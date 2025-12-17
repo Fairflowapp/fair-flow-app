@@ -545,11 +545,11 @@ dialog footer button, .code-dialog footer button {
       <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:18px;">
         <div>
           <label style="display:block;font-size:13px;color:#666;margin-bottom:6px;font-weight:500;">New PIN (4-6 digits)</label>
-          <input id="reset-pin-new" type="password" placeholder="Enter new PIN" maxlength="6" pattern="[0-9]{4,6}" inputmode="numeric" style="width:100%;border:1px solid #ddd;border-radius:10px;padding:12px 16px;font-size:16px;outline:none;" />
+          <input id="reset-pin-new" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" placeholder="Enter new PIN" style="width:100%;border:1px solid #ddd;border-radius:10px;padding:12px 16px;font-size:16px;outline:none;" />
         </div>
         <div>
           <label style="display:block;font-size:13px;color:#666;margin-bottom:6px;font-weight:500;">Confirm PIN</label>
-          <input id="reset-pin-confirm" type="password" placeholder="Confirm new PIN" maxlength="6" pattern="[0-9]{4,6}" inputmode="numeric" style="width:100%;border:1px solid #ddd;border-radius:10px;padding:12px 16px;font-size:16px;outline:none;" />
+          <input id="reset-pin-confirm" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" placeholder="Confirm new PIN" style="width:100%;border:1px solid #ddd;border-radius:10px;padding:12px 16px;font-size:16px;outline:none;" />
         </div>
       </div>
       <div id="reset-pin-error" style="color:#dc2626;font-size:13px;margin-bottom:12px;min-height:18px;"></div>
@@ -622,7 +622,7 @@ dialog footer button, .code-dialog footer button {
 
       <div class="grow pinwrap">
 
-        <input id="pinInput" type="password" placeholder="PIN (hidden)" autocomplete="off" style="cursor:text;"/>
+        <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" placeholder="PIN (hidden)" style="cursor:text;"/>
 
         <span id="togglePin" class="eye">👁️</span>
 
@@ -726,7 +726,7 @@ dialog footer button, .code-dialog footer button {
 
           <span class="pill">Admin code:
 
-            <input id="adminCode" type="password" style="height:32px;width:120px;padding:0 10px">
+            <input id="adminCode" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" style="height:32px;width:120px;padding:0 10px">
 
             <button class="btn-mini" type="button" data-eye="adminCode">👁</button>
 
@@ -1015,13 +1015,102 @@ const startFirstBtn=$("#startFirstBtn"); // adminBtn removed
 
 const resetBtn=$("#resetBtn"), reorderBtn=$("#reorderBtn"), logBtn=$("#logBtn"), settingsBtn=$("#settingsBtn");
 
+// Declare salonName early to ensure it's available before renderBrand() is called
+const salonName=$("#salonName"), salonInput=$("#salonInput"), brandLogo=$("#brandLogo");
+
+// Numeric-only PIN/code input enforcement using event delegation
+(function() {
+  // Matcher function to identify PIN/code inputs
+  function isPinLikeInput(el) {
+    if (!el || el.tagName !== 'INPUT' || el.type === 'email' || el.type === 'file') {
+      return false;
+    }
+    
+    const id = (el.id || '').toLowerCase();
+    const name = (el.name || '').toLowerCase();
+    const placeholder = (el.placeholder || '').toLowerCase();
+    const className = (el.className || '').toLowerCase();
+    
+    return (
+      id.includes('pin') || id.includes('code') ||
+      name.includes('pin') || name.includes('code') ||
+      placeholder.includes('pin') || placeholder.includes('code') ||
+      className.includes('pin') || className.includes('mcode') || className.includes('wpin')
+    );
+  }
+  
+  // Configure a PIN input with numeric attributes
+  // Keep type="password" by default for visual hiding, but allow eye toggle to change to text
+  function configurePinInput(el) {
+    if (!el || !isPinLikeInput(el)) return;
+    
+    // Set to password by default (hidden), unless already text (eye toggle revealed it)
+    // Don't override if eye toggle has set it to text
+    if (el.type !== 'text') {
+      el.type = "password";
+    }
+    // If type is already 'text' (from eye toggle), leave it as text
+    
+    el.inputMode = "numeric";
+    el.pattern = "[0-9]*";
+    // Use one-time-code for autocomplete, but allow override
+    if (!el.hasAttribute('autocomplete')) {
+      el.autocomplete = "one-time-code";
+    }
+  }
+  
+  // Focusin handler: configure input when focused
+  document.addEventListener('focusin', function(e) {
+    if (isPinLikeInput(e.target)) {
+      configurePinInput(e.target);
+    }
+  }, true);
+  
+  // Input handler: strip non-digits
+  document.addEventListener('input', function(e) {
+    if (isPinLikeInput(e.target)) {
+      e.target.value = e.target.value.replace(/\D/g, "");
+    }
+  }, true);
+  
+  // Paste handler: strip non-digits from pasted content
+  document.addEventListener('paste', function(e) {
+    if (isPinLikeInput(e.target)) {
+      e.preventDefault();
+      const pastedText = (e.clipboardData || window.clipboardData).getData('text');
+      const numericOnly = pastedText.replace(/\D/g, "");
+      if (numericOnly) {
+        const start = e.target.selectionStart || 0;
+        const end = e.target.selectionEnd || 0;
+        const currentValue = e.target.value;
+        e.target.value = currentValue.substring(0, start) + numericOnly + currentValue.substring(end);
+        e.target.setSelectionRange(start + numericOnly.length, start + numericOnly.length);
+        e.target.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+  }, true);
+  
+  // Initialize existing inputs on DOM ready
+  function initPinInputs() {
+    document.querySelectorAll('input').forEach(function(input) {
+      if (isPinLikeInput(input)) {
+        configurePinInput(input);
+      }
+    });
+  }
+  
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPinInputs);
+  } else {
+    initPinInputs();
+  }
+})();
+
 const queueList=$("#queueList"), serviceList=$("#serviceList");
 
 const settingsDlg=$("#settingsDlg");
 
 const logoPreview=$("#logoPreview"), logoFile=$("#logoFile");
-
-const salonName=$("#salonName"), salonInput=$("#salonInput"), brandLogo=$("#brandLogo");
 
 const logDlg=$("#logDlg"), logBox=$("#logBox");
 
@@ -1326,13 +1415,14 @@ function renderHistory() {
 // Render
 
 function renderBrand(){
+  if (salonName) {
+    salonName.innerHTML="Owner: <strong>"+escapeHtml(settings.brand.name||"")+"</strong>";
+  }
 
-  salonName.innerHTML="Owner: <strong>"+escapeHtml(settings.brand.name||"")+"</strong>";
-
-  brandLogo.src = "fairflow-logo.png";
-
-  brandLogo.style.visibility="visible";
-
+  if (brandLogo) {
+    brandLogo.src = "fairflow-logo.png";
+    brandLogo.style.visibility="visible";
+  }
 }
 
 function loadTechniciansFromSettings() {
@@ -2798,7 +2888,7 @@ function managerRow(i,m){
 
     <div style="display:flex;gap:8px;align-items:center">
 
-      <input class="mcode" data-i="${i}" type="password" placeholder="Code" value="${escapeHtml(m.code||"")}" style="height:32px;padding:0 10px;width:120px">
+      <input class="mcode" data-i="${i}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" placeholder="Code" value="${escapeHtml(m.code||"")}" style="height:32px;padding:0 10px;width:120px">
 
       <button class="btn-mini eyeBtn" data-for="mcode" data-i="${i}" type="button">👁</button>
 
@@ -2817,7 +2907,16 @@ function managerRow(i,m){
     save();
   };
 
-  div.querySelector(".eyeBtn").onclick=e=>{ const idx=+e.target.dataset.i; const inp=div.querySelector('.mcode'); inp.type=inp.type==="password"?"text":"password"; };
+  div.querySelector(".eyeBtn").onclick=e=>{ 
+    const idx=+e.target.dataset.i; 
+    const inp=div.querySelector('.mcode'); 
+    // Toggle between password (hidden) and text (visible)
+    inp.type = (inp.type === "password") ? "text" : "password";
+  };
+  
+  // Apply numeric enforcement to the manager code input
+  const mcodeInput = div.querySelector('.mcode');
+  // Manager code input will be configured automatically by event delegation
 
   return div;
 
@@ -2861,15 +2960,22 @@ function workerRow(i,w){
 
   const pin = document.createElement("input");
 
-  pin.className="wpin pin"; pin.dataset.i=i; pin.type="password"; pin.placeholder="PIN"; pin.value=(w.pin||"");
+  pin.className="wpin pin"; pin.dataset.i=i; pin.type="password"; pin.inputMode="numeric"; pin.pattern="[0-9]*"; pin.autocomplete="off"; pin.maxLength="6"; pin.placeholder="PIN"; pin.value=(w.pin||"");
 
   const eye = document.createElement("button"); eye.type="button"; eye.className="btn-mini"; eye.textContent="👁";
 
-  eye.onclick=()=>{ pin.type = (pin.type==="password") ? "text" : "password"; };
+  eye.onclick=()=>{ 
+    // Toggle between password (hidden) and text (visible)
+    pin.type = (pin.type === "password") ? "text" : "password";
+  };
+  
+  // PIN input will be configured automatically by event delegation
   
   // Update settings.workers directly on input
   pin.dataset.index = i;
   pin.addEventListener("input", (e) => {
+    // Enforce numeric-only input
+    e.currentTarget.value = e.currentTarget.value.replace(/\D/g, "");
     const idx = Number(e.currentTarget.dataset.index);
     if (settings.workers[idx]) {
       settings.workers[idx].pin = e.currentTarget.value;
@@ -3520,15 +3626,22 @@ if (document.readyState === 'loading') {
 }
 
 // Wrap navigation handlers to ensure tasksScreen is hidden
-const originalOpenLog = openLog;
-const originalOpenSettingsSecure = openSettingsSecure;
-const originalResetDay = resetDay;
+// Use window properties to avoid TDZ issues - functions are hoisted but consts are not
+if (!window.__originalOpenLog) {
+  window.__originalOpenLog = openLog;
+}
+if (!window.__originalOpenSettingsSecure) {
+  window.__originalOpenSettingsSecure = openSettingsSecure;
+}
+if (!window.__originalResetDay) {
+  window.__originalResetDay = resetDay;
+}
 
 async function openLogWithNav() {
   try {
   console.log('History clicked');
   ensureTasksScreenHidden();
-  return originalOpenLog();
+  return (window.__originalOpenLog || openLog)();
   } catch (e) {
     console.error('[Navigation] Error in openLogWithNav:', e);
   }
@@ -3538,7 +3651,7 @@ async function openSettingsSecureWithNav() {
   try {
   console.log('Settings clicked');
   ensureTasksScreenHidden();
-  return originalOpenSettingsSecure();
+  return (window.__originalOpenSettingsSecure || openSettingsSecure)();
   } catch (e) {
     console.error('[Navigation] Error in openSettingsSecureWithNav:', e);
   }
@@ -3548,7 +3661,7 @@ async function resetDayWithNav() {
   try {
   console.log('RESET clicked');
   ensureTasksScreenHidden();
-    await originalResetDay();
+  await (window.__originalResetDay || resetDay)();
   } catch (e) {
     console.error('[Navigation] Error in resetDayWithNav:', e);
   }
@@ -7107,34 +7220,36 @@ if (document.readyState === 'loading') {
 }
 
 // Also try to render when owner-view becomes visible (observer pattern)
-const observer = new MutationObserver((mutations) => {
-  mutations.forEach((mutation) => {
-    if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
-      const ownerView = document.getElementById("owner-view");
-      if (ownerView && ownerView.style.display === 'block') {
-        console.log('[Observer] owner-view became visible, calling renderSelect');
-        setTimeout(() => {
-          if (typeof renderSelect === 'function') {
-            renderSelect();
-          }
-        }, 200);
+if (!window.__uiObserver) {
+  window.__uiObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+        const ownerView = document.getElementById("owner-view");
+        if (ownerView && ownerView.style.display === 'block') {
+          console.log('[Observer] owner-view became visible, calling renderSelect');
+          setTimeout(() => {
+            if (typeof renderSelect === 'function') {
+              renderSelect();
+            }
+          }, 200);
+        }
       }
-    }
+    });
   });
-});
+}
 
 // Start observing when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     const ownerView = document.getElementById("owner-view");
-    if (ownerView) {
-      observer.observe(ownerView, { attributes: true, attributeFilter: ['style'] });
+    if (ownerView && window.__uiObserver) {
+      window.__uiObserver.observe(ownerView, { attributes: true, attributeFilter: ['style'] });
     }
   });
 } else {
   const ownerView = document.getElementById("owner-view");
-  if (ownerView) {
-    observer.observe(ownerView, { attributes: true, attributeFilter: ['style'] });
+  if (ownerView && window.__uiObserver) {
+    window.__uiObserver.observe(ownerView, { attributes: true, attributeFilter: ['style'] });
   }
 }
 
@@ -7264,7 +7379,7 @@ function hookSettingsGuard_DISABLED(){
 
     <div style="display:flex;gap:8px;align-items:center">
 
-      <input id="codePromptInput" type="password" style="flex:1;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:16px" />
+      <input id="codePromptInput" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" style="flex:1;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:16px" />
 
       <button id="codePromptEye" aria-label="Show" style="border:1px solid #ddd;background:#fff;border-radius:8px;padding:8px 10px;cursor:pointer">👁️</button>
 
@@ -7355,7 +7470,10 @@ function hookSettingsGuard_DISABLED(){
 
   btnCancel.onclick = ()=>{ hide(); resolver && resolver(null); };
 
-  eye.onmousedown = ()=>{ input.type="text"; };
+  eye.onmousedown = ()=>{ 
+    // Toggle between password (hidden) and text (visible)
+    input.type = (input.type === "password") ? "text" : "password";
+  };
 
   eye.onmouseup = eye.onmouseleave = ()=>{ input.type="password"; };
 
