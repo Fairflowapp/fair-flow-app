@@ -604,6 +604,8 @@ dialog footer button, .code-dialog footer button {
 
         <button id="reorderBtn" class="btn-pill">Reorder</button>
 
+        <button id="tasksBtn" class="btn-pill">TASKS</button>
+
         <button id="resetBtn" class="btn-pill btn-danger">RESET</button>
 
         <button id="logout-button" class="btn-pill">Log out</button>
@@ -959,6 +961,11 @@ if (!settings.taskNotes) {
     yearly: ''
   };
 }
+
+// Initialize tasks catalog globally
+window.ff_tasks_catalog_v1 =
+    window.ff_tasks_catalog_v1 ||
+    JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
 
 // Initialize incomplete tasks badge setting (backward compatible)
 if (settings.showIncompleteTasksBadge === undefined) {
@@ -3584,6 +3591,1489 @@ function ensureTasksScreenHidden() {
   }
 }
 
+// Tasks Screen Functions - Header Snapshot/Restore
+let __headerSnapshot = null;
+
+function snapshotHeaderLayout() {
+  const header = document.querySelector('#owner-view .header');
+  if (!header || __headerSnapshot) return;
+  __headerSnapshot = {
+    el: header,
+    className: header.className,
+    style: header.style.cssText
+  };
+  console.log('[Tasks] Header layout snapshotted');
+}
+
+function restoreHeaderLayout() {
+  if (!__headerSnapshot) return;
+  const { el, className, style } = __headerSnapshot;
+  el.className = className;
+  el.style.cssText = style;
+  __headerSnapshot = null;
+  console.log('[Tasks] Header layout restored');
+  
+  // Trigger layout refresh
+  requestAnimationFrame(() => {
+    window.dispatchEvent(new Event('resize'));
+  });
+}
+
+function loadTasks() {
+  try {
+    // If Settings modal is open, load only the current Settings tab
+    if (isTasksSettingsOpen) {
+      const tab = currentSettingsTab || 'opening';
+      loadTasksForSettingsTab(tab);
+      return true;
+    }
+    
+    // Otherwise, load all tabs for main Tasks screen
+    const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+    
+    tabs.forEach(tab => {
+      // Load from tab-specific active storage
+      const activeTasks = getTabTasks(tab, 'active');
+      tasksModalDraft[tab] = activeTasks;
+    });
+    
+    console.log('[Tasks] Tasks loaded from storage');
+    return true;
+  } catch (e) {
+    console.error('[Tasks] Error loading tasks:', e);
+    return false;
+  }
+}
+
+function loadTasksForSettingsTab(tab) {
+  try {
+    // Load only the specified tab's active tasks from storage
+    const activeTasks = getTabTasks(tab, 'active');
+    tasksModalDraft[tab] = activeTasks;
+    console.log(`[Tasks] Loaded ${activeTasks.length} tasks for Settings tab: ${tab}`);
+  } catch (e) {
+    console.error(`[Tasks] Error loading tasks for Settings tab ${tab}:`, e);
+    tasksModalDraft[tab] = [];
+  }
+}
+
+// Ensure task storage is initialized for a specific tab
+function ensureTaskStorageInitialized(tab) {
+    const keyActive = `ffv24_tasks_${tab}_active`;
+    const keyPending = `ffv24_tasks_${tab}_pending`;
+    const keyDone = `ffv24_tasks_${tab}_done`;
+
+    const catalog = window.ff_tasks_catalog_v1?.[tab] || [];
+
+    // Create active list if missing
+    if (!localStorage.getItem(keyActive)) {
+        localStorage.setItem(keyActive, JSON.stringify(catalog));
+    }
+
+    // Create empty pending and done if missing
+    if (!localStorage.getItem(keyPending)) {
+        localStorage.setItem(keyPending, JSON.stringify([]));
+    }
+    if (!localStorage.getItem(keyDone)) {
+        localStorage.setItem(keyDone, JSON.stringify([]));
+    }
+}
+
+function openTasks() {
+  try {
+    // Ensure a default tab exists when Tasks screen loads
+    window.currentTasksTab = window.currentTasksTab || "opening";
+    console.log("INIT TAB →", window.currentTasksTab);
+    
+    const tasksScreen = document.getElementById('tasksScreen');
+    const mainContent = document.querySelector('#owner-view .wrap');
+    const joinBar = document.getElementById('joinBar');
+    const header = document.querySelector('#owner-view .header');
+    
+    if (!tasksScreen) {
+      console.error('[Tasks] tasksScreen element not found');
+      return;
+    }
+    
+    // Snapshot header layout before hiding
+    snapshotHeaderLayout();
+    
+    // Hide main content and header
+    if (mainContent) mainContent.style.display = 'none';
+    if (joinBar) joinBar.style.display = 'none';
+    if (header) header.style.display = 'none';
+    
+    // Show Tasks screen
+    tasksScreen.style.display = 'flex';
+    tasksScreen.style.pointerEvents = 'auto';
+    
+    // Initialize storage for all tabs
+    ['opening', 'closing', 'weekly', 'monthly', 'yearly'].forEach(ensureTaskStorageInitialized);
+    
+    // Load tasks from storage (single source of truth)
+    loadTasks();
+    
+    // Ensure event listeners are attached (re-initialize if needed)
+    setTimeout(() => {
+      if (typeof window.initializeTasksScreenButtons === 'function') {
+        window.initializeTasksScreenButtons();
+      }
+      // Check user role for reset button visibility
+      if (typeof window.showResetBtnIfAllowed === 'function') {
+        window.showResetBtnIfAllowed();
+      }
+    }, 50);
+    
+    // Set default tab to Opening (this will render tasks)
+    setTasksTab('opening');
+    
+    // After DOM rendering is completed and renderTasksList() has run, check reset button visibility
+    setTimeout(() => showResetBtnIfAllowed(), 150);
+    
+    // Initialize RESET button after rendering tasks (one-time only)
+    setTimeout(() => {
+      initializeResetButton();
+    }, 200);
+    
+    console.log('[Tasks] Tasks screen opened');
+  } catch (e) {
+    console.error('[Tasks] Error opening Tasks screen:', e);
+  }
+}
+
+function closeTasks() {
+  try {
+    const tasksScreen = document.getElementById('tasksScreen');
+    const mainContent = document.querySelector('#owner-view .wrap');
+    const joinBar = document.getElementById('joinBar');
+    const header = document.querySelector('#owner-view .header');
+    
+    if (!tasksScreen) {
+      console.error('[Tasks] tasksScreen element not found');
+      return;
+    }
+    
+    // Hide Tasks screen
+    tasksScreen.style.display = 'none';
+    
+    // Restore header layout first (before showing elements)
+    restoreHeaderLayout();
+    
+    // Show main content and header (restoreHeaderLayout already restored header display)
+    if (mainContent) mainContent.style.display = 'block';
+    if (joinBar) joinBar.style.display = 'flex';
+    // Header display is restored by restoreHeaderLayout()
+    
+    console.log('[Tasks] Tasks screen closed');
+  } catch (e) {
+    console.error('[Tasks] Error closing Tasks screen:', e);
+  }
+}
+
+function setTasksTab(tabName) {
+  console.log("SET TASK TAB CALLED:", tabName);
+  console.log("TAB CLICKED:", tabName);
+  try {
+    const tabs = document.querySelectorAll('.tasks-tab');
+    const contentContainer = document.getElementById('tasksContentContainer');
+    
+    if (!contentContainer) {
+      console.error('[Tasks] tasksContentContainer element not found');
+      return;
+    }
+    
+    // Update tab styles
+    tabs.forEach(tab => {
+      const isActive = tab.dataset.tab === tabName;
+      if (isActive) {
+        tab.style.color = '#111';
+        tab.style.borderBottomColor = '#7b3fe4';
+        tab.style.fontWeight = '600';
+      } else {
+        tab.style.color = '#666';
+        tab.style.borderBottomColor = 'transparent';
+        tab.style.fontWeight = '500';
+      }
+    });
+    
+    // Store current tab
+    currentTasksTab = tabName;
+    // Always update the active tab BEFORE rendering
+    window.currentTasksTab = tabName.toLowerCase();
+    window.currentTasksTabOriginal = tabName;
+    console.log("ACTIVE TAB SET →", window.currentTasksTab);
+    
+    // Get tab label
+    const tabLabels = {
+      'opening': 'Opening',
+      'closing': 'Closing',
+      'weekly': 'Weekly',
+      'monthly': 'Monthly',
+      'yearly': 'Yearly'
+    };
+    const label = tabLabels[tabName] || tabName;
+    
+    // Render two-column layout
+    contentContainer.innerHTML = `
+      <div class="tasks-col">
+        <h2>MY LIST</h2>
+        <div class="tasks-list">
+          <div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">No tasks yet</div>
+        </div>
+      </div>
+      <div class="tasks-col">
+        <h2>PENDING</h2>
+        <div class="tasks-list">
+          <div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">Pending (coming soon)</div>
+        </div>
+      </div>
+    `;
+    
+    // Render tasks for current tab
+    renderTasksList(window.currentTasksTab);
+    
+    // Setup delegated click handler for info icons (attach once)
+    setupTasksInfoIconHandler();
+    
+    console.log('[Tasks] Tab switched to:', tabName);
+  } catch (e) {
+    console.error('[Tasks] Error setting tab:', e);
+  }
+}
+
+// Tasks Settings Modal Functions
+let isTasksSettingsOpen = false;
+let tasksSettingsModalContainer = null; // Reference to modal container element
+let currentTasksTab = 'opening'; // Track current active tab in main Tasks screen
+let currentSettingsTab = 'opening'; // Track current active tab in Settings modal (separate from main screen)
+let tasksModalDraft = {
+  opening: [],
+  closing: [],
+  weekly: [],
+  monthly: [],
+  yearly: []
+}; // In-memory arrays per tab
+
+function getCurrentTasksTab() {
+  // If Settings modal is open, use Settings modal tab
+  if (isTasksSettingsOpen) {
+    return currentSettingsTab || 'opening';
+  }
+  // Otherwise, get active tab from TASKS screen
+  const activeTab = document.querySelector('.tasks-tab[style*="border-bottom-color: #7b3fe4"]') || 
+                    document.querySelector('.tasks-tab.active') ||
+                    document.querySelector('.tasks-tab[data-tab="opening"]');
+  if (activeTab && activeTab.dataset.tab) {
+    return activeTab.dataset.tab;
+  }
+  return currentTasksTab || 'opening';
+}
+
+function setSettingsModalTab(tabName) {
+  try {
+    const tabs = document.querySelectorAll('.tasks-settings-tab');
+    
+    // Update tab styles
+    tabs.forEach(tab => {
+      const isActive = tab.dataset.tab === tabName;
+      if (isActive) {
+        tab.style.color = '#111';
+        tab.style.borderBottomColor = '#7b3fe4';
+        tab.style.fontWeight = '600';
+      } else {
+        tab.style.color = '#666';
+        tab.style.borderBottomColor = 'transparent';
+        tab.style.fontWeight = '500';
+      }
+    });
+    
+    // Store current Settings modal tab
+    currentSettingsTab = tabName;
+    
+    // Load tasks for this tab
+    loadTasksForSettingsTab(tabName);
+    
+    // Re-render the list
+    renderTasksList(window.currentTasksTab);
+    
+    console.log('[Tasks] Settings modal tab switched to:', tabName);
+  } catch (e) {
+    console.error('[Tasks] Error setting Settings modal tab:', e);
+  }
+}
+
+function saveTasksToStorage() {
+  try {
+    // Save ONLY the active tab's tasks to tab-specific active storage
+    const tab = getCurrentTasksTab();
+    const currentTabTasks = tasksModalDraft[tab] || [];
+    saveTabTasks(tab, 'active', currentTabTasks);
+    
+    console.log(`[Tasks] Saved ${currentTabTasks.length} tasks for tab: ${tab}`);
+    return true;
+  } catch (e) {
+    console.error('[Tasks] Error saving to storage:', e);
+    return false;
+  }
+}
+
+// =====================
+// Tab-specific storage helpers
+// =====================
+
+// Get storage key for a specific tab and status
+function getTabStorageKey(tab, status) {
+  const statusMap = {
+    'active': 'active',
+    'pending': 'pending',
+    'done': 'done'
+  };
+  const statusKey = statusMap[status] || 'active';
+  return `ff_tasks_${tab}_${statusKey}_v1`;
+}
+
+// Get tasks for a specific tab and status
+function getTabTasks(tab, status) {
+  try {
+    const key = getTabStorageKey(tab, status);
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      return JSON.parse(stored) || [];
+    }
+  } catch (e) {
+    console.error(`[Tasks] Error loading ${tab} ${status} tasks:`, e);
+  }
+  return [];
+}
+
+// Save tasks for a specific tab and status
+function saveTabTasks(tab, status, tasks) {
+  try {
+    const key = getTabStorageKey(tab, status);
+    localStorage.setItem(key, JSON.stringify(tasks));
+    return true;
+  } catch (e) {
+    console.error(`[Tasks] Error saving ${tab} ${status} tasks:`, e);
+    return false;
+  }
+}
+
+// Shared function to render tasks list (used by both modal and main screen)
+function renderTasksList(tab, opts) {
+  try {
+    // Use provided tab or fall back to window.currentTasksTab or default
+    const currentTab = tab || window.currentTasksTab || 'opening';
+    
+    // If force option is set, bypass any caches and rebuild fresh
+    const force = opts?.force === true;
+    
+    // Render modal list (Settings modal)
+    const modalListContainer = document.getElementById('tasksModalDraftList');
+    if (modalListContainer && isTasksSettingsOpen) {
+      const settingsTab = currentSettingsTab || 'opening';
+      const tasks = tasksModalDraft[settingsTab] || [];
+      
+      if (tasks.length === 0) {
+        modalListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;">No tasks yet</div>';
+      } else {
+        // Show newest first (reverse array)
+        const tasksReversed = [...tasks].reverse();
+        
+        modalListContainer.innerHTML = tasksReversed.map((task, displayIndex) => {
+          const actualIndex = tasks.length - 1 - displayIndex;
+          return `
+            <div class="tasks-modal-draft-item" style="display:flex;align-items:flex-start;justify-content:space-between;padding:12px;margin-bottom:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;">
+              <div style="flex:1;">
+                <div style="font-weight:600;font-size:14px;color:#111;margin-bottom:4px;">${escapeHtmlDraft(task.title)}</div>
+                ${task.instructions ? `<div style="font-size:13px;color:#666;margin-top:4px;white-space:pre-wrap;">${escapeHtmlDraft(task.instructions)}</div>` : ''}
+              </div>
+              <button class="tasks-modal-draft-remove" data-index="${actualIndex}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;padding:0;width:24px;height:24px;display:flex;align-items:center;justify-content:center;margin-left:12px;border-radius:4px;flex-shrink:0;">×</button>
+            </div>
+          `;
+        }).join('');
+        
+        // Attach remove handlers for modal
+        modalListContainer.querySelectorAll('.tasks-modal-draft-remove').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const index = parseInt(btn.dataset.index);
+            removeTaskFromDraft(index);
+          });
+        });
+      }
+    }
+    
+    // If force option is set, clear any caches for this tab before rendering
+    if (force) {
+      if (typeof window.tasksCache !== 'undefined' && window.tasksCache && window.tasksCache[currentTab]) {
+        delete window.tasksCache[currentTab];
+      }
+      if (typeof window.myListCache !== 'undefined' && window.myListCache && window.myListCache[currentTab]) {
+        delete window.myListCache[currentTab];
+      }
+    }
+    
+    // Render main screen MY LIST (active + done tasks) - only if main screen is visible and Settings modal is NOT open
+    const mainListContainer = document.querySelector('#tasksContentContainer .tasks-col:first-child .tasks-list');
+    if (mainListContainer && !isTasksSettingsOpen) {
+      // Get current tab for main Tasks screen (not Settings modal)
+      const mainTab = currentTab;
+      
+      // Load catalog for this tab (source of truth)
+      let catalog = [];
+      if (window.ff_tasks_catalog_v1?.[mainTab]) {
+        catalog = window.ff_tasks_catalog_v1[mainTab];
+      } else {
+        try {
+          const stored = localStorage.getItem("ff_tasks_catalog_v1");
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            catalog = parsed[mainTab] || [];
+          }
+        } catch (e) {
+          console.error(`[Tasks] Error loading catalog for ${mainTab}:`, e);
+          catalog = [];
+        }
+      }
+      
+      // Get tasks from tab-specific storage for main screen (getTabTasks reads directly from localStorage, no cache)
+      const activeTasks = getTabTasks(mainTab, 'active');
+      const doneTasks = getTabTasks(mainTab, 'done');
+      const pendingTasks = getTabTasks(mainTab, 'pending');
+      
+      // Build sets of task IDs that are already in pending, done, or active
+      const pendingIds = new Set(pendingTasks.map(t => t.id || t.taskId).filter(Boolean));
+      const doneIds = new Set(doneTasks.map(t => t.id || t.taskId).filter(Boolean));
+      const activeIds = new Set(activeTasks.map(t => t.id || t.taskId).filter(Boolean));
+      
+      // Create a map of done tasks for quick lookup (to get completedBy, etc.)
+      const doneTasksMap = new Map();
+      doneTasks.forEach(t => {
+        const id = t.id || t.taskId;
+        if (id) doneTasksMap.set(id, t);
+      });
+      
+      // MY LIST has two groups:
+      // 1) Available tasks: catalog minus pendingIds/activeIds/doneIds
+      // 2) Completed tasks: catalog tasks that are in doneIds
+      const availableTasks = catalog.filter(t => {
+        const taskId = t.id || t.taskId;
+        if (!taskId) return false; // Skip tasks without ID
+        return !pendingIds.has(taskId) && !doneIds.has(taskId) && !activeIds.has(taskId);
+      });
+      
+      const completedTasks = catalog.filter(t => {
+        const taskId = t.id || t.taskId;
+        if (!taskId) return false;
+        return doneIds.has(taskId);
+      });
+      
+      // Show "No tasks yet" only if catalog is empty
+      if (catalog.length === 0) {
+        mainListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">No tasks yet</div>';
+      } else {
+        // Combine: available tasks first, then completed tasks
+        // Reverse each group separately to maintain order: available first, then completed
+        const availableReversed = [...availableTasks].reverse();
+        const completedReversed = [...completedTasks].reverse();
+        const myListTasks = [...availableReversed, ...completedReversed];
+        
+        mainListContainer.innerHTML = myListTasks.map((task, displayIndex) => {
+          // Check for instructions in any of the possible fields
+          const instructions = task.instructions || task.info || task.details || '';
+          const hasInstructions = instructions.trim().length > 0;
+          
+          // Check if task is completed
+          const taskId = task.id || task.taskId;
+          const isCompleted = doneIds.has(taskId);
+          const doneTaskData = isCompleted ? doneTasksMap.get(taskId) : null;
+          
+          let doneClass = "";
+          let extraInfo = "";
+          let buttonsHtml = "";
+          let cardStyle = "display:flex;align-items:flex-start;justify-content:space-between;padding:12px;margin-bottom:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;";
+          
+          if (isCompleted) {
+            // Completed task: light green background, disabled button
+            doneClass = "task-item-done";
+            cardStyle = "display:flex;align-items:flex-start;justify-content:space-between;padding:12px;margin-bottom:8px;background:#d1fae5;border:1px solid #a7f3d0;border-radius:6px;";
+            extraInfo = doneTaskData?.completedBy ? `<div class="task-worker" style="color:#065f46;font-size:12px;margin-top:4px;">Completed by: ${escapeHtmlDraft(doneTaskData.completedBy)}</div>` : "";
+            
+            // Render info button only if instructions exist
+            let infoButtonHtml = '';
+            if (hasInstructions) {
+              const escapedInstructions = escapeHtmlAttr(instructions);
+              const taskIdAttr = task.id ? ` data-task-id="${escapeHtmlAttr(task.id)}"` : '';
+              infoButtonHtml = `<button type="button" class="tasks-info-icon" data-instructions="${escapedInstructions}"${taskIdAttr} style="background:#7b3fe4;border:none;color:#fff;cursor:pointer;font-size:12px;font-weight:700;padding:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;margin-left:12px;border-radius:50%;flex-shrink:0;line-height:1;" title="View instructions">i</button>`;
+            }
+            
+            // Disabled COMPLETED button (not clickable)
+            buttonsHtml = `
+              <div style="display:flex;align-items:center;gap:8px;">
+                ${infoButtonHtml}
+                <button type="button" class="task-completed-btn" disabled style="padding:6px 12px;font-size:12px;font-weight:600;color:#065f46;background:#a7f3d0;border:1px solid #6ee7b7;border-radius:6px;cursor:not-allowed;flex-shrink:0;opacity:0.7;">COMPLETED</button>
+              </div>
+            `;
+          } else {
+            // Available task: normal rendering with SELECT button
+            let infoButtonHtml = '';
+            if (hasInstructions) {
+              const escapedInstructions = escapeHtmlAttr(instructions);
+              const taskIdAttr = task.id ? ` data-task-id="${escapeHtmlAttr(task.id)}"` : '';
+              infoButtonHtml = `<button type="button" class="tasks-info-icon" data-instructions="${escapedInstructions}"${taskIdAttr} style="background:#7b3fe4;border:none;color:#fff;cursor:pointer;font-size:12px;font-weight:700;padding:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;margin-left:12px;border-radius:50%;flex-shrink:0;line-height:1;" title="View instructions">i</button>`;
+            }
+            buttonsHtml = `
+              <div style="display:flex;align-items:center;gap:8px;">
+                ${infoButtonHtml}
+                <button type="button" class="task-select-btn" style="padding:6px 12px;font-size:12px;font-weight:600;color:#fff;background:#7b3fe4;border:none;border-radius:6px;cursor:pointer;flex-shrink:0;">SELECT</button>
+              </div>
+            `;
+          }
+          
+          const taskIdAttr = task.id ? ` data-task-id="${escapeHtmlAttr(task.id)}" data-is-completed="${isCompleted ? 'true' : 'false'}"` : '';
+          return `
+            <div class="tasks-main-list-item ${doneClass}"${taskIdAttr} style="${cardStyle}">
+              <div style="flex:1;">
+                <div style="font-weight:600;font-size:14px;color:#111;margin-bottom:4px;">${escapeHtmlDraft(task.title)}</div>
+                ${extraInfo}
+              </div>
+              ${buttonsHtml}
+            </div>
+          `;
+        }).join('');
+        
+        // Attach click handlers for SELECT buttons (only for available tasks)
+        mainListContainer.querySelectorAll('.task-select-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const taskItem = btn.closest('.tasks-main-list-item');
+            if (taskItem && taskItem.dataset.taskId) {
+              // Guard: don't allow selection of completed tasks
+              if (taskItem.dataset.isCompleted === 'true') {
+                return;
+              }
+              const taskId = taskItem.dataset.taskId;
+              if (typeof window.openPinModal === 'function') {
+                window.openPinModal(taskId);
+              }
+            }
+          });
+        });
+        
+        // Prevent clicks on completed task cards
+        mainListContainer.querySelectorAll('.task-item-done').forEach(card => {
+          if (card.dataset.isCompleted === 'true') {
+            card.addEventListener('click', (e) => {
+              // Only prevent if clicking on the card itself, not on info icon
+              if (e.target === card || e.target.closest('.task-completed-btn')) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            });
+          }
+        });
+      }
+    }
+    
+    // Render PENDING column (pending tasks) - only if main screen is visible and Settings modal is NOT open
+    const pendingListContainer = document.querySelector('#tasksContentContainer .tasks-col:last-child .tasks-list');
+    if (pendingListContainer && !isTasksSettingsOpen) {
+      // Get current tab for main Tasks screen
+      const mainTab = currentTasksTab || 'opening';
+      const pendingTasks = getTabTasks(mainTab, 'pending');
+      
+      if (pendingTasks.length === 0) {
+        pendingListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">Pending (coming soon)</div>';
+      } else {
+        // Show newest first (reverse array)
+        const pendingReversed = [...pendingTasks].reverse();
+        
+        pendingListContainer.innerHTML = pendingReversed.map((task, displayIndex) => {
+          // Check for instructions in any of the possible fields
+          const instructions = task.instructions || task.info || task.details || '';
+          const hasInstructions = instructions.trim().length > 0;
+          
+          // Render info button only if instructions exist
+          let infoButtonHtml = '';
+          if (hasInstructions) {
+            const escapedInstructions = escapeHtmlAttr(instructions);
+            const taskIdAttr = task.id ? ` data-task-id="${escapeHtmlAttr(task.id)}"` : '';
+            infoButtonHtml = `<button type="button" class="tasks-info-icon" data-instructions="${escapedInstructions}"${taskIdAttr} style="background:#7b3fe4;border:none;color:#fff;cursor:pointer;font-size:12px;font-weight:700;padding:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;margin-left:12px;border-radius:50%;flex-shrink:0;line-height:1;" title="View instructions">i</button>`;
+          }
+          
+          const taskIdAttr = task.id ? ` data-task-id="${escapeHtmlAttr(task.id)}"` : '';
+          const assignedToHtml = task.assignedTo ? `<div class="task-worker">Taken by: ${escapeHtmlDraft(task.assignedTo)}</div>` : '';
+          return `
+            <div class="tasks-main-list-item"${taskIdAttr} style="display:flex;align-items:flex-start;justify-content:space-between;padding:12px;margin-bottom:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;">
+              <div style="flex:1;">
+                <div style="font-weight:600;font-size:14px;color:#111;margin-bottom:4px;">${escapeHtmlDraft(task.title)}</div>
+                ${assignedToHtml}
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                ${infoButtonHtml}
+                <button type="button" class="task-done-btn" data-task-id="${task.id || ''}">MARK DONE</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+        
+        // Attach click handlers for info icons in pending list
+        pendingListContainer.querySelectorAll('.tasks-info-icon').forEach(btn => {
+          // Info icon handler is already set up via delegated handler, but ensure it works
+        });
+        
+        // Rebind MARK DONE buttons after rendering tasks
+        document.querySelectorAll(".task-done-btn").forEach(btn => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const taskId = btn.getAttribute("data-task-id");
+            if (window.openPinModalForDone) {
+              window.openPinModalForDone(taskId);
+            } else {
+              console.error("openPinModalForDone not found on window");
+            }
+          });
+        });
+      }
+    }
+  } catch (e) {
+    console.error('[Tasks] Error rendering tasks list:', e);
+  }
+}
+
+// Legacy function name for backward compatibility (calls shared render)
+function renderTasksDraftList() {
+  renderTasksList(window.currentTasksTab);
+}
+
+// Delegated click handler for tasks info icons (attach once on document, capture phase)
+function setupTasksInfoIconHandler() {
+  if (document.__tasksInfoHandlerAttached) return;
+  
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.tasks-info-icon');
+    if (!btn) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Read instructions text from attribute
+    const text = btn.getAttribute('data-instructions') || '';
+    if (!text.trim()) return;
+    
+    // Open modal showing the instructions text
+    openTaskInfoModal(text);
+  }, true); // Use capture phase
+  
+  document.__tasksInfoHandlerAttached = true;
+}
+
+// Task Info Modal Functions
+function openTaskInfoModal(text) {
+  try {
+    // Get or create modal root (ensure it's appended to body)
+    let modalRoot = document.getElementById('taskInfoModalRoot');
+    if (!modalRoot) {
+      modalRoot = document.createElement('div');
+      modalRoot.id = 'taskInfoModalRoot';
+      document.body.appendChild(modalRoot);
+    } else if (modalRoot.parentElement !== document.body) {
+      // If it exists but is in wrong location, move it to body
+      document.body.appendChild(modalRoot);
+    }
+    
+    // Render modal overlay and dialog
+    modalRoot.innerHTML = `
+      <div class="task-info-overlay">
+        <div class="task-info-dialog" onclick="event.stopPropagation()">
+          <div class="task-info-header">
+            <h3 class="task-info-title">Instructions</h3>
+            <button class="task-info-close-x" aria-label="Close">×</button>
+          </div>
+          <div class="task-info-body"></div>
+          <div class="task-info-footer">
+            <button class="task-info-close-btn">Close</button>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Set instructions text (preserve line breaks)
+    const bodyEl = modalRoot.querySelector('.task-info-body');
+    if (bodyEl) {
+      bodyEl.textContent = text || '';
+    }
+    
+    // Setup close handlers
+    const overlay = modalRoot.querySelector('.task-info-overlay');
+    const closeX = modalRoot.querySelector('.task-info-close-x');
+    const closeBtn = modalRoot.querySelector('.task-info-close-btn');
+    const dialog = modalRoot.querySelector('.task-info-dialog');
+    
+    // Overlay click closes modal
+    if (overlay) {
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          closeTaskInfoModal();
+        }
+      });
+    }
+    
+    // X button closes
+    if (closeX) {
+      closeX.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeTaskInfoModal();
+      });
+    }
+    
+    // Close button closes
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeTaskInfoModal();
+      });
+    }
+    
+    // Dialog click stops propagation (prevents closing)
+    if (dialog) {
+      dialog.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+    }
+    
+    // Disable body scrolling
+    document.body.style.overflow = 'hidden';
+    
+    // Add ESC key listener
+    document.addEventListener('keydown', handleTaskInfoEsc);
+  } catch (e) {
+    // Silent error handling
+  }
+}
+
+function closeTaskInfoModal() {
+  try {
+    const modalRoot = document.getElementById('taskInfoModalRoot');
+    if (!modalRoot) return;
+    
+    // Clear modal content
+    modalRoot.innerHTML = '';
+    
+    // Re-enable body scrolling
+    document.body.style.overflow = '';
+    
+    // Remove ESC key listener
+    document.removeEventListener('keydown', handleTaskInfoEsc);
+  } catch (e) {
+    // Silent error handling
+  }
+}
+
+function handleTaskInfoEsc(e) {
+  if (e.key === 'Escape') {
+    closeTaskInfoModal();
+  }
+}
+
+function escapeHtmlDraft(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Escape text for HTML attribute values (handles quotes and special chars)
+function escapeHtmlAttr(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function addTaskToDraft() {
+  try {
+    const modal = tasksSettingsModalContainer;
+    if (!modal) {
+      console.error('[Tasks] Modal container not found');
+      return;
+    }
+    
+    const nameEl = modal.querySelector('#taskNameInput, input[name="taskName"], input[placeholder*="Turn on"]');
+    const infoEl = modal.querySelector('#taskInfoInput, textarea[name="taskInfo"], textarea, input[name="taskInfo"]');
+    const errorEl = modal.querySelector('#taskNameError');
+    const name = (nameEl?.value || '').trim();
+    const info = (infoEl?.value || '').trim();
+    
+    // Clear previous error
+    if (errorEl) {
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+    }
+    
+    // Validation
+    if (!name) {
+      if (errorEl) {
+        errorEl.textContent = 'Task Name is required';
+        errorEl.style.display = 'block';
+      }
+      nameEl?.focus();
+      return;
+    }
+    
+    const tab = getCurrentTasksTab();
+    if (!tasksModalDraft[tab]) {
+      tasksModalDraft[tab] = [];
+    }
+    
+    // Generate stable ID
+    const id = Date.now().toString(36);
+    
+    // Add to current tab's array
+    tasksModalDraft[tab].push({
+      id,
+      title: name,
+      instructions: info
+    });
+    
+    // Clear form
+    if (nameEl) nameEl.value = '';
+    if (infoEl) infoEl.value = '';
+    
+    // Re-render both modal and main screen lists
+    renderTasksList(window.currentTasksTab);
+    
+    console.log('[Tasks] Task added to draft for tab:', tab);
+  } catch (e) {
+    console.error('[Tasks] Error in addTaskToDraft:', e);
+  }
+}
+
+function cancelTasksModalForm() {
+  try {
+    const formWrap = document.getElementById('tasksAddFormWrap');
+    const nameEl = document.getElementById('taskNameInput');
+    const infoEl = document.getElementById('taskInfoInput');
+    const errorEl = document.getElementById('taskNameError');
+    const toggleBtn = document.getElementById('tasksModalToggleForm');
+    
+    // Hide form
+    if (formWrap) {
+      formWrap.style.display = 'none';
+    }
+    
+    // Clear fields
+    if (nameEl) nameEl.value = '';
+    if (infoEl) infoEl.value = '';
+    
+    // Clear error
+    if (errorEl) {
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+    }
+    
+    // Reset toggle button text
+    if (toggleBtn) {
+      toggleBtn.textContent = 'Add Task';
+    }
+  } catch (e) {
+    console.error('[Tasks] Error canceling form:', e);
+  }
+}
+
+function removeTaskFromDraft(index) {
+  try {
+    const tab = getCurrentTasksTab();
+    const tasks = tasksModalDraft[tab] || [];
+    if (index >= 0 && index < tasks.length) {
+      tasks.splice(index, 1);
+      renderTasksList(window.currentTasksTab);
+      console.log('[Tasks] Task removed from draft');
+    }
+  } catch (e) {
+    console.error('[Tasks] Error removing task from draft:', e);
+  }
+}
+
+function toggleTasksModalForm() {
+  try {
+    const formWrap = document.getElementById('tasksAddFormWrap');
+    if (!formWrap) return;
+    
+    const isVisible = formWrap.style.display !== 'none';
+    
+    if (isVisible) {
+      // Hide form and clear fields
+      cancelTasksModalForm();
+    } else {
+      // Show form
+      formWrap.style.display = 'block';
+      const toggleBtn = document.getElementById('tasksModalToggleForm');
+      if (toggleBtn) {
+        toggleBtn.textContent = 'Cancel';
+      }
+      // Focus on task name input
+      const nameEl = document.getElementById('taskNameInput');
+      if (nameEl) {
+        setTimeout(() => nameEl.focus(), 100);
+      }
+    }
+  } catch (e) {
+    console.error('[Tasks] Error toggling form:', e);
+  }
+}
+
+function saveTasksModal() {
+  try {
+    if (saveTasksToStorage()) {
+      // Reload tasks from storage to ensure consistency
+      loadTasks();
+      
+      // Dispatch event to notify TASKS screen to update
+      window.dispatchEvent(new CustomEvent('tasks:updated'));
+      
+      closeTasksSettings();
+      console.log('[Tasks] Tasks saved to localStorage');
+    } else {
+      alert('Failed to save tasks. Please try again.');
+    }
+  } catch (e) {
+    console.error('[Tasks] Error saving tasks:', e);
+    alert('Error saving tasks. Please try again.');
+  }
+}
+
+function openTasksSettings() {
+  try {
+    if (isTasksSettingsOpen) return;
+    
+    const modal = document.getElementById('tasksSettingsModal');
+    if (!modal) {
+      console.error('[Tasks] Settings modal not found');
+      return;
+    }
+    
+    // Store reference to modal container element
+    tasksSettingsModalContainer = modal.querySelector('.tasks-modal-container');
+    if (!tasksSettingsModalContainer) {
+      console.error('[Tasks] Modal container not found');
+      return;
+    }
+    
+    // Initialize Settings modal tab (default to 'opening' or use current main screen tab)
+    // Get main screen tab (not using getCurrentTasksTab() since modal isn't open yet)
+    const mainScreenTab = currentTasksTab || 'opening';
+    currentSettingsTab = mainScreenTab;
+    
+    // Set up event listeners for Settings modal tabs first
+    const settingsTabs = document.querySelectorAll('.tasks-settings-tab');
+    settingsTabs.forEach(tab => {
+      // Remove existing listeners by cloning
+      const newTab = tab.cloneNode(true);
+      tab.parentNode.replaceChild(newTab, tab);
+      
+      // Add click listener
+      newTab.addEventListener('click', () => {
+        const tabName = newTab.dataset.tab;
+        setSettingsModalTab(tabName);
+      });
+    });
+    
+    // Now set up the tab bar visual state (after listeners are set up)
+    setSettingsModalTab(currentSettingsTab);
+    
+    // Load tasks for current Settings tab
+    loadTasksForSettingsTab(currentSettingsTab);
+    
+    // Hide form initially
+    const formWrap = document.getElementById('tasksAddFormWrap');
+    if (formWrap) {
+      formWrap.style.display = 'none';
+    }
+    const toggleBtn = document.getElementById('tasksModalToggleForm');
+    if (toggleBtn) {
+      toggleBtn.textContent = 'Add Task';
+    }
+    
+    modal.style.display = 'flex';
+    isTasksSettingsOpen = true;
+    
+    // Disable body scrolling
+    document.body.style.overflow = 'hidden';
+    
+    // Add ESC key listener
+    document.addEventListener('keydown', handleTasksSettingsEsc);
+    
+    // Render modal list
+    renderTasksList(window.currentTasksTab);
+    
+    console.log('[Tasks] Settings modal opened for tab:', currentSettingsTab);
+  } catch (e) {
+    console.error('[Tasks] Error opening settings modal:', e);
+  }
+}
+
+function closeTasksSettings() {
+  try {
+    if (!isTasksSettingsOpen) return;
+    
+    const modal = document.getElementById('tasksSettingsModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+    
+    isTasksSettingsOpen = false;
+    
+    // Re-enable body scrolling
+    document.body.style.overflow = '';
+    
+    // Remove ESC key listener
+    document.removeEventListener('keydown', handleTasksSettingsEsc);
+    
+    // Clear form and hide it
+    cancelTasksModalForm();
+    
+    console.log('[Tasks] Settings modal closed');
+  } catch (e) {
+    console.error('[Tasks] Error closing settings modal:', e);
+  }
+}
+
+function handleTasksSettingsEsc(e) {
+  if (e.key === 'Escape' && isTasksSettingsOpen) {
+    closeTasksSettings();
+  }
+}
+
+// Listen for tasks:updated event to refresh TASKS screen
+window.addEventListener('tasks:updated', () => {
+  try {
+    // Reload tasks from storage
+    loadTasks();
+    // Re-render current tab's tasks
+    renderTasksList(window.currentTasksTab);
+    console.log('[Tasks] Tasks updated via event');
+  } catch (e) {
+    console.error('[Tasks] Error handling tasks:updated event:', e);
+  }
+});
+
+// Expose functions to window
+window.openTasks = openTasks;
+window.closeTasks = closeTasks;
+window.setTasksTab = setTasksTab;
+window.getCurrentTasksTab = getCurrentTasksTab;
+window.openTasksSettings = openTasksSettings;
+window.closeTasksSettings = closeTasksSettings;
+window.addTaskToDraft = addTaskToDraft;
+window.renderTasksList = renderTasksList;
+window.renderTasksDraftList = renderTasksDraftList; // Legacy alias
+window.toggleTasksModalForm = toggleTasksModalForm;
+window.cancelTasksModalForm = cancelTasksModalForm;
+window.saveTasksModal = saveTasksModal;
+window.openTaskInfoModal = openTaskInfoModal;
+window.closeTaskInfoModal = closeTaskInfoModal;
+window.loadTasks = loadTasks;
+
+// Tasks Reset Functions
+function showResetBtnIfAllowed() {
+  try {
+    // Read settings from localStorage
+    const settings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+    
+    // Get role: first from current user's worker entry, then from settings.role
+    let role = settings.workers?.find(w => w.name === settings.currentUser)?.role?.toLowerCase() 
+             || settings.role?.toLowerCase() 
+             || "";
+    
+    // If role is missing, set default to admin and save back to localStorage
+    if (!role) {
+      settings.role = "admin";
+      localStorage.setItem("ffv24_settings", JSON.stringify(settings));
+      role = "admin";
+    }
+    
+    // Show button only if role is admin or manager
+    const isAuthorized = role === "admin" || role === "manager";
+    
+    const resetBtn = document.getElementById('tasksResetBtn');
+    if (resetBtn) {
+      resetBtn.style.display = isAuthorized ? 'block' : 'none';
+    }
+    
+    return isAuthorized;
+  } catch (e) {
+    console.error('[Tasks] Error checking user role:', e);
+    return false;
+  }
+}
+
+// Validate reset PIN against admin code, manager code, or worker PIN
+function validateResetPin(pin, settings, currentUser) {
+    pin = String(pin).trim();
+
+    // 1. Admin code
+    if (settings.adminCode && pin === String(settings.adminCode)) {
+        return true;
+    }
+
+    // 2. Managers list (code)
+    if (Array.isArray(settings.managers)) {
+        const manager = settings.managers.find(m => m.name?.toLowerCase() === currentUser?.toLowerCase());
+        if (manager && String(manager.code) === pin) {
+            return true;
+        }
+    }
+
+    // 3. Workers list (pin)
+    if (Array.isArray(settings.workers)) {
+        const worker = settings.workers.find(w => w.name?.toLowerCase() === currentUser?.toLowerCase());
+        if (worker && String(worker.pin) === pin) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+window.validateResetPin = validateResetPin;
+
+// Open PIN modal for RESET verification
+function openResetPinModal(callback) {
+  const modal = document.getElementById("resetPinModal");
+  const pinInput = document.getElementById("resetPinInput");
+  const errorMsg = document.getElementById("resetPinError");
+  
+  if (!modal || !pinInput) {
+    console.error("PIN modal elements missing");
+    return;
+  }
+  
+  // Clear previous input and error
+  pinInput.value = "";
+  errorMsg.textContent = "";
+  
+  // Store callback for later use
+  modal._resetCallback = callback;
+  
+  // Show modal and focus input
+  modal.style.display = "flex";
+  setTimeout(() => pinInput.focus(), 100);
+}
+
+// Close PIN modal
+function closeResetPinModal() {
+  const modal = document.getElementById("resetPinModal");
+  if (modal) {
+    modal.style.display = "none";
+    const pinInput = document.getElementById("resetPinInput");
+    const errorMsg = document.getElementById("resetPinError");
+    if (pinInput) pinInput.value = "";
+    if (errorMsg) errorMsg.textContent = "";
+    delete modal._resetCallback;
+  }
+}
+
+// Validate PIN and execute reset
+async function validateResetPinAndExecute() {
+  const modal = document.getElementById("resetPinModal");
+  const pinInput = document.getElementById("resetPinInput");
+  const errorMsg = document.getElementById("resetPinError");
+  
+  if (!modal || !pinInput) return;
+  
+  const pin = pinInput.value.trim();
+  
+  if (!pin) {
+    errorMsg.textContent = "PIN is required.";
+    return;
+  }
+  
+  // Clear previous error
+  errorMsg.textContent = "";
+  
+  // Validate PIN using the helper from app.js
+  if (typeof window.validateResetPin === "function") {
+    try {
+      const isValid = await window.validateResetPin(pin);
+      if (!isValid) {
+        errorMsg.textContent = "Invalid Admin PIN. Reset cancelled.";
+        pinInput.value = "";
+        setTimeout(() => pinInput.focus(), 100);
+        return;
+      }
+    } catch (e) {
+      console.error("[RESET] Error validating PIN:", e);
+      errorMsg.textContent = "Invalid Admin PIN. Reset cancelled.";
+      pinInput.value = "";
+      setTimeout(() => pinInput.focus(), 100);
+      return;
+    }
+  } else {
+    errorMsg.textContent = "PIN validation function not available.";
+    return;
+  }
+  
+  // PIN is valid - close modal and perform reset
+  console.log("[RESET] PIN accepted");
+  closeResetPinModal();
+  
+  // Call doResetCurrentTab to perform the actual reset
+  if (typeof window.doResetCurrentTab === "function") {
+    window.doResetCurrentTab();
+  } else {
+    console.error("[RESET] doResetCurrentTab function not found!");
+    alert("Reset function not available.");
+  }
+}
+
+window.openResetPinModal = openResetPinModal;
+window.closeResetPinModal = closeResetPinModal;
+
+window.openResetTasksModal = function () {
+  const modal = document.getElementById("tasksResetConfirmModal");
+  if (!modal) { console.error("RESET modal missing"); return; }
+
+  const tab = window.getCurrentTasksTab();
+  const tabNameElement = document.getElementById("tasksResetTabName");
+  if (tabNameElement) {
+    tabNameElement.innerText = tab.charAt(0).toUpperCase() + tab.slice(1);
+  }
+  
+  modal.style.display = "flex";
+};
+
+window.closeResetTasksModal = function () {
+  const modal = document.getElementById("tasksResetConfirmModal");
+  if (modal) modal.style.display = "none";
+};
+
+// Alias for backward compatibility
+function closeTasksResetConfirmModal() {
+  return window.closeResetTasksModal();
+}
+
+// Reload tasks for a specific tab from catalog
+function reloadTasksForTab(tab) {
+  // Use global catalog if available, otherwise load from localStorage
+  const catalog = window.ff_tasks_catalog_v1 || JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+  const fresh = catalog[tab] || [];
+
+  // Save new active list
+  localStorage.setItem(`ffv24_tasks_${tab}_active`, JSON.stringify(fresh));
+}
+
+function resetTasksForCurrentTab() {
+    const tab = window.currentTasksTab;
+    console.log("[RESET] Running for tab:", tab);
+    console.log("[RESET] Start:", window.currentTasksTab);
+
+    if (!tab) {
+        console.error("[RESET] ERROR: currentTasksTab is undefined");
+        return;
+    }
+
+    const keyActive = `ffv24_tasks_${tab}_active`;
+    const keyPending = `ffv24_tasks_${tab}_pending`;
+    const keyDone = `ffv24_tasks_${tab}_done`;
+
+    console.log("[RESET] Clearing storage keys:", keyActive, keyPending, keyDone);
+
+    // Clear all three lists
+    localStorage.removeItem(keyActive);
+    localStorage.removeItem(keyPending);
+    localStorage.removeItem(keyDone);
+
+    // Reload catalog data for this tab
+    const catalog = window.ff_tasks_catalog_v1?.[tab] || [];
+    console.log("[RESET] Catalog data for tab:", tab, "items:", catalog.length);
+    
+    localStorage.setItem(keyActive, JSON.stringify(catalog));
+    localStorage.setItem(keyPending, JSON.stringify([]));
+    localStorage.setItem(keyDone, JSON.stringify([]));
+
+    console.log("[RESET] Storage cleared and reinitialized");
+
+    // Re-render UI for this tab
+    console.log("[RESET] Re-rendering tasks list for tab:", window.currentTasksTab);
+    renderTasksList(window.currentTasksTab);
+    
+    console.log("[RESET] Completed");
+}
+
+window.resetTasksForCurrentTab = resetTasksForCurrentTab;
+
+// Safe initialization function for RESET button
+// Module-level flag to ensure one-time initialization
+let __resetInitDone = false;
+
+function initializeResetButton() {
+  // Guard: run only once
+  if (__resetInitDone) {
+    return;
+  }
+
+  const resetBtn = document.getElementById("tasksResetBtn") || document.getElementById("reset-btn");
+  const modal = document.getElementById("tasksResetConfirmModal");
+
+  // RESET button opens confirmation modal - use addEventListener for one-time binding
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      console.log("RESET CLICKED");
+      if (window.resetTasksForCurrentTab) {
+        window.resetTasksForCurrentTab();
+      }
+    });
+  }
+
+  // Modal event delegation MUST be set up even if button is missing
+  if (!modal) {
+    console.warn("RESET confirmation modal missing — event delegation skipped");
+    return;
+  }
+
+  // EVENT DELEGATION: Attach ONE click handler to modal root container
+  // This works even if modal HTML is re-rendered/replaced
+  modal.addEventListener("click", (e) => {
+    const t = e.target;
+    const modalContent = document.getElementById("tasksResetConfirmModalContent");
+    
+    // If click is inside modal-content, stop propagation (don't close on content clicks)
+    if (modalContent && modalContent.contains(t) && t !== modal) {
+      e.stopPropagation();
+    }
+    
+    // Handle Cancel button click
+    if (t.id === "resetConfirmCancel" || t.closest("#resetConfirmCancel")) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log("[RESET] Cancel clicked");
+      modal.style.display = "none";
+      return;
+    }
+    
+    // Handle Yes button click
+    if (t.id === "resetConfirmYes" || t.closest("#resetConfirmYes")) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const tab = window.currentTasksTab;
+      console.log("[RESET] Confirm YES clicked, tab=", tab);
+      
+      // Close confirmation modal
+      modal.style.display = "none";
+      
+      // Open PIN modal using the existing function
+      if (typeof window.openResetPinModal === "function") {
+        window.openResetPinModal();
+      } else {
+        // Fallback: direct modal opening
+        const pinModal = document.getElementById("resetPinModal");
+        const pinInput = document.getElementById("resetPinInput");
+        const errorMsg = document.getElementById("resetPinError");
+        
+        if (pinModal) {
+          // Clear previous input and error
+          if (pinInput) {
+            pinInput.value = "";
+          }
+          if (errorMsg) {
+            errorMsg.textContent = "";
+          }
+          // Show PIN modal
+          pinModal.style.display = "flex";
+          // Focus input after a short delay
+          if (pinInput) {
+            setTimeout(() => pinInput.focus(), 100);
+          }
+        }
+      }
+      return;
+    }
+    
+    // If click is on backdrop (modal itself, not content), close modal
+    if (t === modal) {
+      e.preventDefault();
+      modal.style.display = "none";
+      return;
+    }
+  });
+  
+  // PIN modal buttons
+  const resetPinOk = document.getElementById("resetPinOk");
+  const resetPinCancel = document.getElementById("resetPinCancel");
+  
+  if (resetPinOk) {
+    resetPinOk.addEventListener("click", () => {
+      validateResetPinAndExecute();
+    });
+  }
+  
+  if (resetPinCancel) {
+    resetPinCancel.addEventListener("click", () => {
+      const pinModal = document.getElementById("resetPinModal");
+      if (pinModal) {
+        pinModal.style.display = "none";
+        const pinInput = document.getElementById("resetPinInput");
+        const errorMsg = document.getElementById("resetPinError");
+        if (pinInput) pinInput.value = "";
+        if (errorMsg) errorMsg.textContent = "";
+      }
+    });
+  }
+  
+  // Allow Enter key to submit PIN
+  const resetPinInput = document.getElementById("resetPinInput");
+  if (resetPinInput) {
+    resetPinInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        validateResetPinAndExecute();
+      }
+    });
+  }
+
+  // Mark as initialized - prevent re-running
+  __resetInitDone = true;
+  console.log("[RESET] Button initialization complete");
+}
+
+// Initialize Tasks screen buttons (including reset button)
+function initializeTasksScreenButtons() {
+  try {
+    // Back button
+    const backBtn = document.getElementById('btnTasksBack');
+    if (backBtn) {
+      backBtn.onclick = closeTasks;
+    }
+    
+    // Settings button
+    const settingsBtn = document.getElementById('btnTasksSettings');
+    if (settingsBtn) {
+      settingsBtn.onclick = openTasksSettings;
+    }
+    
+    // Check role and show/hide reset button
+    showResetBtnIfAllowed();
+    
+    console.log('[Tasks] Screen buttons initialized');
+  } catch (e) {
+    console.error('[Tasks] Error initializing screen buttons:', e);
+  }
+}
+
+// Expose functions
+window.initializeTasksScreenButtons = initializeTasksScreenButtons;
+window.showResetBtnIfAllowed = showResetBtnIfAllowed;
+window.initializeResetButton = initializeResetButton;
+// openResetTasksModal, resetTasksForCurrentTab, and closeResetTasksModal are already defined as window.* functions above
+
 // Initialize navigation on page load
 function initializeNavigation() {
   try {
@@ -3725,10 +5215,32 @@ function initializeNavigationButtons() {
     } else {
       console.warn('[Navigation] Missing element: reorderBtn');
     }
+
+    // Tasks button
+    const tasksBtnEl = document.getElementById("tasksBtn");
+    if (tasksBtnEl) {
+      tasksBtnEl.onclick = function() {
+        if (typeof window.openTasks === 'function') {
+          window.openTasks();
+        } else {
+          console.error('[Navigation] openTasks function not found');
+        }
+      };
+      tasksBtnEl.style.cursor = 'pointer';
+      tasksBtnEl.style.pointerEvents = 'auto';
+      tasksBtnEl.disabled = false;
+      tasksBtnEl.removeAttribute('disabled');
+      console.log('[Navigation] Tasks button initialized');
+    } else {
+      console.warn('[Navigation] Missing element: tasksBtn');
+    }
   } catch (e) {
     console.error('[Navigation] Error initializing navigation buttons:', e);
   }
 }
+
+// Tasks screen buttons are now initialized in app.js via DOMContentLoaded
+// This ensures proper event listener attachment and avoids conflicts
 
 // Initialize buttons when DOM is ready
 if (document.readyState === 'loading') {
@@ -4043,12 +5555,12 @@ window.updateTaskNoteDisplay = updateTaskNoteDisplay;
       }
     });
     
-    // Initialize Reset button
+    // Initialize Reset button (using openResetTasksModal)
     const resetInitialized = initButton('tasksResetBtn', 'Reset', (e) => {
-      if (typeof openTasksResetModal === 'function') {
-        openTasksResetModal();
+      if (typeof openResetTasksModal === 'function') {
+        openResetTasksModal();
       } else {
-        console.error('[Tasks] openTasksResetModal function not found');
+        console.error('[Tasks] openResetTasksModal function not found');
       }
     });
     
@@ -7137,7 +8649,85 @@ eye.addEventListener("mouseup",hide); eye.addEventListener("mouseleave",hide); e
 
 // Save
 
-function save(){ ls("ffv24_settings",settings); ls("ffv24_queue",queue); ls("ffv24_service",service); ls("ffv24_log",log); }
+function save(){ ls("ffv24_settings",settings); ls("ffv24_queue",queue); ls("ffv24_service",service); ls("ffv24_log",log); syncWorkersToUsers(); }
+
+// Sync workers to both ffv24_users and ff_users_v1 storage keys
+function syncWorkersToUsers() {
+  try {
+    // Get all valid workers (with name and pin)
+    const validWorkers = (settings.workers || []).filter(w => w && w.name && w.name.trim() && w.pin);
+    
+    // Initialize ff_users_v1 if it doesn't exist
+    let ffUsers = JSON.parse(localStorage.getItem('ff_users_v1') || '[]');
+    if (!Array.isArray(ffUsers)) {
+      ffUsers = [];
+    }
+    
+    // Initialize ffv24_users if it doesn't exist
+    let ffv24Users = JSON.parse(localStorage.getItem('ffv24_users') || '[]');
+    if (!Array.isArray(ffv24Users)) {
+      ffv24Users = [];
+    }
+    
+    // Process each worker
+    validWorkers.forEach(worker => {
+      const workerName = worker.name.trim();
+      const workerPin = (worker.pin || '').toString();
+      
+      // Generate userId (use name as userId, or create unique ID)
+      const userId = workerName.toLowerCase().replace(/\s+/g, '_');
+      
+      // Create user object in the format expected by Tasks screen
+      const userObj = {
+        userId: userId,
+        displayName: workerName,
+        pin: workerPin,
+        pinHash: workerPin // For now, use PIN as hash (can be enhanced later)
+      };
+      
+      // Check if user already exists in ff_users_v1 (by userId or displayName)
+      const existingIndex = ffUsers.findIndex(u => 
+        (u.userId && u.userId === userId) || 
+        (u.displayName && u.displayName === workerName)
+      );
+      
+      if (existingIndex >= 0) {
+        // Update existing user
+        ffUsers[existingIndex] = userObj;
+      } else {
+        // Add new user
+        ffUsers.push(userObj);
+      }
+      
+      // Same for ffv24_users
+      const existingIndex24 = ffv24Users.findIndex(u => 
+        (u.userId && u.userId === userId) || 
+        (u.displayName && u.displayName === workerName)
+      );
+      
+      if (existingIndex24 >= 0) {
+        // Update existing user
+        ffv24Users[existingIndex24] = userObj;
+      } else {
+        // Add new user
+        ffv24Users.push(userObj);
+      }
+    });
+    
+    // Remove users that no longer exist in settings.workers
+    const validNames = new Set(validWorkers.map(w => w.name.trim()));
+    ffUsers = ffUsers.filter(u => validNames.has(u.displayName));
+    ffv24Users = ffv24Users.filter(u => validNames.has(u.displayName));
+    
+    // Save to both storage keys
+    localStorage.setItem('ff_users_v1', JSON.stringify(ffUsers));
+    localStorage.setItem('ffv24_users', JSON.stringify(ffv24Users));
+    
+    console.log('[syncWorkersToUsers] Synced', validWorkers.length, 'workers to ff_users_v1 and ffv24_users');
+  } catch (e) {
+    console.error('[syncWorkersToUsers] Error syncing workers:', e);
+  }
+}
 
 
 
@@ -9293,6 +10883,472 @@ window.openLog = async function(){
 
 </script>
 
+  <!-- Tasks Screen -->
+  <style>
+    /* Scoped styles for Tasks screen only - does not affect home screen */
+    
+    /* Ensure clickability for info icon and parent containers */
+    #tasksScreen .tasks-info-icon {
+      pointer-events: auto !important;
+      z-index: 5;
+      position: relative;
+    }
+    
+    #tasksScreen .tasks-main-list-item,
+    #tasksScreen .tasks-list,
+    #tasksScreen .tasks-col,
+    #tasksScreen #tasksContentContainer {
+      pointer-events: auto !important;
+    }
+    
+    #tasksScreen .tasks-title-wrapper {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    #tasksScreen .tasks-title-wrapper h2 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+    
+    #tasksScreen .tasks-gear-btn {
+      border-radius: 999px;
+      border: 1px solid #e5e7eb;
+      background: #fff;
+      padding: 8px;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+    }
+    
+    #tasksScreen .tasks-gear-btn:hover {
+      transform: translateY(-1px);
+      background: #f9fafb;
+    }
+    
+    .tasks-reset-btn {
+      background-color: #fff;
+      color: #e74c3c;
+      border: 2px solid #e74c3c;
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 301;
+    }
+    
+    .tasks-reset-btn:hover {
+      transform: translateY(-1px);
+    }
+    
+    /* Tasks Settings Modal */
+    #tasksScreen .tasks-modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    
+    /* Task Info Modal (appended to body) */
+    #taskInfoModalRoot {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 99999;
+      pointer-events: none;
+    }
+    
+    .task-info-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: auto;
+      background: rgba(0, 0, 0, 0.5);
+    }
+    
+    .task-info-dialog {
+      pointer-events: auto;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      width: 90%;
+      max-width: 560px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    
+    .task-info-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    
+    .task-info-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: #111;
+    }
+    
+    .task-info-close-x {
+      background: none;
+      border: none;
+      font-size: 24px;
+      color: #666;
+      cursor: pointer;
+      padding: 0;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      line-height: 1;
+    }
+    
+    .task-info-close-x:hover {
+      background: #f3f4f6;
+    }
+    
+    .task-info-body {
+      padding: 20px;
+      max-height: 70vh;
+      overflow-y: auto;
+      font-size: 14px;
+      color: #333;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+    
+    .task-info-footer {
+      padding: 16px 20px;
+      border-top: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: flex-end;
+    }
+    
+    .task-info-close-btn {
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #fff;
+      background: #7b3fe4;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    
+    .task-info-close-btn:hover {
+      background: #6b2fd4;
+    }
+    
+    .task-worker {
+      font-size: 12px;
+      color: #7b3fe4;
+      margin-top: 4px;
+    }
+    
+    .task-done-btn {
+      background: #4caf50;
+      color: white;
+      padding: 6px 10px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    
+    .task-item-done {
+      background: #d8f8d8 !important;
+      opacity: 0.85;
+    }
+    
+    #tasksScreen .tasks-modal-container {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      width: 90%;
+      max-width: 600px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #tasksScreen .tasks-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    
+    #tasksScreen .tasks-modal-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: #111;
+    }
+    
+    #tasksScreen .tasks-modal-close {
+      background: none;
+      border: none;
+      font-size: 24px;
+      color: #666;
+      cursor: pointer;
+      padding: 0;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      line-height: 1;
+    }
+    
+    #tasksScreen .tasks-modal-close:hover {
+      background: #f3f4f6;
+    }
+    
+    #tasksScreen .tasks-modal-content {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+      padding-bottom: 80px; /* Space for sticky footer */
+    }
+    
+    #tasksScreen .tasks-modal-footer {
+      position: sticky;
+      bottom: 0;
+      z-index: 10;
+    }
+    
+    #tasksScreen .tasks-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      max-width: 1140px;
+      margin: 0 auto;
+    }
+    
+    #tasksScreen .tasks-col {
+      background: #f7f7f8;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      padding: 14px;
+      min-height: 240px;
+    }
+    
+    #tasksScreen .tasks-col h2 {
+      margin: 2px 0 10px;
+      font-size: 15px;
+      color: #6b7280;
+      letter-spacing: 0.4px;
+    }
+    
+    #tasksScreen .tasks-list {
+      max-height: 58vh;
+      overflow: auto;
+    }
+    
+    /* Mobile: stack columns vertically */
+    @media (max-width: 768px) {
+      #tasksScreen .tasks-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    
+    /* Fullscreen modal overlay */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      pointer-events: auto;
+    }
+    
+    .modal-content {
+      background: white;
+      padding: 24px;
+      border-radius: 12px;
+      max-width: 400px;
+      width: 90%;
+      text-align: center;
+      pointer-events: auto;
+      position: relative;
+      z-index: 10000;
+    }
+    
+    /* Ensure buttons inside modals are always clickable */
+    .modal-content button,
+    #tasksResetConfirmModal button,
+    #resetPinModal button {
+      pointer-events: auto;
+      cursor: pointer;
+    }
+    
+    .modal-footer {
+      margin-top: 20px;
+      display: flex;
+      justify-content: space-between;
+    }
+    
+    .danger {
+      background: #e53935;
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+    }
+  </style>
+  <div id="tasksScreen" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#fff;z-index:300;flex-direction:column;pointer-events:auto;">
+    <!-- Top bar with BACK button, TASKS title, and RESET button -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#fff;">
+      <button id="btnTasksBack" class="btn-pill" style="pointer-events:auto;z-index:301;">BACK</button>
+      <div style="flex:1;display:flex;justify-content:center;">
+        <div class="tasks-title-wrapper">
+          <h2>TASKS</h2>
+          <button id="btnTasksSettings" class="tasks-gear-btn" aria-label="Task settings" style="pointer-events:auto;z-index:301;">⚙️</button>
+        </div>
+      </div>
+      <button id="reset-btn" class="tasks-reset-btn" style="margin-left:auto;" onclick="resetTasksForCurrentTab()">RESET</button>
+    </div>
+    
+    <!-- Tab row -->
+    <div style="display:flex;border-bottom:1px solid #e5e7eb;background:#f9fafb;pointer-events:auto;z-index:301;">
+      <button class="tasks-tab" data-tab="opening" onclick="console.log('TAB CLICKED:', 'opening'); setTasksTab('opening')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Opening</button>
+      <button class="tasks-tab" data-tab="closing" onclick="console.log('TAB CLICKED:', 'closing'); setTasksTab('closing')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Closing</button>
+      <button class="tasks-tab" data-tab="weekly" onclick="console.log('TAB CLICKED:', 'weekly'); setTasksTab('weekly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Weekly</button>
+      <button class="tasks-tab" data-tab="monthly" onclick="console.log('TAB CLICKED:', 'monthly'); setTasksTab('monthly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Monthly</button>
+      <button class="tasks-tab" data-tab="yearly" onclick="console.log('TAB CLICKED:', 'yearly'); setTasksTab('yearly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Yearly</button>
+    </div>
+    
+    <!-- Content area -->
+    <div id="tasksContent" style="flex:1;padding:24px;overflow-y:auto;">
+      <div id="tasksContentContainer" class="tasks-grid">
+        <!-- Two-column layout will be rendered here by setTasksTab -->
+      </div>
+    </div>
+    
+    <!-- Tasks Reset Confirmation Modal -->
+    <div id="tasksResetConfirmModal" class="modal-overlay" style="display:none;pointer-events:auto;z-index:10000;">
+      <div id="tasksResetConfirmModalContent" class="modal-content" style="pointer-events:auto;position:relative;z-index:10001;">
+        <h2>Reset tasks?</h2>
+        <p>Are you sure you want to reset the tasks for: <span id="resetConfirmTabLabel"></span>?</p>
+        <p id="resetConfirmError" style="color:#e53935;font-size:14px;margin:5px 0;min-height:20px;display:none;"></p>
+
+        <div class="modal-footer">
+          <button id="resetConfirmCancel" style="pointer-events:auto;">Cancel</button>
+          <button id="resetConfirmYes" class="danger" style="pointer-events:auto;">Yes</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="resetPinModal" class="modal-overlay" style="display:none;" onclick="if(event.target === this) { this.style.display='none'; }">
+      <div class="modal-content" onclick="event.stopPropagation()">
+        <h2>Admin PIN Required</h2>
+        <p style="margin-bottom:12px;">Please enter Admin PIN to confirm reset:</p>
+        <input id="resetPinInput" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" style="width:100%;padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:6px;font-size:16px;text-align:center;">
+        <p id="resetPinError" style="color:#e53935;font-size:14px;margin:5px 0;min-height:20px;"></p>
+        <div class="modal-footer">
+          <button id="resetPinCancel">Cancel</button>
+          <button id="resetPinOk" class="danger">Confirm</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Tasks Settings Modal -->
+    <div id="tasksSettingsModal" class="tasks-modal-overlay" style="display:none;">
+      <div class="tasks-modal-container" onclick="event.stopPropagation()">
+        <div class="tasks-modal-header">
+          <h3 class="tasks-modal-title">Settings</h3>
+          <button id="tasksSettingsClose" class="tasks-modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="tasks-modal-content">
+          <!-- Tab bar inside Settings modal -->
+          <div id="tasksSettingsTabs" style="display:flex;border-bottom:1px solid #e5e7eb;background:#f9fafb;margin:-20px -20px 20px -20px;padding:0 20px;">
+            <button class="tasks-settings-tab" data-tab="opening" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Opening</button>
+            <button class="tasks-settings-tab" data-tab="closing" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Closing</button>
+            <button class="tasks-settings-tab" data-tab="weekly" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Weekly</button>
+            <button class="tasks-settings-tab" data-tab="monthly" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Monthly</button>
+            <button class="tasks-settings-tab" data-tab="yearly" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Yearly</button>
+          </div>
+          
+          <!-- Add Task button -->
+          <button id="tasksModalToggleForm" type="button" class="btn-pill" style="margin-bottom:16px;font-size:13px;">Add Task</button>
+          
+          <!-- Collapsible form section -->
+          <div id="tasksAddFormWrap" style="display:none;margin-bottom:20px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+            <label style="display:block;font-size:13px;font-weight:500;color:#111;margin-bottom:6px;">Task Name</label>
+            <input type="text" id="taskNameInput" class="taskNameInput" placeholder="e.g., Turn on lights" style="width:100%;padding:10px;margin-bottom:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;font-family:inherit;">
+            <div id="taskNameError" style="color:#dc2626;font-size:12px;margin-bottom:12px;min-height:16px;display:none;"></div>
+            
+            <label style="display:block;font-size:13px;font-weight:500;color:#111;margin-bottom:6px;">Info / Instructions</label>
+            <textarea id="taskInfoInput" class="taskInfoInput" placeholder="Write the instructions..." rows="3" style="width:100%;padding:10px;margin-bottom:12px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;resize:vertical;font-family:inherit;"></textarea>
+            
+            <div style="display:flex;gap:8px;">
+              <button id="taskAddBtn" type="button" class="btn-primary" style="padding:8px 16px;font-size:13px;">Add</button>
+              <button id="taskCancelBtn" type="button" class="btn-pill" style="padding:8px 16px;font-size:13px;">Cancel</button>
+            </div>
+          </div>
+          
+          <!-- MY LIST section (always visible) -->
+          <div style="border-top:1px solid #e5e7eb;margin:20px 0;padding-top:20px;">
+            <h4 style="margin:0 0 12px;font-size:14px;font-weight:600;color:#111;">MY LIST</h4>
+            <div id="tasksModalDraftList" style="min-height:40px;max-height:300px;overflow-y:auto;"></div>
+          </div>
+        </div>
+        
+        <!-- Sticky Save button -->
+        <div class="tasks-modal-footer" style="padding:16px 20px;border-top:1px solid #e5e7eb;background:#fff;border-radius:0 0 12px 12px;">
+          <button id="tasksModalSaveBtn" class="btn-primary" style="width:100%;padding:12px;font-size:14px;">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Task Instructions Modal -->
+  <div id="taskInstructionsModal" class="tasks-modal-overlay" style="display:none;z-index:9999;">
+    <div class="tasks-modal-container" onclick="event.stopPropagation()" style="max-width:500px;">
+      <div class="tasks-modal-header">
+        <h3 class="tasks-modal-title" id="taskInstructionsTitle">Instructions</h3>
+        <button id="taskInstructionsClose" class="tasks-modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="tasks-modal-content" style="padding:20px;max-height:70vh;overflow-y:auto;">
+        <div id="taskInstructionsText" style="font-size:14px;color:#333;line-height:1.6;white-space:pre-wrap;"></div>
+      </div>
+    </div>
+  </div>
+
   </div> <!-- End owner-view -->
 
   <!-- Reception View -->
@@ -9310,6 +11366,50 @@ window.openLog = async function(){
   </div> <!-- End main-app-content -->
 
   <script type="module" src="app.js"></script>
+
+  <!-- PIN Modal -->
+  <div id="pinModal" class="pin-modal" style="display:none;">
+    <div class="pin-modal-backdrop"></div>
+    <div class="pin-modal-dialog">
+      <h3>Enter PIN to take this task</h3>
+      <input id="pinModalTaskInput" type="password" maxlength="6" placeholder="Enter 4–6 digit PIN" />
+      <div class="pin-actions">
+        <button id="pinCancelBtn">Cancel</button>
+        <button id="pinSubmitBtn">OK</button>
+      </div>
+      <p id="pinError" style="color:red; display:none;">Incorrect PIN</p>
+    </div>
+  </div>
+
+  <style>
+    .pin-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .pin-modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+    }
+    .pin-modal-dialog {
+      position: relative;
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      width: 280px;
+      text-align: center;
+      z-index: 10000;
+    }
+    .pin-actions {
+      margin-top: 12px;
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
 
 </body>
 

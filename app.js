@@ -760,7 +760,791 @@ window.addEventListener("DOMContentLoaded", () => {
   } catch (e) {
     console.error("[UI] switchToLogin failed", e);
   }
+
+  try {
+    // Tasks screen event listeners
+    const btnTasksBack = document.getElementById("btnTasksBack");
+    if (btnTasksBack) {
+      btnTasksBack.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log("[Tasks] BACK button clicked");
+        if (typeof window.closeTasks === 'function') {
+          window.closeTasks();
+        } else {
+          console.error("[Tasks] closeTasks function not found");
+        }
+      });
+      btnTasksBack.style.pointerEvents = 'auto';
+      btnTasksBack.style.cursor = 'pointer';
+      console.log("[Tasks] BACK button initialized");
+    } else {
+      console.warn("[Tasks] Missing element: btnTasksBack");
+    }
+
+    // Tab buttons
+    const tabButtons = document.querySelectorAll('.tasks-tab');
+    tabButtons.forEach(tab => {
+      // Remove any existing listeners by cloning the element
+      const newTab = tab.cloneNode(true);
+      tab.parentNode.replaceChild(newTab, tab);
+      
+      newTab.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const tabName = newTab.dataset.tab;
+        console.log("[Tasks] Tab clicked:", tabName);
+        if (tabName && typeof window.setTasksTab === 'function') {
+          window.setTasksTab(tabName);
+        } else {
+          console.error("[Tasks] setTasksTab function not found or invalid tab name:", tabName);
+        }
+      });
+      newTab.style.pointerEvents = 'auto';
+      newTab.style.cursor = 'pointer';
+    });
+    console.log("[Tasks] Tab buttons initialized:", tabButtons.length);
+    
+    // Tasks Settings button
+    const btnTasksSettings = document.getElementById("btnTasksSettings");
+    if (btnTasksSettings) {
+      btnTasksSettings.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.openTasksSettings === 'function') {
+          window.openTasksSettings();
+        } else {
+          console.error("[Tasks] openTasksSettings function not found");
+        }
+      });
+      btnTasksSettings.style.pointerEvents = 'auto';
+      btnTasksSettings.style.cursor = 'pointer';
+      console.log("[Tasks] Settings button initialized");
+    }
+    
+    // Tasks Settings Modal - Close button
+    const tasksSettingsClose = document.getElementById("tasksSettingsClose");
+    if (tasksSettingsClose) {
+      tasksSettingsClose.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.closeTasksSettings === 'function') {
+          window.closeTasksSettings();
+        }
+      });
+    }
+    
+    // Tasks Settings Modal - Backdrop click
+    const tasksSettingsModal = document.getElementById("tasksSettingsModal");
+    if (tasksSettingsModal) {
+      tasksSettingsModal.addEventListener("click", (e) => {
+        if (e.target === tasksSettingsModal) {
+          if (typeof window.closeTasksSettings === 'function') {
+            window.closeTasksSettings();
+          }
+        }
+      });
+    }
+    
+    // Tasks Settings Modal - Toggle form button
+    const tasksModalToggleForm = document.getElementById("tasksModalToggleForm");
+    if (tasksModalToggleForm && !tasksModalToggleForm.dataset.listenerAttached) {
+      tasksModalToggleForm.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.toggleTasksModalForm === 'function') {
+          window.toggleTasksModalForm();
+        }
+      });
+      tasksModalToggleForm.dataset.listenerAttached = 'true';
+    }
+    
+    // Tasks Settings Modal - Add button (inside form)
+    const taskAddBtn = document.getElementById("taskAddBtn");
+    if (taskAddBtn && !taskAddBtn.dataset.listenerAttached) {
+      taskAddBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.addTaskToDraft === 'function') {
+          window.addTaskToDraft();
+        }
+      });
+      taskAddBtn.dataset.listenerAttached = 'true';
+    }
+    
+    // Tasks Settings Modal - Cancel button
+    const taskCancelBtn = document.getElementById("taskCancelBtn");
+    if (taskCancelBtn && !taskCancelBtn.dataset.listenerAttached) {
+      taskCancelBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.cancelTasksModalForm === 'function') {
+          window.cancelTasksModalForm();
+        }
+      });
+      taskCancelBtn.dataset.listenerAttached = 'true';
+    }
+    
+    // Tasks Settings Modal - Clear error on input
+    const taskNameInput = document.getElementById("taskNameInput");
+    if (taskNameInput && !taskNameInput.dataset.listenerAttached) {
+      taskNameInput.addEventListener("input", () => {
+        const errorEl = document.getElementById("taskNameError");
+        if (errorEl) {
+          errorEl.style.display = 'none';
+          errorEl.textContent = '';
+        }
+      });
+      taskNameInput.dataset.listenerAttached = 'true';
+    }
+    
+    // Task Instructions Modal - Close button
+    const taskInstructionsClose = document.getElementById("taskInstructionsClose");
+    if (taskInstructionsClose && !taskInstructionsClose.dataset.listenerAttached) {
+      taskInstructionsClose.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.closeTaskInstructionsModal === 'function') {
+          window.closeTaskInstructionsModal();
+        }
+      });
+      taskInstructionsClose.dataset.listenerAttached = 'true';
+    }
+    
+    // Task Instructions Modal - Backdrop click
+    const taskInstructionsModal = document.getElementById("taskInstructionsModal");
+    if (taskInstructionsModal && !taskInstructionsModal.dataset.listenerAttached) {
+      taskInstructionsModal.addEventListener("click", (e) => {
+        if (e.target === taskInstructionsModal) {
+          if (typeof window.closeTaskInstructionsModal === 'function') {
+            window.closeTaskInstructionsModal();
+          }
+        }
+      });
+      taskInstructionsModal.dataset.listenerAttached = 'true';
+    }
+    
+    // Tasks Settings Modal - Save button
+    const tasksModalSaveBtn = document.getElementById("tasksModalSaveBtn");
+    if (tasksModalSaveBtn && !tasksModalSaveBtn.dataset.listenerAttached) {
+      tasksModalSaveBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.saveTasksModal === 'function') {
+          window.saveTasksModal();
+        }
+      });
+      tasksModalSaveBtn.dataset.listenerAttached = 'true';
+    }
+    
+    // Tasks Settings Modal - Add button
+    const tasksModalAddBtn = document.getElementById("tasksModalAddBtn");
+    if (tasksModalAddBtn) {
+      tasksModalAddBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.addTaskToCatalog === 'function') {
+          window.addTaskToCatalog();
+        }
+      });
+    }
+    
+    // Tasks Settings Modal - Clear error on input
+    const tasksModalTaskName = document.getElementById("tasksModalTaskName");
+    if (tasksModalTaskName) {
+      tasksModalTaskName.addEventListener("input", () => {
+        const errorDiv = document.getElementById("tasksModalTaskNameError");
+        if (errorDiv) {
+          errorDiv.style.display = 'none';
+          errorDiv.textContent = '';
+        }
+      });
+    }
+    
+    // Tasks Settings Modal - Allow Enter key to add task
+    if (tasksModalTaskName) {
+      tasksModalTaskName.addEventListener("keypress", (e) => {
+        if (e.key === 'Enter' && typeof window.addTaskToCatalog === 'function') {
+          e.preventDefault();
+          window.addTaskToCatalog();
+        }
+      });
+    }
+    
+  } catch (e) {
+    console.error("[Tasks] Error initializing Tasks screen buttons:", e);
+  }
 });
+
+// Initialize Tasks screen buttons function (can be called when Tasks screen opens)
+function initializeTasksScreenButtons() {
+  try {
+    // BACK button
+    const btnTasksBack = document.getElementById("btnTasksBack");
+    if (btnTasksBack) {
+      // Remove any existing listeners by cloning
+      const newBtn = btnTasksBack.cloneNode(true);
+      btnTasksBack.parentNode.replaceChild(newBtn, btnTasksBack);
+      
+      newBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log("[Tasks] BACK button clicked");
+        if (typeof window.closeTasks === 'function') {
+          window.closeTasks();
+        } else {
+          console.error("[Tasks] closeTasks function not found");
+        }
+      });
+      newBtn.style.pointerEvents = 'auto';
+      newBtn.style.cursor = 'pointer';
+      console.log("[Tasks] BACK button re-initialized");
+    }
+
+    // Tab buttons
+    const tabButtons = document.querySelectorAll('.tasks-tab');
+    tabButtons.forEach(tab => {
+      // Remove any existing listeners by cloning
+      const newTab = tab.cloneNode(true);
+      tab.parentNode.replaceChild(newTab, tab);
+      
+      newTab.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const tabName = newTab.dataset.tab;
+        console.log("[Tasks] Tab clicked:", tabName);
+        if (tabName && typeof window.setTasksTab === 'function') {
+          window.setTasksTab(tabName);
+        } else {
+          console.error("[Tasks] setTasksTab function not found or invalid tab name:", tabName);
+        }
+      });
+      newTab.style.pointerEvents = 'auto';
+      newTab.style.cursor = 'pointer';
+    });
+    console.log("[Tasks] Tab buttons re-initialized:", tabButtons.length);
+    
+    // Tasks Settings button
+    const btnTasksSettings = document.getElementById("btnTasksSettings");
+    if (btnTasksSettings) {
+      btnTasksSettings.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.openTasksSettings === 'function') {
+          window.openTasksSettings();
+        }
+      };
+      btnTasksSettings.style.pointerEvents = 'auto';
+      btnTasksSettings.style.cursor = 'pointer';
+    }
+    
+    // Tasks Settings Modal - Close button
+    const tasksSettingsClose = document.getElementById("tasksSettingsClose");
+    if (tasksSettingsClose) {
+      tasksSettingsClose.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.closeTasksSettings === 'function') {
+          window.closeTasksSettings();
+        }
+      };
+    }
+    
+    // Tasks Settings Modal - Backdrop click
+    const tasksSettingsModal = document.getElementById("tasksSettingsModal");
+    if (tasksSettingsModal) {
+      tasksSettingsModal.onclick = (e) => {
+        if (e.target === tasksSettingsModal) {
+          if (typeof window.closeTasksSettings === 'function') {
+            window.closeTasksSettings();
+          }
+        }
+      };
+    }
+    
+    // Tasks Settings Modal - Toggle form button
+    const tasksModalToggleForm = document.getElementById("tasksModalToggleForm");
+    if (tasksModalToggleForm && !tasksModalToggleForm.dataset.listenerAttached) {
+      tasksModalToggleForm.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.toggleTasksModalForm === 'function') {
+          window.toggleTasksModalForm();
+        }
+      };
+      tasksModalToggleForm.dataset.listenerAttached = 'true';
+    }
+    
+    // Tasks Settings Modal - Add button (inside form)
+    const taskAddBtn = document.getElementById("taskAddBtn");
+    if (taskAddBtn && !taskAddBtn.dataset.listenerAttached) {
+      taskAddBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.addTaskToDraft === 'function') {
+          window.addTaskToDraft();
+        }
+      };
+      taskAddBtn.dataset.listenerAttached = 'true';
+    }
+    
+    // Tasks Settings Modal - Cancel button
+    const taskCancelBtn = document.getElementById("taskCancelBtn");
+    if (taskCancelBtn && !taskCancelBtn.dataset.listenerAttached) {
+      taskCancelBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.cancelTasksModalForm === 'function') {
+          window.cancelTasksModalForm();
+        }
+      };
+      taskCancelBtn.dataset.listenerAttached = 'true';
+    }
+    
+    // Tasks Settings Modal - Clear error on input
+    const taskNameInput = document.getElementById("taskNameInput");
+    if (taskNameInput && !taskNameInput.dataset.listenerAttached) {
+      taskNameInput.oninput = () => {
+        const errorEl = document.getElementById("taskNameError");
+        if (errorEl) {
+          errorEl.style.display = 'none';
+          errorEl.textContent = '';
+        }
+      };
+      taskNameInput.dataset.listenerAttached = 'true';
+    }
+    
+    // Task Instructions Modal - Close button
+    const taskInstructionsClose = document.getElementById("taskInstructionsClose");
+    if (taskInstructionsClose && !taskInstructionsClose.dataset.listenerAttached) {
+      taskInstructionsClose.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.closeTaskInstructionsModal === 'function') {
+          window.closeTaskInstructionsModal();
+        }
+      };
+      taskInstructionsClose.dataset.listenerAttached = 'true';
+    }
+    
+    // Task Instructions Modal - Backdrop click
+    const taskInstructionsModal = document.getElementById("taskInstructionsModal");
+    if (taskInstructionsModal && !taskInstructionsModal.dataset.listenerAttached) {
+      taskInstructionsModal.onclick = (e) => {
+        if (e.target === taskInstructionsModal) {
+          if (typeof window.closeTaskInstructionsModal === 'function') {
+            window.closeTaskInstructionsModal();
+          }
+        }
+      };
+      taskInstructionsModal.dataset.listenerAttached = 'true';
+    }
+    
+    // Tasks Settings Modal - Save button
+    const tasksModalSaveBtn = document.getElementById("tasksModalSaveBtn");
+    if (tasksModalSaveBtn && !tasksModalSaveBtn.dataset.listenerAttached) {
+      tasksModalSaveBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.saveTasksModal === 'function') {
+          window.saveTasksModal();
+        }
+      };
+      tasksModalSaveBtn.dataset.listenerAttached = 'true';
+    }
+    
+    // Tasks Settings Modal - Add button
+    const tasksModalAddBtn = document.getElementById("tasksModalAddBtn");
+    if (tasksModalAddBtn) {
+      tasksModalAddBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.addTaskToCatalog === 'function') {
+          window.addTaskToCatalog();
+        }
+      };
+    }
+    
+    // Tasks Settings Modal - Clear error on input
+    const tasksModalTaskName = document.getElementById("tasksModalTaskName");
+    if (tasksModalTaskName) {
+      tasksModalTaskName.oninput = () => {
+        const errorDiv = document.getElementById("tasksModalTaskNameError");
+        if (errorDiv) {
+          errorDiv.style.display = 'none';
+          errorDiv.textContent = '';
+        }
+      };
+    }
+    
+  } catch (e) {
+    console.error("[Tasks] Error re-initializing Tasks screen buttons:", e);
+  }
+}
+
+// Expose for use in index.html
+window.initializeTasksScreenButtons = initializeTasksScreenButtons;
+
+// Safely move a task into the Pending list (tab-specific storage)
+function moveTaskToPending(taskId, workerName) {
+    const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+    
+    // Find which tab contains this task
+    for (let tab of tabs) {
+        const activeTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_active_v1`) || '[]');
+        const taskIndex = activeTasks.findIndex(t => t.id === taskId);
+        
+        if (taskIndex >= 0) {
+            // Found the task in active list - move it to pending
+            const task = activeTasks[taskIndex];
+            task.assignedTo = workerName;
+            
+            // Remove from active
+            activeTasks.splice(taskIndex, 1);
+            
+            // Add to pending
+            const pendingTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_pending_v1`) || '[]');
+            pendingTasks.push(task);
+            
+            // Save both lists
+            localStorage.setItem(`ff_tasks_${tab}_active_v1`, JSON.stringify(activeTasks));
+            localStorage.setItem(`ff_tasks_${tab}_pending_v1`, JSON.stringify(pendingTasks));
+            
+            console.log(`[Tasks] Moved task ${taskId} to pending in ${tab} tab`);
+            
+            if (window.renderTasksList) window.renderTasksList(tab);
+            return;
+        }
+        
+        // If not found in active, check catalog for initial state tasks (status null/empty)
+        try {
+            const catalog = window.ff_tasks_catalog_v1?.[tab] || 
+                           (() => {
+                               try {
+                                   const stored = localStorage.getItem("ff_tasks_catalog_v1");
+                                   if (stored) {
+                                       const parsed = JSON.parse(stored);
+                                       return parsed[tab] || [];
+                                   }
+                               } catch (e) {
+                                   console.error(`[Tasks] Error loading catalog for ${tab}:`, e);
+                               }
+                               return [];
+                           })();
+            
+            const catalogTaskIndex = catalog.findIndex(t => t && t.id === taskId);
+            
+            if (catalogTaskIndex >= 0) {
+                const task = catalog[catalogTaskIndex];
+                
+                // Normalize status to check if task is in initial state
+                const originalStatus = task.status;
+                const status = (task.status ?? "").toLowerCase();
+                const isInitial = (status === "" || status === "new" || status === "idle" || status === "catalog" || task.status === null);
+                
+                if (isInitial) {
+                    // Task is in initial state - move it to pending
+                    // Create a copy to avoid mutating catalog directly
+                    const taskCopy = { ...task };
+                    taskCopy.status = "pending";
+                    taskCopy.assignedTo = workerName;
+                    
+                    // Update task in catalog (set status to pending)
+                    task.status = "pending";
+                    task.assignedTo = workerName;
+                    
+                    // Save updated catalog
+                    const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+                    catalogObj[tab] = catalog;
+                    localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
+                    if (window.ff_tasks_catalog_v1) {
+                        window.ff_tasks_catalog_v1[tab] = catalog;
+                    }
+                    
+                    // Add to pending list
+                    const pendingTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_pending_v1`) || '[]');
+                    pendingTasks.push(taskCopy);
+                    localStorage.setItem(`ff_tasks_${tab}_pending_v1`, JSON.stringify(pendingTasks));
+                    
+                    const fromStatus = originalStatus === null ? "null" : (originalStatus || "empty");
+                    console.log("[SELECT] moved to pending", { tab, id: taskId, from: fromStatus, to: "pending" });
+                    
+                    if (window.renderTasksList) {
+                        if (window.renderTasksList.length > 1) {
+                            window.renderTasksList(tab, { force: true });
+                        } else {
+                            window.renderTasksList(tab);
+                        }
+                    }
+                    return;
+                }
+            }
+        } catch (e) {
+            console.error(`[Tasks] Error checking catalog for task ${taskId} in ${tab}:`, e);
+        }
+    }
+    
+    console.warn(`[Tasks] Task ${taskId} not found in any active list or catalog`);
+}
+
+// Expose to window for use in index.html
+window.moveTaskToPending = moveTaskToPending;
+
+// Mark task as done (tab-specific storage)
+function markTaskDone(taskId, workerName) {
+    const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+    
+    // Find which tab contains this task (in pending list)
+    for (let tab of tabs) {
+        const pendingTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_pending_v1`) || '[]');
+        const taskIndex = pendingTasks.findIndex(t => t.id === taskId);
+        
+        if (taskIndex >= 0) {
+            // Found the task - move it to done
+            const task = pendingTasks[taskIndex];
+            task.completedBy = workerName;
+            task.assignedTo = null; // no longer pending
+            task.status = "done"; // Set status to done
+            task.completedAt = new Date().toISOString(); // Optional: record completion time
+            
+            // Remove from pending
+            pendingTasks.splice(taskIndex, 1);
+            
+            // Add to done
+            const doneTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_done_v1`) || '[]');
+            doneTasks.push(task);
+            
+            // Save both lists
+            localStorage.setItem(`ff_tasks_${tab}_pending_v1`, JSON.stringify(pendingTasks));
+            localStorage.setItem(`ff_tasks_${tab}_done_v1`, JSON.stringify(doneTasks));
+            
+            // Update catalog task status if it exists
+            try {
+                const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+                const catalog = catalogObj[tab] || [];
+                const catalogTaskIndex = catalog.findIndex(t => t && t.id === taskId);
+                if (catalogTaskIndex >= 0) {
+                    catalog[catalogTaskIndex].status = "done";
+                    catalog[catalogTaskIndex].completedBy = workerName;
+                    catalog[catalogTaskIndex].completedAt = task.completedAt;
+                    catalogObj[tab] = catalog;
+                    localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
+                    if (window.ff_tasks_catalog_v1) {
+                        window.ff_tasks_catalog_v1[tab] = catalog;
+                    }
+                }
+            } catch (e) {
+                console.error(`[Tasks] Error updating catalog for task ${taskId} in ${tab}:`, e);
+            }
+            
+            console.log(`[Tasks] Marked task ${taskId} as done in ${tab} tab`);
+            
+            if (window.renderTasksList) {
+                if (window.renderTasksList.length > 1) {
+                    window.renderTasksList(tab, { force: true });
+                } else {
+                    window.renderTasksList(tab);
+                }
+            }
+            return;
+        }
+    }
+    
+    console.warn(`[Tasks] Task ${taskId} not found in any pending list`);
+}
+
+window.markTaskDone = markTaskDone;
+
+// PIN Modal functions
+let __pendingTaskId = null;
+let pinModalDoneTaskId = null;
+
+function openPinModal(taskId) {
+    __pendingTaskId = taskId;
+    pinModalDoneTaskId = null;
+    const pinModal = document.getElementById("pinModal");
+    const pinError = document.getElementById("pinError");
+    const pinInput = document.getElementById("pinModalTaskInput");
+    if (pinModal) pinModal.style.display = "flex";
+    if (pinError) pinError.style.display = "none";
+    if (pinInput) pinInput.value = "";
+    if (pinInput) pinInput.focus();
+}
+
+function openPinModalForDone(taskId) {
+    pinModalDoneTaskId = taskId;
+    __pendingTaskId = null;
+    const pinModal = document.getElementById("pinModal");
+    const pinError = document.getElementById("pinError");
+    const pinInput = document.getElementById("pinModalTaskInput");
+    if (pinModal) pinModal.style.display = "flex";
+    if (pinError) pinError.style.display = "none";
+    if (pinInput) pinInput.value = "";
+    if (pinInput) pinInput.focus();
+}
+
+function closePinModal() {
+    const pinModal = document.getElementById("pinModal");
+    if (pinModal) pinModal.style.display = "none";
+    __pendingTaskId = null;
+    pinModalDoneTaskId = null;
+}
+
+async function validatePinAndMove() {
+    const pinInput = document.getElementById("pinModalTaskInput");
+    const pinError = document.getElementById("pinError");
+    if (!pinInput) return;
+    
+    const enteredPin = pinInput.value.trim();
+    
+    // Validate PIN length (4-6 digits)
+    if (enteredPin.length < 4 || enteredPin.length > 6) {
+        if (pinError) {
+            pinError.textContent = "PIN must be 4–6 digits";
+            pinError.style.display = "block";
+        }
+        return;
+    }
+    
+    const users = JSON.parse(localStorage.getItem("ff_users_v1") || "[]");
+
+    const match = users.find(u => u.pin === enteredPin);
+
+    if (!match) {
+        if (pinError) {
+            pinError.textContent = "Incorrect PIN";
+            pinError.style.display = "block";
+        }
+        return;
+    }
+
+    const workerName = match.displayName;
+
+    if (__pendingTaskId) {
+        moveTaskToPending(__pendingTaskId, workerName);
+    }
+
+    closePinModal();
+}
+
+function validatePinAndMarkDone() {
+    const pinInput = document.getElementById("pinModalTaskInput");
+    const pinError = document.getElementById("pinError");
+    if (!pinInput) return;
+    
+    const pin = pinInput.value.trim();
+    
+    // Validate PIN length (4-6 digits)
+    if (pin.length < 4 || pin.length > 6) {
+        if (pinError) {
+            pinError.textContent = "PIN must be 4–6 digits";
+            pinError.style.display = "block";
+        }
+        return;
+    }
+    
+    const users = JSON.parse(localStorage.getItem("ff_users_v1") || "[]");
+    const user = users.find(u => u.pin === pin);
+
+    if (!user) {
+        if (pinError) {
+            pinError.textContent = "Incorrect PIN";
+            pinError.style.display = "block";
+        }
+        return;
+    }
+
+    if (pinModalDoneTaskId) {
+        markTaskDone(pinModalDoneTaskId, user.displayName);
+    }
+    
+    closePinModal();
+}
+
+// Expose PIN modal functions to window
+window.openPinModal = openPinModal;
+window.openPinModalForDone = openPinModalForDone;
+window.closePinModal = closePinModal;
+window.validatePinAndMove = validatePinAndMove;
+window.validatePinAndMarkDone = validatePinAndMarkDone;
+
+// Connect modal buttons when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const pinCancelBtn = document.getElementById("pinCancelBtn");
+        const pinSubmitBtn = document.getElementById("pinSubmitBtn");
+        const pinModal = document.getElementById("pinModal");
+        const pinModalBackdrop = pinModal?.querySelector('.pin-modal-backdrop');
+        
+        if (pinCancelBtn) pinCancelBtn.onclick = closePinModal;
+        // Submit button logic is handled dynamically based on which modal was opened
+        if (pinSubmitBtn) {
+            pinSubmitBtn.onclick = () => {
+                if (pinModalDoneTaskId) {
+                    validatePinAndMarkDone();
+                } else if (__pendingTaskId) {
+                    validatePinAndMove();
+                }
+            };
+        }
+        if (pinModalBackdrop) {
+            pinModalBackdrop.onclick = (e) => {
+                if (e.target === pinModalBackdrop) closePinModal();
+            };
+        }
+        
+        // Allow Enter key to submit PIN
+        const pinInput = document.getElementById("pinModalTaskInput");
+        if (pinInput) {
+            pinInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    if (pinModalDoneTaskId) {
+                        validatePinAndMarkDone();
+                    } else if (__pendingTaskId) {
+                        validatePinAndMove();
+                    }
+                }
+            });
+        }
+    });
+} else {
+    // DOM already loaded
+    const pinCancelBtn = document.getElementById("pinCancelBtn");
+    const pinSubmitBtn = document.getElementById("pinSubmitBtn");
+    const pinModal = document.getElementById("pinModal");
+    const pinModalBackdrop = pinModal?.querySelector('.pin-modal-backdrop');
+    
+    if (pinCancelBtn) pinCancelBtn.onclick = closePinModal;
+    // Submit button logic is handled dynamically based on which modal was opened
+    if (pinSubmitBtn) {
+        pinSubmitBtn.onclick = () => {
+            if (pinModalDoneTaskId) {
+                validatePinAndMarkDone();
+            } else if (__pendingTaskId) {
+                validatePinAndMove();
+            }
+        };
+    }
+    if (pinModalBackdrop) {
+        pinModalBackdrop.onclick = (e) => {
+            if (e.target === pinModalBackdrop) closePinModal();
+        };
+    }
+    
+    // Allow Enter key to submit PIN
+    const pinInput = document.getElementById("pinModalTaskInput");
+    if (pinInput) {
+        pinInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                if (pinModalDoneTaskId) {
+                    validatePinAndMarkDone();
+                } else if (__pendingTaskId) {
+                    validatePinAndMove();
+                }
+            }
+        });
+    }
+}
 
 // =====================
 // Expose Firestore functions for Tasks feature
@@ -911,6 +1695,346 @@ async function confirmPinReset(token, newPin) {
   }
 }
 
+// Load tasks for a specific tab from localStorage and refresh UI
+function loadTasksForTab(tab) {
+    console.log(`Loading tasks for tab: ${tab}`);
+    
+    // Load tasks from localStorage (they will be empty after reset)
+    const activeTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_active_v1`) || '[]');
+    const pendingTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_pending_v1`) || '[]');
+    const doneTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_done_v1`) || '[]');
+    
+    console.log(`Loaded tasks - Active: ${activeTasks.length}, Pending: ${pendingTasks.length}, Done: ${doneTasks.length}`);
+    
+    // Refresh the UI
+    if (typeof window.renderTasksList === "function") {
+        window.renderTasksList(tab);
+    } else {
+        console.warn("renderTasksList() not found, UI may not refresh");
+    }
+}
+
+// Helper function to validate reset PIN
+async function validateResetPin(pin) {
+    // Detect local dev environment
+    const isLocal = ["127.0.0.1", "localhost"].includes(window.location.hostname);
+
+    if (isLocal) {
+        // Local dev: skip Firebase, use only local validation
+        if (typeof window.isAdminCode === "function") {
+            return window.isAdminCode(pin);
+        } else {
+            // Fallback: check against settings from localStorage
+            try {
+                const settings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+                return (settings.adminCode || "").toString() === pin.toString();
+            } catch (e) {
+                console.error("RESET: Error checking PIN", e);
+                return false;
+            }
+        }
+    } else {
+        // Production: use verifyPinResetToken as primary, with fallbacks
+        let isValidPin = false;
+        if (typeof window.verifyPinResetToken === "function") {
+            try {
+                const result = await window.verifyPinResetToken(pin);
+                isValidPin = result && result.success;
+            } catch (e) {
+                console.warn("RESET: verifyPinResetToken failed, falling back to other methods", e);
+            }
+        }
+        
+        // Fallback: use isAdminCode or legacy settings check
+        if (!isValidPin) {
+            if (typeof window.isAdminCode === "function") {
+                isValidPin = window.isAdminCode(pin);
+            } else {
+                try {
+                    const settings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+                    isValidPin = (settings.adminCode || "").toString() === pin.toString();
+                } catch (e) {
+                    console.error("RESET: Error checking PIN", e);
+                }
+            }
+        }
+        return isValidPin;
+    }
+}
+
+// Perform the actual reset (called after PIN validation)
+// STATE ONLY: Clears progress/state, does NOT touch catalog or rebuild tasks
+window.doResetCurrentTab = function doResetCurrentTab() {
+    console.log("RESET: Performing STATE-ONLY reset for current tab");
+
+    // 1) Resolve tab from window.currentTasksTab
+    const tab = window.currentTasksTab;
+    if (!tab) {
+        // Show inline error in confirm modal if it's still open
+        const errorMsg = document.getElementById("resetConfirmError");
+        if (errorMsg) {
+            errorMsg.textContent = "No tab selected. Reset cannot proceed.";
+            errorMsg.style.display = "block";
+        } else {
+            alert("No tab selected. Reset cannot proceed.");
+        }
+        console.error("RESET: No tab selected");
+        return;
+    }
+
+    console.log("RESET: Resetting state for tab:", tab);
+
+    // 2) Clear storage STATE KEYS for this tab ONLY (using correct format from getTabStorageKey)
+    // Format: ff_tasks_${tab}_${status}_v1 (matches getTabStorageKey helper)
+    const STORAGE_ACTIVE = `ff_tasks_${tab}_active_v1`;
+    const STORAGE_DONE = `ff_tasks_${tab}_done_v1`;
+    const STORAGE_PENDING = `ff_tasks_${tab}_pending_v1`;
+    
+    // Also remove legacy format (ffv24_tasks_...) if it exists
+    const STORAGE_ACTIVE_LEGACY = `ffv24_tasks_${tab}_active_v1`;
+    const STORAGE_DONE_LEGACY = `ffv24_tasks_${tab}_done_v1`;
+    const STORAGE_PENDING_LEGACY = `ffv24_tasks_${tab}_pending_v1`;
+    
+    // Also check for format without _v1 suffix
+    const STORAGE_ACTIVE_LEGACY2 = `ffv24_tasks_${tab}_active`;
+    const STORAGE_DONE_LEGACY2 = `ffv24_tasks_${tab}_done`;
+    const STORAGE_PENDING_LEGACY2 = `ffv24_tasks_${tab}_pending`;
+
+    console.log("RESET: Deleting STATE keys (not catalog):", STORAGE_ACTIVE, STORAGE_DONE, STORAGE_PENDING);
+    
+    // Remove state keys (active, done, pending) - NOT catalog
+    localStorage.removeItem(STORAGE_ACTIVE);
+    localStorage.removeItem(STORAGE_DONE);
+    localStorage.removeItem(STORAGE_PENDING);
+    
+    // Remove legacy format keys if they exist
+    localStorage.removeItem(STORAGE_ACTIVE_LEGACY);
+    localStorage.removeItem(STORAGE_DONE_LEGACY);
+    localStorage.removeItem(STORAGE_PENDING_LEGACY);
+    localStorage.removeItem(STORAGE_ACTIVE_LEGACY2);
+    localStorage.removeItem(STORAGE_DONE_LEGACY2);
+    localStorage.removeItem(STORAGE_PENDING_LEGACY2);
+    
+    // Remove any "selected" keys for this tab if they exist
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.includes(tab) && (key.includes('selected') || key.includes('_selected_'))) {
+            // Safety: Do NOT remove anything containing "catalog"
+            if (!key.toLowerCase().includes('catalog')) {
+                keysToRemove.push(key);
+            }
+        }
+    }
+    keysToRemove.forEach(key => {
+        console.log("RESET: Removing selected key:", key);
+        localStorage.removeItem(key);
+    });
+
+    console.log("RESET: Storage STATE keys deleted. Catalog preserved.");
+
+    // 3) Clear in-memory UI state (ONLY state, not catalog)
+    console.log("RESET: Clearing in-memory task UI state");
+    
+    // Clear selected task state
+    if (typeof window.selectedTaskId !== 'undefined') {
+        window.selectedTaskId = null;
+    }
+    if (typeof window.selectedTask !== 'undefined') {
+        window.selectedTask = null;
+    }
+    
+    // Clear active task state
+    if (typeof window.activeTaskId !== 'undefined') {
+        window.activeTaskId = null;
+    }
+    if (typeof window.activeTask !== 'undefined') {
+        window.activeTask = null;
+    }
+    
+    // Clear pending task state
+    if (typeof window.pendingTaskId !== 'undefined') {
+        window.pendingTaskId = null;
+    }
+    if (typeof window.pendingTask !== 'undefined') {
+        window.pendingTask = null;
+    }
+    
+    // Clear app.js module-level state
+    if (typeof __pendingTaskId !== 'undefined') {
+        __pendingTaskId = null;
+    }
+    if (typeof pinModalDoneTaskId !== 'undefined') {
+        pinModalDoneTaskId = null;
+    }
+    
+    // Clear cache objects (state cache, not catalog)
+    if (typeof window.tasksCache !== 'undefined' && window.tasksCache) {
+        if (window.tasksCache[tab]) {
+            delete window.tasksCache[tab];
+        }
+    }
+    if (typeof window.myListCache !== 'undefined' && window.myListCache) {
+        if (window.myListCache[tab]) {
+            delete window.myListCache[tab];
+        }
+    }
+    
+    console.log("RESET: In-memory state cleared");
+
+    // 4) Reset runtime status fields in catalog for this tab
+    console.log("RESET: Resetting runtime fields in catalog for tab:", tab);
+    try {
+        // Load catalog object
+        const raw = localStorage.getItem("ff_tasks_catalog_v1");
+        const catalogObj = raw ? JSON.parse(raw) : {};
+        const list = catalogObj?.[tab] ?? window.ff_tasks_catalog_v1?.[tab] ?? [];
+        
+        if (Array.isArray(list) && list.length > 0) {
+            // Reset runtime fields for each task while keeping identity fields
+            list.forEach(task => {
+                if (task && typeof task === 'object') {
+                    // Keep identity fields: id, title, instructions, and any static fields
+                    // Reset runtime status fields
+                    if ('status' in task) {
+                        task.status = null;
+                    }
+                    if ('completedBy' in task) {
+                        task.completedBy = null;
+                    }
+                    if ('assignedTo' in task) {
+                        task.assignedTo = null;
+                    }
+                    if ('completedAt' in task) {
+                        task.completedAt = null;
+                    }
+                    
+                    // Delete selected-related fields if they exist
+                    if ('selected' in task) {
+                        delete task.selected;
+                    }
+                    if ('selectedBy' in task) {
+                        delete task.selectedBy;
+                    }
+                    if ('selectedAt' in task) {
+                        delete task.selectedAt;
+                    }
+                    
+                    // Delete any pending/done/active flags if they exist on the task object
+                    if ('pending' in task) {
+                        delete task.pending;
+                    }
+                    if ('done' in task) {
+                        delete task.done;
+                    }
+                    if ('active' in task) {
+                        delete task.active;
+                    }
+                }
+            });
+            
+            // Save catalog back safely
+            catalogObj[tab] = list;
+            localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
+            
+            // Update window object to keep it in sync
+            if (typeof window.ff_tasks_catalog_v1 === 'undefined' || !window.ff_tasks_catalog_v1) {
+                window.ff_tasks_catalog_v1 = {};
+            }
+            window.ff_tasks_catalog_v1[tab] = list;
+            
+            console.log(`RESET: Reset runtime fields for ${list.length} tasks in catalog for tab:`, tab);
+        } else {
+            console.log("RESET: No tasks found in catalog for tab:", tab);
+        }
+    } catch (e) {
+        console.error("RESET: Error resetting catalog runtime fields:", e);
+        // Continue with reset even if catalog update fails
+    }
+
+    // 5) Rerender from existing catalog source (renderer will show tasks as SELECT when state is empty)
+    if (typeof window.renderTasksList === "function") {
+        // Call with force option if supported, otherwise call normally
+        // The renderer should naturally show all tasks as SELECT in MY LIST when state is empty
+        if (window.renderTasksList.length > 1) {
+            // Function accepts options parameter
+            window.renderTasksList(tab, { force: true });
+        } else {
+            // Function only accepts tab parameter
+            window.renderTasksList(tab);
+        }
+        console.log("RESET: UI refreshed for tab:", tab);
+    } else {
+        console.warn("RESET: renderTasksList not found, UI may not refresh");
+    }
+
+    console.log("RESET: STATE-ONLY reset complete for tab:", tab);
+};
+
+// Reset tasks for current active tab - opens modals
+function resetTasksForCurrentTab() {
+    console.log("RESET: Opening confirmation modal");
+
+    // Get current tab
+    const tab = window.currentTasksTab;
+    
+    // Get modal elements
+    const confirmModal = document.getElementById("tasksResetConfirmModal");
+    if (!confirmModal) {
+        console.error("RESET: Confirmation modal not found");
+        return;
+    }
+
+    // Get elements for updating modal content
+    const tabLabelSpan = document.getElementById("resetConfirmTabLabel");
+    const errorMsg = document.getElementById("resetConfirmError");
+    const yesBtn = document.getElementById("resetConfirmYes");
+
+    // Map tab to human label
+    const tabLabels = {
+        "opening": "Opening",
+        "closing": "Closing",
+        "weekly": "Weekly",
+        "monthly": "Monthly",
+        "yearly": "Yearly"
+    };
+    const tabLabel = tabLabels[tab] || (tab ? tab.charAt(0).toUpperCase() + tab.slice(1) : "");
+
+    // Check if tab is missing
+    if (!tab) {
+        // Show error in modal
+        if (errorMsg) {
+            errorMsg.textContent = "No tab selected.";
+            errorMsg.style.display = "block";
+        }
+        if (tabLabelSpan) {
+            tabLabelSpan.textContent = "";
+        }
+        // Disable Yes button
+        if (yesBtn) {
+            yesBtn.disabled = true;
+        }
+        // Still show modal so user can see the error
+        confirmModal.style.display = "flex";
+        return;
+    }
+
+    // Tab exists - clear error and enable Yes button
+    if (errorMsg) {
+        errorMsg.textContent = "";
+        errorMsg.style.display = "none";
+    }
+    if (tabLabelSpan) {
+        tabLabelSpan.textContent = tabLabel;
+    }
+    if (yesBtn) {
+        yesBtn.disabled = false;
+    }
+
+    // Show modal
+    confirmModal.style.display = "flex";
+}
+
 // Expose functions to window for use in index.html
 window.getAdminPinFromFirestore = getAdminPinFromFirestore;
 // updateAdminPinInFirestore is NOT exposed - PIN can only be reset via email flow
@@ -919,6 +2043,10 @@ window.showLoginScreen = showLoginScreen;
 window.generatePinResetLink = generatePinResetLink;
 window.verifyPinResetToken = verifyPinResetToken;
 window.confirmPinReset = confirmPinReset;
+window.resetTasksForCurrentTab = resetTasksForCurrentTab;
+window.loadTasksForTab = loadTasksForTab;
+window.validateResetPin = validateResetPin;
+window.doResetCurrentTab = doResetCurrentTab;
 
 // Expose auth for owner check
 window.auth = auth;
