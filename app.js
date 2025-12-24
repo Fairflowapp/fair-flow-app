@@ -1279,6 +1279,12 @@ function moveTaskToPending(taskId, workerName) {
                     window.renderTasksList(tab);
                 }
             }
+            
+            // Update tab badges after moving task to pending
+            if (typeof window.ffUpdateTasksTabBadges === 'function') {
+                setTimeout(() => window.ffUpdateTasksTabBadges(), 50);
+            }
+            
             return;
         }
         
@@ -1527,6 +1533,11 @@ function markTaskDone(taskId, workerName) {
         } else {
             window.renderTasksList(tab);
         }
+    }
+    
+    // Update tab badges after marking task as done
+    if (typeof window.ffUpdateTasksTabBadges === 'function') {
+        setTimeout(() => window.ffUpdateTasksTabBadges(), 50);
     }
 }
 
@@ -2331,3 +2342,292 @@ window.doResetCurrentTab = doResetCurrentTab;
 
 // Expose auth for owner check
 window.auth = auth;
+
+// =====================
+// Tasks Tab Badge Helpers
+// =====================
+
+function ffSafeParseJSON(str, fallback) {
+  try {
+    if (!str || typeof str !== 'string') return fallback;
+    const parsed = JSON.parse(str);
+    return parsed !== null && parsed !== undefined ? parsed : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function ffIsTaskCompleted(task) {
+  if (!task || typeof task !== 'object') return false;
+  
+  // Check status field (case-insensitive)
+  const status = String(task.status || '').toLowerCase().trim();
+  if (status === 'done' || status === 'completed') {
+    return true;
+  }
+  
+  // Check boolean completion flags
+  if (task.completed === true || task.isCompleted === true) {
+    return true;
+  }
+  if (task.done === true || task.isDone === true) {
+    return true;
+  }
+  
+  // Check completion timestamp/author fields
+  if (task.completedAt || task.completedBy) {
+    return true;
+  }
+  
+  return false;
+}
+
+function ffGetTaskIdSetFromStorage(key) {
+  const idSet = new Set();
+  try {
+    const stored = localStorage.getItem(key);
+    if (!stored) return idSet;
+    
+    const parsed = ffSafeParseJSON(stored, null);
+    if (parsed === null) return idSet;
+    
+    // Handle array storage
+    if (Array.isArray(parsed)) {
+      parsed.forEach(task => {
+        if (!task || typeof task !== 'object') return;
+        
+        // Skip completed tasks
+        if (ffIsTaskCompleted(task)) return;
+        
+        // Identifier priority: taskId || id || keyId || _id, fallback to title
+        const identifier = task.taskId || task.id || task.keyId || task._id;
+        if (identifier) {
+          idSet.add(String(identifier).trim());
+        } else if (task.title && String(task.title).trim()) {
+          // Fallback to title only if non-empty
+          idSet.add(String(task.title).trim());
+        }
+      });
+    }
+    // Handle object storage
+    else if (typeof parsed === 'object') {
+      Object.values(parsed).forEach(task => {
+        if (!task || typeof task !== 'object') return;
+        
+        // Skip completed tasks
+        if (ffIsTaskCompleted(task)) return;
+        
+        const identifier = task.taskId || task.id || task.keyId || task._id;
+        if (identifier) {
+          idSet.add(String(identifier).trim());
+        } else if (task.title && String(task.title).trim()) {
+          idSet.add(String(task.title).trim());
+        }
+      });
+    }
+  } catch (e) {
+    console.error(`[Badge] Error extracting IDs from storage key ${key}:`, e);
+  }
+  return idSet;
+}
+
+function ffGetUncompletedCountForTab(tab) {
+  try {
+    // Use getTabStorageKey if it exists, otherwise fall back to literal keys
+    let activeKey, pendingKey;
+    if (typeof getTabStorageKey === 'function') {
+      activeKey = getTabStorageKey(tab, 'active');
+      pendingKey = getTabStorageKey(tab, 'pending');
+    } else {
+      activeKey = `ff_tasks_${tab}_active_v1`;
+      pendingKey = `ff_tasks_${tab}_pending_v1`;
+    }
+    
+    // If both keys resolve to the same string, treat as single source
+    if (activeKey === pendingKey) {
+      const idSet = ffGetTaskIdSetFromStorage(activeKey);
+      return idSet.size;
+    }
+    
+    // Get unique IDs from both lists
+    const activeIds = ffGetTaskIdSetFromStorage(activeKey);
+    const pendingIds = ffGetTaskIdSetFromStorage(pendingKey);
+    
+    // Union: combine both sets (Set automatically handles duplicates)
+    const unionSet = new Set([...activeIds, ...pendingIds]);
+    
+    return unionSet.size;
+  } catch (e) {
+    console.error(`[Badge] Error counting uncompleted for tab ${tab}:`, e);
+    return 0;
+  }
+}
+
+function ffIsAlertsActiveForTab(tab, nowDate) {
+  try {
+    const now = nowDate || new Date();
+    
+    // Load alert window settings
+    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const tabConfig = alertWindows[tab];
+    
+    // Handle opening/closing (time-based)
+    if (tab === 'opening' || tab === 'closing') {
+      if (!tabConfig || !tabConfig.startTime) {
+        // No config found, use defaults
+        const defaultTime = tab === 'opening' ? '09:00' : '18:00';
+        const [defaultHour, defaultMinute] = defaultTime.split(':').map(Number);
+        const nowHour = now.getHours();
+        const nowMinute = now.getMinutes();
+        const nowTotalMinutes = nowHour * 60 + nowMinute;
+        const defaultTotalMinutes = defaultHour * 60 + defaultMinute;
+        return nowTotalMinutes >= defaultTotalMinutes;
+      }
+      
+      // Parse startTime (format: "HH:MM")
+      const [startHour, startMinute] = tabConfig.startTime.split(':').map(Number);
+      if (isNaN(startHour) || isNaN(startMinute)) {
+        return true; // Invalid time, show badge
+      }
+      
+      const nowHour = now.getHours();
+      const nowMinute = now.getMinutes();
+      const nowTotalMinutes = nowHour * 60 + nowMinute;
+      const startTotalMinutes = startHour * 60 + startMinute;
+      
+      // Return true if current time >= start time
+      return nowTotalMinutes >= startTotalMinutes;
+    }
+    
+    // Handle weekly (weekday-based)
+    if (tab === 'weekly') {
+      const startWeekday = tabConfig && tabConfig.startWeekday !== undefined 
+        ? tabConfig.startWeekday 
+        : 4; // Default: Thursday
+      
+      if (isNaN(startWeekday) || startWeekday < 0 || startWeekday > 6) {
+        return true; // Invalid weekday, show badge
+      }
+      
+      const nowWeekday = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+      return nowWeekday >= startWeekday;
+    }
+    
+    // Handle monthly (day-of-month-based)
+    if (tab === 'monthly') {
+      const startDayOfMonth = tabConfig && tabConfig.startDayOfMonth !== undefined
+        ? tabConfig.startDayOfMonth
+        : 20; // Default: day 20
+      
+      if (isNaN(startDayOfMonth) || startDayOfMonth < 1 || startDayOfMonth > 31) {
+        return true; // Invalid day, show badge
+      }
+      
+      const nowDayOfMonth = now.getDate(); // 1..31
+      return nowDayOfMonth >= startDayOfMonth;
+    }
+    
+    // Handle yearly (month+day-based)
+    if (tab === 'yearly') {
+      const startMonth = tabConfig && tabConfig.startMonth !== undefined
+        ? tabConfig.startMonth
+        : 11; // Default: November
+      const startDay = tabConfig && tabConfig.startDay !== undefined
+        ? tabConfig.startDay
+        : 15; // Default: day 15
+      
+      if (isNaN(startMonth) || startMonth < 1 || startMonth > 12 ||
+          isNaN(startDay) || startDay < 1 || startDay > 31) {
+        return true; // Invalid month/day, show badge
+      }
+      
+      const nowMonth = now.getMonth() + 1; // JS months are 0-11, convert to 1-12
+      const nowDay = now.getDate();
+      
+      // Compare using numeric key: (month * 100 + day)
+      const nowKey = nowMonth * 100 + nowDay;
+      const startKey = startMonth * 100 + startDay;
+      
+      return nowKey >= startKey;
+    }
+    
+    // Unknown tab type, show badge
+    return true;
+  } catch (e) {
+    console.error(`[Badge] Error checking alerts active for tab ${tab}:`, e);
+    return true; // On error, show badge
+  }
+}
+
+function ffUpdateTasksTabBadges() {
+  try {
+    const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+    const now = new Date();
+    
+    tabs.forEach(tab => {
+      const badge = document.querySelector(`.ff-tab-badge[data-ff-badge="${tab}"]`);
+      if (!badge) return;
+      
+      const count = ffGetUncompletedCountForTab(tab);
+      const alertsActive = ffIsAlertsActiveForTab(tab, now);
+      
+      // Show badge only if count > 0 AND alerts are active
+      if (count > 0 && alertsActive) {
+        badge.textContent = String(count);
+        badge.style.display = 'inline-block';
+      } else {
+        badge.textContent = '';
+        badge.style.display = 'none';
+      }
+    });
+    
+    // Also update home badge after tab badges
+    if (typeof window.ffUpdateHomeTasksBadge === 'function') {
+      window.ffUpdateHomeTasksBadge();
+    }
+  } catch (e) {
+    console.error('[Badge] Error updating tab badges:', e);
+  }
+}
+
+function ffUpdateHomeTasksBadge() {
+  try {
+    const badge = document.querySelector('.ff-home-tasks-badge');
+    if (!badge) return;
+    
+    // Load alert window settings
+    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+    const now = new Date();
+    
+    let total = 0;
+    
+    tabs.forEach(tab => {
+      const tabConfig = alertWindows[tab];
+      
+      // Only count if showOnHome is true AND alerts are active
+      if (tabConfig && tabConfig.showOnHome === true) {
+        const alertsActive = ffIsAlertsActiveForTab(tab, now);
+        if (alertsActive) {
+          const count = ffGetUncompletedCountForTab(tab);
+          total += count;
+        }
+      }
+    });
+    
+    // Update badge
+    if (total > 0) {
+      badge.textContent = String(total);
+      badge.style.display = 'inline-block';
+    } else {
+      badge.textContent = '';
+      badge.style.display = 'none';
+    }
+  } catch (e) {
+    console.error('[Badge] Error updating home tasks badge:', e);
+  }
+}
+
+// Expose badge update functions
+window.ffUpdateTasksTabBadges = ffUpdateTasksTabBadges;
+window.ffUpdateHomeTasksBadge = ffUpdateHomeTasksBadge;

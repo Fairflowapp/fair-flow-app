@@ -624,7 +624,7 @@ dialog footer button, .code-dialog footer button {
 
         <button id="reorderBtn" class="btn-pill">Reorder</button>
 
-        <button id="tasksBtn" class="btn-pill">TASKS</button>
+        <button id="tasksBtn" class="btn-pill">TASKS<span class="ff-home-tasks-badge"></span></button>
 
         <button id="resetBtn" class="btn-pill btn-danger">RESET</button>
 
@@ -4673,6 +4673,11 @@ function openTasks() {
     // Set default tab to Opening (this will render tasks)
     setTasksTab('opening');
     
+    // Update tab badges after opening Tasks screen
+    if (typeof window.ffUpdateTasksTabBadges === 'function') {
+      setTimeout(() => window.ffUpdateTasksTabBadges(), 200);
+    }
+    
     // After DOM rendering is completed and renderTasksList() has run, check reset button visibility
     setTimeout(() => showResetBtnIfAllowed(), 150);
     
@@ -4779,6 +4784,11 @@ function setTasksTab(tabName) {
     // Setup delegated click handler for info icons (attach once)
     setupTasksInfoIconHandler();
     
+    // Update tab badges after switching tabs
+    if (typeof window.ffUpdateTasksTabBadges === 'function') {
+      setTimeout(() => window.ffUpdateTasksTabBadges(), 50);
+    }
+    
     console.log('[Tasks] Tab switched to:', tabName);
   } catch (e) {
     console.error('[Tasks] Error setting tab:', e);
@@ -4788,6 +4798,151 @@ function setTasksTab(tabName) {
 // Tasks Settings Modal Functions
 let isTasksSettingsOpen = false;
 let tasksSettingsModalContainer = null; // Reference to modal container element
+window.ff_is_admin_cached = null; // Cached admin status for Tasks Settings access
+
+// Check if user has admin access (owner role OR valid admin code override)
+function ffHasAdminAccess() {
+  // Check owner role cache
+  if (window.ff_is_admin_cached === true) {
+    return true;
+  }
+  
+  // Check sessionStorage override
+  try {
+    const overrideUntil = sessionStorage.getItem('ff_admin_override_until');
+    if (overrideUntil) {
+      const expiry = parseInt(overrideUntil, 10);
+      if (!isNaN(expiry) && Date.now() < expiry) {
+        return true;
+      } else {
+        // Expired, clean up
+        sessionStorage.removeItem('ff_admin_override_until');
+      }
+    }
+  } catch (e) {
+    console.warn('[Tasks Settings] Error checking admin override:', e);
+  }
+  
+  return false;
+}
+
+// Show admin code prompt modal
+function showAdminCodeModal(onSuccess) {
+  // Create modal if it doesn't exist
+  let modal = document.getElementById('ffAdminCodeModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'ffAdminCodeModal';
+    modal.className = 'tasks-modal-overlay';
+    modal.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <div class="tasks-modal-container" onclick="event.stopPropagation()" style="background:#fff;border-radius:12px;padding:24px;max-width:400px;width:90%;box-shadow:0 10px 30px rgba(0,0,0,0.2);">
+        <h3 style="margin:0 0 16px;font-size:18px;font-weight:600;color:#111;">Admin access required</h3>
+        <div style="margin-bottom:16px;">
+          <input type="password" id="ffAdminCodeInput" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" placeholder="Enter admin code" style="width:100%;padding:10px 14px;border:1px solid #e5e7eb;border-radius:8px;font-size:16px;text-align:center;font-family:inherit;">
+          <div id="ffAdminCodeError" style="color:#dc2626;font-size:13px;margin-top:8px;min-height:20px;display:none;"></div>
+        </div>
+        <div style="font-size:12px;color:#666;margin-bottom:16px;text-align:center;">Access lasts 10 minutes on this device</div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button id="ffAdminCodeCancel" class="btn-pill" style="padding:8px 16px;font-size:14px;">Cancel</button>
+          <button id="ffAdminCodeUnlock" class="btn-primary" style="padding:8px 16px;font-size:14px;">Unlock</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    
+    // Setup event handlers (only once when modal is created)
+    const closeModal = () => {
+      modal.style.display = 'none';
+      const input = document.getElementById('ffAdminCodeInput');
+      const error = document.getElementById('ffAdminCodeError');
+      if (input) input.value = '';
+      if (error) {
+        error.style.display = 'none';
+        error.textContent = '';
+      }
+    };
+    
+    const handleUnlock = () => {
+      const input = document.getElementById('ffAdminCodeInput');
+      const error = document.getElementById('ffAdminCodeError');
+      if (!input) return;
+      
+      const code = input.value.trim();
+      
+      if (!code) {
+        if (error) {
+          error.textContent = 'Please enter admin code';
+          error.style.display = 'block';
+        }
+        return;
+      }
+      
+      // Use existing isAdminCode function
+      if (typeof isAdminCode === 'function' && isAdminCode(code)) {
+        // Valid code - set override
+        const expiry = Date.now() + (10 * 60 * 1000); // 10 minutes
+        sessionStorage.setItem('ff_admin_override_until', String(expiry));
+        window.ff_is_admin_cached = true;
+        
+        closeModal();
+        
+        // Call success callback
+        if (typeof onSuccess === 'function') {
+          onSuccess();
+        }
+      } else {
+        // Invalid code
+        if (error) {
+          error.textContent = 'Invalid admin code';
+          error.style.display = 'block';
+        }
+        if (input) input.value = '';
+      }
+    };
+    
+    const cancelBtn = document.getElementById('ffAdminCodeCancel');
+    const unlockBtn = document.getElementById('ffAdminCodeUnlock');
+    const input = document.getElementById('ffAdminCodeInput');
+    
+    if (cancelBtn) {
+      cancelBtn.onclick = closeModal;
+    }
+    
+    if (unlockBtn) {
+      unlockBtn.onclick = handleUnlock;
+    }
+    
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleUnlock();
+        }
+      });
+    }
+    
+    // Close on backdrop click
+    modal.onclick = (e) => {
+      if (e.target === modal) {
+        closeModal();
+      }
+    };
+  }
+  
+  // Show modal (get fresh references each time)
+  modal.style.display = 'flex';
+  const input = document.getElementById('ffAdminCodeInput');
+  const error = document.getElementById('ffAdminCodeError');
+  if (input) {
+    input.value = '';
+    setTimeout(() => input.focus(), 100);
+  }
+  if (error) {
+    error.style.display = 'none';
+    error.textContent = '';
+  }
+}
 // Use window.currentTasksTab as single source of truth for current tab
 let tasksModalDraft = {
   opening: [],
@@ -4806,6 +4961,15 @@ function getCurrentTasksTab() {
 
 function setSettingsModalTab(tabName) {
   try {
+    // Check admin access (owner role OR admin code override)
+    if (!ffHasAdminAccess()) {
+      showAdminCodeModal(() => {
+        // Retry tab switch after successful unlock
+        setSettingsModalTab(tabName);
+      });
+      return;
+    }
+    
     const tabs = document.querySelectorAll('.tasks-settings-tab');
     
     // Update tab styles
@@ -4827,6 +4991,217 @@ function setSettingsModalTab(tabName) {
     
     // Clear editing state when switching tabs
     editingTaskId = null;
+    
+    // Show/hide alert controls based on tab type
+    const alertTimeControl = document.getElementById('tasksAlertTimeControl');
+    const alertTimeInput = document.getElementById('tasksAlertTimeInput');
+    const alertWeekdayControl = document.getElementById('tasksAlertWeekdayControl');
+    const alertWeekdaySelect = document.getElementById('tasksAlertWeekdaySelect');
+    const alertDayControl = document.getElementById('tasksAlertDayControl');
+    const alertDayInput = document.getElementById('tasksAlertDayInput');
+    const alertYearlyControl = document.getElementById('tasksAlertYearlyControl');
+    const alertMonthSelect = document.getElementById('tasksAlertMonthSelect');
+    const alertYearlyDayInput = document.getElementById('tasksAlertYearlyDayInput');
+    
+    // Hide all controls first
+    if (alertTimeControl) alertTimeControl.style.display = 'none';
+    if (alertWeekdayControl) alertWeekdayControl.style.display = 'none';
+    if (alertDayControl) alertDayControl.style.display = 'none';
+    if (alertYearlyControl) alertYearlyControl.style.display = 'none';
+    
+    // Load alert window settings
+    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const tabConfig = alertWindows[tabName] || {};
+    
+    // Show appropriate control based on tab
+    if (tabName === 'opening' || tabName === 'closing') {
+      if (alertTimeControl && alertTimeInput) {
+        alertTimeControl.style.display = 'block';
+        const defaultTime = tabName === 'opening' ? '09:00' : '18:00';
+        alertTimeInput.value = tabConfig.startTime || defaultTime;
+        
+        // Save on change
+        alertTimeInput.onchange = function() {
+          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          if (!alertWindows[tabName]) {
+            alertWindows[tabName] = {};
+          }
+          alertWindows[tabName].startTime = alertTimeInput.value;
+          localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+          
+          // Update badges immediately to reflect the change
+          if (typeof window.ffUpdateTasksTabBadges === 'function') {
+            window.ffUpdateTasksTabBadges();
+          }
+        };
+        alertTimeInput.oninput = alertTimeInput.onchange;
+        
+        // Setup checkbox for showOnHome
+        const showOnHomeCheckbox = document.getElementById('tasksAlertTimeShowOnHomeCheckbox');
+        if (showOnHomeCheckbox) {
+          showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
+          showOnHomeCheckbox.onchange = function() {
+            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            if (!alertWindows[tabName]) {
+              alertWindows[tabName] = {};
+            }
+            alertWindows[tabName].showOnHome = showOnHomeCheckbox.checked;
+            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            
+            // Update both badges
+            if (typeof window.ffUpdateTasksTabBadges === 'function') {
+              window.ffUpdateTasksTabBadges();
+            }
+            if (typeof window.ffUpdateHomeTasksBadge === 'function') {
+              window.ffUpdateHomeTasksBadge();
+            }
+          };
+        }
+      }
+    } else if (tabName === 'weekly') {
+      if (alertWeekdayControl && alertWeekdaySelect) {
+        alertWeekdayControl.style.display = 'block';
+        const defaultWeekday = 4; // Thursday
+        alertWeekdaySelect.value = String(tabConfig.startWeekday !== undefined ? tabConfig.startWeekday : defaultWeekday);
+        
+        // Save on change
+        alertWeekdaySelect.onchange = function() {
+          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          if (!alertWindows[tabName]) {
+            alertWindows[tabName] = {};
+          }
+          alertWindows[tabName].startWeekday = parseInt(alertWeekdaySelect.value, 10);
+          localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+          
+          // Update badges immediately
+          if (typeof window.ffUpdateTasksTabBadges === 'function') {
+            window.ffUpdateTasksTabBadges();
+          }
+        };
+        
+        // Setup checkbox for showOnHome
+        const showOnHomeCheckbox = document.getElementById('tasksAlertWeekdayShowOnHomeCheckbox');
+        if (showOnHomeCheckbox) {
+          showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
+          showOnHomeCheckbox.onchange = function() {
+            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            if (!alertWindows[tabName]) {
+              alertWindows[tabName] = {};
+            }
+            alertWindows[tabName].showOnHome = showOnHomeCheckbox.checked;
+            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            
+            // Update both badges
+            if (typeof window.ffUpdateTasksTabBadges === 'function') {
+              window.ffUpdateTasksTabBadges();
+            }
+            if (typeof window.ffUpdateHomeTasksBadge === 'function') {
+              window.ffUpdateHomeTasksBadge();
+            }
+          };
+        }
+      }
+    } else if (tabName === 'monthly') {
+      if (alertDayControl && alertDayInput) {
+        alertDayControl.style.display = 'block';
+        const defaultDay = 20;
+        alertDayInput.value = String(tabConfig.startDayOfMonth !== undefined ? tabConfig.startDayOfMonth : defaultDay);
+        
+        // Save on change
+        alertDayInput.onchange = function() {
+          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          if (!alertWindows[tabName]) {
+            alertWindows[tabName] = {};
+          }
+          const dayValue = parseInt(alertDayInput.value, 10);
+          if (dayValue >= 1 && dayValue <= 31) {
+            alertWindows[tabName].startDayOfMonth = dayValue;
+            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            
+            // Update badges immediately
+            if (typeof window.ffUpdateTasksTabBadges === 'function') {
+              window.ffUpdateTasksTabBadges();
+            }
+          }
+        };
+        alertDayInput.oninput = alertDayInput.onchange;
+        
+        // Setup checkbox for showOnHome
+        const showOnHomeCheckbox = document.getElementById('tasksAlertDayShowOnHomeCheckbox');
+        if (showOnHomeCheckbox) {
+          showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
+          showOnHomeCheckbox.onchange = function() {
+            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            if (!alertWindows[tabName]) {
+              alertWindows[tabName] = {};
+            }
+            alertWindows[tabName].showOnHome = showOnHomeCheckbox.checked;
+            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            
+            // Update both badges
+            if (typeof window.ffUpdateTasksTabBadges === 'function') {
+              window.ffUpdateTasksTabBadges();
+            }
+            if (typeof window.ffUpdateHomeTasksBadge === 'function') {
+              window.ffUpdateHomeTasksBadge();
+            }
+          };
+        }
+      }
+    } else if (tabName === 'yearly') {
+      if (alertYearlyControl && alertMonthSelect && alertYearlyDayInput) {
+        alertYearlyControl.style.display = 'block';
+        const defaultMonth = 11; // November
+        const defaultDay = 15;
+        alertMonthSelect.value = String(tabConfig.startMonth !== undefined ? tabConfig.startMonth : defaultMonth);
+        alertYearlyDayInput.value = String(tabConfig.startDay !== undefined ? tabConfig.startDay : defaultDay);
+        
+        // Save on change
+        const saveYearlyConfig = function() {
+          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          if (!alertWindows[tabName]) {
+            alertWindows[tabName] = {};
+          }
+          const monthValue = parseInt(alertMonthSelect.value, 10);
+          const dayValue = parseInt(alertYearlyDayInput.value, 10);
+          if (monthValue >= 1 && monthValue <= 12 && dayValue >= 1 && dayValue <= 31) {
+            alertWindows[tabName].startMonth = monthValue;
+            alertWindows[tabName].startDay = dayValue;
+            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            
+            // Update badges immediately
+            if (typeof window.ffUpdateTasksTabBadges === 'function') {
+              window.ffUpdateTasksTabBadges();
+            }
+          }
+        };
+        alertMonthSelect.onchange = saveYearlyConfig;
+        alertYearlyDayInput.onchange = saveYearlyConfig;
+        alertYearlyDayInput.oninput = saveYearlyConfig;
+        
+        // Setup checkbox for showOnHome
+        const showOnHomeCheckbox = document.getElementById('tasksAlertYearlyShowOnHomeCheckbox');
+        if (showOnHomeCheckbox) {
+          showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
+          showOnHomeCheckbox.onchange = function() {
+            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            if (!alertWindows[tabName]) {
+              alertWindows[tabName] = {};
+            }
+            alertWindows[tabName].showOnHome = showOnHomeCheckbox.checked;
+            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            
+            // Update both badges
+            if (typeof window.ffUpdateTasksTabBadges === 'function') {
+              window.ffUpdateTasksTabBadges();
+            }
+            if (typeof window.ffUpdateHomeTasksBadge === 'function') {
+              window.ffUpdateHomeTasksBadge();
+            }
+          };
+        }
+      }
+    }
     
     // Load tasks for this tab
     loadTasksForSettingsTab(tabName);
@@ -5005,6 +5380,12 @@ function saveTasksToStorage() {
     }
     
     console.log(`[Tasks] Saved ${catalogList.length} tasks to catalog and ${activeTasks.length} tasks to active list for tab: ${tab}`);
+    
+    // Update tab badges after saving tasks
+    if (typeof window.ffUpdateTasksTabBadges === 'function') {
+      setTimeout(() => window.ffUpdateTasksTabBadges(), 50);
+    }
+    
     return true;
   } catch (e) {
     console.error('[Tasks] Error saving to storage:', e);
@@ -6194,6 +6575,15 @@ function openTasksSettings() {
   try {
     if (isTasksSettingsOpen) return;
     
+    // Check admin access (owner role OR admin code override)
+    if (!ffHasAdminAccess()) {
+      showAdminCodeModal(() => {
+        // Retry opening settings after successful unlock
+        openTasksSettings();
+      });
+      return;
+    }
+    
     const modal = document.getElementById('tasksSettingsModal');
     if (!modal) {
       console.error('[Tasks] Settings modal not found');
@@ -6224,6 +6614,45 @@ function openTasksSettings() {
         setSettingsModalTab(tabName);
       });
     });
+    
+    // Initialize alert window settings with defaults if missing
+    let alertWindows = {};
+    try {
+      const stored = localStorage.getItem('ff_tasks_alert_windows_v1');
+      if (stored) {
+        alertWindows = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.warn('[Tasks] Error loading alert windows:', e);
+    }
+    
+    // Set defaults if missing
+    if (!alertWindows.opening) {
+      alertWindows.opening = { startTime: '09:00', showOnHome: true };
+    } else if (alertWindows.opening.showOnHome === undefined) {
+      alertWindows.opening.showOnHome = true;
+    }
+    if (!alertWindows.closing) {
+      alertWindows.closing = { startTime: '18:00', showOnHome: true };
+    } else if (alertWindows.closing.showOnHome === undefined) {
+      alertWindows.closing.showOnHome = true;
+    }
+    if (!alertWindows.weekly) {
+      alertWindows.weekly = { startWeekday: 4, showOnHome: false }; // Thursday
+    } else if (alertWindows.weekly.showOnHome === undefined) {
+      alertWindows.weekly.showOnHome = false;
+    }
+    if (!alertWindows.monthly) {
+      alertWindows.monthly = { startDayOfMonth: 20, showOnHome: false };
+    } else if (alertWindows.monthly.showOnHome === undefined) {
+      alertWindows.monthly.showOnHome = false;
+    }
+    if (!alertWindows.yearly) {
+      alertWindows.yearly = { startMonth: 11, startDay: 15, showOnHome: false }; // November 15
+    } else if (alertWindows.yearly.showOnHome === undefined) {
+      alertWindows.yearly.showOnHome = false;
+    }
+    localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
     
     // Now set up the tab bar visual state (after listeners are set up)
     setSettingsModalTab(mainScreenTab);
@@ -6702,6 +7131,28 @@ function initializeTasksScreenButtons() {
     const settingsBtn = document.getElementById('btnTasksSettings');
     if (settingsBtn) {
       settingsBtn.onclick = openTasksSettings;
+      
+      // Update button visibility based on admin access
+      const updateButtonVisibility = () => {
+        if (settingsBtn) {
+          settingsBtn.style.display = ffHasAdminAccess() ? '' : 'none';
+        }
+      };
+      
+      // Check admin status once and cache it
+      if (window.ff_is_admin_cached === null && typeof window.isCurrentUserOwner === 'function') {
+        window.isCurrentUserOwner().then(isAdmin => {
+          window.ff_is_admin_cached = isAdmin === true;
+          updateButtonVisibility();
+        }).catch(e => {
+          console.warn('[Tasks Settings] Error checking admin status:', e);
+          window.ff_is_admin_cached = false;
+          updateButtonVisibility();
+        });
+      } else {
+        // Use cached value or override
+        updateButtonVisibility();
+      }
     }
     
     // Check role and show/hide reset button
@@ -12736,6 +13187,46 @@ window.openLog = async function(){
       outline: none;
     }
     
+    .ff-tab-badge {
+      display: none;
+      margin-left: 8px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 6px;
+      background: #ef4444;
+      color: #fff;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 18px;
+      text-align: center;
+      vertical-align: middle;
+    }
+    
+    .ff-tab-badge:not(:empty) {
+      display: inline-block;
+    }
+    
+    .ff-home-tasks-badge {
+      display: none;
+      margin-left: 8px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 6px;
+      background: #ef4444;
+      color: #fff;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 18px;
+      text-align: center;
+      vertical-align: middle;
+    }
+    
+    .ff-home-tasks-badge:not(:empty) {
+      display: inline-block;
+    }
+    
     .task-item-done {
       background: #d8f8d8 !important;
       opacity: 0.85;
@@ -12902,11 +13393,11 @@ window.openLog = async function(){
     
     <!-- Tab row -->
     <div style="display:flex;border-bottom:1px solid #e5e7eb;background:#f9fafb;pointer-events:auto;z-index:301;">
-      <button class="tasks-tab" data-tab="opening" onclick="console.log('TAB CLICKED:', 'opening'); setTasksTab('opening')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Opening</button>
-      <button class="tasks-tab" data-tab="closing" onclick="console.log('TAB CLICKED:', 'closing'); setTasksTab('closing')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Closing</button>
-      <button class="tasks-tab" data-tab="weekly" onclick="console.log('TAB CLICKED:', 'weekly'); setTasksTab('weekly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Weekly</button>
-      <button class="tasks-tab" data-tab="monthly" onclick="console.log('TAB CLICKED:', 'monthly'); setTasksTab('monthly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Monthly</button>
-      <button class="tasks-tab" data-tab="yearly" onclick="console.log('TAB CLICKED:', 'yearly'); setTasksTab('yearly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Yearly</button>
+      <button class="tasks-tab" data-tab="opening" onclick="console.log('TAB CLICKED:', 'opening'); setTasksTab('opening')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Opening<span class="ff-tab-badge" data-ff-badge="opening"></span></button>
+      <button class="tasks-tab" data-tab="closing" onclick="console.log('TAB CLICKED:', 'closing'); setTasksTab('closing')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Closing<span class="ff-tab-badge" data-ff-badge="closing"></span></button>
+      <button class="tasks-tab" data-tab="weekly" onclick="console.log('TAB CLICKED:', 'weekly'); setTasksTab('weekly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Weekly<span class="ff-tab-badge" data-ff-badge="weekly"></span></button>
+      <button class="tasks-tab" data-tab="monthly" onclick="console.log('TAB CLICKED:', 'monthly'); setTasksTab('monthly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Monthly<span class="ff-tab-badge" data-ff-badge="monthly"></span></button>
+      <button class="tasks-tab" data-tab="yearly" onclick="console.log('TAB CLICKED:', 'yearly'); setTasksTab('yearly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Yearly<span class="ff-tab-badge" data-ff-badge="yearly"></span></button>
     </div>
     
     <!-- Content area -->
@@ -12958,6 +13449,76 @@ window.openLog = async function(){
             <button class="tasks-settings-tab" data-tab="weekly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Weekly</button>
             <button class="tasks-settings-tab" data-tab="monthly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Monthly</button>
             <button class="tasks-settings-tab" data-tab="yearly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Yearly</button>
+          </div>
+          
+          <!-- Alert Start Time control (only for opening/closing) -->
+          <div id="tasksAlertTimeControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+              <span>Show alerts starting at:</span>
+              <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+            </label>
+            <label id="tasksAlertTimeShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;margin-top:8px;">
+              <input type="checkbox" id="tasksAlertTimeShowOnHomeCheckbox" style="cursor:pointer;">
+              <span>Show this alert on Home screen</span>
+            </label>
+          </div>
+          
+          <!-- Alert Start Weekday control (only for weekly) -->
+          <div id="tasksAlertWeekdayControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+              <span>Show alerts starting on:</span>
+              <select id="tasksAlertWeekdaySelect" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                <option value="0">Sunday</option>
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+              </select>
+            </label>
+            <label id="tasksAlertWeekdayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;margin-top:8px;">
+              <input type="checkbox" id="tasksAlertWeekdayShowOnHomeCheckbox" style="cursor:pointer;">
+              <span>Show this alert on Home screen</span>
+            </label>
+          </div>
+          
+          <!-- Alert Start Day control (only for monthly) -->
+          <div id="tasksAlertDayControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+              <span>Show alerts starting on day:</span>
+              <input type="number" id="tasksAlertDayInput" min="1" max="31" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;width:60px;">
+            </label>
+            <label id="tasksAlertDayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;margin-top:8px;">
+              <input type="checkbox" id="tasksAlertDayShowOnHomeCheckbox" style="cursor:pointer;">
+              <span>Show this alert on Home screen</span>
+            </label>
+          </div>
+          
+          <!-- Alert Start Month/Day control (only for yearly) -->
+          <div id="tasksAlertYearlyControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;flex-wrap:wrap;">
+              <span>Show alerts starting on:</span>
+              <select id="tasksAlertMonthSelect" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                <option value="1">January</option>
+                <option value="2">February</option>
+                <option value="3">March</option>
+                <option value="4">April</option>
+                <option value="5">May</option>
+                <option value="6">June</option>
+                <option value="7">July</option>
+                <option value="8">August</option>
+                <option value="9">September</option>
+                <option value="10">October</option>
+                <option value="11">November</option>
+                <option value="12">December</option>
+              </select>
+              <input type="number" id="tasksAlertYearlyDayInput" min="1" max="31" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;width:60px;">
+            </label>
+            <label id="tasksAlertYearlyShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;margin-top:8px;">
+              <input type="checkbox" id="tasksAlertYearlyShowOnHomeCheckbox" style="cursor:pointer;">
+              <span>Show this alert on Home screen</span>
+            </label>
           </div>
           
           <!-- Add Task section (always visible, fixed position above catalog) -->
