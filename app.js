@@ -1187,32 +1187,98 @@ window.initializeTasksScreenButtons = initializeTasksScreenButtons;
 
 // Safely move a task into the Pending list (tab-specific storage)
 function moveTaskToPending(taskId, workerName) {
+    console.log(`%c[MOVE TO PENDING] START`, 'color:blue;font-weight:bold', { taskId, workerName });
     const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
     
     // Find which tab contains this task
     for (let tab of tabs) {
-        const activeTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_active_v1`) || '[]');
-        const taskIndex = activeTasks.findIndex(t => t.id === taskId);
+        const activeKey = `ff_tasks_${tab}_active_v1`;
+        const pendingKey = `ff_tasks_${tab}_pending_v1`;
+        
+        console.log(`[MOVE TO PENDING] Checking tab: ${tab}, activeKey: ${activeKey}, pendingKey: ${pendingKey}`);
+        
+        const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+        console.log(`[MOVE TO PENDING] Active tasks count before: ${activeTasks.length}`);
+        
+        const taskIndex = activeTasks.findIndex(t => {
+            const tId = t.taskId || t.id;
+            return tId && String(tId) === String(taskId);
+        });
         
         if (taskIndex >= 0) {
-            // Found the task in active list - move it to pending
+            // Found the task in active list
             const task = activeTasks[taskIndex];
+            console.log(`[MOVE TO PENDING] Found task in ACTIVE at index ${taskIndex}:`, {
+                tab,
+                taskId,
+                activeKey,
+                pendingKey,
+                taskBefore: { ...task },
+                activeLengthBefore: activeTasks.length
+            });
+            
+            // Update task in ACTIVE: set status='pending' and assignedTo
+            task.status = 'pending';
             task.assignedTo = workerName;
             
-            // Remove from active
-            activeTasks.splice(taskIndex, 1);
+            console.log(`[MOVE TO PENDING] Updated task in ACTIVE:`, {
+                tab,
+                taskId,
+                status: task.status,
+                assignedTo: task.assignedTo,
+                activeLengthAfter: activeTasks.length,
+                removedFromActive: false // Task is NOT removed, just updated
+            });
             
-            // Add to pending
-            const pendingTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_pending_v1`) || '[]');
-            pendingTasks.push(task);
+            // Save updated ACTIVE list
+            localStorage.setItem(activeKey, JSON.stringify(activeTasks));
+            console.log(`[MOVE TO PENDING] Saved ACTIVE list: ${activeKey}, length: ${activeTasks.length}`);
             
-            // Save both lists
-            localStorage.setItem(`ff_tasks_${tab}_active_v1`, JSON.stringify(activeTasks));
-            localStorage.setItem(`ff_tasks_${tab}_pending_v1`, JSON.stringify(pendingTasks));
+            // Add to pending list (create a copy for pending)
+            const pendingTasks = JSON.parse(localStorage.getItem(pendingKey) || '[]');
+            console.log(`[MOVE TO PENDING] Pending tasks count before: ${pendingTasks.length}`);
             
-            console.log(`[Tasks] Moved task ${taskId} to pending in ${tab} tab`);
+            // Check if already in pending to avoid duplicates
+            const pendingIndex = pendingTasks.findIndex(t => {
+                const tId = t.taskId || t.id;
+                return tId && String(tId) === String(taskId);
+            });
             
-            if (window.renderTasksList) window.renderTasksList(tab);
+            if (pendingIndex < 0) {
+                // Create a copy for pending list
+                const pendingCopy = {
+                    id: task.id || task.taskId,
+                    taskId: task.taskId || task.id,
+                    title: task.title || '',
+                    instructions: task.instructions || task.info || task.details || '',
+                    status: 'pending',
+                    assignedTo: workerName
+                };
+                pendingTasks.push(pendingCopy);
+                localStorage.setItem(pendingKey, JSON.stringify(pendingTasks));
+                console.log(`[MOVE TO PENDING] Added to PENDING list: ${pendingKey}, length: ${pendingTasks.length}`);
+            } else {
+                console.warn(`[MOVE TO PENDING] Task ${taskId} already exists in PENDING at index ${pendingIndex}, skipping duplicate`);
+            }
+            
+            console.log(`%c[MOVE TO PENDING] COMPLETE`, 'color:green;font-weight:bold', {
+                tab,
+                taskId,
+                activeKey,
+                pendingKey,
+                activeLength: activeTasks.length,
+                pendingLength: pendingTasks.length,
+                taskRemovedFromActive: false,
+                taskAddedToPending: pendingIndex < 0
+            });
+            
+            if (window.renderTasksList) {
+                if (window.renderTasksList.length > 1) {
+                    window.renderTasksList(tab, { force: true });
+                } else {
+                    window.renderTasksList(tab);
+                }
+            }
             return;
         }
         
@@ -1244,27 +1310,24 @@ function moveTaskToPending(taskId, workerName) {
                 
                 if (isInitial) {
                     // Task is in initial state - move it to pending
-                    // Create a copy to avoid mutating catalog directly
-                    const taskCopy = { ...task };
-                    taskCopy.status = "pending";
-                    taskCopy.assignedTo = workerName;
+                    // Create a runtime copy based only on catalog template fields.
+                    // IMPORTANT: Do NOT mutate or persist runtime fields into catalog.
+                    const taskCopy = {
+                        id: task.id,
+                        title: task.title,
+                        instructions: task.instructions || task.info || task.details || "",
+                        status: "pending",
+                        assignedTo: workerName
+                    };
                     
-                    // Update task in catalog (set status to pending)
-                    task.status = "pending";
-                    task.assignedTo = workerName;
-                    
-                    // Save updated catalog
-                    const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
-                    catalogObj[tab] = catalog;
-                    localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
-                    if (window.ff_tasks_catalog_v1) {
-                        window.ff_tasks_catalog_v1[tab] = catalog;
-                    }
-                    
-                    // Add to pending list
+                    // Add to pending list (runtime state only)
                     const pendingTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_pending_v1`) || '[]');
                     pendingTasks.push(taskCopy);
-                    localStorage.setItem(`ff_tasks_${tab}_pending_v1`, JSON.stringify(pendingTasks));
+                    if (typeof writeTasksList === 'function') {
+                      writeTasksList(tab, 'pending', pendingTasks);
+                    } else {
+                      localStorage.setItem(`ff_tasks_${tab}_pending_v1`, JSON.stringify(pendingTasks));
+                    }
                     
                     const fromStatus = originalStatus === null ? "null" : (originalStatus || "empty");
                     console.log("[SELECT] moved to pending", { tab, id: taskId, from: fromStatus, to: "pending" });
@@ -1292,65 +1355,179 @@ window.moveTaskToPending = moveTaskToPending;
 
 // Mark task as done (tab-specific storage)
 function markTaskDone(taskId, workerName) {
-    const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+    console.log(`%c[MARK DONE] START`, 'color:orange;font-weight:bold', { taskId, workerName });
     
-    // Find which tab contains this task (in pending list)
-    for (let tab of tabs) {
-        const pendingTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_pending_v1`) || '[]');
-        const taskIndex = pendingTasks.findIndex(t => t.id === taskId);
+    // Determine current tab
+    const tab = (typeof window.currentTasksTab !== 'undefined' && window.currentTasksTab) 
+        ? window.currentTasksTab 
+        : 'opening';
+    
+    const completionTime = Date.now();
+    const normalizedTaskId = String(taskId);
+    
+    const pendingKey = `ff_tasks_${tab}_pending_v1`;
+    const activeKey = `ff_tasks_${tab}_active_v1`;
+    
+    console.log(`[MARK DONE] Using tab: ${tab}, pendingKey: ${pendingKey}, activeKey: ${activeKey}`);
+    
+    // 1) Remove from pending and get task data
+    const pendingTasks = JSON.parse(localStorage.getItem(pendingKey) || '[]');
+    const pendingBeforeLength = pendingTasks.length;
+    console.log(`[MARK DONE] Pending tasks count before: ${pendingBeforeLength}`);
+    
+    const pendingTaskIndex = pendingTasks.findIndex(t => {
+        const tId = t.taskId || t.id;
+        return tId && String(tId) === normalizedTaskId;
+    });
+    
+    let pendingTask = null;
+    let assignedEmployee = workerName; // Default to current employee
+    
+    if (pendingTaskIndex >= 0) {
+        // Get pending task data
+        pendingTask = pendingTasks[pendingTaskIndex];
+        assignedEmployee = pendingTask.assignedTo || pendingTask.completedBy || workerName;
         
-        if (taskIndex >= 0) {
-            // Found the task - move it to done
-            const task = pendingTasks[taskIndex];
-            task.completedBy = workerName;
-            task.assignedTo = null; // no longer pending
-            task.status = "done"; // Set status to done
-            task.completedAt = new Date().toISOString(); // Optional: record completion time
-            
-            // Remove from pending
-            pendingTasks.splice(taskIndex, 1);
-            
-            // Add to done
-            const doneTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_done_v1`) || '[]');
-            doneTasks.push(task);
-            
-            // Save both lists
-            localStorage.setItem(`ff_tasks_${tab}_pending_v1`, JSON.stringify(pendingTasks));
-            localStorage.setItem(`ff_tasks_${tab}_done_v1`, JSON.stringify(doneTasks));
-            
-            // Update catalog task status if it exists
-            try {
-                const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
-                const catalog = catalogObj[tab] || [];
-                const catalogTaskIndex = catalog.findIndex(t => t && t.id === taskId);
-                if (catalogTaskIndex >= 0) {
-                    catalog[catalogTaskIndex].status = "done";
-                    catalog[catalogTaskIndex].completedBy = workerName;
-                    catalog[catalogTaskIndex].completedAt = task.completedAt;
-                    catalogObj[tab] = catalog;
-                    localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
-                    if (window.ff_tasks_catalog_v1) {
-                        window.ff_tasks_catalog_v1[tab] = catalog;
-                    }
-                }
-            } catch (e) {
-                console.error(`[Tasks] Error updating catalog for task ${taskId} in ${tab}:`, e);
-            }
-            
-            console.log(`[Tasks] Marked task ${taskId} as done in ${tab} tab`);
-            
-            if (window.renderTasksList) {
-                if (window.renderTasksList.length > 1) {
-                    window.renderTasksList(tab, { force: true });
-                } else {
-                    window.renderTasksList(tab);
-                }
-            }
-            return;
+        console.log(`[MARK DONE] Found task in PENDING at index ${pendingTaskIndex}:`, {
+            tab,
+            taskId,
+            pendingKey,
+            pendingTask: { ...pendingTask },
+            pendingLengthBefore: pendingBeforeLength
+        });
+        
+        // Remove from pending
+        pendingTasks.splice(pendingTaskIndex, 1);
+        if (typeof writeTasksList === 'function') {
+          const m = String(pendingKey).match(
+            /^ff_tasks_(opening|closing|weekly|monthly|yearly)_(active|pending|done)_v1$/
+          );
+          if (m) {
+            writeTasksList(m[1], m[2], pendingTasks);
+          } else {
+            localStorage.setItem(pendingKey, JSON.stringify(pendingTasks));
+          }
+        } else {
+          localStorage.setItem(pendingKey, JSON.stringify(pendingTasks));
         }
+        console.log(`[MARK DONE] Removed from PENDING: ${pendingKey}, length: ${pendingBeforeLength} -> ${pendingTasks.length}`);
+    } else {
+        console.warn(`[MARK DONE] Task ${taskId} not found in PENDING list`);
     }
     
-    console.warn(`[Tasks] Task ${taskId} not found in any pending list`);
+    // 1) Normalize keyId ONCE
+    const keyId = pendingTask 
+        ? (pendingTask.taskId || pendingTask.id || normalizedTaskId)
+        : normalizedTaskId;
+    
+    console.log(`[MARK DONE] Normalized keyId: ${keyId}`);
+    
+    // 2) Update or create in ACTIVE list
+    const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+    const activeBeforeLength = activeTasks.length;
+    console.log(`[MARK DONE] Active tasks count before: ${activeBeforeLength}`);
+    
+    // Match on BOTH id/taskId
+    const idx = activeTasks.findIndex(t => {
+        const tId = t?.taskId || t?.id;
+        return tId && String(tId) === String(keyId);
+    });
+    
+    console.log(`[MARK DONE] Active task index: ${idx}, keyId: ${keyId}`);
+    
+    if (idx >= 0) {
+        // Update existing active task
+        const taskBefore = { ...activeTasks[idx] };
+        activeTasks[idx].id = keyId;
+        activeTasks[idx].taskId = keyId;
+        activeTasks[idx].status = 'done';
+        activeTasks[idx].completedAt = completionTime;
+        activeTasks[idx].completedBy = assignedEmployee;
+        activeTasks[idx].active = true;
+        activeTasks[idx].assignedTo = null;
+        
+        console.log(`[MARK DONE] Updated existing task in ACTIVE:`, {
+            tab,
+            taskId: keyId,
+            activeKey,
+            taskBefore,
+            taskAfter: { ...activeTasks[idx] },
+            activeLengthBefore: activeBeforeLength,
+            activeLengthAfter: activeTasks.length,
+            removedFromActive: false // Task is NOT removed, just updated
+        });
+    } else {
+        // Not found in ACTIVE - PUSH a completed copy
+        const newTask = {
+            id: keyId,
+            taskId: keyId,
+            title: pendingTask?.title || '',
+            instructions: pendingTask?.instructions || pendingTask?.info || pendingTask?.details || '',
+            active: true,
+            status: 'done',
+            completedAt: completionTime,
+            completedBy: assignedEmployee,
+            assignedTo: null
+        };
+        activeTasks.push(newTask);
+        
+        console.log(`[MARK DONE] Created new task in ACTIVE (not found):`, {
+            tab,
+            taskId: keyId,
+            activeKey,
+            newTask,
+            activeLengthBefore: activeBeforeLength,
+            activeLengthAfter: activeTasks.length,
+            removedFromActive: false // Task was not in active, so nothing to remove
+        });
+    }
+    
+    // Save updated ACTIVE list
+    if (typeof writeTasksList === 'function') {
+      const m = String(activeKey).match(
+        /^ff_tasks_(opening|closing|weekly|monthly|yearly)_(active|pending|done)_v1$/
+      );
+      if (m) {
+        writeTasksList(m[1], m[2], activeTasks);
+      } else {
+        localStorage.setItem(activeKey, JSON.stringify(activeTasks));
+      }
+    } else {
+      localStorage.setItem(activeKey, JSON.stringify(activeTasks));
+    }
+    console.log(`[MARK DONE] Saved ACTIVE list: ${activeKey}, length: ${activeTasks.length}`);
+    
+    // Verify completion
+    const verifyActive = JSON.parse(localStorage.getItem(activeKey) || '[]');
+    const completedCount = verifyActive.filter(t => t.status === 'done' || t.completedAt).length;
+    console.log(`[MARK DONE] Active saved: ${completedCount} completed task(s) in ACTIVE list`);
+    
+    console.log(`%c[MARK DONE] COMPLETE`, 'color:green;font-weight:bold', {
+        tab,
+        taskId: keyId,
+        pendingKey,
+        activeKey,
+        pendingLengthBefore: pendingBeforeLength,
+        pendingLengthAfter: pendingTasks.length,
+        activeLengthBefore: activeBeforeLength,
+        activeLengthAfter: activeTasks.length,
+        taskRemovedFromPending: pendingTaskIndex >= 0,
+        taskRemovedFromActive: false,
+        taskUpdatedInActive: idx >= 0,
+        taskCreatedInActive: idx < 0
+    });
+    
+    // 3) Re-render UI
+    if (typeof window.loadTasks === 'function') {
+        window.loadTasks();
+    }
+    if (window.renderTasksList) {
+        if (window.renderTasksList.length > 1) {
+            window.renderTasksList(tab, { force: true });
+        } else {
+            window.renderTasksList(tab);
+        }
+    }
 }
 
 window.markTaskDone = markTaskDone;
@@ -1397,20 +1574,64 @@ async function validatePinAndMove() {
     
     const enteredPin = pinInput.value.trim();
     
-    // Validate PIN length (4-6 digits)
-    if (enteredPin.length < 4 || enteredPin.length > 6) {
+    if (!enteredPin || enteredPin === '') {
         if (pinError) {
-            pinError.textContent = "PIN must be 4–6 digits";
+            pinError.textContent = "Please enter PIN";
             pinError.style.display = "block";
         }
         return;
     }
     
-    const users = JSON.parse(localStorage.getItem("ff_users_v1") || "[]");
-
-    const match = users.find(u => u.pin === enteredPin);
-
-    if (!match) {
+    let matchedRole = null;
+    let matchedName = null;
+    
+    // Check admin code first (no length restriction)
+    if (typeof isAdminCode === 'function' && isAdminCode(enteredPin)) {
+        matchedRole = 'Admin';
+        matchedName = (typeof settings !== 'undefined' && settings) 
+            ? (settings.ownerName || settings.adminName || 'Admin')
+            : 'Admin';
+        console.log('✅ TASK_TAKE_OK', { role: matchedRole, userName: matchedName, taskId: __pendingTaskId });
+    }
+    // Check manager code second (no length restriction)
+    else if (typeof isManagerCode === 'function' && isManagerCode(enteredPin)) {
+        matchedRole = 'Manager';
+        const managers = (typeof settings !== 'undefined' && settings && settings.managers) ? settings.managers : [];
+        const manager = managers.find(m => {
+            if (!m.code) return false;
+            return m.code.toString().trim() === enteredPin;
+        });
+        matchedName = manager ? (manager.name || 'Manager') : 'Manager';
+        console.log('✅ TASK_TAKE_OK', { role: matchedRole, userName: matchedName, taskId: __pendingTaskId });
+    }
+    // Check technician (worker) PIN third (with length validation)
+    else {
+        // Validate PIN length for workers only (4-6 digits)
+        if (enteredPin.length < 4 || enteredPin.length > 6) {
+            if (pinError) {
+                pinError.textContent = "PIN must be 4–6 digits";
+                pinError.style.display = "block";
+            }
+            return;
+        }
+        
+        const users = JSON.parse(localStorage.getItem("ff_users_v1") || "[]");
+        const match = users.find(u => u.pin === enteredPin);
+        
+        if (match) {
+            matchedRole = 'Tech';
+            matchedName = match.displayName;
+            console.log('✅ TASK_TAKE_OK', { role: matchedRole, userName: matchedName, taskId: __pendingTaskId });
+        }
+    }
+    
+    if (!matchedName) {
+        // Determine current role for logging
+        let currentRole = 'Tech';
+        if (typeof getCurrentActorRole === 'function') {
+            currentRole = getCurrentActorRole() || 'Tech';
+        }
+        console.log('❌ TASK_TAKE_BAD_PIN', { role: currentRole, taskId: __pendingTaskId });
         if (pinError) {
             pinError.textContent = "Incorrect PIN";
             pinError.style.display = "block";
@@ -1418,10 +1639,8 @@ async function validatePinAndMove() {
         return;
     }
 
-    const workerName = match.displayName;
-
     if (__pendingTaskId) {
-        moveTaskToPending(__pendingTaskId, workerName);
+        moveTaskToPending(__pendingTaskId, matchedName);
     }
 
     closePinModal();
@@ -1432,21 +1651,66 @@ function validatePinAndMarkDone() {
     const pinError = document.getElementById("pinError");
     if (!pinInput) return;
     
-    const pin = pinInput.value.trim();
+    const enteredPin = pinInput.value.trim();
     
-    // Validate PIN length (4-6 digits)
-    if (pin.length < 4 || pin.length > 6) {
+    if (!enteredPin || enteredPin === '') {
         if (pinError) {
-            pinError.textContent = "PIN must be 4–6 digits";
+            pinError.textContent = "Please enter PIN";
             pinError.style.display = "block";
         }
         return;
     }
     
-    const users = JSON.parse(localStorage.getItem("ff_users_v1") || "[]");
-    const user = users.find(u => u.pin === pin);
-
-    if (!user) {
+    let matchedRole = null;
+    let matchedName = null;
+    
+    // Check admin code first (no length restriction)
+    if (typeof isAdminCode === 'function' && isAdminCode(enteredPin)) {
+        matchedRole = 'Admin';
+        matchedName = (typeof settings !== 'undefined' && settings) 
+            ? (settings.ownerName || settings.adminName || 'Admin')
+            : 'Admin';
+        console.log('✅ TASK_MARK_DONE_OK', { role: matchedRole, userName: matchedName, taskId: pinModalDoneTaskId });
+    }
+    // Check manager code second (no length restriction)
+    else if (typeof isManagerCode === 'function' && isManagerCode(enteredPin)) {
+        matchedRole = 'Manager';
+        const managers = (typeof settings !== 'undefined' && settings && settings.managers) ? settings.managers : [];
+        const manager = managers.find(m => {
+            if (!m.code) return false;
+            return m.code.toString().trim() === enteredPin;
+        });
+        matchedName = manager ? (manager.name || 'Manager') : 'Manager';
+        console.log('✅ TASK_MARK_DONE_OK', { role: matchedRole, userName: matchedName, taskId: pinModalDoneTaskId });
+    }
+    // Check technician (worker) PIN third (with length validation)
+    else {
+        // Validate PIN length for workers only (4-6 digits)
+        if (enteredPin.length < 4 || enteredPin.length > 6) {
+            if (pinError) {
+                pinError.textContent = "PIN must be 4–6 digits";
+                pinError.style.display = "block";
+            }
+            return;
+        }
+        
+        const users = JSON.parse(localStorage.getItem("ff_users_v1") || "[]");
+        const user = users.find(u => u.pin === enteredPin);
+        
+        if (user) {
+            matchedRole = 'Tech';
+            matchedName = user.displayName;
+            console.log('✅ TASK_MARK_DONE_OK', { role: matchedRole, userName: matchedName, taskId: pinModalDoneTaskId });
+        }
+    }
+    
+    if (!matchedName) {
+        // Determine current role for logging
+        let currentRole = 'Tech';
+        if (typeof getCurrentActorRole === 'function') {
+            currentRole = getCurrentActorRole() || 'Tech';
+        }
+        console.log('❌ TASK_MARK_DONE_BAD_PIN', { role: currentRole, taskId: pinModalDoneTaskId });
         if (pinError) {
             pinError.textContent = "Incorrect PIN";
             pinError.style.display = "block";
@@ -1455,7 +1719,7 @@ function validatePinAndMarkDone() {
     }
 
     if (pinModalDoneTaskId) {
-        markTaskDone(pinModalDoneTaskId, user.displayName);
+        markTaskDone(pinModalDoneTaskId, matchedName);
     }
     
     closePinModal();
@@ -1785,33 +2049,31 @@ window.doResetCurrentTab = function doResetCurrentTab() {
     console.log("RESET: Resetting state for tab:", tab);
 
     // 2) Clear storage STATE KEYS for this tab ONLY (using correct format from getTabStorageKey)
+    // IMPORTANT: Preserve ACTIVE list (task roster) and only clear progress lists (done/pending).
     // Format: ff_tasks_${tab}_${status}_v1 (matches getTabStorageKey helper)
     const STORAGE_ACTIVE = `ff_tasks_${tab}_active_v1`;
     const STORAGE_DONE = `ff_tasks_${tab}_done_v1`;
     const STORAGE_PENDING = `ff_tasks_${tab}_pending_v1`;
     
-    // Also remove legacy format (ffv24_tasks_...) if it exists
+    // Also remove legacy format (ffv24_tasks_...) for done/pending if they exist
     const STORAGE_ACTIVE_LEGACY = `ffv24_tasks_${tab}_active_v1`;
     const STORAGE_DONE_LEGACY = `ffv24_tasks_${tab}_done_v1`;
     const STORAGE_PENDING_LEGACY = `ffv24_tasks_${tab}_pending_v1`;
     
-    // Also check for format without _v1 suffix
+    // Also check for legacy format without _v1 suffix
     const STORAGE_ACTIVE_LEGACY2 = `ffv24_tasks_${tab}_active`;
     const STORAGE_DONE_LEGACY2 = `ffv24_tasks_${tab}_done`;
     const STORAGE_PENDING_LEGACY2 = `ffv24_tasks_${tab}_pending`;
 
-    console.log("RESET: Deleting STATE keys (not catalog):", STORAGE_ACTIVE, STORAGE_DONE, STORAGE_PENDING);
+    console.log("RESET: Clearing progress STATE keys (done/pending only, preserving active):", STORAGE_DONE, STORAGE_PENDING);
     
-    // Remove state keys (active, done, pending) - NOT catalog
-    localStorage.removeItem(STORAGE_ACTIVE);
+    // Remove progress state keys (done, pending) - NOT catalog and NOT active roster
     localStorage.removeItem(STORAGE_DONE);
     localStorage.removeItem(STORAGE_PENDING);
     
-    // Remove legacy format keys if they exist
-    localStorage.removeItem(STORAGE_ACTIVE_LEGACY);
+    // Remove legacy progress keys if they exist
     localStorage.removeItem(STORAGE_DONE_LEGACY);
     localStorage.removeItem(STORAGE_PENDING_LEGACY);
-    localStorage.removeItem(STORAGE_ACTIVE_LEGACY2);
     localStorage.removeItem(STORAGE_DONE_LEGACY2);
     localStorage.removeItem(STORAGE_PENDING_LEGACY2);
     
@@ -1882,77 +2144,96 @@ window.doResetCurrentTab = function doResetCurrentTab() {
     
     console.log("RESET: In-memory state cleared");
 
-    // 4) Reset runtime status fields in catalog for this tab
-    console.log("RESET: Resetting runtime fields in catalog for tab:", tab);
+    // 4) Normalize ACTIVE list from catalog: ensure all catalog tasks exist in active,
+    //     and reset runtime status fields in ACTIVE ONLY (do not touch catalog).
+    console.log("RESET: Normalizing active list from catalog for tab:", tab);
     try {
-        // Load catalog object
-        const raw = localStorage.getItem("ff_tasks_catalog_v1");
-        const catalogObj = raw ? JSON.parse(raw) : {};
-        const list = catalogObj?.[tab] ?? window.ff_tasks_catalog_v1?.[tab] ?? [];
-        
-        if (Array.isArray(list) && list.length > 0) {
-            // Reset runtime fields for each task while keeping identity fields
-            list.forEach(task => {
-                if (task && typeof task === 'object') {
-                    // Keep identity fields: id, title, instructions, and any static fields
-                    // Reset runtime status fields
-                    if ('status' in task) {
-                        task.status = null;
-                    }
-                    if ('completedBy' in task) {
-                        task.completedBy = null;
-                    }
-                    if ('assignedTo' in task) {
-                        task.assignedTo = null;
-                    }
-                    if ('completedAt' in task) {
-                        task.completedAt = null;
-                    }
-                    
-                    // Delete selected-related fields if they exist
-                    if ('selected' in task) {
-                        delete task.selected;
-                    }
-                    if ('selectedBy' in task) {
-                        delete task.selectedBy;
-                    }
-                    if ('selectedAt' in task) {
-                        delete task.selectedAt;
-                    }
-                    
-                    // Delete any pending/done/active flags if they exist on the task object
-                    if ('pending' in task) {
-                        delete task.pending;
-                    }
-                    if ('done' in task) {
-                        delete task.done;
-                    }
-                    if ('active' in task) {
-                        delete task.active;
-                    }
+        // Load catalog object (template only)
+        let catalogObj = {};
+        try {
+            const raw = localStorage.getItem("ff_tasks_catalog_v1");
+            if (raw) {
+                catalogObj = JSON.parse(raw);
+            }
+        } catch (e) {
+            console.warn("RESET: Error parsing catalog from localStorage:", e);
+        }
+        if (!catalogObj || Object.keys(catalogObj).length === 0) {
+            catalogObj = window.ff_tasks_catalog_v1 || {};
+        }
+        const catalogList = Array.isArray(catalogObj?.[tab]) ? catalogObj[tab] : (window.ff_tasks_catalog_v1?.[tab] || []);
+
+        // Load existing active list (roster)
+        const activeKey = `ff_tasks_${tab}_active_v1`;
+        let activeTasks = [];
+        try {
+            const activeRaw = localStorage.getItem(activeKey);
+            if (activeRaw) {
+                activeTasks = JSON.parse(activeRaw) || [];
+            }
+        } catch (e) {
+            console.warn("RESET: Error parsing active list:", e);
+        }
+
+        // Index existing active tasks by stable id
+        const activeById = new Map();
+        activeTasks.forEach(t => {
+            if (!t || typeof t !== "object") return;
+            const keyId = t.taskId || t.id;
+            if (keyId) {
+                activeById.set(keyId, t);
+            }
+        });
+
+        // Merge catalog tasks into active list (add missing only)
+        if (Array.isArray(catalogList)) {
+            catalogList.forEach(task => {
+                if (!task || typeof task !== "object") return;
+                const keyId = task.taskId || task.id;
+                if (!keyId) return;
+                if (!activeById.has(keyId)) {
+                    activeById.set(keyId, {
+                        id: keyId,
+                        title: task.title,
+                        instructions: task.instructions || task.info || task.details || ""
+                    });
                 }
             });
-            
-            // Save catalog back safely
-            catalogObj[tab] = list;
-            localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
-            
-            // Update window object to keep it in sync
-            if (typeof window.ff_tasks_catalog_v1 === 'undefined' || !window.ff_tasks_catalog_v1) {
-                window.ff_tasks_catalog_v1 = {};
-            }
-            window.ff_tasks_catalog_v1[tab] = list;
-            
-            console.log(`RESET: Reset runtime fields for ${list.length} tasks in catalog for tab:`, tab);
-        } else {
-            console.log("RESET: No tasks found in catalog for tab:", tab);
         }
+
+        // Reset runtime fields in ACTIVE ONLY (status/assignment/completion), preserve roster
+        // and ensure stable id/taskId/active flags.
+        const normalizedActive = Array.from(activeById.values()).map(task => {
+            if (!task || typeof task !== "object") return null;
+            const keyId = task.taskId || task.id;
+            if (!keyId) return null;
+            const clone = { ...task };
+            // Normalize identity fields
+            clone.id = keyId;
+            clone.taskId = keyId;
+            // Ensure active flag exists and is true for active-list items
+            clone.active = clone.active == null ? true : clone.active;
+            // Remove transient runtime status fields
+            delete clone.status;
+            delete clone.completedBy;
+            delete clone.assignedTo;
+            delete clone.completedAt;
+            delete clone.selected;
+            delete clone.selectedBy;
+            delete clone.selectedAt;
+            delete clone.pending;
+            delete clone.done;
+            return clone;
+        }).filter(Boolean);
+
+        localStorage.setItem(activeKey, JSON.stringify(normalizedActive));
+        console.log(`RESET: Active list normalized for tab ${tab}, count=${normalizedActive.length}`);
     } catch (e) {
-        console.error("RESET: Error resetting catalog runtime fields:", e);
-        // Continue with reset even if catalog update fails
+        console.error("RESET: Error normalizing active list from catalog:", e);
+        // Continue with reset even if active normalization fails
     }
 
-    // 5) Rerender from existing catalog source (renderer will show tasks as SELECT when state is empty)
+    // 5) Rerender from existing storage (renderer will show tasks in MY LIST using catalog + active)
     if (typeof window.renderTasksList === "function") {
         // Call with force option if supported, otherwise call normally
         // The renderer should naturally show all tasks as SELECT in MY LIST when state is empty

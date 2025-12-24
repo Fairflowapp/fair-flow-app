@@ -123,9 +123,29 @@ ul{list-style:none;padding:0;margin:0}
 
 /* Buttons in rows */
 
-.start-btn,.finish-btn{padding:6px 12px;border-radius:8px;background:#e5e7eb;border:0;cursor:pointer;font-weight:800}
+/* Shared neutral button style - used by START and SELECT buttons */
+.btn-neutral{display:inline-flex;align-items:center;justify-content:center;padding:6px 12px;border-radius:8px;background:#e5e7eb;border:0;cursor:pointer;font-weight:800;font-size:13.3333px;color:#111827;line-height:normal;min-width:auto;box-shadow:none;outline:none}
+.btn-neutral:hover{background:#d1d5db;transform:none;box-shadow:none}
+.btn-neutral:focus-visible,.btn-neutral:active,.btn-neutral:focus{outline:none;box-shadow:none;transform:none}
+
+.start-btn,.finish-btn{display:inline-flex;align-items:center;justify-content:center;padding:6px 12px;border-radius:8px;background:#e5e7eb;border:0;cursor:pointer;font-weight:800;font-size:13.3333px;color:#111827;line-height:normal;min-width:auto;box-shadow:none;outline:none}
+.start-btn:hover,.finish-btn:hover{background:#d1d5db;transform:none;box-shadow:none}
+.start-btn:focus-visible,.start-btn:active,.start-btn:focus,.finish-btn:focus-visible,.finish-btn:active,.finish-btn:focus{outline:none;box-shadow:none;transform:none}
+
+/* SELECT button in MY LIST - uses shared btn-neutral class */
 
 .hold-btn{padding:6px 12px;border-radius:8px;border:1px solid #e8d27a;background:var(--held);font-weight:800;cursor:pointer}
+
+/* Red status dot for selectable tasks in MY LIST */
+.task-status-dot {
+  width: 8px;
+  height: 8px;
+  background: #EF4444;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+  margin-right: 8px;
+}
 
 .item[held="true"]{background:#fff9e6;border-color:#ffcc00;opacity:.95}
 
@@ -3623,7 +3643,7 @@ function loadTasks() {
   try {
     // If Settings modal is open, load only the current Settings tab
     if (isTasksSettingsOpen) {
-      const tab = currentSettingsTab || 'opening';
+      const tab = window.currentTasksTab || 'opening';
       loadTasksForSettingsTab(tab);
       return true;
     }
@@ -3632,7 +3652,11 @@ function loadTasks() {
     const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
     
     tabs.forEach(tab => {
-      // Load from tab-specific active storage
+      // One-time migration from any legacy active storage into v1 key
+      if (typeof migrateLegacyActiveToV1 === 'function') {
+        migrateLegacyActiveToV1(tab);
+      }
+      // Load from tab-specific active storage (single source of truth)
       const activeTasks = getTabTasks(tab, 'active');
       tasksModalDraft[tab] = activeTasks;
     });
@@ -3647,40 +3671,927 @@ function loadTasks() {
 
 function loadTasksForSettingsTab(tab) {
   try {
-    // Load only the specified tab's active tasks from storage
-    const activeTasks = getTabTasks(tab, 'active');
-    tasksModalDraft[tab] = activeTasks;
-    console.log(`[Tasks] Loaded ${activeTasks.length} tasks for Settings tab: ${tab}`);
+    // One-time migration for this tab before reading v1 storage
+    if (typeof migrateLegacyActiveToV1 === 'function') {
+      migrateLegacyActiveToV1(tab);
+    }
+    // Load catalog tasks (template tasks) for Settings modal editing
+    let catalogObj = {};
+    try {
+      const raw = localStorage.getItem("ff_tasks_catalog_v1");
+      if (raw) {
+        catalogObj = JSON.parse(raw);
+      }
+    } catch (e) {
+      console.warn('[Tasks] Error parsing catalog from localStorage:', e);
+    }
+    
+    // Fallback to window object
+    if (!catalogObj || Object.keys(catalogObj).length === 0) {
+      catalogObj = window.ff_tasks_catalog_v1 || {};
+    }
+    
+    // Get catalog tasks for this tab and normalize to include id/taskId
+    const catalogTasks = (catalogObj[tab] || []).map(task => {
+      if (!task || typeof task !== 'object') return null;
+      const keyId = task.taskId || task.id;
+      if (!keyId) return null;
+      return {
+        id: keyId,
+        taskId: keyId,
+        title: task.title || '',
+        instructions: task.instructions || task.info || task.details || ''
+      };
+    }).filter(Boolean);
+    
+    tasksModalDraft[tab] = catalogTasks;
+    console.log(`[Tasks] Loaded ${catalogTasks.length} catalog tasks for Settings tab: ${tab}`);
   } catch (e) {
     console.error(`[Tasks] Error loading tasks for Settings tab ${tab}:`, e);
     tasksModalDraft[tab] = [];
   }
 }
 
+// Render tasks list in Settings modal from draft (all tasks, no filtering by status)
+function renderSettingsTaskList(tabKey) {
+  try {
+    // Normalize tab key to lowercase
+    const normalizedTab = (tabKey || 'opening').toLowerCase();
+    
+    // Ensure tab key is valid
+    const validTabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+    const tab = validTabs.includes(normalizedTab) ? normalizedTab : 'opening';
+    
+    // Get catalog tasks from draft state
+    const catalogList = tasksModalDraft[tab] || [];
+    
+    // Get orphan tasks from ACTIVE list (tasks not in catalog)
+    let orphanTasks = [];
+    try {
+      const activeKey = `ff_tasks_${tab}_active_v1`;
+      const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+      
+      // Build set of catalog task IDs for quick lookup (normalized: taskId || id)
+      const catalogIds = new Set();
+      catalogList.forEach(task => {
+        if (!task || typeof task !== 'object') return;
+        const resolvedTaskId = task.taskId || task.id;
+        if (resolvedTaskId) {
+          catalogIds.add(String(resolvedTaskId));
+        }
+      });
+      
+      // Find orphans: tasks in ACTIVE that are not in catalog (normalized: taskId || id)
+      orphanTasks = activeTasks
+        .filter(task => {
+          if (!task || typeof task !== 'object') return false;
+          const resolvedTaskId = task.taskId || task.id;
+          if (!resolvedTaskId) return false;
+          return !catalogIds.has(String(resolvedTaskId));
+        })
+        .map(task => {
+          // Normalize orphan task to match catalog format (use resolved ID)
+          const resolvedTaskId = task.taskId || task.id;
+          return {
+            id: resolvedTaskId,
+            taskId: resolvedTaskId,
+            title: task.title || '',
+            instructions: task.instructions || task.info || task.details || '',
+            isOrphan: true // Flag to identify orphans
+          };
+        });
+    } catch (e) {
+      console.warn('[SETTINGS] Error loading orphan tasks:', e);
+    }
+    
+    // Combine catalog and orphan tasks
+    const combinedList = [...catalogList, ...orphanTasks];
+    
+    // Debug log
+    console.log("[SETTINGS] render tab", tab, "catalog:", catalogList.length, "orphans:", orphanTasks.length, "total:", combinedList.length);
+    
+    // Get the Settings modal container
+    const modalListContainer = document.getElementById('tasksModalDraftList');
+    if (!modalListContainer) {
+      console.warn('[SETTINGS] Modal list container not found');
+      return;
+    }
+    
+    // Clear container
+    modalListContainer.innerHTML = '';
+    
+    // Show placeholder if empty, otherwise render tasks
+    if (combinedList.length === 0) {
+      modalListContainer.innerHTML = '<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px;">No tasks yet</div>';
+    } else {
+      // Render in catalog order (catalog first, then orphans at end)
+      // Don't reverse - preserve catalog order
+      modalListContainer.innerHTML = combinedList.map((task, displayIndex) => {
+        const resolvedTaskId = task.taskId || task.id;
+        const isEditing = editingTaskId === resolvedTaskId;
+        const isOrphan = task.isOrphan === true;
+        
+        if (isEditing) {
+          // Edit mode: show inputs with ID display and action buttons
+          // Resolve IDs from task object and catalog
+          let displayId = task.id || '';
+          let displayTaskId = task.taskId || '';
+          
+          // Try to get from catalog if not in task object
+          if ((!displayId && !displayTaskId) || isOrphan) {
+            try {
+              const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+              const catalogList = catalogObj[tab] || [];
+              const catalogTask = catalogList.find(t => {
+                const tId = t.taskId || t.id;
+                return tId && String(tId) === String(resolvedTaskId);
+              });
+              if (catalogTask) {
+                displayId = catalogTask.id || '';
+                displayTaskId = catalogTask.taskId || '';
+              }
+            } catch (e) {
+              console.warn('[SETTINGS] Error loading catalog for ID display:', e);
+            }
+          }
+          
+        return `
+            <div class="tasks-modal-draft-item" style="display:flex;flex-direction:column;padding:10px;margin-bottom:6px;background:#f9fafb;border:1px solid #7b3fe4;border-radius:6px;">
+              <div style="flex:1;margin-bottom:6px;">
+                <input type="text" class="tasks-edit-title" data-task-id="${resolvedTaskId}" value="${escapeHtmlDraft(task.title || '')}" placeholder="Task title" style="width:100%;padding:6px;margin-bottom:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-weight:600;font-family:inherit;" />
+                <textarea class="tasks-edit-instructions" data-task-id="${resolvedTaskId}" placeholder="Instructions..." rows="3" style="width:100%;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;resize:vertical;font-family:inherit;">${escapeHtmlDraft(task.instructions || '')}</textarea>
+                <div style="margin-top:8px;padding:8px;background:#f3f4f6;border-radius:4px;font-size:11px;color:#666;">
+                  <div style="margin-bottom:4px;"><strong>ID fields (read-only):</strong></div>
+                  <div>task.id: ${escapeHtmlDraft(displayId || '(empty)')}</div>
+                  <div>task.taskId: ${escapeHtmlDraft(displayTaskId || '(empty)')}</div>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <div style="display:flex;gap:6px;justify-content:flex-end;">
+                  <button class="tasks-modal-draft-save" data-task-id="${resolvedTaskId}" style="background:#7b3fe4;border:none;color:#fff;cursor:pointer;font-size:12px;padding:5px 10px;border-radius:4px;flex-shrink:0;">Save</button>
+                  <button class="tasks-modal-draft-cancel-edit" data-task-id="${resolvedTaskId}" style="background:none;border:1px solid #e5e7eb;color:#666;cursor:pointer;font-size:12px;padding:5px 10px;border-radius:4px;flex-shrink:0;">Cancel</button>
+                </div>
+                <div style="display:flex;gap:6px;justify-content:flex-end;">
+                  <button class="tasks-modal-draft-copy-ids" data-task-id="${resolvedTaskId}" data-task-title="${escapeHtmlDraft(task.title || '')}" data-task-id-value="${escapeHtmlDraft(displayId)}" data-task-taskid-value="${escapeHtmlDraft(displayTaskId)}" data-settings-tab="${tab}" style="background:none;border:none;color:#7b3fe4;cursor:pointer;font-size:11px;padding:3px 6px;text-decoration:underline;">Copy IDs</button>
+                  <button class="tasks-modal-draft-force-delete" data-task-id="${resolvedTaskId}" data-task-id-value="${escapeHtmlDraft(displayId)}" data-task-taskid-value="${escapeHtmlDraft(displayTaskId)}" data-settings-tab="${tab}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:11px;padding:3px 6px;text-decoration:underline;">Force Delete</button>
+                </div>
+              </div>
+            </div>
+          `;
+        } else {
+          // View mode: show title and instructions with Edit and Delete buttons (draggable)
+          return `
+            <div class="tasks-modal-draft-item" draggable="true" data-task-key="${String(resolvedTaskId || '').trim()}" data-is-orphan="${isOrphan ? 'true' : 'false'}" style="display:flex;align-items:flex-start;justify-content:space-between;padding:8px 10px;margin-bottom:6px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;cursor:move;">
+            <div style="flex:1;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+                  <div style="font-weight:600;font-size:13px;color:#111;">${escapeHtmlDraft(task.title || '')}</div>
+            </div>
+                ${task.instructions ? `<div style="font-size:12px;color:#666;margin-top:2px;white-space:pre-wrap;">${escapeHtmlDraft(task.instructions)}</div>` : ''}
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;margin-left:10px;flex-shrink:0;">
+                <button class="tasks-modal-draft-edit" data-task-id="${resolvedTaskId}" style="background:none;border:none;color:#7b3fe4;cursor:pointer;font-size:12px;padding:3px 6px;border-radius:4px;text-decoration:underline;">Edit</button>
+                <button class="tasks-modal-draft-remove" data-task-id="${resolvedTaskId}" data-is-orphan="${isOrphan ? 'true' : 'false'}" data-settings-tab="${tab}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:12px;padding:3px 8px;border-radius:4px;text-decoration:underline;">DELETE</button>
+              </div>
+          </div>
+        `;
+        }
+      }).join('');
+      
+      // Attach event handlers
+      // Edit buttons
+      modalListContainer.querySelectorAll('.tasks-modal-draft-edit').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const taskId = btn.dataset.taskId;
+          startEditTask(taskId);
+        });
+      });
+      
+      // Save buttons
+      modalListContainer.querySelectorAll('.tasks-modal-draft-save').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const taskId = btn.dataset.taskId;
+          saveEditTask(taskId);
+        });
+      });
+      
+      // Cancel edit buttons
+      modalListContainer.querySelectorAll('.tasks-modal-draft-cancel-edit').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          cancelEditTask();
+        });
+      });
+      
+      // Copy IDs buttons
+      modalListContainer.querySelectorAll('.tasks-modal-draft-copy-ids').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const title = btn.dataset.taskTitle || '';
+          const id = btn.dataset.taskIdValue || '';
+          const taskId = btn.dataset.taskTaskidValue || '';
+          const settingsTab = btn.dataset.settingsTab || tab;
+          const copyText = `title="${title}" id="${id}" taskId="${taskId}" tab="${settingsTab}"`;
+          navigator.clipboard.writeText(copyText).then(() => {
+            console.log('[SETTINGS] Copied IDs to clipboard:', copyText);
+          }).catch(err => {
+            console.error('[SETTINGS] Failed to copy:', err);
+            // Fallback: select text
+            const textarea = document.createElement('textarea');
+            textarea.value = copyText;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+          });
+        });
+      });
+      
+      // Force Delete buttons
+      modalListContainer.querySelectorAll('.tasks-modal-draft-force-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const taskIdParam = btn.dataset.taskId;
+          const idValue = btn.dataset.taskIdValue || '';
+          const taskIdValue = btn.dataset.taskTaskidValue || '';
+          const settingsTab = btn.dataset.settingsTab || tab;
+          
+          // Build idVariants Set
+          const idVariants = new Set();
+          [idValue, taskIdValue, taskIdParam].forEach(v => {
+            const normalized = String(v || "").trim();
+            if (normalized) idVariants.add(normalized);
+          });
+          
+          if (idVariants.size === 0) {
+            console.warn('[SETTINGS] No ID variants found for Force Delete');
+            return;
+          }
+          
+          console.log('[SETTINGS] Force Delete - ID variants:', Array.from(idVariants));
+          
+          // Remove from catalog
+          try {
+            const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+            if (catalogObj[settingsTab]) {
+              catalogObj[settingsTab] = catalogObj[settingsTab].filter(t => {
+                const tId = t.taskId || t.id;
+                return !idVariants.has(String(tId || "").trim());
+              });
+              localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
+              if (window.ff_tasks_catalog_v1) {
+                window.ff_tasks_catalog_v1[settingsTab] = catalogObj[settingsTab];
+              }
+            }
+          } catch (e) {
+            console.error('[SETTINGS] Error removing from catalog:', e);
+          }
+          
+          // Remove from active/pending/done lists
+          ['active', 'pending', 'done'].forEach(kind => {
+            const key = `ff_tasks_${settingsTab}_${kind}_v1`;
+            try {
+              const arr = JSON.parse(localStorage.getItem(key) || "[]");
+              const filtered = arr.filter(t => {
+                const tId = t.taskId || t.id;
+                return !idVariants.has(String(tId || "").trim());
+              });
+              if (typeof writeTasksList === 'function') {
+                writeTasksList(settingsTab, kind, filtered);
+              } else {
+                localStorage.setItem(key, JSON.stringify(filtered));
+              }
+            } catch (e) {
+              console.error(`[SETTINGS] Error removing from ${key}:`, e);
+            }
+          });
+          
+          // Add to tombstone
+          try {
+            const tombstoneKey = "ff_tasks_active_deleted_v1";
+            let tombstone = {};
+            try {
+              const tombstoneRaw = localStorage.getItem(tombstoneKey);
+              if (tombstoneRaw) {
+                tombstone = JSON.parse(tombstoneRaw);
+              }
+            } catch (e) {
+              console.warn('[SETTINGS] Error parsing tombstone:', e);
+            }
+            
+            if (!tombstone || typeof tombstone !== 'object') {
+              tombstone = { opening: [], closing: [], weekly: [], monthly: [], yearly: [] };
+            }
+            
+            if (!Array.isArray(tombstone[settingsTab])) {
+              tombstone[settingsTab] = [];
+            }
+            
+            const existingIds = new Set(tombstone[settingsTab].map(id => String(id).trim()));
+            idVariants.forEach(id => {
+              if (!existingIds.has(id)) {
+                tombstone[settingsTab].push(id);
+                existingIds.add(id);
+              }
+            });
+            
+            localStorage.setItem(tombstoneKey, JSON.stringify(tombstone));
+            console.log(`[SETTINGS] Added ID variants to tombstone for ${settingsTab}:`, Array.from(idVariants));
+          } catch (e) {
+            console.error('[SETTINGS] Error updating tombstone:', e);
+          }
+          
+          // Close edit mode and refresh
+          editingTaskId = null;
+          renderSettingsTaskList(settingsTab);
+          
+          console.log('[SETTINGS] Force Delete completed');
+        });
+      });
+      
+      // Drag and drop handlers for catalog reordering (only for catalog tasks, not orphans)
+      let draggedElement = null;
+      let draggedKey = null;
+      
+      modalListContainer.querySelectorAll('.tasks-modal-draft-item[draggable="true"]').forEach(item => {
+        const isOrphan = item.dataset.isOrphan === 'true';
+        if (isOrphan) return; // Skip orphans, only allow reordering catalog tasks
+        
+        item.addEventListener('dragstart', (e) => {
+          // Don't start drag if clicking on a button
+          if (e.target.closest('button')) {
+            e.preventDefault();
+            return;
+          }
+          draggedElement = item;
+          draggedKey = item.dataset.taskKey;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', draggedKey);
+          item.style.opacity = '0.5';
+        });
+        
+        item.addEventListener('dragend', (e) => {
+          item.style.opacity = '1';
+          draggedElement = null;
+          draggedKey = null;
+        });
+        
+        item.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          
+          if (draggedElement && draggedElement !== item) {
+            const isOrphanTarget = item.dataset.isOrphan === 'true';
+            if (isOrphanTarget) return; // Don't allow dropping on orphans
+            
+            const rect = item.getBoundingClientRect();
+            const midpoint = rect.top + rect.height / 2;
+            const mouseY = e.clientY;
+            
+            if (mouseY < midpoint) {
+              item.parentNode.insertBefore(draggedElement, item);
+            } else {
+              item.parentNode.insertBefore(draggedElement, item.nextSibling);
+            }
+          }
+        });
+        
+        item.addEventListener('drop', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          if (!draggedKey) return;
+          
+          const isOrphanTarget = item.dataset.isOrphan === 'true';
+          if (isOrphanTarget) return; // Don't allow dropping on orphans
+          
+          // Get current order from DOM
+          const items = Array.from(modalListContainer.querySelectorAll('.tasks-modal-draft-item[draggable="true"]'));
+          const reorderedKeys = items
+            .filter(i => i.dataset.isOrphan !== 'true')
+            .map(i => i.dataset.taskKey)
+            .filter(Boolean);
+          
+          // Reorder catalog array based on DOM order
+          const catalogArray = tasksModalDraft[tab] || [];
+          const reorderedCatalog = [];
+          const catalogMap = new Map();
+          catalogArray.forEach(task => {
+            const key = String(task.taskId || task.id || '').trim();
+            if (key) catalogMap.set(key, task);
+          });
+          
+          // Build reordered array following DOM order
+          reorderedKeys.forEach(key => {
+            const task = catalogMap.get(key);
+            if (task) {
+              reorderedCatalog.push(task);
+              catalogMap.delete(key);
+            }
+          });
+          
+          // Add any remaining tasks (shouldn't happen, but safety)
+          catalogMap.forEach(task => {
+            reorderedCatalog.push(task);
+          });
+          
+          // Update draft
+          tasksModalDraft[tab] = reorderedCatalog;
+          
+          // Persist to localStorage
+          try {
+            const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+            catalogObj[tab] = reorderedCatalog;
+            localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
+            
+            // Update window cache if it exists
+            if (window.ff_tasks_catalog_v1) {
+              window.ff_tasks_catalog_v1[tab] = reorderedCatalog;
+            }
+            
+            console.log('[SETTINGS] Catalog reordered and saved for tab:', tab);
+          } catch (e) {
+            console.error('[SETTINGS] Error saving reordered catalog:', e);
+          }
+          
+          // Re-render to update visual state
+          renderSettingsTaskList(tab);
+        });
+      });
+      
+      // Remove buttons - now use taskId instead of index
+      modalListContainer.querySelectorAll('.tasks-modal-draft-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const taskId = btn.dataset.taskId;
+          const isOrphan = btn.dataset.isOrphan === 'true';
+          const settingsTab = btn.dataset.settingsTab || tab; // Use Settings tab from button or fallback to current tab
+          
+          // Find the task object for debug log
+          const task = combinedList.find(t => {
+            const tId = t.taskId || t.id;
+            return tId && String(tId) === String(taskId);
+          });
+          
+          // TEMP debug log
+          console.log("✅ SETTINGS_DELETE_CLICK", { 
+            tab: settingsTab, 
+            title: task?.title, 
+            id: task?.id, 
+            taskId: task?.taskId 
+          });
+          
+          // Call deletion logic - use task.id || task.taskId || taskId as the identifier
+          const deleteId = task?.id || task?.taskId || taskId;
+          removeTaskFromDraftByTaskId(deleteId, isOrphan, settingsTab);
+        });
+      });
+    }
+  } catch (e) {
+    console.error('[SETTINGS] Error rendering Settings task list:', e);
+    const modalListContainer = document.getElementById('tasksModalDraftList');
+    if (modalListContainer) {
+      modalListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;">No tasks yet</div>';
+    }
+  }
+}
+
 // Ensure task storage is initialized for a specific tab
 function ensureTaskStorageInitialized(tab) {
-    const keyActive = `ffv24_tasks_${tab}_active`;
-    const keyPending = `ffv24_tasks_${tab}_pending`;
-    const keyDone = `ffv24_tasks_${tab}_done`;
+    // Initialize ONLY new v1 storage keys; legacy keys are left untouched.
+    const keyActive = getTabStorageKey(tab, 'active');    // ff_tasks_${tab}_active_v1
+    const keyPending = getTabStorageKey(tab, 'pending');  // ff_tasks_${tab}_pending_v1
+    const keyDone = getTabStorageKey(tab, 'done');        // ff_tasks_${tab}_done_v1
 
     const catalog = window.ff_tasks_catalog_v1?.[tab] || [];
 
-    // Create active list if missing
+    // Load tombstone (deleted task IDs that should not be re-seeded)
+    const tombstoneKey = "ff_tasks_active_deleted_v1";
+    let blocked = new Set();
+    try {
+      const tombstoneRaw = localStorage.getItem(tombstoneKey);
+      if (tombstoneRaw) {
+        const tombstone = JSON.parse(tombstoneRaw);
+        if (tombstone && typeof tombstone === 'object' && Array.isArray(tombstone[tab])) {
+          blocked = new Set(tombstone[tab].map(id => String(id).trim()));
+        }
+      }
+    } catch (e) {
+      console.warn(`[INIT] Error loading tombstone for ${tab}:`, e);
+    }
+
+    // Create active list if missing (use catalog as initial roster)
     if (!localStorage.getItem(keyActive)) {
-        localStorage.setItem(keyActive, JSON.stringify(catalog));
+        console.log(`%c[INIT] Repopulating ACTIVE from catalog (active list missing)`, 'color:cyan;font-weight:bold', {
+          tab,
+          activeKey: keyActive,
+          catalogCount: catalog.length,
+          blockedCount: blocked.size
+        });
+        
+        const initialActive = Array.isArray(catalog)
+          ? catalog.map(task => {
+              if (!task || typeof task !== 'object') return null;
+              const keyId = task.taskId || task.id;
+              if (!keyId) return null;
+              
+              // Skip if ANY ID variant of task is in tombstone (was explicitly deleted)
+              const taskIds = new Set(
+                [task.taskId, task.id].filter(Boolean).map(v => String(v).trim())
+              );
+              const isBlocked = Array.from(taskIds).some(id => blocked.has(id));
+              if (isBlocked) {
+                console.log(`[INIT] Skipping blocked task (ID variants: ${Array.from(taskIds).join(', ')}):`, task.title);
+                return null;
+              }
+              
+              return {
+                id: keyId,
+                taskId: keyId,
+                title: task.title || '',
+                instructions: task.instructions || task.info || task.details || '',
+                status: null,
+                assignedTo: null,
+                completedBy: null,
+                completedAt: null
+              };
+            }).filter(Boolean)
+          : [];
+        
+        const taskIds = initialActive.map(t => t.taskId || t.id);
+        console.log(`[INIT] Created initial ACTIVE list from catalog:`, {
+          tab,
+          activeKey: keyActive,
+          activeCount: initialActive.length,
+          taskIds: taskIds
+        });
+        
+        writeTasksList(tab, 'active', initialActive);
+    } else {
+        console.log(`[INIT] ACTIVE list already exists for tab ${tab}, skipping repopulation`);
     }
 
     // Create empty pending and done if missing
     if (!localStorage.getItem(keyPending)) {
-        localStorage.setItem(keyPending, JSON.stringify([]));
+        writeTasksList(tab, 'pending', []);
     }
     if (!localStorage.getItem(keyDone)) {
-        localStorage.setItem(keyDone, JSON.stringify([]));
+        writeTasksList(tab, 'done', []);
     }
+}
+
+// Cleanup blocked tasks: Remove tasks from active/pending/done that are in tombstone
+function cleanupBlockedTasks() {
+  try {
+    const tombstoneKey = "ff_tasks_active_deleted_v1";
+    let tombstone = {};
+    try {
+      const tombstoneRaw = localStorage.getItem(tombstoneKey);
+      if (tombstoneRaw) {
+        tombstone = JSON.parse(tombstoneRaw);
+      }
+    } catch (e) {
+      console.warn('[CLEANUP BLOCKED] Error parsing tombstone:', e);
+      return;
+    }
+    
+    if (!tombstone || typeof tombstone !== 'object') {
+      return; // No tombstone, nothing to clean
+    }
+    
+    const allTabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+    
+    allTabs.forEach(tab => {
+      const blocked = new Set((tombstone[tab] || []).map(x => String(x).trim()));
+      if (blocked.size === 0) return; // No blocked IDs for this tab
+      
+      // Clean ACTIVE list
+      const activeKey = `ff_tasks_${tab}_active_v1`;
+      try {
+        const arr = JSON.parse(localStorage.getItem(activeKey) || "[]");
+        const filtered = arr.filter(t => {
+          if (!t || typeof t !== 'object') return false;
+          const ids = new Set([t?.taskId, t?.id].filter(Boolean).map(v => String(v).trim()));
+          return !Array.from(ids).some(id => blocked.has(id));
+        });
+        if (filtered.length !== arr.length) {
+          writeTasksList(tab, 'active', filtered);
+          console.log(`[CLEANUP BLOCKED] Removed ${arr.length - filtered.length} blocked task(s) from ${activeKey}`);
+        }
+      } catch (e) {
+        console.warn(`[CLEANUP BLOCKED] Error cleaning ${activeKey}:`, e);
+      }
+      
+      // Clean PENDING list
+      const pendingKey = `ff_tasks_${tab}_pending_v1`;
+      try {
+        const arr = JSON.parse(localStorage.getItem(pendingKey) || "[]");
+        const filtered = arr.filter(t => {
+          if (!t || typeof t !== 'object') return false;
+          const ids = new Set([t?.taskId, t?.id].filter(Boolean).map(v => String(v).trim()));
+          return !Array.from(ids).some(id => blocked.has(id));
+        });
+        if (filtered.length !== arr.length) {
+          writeTasksList(tab, 'pending', filtered);
+          console.log(`[CLEANUP BLOCKED] Removed ${arr.length - filtered.length} blocked task(s) from ${pendingKey}`);
+        }
+      } catch (e) {
+        console.warn(`[CLEANUP BLOCKED] Error cleaning ${pendingKey}:`, e);
+      }
+      
+      // Clean DONE list
+      const doneKey = `ff_tasks_${tab}_done_v1`;
+      try {
+        const arr = JSON.parse(localStorage.getItem(doneKey) || "[]");
+        const filtered = arr.filter(t => {
+          if (!t || typeof t !== 'object') return false;
+          const ids = new Set([t?.taskId, t?.id].filter(Boolean).map(v => String(v).trim()));
+          return !Array.from(ids).some(id => blocked.has(id));
+        });
+        if (filtered.length !== arr.length) {
+          writeTasksList(tab, 'done', filtered);
+          console.log(`[CLEANUP BLOCKED] Removed ${arr.length - filtered.length} blocked task(s) from ${doneKey}`);
+        }
+      } catch (e) {
+        console.warn(`[CLEANUP BLOCKED] Error cleaning ${doneKey}:`, e);
+      }
+    });
+  } catch (e) {
+    console.error('[CLEANUP BLOCKED] Error during blocked tasks cleanup:', e);
+  }
+}
+
+// Cleanup orphan tasks: Remove tasks from active/pending/done that don't exist in catalog (ONE-TIME cleanup)
+function cleanupOrphanTasks() {
+  try {
+    console.log('[CLEANUP] Starting orphan task cleanup...');
+    
+    // Build Set of valid taskIds from catalog (source of truth)
+    const validTaskIds = new Set();
+    let catalogObj = {};
+    
+    try {
+      const raw = localStorage.getItem("ff_tasks_catalog_v1");
+      if (raw) {
+        catalogObj = JSON.parse(raw);
+      }
+    } catch (e) {
+      console.warn('[CLEANUP] Error parsing catalog:', e);
+      return; // Cannot cleanup without catalog
+    }
+    
+    if (!catalogObj || Object.keys(catalogObj).length === 0) {
+      catalogObj = window.ff_tasks_catalog_v1 || {};
+    }
+    
+    // Collect all valid taskIds from all tabs in catalog (normalized: taskId || id)
+    const allTabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+    allTabs.forEach(tab => {
+      const catalogList = catalogObj[tab] || [];
+      catalogList.forEach(task => {
+        if (task && typeof task === 'object') {
+          const resolvedTaskId = task.taskId || task.id;
+          if (resolvedTaskId) {
+            validTaskIds.add(String(resolvedTaskId));
+          }
+        }
+      });
+    });
+    
+    console.log(`[CLEANUP] Found ${validTaskIds.size} valid taskIds in catalog`);
+    
+    // Clean up active/pending lists for all tabs
+    let totalRemoved = 0;
+    
+    allTabs.forEach(tab => {
+      // Clean ACTIVE list
+      const activeKey = `ff_tasks_${tab}_active_v1`;
+      let activeTasks = [];
+      try {
+        const activeRaw = localStorage.getItem(activeKey);
+        if (activeRaw) {
+          activeTasks = JSON.parse(activeRaw) || [];
+        }
+      } catch (e) {
+        console.warn(`[CLEANUP] Error parsing ${activeKey}:`, e);
+        activeTasks = [];
+      }
+      
+      const activeBefore = activeTasks.length;
+      const activeCleaned = activeTasks.filter(task => {
+        if (!task || typeof task !== 'object') return false;
+        const resolvedTaskId = task.taskId || task.id;
+        if (!resolvedTaskId) return false;
+        const exists = validTaskIds.has(String(resolvedTaskId));
+        if (!exists) {
+          console.log(`[CLEANUP] Removing orphan from ACTIVE: ${tab}, taskId: ${resolvedTaskId}`);
+        }
+        return exists;
+      });
+      
+      if (activeCleaned.length !== activeBefore) {
+        writeTasksList(tab, 'active', activeCleaned);
+        totalRemoved += (activeBefore - activeCleaned.length);
+        console.log(`[CLEANUP] Cleaned ${activeKey}: ${activeBefore} -> ${activeCleaned.length} (removed ${activeBefore - activeCleaned.length})`);
+      }
+      
+      // Clean PENDING list
+      const pendingKey = `ff_tasks_${tab}_pending_v1`;
+      let pendingTasks = [];
+      try {
+        const pendingRaw = localStorage.getItem(pendingKey);
+        if (pendingRaw) {
+          pendingTasks = JSON.parse(pendingRaw) || [];
+        }
+      } catch (e) {
+        console.warn(`[CLEANUP] Error parsing ${pendingKey}:`, e);
+        pendingTasks = [];
+      }
+      
+      const pendingBefore = pendingTasks.length;
+      const pendingCleaned = pendingTasks.filter(task => {
+        if (!task || typeof task !== 'object') return false;
+        const resolvedTaskId = task.taskId || task.id;
+        if (!resolvedTaskId) return false;
+        const exists = validTaskIds.has(String(resolvedTaskId));
+        if (!exists) {
+          console.log(`[CLEANUP] Removing orphan from PENDING: ${tab}, taskId: ${resolvedTaskId}`);
+        }
+        return exists;
+      });
+      
+      if (pendingCleaned.length !== pendingBefore) {
+        writeTasksList(tab, 'pending', pendingCleaned);
+        totalRemoved += (pendingBefore - pendingCleaned.length);
+        console.log(`[CLEANUP] Cleaned ${pendingKey}: ${pendingBefore} -> ${pendingCleaned.length} (removed ${pendingBefore - pendingCleaned.length})`);
+      }
+      
+      // Clean DONE list
+      const doneKey = `ff_tasks_${tab}_done_v1`;
+      let doneTasks = [];
+      try {
+        const doneRaw = localStorage.getItem(doneKey);
+        if (doneRaw) {
+          doneTasks = JSON.parse(doneRaw) || [];
+        }
+      } catch (e) {
+        console.warn(`[CLEANUP] Error parsing ${doneKey}:`, e);
+        doneTasks = [];
+      }
+      
+      const doneBefore = doneTasks.length;
+      const doneCleaned = doneTasks.filter(task => {
+        if (!task || typeof task !== 'object') return false;
+        const resolvedTaskId = task.taskId || task.id;
+        if (!resolvedTaskId) return false;
+        const exists = validTaskIds.has(String(resolvedTaskId));
+        if (!exists) {
+          console.log(`[CLEANUP] Removing orphan from DONE: ${tab}, taskId: ${resolvedTaskId}`);
+        }
+        return exists;
+      });
+      
+      if (doneCleaned.length !== doneBefore) {
+        writeTasksList(tab, 'done', doneCleaned);
+        totalRemoved += (doneBefore - doneCleaned.length);
+        console.log(`[CLEANUP] Cleaned ${doneKey}: ${doneBefore} -> ${doneCleaned.length} (removed ${doneBefore - doneCleaned.length})`);
+      }
+    });
+    
+    if (totalRemoved > 0) {
+      console.log(`[CLEANUP] Complete: Removed ${totalRemoved} orphan task(s) from active/pending/done lists`);
+    } else {
+      console.log('[CLEANUP] Complete: No orphan tasks found');
+    }
+  } catch (e) {
+    console.error('[CLEANUP] Error during orphan cleanup:', e);
+  }
+}
+
+// Helper functions for tombstone filtering
+function normId(v) {
+  return String(v ?? "").trim();
+}
+
+function getTaskIdVariants(t) {
+  const a = normId(t?.taskId);
+  const b = normId(t?.id);
+  const out = [];
+  if (a) out.push(a);
+  if (b && b !== a) out.push(b);
+  return out;
+}
+
+function getTombstone() {
+  try {
+    return JSON.parse(localStorage.getItem("ff_tasks_active_deleted_v1") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function filterBlocked(tab, arr) {
+  const tomb = getTombstone();
+  const blockedArr = Array.isArray(tomb?.[tab]) ? tomb[tab] : [];
+  const blocked = new Set(blockedArr.map(normId).filter(Boolean));
+  if (!blocked.size) return Array.isArray(arr) ? arr : [];
+
+  return (Array.isArray(arr) ? arr : []).filter(t => {
+    const ids = getTaskIdVariants(t);
+    return !ids.some(id => blocked.has(id));
+  });
+}
+
+/**
+ * THE ONLY ALLOWED WRITER for task runtime lists
+ * tab: opening | closing | weekly | monthly | yearly
+ * kind: active | pending | done
+ */
+function writeTasksList(tab, kind, arr) {
+  const key = `ff_tasks_${tab}_${kind}_v1`;
+  const filtered = filterBlocked(tab, arr);
+
+  localStorage.setItem(key, JSON.stringify(filtered));
+
+  // keep cache consistent ONLY if it already exists
+  if (window[key] && Array.isArray(window[key])) {
+    window[key] = filtered;
+  }
+
+  return filtered;
 }
 
 function openTasks() {
   try {
+    // HARD GUARANTEE: Patch localStorage.setItem to filter tombstoned tasks (one-time)
+    if (!window.__ffTombstonePatchInstalled) {
+      window.__ffTombstonePatchInstalled = true;
+      const originalSetItem = localStorage.setItem.bind(localStorage);
+      localStorage.setItem = function(key, value) {
+        const keyStr = String(key || "");
+        // Only intercept task list keys: ff_tasks_${tab}_${kind}_v1
+        const match = keyStr.match(/^ff_tasks_(opening|closing|weekly|monthly|yearly)_(active|pending|done)_v1$/);
+        if (match) {
+          const tab = match[1];
+          const kind = match[2];
+          try {
+            // Parse incoming value as JSON array
+            const arr = JSON.parse(value);
+            if (!Array.isArray(arr)) {
+              // Not an array, fall back to original
+              return originalSetItem(key, value);
+            }
+            
+            // Load tombstone DIRECTLY from localStorage every time
+            const tomb = JSON.parse(localStorage.getItem("ff_tasks_active_deleted_v1") || "{}");
+            const blocked = new Set((tomb[tab] || []).map(x => String(x || "").trim()).filter(Boolean));
+            
+            if (blocked.size === 0) {
+              // No blocked IDs, proceed normally
+              return originalSetItem(key, value);
+            }
+            
+            // Filter the array BEFORE saving
+            const originalLength = arr.length;
+            const filtered = arr.filter(item => {
+              if (!item || typeof item !== 'object') return true;
+              const itemId = String(item.id || "").trim();
+              const itemTaskId = String(item.taskId || "").trim();
+              // Remove if EITHER id OR taskId is in blocked
+              return !blocked.has(itemId) && !blocked.has(itemTaskId);
+            });
+            
+            const removedCount = originalLength - filtered.length;
+            if (removedCount > 0) {
+              console.log("🧹 tombstone filtered write", { key, removedCount });
+            }
+            
+            // Update window cache if it exists
+            if (window[keyStr] && Array.isArray(window[keyStr])) {
+              window[keyStr] = filtered;
+            }
+            
+            // Call original setItem with filtered array
+            return originalSetItem(key, JSON.stringify(filtered));
+          } catch (e) {
+            // Parse failed or other error, fall back to original
+            return originalSetItem(key, value);
+          }
+        } else {
+          // Not a task list key, proceed normally
+          return originalSetItem(key, value);
+        }
+      };
+      console.log('[TASKS] Tombstone filter patch installed');
+    }
+    
     // Ensure a default tab exists when Tasks screen loads
     window.currentTasksTab = window.currentTasksTab || "opening";
     console.log("INIT TAB →", window.currentTasksTab);
@@ -3709,6 +4620,41 @@ function openTasks() {
     
     // Initialize storage for all tabs
     ['opening', 'closing', 'weekly', 'monthly', 'yearly'].forEach(ensureTaskStorageInitialized);
+    
+    // Cleanup orphan tasks (one-time cleanup on load)
+    cleanupOrphanTasks();
+    
+    // Cleanup blocked tasks (remove tasks in tombstone from existing lists)
+    cleanupBlockedTasks();
+    
+    // FINAL ROOT FIX: Cleanup blocked tasks from active list (direct execution, no cache)
+    // MUST run for ALL TABS, not only currentTasksTab
+    const tombstone = JSON.parse(localStorage.getItem("ff_tasks_active_deleted_v1") || "{}");
+    const tabs = ["opening", "closing", "weekly", "monthly", "yearly"];
+    
+    tabs.forEach(tab => {
+      const blocked = new Set((tombstone[tab] || []).map(x => String(x).trim()));
+      if (!blocked.size) return;
+      
+      const key = `ff_tasks_${tab}_active_v1`;
+      const arr = JSON.parse(localStorage.getItem(key) || "[]");
+      
+      const filtered = arr.filter(t => {
+        const ids = [t?.taskId, t?.id].filter(Boolean).map(v => String(v).trim());
+        return !ids.some(id => blocked.has(id));
+      });
+      
+      if (filtered.length !== arr.length) {
+        const m = String(key).match(
+          /^ff_tasks_(opening|closing|weekly|monthly|yearly)_(active|pending|done)_v1$/
+        );
+        if (m) {
+          writeTasksList(m[1], m[2], filtered);
+        } else {
+          localStorage.setItem(key, JSON.stringify(filtered));
+        }
+      }
+    });
     
     // Load tasks from storage (single source of truth)
     loadTasks();
@@ -3796,9 +4742,7 @@ function setTasksTab(tabName) {
       }
     });
     
-    // Store current tab
-    currentTasksTab = tabName;
-    // Always update the active tab BEFORE rendering
+    // Always update the active tab BEFORE rendering (single source of truth)
     window.currentTasksTab = tabName.toLowerCase();
     window.currentTasksTabOriginal = tabName;
     console.log("ACTIVE TAB SET →", window.currentTasksTab);
@@ -3844,8 +4788,7 @@ function setTasksTab(tabName) {
 // Tasks Settings Modal Functions
 let isTasksSettingsOpen = false;
 let tasksSettingsModalContainer = null; // Reference to modal container element
-let currentTasksTab = 'opening'; // Track current active tab in main Tasks screen
-let currentSettingsTab = 'opening'; // Track current active tab in Settings modal (separate from main screen)
+// Use window.currentTasksTab as single source of truth for current tab
 let tasksModalDraft = {
   opening: [],
   closing: [],
@@ -3854,19 +4797,11 @@ let tasksModalDraft = {
   yearly: []
 }; // In-memory arrays per tab
 
+// Track which task is currently being edited (by taskId)
+let editingTaskId = null;
+
 function getCurrentTasksTab() {
-  // If Settings modal is open, use Settings modal tab
-  if (isTasksSettingsOpen) {
-    return currentSettingsTab || 'opening';
-  }
-  // Otherwise, get active tab from TASKS screen
-  const activeTab = document.querySelector('.tasks-tab[style*="border-bottom-color: #7b3fe4"]') || 
-                    document.querySelector('.tasks-tab.active') ||
-                    document.querySelector('.tasks-tab[data-tab="opening"]');
-  if (activeTab && activeTab.dataset.tab) {
-    return activeTab.dataset.tab;
-  }
-  return currentTasksTab || 'opening';
+  return window.currentTasksTab || 'opening';
 }
 
 function setSettingsModalTab(tabName) {
@@ -3887,14 +4822,17 @@ function setSettingsModalTab(tabName) {
       }
     });
     
-    // Store current Settings modal tab
-    currentSettingsTab = tabName;
+    // Update single source of truth for current tab
+    window.currentTasksTab = tabName.toLowerCase();
+    
+    // Clear editing state when switching tabs
+    editingTaskId = null;
     
     // Load tasks for this tab
     loadTasksForSettingsTab(tabName);
     
-    // Re-render the list
-    renderTasksList(window.currentTasksTab);
+    // Render Settings modal list from catalog
+    renderSettingsTaskList(tabName);
     
     console.log('[Tasks] Settings modal tab switched to:', tabName);
   } catch (e) {
@@ -3904,16 +4842,247 @@ function setSettingsModalTab(tabName) {
 
 function saveTasksToStorage() {
   try {
-    // Save ONLY the active tab's tasks to tab-specific active storage
+    // Get current tab (Settings modal tab)
     const tab = getCurrentTasksTab();
     const currentTabTasks = tasksModalDraft[tab] || [];
-    saveTabTasks(tab, 'active', currentTabTasks);
     
-    console.log(`[Tasks] Saved ${currentTabTasks.length} tasks for tab: ${tab}`);
+    // 1) Update catalog (ff_tasks_catalog_v1) with template-only entries
+    let catalogObj = {};
+    try {
+      const raw = localStorage.getItem("ff_tasks_catalog_v1");
+      if (raw) {
+        catalogObj = JSON.parse(raw);
+      }
+    } catch (e) {
+      console.warn('[Tasks] Error parsing catalog from localStorage:', e);
+    }
+    
+    // Fallback to window object
+    if (!catalogObj || Object.keys(catalogObj).length === 0) {
+      catalogObj = window.ff_tasks_catalog_v1 || {};
+    }
+    
+    // Sanitize tasks for catalog: keep only id/title/instructions (no runtime status fields)
+    const catalogList = currentTabTasks.map(task => {
+      if (!task || typeof task !== 'object') return null;
+      const keyId = task.taskId || task.id;
+      if (!keyId) return null;
+      return {
+        id: keyId,
+        title: task.title || '',
+        instructions: task.instructions || task.info || task.details || ''
+      };
+    }).filter(Boolean);
+    
+    // Update catalog for this tab
+    catalogObj[tab] = catalogList;
+    localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
+    
+    // Update window object to keep it in sync
+    if (typeof window.ff_tasks_catalog_v1 === 'undefined' || !window.ff_tasks_catalog_v1) {
+      window.ff_tasks_catalog_v1 = {};
+    }
+    window.ff_tasks_catalog_v1[tab] = catalogList;
+    
+    // 2) Update active list (ff_tasks_${tab}_active_v1) - append new tasks if not already present
+    const activeKey = getTabStorageKey(tab, 'active');
+    console.log(`%c[SYNC/SAVE] Repopulating ACTIVE from catalog`, 'color:purple;font-weight:bold', {
+      tab,
+      activeKey,
+      catalogCount: catalogList.length
+    });
+    
+    let activeTasks = [];
+    try {
+      const activeStored = localStorage.getItem(activeKey);
+      if (activeStored) {
+        activeTasks = JSON.parse(activeStored) || [];
+      }
+    } catch (e) {
+      console.warn('[Tasks] Error parsing active tasks:', e);
+    }
+    
+    const activeBeforeLength = activeTasks.length;
+    console.log(`[SYNC/SAVE] Active tasks count before sync: ${activeBeforeLength}`);
+    
+    // Normalize existing active tasks: ensure id/taskId and active flag
+    activeTasks = (activeTasks || []).map(task => {
+      if (!task || typeof task !== 'object') return null;
+      const keyId = task.taskId || task.id;
+      if (!keyId) return null;
+      return {
+        ...task,
+        id: keyId,
+        taskId: keyId,
+        active: task.active == null ? true : task.active
+      };
+    }).filter(Boolean);
+    
+    // Build set of existing active task IDs (using taskId || id)
+    const activeIds = new Set(activeTasks.map(t => t.taskId || t.id).filter(Boolean));
+    console.log(`[SYNC/SAVE] Existing active task IDs:`, Array.from(activeIds));
+    
+    // Load tombstone (deleted task IDs that should not be re-seeded)
+    const tombstoneKey = "ff_tasks_active_deleted_v1";
+    let blocked = new Set();
+    try {
+      const tombstoneRaw = localStorage.getItem(tombstoneKey);
+      if (tombstoneRaw) {
+        const tombstone = JSON.parse(tombstoneRaw);
+        if (tombstone && typeof tombstone === 'object' && Array.isArray(tombstone[tab])) {
+          blocked = new Set(tombstone[tab].map(id => String(id).trim()));
+        }
+      }
+    } catch (e) {
+      console.warn(`[SYNC/SAVE] Error loading tombstone for ${tab}:`, e);
+    }
+    
+    const tasksAdded = [];
+    // Append new tasks from catalog that aren't already in active list.
+    // Do NOT modify existing active tasks or their statuses.
+    catalogList.forEach(task => {
+      const keyId = task.id; // catalogList already normalized to use id
+      
+      // Skip if ANY ID variant of task is in tombstone (was explicitly deleted)
+      const taskIds = new Set(
+        [task.taskId, task.id].filter(Boolean).map(v => String(v).trim())
+      );
+      const isBlocked = Array.from(taskIds).some(id => blocked.has(id));
+      if (isBlocked) {
+        console.log(`[SYNC/SAVE] Skipping blocked task (ID variants: ${Array.from(taskIds).join(', ')}):`, task.title);
+        return;
+      }
+      
+      if (keyId && !activeIds.has(keyId)) {
+        const newActiveTask = {
+          id: keyId,
+          taskId: keyId,
+          title: task.title,
+          instructions: task.instructions,
+          active: true,
+          status: null,
+          assignedTo: null,
+          completedBy: null,
+          completedAt: null
+        };
+        activeTasks.push(newActiveTask);
+        activeIds.add(keyId); // Prevent duplicates
+        tasksAdded.push(keyId);
+        console.log(`[SYNC/SAVE] Added new task to ACTIVE from catalog:`, {
+          tab,
+          taskId: keyId,
+          activeKey,
+          task: newActiveTask
+        });
+      } else if (keyId && activeIds.has(keyId)) {
+        console.log(`[SYNC/SAVE] Task ${keyId} already exists in ACTIVE, skipping (preserving existing status/state)`);
+      }
+    });
+    
+    const activeAfterLength = activeTasks.length;
+    console.log(`[SYNC/SAVE] Active tasks count after sync: ${activeAfterLength} (added ${tasksAdded.length} new tasks)`);
+    
+    // Save updated active list
+    saveTabTasks(tab, 'active', activeTasks);
+    
+    console.log(`%c[SYNC/SAVE] COMPLETE - ACTIVE repopulated from catalog`, 'color:green;font-weight:bold', {
+      tab,
+      activeKey,
+      catalogCount: catalogList.length,
+      activeBefore: activeBeforeLength,
+      activeAfter: activeAfterLength,
+      tasksAdded: tasksAdded.length,
+      taskIdsAdded: tasksAdded
+    });
+    
+    // TEMP debug: log v1 active count after save
+    try {
+      const newKey = getTabStorageKey(tab, 'active');
+      const count = JSON.parse(localStorage.getItem(newKey) || "[]").length;
+      console.log("ACTIVE v1 count", tab, count);
+    } catch (e) {
+      console.warn('[Tasks] Error logging ACTIVE v1 count:', e);
+    }
+    
+    console.log(`[Tasks] Saved ${catalogList.length} tasks to catalog and ${activeTasks.length} tasks to active list for tab: ${tab}`);
     return true;
   } catch (e) {
     console.error('[Tasks] Error saving to storage:', e);
     return false;
+  }
+}
+
+// One-time migration/merge from any legacy active storage into v1 key for a tab.
+// After migration, MY LIST reads ONLY from ff_tasks_${tab}_active_v1 via getTabStorageKey(tab, 'active').
+function migrateLegacyActiveToV1(tab) {
+  try {
+    if (!tab) return;
+    
+    const newKey = getTabStorageKey(tab, 'active'); // ff_tasks_${tab}_active_v1
+    const legacyKeys = [
+      `ffv24_tasks_${tab}_active`,
+      `ffv24_tasks_${tab}_active_v1`,
+      `ff_tasks_${tab}_active`
+    ];
+    
+    const mergedById = new Map();
+    
+    // Helper to merge an array of tasks into the map by stable id (taskId || id)
+    function mergeTasks(tasks) {
+      if (!Array.isArray(tasks)) return;
+      tasks.forEach(t => {
+        if (!t || typeof t !== 'object') return;
+        const keyId = t.taskId || t.id;
+        if (!keyId) return;
+        const existing = mergedById.get(keyId) || {};
+        // Merge while enforcing id/taskId/active and preserving any runtime fields already present
+        const merged = {
+          ...existing,
+          ...t,
+          id: keyId,
+          taskId: keyId,
+          active: t.active == null ? true : t.active
+        };
+        mergedById.set(keyId, merged);
+      });
+    }
+    
+    // 1) Start with current v1 active as base
+    try {
+      const rawNew = localStorage.getItem(newKey);
+      if (rawNew) {
+        const arr = JSON.parse(rawNew) || [];
+        mergeTasks(arr);
+      }
+    } catch (e) {
+      console.warn('[Tasks] Error parsing current v1 active for migration:', e);
+    }
+    
+    // 2) Merge in all legacy keys (if present)
+    legacyKeys.forEach(k => {
+      const raw = localStorage.getItem(k);
+      if (!raw) return;
+      try {
+        const arr = JSON.parse(raw) || [];
+        mergeTasks(arr);
+      } catch (e) {
+        console.warn('[Tasks] Error parsing legacy active key', k, e);
+      }
+    });
+    
+    // Save merged result back to v1 key
+    const mergedArray = Array.from(mergedById.values());
+    localStorage.setItem(newKey, JSON.stringify(mergedArray));
+    
+    // TEMP debug log for active v1 count after migration
+    try {
+      const count = JSON.parse(localStorage.getItem(newKey) || "[]").length;
+      console.log("ACTIVE v1 count", tab, count);
+    } catch (e) {
+      console.warn('[Tasks] Error logging ACTIVE v1 count after migration:', e);
+    }
+  } catch (e) {
+    console.error('[Tasks] Error in migrateLegacyActiveToV1 for tab', tab, e);
   }
 }
 
@@ -3950,7 +5119,14 @@ function getTabTasks(tab, status) {
 function saveTabTasks(tab, status, tasks) {
   try {
     const key = getTabStorageKey(tab, status);
+    const m = String(key).match(
+      /^ff_tasks_(opening|closing|weekly|monthly|yearly)_(active|pending|done)_v1$/
+    );
+    if (m) {
+      writeTasksList(m[1], m[2], tasks);
+    } else {
     localStorage.setItem(key, JSON.stringify(tasks));
+    }
     return true;
   } catch (e) {
     console.error(`[Tasks] Error saving ${tab} ${status} tasks:`, e);
@@ -3967,10 +5143,15 @@ function renderTasksList(tab, opts) {
     // If force option is set, bypass any caches and rebuild fresh
     const force = opts?.force === true;
     
+    // Before any reads, run one-time migration for this tab to ensure v1 active is the source of truth
+    if (typeof migrateLegacyActiveToV1 === 'function') {
+      migrateLegacyActiveToV1(currentTab);
+    }
+    
     // Render modal list (Settings modal)
     const modalListContainer = document.getElementById('tasksModalDraftList');
     if (modalListContainer && isTasksSettingsOpen) {
-      const settingsTab = currentSettingsTab || 'opening';
+      const settingsTab = window.currentTasksTab || 'opening';
       const tasks = tasksModalDraft[settingsTab] || [];
       
       if (tasks.length === 0) {
@@ -4014,80 +5195,105 @@ function renderTasksList(tab, opts) {
       }
     }
     
-    // Render main screen MY LIST (active + done tasks) - only if main screen is visible and Settings modal is NOT open
+    // Render main screen MY LIST (active tasks) - only if main screen is visible and Settings modal is NOT open
     const mainListContainer = document.querySelector('#tasksContentContainer .tasks-col:first-child .tasks-list');
     if (mainListContainer && !isTasksSettingsOpen) {
       // Get current tab for main Tasks screen (not Settings modal)
       const mainTab = currentTab;
-      
-      // Load catalog for this tab (source of truth)
-      let catalog = [];
-      if (window.ff_tasks_catalog_v1?.[mainTab]) {
-        catalog = window.ff_tasks_catalog_v1[mainTab];
-      } else {
-        try {
-          const stored = localStorage.getItem("ff_tasks_catalog_v1");
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            catalog = parsed[mainTab] || [];
-          }
-        } catch (e) {
-          console.error(`[Tasks] Error loading catalog for ${mainTab}:`, e);
-          catalog = [];
-        }
-      }
       
       // Get tasks from tab-specific storage for main screen (getTabTasks reads directly from localStorage, no cache)
       const activeTasks = getTabTasks(mainTab, 'active');
       const doneTasks = getTabTasks(mainTab, 'done');
       const pendingTasks = getTabTasks(mainTab, 'pending');
       
-      // Build sets of task IDs that are already in pending, done, or active
-      const pendingIds = new Set(pendingTasks.map(t => t.id || t.taskId).filter(Boolean));
-      const doneIds = new Set(doneTasks.map(t => t.id || t.taskId).filter(Boolean));
-      const activeIds = new Set(activeTasks.map(t => t.id || t.taskId).filter(Boolean));
+      // Build MY LIST directly from ACTIVE list only
+      const myListTasks = activeTasks
+        .filter(task => {
+          if (!task || typeof task !== 'object') return false;
+          const keyId = task.taskId || task.id;
+          if (!keyId) return false;
+          // Only consider tasks that are marked active (default true)
+          const isActiveFlag = task.active == null ? true : !!task.active;
+          if (!isActiveFlag) return false;
+          // Hide tasks that are pending (status='pending' or assignedTo exists)
+          if (task.status === 'pending' || !!task.assignedTo) return false;
+          return true;
+        });
       
-      // Create a map of done tasks for quick lookup (to get completedBy, etc.)
-      const doneTasksMap = new Map();
-      doneTasks.forEach(t => {
-        const id = t.id || t.taskId;
-        if (id) doneTasksMap.set(id, t);
-      });
-      
-      // MY LIST has two groups:
-      // 1) Available tasks: catalog minus pendingIds/activeIds/doneIds
-      // 2) Completed tasks: catalog tasks that are in doneIds
-      const availableTasks = catalog.filter(t => {
-        const taskId = t.id || t.taskId;
-        if (!taskId) return false; // Skip tasks without ID
-        return !pendingIds.has(taskId) && !doneIds.has(taskId) && !activeIds.has(taskId);
-      });
-      
-      const completedTasks = catalog.filter(t => {
-        const taskId = t.id || t.taskId;
-        if (!taskId) return false;
-        return doneIds.has(taskId);
-      });
-      
-      // Show "No tasks yet" only if catalog is empty
-      if (catalog.length === 0) {
+      // Show "No tasks yet" only if ACTIVE list has no displayable tasks
+      if (myListTasks.length === 0) {
         mainListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">No tasks yet</div>';
       } else {
-        // Combine: available tasks first, then completed tasks
-        // Reverse each group separately to maintain order: available first, then completed
-        const availableReversed = [...availableTasks].reverse();
-        const completedReversed = [...completedTasks].reverse();
-        const myListTasks = [...availableReversed, ...completedReversed];
+        // Split tasks into incomplete and completed groups
+        const incomplete = [];
+        const completed = [];
         
-        mainListContainer.innerHTML = myListTasks.map((task, displayIndex) => {
+        myListTasks.forEach(task => {
+          const isCompleted = task.status === 'done' || !!task.completedAt;
+          if (isCompleted) {
+            completed.push(task);
+          } else {
+            incomplete.push(task);
+          }
+        });
+        
+        // Apply catalog order to MY LIST (display order only, no state changes)
+        let catalogOrder = [];
+        try {
+          const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+          catalogOrder = (catalogObj[mainTab] || []).map(t => String(t.taskId || t.id || '').trim()).filter(Boolean);
+        } catch (e) {
+          console.warn('[MY LIST] Error loading catalog for ordering:', e);
+        }
+        
+        // Sort by catalog order: tasks in catalog appear in catalog order, others at end
+        const sortedIncomplete = incomplete.sort((a, b) => {
+          const aKey = String(a.taskId || a.id || '').trim();
+          const bKey = String(b.taskId || b.id || '').trim();
+          const aIndex = catalogOrder.indexOf(aKey);
+          const bIndex = catalogOrder.indexOf(bKey);
+          
+          // Both in catalog: use catalog order
+          if (aIndex >= 0 && bIndex >= 0) return aIndex - bIndex;
+          // Only a in catalog: a comes first
+          if (aIndex >= 0) return -1;
+          // Only b in catalog: b comes first
+          if (bIndex >= 0) return 1;
+          // Neither in catalog: maintain original order
+          return 0;
+        });
+        
+        const sortedCompleted = completed.sort((a, b) => {
+          const aKey = String(a.taskId || a.id || '').trim();
+          const bKey = String(b.taskId || b.id || '').trim();
+          const aIndex = catalogOrder.indexOf(aKey);
+          const bIndex = catalogOrder.indexOf(bKey);
+          
+          // Both in catalog: use catalog order
+          if (aIndex >= 0 && bIndex >= 0) return aIndex - bIndex;
+          // Only a in catalog: a comes first
+          if (aIndex >= 0) return -1;
+          // Only b in catalog: b comes first
+          if (bIndex >= 0) return 1;
+          // Neither in catalog: maintain original order
+          return 0;
+        });
+        
+        const tasksReversed = [...sortedIncomplete, ...sortedCompleted];
+        
+        mainListContainer.innerHTML = tasksReversed.map((task, displayIndex) => {
           // Check for instructions in any of the possible fields
           const instructions = task.instructions || task.info || task.details || '';
           const hasInstructions = instructions.trim().length > 0;
           
-          // Check if task is completed
-          const taskId = task.id || task.taskId;
-          const isCompleted = doneIds.has(taskId);
-          const doneTaskData = isCompleted ? doneTasksMap.get(taskId) : null;
+          // Use consistent keyId: taskId || id
+          const keyId = task.taskId || task.id;
+          
+          // Check if task is completed (status === 'done' or completedAt exists)
+          const isCompleted = task.status === 'done' || !!task.completedAt;
+          const doneTaskData = isCompleted ? {
+            completedBy: task.completedBy || null
+          } : null;
           
           let doneClass = "";
           let extraInfo = "";
@@ -4104,7 +5310,7 @@ function renderTasksList(tab, opts) {
             let infoButtonHtml = '';
             if (hasInstructions) {
               const escapedInstructions = escapeHtmlAttr(instructions);
-              const taskIdAttr = task.id ? ` data-task-id="${escapeHtmlAttr(task.id)}"` : '';
+              const taskIdAttr = keyId ? ` data-task-id="${escapeHtmlAttr(keyId)}"` : '';
               infoButtonHtml = `<button type="button" class="tasks-info-icon" data-instructions="${escapedInstructions}"${taskIdAttr} style="background:#7b3fe4;border:none;color:#fff;cursor:pointer;font-size:12px;font-weight:700;padding:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;margin-left:12px;border-radius:50%;flex-shrink:0;line-height:1;" title="View instructions">i</button>`;
             }
             
@@ -4120,22 +5326,24 @@ function renderTasksList(tab, opts) {
             let infoButtonHtml = '';
             if (hasInstructions) {
               const escapedInstructions = escapeHtmlAttr(instructions);
-              const taskIdAttr = task.id ? ` data-task-id="${escapeHtmlAttr(task.id)}"` : '';
+              const taskIdAttr = keyId ? ` data-task-id="${escapeHtmlAttr(keyId)}"` : '';
               infoButtonHtml = `<button type="button" class="tasks-info-icon" data-instructions="${escapedInstructions}"${taskIdAttr} style="background:#7b3fe4;border:none;color:#fff;cursor:pointer;font-size:12px;font-weight:700;padding:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;margin-left:12px;border-radius:50%;flex-shrink:0;line-height:1;" title="View instructions">i</button>`;
             }
             buttonsHtml = `
               <div style="display:flex;align-items:center;gap:8px;">
                 ${infoButtonHtml}
-                <button type="button" class="task-select-btn" style="padding:6px 12px;font-size:12px;font-weight:600;color:#fff;background:#7b3fe4;border:none;border-radius:6px;cursor:pointer;flex-shrink:0;">SELECT</button>
+                <button type="button" class="task-select-btn btn-neutral" style="flex-shrink:0;">SELECT</button>
               </div>
             `;
           }
           
-          const taskIdAttr = task.id ? ` data-task-id="${escapeHtmlAttr(task.id)}" data-is-completed="${isCompleted ? 'true' : 'false'}"` : '';
+          const taskIdAttr = keyId ? ` data-task-id="${escapeHtmlAttr(keyId)}" data-is-completed="${isCompleted ? 'true' : 'false'}"` : '';
+          // Add red status dot only for selectable (non-completed) tasks in MY LIST
+          const statusDot = !isCompleted ? '<span class="task-status-dot"></span>' : '';
           return `
             <div class="tasks-main-list-item ${doneClass}"${taskIdAttr} style="${cardStyle}">
               <div style="flex:1;">
-                <div style="font-weight:600;font-size:14px;color:#111;margin-bottom:4px;">${escapeHtmlDraft(task.title)}</div>
+                <div style="display:flex;align-items:center;font-weight:600;font-size:14px;color:#111;margin-bottom:4px;">${statusDot}${escapeHtmlDraft(task.title)}</div>
                 ${extraInfo}
               </div>
               ${buttonsHtml}
@@ -4195,15 +5403,18 @@ function renderTasksList(tab, opts) {
           const instructions = task.instructions || task.info || task.details || '';
           const hasInstructions = instructions.trim().length > 0;
           
+          // Use consistent keyId: taskId || id (catalog may use either)
+          const keyId = task.taskId || task.id;
+          
           // Render info button only if instructions exist
           let infoButtonHtml = '';
           if (hasInstructions) {
             const escapedInstructions = escapeHtmlAttr(instructions);
-            const taskIdAttr = task.id ? ` data-task-id="${escapeHtmlAttr(task.id)}"` : '';
+            const taskIdAttr = keyId ? ` data-task-id="${escapeHtmlAttr(keyId)}"` : '';
             infoButtonHtml = `<button type="button" class="tasks-info-icon" data-instructions="${escapedInstructions}"${taskIdAttr} style="background:#7b3fe4;border:none;color:#fff;cursor:pointer;font-size:12px;font-weight:700;padding:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;margin-left:12px;border-radius:50%;flex-shrink:0;line-height:1;" title="View instructions">i</button>`;
           }
           
-          const taskIdAttr = task.id ? ` data-task-id="${escapeHtmlAttr(task.id)}"` : '';
+          const taskIdAttr = keyId ? ` data-task-id="${escapeHtmlAttr(keyId)}"` : '';
           const assignedToHtml = task.assignedTo ? `<div class="task-worker">Taken by: ${escapeHtmlDraft(task.assignedTo)}</div>` : '';
           return `
             <div class="tasks-main-list-item"${taskIdAttr} style="display:flex;align-items:flex-start;justify-content:space-between;padding:12px;margin-bottom:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;">
@@ -4213,7 +5424,7 @@ function renderTasksList(tab, opts) {
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 ${infoButtonHtml}
-                <button type="button" class="task-done-btn" data-task-id="${task.id || ''}">MARK DONE</button>
+                <button type="button" class="task-done-btn" data-task-id="${keyId || ''}">MARK DONE</button>
               </div>
             </div>
           `;
@@ -4436,9 +5647,10 @@ function addTaskToDraft() {
     // Generate stable ID
     const id = Date.now().toString(36);
     
-    // Add to current tab's array
+    // Add to current tab's array - ALWAYS append to END (preserves catalog order)
     tasksModalDraft[tab].push({
       id,
+      taskId: id,
       title: name,
       instructions: info
     });
@@ -4447,7 +5659,10 @@ function addTaskToDraft() {
     if (nameEl) nameEl.value = '';
     if (infoEl) infoEl.value = '';
     
-    // Re-render both modal and main screen lists
+    // Re-render Settings modal list to show new task
+    renderSettingsTaskList(tab);
+    
+    // Re-render main screen list
     renderTasksList(window.currentTasksTab);
     
     console.log('[Tasks] Task added to draft for tab:', tab);
@@ -4493,12 +5708,409 @@ function removeTaskFromDraft(index) {
     const tab = getCurrentTasksTab();
     const tasks = tasksModalDraft[tab] || [];
     if (index >= 0 && index < tasks.length) {
+      // Get task data before removing
+      const task = tasks[index];
+      const resolvedTaskId = task?.taskId || task?.id;
+      const taskTitle = (task?.title || '').trim();
+      
+      // If removing the task that's being edited, cancel edit mode
+      if (resolvedTaskId && editingTaskId === resolvedTaskId) {
+        editingTaskId = null;
+      }
+      
+      // Check if current user is ADMIN
+      let isAdmin = false;
+      try {
+        const currentSettings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+        const role = currentSettings.role?.toLowerCase();
+        if (role === 'admin' || role === 'owner') {
+          isAdmin = true;
+        } else if (!role) {
+          // No role set - default to admin for Settings access (Settings is admin-only)
+          isAdmin = true;
+        }
+      } catch (e) {
+        console.warn('[Tasks] Error checking admin role, defaulting to admin:', e);
+        isAdmin = true; // Default to admin for Settings access
+      }
+      
+      // Helper function to filter out matching items (normalized taskId ONLY)
+      const filterTask = (item) => {
+        if (!item || typeof item !== 'object') return true;
+        const itemResolvedId = item?.taskId || item?.id;
+        // Match by normalized taskId ONLY (catalog is source of truth)
+        if (resolvedTaskId && itemResolvedId) {
+          return String(itemResolvedId) !== String(resolvedTaskId);
+        }
+        // If no taskId match, keep the item
+        return true;
+      };
+      
+      // 1) Remove from catalog (ff_tasks_catalog_v1[tab]) - always
+      let catalogObj = {};
+      try {
+        const raw = localStorage.getItem("ff_tasks_catalog_v1");
+        if (raw) {
+          catalogObj = JSON.parse(raw);
+        }
+      } catch (e) {
+        console.warn('[Tasks] Error parsing catalog:', e);
+      }
+      if (!catalogObj || Object.keys(catalogObj).length === 0) {
+        catalogObj = window.ff_tasks_catalog_v1 || {};
+      }
+      if (catalogObj[tab]) {
+        catalogObj[tab] = catalogObj[tab].filter(filterTask);
+        localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
+        // Update window object to keep it in sync
+        if (typeof window.ff_tasks_catalog_v1 === 'undefined' || !window.ff_tasks_catalog_v1) {
+          window.ff_tasks_catalog_v1 = {};
+        }
+        window.ff_tasks_catalog_v1[tab] = catalogObj[tab];
+      }
+      
+      // Remove from draft (in-memory catalog)
       tasks.splice(index, 1);
-      renderTasksList(window.currentTasksTab);
+      
+      // 2) Remove from all runtime lists (ACTIVE, PENDING, DONE) across ALL tabs
+      if (resolvedTaskId) {
+        const allTabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+        
+        allTabs.forEach(t => {
+          // Remove from ACTIVE
+          const activeKey = `ff_tasks_${t}_active_v1`;
+          const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+          const activeBefore = activeTasks.length;
+          const activeFiltered = activeTasks.filter(item => {
+            if (!item || typeof item !== 'object') return true;
+            const itemResolvedId = item?.taskId || item?.id;
+            return !itemResolvedId || String(itemResolvedId) !== String(resolvedTaskId);
+          });
+          if (activeFiltered.length !== activeBefore) {
+            localStorage.setItem(activeKey, JSON.stringify(activeFiltered));
+          }
+          
+          // Remove from PENDING
+          const pendingKey = `ff_tasks_${t}_pending_v1`;
+          const pendingTasks = JSON.parse(localStorage.getItem(pendingKey) || '[]');
+          const pendingBefore = pendingTasks.length;
+          const pendingFiltered = pendingTasks.filter(item => {
+            if (!item || typeof item !== 'object') return true;
+            const itemResolvedId = item?.taskId || item?.id;
+            return !itemResolvedId || String(itemResolvedId) !== String(resolvedTaskId);
+          });
+          if (pendingFiltered.length !== pendingBefore) {
+            localStorage.setItem(pendingKey, JSON.stringify(pendingFiltered));
+          }
+          
+          // Remove from DONE
+          const doneKey = `ff_tasks_${t}_done_v1`;
+          const doneTasks = JSON.parse(localStorage.getItem(doneKey) || '[]');
+          const doneBefore = doneTasks.length;
+          const doneFiltered = doneTasks.filter(item => {
+            if (!item || typeof item !== 'object') return true;
+            const itemResolvedId = item?.taskId || item?.id;
+            return !itemResolvedId || String(itemResolvedId) !== String(resolvedTaskId);
+          });
+          if (doneFiltered.length !== doneBefore) {
+            localStorage.setItem(doneKey, JSON.stringify(doneFiltered));
+          }
+        });
+        
+        console.log('[Tasks] Task removed from catalog and all active/pending/done lists across all tabs');
+      }
+      
+      // 3) Refresh UI immediately
+      if (typeof window.loadTasks === 'function') {
+        window.loadTasks();
+      }
+      renderSettingsTaskList(tab);
+      if (window.renderTasksList) {
+        if (window.renderTasksList.length > 1) {
+          window.renderTasksList(tab, { force: true });
+        } else {
+          window.renderTasksList(tab);
+        }
+      }
       console.log('[Tasks] Task removed from draft');
     }
   } catch (e) {
     console.error('[Tasks] Error removing task from draft:', e);
+  }
+}
+
+// Remove task by taskId (handles both catalog tasks and orphan tasks)
+function removeTaskFromDraftByTaskId(taskId, isOrphan, settingsTab) {
+  try {
+    // Use Settings tab if provided (when called from Settings modal), otherwise use current tab
+    const tab = settingsTab || getCurrentTasksTab();
+    
+    if (!taskId) {
+      console.warn('[Tasks] Cannot remove task: taskId is missing');
+      return;
+    }
+    
+    // If removing the task that's being edited, cancel edit mode
+    if (editingTaskId === taskId) {
+      editingTaskId = null;
+    }
+    
+    // Normalized ID (exact pattern as specified)
+    const rid = String(taskId || "").trim();
+    const getId = (t) => String(t?.taskId || t?.id || "").trim();
+    if (!rid) {
+      console.warn('[Tasks] Cannot remove task: taskId is missing or empty');
+      return;
+    }
+    
+    // Collect ALL ID variants from the task being deleted (for tombstone)
+    // Try to find the actual task object from multiple sources to get all ID variants
+    let taskObj = null;
+    
+    // First, try to find in ACTIVE list (most complete data)
+    try {
+      const activeKey = `ff_tasks_${tab}_active_v1`;
+      const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+      taskObj = activeTasks.find(task => {
+        const itemResolvedId = task?.taskId || task?.id;
+        return itemResolvedId && String(itemResolvedId).trim() === rid;
+      });
+    } catch (e) {
+      console.warn('[Tasks] Error loading from active list:', e);
+    }
+    
+    // If not found, try draft (catalog tasks in Settings)
+    if (!taskObj) {
+      const tasks = tasksModalDraft[tab] || [];
+      taskObj = tasks.find(task => {
+        const itemResolvedId = task?.taskId || task?.id;
+        return itemResolvedId && String(itemResolvedId).trim() === rid;
+      });
+    }
+    
+    // If still not found, try catalog storage
+    if (!taskObj) {
+      try {
+        const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+        const catalogList = catalogObj[tab] || [];
+        taskObj = catalogList.find(task => {
+          const itemResolvedId = task?.taskId || task?.id;
+          return itemResolvedId && String(itemResolvedId).trim() === rid;
+        });
+      } catch (e) {
+        console.warn('[Tasks] Error loading from catalog:', e);
+      }
+    }
+    
+    // Build idVariants Set from task.id, task.taskId, and taskId parameter
+    const idVariants = new Set(
+      [taskObj?.id, taskObj?.taskId, taskId].filter(Boolean).map(v => String(v).trim())
+    );
+    
+    if (idVariants.size === 0) {
+      console.warn('[Tasks] No ID variants found for deletion');
+      return;
+    }
+    
+    console.log('[Tasks] DELETE - ID variants:', Array.from(idVariants));
+    
+    // Helper function to filter out items matching ANY idVariants
+    const filterByVariants = (item) => {
+      if (!item || typeof item !== 'object') return true;
+      const itemId = String(item.id || "").trim();
+      const itemTaskId = String(item.taskId || "").trim();
+      // Remove if EITHER id OR taskId matches ANY variant
+      return !idVariants.has(itemId) && !idVariants.has(itemTaskId);
+    };
+    
+    // 1) Remove from catalog (ff_tasks_catalog_v1[tab]) using variant matching
+    let catalogObj = {};
+    try {
+      const raw = localStorage.getItem("ff_tasks_catalog_v1");
+      if (raw) {
+        catalogObj = JSON.parse(raw);
+      }
+    } catch (e) {
+      console.warn('[Tasks] Error parsing catalog:', e);
+    }
+    if (!catalogObj || Object.keys(catalogObj).length === 0) {
+      catalogObj = window.ff_tasks_catalog_v1 || {};
+    }
+    if (catalogObj[tab]) {
+      catalogObj[tab] = catalogObj[tab].filter(filterByVariants);
+      localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
+      // Update window object to keep it in sync
+      if (typeof window.ff_tasks_catalog_v1 === 'undefined' || !window.ff_tasks_catalog_v1) {
+        window.ff_tasks_catalog_v1 = {};
+      }
+      window.ff_tasks_catalog_v1[tab] = catalogObj[tab];
+    }
+    
+    // Remove from draft (in-memory catalog)
+    const tasks = tasksModalDraft[tab] || [];
+    tasksModalDraft[tab] = tasks.filter(filterByVariants);
+    
+    // 2) Remove from ALL three lists for the SAME tab using direct localStorage writes
+    const keys = [
+      `ff_tasks_${tab}_active_v1`,
+      `ff_tasks_${tab}_pending_v1`,
+      `ff_tasks_${tab}_done_v1`,
+    ];
+    
+    keys.forEach(key => {
+      try {
+        const arr = JSON.parse(localStorage.getItem(key) || "[]");
+        const filtered = arr.filter(filterByVariants);
+        if (filtered.length !== arr.length) {
+          localStorage.setItem(key, JSON.stringify(filtered));
+          console.log(`[Tasks] Removed from ${key}: ${arr.length} -> ${filtered.length}`);
+        }
+      } catch (e) {
+        console.warn(`[Tasks] Error processing ${key}:`, e);
+      }
+    });
+    
+    // 3) Add ALL idVariants to tombstone (prevent re-seeding)
+    try {
+      const tombstoneKey = "ff_tasks_active_deleted_v1";
+      let tombstone = {};
+      try {
+        const tombstoneRaw = localStorage.getItem(tombstoneKey);
+        if (tombstoneRaw) {
+          tombstone = JSON.parse(tombstoneRaw);
+        }
+      } catch (e) {
+        console.warn('[Tasks] Error parsing tombstone:', e);
+      }
+      
+      if (!tombstone || typeof tombstone !== 'object') {
+        tombstone = { opening: [], closing: [], weekly: [], monthly: [], yearly: [] };
+      }
+      
+      // Ensure tab array exists
+      if (!Array.isArray(tombstone[tab])) {
+        tombstone[tab] = [];
+      }
+      
+      // Add ALL idVariants to tombstone (avoid duplicates)
+      const existingIds = new Set(tombstone[tab].map(id => String(id).trim()));
+      idVariants.forEach(id => {
+        if (!existingIds.has(id)) {
+          tombstone[tab].push(id);
+          existingIds.add(id);
+        }
+      });
+      
+      localStorage.setItem(tombstoneKey, JSON.stringify(tombstone));
+      console.log(`[Tasks] Added ID variants to tombstone for tab ${tab}:`, Array.from(idVariants));
+    } catch (e) {
+      console.warn('[Tasks] Error updating tombstone:', e);
+    }
+    
+    console.log(`[Tasks] Task ${rid} removed from catalog and runtime lists for tab: ${tab}`);
+    
+    // 3) Refresh UI immediately
+    if (typeof window.loadTasks === 'function') {
+      window.loadTasks();
+    }
+    renderSettingsTaskList(tab);
+    if (window.renderTasksList) {
+      if (window.renderTasksList.length > 1) {
+        window.renderTasksList(tab, { force: true });
+      } else {
+        window.renderTasksList(tab);
+      }
+    }
+    console.log('[Tasks] Task removed by taskId:', taskId, 'isOrphan:', isOrphan);
+  } catch (e) {
+    console.error('[Tasks] Error removing task by taskId:', e);
+  }
+}
+
+function startEditTask(taskId) {
+  try {
+    // Set editing state
+    editingTaskId = taskId;
+    
+    // Re-render to show edit mode
+    const tab = getCurrentTasksTab();
+    renderSettingsTaskList(tab);
+    
+    // Focus on title input after a short delay to ensure DOM is updated
+    setTimeout(() => {
+      const titleInput = document.querySelector(`.tasks-edit-title[data-task-id="${taskId}"]`);
+      if (titleInput) {
+        titleInput.focus();
+        titleInput.select();
+      }
+    }, 50);
+    
+    console.log('[Tasks] Started editing task:', taskId);
+  } catch (e) {
+    console.error('[Tasks] Error starting edit:', e);
+  }
+}
+
+function saveEditTask(taskId) {
+  try {
+    const tab = getCurrentTasksTab();
+    const tasks = tasksModalDraft[tab] || [];
+    
+    // Find the task being edited
+    const taskIndex = tasks.findIndex(t => (t.taskId || t.id) === taskId);
+    if (taskIndex === -1) {
+      console.warn('[Tasks] Task not found for editing:', taskId);
+      return;
+    }
+    
+    // Get input values
+    const titleInput = document.querySelector(`.tasks-edit-title[data-task-id="${taskId}"]`);
+    const instructionsInput = document.querySelector(`.tasks-edit-instructions[data-task-id="${taskId}"]`);
+    
+    if (!titleInput) {
+      console.warn('[Tasks] Title input not found');
+      return;
+    }
+    
+    const newTitle = (titleInput.value || '').trim();
+    const newInstructions = (instructionsInput?.value || '').trim();
+    
+    // Validation
+    if (!newTitle) {
+      alert('Task title is required');
+      titleInput.focus();
+      return;
+    }
+    
+    // Update task in draft
+    const task = tasks[taskIndex];
+    task.title = newTitle;
+    task.instructions = newInstructions;
+    
+    // Clear editing state
+    editingTaskId = null;
+    
+    // Re-render to show updated task
+    renderSettingsTaskList(tab);
+    
+    console.log('[Tasks] Task saved in draft:', taskId);
+  } catch (e) {
+    console.error('[Tasks] Error saving edit:', e);
+  }
+}
+
+function cancelEditTask() {
+  try {
+    // Clear editing state
+    editingTaskId = null;
+    
+    // Re-render to show view mode
+    const tab = getCurrentTasksTab();
+    renderSettingsTaskList(tab);
+    
+    console.log('[Tasks] Edit cancelled');
+  } catch (e) {
+    console.error('[Tasks] Error cancelling edit:', e);
   }
 }
 
@@ -4513,6 +6125,10 @@ function toggleTasksModalForm() {
       // Hide form and clear fields
       cancelTasksModalForm();
     } else {
+      // Cancel any active edit when showing add form
+      if (editingTaskId) {
+        cancelEditTask();
+      }
       // Show form
       formWrap.style.display = 'block';
       const toggleBtn = document.getElementById('tasksModalToggleForm');
@@ -4533,14 +6149,38 @@ function toggleTasksModalForm() {
 function saveTasksModal() {
   try {
     if (saveTasksToStorage()) {
+      // Store the tab that was saved (Settings tab, which should match main Tasks tab)
+      const savedTab = getCurrentTasksTab();
+      
+      // Close Settings modal FIRST so renderTasksList can render MY LIST
+      // (renderTasksList checks !isTasksSettingsOpen before rendering MY LIST)
+      closeTasksSettings();
+      
       // Reload tasks from storage to ensure consistency
       loadTasks();
       
-      // Dispatch event to notify TASKS screen to update
+      // Clear any caches for the saved tab to force fresh render
+      if (typeof window.tasksCache !== 'undefined' && window.tasksCache && window.tasksCache[savedTab]) {
+        delete window.tasksCache[savedTab];
+      }
+      if (typeof window.myListCache !== 'undefined' && window.myListCache && window.myListCache[savedTab]) {
+        delete window.myListCache[savedTab];
+      }
+      
+      // Ensure legacy → v1 migration has run before rendering
+      if (typeof migrateLegacyActiveToV1 === 'function') {
+        migrateLegacyActiveToV1(savedTab);
+      }
+      
+      // Refresh MY LIST for the saved tab immediately
+      if (typeof window.renderTasksList === 'function') {
+        window.renderTasksList(savedTab, { force: true });
+      }
+      
+      // Dispatch event as backup notification (listener will also refresh)
       window.dispatchEvent(new CustomEvent('tasks:updated'));
       
-      closeTasksSettings();
-      console.log('[Tasks] Tasks saved to localStorage');
+      console.log('[Tasks] Tasks saved to localStorage and MY LIST refreshed for tab:', savedTab);
     } else {
       alert('Failed to save tasks. Please try again.');
     }
@@ -4569,8 +6209,7 @@ function openTasksSettings() {
     
     // Initialize Settings modal tab (default to 'opening' or use current main screen tab)
     // Get main screen tab (not using getCurrentTasksTab() since modal isn't open yet)
-    const mainScreenTab = currentTasksTab || 'opening';
-    currentSettingsTab = mainScreenTab;
+    const mainScreenTab = window.currentTasksTab || 'opening';
     
     // Set up event listeners for Settings modal tabs first
     const settingsTabs = document.querySelectorAll('.tasks-settings-tab');
@@ -4587,10 +6226,10 @@ function openTasksSettings() {
     });
     
     // Now set up the tab bar visual state (after listeners are set up)
-    setSettingsModalTab(currentSettingsTab);
+    setSettingsModalTab(mainScreenTab);
     
     // Load tasks for current Settings tab
-    loadTasksForSettingsTab(currentSettingsTab);
+    loadTasksForSettingsTab(mainScreenTab);
     
     // Hide form initially
     const formWrap = document.getElementById('tasksAddFormWrap');
@@ -4602,6 +6241,9 @@ function openTasksSettings() {
       toggleBtn.textContent = 'Add Task';
     }
     
+    // Clear editing state when opening modal
+    editingTaskId = null;
+    
     modal.style.display = 'flex';
     isTasksSettingsOpen = true;
     
@@ -4611,10 +6253,10 @@ function openTasksSettings() {
     // Add ESC key listener
     document.addEventListener('keydown', handleTasksSettingsEsc);
     
-    // Render modal list
-    renderTasksList(window.currentTasksTab);
+    // Render Settings modal list from catalog
+    renderSettingsTaskList(mainScreenTab);
     
-    console.log('[Tasks] Settings modal opened for tab:', currentSettingsTab);
+    console.log('[Tasks] Settings modal opened for tab:', mainScreenTab);
   } catch (e) {
     console.error('[Tasks] Error opening settings modal:', e);
   }
@@ -4639,6 +6281,9 @@ function closeTasksSettings() {
     
     // Clear form and hide it
     cancelTasksModalForm();
+    
+    // Clear editing state
+    editingTaskId = null;
     
     console.log('[Tasks] Settings modal closed');
   } catch (e) {
@@ -4895,9 +6540,9 @@ function resetTasksForCurrentTab() {
     const catalog = window.ff_tasks_catalog_v1?.[tab] || [];
     console.log("[RESET] Catalog data for tab:", tab, "items:", catalog.length);
     
-    localStorage.setItem(keyActive, JSON.stringify(catalog));
-    localStorage.setItem(keyPending, JSON.stringify([]));
-    localStorage.setItem(keyDone, JSON.stringify([]));
+    writeTasksList(tab, 'active', catalog);
+    writeTasksList(tab, 'pending', []);
+    writeTasksList(tab, 'done', []);
 
     console.log("[RESET] Storage cleared and reinitialized");
 
@@ -10962,6 +12607,7 @@ window.openLog = async function(){
       align-items: center;
       justify-content: center;
       z-index: 1000;
+      overflow: hidden;
     }
     
     /* Task Info Modal (appended to body) */
@@ -11073,13 +12719,21 @@ window.openLog = async function(){
     }
     
     .task-done-btn {
-      background: #4caf50;
-      color: white;
-      padding: 6px 10px;
-      border: none;
-      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #e5e7eb;
+      color: #111827;
+      padding: 6px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
       cursor: pointer;
-      font-size: 13px;
+      font-weight: 800;
+      font-size: 13.3333px;
+      line-height: normal;
+      min-width: auto;
+      box-shadow: none;
+      outline: none;
     }
     
     .task-item-done {
@@ -11092,8 +12746,8 @@ window.openLog = async function(){
       border-radius: 12px;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
       width: 90%;
-      max-width: 600px;
-      max-height: 80vh;
+      max-width: 650px;
+      max-height: 90vh;
       display: flex;
       flex-direction: column;
     }
@@ -11102,14 +12756,14 @@ window.openLog = async function(){
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 20px;
+      padding: 12px 20px;
       border-bottom: 1px solid #e5e7eb;
     }
     
     #tasksScreen .tasks-modal-title {
       margin: 0;
-      font-size: 18px;
-      font-weight: 600;
+      font-size: 16px;
+      font-weight: 500;
       color: #111;
     }
     
@@ -11134,10 +12788,13 @@ window.openLog = async function(){
     }
     
     #tasksScreen .tasks-modal-content {
-      padding: 20px;
+      padding: 16px 20px;
       overflow-y: auto;
-      flex: 1;
-      padding-bottom: 80px; /* Space for sticky footer */
+      -webkit-overflow-scrolling: touch;
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
     }
     
     #tasksScreen .tasks-modal-footer {
@@ -11295,42 +12952,45 @@ window.openLog = async function(){
         </div>
         <div class="tasks-modal-content">
           <!-- Tab bar inside Settings modal -->
-          <div id="tasksSettingsTabs" style="display:flex;border-bottom:1px solid #e5e7eb;background:#f9fafb;margin:-20px -20px 20px -20px;padding:0 20px;">
-            <button class="tasks-settings-tab" data-tab="opening" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Opening</button>
-            <button class="tasks-settings-tab" data-tab="closing" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Closing</button>
-            <button class="tasks-settings-tab" data-tab="weekly" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Weekly</button>
-            <button class="tasks-settings-tab" data-tab="monthly" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Monthly</button>
-            <button class="tasks-settings-tab" data-tab="yearly" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Yearly</button>
+          <div id="tasksSettingsTabs" style="display:flex;border-bottom:1px solid #e5e7eb;background:#f9fafb;margin:-16px -20px 12px -20px;padding:0 20px;">
+            <button class="tasks-settings-tab" data-tab="opening" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Opening</button>
+            <button class="tasks-settings-tab" data-tab="closing" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Closing</button>
+            <button class="tasks-settings-tab" data-tab="weekly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Weekly</button>
+            <button class="tasks-settings-tab" data-tab="monthly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Monthly</button>
+            <button class="tasks-settings-tab" data-tab="yearly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Yearly</button>
           </div>
           
-          <!-- Add Task button -->
-          <button id="tasksModalToggleForm" type="button" class="btn-pill" style="margin-bottom:16px;font-size:13px;">Add Task</button>
+          <!-- Add Task section (always visible, fixed position above catalog) -->
+          <div style="flex-shrink:0;margin-bottom:12px;">
+            <button id="tasksModalToggleForm" type="button" class="btn-pill" style="margin-bottom:8px;font-size:13px;">Add Task</button>
           
           <!-- Collapsible form section -->
-          <div id="tasksAddFormWrap" style="display:none;margin-bottom:20px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-            <label style="display:block;font-size:13px;font-weight:500;color:#111;margin-bottom:6px;">Task Name</label>
-            <input type="text" id="taskNameInput" class="taskNameInput" placeholder="e.g., Turn on lights" style="width:100%;padding:10px;margin-bottom:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;font-family:inherit;">
-            <div id="taskNameError" style="color:#dc2626;font-size:12px;margin-bottom:12px;min-height:16px;display:none;"></div>
-            
-            <label style="display:block;font-size:13px;font-weight:500;color:#111;margin-bottom:6px;">Info / Instructions</label>
-            <textarea id="taskInfoInput" class="taskInfoInput" placeholder="Write the instructions..." rows="3" style="width:100%;padding:10px;margin-bottom:12px;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;resize:vertical;font-family:inherit;"></textarea>
+            <div id="tasksAddFormWrap" style="display:none;padding:12px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;margin-bottom:0;">
+              <label style="display:block;font-size:12px;font-weight:500;color:#111;margin-bottom:4px;">Task Name</label>
+              <input type="text" id="taskNameInput" class="taskNameInput" placeholder="e.g., Turn on lights" style="width:100%;padding:8px;margin-bottom:4px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;">
+              <div id="taskNameError" style="color:#dc2626;font-size:11px;margin-bottom:8px;min-height:14px;display:none;"></div>
+              
+              <label style="display:block;font-size:12px;font-weight:500;color:#111;margin-bottom:4px;">Info / Instructions</label>
+              <textarea id="taskInfoInput" class="taskInfoInput" placeholder="Write the instructions..." rows="3" style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;"></textarea>
             
             <div style="display:flex;gap:8px;">
-              <button id="taskAddBtn" type="button" class="btn-primary" style="padding:8px 16px;font-size:13px;">Add</button>
-              <button id="taskCancelBtn" type="button" class="btn-pill" style="padding:8px 16px;font-size:13px;">Cancel</button>
+                <button id="taskAddBtn" type="button" class="btn-primary" style="padding:6px 14px;font-size:12px;">Add</button>
+                <button id="taskCancelBtn" type="button" class="btn-pill" style="padding:6px 14px;font-size:12px;">Cancel</button>
+              </div>
             </div>
           </div>
           
-          <!-- MY LIST section (always visible) -->
-          <div style="border-top:1px solid #e5e7eb;margin:20px 0;padding-top:20px;">
-            <h4 style="margin:0 0 12px;font-size:14px;font-weight:600;color:#111;">MY LIST</h4>
-            <div id="tasksModalDraftList" style="min-height:40px;max-height:300px;overflow-y:auto;"></div>
+          <!-- Task Catalog section (no internal scroll, flows naturally) -->
+          <div style="flex:1;display:flex;flex-direction:column;min-height:0;border-top:1px solid #e5e7eb;padding-top:12px;">
+            <h4 style="margin:0 0 8px;font-size:13px;font-weight:600;color:#111;">Task Catalog</h4>
+            <div id="tasksModalDraftList" style="height:auto;max-height:none;overflow:visible;"></div>
           </div>
         </div>
         
         <!-- Sticky Save button -->
-        <div class="tasks-modal-footer" style="padding:16px 20px;border-top:1px solid #e5e7eb;background:#fff;border-radius:0 0 12px 12px;">
-          <button id="tasksModalSaveBtn" class="btn-primary" style="width:100%;padding:12px;font-size:14px;">Save</button>
+        <div class="tasks-modal-footer" style="padding:10px 20px;border-top:1px solid #e5e7eb;background:#fff;border-radius:0 0 12px 12px;">
+          <div style="font-size:11px;color:#666;margin-bottom:4px;text-align:center;">Save all changes to Task Catalog</div>
+          <button id="tasksModalSaveBtn" class="btn-primary" style="width:100%;padding:8px;font-size:13px;">Save</button>
         </div>
       </div>
     </div>
