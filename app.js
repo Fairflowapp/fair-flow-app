@@ -1,3 +1,5 @@
+console.log('[BUILD MARKER] app.js loaded', new Date().toISOString());
+
 // =====================
 // Global Error Logging
 // =====================
@@ -974,6 +976,29 @@ window.addEventListener("DOMContentLoaded", () => {
   } catch (e) {
     console.error("[Tasks] Error initializing Tasks screen buttons:", e);
   }
+
+  // Enforce history retention policy on app load
+  enforceHistoryRetention();
+  
+  // Queue Auto Reset: call on startup and set up interval
+  try {
+    if (typeof window.ffMaybeAutoResetQueue === 'function') {
+      window.ffMaybeAutoResetQueue(new Date());
+    }
+    
+    // Set up interval timer (30 seconds) - guard with window flag
+    if (!window.__queueAutoResetIntervalStarted) {
+      window.__queueAutoResetIntervalStarted = true;
+      setInterval(() => {
+        if (typeof window.ffMaybeAutoResetQueue === 'function') {
+          window.ffMaybeAutoResetQueue(new Date());
+        }
+      }, 30 * 1000);
+      console.log('[AUTO_RESET][QUEUE] Interval timer started (30s)');
+    }
+  } catch (e) {
+    console.error('[AUTO_RESET][QUEUE] Error initializing:', e);
+  }
 });
 
 // Initialize Tasks screen buttons function (can be called when Tasks screen opens)
@@ -1185,6 +1210,100 @@ function initializeTasksScreenButtons() {
 // Expose for use in index.html
 window.initializeTasksScreenButtons = initializeTasksScreenButtons;
 
+// History retention policy: Keep last 90 days and max 10,000 entries
+function enforceHistoryRetention() {
+  try {
+    const MAX_DAYS = 90;
+    const MAX_ENTRIES = 10000;
+
+    const raw = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+    if (!Array.isArray(raw)) return;
+
+    const now = Date.now();
+    const cutoff = now - MAX_DAYS * 24 * 60 * 60 * 1000;
+
+    // Keep entries that are within MAX_DAYS if they have ts.
+    // If an entry has no ts, keep it (legacy safety).
+    let filtered = raw.filter(e => {
+      if (!e || typeof e !== 'object') return false;
+      if (!e.ts) return true;
+      return e.ts >= cutoff;
+    });
+
+    // Keep only the newest MAX_ENTRIES
+    if (filtered.length > MAX_ENTRIES) {
+      filtered = filtered.slice(-MAX_ENTRIES);
+    }
+
+    localStorage.setItem('ffv24_log', JSON.stringify(filtered));
+  } catch (err) {
+    console.error('[HISTORY RETENTION] failed', err);
+  }
+}
+
+// Expose globally so it can be called from index.html's addHistoryEntry if needed
+window.enforceHistoryRetention = enforceHistoryRetention;
+
+// Helper function to log Tasks actions to history
+function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, performedBy, extra }) {
+  try {
+    const now = new Date();
+    const entry = {
+      source: 'tasks',
+      dateTime: now.toISOString(),
+      ts: now.getTime(),
+      action: action || '-',
+      taskId: taskId || null,
+      taskTitle: taskTitle || null,
+      role: role || '-',
+      performedBy: performedBy || '-',
+      worker: worker || '-',
+      extra: extra || null,
+    };
+    // Call addHistoryEntry if available (defined in index.html), then extend the entry
+    if (typeof addHistoryEntry === 'function') {
+      addHistoryEntry(entry.action, entry.role, entry.performedBy, entry.worker, entry.source);
+      // Extend the last entry with task-specific fields
+      const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+      if (logArr.length > 0) {
+        const lastEntry = logArr[logArr.length - 1];
+        lastEntry.taskId = entry.taskId;
+        lastEntry.taskTitle = entry.taskTitle;
+        lastEntry.extra = entry.extra;
+        lastEntry.dateTime = entry.dateTime;
+        lastEntry.ts = entry.ts;
+        localStorage.setItem('ffv24_log', JSON.stringify(logArr));
+      }
+      // Enforce retention policy after writing (even if no entries to extend)
+      enforceHistoryRetention();
+    } else {
+      // Fallback: write directly to ffv24_log
+      const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+      const historyEntry = {
+        date: now.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }),
+        time: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        action: entry.action || '',
+        role: entry.role || '',
+        performedBy: entry.performedBy || '',
+        worker: entry.worker || '',
+        source: entry.source || 'tasks',
+        ts: entry.ts,
+        dateTime: entry.dateTime,
+        taskId: entry.taskId,
+        taskTitle: entry.taskTitle,
+        extra: entry.extra
+      };
+      logArr.push(historyEntry);
+      localStorage.setItem('ffv24_log', JSON.stringify(logArr));
+    }
+    // Enforce retention policy after writing
+    enforceHistoryRetention();
+    console.log('[TASKS HISTORY] wrote', entry);
+  } catch (err) {
+    console.error('[TASKS HISTORY] failed', err);
+  }
+}
+
 // Safely move a task into the Pending list (tab-specific storage)
 function moveTaskToPending(taskId, workerName) {
     console.log(`%c[MOVE TO PENDING] START`, 'color:blue;font-weight:bold', { taskId, workerName });
@@ -1257,6 +1376,20 @@ function moveTaskToPending(taskId, workerName) {
                 pendingTasks.push(pendingCopy);
                 localStorage.setItem(pendingKey, JSON.stringify(pendingTasks));
                 console.log(`[MOVE TO PENDING] Added to PENDING list: ${pendingKey}, length: ${pendingTasks.length}`);
+                
+                // Log to history after successful SELECT
+                const taskTitle = task.title || '';
+                const worker = (typeof getCurrentActorName === 'function' ? getCurrentActorName() : (window.__ff_actorName || window.currentUserName || null)) || '-';
+                const currentTab = (typeof getCurrentTasksTab === 'function') ? getCurrentTasksTab() : (window.currentTasksTab || tab || null);
+                addTasksHistoryEntry({
+                    action: `Task Selected: ${taskTitle || taskId || ''}`.trim(),
+                    taskId,
+                    taskTitle,
+                    worker,
+                    role: '-',
+                    performedBy: '-',
+                    extra: currentTab ? { tab: currentTab, status: 'selected' } : { status: 'selected' }
+                });
             } else {
                 console.warn(`[MOVE TO PENDING] Task ${taskId} already exists in PENDING at index ${pendingIndex}, skipping duplicate`);
             }
@@ -1337,6 +1470,20 @@ function moveTaskToPending(taskId, workerName) {
                     
                     const fromStatus = originalStatus === null ? "null" : (originalStatus || "empty");
                     console.log("[SELECT] moved to pending", { tab, id: taskId, from: fromStatus, to: "pending" });
+                    
+                    // Log to history after successful SELECT
+                    const taskTitle = task.title || '';
+                    const worker = (typeof getCurrentActorName === 'function' ? getCurrentActorName() : (window.__ff_actorName || window.currentUserName || null)) || '-';
+                    const currentTab = (typeof getCurrentTasksTab === 'function') ? getCurrentTasksTab() : (window.currentTasksTab || tab || null);
+                    addTasksHistoryEntry({
+                        action: `Task Selected: ${taskTitle || taskId || ''}`.trim(),
+                        taskId,
+                        taskTitle,
+                        worker,
+                        role: '-',
+                        performedBy: '-',
+                        extra: currentTab ? { tab: currentTab, status: 'selected' } : { status: 'selected' }
+                    });
                     
                     if (window.renderTasksList) {
                         if (window.renderTasksList.length > 1) {
@@ -1508,6 +1655,21 @@ function markTaskDone(taskId, workerName) {
     const completedCount = verifyActive.filter(t => t.status === 'done' || t.completedAt).length;
     console.log(`[MARK DONE] Active saved: ${completedCount} completed task(s) in ACTIVE list`);
     
+    // Log to history after successful DONE
+    const completedTask = idx >= 0 ? activeTasks[idx] : (pendingTask || null);
+    const taskTitle = completedTask?.title || pendingTask?.title || '';
+    const worker = assignedEmployee || '-';
+    const currentTab = (typeof getCurrentTasksTab === 'function') ? getCurrentTasksTab() : (window.currentTasksTab || tab || null);
+    addTasksHistoryEntry({
+        action: `Task Completed: ${taskTitle || keyId || ''}`.trim(),
+        taskId: keyId,
+        taskTitle,
+        worker,
+        role: '-',
+        performedBy: '-',
+        extra: currentTab ? { tab: currentTab, status: 'done' } : { status: 'done' }
+    });
+    
     console.log(`%c[MARK DONE] COMPLETE`, 'color:green;font-weight:bold', {
         tab,
         taskId: keyId,
@@ -1538,6 +1700,49 @@ function markTaskDone(taskId, workerName) {
     // Update tab badges after marking task as done
     if (typeof window.ffUpdateTasksTabBadges === 'function') {
         setTimeout(() => window.ffUpdateTasksTabBadges(), 50);
+    }
+    
+    // Check for auto-reset after marking task as done (if opening/closing tab, no setTimeout)
+    if (tab === 'opening') {
+        try {
+            if (typeof window.ffMaybeAutoResetOpening === 'function') {
+                window.ffMaybeAutoResetOpening(new Date());
+            }
+        } catch (e) {
+            // Silently ignore errors
+        }
+    } else if (tab === 'closing') {
+        try {
+            if (typeof window.ffMaybeAutoResetClosing === 'function') {
+                window.ffMaybeAutoResetClosing(new Date());
+            }
+        } catch (e) {
+            // Silently ignore errors
+        }
+    } else if (tab === 'weekly') {
+        try {
+            if (typeof window.ffMaybeAutoResetWeekly === 'function') {
+                window.ffMaybeAutoResetWeekly(new Date());
+            }
+        } catch (e) {
+            // Silently ignore errors
+        }
+    } else if (tab === 'monthly') {
+        try {
+            if (typeof window.ffMaybeAutoResetMonthly === 'function') {
+                window.ffMaybeAutoResetMonthly(new Date());
+            }
+        } catch (e) {
+            // Silently ignore errors
+        }
+    } else if (tab === 'yearly') {
+        try {
+            if (typeof window.ffMaybeAutoResetYearly === 'function') {
+                window.ffMaybeAutoResetYearly(new Date());
+            }
+        } catch (e) {
+            // Silently ignore errors
+        }
     }
 }
 
@@ -2260,6 +2465,18 @@ window.doResetCurrentTab = function doResetCurrentTab() {
         console.warn("RESET: renderTasksList not found, UI may not refresh");
     }
 
+    // Log to history after successful RESET
+    const currentTab = (typeof getCurrentTasksTab === 'function') ? getCurrentTasksTab() : (window.currentTasksTab || tab || null);
+    addTasksHistoryEntry({
+        action: `Tasks Reset: ${currentTab || ''}`.trim(),
+        taskId: null,
+        taskTitle: null,
+        worker: '-',
+        role: '-',
+        performedBy: '-',
+        extra: currentTab ? { tab: currentTab, reset: true } : { reset: true }
+    });
+
     console.log("RESET: STATE-ONLY reset complete for tab:", tab);
 };
 
@@ -2382,6 +2599,130 @@ function ffIsTaskCompleted(task) {
   return false;
 }
 
+// Helper function to load weekly catalog and build a map by taskId
+function ffGetWeeklyCatalogMap() {
+  const catalogMap = new Map();
+  try {
+    const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
+    if (!catalogRaw) return catalogMap;
+    
+    const catalogObj = JSON.parse(catalogRaw);
+    const weeklyCatalog = catalogObj.weekly || [];
+    
+    weeklyCatalog.forEach(catalogTask => {
+      if (catalogTask && typeof catalogTask === 'object') {
+        const catalogId = catalogTask.taskId || catalogTask.id;
+        if (catalogId) {
+          catalogMap.set(String(catalogId).trim(), catalogTask);
+        }
+      }
+    });
+  } catch (e) {
+    console.warn('[Weekly Schedule] Error loading catalog:', e);
+  }
+  return catalogMap;
+}
+
+// Helper function to check if a weekly task is scheduled for today
+function ffIsWeeklyTaskScheduledToday(taskId, nowDate) {
+  if (!taskId) return true; // Fail-open: if no taskId, show it
+  
+  const now = nowDate || new Date();
+  const todayWeekday = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  
+  // Load catalog map
+  const catalogMap = ffGetWeeklyCatalogMap();
+  const catalogTask = catalogMap.get(String(taskId).trim());
+  
+  // If missing catalog entry, treat as "any" (show every day)
+  if (!catalogTask) {
+    return true;
+  }
+  
+  const scheduleWeekdays = catalogTask.scheduleWeekdays;
+  
+  // If "any" or undefined, show every day
+  if (scheduleWeekdays === 'any' || scheduleWeekdays === undefined) {
+    return true;
+  }
+  
+  // If array, check if today's weekday is included
+  if (Array.isArray(scheduleWeekdays)) {
+    // If empty array, treat as "any" (fail-open)
+    if (scheduleWeekdays.length === 0) {
+      return true;
+    }
+    return scheduleWeekdays.includes(todayWeekday);
+  }
+  
+  // Fallback: fail-open (show task)
+  return true;
+}
+
+// Helper function to load monthly catalog and build a map by taskId
+function ffGetMonthlyCatalogMap() {
+  const catalogMap = new Map();
+  try {
+    const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
+    if (!catalogRaw) return catalogMap;
+    
+    const catalogObj = JSON.parse(catalogRaw);
+    const monthlyCatalog = catalogObj.monthly || [];
+    
+    monthlyCatalog.forEach(catalogTask => {
+      if (catalogTask && typeof catalogTask === 'object') {
+        const catalogId = catalogTask.taskId || catalogTask.id;
+        if (catalogId) {
+          catalogMap.set(String(catalogId).trim(), catalogTask);
+        }
+      }
+    });
+  } catch (e) {
+    console.warn('[Monthly Schedule] Error loading catalog:', e);
+  }
+  return catalogMap;
+}
+
+// Helper function to check if a monthly task is scheduled for today
+function ffIsMonthlyTaskScheduledToday(taskId, nowDate) {
+  if (!taskId) return true; // Fail-open: if no taskId, show it
+  
+  const now = nowDate || new Date();
+  const todayDayOfMonth = now.getDate(); // 1..31
+  
+  // Load catalog map
+  const catalogMap = ffGetMonthlyCatalogMap();
+  const catalogTask = catalogMap.get(String(taskId).trim());
+  
+  // If missing catalog entry, treat as "any" (show every day)
+  if (!catalogTask) {
+    return true;
+  }
+  
+  const scheduleDayOfMonth = catalogTask.scheduleDayOfMonth;
+  
+  // If "any" or undefined, show every day
+  if (scheduleDayOfMonth === 'any' || scheduleDayOfMonth === undefined) {
+    return true;
+  }
+  
+  // If number, check if equals today's day-of-month
+  if (typeof scheduleDayOfMonth === 'number' && scheduleDayOfMonth >= 1 && scheduleDayOfMonth <= 31) {
+    return scheduleDayOfMonth === todayDayOfMonth;
+  }
+  
+  // If string that represents a number, parse and compare
+  if (typeof scheduleDayOfMonth === 'string') {
+    const n = Number(scheduleDayOfMonth);
+    if (n >= 1 && n <= 31 && !isNaN(n)) {
+      return n === todayDayOfMonth;
+    }
+  }
+  
+  // Fallback: fail-open (show task)
+  return true;
+}
+
 function ffGetTaskIdSetFromStorage(key) {
   const idSet = new Set();
   try {
@@ -2445,7 +2786,24 @@ function ffGetUncompletedCountForTab(tab) {
     
     // If both keys resolve to the same string, treat as single source
     if (activeKey === pendingKey) {
-      const idSet = ffGetTaskIdSetFromStorage(activeKey);
+      let idSet = ffGetTaskIdSetFromStorage(activeKey);
+      
+      // For weekly tab, filter by scheduleWeekdays (only count tasks scheduled for today)
+      if (tab === 'weekly') {
+        const now = new Date();
+        idSet = new Set(Array.from(idSet).filter(taskId => {
+          return ffIsWeeklyTaskScheduledToday(taskId, now);
+        }));
+      }
+      
+      // For monthly tab, filter by scheduleDayOfMonth (only count tasks scheduled for today)
+      if (tab === 'monthly') {
+        const now = new Date();
+        idSet = new Set(Array.from(idSet).filter(taskId => {
+          return ffIsMonthlyTaskScheduledToday(taskId, now);
+        }));
+      }
+      
       return idSet.size;
     }
     
@@ -2454,7 +2812,58 @@ function ffGetUncompletedCountForTab(tab) {
     const pendingIds = ffGetTaskIdSetFromStorage(pendingKey);
     
     // Union: combine both sets (Set automatically handles duplicates)
-    const unionSet = new Set([...activeIds, ...pendingIds]);
+    let unionSet = new Set([...activeIds, ...pendingIds]);
+    
+    // For weekly tab, filter by scheduleWeekdays (only count tasks scheduled for today)
+    if (tab === 'weekly') {
+      const now = new Date();
+      unionSet = new Set(Array.from(unionSet).filter(taskId => {
+        return ffIsWeeklyTaskScheduledToday(taskId, now);
+      }));
+    }
+    
+    // For monthly tab, filter by scheduleDayOfMonth (only count tasks scheduled for today)
+    if (tab === 'monthly') {
+      const now = new Date();
+      unionSet = new Set(Array.from(unionSet).filter(taskId => {
+        return ffIsMonthlyTaskScheduledToday(taskId, now);
+      }));
+    }
+    
+    // For yearly tab, filter by active status (appears if today >= scheduled date AND not completed)
+    if (tab === 'yearly') {
+      const now = new Date();
+      // Need to check actual task objects, not just IDs
+      // Load active and pending lists to check task status
+      try {
+        const activeKey = `ff_tasks_${tab}_active_v1`;
+        const pendingKey = `ff_tasks_${tab}_pending_v1`;
+        const activeRaw = localStorage.getItem(activeKey);
+        const pendingRaw = localStorage.getItem(pendingKey);
+        const activeList = activeRaw ? JSON.parse(activeRaw) : [];
+        const pendingList = pendingRaw ? JSON.parse(pendingRaw) : [];
+        
+        // Build map of taskId -> task for quick lookup
+        const taskMap = new Map();
+        [...activeList, ...pendingList].forEach(task => {
+          if (!task || typeof task !== 'object') return;
+          const taskId = task.taskId || task.id;
+          if (taskId) {
+            taskMap.set(String(taskId).trim(), task);
+          }
+        });
+        
+        // Filter unionSet to only include active tasks
+        unionSet = new Set(Array.from(unionSet).filter(taskId => {
+          const task = taskMap.get(String(taskId).trim());
+          if (!task) return false;
+          return ffIsYearlyTaskActive(task, now);
+        }));
+      } catch (e) {
+        console.warn('[Badge] Error filtering yearly tasks:', e);
+        unionSet = new Set(); // Fail-closed: if error, don't count any
+      }
+    }
     
     return unionSet.size;
   } catch (e) {
@@ -2499,22 +2908,62 @@ function ffIsAlertsActiveForTab(tab, nowDate) {
       return nowTotalMinutes >= startTotalMinutes;
     }
     
-    // Handle weekly (weekday-based)
+    // Handle weekly (time-based)
     if (tab === 'weekly') {
-      const startWeekday = tabConfig && tabConfig.startWeekday !== undefined 
-        ? tabConfig.startWeekday 
-        : 4; // Default: Thursday
-      
-      if (isNaN(startWeekday) || startWeekday < 0 || startWeekday > 6) {
-        return true; // Invalid weekday, show badge
+      if (!tabConfig || !tabConfig.startTime) {
+        // No config found, use default
+        const defaultTime = '09:00';
+        const [defaultHour, defaultMinute] = defaultTime.split(':').map(Number);
+        const nowHour = now.getHours();
+        const nowMinute = now.getMinutes();
+        const nowTotalMinutes = nowHour * 60 + nowMinute;
+        const defaultTotalMinutes = defaultHour * 60 + defaultMinute;
+        return nowTotalMinutes >= defaultTotalMinutes;
       }
       
-      const nowWeekday = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-      return nowWeekday >= startWeekday;
+      // Parse startTime (format: "HH:MM")
+      const [startHour, startMinute] = tabConfig.startTime.split(':').map(Number);
+      if (isNaN(startHour) || isNaN(startMinute)) {
+        return true; // Invalid time, show badge
+      }
+      
+      const nowHour = now.getHours();
+      const nowMinute = now.getMinutes();
+      const nowTotalMinutes = nowHour * 60 + nowMinute;
+      const startTotalMinutes = startHour * 60 + startMinute;
+      
+      // Return true if current time >= start time
+      return nowTotalMinutes >= startTotalMinutes;
     }
     
-    // Handle monthly (day-of-month-based)
+    // Handle monthly (time-based)
     if (tab === 'monthly') {
+      if (!tabConfig || !tabConfig.startTime) {
+        // No config found, use default
+        const defaultTime = '09:00';
+        const [defaultHour, defaultMinute] = defaultTime.split(':').map(Number);
+        const nowHour = now.getHours();
+        const nowMinute = now.getMinutes();
+        const nowTotalMinutes = nowHour * 60 + nowMinute;
+        const defaultTotalMinutes = defaultHour * 60 + defaultMinute;
+        return nowTotalMinutes >= defaultTotalMinutes;
+      }
+      
+      // Parse startTime (format: "HH:MM")
+      const [startHour, startMinute] = tabConfig.startTime.split(':').map(Number);
+      if (isNaN(startHour) || isNaN(startMinute)) {
+        return true; // Invalid time, show badge
+      }
+      
+      const nowHour = now.getHours();
+      const nowMinute = now.getMinutes();
+      const nowTotalMinutes = nowHour * 60 + nowMinute;
+      const startTotalMinutes = startHour * 60 + startMinute;
+      return nowTotalMinutes >= startTotalMinutes;
+    }
+    
+    // Handle yearly (month/day-based)
+    if (tab === 'yearly') {
       const startDayOfMonth = tabConfig && tabConfig.startDayOfMonth !== undefined
         ? tabConfig.startDayOfMonth
         : 20; // Default: day 20
@@ -2631,3 +3080,590 @@ function ffUpdateHomeTasksBadge() {
 // Expose badge update functions
 window.ffUpdateTasksTabBadges = ffUpdateTasksTabBadges;
 window.ffUpdateHomeTasksBadge = ffUpdateHomeTasksBadge;
+
+// Expose weekly schedule helper function
+window.ffIsWeeklyTaskScheduledToday = ffIsWeeklyTaskScheduledToday;
+
+// Expose monthly schedule helper function
+window.ffIsMonthlyTaskScheduledToday = ffIsMonthlyTaskScheduledToday;
+
+// ============================================
+// Yearly Schedule Helper Functions
+// ============================================
+
+// Get yearly catalog map (taskId -> catalogTask)
+function ffGetYearlyCatalogMap() {
+  const catalogMap = new Map();
+  try {
+    const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
+    if (!catalogRaw) return catalogMap;
+    
+    const catalogObj = JSON.parse(catalogRaw);
+    const yearlyCatalog = catalogObj.yearly || [];
+    
+    yearlyCatalog.forEach(catalogTask => {
+      if (catalogTask && typeof catalogTask === 'object') {
+        const catalogId = catalogTask.taskId || catalogTask.id;
+        if (catalogId) {
+          catalogMap.set(String(catalogId).trim(), catalogTask);
+        }
+      }
+    });
+  } catch (e) {
+    console.warn('[Yearly Schedule] Error loading catalog:', e);
+  }
+  return catalogMap;
+}
+
+// Check if a yearly task is active (appears in MY LIST/PENDING)
+// Logic: appears if has valid date AND today >= scheduled date AND not completed
+// If not completed, continues to appear every day after until completed
+function ffIsYearlyTaskActive(task, nowDate) {
+  if (!task || typeof task !== 'object') return false;
+  
+  const now = nowDate || new Date();
+  const todayMonth = now.getMonth() + 1; // 1..12 (JS getMonth() returns 0..11)
+  const todayDay = now.getDate(); // 1..31
+  const todayYear = now.getFullYear();
+  
+  // Get schedule from task (prefer task fields, fallback to catalog lookup)
+  let scheduleMonth = task.scheduleMonth;
+  let scheduleDay = task.scheduleDay;
+  
+  // If not in task, try catalog lookup
+  if ((scheduleMonth === undefined || scheduleMonth === null) || 
+      (scheduleDay === undefined || scheduleDay === null)) {
+    const taskId = task.taskId || task.id;
+    if (taskId) {
+      const catalogMap = ffGetYearlyCatalogMap();
+      const catalogTask = catalogMap.get(String(taskId).trim());
+      if (catalogTask) {
+        if (scheduleMonth === undefined || scheduleMonth === null) {
+          scheduleMonth = catalogTask.scheduleMonth;
+        }
+        if (scheduleDay === undefined || scheduleDay === null) {
+          scheduleDay = catalogTask.scheduleDay;
+        }
+      }
+    }
+  }
+  
+  // FAIL-CLOSED: Missing or invalid date
+  if (scheduleMonth === undefined || scheduleMonth === null || 
+      scheduleDay === undefined || scheduleDay === null) {
+    return false;
+  }
+  
+  // Parse and validate
+  const monthNum = typeof scheduleMonth === 'number' ? scheduleMonth : 
+                   (typeof scheduleMonth === 'string' && /^\d+$/.test(scheduleMonth)) ? parseInt(scheduleMonth, 10) : null;
+  const dayNum = typeof scheduleDay === 'number' ? scheduleDay : 
+                 (typeof scheduleDay === 'string' && /^\d+$/.test(scheduleDay)) ? parseInt(scheduleDay, 10) : null;
+  
+  // If invalid values, fail-closed
+  if (monthNum === null || monthNum < 1 || monthNum > 12 || 
+      dayNum === null || dayNum < 1 || dayNum > 31) {
+    return false;
+  }
+  
+  // Check if task is completed
+  const isCompleted = task.status === 'done' || !!task.completedAt || 
+                      task.completed === true || task.isCompleted === true ||
+                      task.done === true || task.isDone === true;
+  
+  if (isCompleted) {
+    return false; // Completed tasks don't appear
+  }
+  
+  // Check if today >= scheduled date (year-agnostic comparison)
+  // Compare month first, then day
+  if (todayMonth > monthNum) {
+    return true; // Past the scheduled month
+  }
+  if (todayMonth < monthNum) {
+    return false; // Before the scheduled month
+  }
+  // Same month - compare day
+  if (todayDay >= dayNum) {
+    return true; // On or past the scheduled day
+  }
+  return false; // Before the scheduled day
+}
+
+// Legacy function for backward compatibility (used by auto-reset)
+// Check if a yearly task is scheduled for today (month+day) - FAIL-CLOSED
+function ffIsYearlyTaskScheduledToday(taskId, nowDate) {
+  if (!taskId) return false; // Fail-closed: if no taskId, don't show it
+  
+  const now = nowDate || new Date();
+  const todayMonth = now.getMonth() + 1; // 1..12 (JS getMonth() returns 0..11)
+  const todayDay = now.getDate(); // 1..31
+  
+  // Load catalog map
+  const catalogMap = ffGetYearlyCatalogMap();
+  const catalogTask = catalogMap.get(String(taskId).trim());
+  
+  // If missing catalog entry, fail-closed (don't show)
+  if (!catalogTask) {
+    return false;
+  }
+  
+  const scheduleMonth = catalogTask.scheduleMonth;
+  const scheduleDay = catalogTask.scheduleDay;
+  
+  // If either is missing/invalid, fail-closed (date is required)
+  if (scheduleMonth === undefined || scheduleMonth === null || 
+      scheduleDay === undefined || scheduleDay === null) {
+    return false;
+  }
+  
+  // Parse and validate
+  const monthNum = typeof scheduleMonth === 'number' ? scheduleMonth : 
+                   (typeof scheduleMonth === 'string' && /^\d+$/.test(scheduleMonth)) ? parseInt(scheduleMonth, 10) : null;
+  const dayNum = typeof scheduleDay === 'number' ? scheduleDay : 
+                 (typeof scheduleDay === 'string' && /^\d+$/.test(scheduleDay)) ? parseInt(scheduleDay, 10) : null;
+  
+  // If invalid values, fail-closed
+  if (monthNum === null || monthNum < 1 || monthNum > 12 || 
+      dayNum === null || dayNum < 1 || dayNum > 31) {
+    return false;
+  }
+  
+  // Both valid - compare with today
+  return monthNum === todayMonth && dayNum === todayDay;
+}
+
+// Expose yearly helper functions
+window.ffIsYearlyTaskActive = ffIsYearlyTaskActive;
+window.ffIsYearlyTaskScheduledToday = ffIsYearlyTaskScheduledToday;
+
+// ============================================
+// Auto-Reset Helper Functions (Opening tab only)
+// ============================================
+
+// Get today's date as "YYYY-MM-DD" in local timezone
+function ffGetTodayLocalISO() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Parse "HH:MM" time string to minutes since midnight
+function ffParseHHMMToMinutes(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') return null;
+  const parts = timeStr.split(':');
+  if (parts.length !== 2) return null;
+  const hour = parseInt(parts[0], 10);
+  const minute = parseInt(parts[1], 10);
+  if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+  return hour * 60 + minute;
+}
+
+// Get auto-reset config for a tab (with defaults)
+function ffGetAutoResetConfig(tab) {
+  if (tab !== 'opening' && tab !== 'closing' && tab !== 'weekly' && tab !== 'monthly' && tab !== 'yearly') return null;
+  
+  try {
+    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const tabConfig = alertWindows[tab] || {};
+    
+    return {
+      autoResetEnabled: tabConfig.autoResetEnabled === true,
+      autoResetTime: tabConfig.autoResetTime || '21:00'
+    };
+  } catch (e) {
+    console.warn('[Auto-Reset] Error loading config:', e);
+    return {
+      autoResetEnabled: false,
+      autoResetTime: '21:00'
+    };
+  }
+}
+
+// Get auto-reset state (last run date)
+function ffGetAutoResetState(tab) {
+  if (tab !== 'opening' && tab !== 'closing' && tab !== 'weekly' && tab !== 'monthly' && tab !== 'yearly') return null;
+  
+  try {
+    const state = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+    return state[tab] || {};
+  } catch (e) {
+    console.warn('[Auto-Reset] Error loading state:', e);
+    return {};
+  }
+}
+
+// Set auto-reset last run date
+function ffSetAutoResetLastRun(tab, todayISO) {
+  if (tab !== 'opening' && tab !== 'closing' && tab !== 'weekly' && tab !== 'monthly' && tab !== 'yearly') return;
+  
+  try {
+    const state = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+    if (!state[tab]) {
+      state[tab] = {};
+    }
+    state[tab].lastRunDate = todayISO;
+    localStorage.setItem('ff_tasks_auto_reset_state_v1', JSON.stringify(state));
+  } catch (e) {
+    console.error('[Auto-Reset] Error saving state:', e);
+  }
+}
+
+// Main auto-reset function for Opening tab
+window.ffMaybeAutoResetOpening = function(nowDate) {
+  try {
+    const tab = 'opening';
+    const now = nowDate || new Date();
+    
+    // Get config
+    const config = ffGetAutoResetConfig(tab);
+    if (!config || !config.autoResetEnabled) {
+      return; // Auto-reset not enabled
+    }
+    
+    // Check if current time >= reset time
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const resetMinutes = ffParseHHMMToMinutes(config.autoResetTime);
+    if (resetMinutes === null) {
+      console.warn('[Auto-Reset] Invalid reset time:', config.autoResetTime);
+      return;
+    }
+    
+    if (nowMinutes < resetMinutes) {
+      return; // Not yet time for reset
+    }
+    
+    // Check if already run today
+    const todayISO = ffGetTodayLocalISO();
+    const state = ffGetAutoResetState(tab);
+    if (state.lastRunDate === todayISO) {
+      return; // Already run today
+    }
+    
+    // Check if all Opening tasks are completed
+    if (typeof ffGetUncompletedCountForTab !== 'function') {
+      console.warn('[Auto-Reset] ffGetUncompletedCountForTab not available');
+      return;
+    }
+    
+    const uncompleted = ffGetUncompletedCountForTab(tab);
+    if (uncompleted !== 0) {
+      return; // Not all tasks completed
+    }
+    
+    // All conditions met - perform reset
+    console.log('[Auto-Reset] All Opening tasks completed, performing auto-reset at', config.autoResetTime);
+    
+    // Call reset function for opening tab (uses existing reset logic via getTabStorageKey)
+    if (typeof window.resetTasksForTab === 'function') {
+      window.resetTasksForTab('opening');
+      
+      // Mark as run today
+      ffSetAutoResetLastRun(tab, todayISO);
+      
+      console.log('[Auto-Reset] Auto-reset completed for Opening tab');
+    } else {
+      console.error('[Auto-Reset] resetTasksForTab function not found');
+    }
+    
+  } catch (e) {
+    console.error('[Auto-Reset] Error in ffMaybeAutoResetOpening:', e);
+  }
+};
+
+// Main auto-reset function for Closing tab
+window.ffMaybeAutoResetClosing = function(nowDate) {
+  try {
+    const tab = 'closing';
+    const now = nowDate || new Date();
+    
+    // Get config
+    const config = ffGetAutoResetConfig(tab);
+    if (!config || !config.autoResetEnabled) {
+      return; // Auto-reset not enabled
+    }
+    
+    // Check if current time >= reset time
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const resetMinutes = ffParseHHMMToMinutes(config.autoResetTime);
+    if (resetMinutes === null) {
+      console.warn('[Auto-Reset] Invalid reset time:', config.autoResetTime);
+      return;
+    }
+    
+    if (nowMinutes < resetMinutes) {
+      return; // Not yet time for reset
+    }
+    
+    // Check if already run today
+    const todayISO = ffGetTodayLocalISO();
+    const state = ffGetAutoResetState(tab);
+    if (state.lastRunDate === todayISO) {
+      return; // Already run today
+    }
+    
+    // Check if all Closing tasks are completed
+    if (typeof ffGetUncompletedCountForTab !== 'function') {
+      console.warn('[Auto-Reset] ffGetUncompletedCountForTab not available');
+      return;
+    }
+    
+    const uncompleted = ffGetUncompletedCountForTab(tab);
+    if (uncompleted !== 0) {
+      return; // Not all tasks completed
+    }
+    
+    // All conditions met - perform reset
+    console.log('[Auto-Reset] All Closing tasks completed, performing auto-reset at', config.autoResetTime);
+    
+    // Call reset function for closing tab (uses existing reset logic via getTabStorageKey)
+    if (typeof window.resetTasksForTab === 'function') {
+      window.resetTasksForTab('closing');
+      
+      // Mark as run today
+      ffSetAutoResetLastRun(tab, todayISO);
+      
+      console.log('[Auto-Reset] Auto-reset completed for Closing tab');
+    } else {
+      console.error('[Auto-Reset] resetTasksForTab function not found');
+    }
+    
+  } catch (e) {
+    console.error('[Auto-Reset] Error in ffMaybeAutoResetClosing:', e);
+  }
+};
+
+// Helper function to check if ANY weekly task is scheduled for today
+function ffHasWeeklyTasksScheduledToday(nowDate) {
+  try {
+    const now = nowDate || new Date();
+    const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
+    if (!catalogRaw) return false;
+    
+    const catalogObj = JSON.parse(catalogRaw);
+    const weeklyCatalog = catalogObj.weekly || [];
+    
+    // Check if at least one task is scheduled for today
+    for (let i = 0; i < weeklyCatalog.length; i++) {
+      const catalogTask = weeklyCatalog[i];
+      if (!catalogTask || typeof catalogTask !== 'object') continue;
+      
+      const taskId = catalogTask.taskId || catalogTask.id;
+      if (!taskId) continue;
+      
+      // Use existing helper to check if this task is scheduled today
+      if (typeof window.ffIsWeeklyTaskScheduledToday === 'function') {
+        if (window.ffIsWeeklyTaskScheduledToday(taskId, now)) {
+          return true; // Found at least one task scheduled for today
+        }
+      } else {
+        // Fallback: if helper not available, treat missing scheduleWeekdays as 'any' (scheduled)
+        const scheduleWeekdays = catalogTask.scheduleWeekdays;
+        if (scheduleWeekdays === 'any' || scheduleWeekdays === undefined) {
+          return true;
+        }
+      }
+    }
+    
+    return false; // No tasks scheduled for today
+  } catch (e) {
+    console.warn('[Auto-Reset] Error checking weekly tasks scheduled today:', e);
+    return false; // Fail-closed: don't reset if we can't determine
+  }
+}
+
+// Main auto-reset function for Weekly tab (today-only reset)
+window.ffMaybeAutoResetWeekly = function(nowDate) {
+  try {
+    const tab = 'weekly';
+    const now = nowDate || new Date();
+    
+    // Get config
+    const config = ffGetAutoResetConfig(tab);
+    if (!config || !config.autoResetEnabled) {
+      return; // Auto-reset not enabled
+    }
+    
+    // Check if current time >= reset time
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const resetMinutes = ffParseHHMMToMinutes(config.autoResetTime);
+    if (resetMinutes === null) {
+      console.warn('[Auto-Reset] Invalid reset time:', config.autoResetTime);
+      return;
+    }
+    
+    if (nowMinutes < resetMinutes) {
+      return; // Not yet time for reset
+    }
+    
+    // Check if already run today
+    const todayISO = ffGetTodayLocalISO();
+    const state = ffGetAutoResetState(tab);
+    if (state.lastRunDate === todayISO) {
+      return; // Already run today
+    }
+    
+    // Check if ANY weekly task is scheduled for today (prevent useless resets)
+    if (!ffHasWeeklyTasksScheduledToday(now)) {
+      return; // No tasks scheduled for today, skip reset
+    }
+    
+    console.log('[AUTO_RESET][WEEKLY] running', now);
+    
+    // Perform rollover for unfinished tasks (regardless of completion status)
+    // This advances unfinished tasks scheduled for today to tomorrow
+    if (typeof window.resetWeeklyForToday === 'function') {
+      window.resetWeeklyForToday(now);
+    } else {
+      console.warn('[AUTO_RESET][WEEKLY] resetWeeklyForToday not exposed');
+      return;
+    }
+    
+    // Check if all Weekly tasks scheduled for TODAY are completed
+    if (typeof ffGetUncompletedCountForTab !== 'function') {
+      console.warn('[Auto-Reset] ffGetUncompletedCountForTab not available');
+      // Mark as run today even if we can't check completion (rollover happened)
+      ffSetAutoResetLastRun(tab, todayISO);
+      return;
+    }
+    
+    const uncompleted = ffGetUncompletedCountForTab(tab);
+    if (uncompleted !== 0) {
+      // Not all tasks completed - rollover already happened above
+      // Mark as run today to prevent multiple rollovers
+      ffSetAutoResetLastRun(tab, todayISO);
+      console.log('[Auto-Reset] Weekly rollover completed (some tasks still unfinished)');
+      return;
+    }
+    
+    // All conditions met - rollover already done above
+    console.log('[Auto-Reset] All Weekly tasks for today completed, rollover completed at', config.autoResetTime);
+    
+    // Mark as run today
+    ffSetAutoResetLastRun(tab, todayISO);
+    
+    console.log('[Auto-Reset] Today-only reset completed for Weekly tab');
+    
+  } catch (e) {
+    console.error('[Auto-Reset] Error in ffMaybeAutoResetWeekly:', e);
+  }
+};
+
+// Helper function to check if ANY monthly task is scheduled for today
+function ffHasMonthlyTasksScheduledToday(nowDate) {
+  try {
+    const now = nowDate || new Date();
+    const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
+    if (!catalogRaw) return false;
+    
+    const catalogObj = JSON.parse(catalogRaw);
+    const monthlyCatalog = catalogObj.monthly || [];
+    
+    // Check if at least one task is scheduled for today
+    for (let i = 0; i < monthlyCatalog.length; i++) {
+      const catalogTask = monthlyCatalog[i];
+      if (!catalogTask || typeof catalogTask !== 'object') continue;
+      
+      const taskId = catalogTask.taskId || catalogTask.id;
+      if (!taskId) continue;
+      
+      // Use existing helper to check if this task is scheduled today
+      if (typeof window.ffIsMonthlyTaskScheduledToday === 'function') {
+        if (window.ffIsMonthlyTaskScheduledToday(taskId, now)) {
+          return true; // Found at least one task scheduled for today
+        }
+      } else {
+        // Fallback: if helper not available, treat missing scheduleDayOfMonth as 'any' (scheduled)
+        const scheduleDayOfMonth = catalogTask.scheduleDayOfMonth;
+        if (scheduleDayOfMonth === 'any' || scheduleDayOfMonth === undefined) {
+          return true;
+        }
+      }
+    }
+    
+    return false; // No tasks scheduled for today
+  } catch (e) {
+    console.warn('[Auto-Reset] Error checking monthly tasks scheduled today:', e);
+    return false; // Fail-closed: don't reset if we can't determine
+  }
+}
+
+// Main auto-reset function for Monthly tab (today-only reset)
+window.ffMaybeAutoResetMonthly = function(nowDate) {
+  try {
+    console.log('[AUTO_RESET][MONTHLY] running', new Date().toISOString());
+    const tab = 'monthly';
+    const now = nowDate || new Date();
+    
+    // Get config
+    const config = ffGetAutoResetConfig(tab);
+    if (!config || !config.autoResetEnabled) {
+      return; // Auto-reset not enabled
+    }
+    
+    // Check if current time >= reset time
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const resetMinutes = ffParseHHMMToMinutes(config.autoResetTime);
+    if (resetMinutes === null) {
+      console.warn('[Auto-Reset] Invalid reset time:', config.autoResetTime);
+      return;
+    }
+    
+    if (nowMinutes < resetMinutes) {
+      return; // Not yet time for reset
+    }
+    
+    // Check if already run today
+    const todayISO = ffGetTodayLocalISO();
+    const state = ffGetAutoResetState(tab);
+    if (state.lastRunDate === todayISO) {
+      return; // Already run today
+    }
+    
+    // Check if ANY monthly task is scheduled for today (prevent useless resets)
+    if (!ffHasMonthlyTasksScheduledToday(now)) {
+      return; // No tasks scheduled for today, skip reset
+    }
+    
+    // Perform rollover for unfinished tasks (regardless of completion status)
+    // This advances unfinished tasks scheduled for today to tomorrow
+    if (typeof window.resetMonthlyForToday === 'function') {
+      window.resetMonthlyForToday(now);
+    } else {
+      console.warn('[AUTO_RESET][MONTHLY] resetMonthlyForToday not exposed');
+      return;
+    }
+    
+    // Check if all Monthly tasks scheduled for TODAY are completed
+    if (typeof ffGetUncompletedCountForTab !== 'function') {
+      console.warn('[Auto-Reset] ffGetUncompletedCountForTab not available');
+      // Mark as run today even if we can't check completion (rollover happened)
+      ffSetAutoResetLastRun(tab, todayISO);
+      return;
+    }
+    
+    const uncompleted = ffGetUncompletedCountForTab(tab);
+    if (uncompleted !== 0) {
+      // Not all tasks completed - rollover already happened above
+      // Mark as run today to prevent multiple rollovers
+      ffSetAutoResetLastRun(tab, todayISO);
+      console.log('[Auto-Reset] Monthly rollover completed (some tasks still unfinished)');
+      return;
+    }
+    
+    // All conditions met - rollover already done above
+    console.log('[Auto-Reset] All Monthly tasks for today completed, rollover completed at', config.autoResetTime);
+    
+    // Mark as run today
+    ffSetAutoResetLastRun(tab, todayISO);
+    
+    console.log('[Auto-Reset] Today-only reset completed for Monthly tab');
+    
+  } catch (e) {
+    console.error('[Auto-Reset] Error in ffMaybeAutoResetMonthly:', e);
+  }
+};

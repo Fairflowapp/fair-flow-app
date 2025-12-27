@@ -4,6 +4,10 @@
 
 <head>
 
+<script>
+  console.log('[BUILD MARKER] index.html loaded at', new Date().toISOString());
+</script>
+
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
 
 <meta charset="utf-8"/>
@@ -66,7 +70,12 @@ header .brand{display:flex;align-items:center;gap:1rem}
 
 /* Join row under header */
 
-.joinbar{max-width:1140px;margin:6px auto 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:0 24px 10px}
+.joinbar{max-width:1140px;margin:6px auto 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:0 24px 10px;z-index:1}
+
+/* make sure top bar can't appear above modals */
+#joinBar, .joinbar, .top-bar, #mainTopBar, .header {
+  z-index: 1;
+}
 
 .grow{flex:1 1 260px}
 
@@ -241,9 +250,9 @@ dialog footer button, .code-dialog footer button {
 
 .history-modal {
 
-  position: fixed;
+  position: fixed !important;
 
-  inset: 0;
+  inset: 0 !important;
 
   display: flex;
 
@@ -251,7 +260,7 @@ dialog footer button, .code-dialog footer button {
 
   justify-content: center;
 
-  z-index: 1000;
+  z-index: 2147483647 !important; /* above everything */
 
 }
 
@@ -309,11 +318,23 @@ dialog footer button, .code-dialog footer button {
 
 .history-modal-backdrop {
 
-  position: absolute;
+  position: absolute !important;
 
-  inset: 0;
+  inset: 0 !important;
 
   background: rgba(0, 0, 0, 0.25);
+
+  pointer-events: auto;
+
+  z-index: 0;
+
+}
+
+#historyModal .history-modal-backdrop {
+
+  pointer-events: auto;
+
+  z-index: 0;
 
 }
 
@@ -337,7 +358,19 @@ dialog footer button, .code-dialog footer button {
 
   flex-direction: column;
 
-  z-index: 1000;
+  z-index: 2147483647;
+
+  pointer-events: auto;
+
+}
+
+#historyModal .history-modal-dialog {
+
+  position: relative;
+
+  z-index: 1;
+
+  pointer-events: auto;
 
 }
 
@@ -356,6 +389,14 @@ dialog footer button, .code-dialog footer button {
 .history-modal-body {
 
   overflow: hidden;
+
+  pointer-events: auto;
+
+}
+
+#historyModal .history-modal-body {
+
+  pointer-events: auto;
 
 }
 
@@ -698,7 +739,17 @@ dialog footer button, .code-dialog footer button {
     <div class="history-modal-backdrop"></div>
     <div class="history-modal-dialog">
       <div class="history-modal-header">
-        <h3>History</h3>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <h3>History</h3>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
+            <span>Source:</span>
+            <select id="historySourceFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
+              <option value="all">All</option>
+              <option value="queue">Queue</option>
+              <option value="tasks">Tasks</option>
+            </select>
+          </label>
+        </div>
         <button id="historyCloseBtn" class="history-close-btn" type="button">×</button>
       </div>
       <div class="history-modal-body">
@@ -793,6 +844,29 @@ dialog footer button, .code-dialog footer button {
         <div class="row"><button id="addWorker" type="button" class="btn-mini">+ Add worker</button></div>
 
         <div class="row small">Only these names can join. Duplicates are blocked.</div>
+
+        <h4>Queue Auto Reset</h4>
+
+        <div class="row">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="queueAutoResetEnabled" style="width:18px;height:18px;cursor:pointer;">
+            <span>Enable queue auto reset</span>
+          </label>
+        </div>
+
+        <div class="row">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <span style="min-width:100px;">Reset time:</span>
+            <input type="time" id="queueAutoResetTime" style="height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
+          </label>
+        </div>
+
+        <div class="row">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="queueAutoResetForce" style="width:18px;height:18px;cursor:pointer;">
+            <span>Reset even if people are In Service</span>
+          </label>
+        </div>
 
       </div>
 
@@ -889,6 +963,8 @@ dialog footer button, .code-dialog footer button {
 
 
 <script>
+
+console.log('[BUILD MARKER] app.js logic loaded at', new Date().toISOString());
 
 // Helpers
 
@@ -1024,7 +1100,11 @@ let service=ls("ffv24_service")||[];  // {name}
 
 let log=ls("ffv24_log")||[];
 
-const history = [];
+// Global state for history source filter
+window.__historySourceFilter = 'all';
+
+// Global state for history source filter
+window.__historySourceFilter = 'all';
 
 let reorderMode=false;
 
@@ -1132,6 +1212,50 @@ const salonName=$("#salonName"), salonInput=$("#salonInput"), brandLogo=$("#bran
     initPinInputs();
   }
 })();
+
+// Global delegated handler for yearly month/day controls
+if (!window.__ffYearlyDraftHandlersAttached) {
+  window.__ffYearlyDraftHandlersAttached = true;
+
+  function handleYearlyDateChange(e) {
+    const el = e.target.closest('[data-ff="yearly-month"], [data-ff="yearly-day"]');
+    if (!el) return;
+
+    const taskId = el.getAttribute('data-task-id');
+    if (!taskId) return;
+
+    const task = (tasksModalDraft.yearly || []).find(t =>
+      String(t.taskId || t.id) === String(taskId)
+    );
+    if (!task) return;
+
+    if (el.getAttribute('data-ff') === 'yearly-month') {
+      const n = parseInt(el.value, 10);
+      task.scheduleMonth = Number.isFinite(n) ? n : null;
+    }
+
+    if (el.getAttribute('data-ff') === 'yearly-day') {
+      const n = parseInt(el.value, 10);
+      task.scheduleDay = (Number.isFinite(n) && n >= 1 && n <= 31) ? n : null;
+    }
+
+    // update the visible button label immediately
+    const wrapper = document.querySelector(
+      `.tasks-yearly-date-selector-wrapper[data-task-id="${taskId}"]`
+    );
+    const label = wrapper?.querySelector('.tasks-yearly-date-summary span:first-child');
+    if (label) label.textContent = `Date: ${getYearlyDateSummary(task.scheduleMonth, task.scheduleDay)}`;
+    
+    const summaryBtn = wrapper?.querySelector('.tasks-yearly-date-summary');
+    if (summaryBtn) {
+      summaryBtn.style.color = (task.scheduleMonth === null || task.scheduleDay === null) ? '#dc2626' : '#666';
+    }
+  }
+
+  // Handle both 'input' (for number input) and 'change' (for select)
+  document.addEventListener('input', handleYearlyDateChange, true);
+  document.addEventListener('change', handleYearlyDateChange, true);
+}
 
 const queueList=$("#queueList"), serviceList=$("#serviceList");
 
@@ -1367,71 +1491,223 @@ function getActorInfo(code = null, workerName = '') {
   };
 }
 
-function addHistoryEntry(actionText, actor, workerName) {
-  const now = new Date();
+function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue') {
+  console.log('[BUILD MARKER] addHistoryEntry is THIS version', addHistoryEntry.toString().slice(0,120));
+  console.log('[ADD_HISTORY_ENTRY CALLED]', { args: Array.from(arguments) });
+  try {
+    // Read existing log array from ffv24_log
+    const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+    
+    // Create new entry object with date/time formatted using formatHistoryDate/formatHistoryTime
+    const now = new Date();
+    const entry = {
+      date: formatHistoryDate(now),
+      time: formatHistoryTime(now),
+      action: actionText || '',
+      role: role || '',
+      performedBy: performedBy || '',
+      worker: worker || '',
+      source: source || 'queue',
+      ts: Date.now()
+    };
+    
+    // Append to log array (keep backward compatibility: do NOT delete existing string entries; just append objects)
+    logArr.push(entry);
+    
+    // Write back to localStorage
+    const logLenBefore = (typeof ls === 'function' ? (ls('ffv24_log') || []) : JSON.parse(localStorage.getItem('ffv24_log') || '[]')).length;
+    console.log('[ADD_HISTORY_ENTRY BEFORE SAVE]', { entry, source: entry?.source, logLenBefore });
+    localStorage.setItem('ffv24_log', JSON.stringify(logArr));
+    
+    // Enforce history retention policy
+    if (typeof window.enforceHistoryRetention === 'function') {
+      window.enforceHistoryRetention();
+    }
+    
+    // Update in-memory log variable
+    log = logArr;
+    
+    console.log('[HISTORY ADD]', entry);
+    
+    // Quick verification (leave this as a comment for me in code):
+    // After clicking a QUEUE action: JSON.parse(localStorage.getItem('ffv24_log')||'[]').slice(-1)
+    // After selecting a TASK: same command should show an object with source:'tasks'
+    
+    return entry;
+  } catch (e) {
+    console.error('[HISTORY WRITE ERROR]', e);
+  }
+}
+
+// Wrapper function for Tasks history logging
+function logTaskHistory(actionText, extra = {}) {
+  // Get actor info - try to use current actor state if available
+  let actor = { role: 'Tasks', name: 'User' };
   
-  history.unshift({
-    timestamp: now,
-    date: formatHistoryDate(now),   // 11/16
-    time: formatHistoryTime(now),   // 16:40
-    action: actionText,
-    role: actor.role,            // Tech / Manager / Admin
-    performedBy: actor.name,     // Shiri / Leya / Admin / ...
-    worker: workerName || '',
-    // Keep backward compatibility fields
-    actorRole: actor.role,
-    actorName: actor.name,
-    workerName: workerName || ''
-  });
+  // Try to get actor from last validated code if available
+  if (window.__ff_lastValidatedCode && typeof getActorForAction === 'function') {
+    const code = window.__ff_lastValidatedCode;
+    if (isAdminCode(code)) {
+      actor = getActorForAction({ adminCode: code });
+    } else if (isManagerCode(code)) {
+      actor = getActorForAction({ managerCode: code });
+    }
+  }
+  
+  // Use worker name from extra if provided, otherwise empty
+  const workerName = extra.workerName || '';
+  
+  // Call the existing addHistoryEntry function with source: 'tasks'
+  addHistoryEntry(actionText, actor.role, actor.name, workerName, 'tasks');
+}
+window.logTaskHistory = logTaskHistory;
+
+// Helper function to set history source filter
+function setHistorySourceFilter(value) {
+  window.__historySourceFilter = value || 'all';
+  const select = document.getElementById('historySourceFilter');
+  if (select) {
+    select.value = window.__historySourceFilter;
+  }
   renderHistory();
+}
+window.setHistorySourceFilter = setHistorySourceFilter;
+
+// Helper function to get actor info from latest validated code
+function getHistoryActor() {
+  const v = window.__ff_lastValidatedCode;
+  if (v && typeof v === 'object') return { role: v.role || 'Admin', name: v.name || 'Admin' };
+  return { role: 'Admin', name: 'Admin' };
+}
+
+// Normalize history entry: convert string or object to consistent object format
+function normalizeHistoryEntry(entry) {
+  // Handle legacy string entries
+  if (typeof entry === 'string') {
+    // Parse string format: "12/25/2025, 6:24:57 PM START -> IN SERVICE: shiri"
+    const match = entry.match(/^(\d{1,2}\/\d{1,2}\/\d{4}),\s*([\d:]+\s*[AP]M)\s*(.*)$/);
+    if (match) {
+      const [, dateStr, timeStr, actionStr] = match;
+      // Convert date from MM/DD/YYYY to MM/DD format
+      const dateParts = dateStr.split('/');
+      const date = dateParts.length >= 2 ? `${dateParts[0]}/${dateParts[1]}` : dateStr;
+      
+      // Extract worker name from action text (case-insensitive)
+      let worker = '';
+      const actionTrimmed = actionStr.trim();
+      
+      // Pattern 1: "IN SERVICE: workerName"
+      const inServiceMatch = actionTrimmed.match(/IN SERVICE:\s*([^|]+)$/i);
+      if (inServiceMatch) {
+        worker = inServiceMatch[1].trim();
+      } else {
+        // Pattern 2: "Back to end: workerName"
+        const backToEndMatch = actionTrimmed.match(/Back to end:\s*([^|]+)$/i);
+        if (backToEndMatch) {
+          worker = backToEndMatch[1].trim();
+        } else {
+          // Pattern 3: "-> something: workerName" (fallback: take part after last colon)
+          const colonMatch = actionTrimmed.match(/->\s*([^:]+):\s*(.+)$/);
+          if (colonMatch) {
+            worker = colonMatch[2].trim();
+          } else {
+            // Try to extract from any "action: workerName" pattern
+            const lastColonIndex = actionTrimmed.lastIndexOf(':');
+            if (lastColonIndex > -1) {
+              const afterColon = actionTrimmed.substring(lastColonIndex + 1).trim();
+              if (afterColon) {
+                worker = afterColon;
+              }
+            }
+          }
+        }
+      }
+      
+      return {
+        date: date,
+        time: timeStr.trim(),
+        action: actionTrimmed, // Keep original action text
+        role: '',
+        performedBy: '',
+        worker: worker,
+        source: 'queue',
+        ts: Date.parse(dateStr + ' ' + timeStr) || Date.now()
+      };
+    }
+    // If string doesn't match pattern, treat as action only
+    return {
+      date: '',
+      time: '',
+      action: entry.trim(),
+      role: '',
+      performedBy: '',
+      worker: '',
+      source: 'queue',
+      ts: Date.now()
+    };
+  }
+  
+  // Handle object entries
+  if (typeof entry === 'object' && entry !== null) {
+    return {
+      date: entry.date || '',
+      time: entry.time || '',
+      action: entry.action || entry.actionText || '',
+      role: entry.role || '',
+      performedBy: entry.performedBy || '',
+      worker: entry.worker || entry.assignedTo || '',
+      source: entry.source || 'queue',
+      ts: entry.ts || entry.timestamp || Date.now()
+    };
+  }
+  
+  // Invalid entry - return empty object
+  return {
+    date: '',
+    time: '',
+    action: '',
+    role: '',
+    performedBy: '',
+    worker: '',
+    source: 'queue',
+    ts: Date.now()
+  };
 }
 
 function renderHistory() {
   const tableBody = document.getElementById('historyBody');
   if (!tableBody) return;
 
-  tableBody.innerHTML = history.map(entry => {
-    const d = entry.timestamp;
-    // Backwards compatibility: handle old structure
-    let role = entry.role || entry.actorRole;
-    let performedBy = entry.performedBy || entry.actorName;
-    let worker = entry.worker || entry.workerName;
-    
-    // Try to get from old structure if missing
-    if (!performedBy) {
-      if (entry.performedBy) {
-        performedBy = entry.performedBy;
-      } else if (entry.actorName) {
-        performedBy = entry.actorName;
-      } else if (entry.performedBy && typeof entry.performedBy === 'object') {
-        performedBy = entry.performedBy.name || '-';
-      } else {
-        performedBy = '-';
-      }
-    }
-    
-    if (!role) {
-      if (entry.actorRole) {
-        role = entry.actorRole;
-      } else if (entry.performedBy && typeof entry.performedBy === 'object') {
-        role = entry.performedBy.role || 'Tech';
-      } else {
-        role = 'Tech';
-      }
-    }
-    
-    if (!worker && entry.workerName) {
-      worker = entry.workerName;
-    }
-    
+  // Read the raw array ONLY from localStorage key "ffv24_log" (fallback [])
+  const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+  
+  // Update in-memory log variable
+  log = logArr;
+  
+  // Map all entries through normalizeHistoryEntry()
+  const normalizedEntries = logArr.map(normalizeHistoryEntry);
+  
+  // Apply source filter on the normalized objects
+  const sourceFilter = (window.__historySourceFilter || 'all').toLowerCase();
+  let rows = normalizedEntries;
+  if (sourceFilter !== 'all') {
+    rows = normalizedEntries.filter(normalized => {
+      return normalized.source.toLowerCase() === sourceFilter;
+    });
+  }
+  
+  // Render the table using normalized fields
+  // Always render columns from normalized fields: Date | Time | Action | Role | Performed by | Worker
+  // For empty role/performedBy/worker, show '-' (UI only)
+  tableBody.innerHTML = rows.map(normalized => {
     return `
       <tr>
-        <td>${formatHistoryDate(d)}</td>
-        <td>${formatHistoryTime(d)}</td>
-        <td>${escapeHtml(entry.action)}</td>
-        <td>${escapeHtml(role || '-')}</td>
-        <td>${escapeHtml(performedBy || '-')}</td>
-        <td>${escapeHtml(worker || '')}</td>
+        <td>${escapeHtml(normalized.date || '-')}</td>
+        <td>${escapeHtml(normalized.time || '-')}</td>
+        <td>${escapeHtml(normalized.action || '')}</td>
+        <td>${escapeHtml(normalized.role || '-')}</td>
+        <td>${escapeHtml(normalized.performedBy || '-')}</td>
+        <td>${escapeHtml(normalized.worker || '-')}</td>
       </tr>
     `;
   }).join('');
@@ -1627,10 +1903,6 @@ function removeFromQueue(i){
 
   renderQueue(); 
 
-  log.push(`${new Date().toLocaleString()} – REMOVED ${rem.name} by admin/manager`);
-
-  save();
-
   // Remove from queue is always done by manager/admin (guardHold ensures this)
   // Use the last validated code or current actor state
   const lastCode = window.__ff_lastValidatedCode;
@@ -1647,7 +1919,7 @@ function removeFromQueue(i){
     const name = window.__ff_actorName || 'Manager';
     actor = { role, name };
   }
-  addHistoryEntry('Remove from queue', actor, rem.name);
+  addHistoryEntry('Remove from queue', actor.role, actor.name, rem.name, 'queue');
 
 }
 
@@ -1785,7 +2057,6 @@ function handleJoin(){
   // All validations passed - add to queue
   console.log('[handleJoin] Adding technician to queue:', selectedTechnicianName);
   queue.push({name: selectedTechnicianName, held: false});
-  log.unshift(stamp() + ` join: ${selectedTechnicianName}`);
   save();
   renderQueue();
   
@@ -1800,7 +2071,7 @@ function handleJoin(){
 
   // Join is done directly by worker (Tech action)
   const techActor = getActorForAction({ workerName: selectedTechnicianName });
-  addHistoryEntry('Join', techActor, selectedTechnicianName);
+  addHistoryEntry('Join', techActor.role, techActor.name, selectedTechnicianName, 'queue');
   } catch (e) {
     console.error('[handleJoin] Error in handleJoin:', e);
     const joinErrorEl = document.getElementById('joinError');
@@ -1830,7 +2101,7 @@ function startSpecific(idx){
 
   const [it]=queue.splice(idx,1); service.push({name:it.name});
 
-  log.unshift(stamp()+` START -> IN SERVICE: ${it.name}`); save(); renderQueue(); renderService();
+  save(); renderQueue(); renderService();
 
   // Actor info is already set by guardStart (manager/admin code or worker PIN)
   const lastCode = window.__ff_lastValidatedCode;
@@ -1845,11 +2116,11 @@ function startSpecific(idx){
     // Worker PIN was used - tech action
     actor = getActorForAction({ workerName: it.name });
   }
-  addHistoryEntry('Start (Available → In service)', actor, it.name);
+  addHistoryEntry('Start (Available → In service)', actor.role, actor.name, it.name, 'queue');
 
 }
 
-function toggleHold(i){ queue[i].held=!queue[i].held; log.unshift(stamp()+` ${queue[i].held?"HOLD":"RELEASE"}: ${queue[i].name}`); save(); renderQueue(); 
+function toggleHold(i){ queue[i].held=!queue[i].held; save(); renderQueue(); 
 
   // Actor info is already set by guardHold (manager/admin code)
   const lastCode = window.__ff_lastValidatedCode;
@@ -1866,7 +2137,7 @@ function toggleHold(i){ queue[i].held=!queue[i].held; log.unshift(stamp()+` ${qu
     const name = window.__ff_actorName || 'Manager';
     actor = { role, name };
   }
-  addHistoryEntry(queue[i].held ? 'Hold' : 'Release', actor, queue[i].name);
+  addHistoryEntry(queue[i].held ? 'Hold' : 'Release', actor.role, actor.name, queue[i].name, 'queue');
 
 }
 
@@ -1876,7 +2147,7 @@ function finish(i){
 
   queue.push({name:it.name, held:false}); // back to end
 
-  log.unshift(stamp()+` FINISH -> Back to end: ${it.name}`); save(); renderQueue(); renderService();
+  save(); renderQueue(); renderService();
 
   // Actor info is already set by guardFinish (manager/admin code or worker PIN)
   const lastCode = window.__ff_lastValidatedCode;
@@ -1891,7 +2162,7 @@ function finish(i){
     // Worker PIN was used - tech action
     actor = getActorForAction({ workerName: it.name });
   }
-  addHistoryEntry('Finish (In service → Available)', actor, it.name);
+  addHistoryEntry('Finish (In service → Available)', actor.role, actor.name, it.name, 'queue');
 
 }
 
@@ -1912,7 +2183,7 @@ function move(i,d){ const j=i+d; if(j<0||j>=queue.length) return; const t=queue[
     const name = window.__ff_actorName || 'Manager';
     actor = { role, name };
   }
-  addHistoryEntry('Reorder list', actor, '');
+  addHistoryEntry('Reorder list', actor.role, actor.name, '', 'queue');
 
 }
 
@@ -1946,24 +2217,57 @@ async function resetDay(){
   // Set actor info if using securePromptOnce wrapper
   if (window.securePromptOnce) {
     // Actor info is already set by securePromptOnce wrapper
-    window.__ff_lastValidatedCode = code;
+    const actor = getActorForAction({ adminCode: code });
+    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
   } else {
     // If using prompt, set actor info manually
     const actorInfo = getActorInfo(code, '');
     window.__ff_actorRole = actorInfo.actorRole;
     window.__ff_actorName = actorInfo.actorName;
-    window.__ff_lastValidatedCode = code;
+    const actor = getActorForAction({ adminCode: code });
+    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
   }
   
-  // Proceed with reset - clear queues only, NOT history
-  queue = [];
-  service = [];
-  // History is NOT cleared - log and history arrays remain untouched
-  save();
-  renderQueue();
-  renderService();
-  
-  // Tasks feature removed - no Tasks state to clear
+  // Proceed with reset - use resetQueueState function
+  resetQueueState({ force: true, source: 'manual' });
+}
+
+// Reusable queue reset function (extracted from resetDay)
+function resetQueueState({ force = false, source = 'manual' }) {
+  try {
+    // Clear Available queue
+    queue = [];
+    
+    // Clear In Service only if force=true OR source=manual (manual always forces)
+    if (force || source === 'manual') {
+      service = [];
+    } else {
+      // Auto reset: only clear if force=true (checked in ffMaybeAutoResetQueue)
+      // If force=false and there are people in service, this function shouldn't be called
+    }
+    
+    // Clear any HOLD states (queue items with held=true are cleared when queue is cleared)
+    // No separate hold list to clear
+    
+    // History is NOT cleared - log and history arrays remain untouched
+    save();
+    renderQueue();
+    renderService();
+    
+    console.log('[RESET_QUEUE]', { force, source, queueCleared: true, serviceCleared: force || source === 'manual' });
+  } catch (e) {
+    console.error('[RESET_QUEUE] Error:', e);
+  }
+}
+
+// Helper to check if anyone is in service
+function ffQueueHasInService() {
+  try {
+    return service && Array.isArray(service) && service.length > 0;
+  } catch (e) {
+    console.error('[ffQueueHasInService] Error:', e);
+    return false;
+  }
 }
 
 // Helper function to show RESET confirmation modal (Step 1)
@@ -2152,7 +2456,10 @@ async function guardHold(fn){
 
   if (isAdminCode(entry) || isManagerCode(entry)) { 
     // Store the validated code for later use in addHistoryEntry
-    window.__ff_lastValidatedCode = entry;
+    const actor = isAdminCode(entry) 
+      ? getActorForAction({ adminCode: entry })
+      : getActorForAction({ managerCode: entry });
+    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
     // Actor info is already set by securePromptOnce wrapper, but if using prompt, set it here
     if (!window.securePromptOnce) {
       const actorInfo = getActorInfo(entry, '');
@@ -2174,7 +2481,10 @@ async function guardStart(workerName, idx, fn){
 
   if(isAdminCode(entry)||isManagerCode(entry)) {
     // Store the validated code for later use in addHistoryEntry
-    window.__ff_lastValidatedCode = entry;
+    const actor = isAdminCode(entry) 
+      ? getActorForAction({ adminCode: entry })
+      : getActorForAction({ managerCode: entry });
+    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
     // Actor info is already set by securePromptOnce wrapper, but if using prompt, set it here
     if (!window.securePromptOnce) {
       const actorInfo = getActorInfo(entry, workerName);
@@ -2206,7 +2516,10 @@ async function guardFinish(workerName, fn){
 
   if(isAdminCode(entry)||isManagerCode(entry)) {
     // Store the validated code for later use in addHistoryEntry
-    window.__ff_lastValidatedCode = entry;
+    const actor = isAdminCode(entry) 
+      ? getActorForAction({ adminCode: entry })
+      : getActorForAction({ managerCode: entry });
+    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
     // Actor info is already set by securePromptOnce wrapper, but if using prompt, set it here
     if (!window.securePromptOnce) {
       const actorInfo = getActorInfo(entry, workerName);
@@ -2342,6 +2655,16 @@ function renderSettings(){
   
   // Tasks-related UI removed (Task Reminders, Task Notes sections)
   // These will be rebuilt from scratch in the future
+
+  // Queue Auto Reset settings
+  const queueSettings = JSON.parse(localStorage.getItem('ff_queue_settings_v1') || '{}');
+  const enabledEl = document.getElementById('queueAutoResetEnabled');
+  const timeEl = document.getElementById('queueAutoResetTime');
+  const forceEl = document.getElementById('queueAutoResetForce');
+  
+  if (enabledEl) enabledEl.checked = queueSettings.autoResetEnabled === true;
+  if (timeEl) timeEl.value = queueSettings.autoResetTime || '02:00';
+  if (forceEl) forceEl.checked = queueSettings.autoResetForce === true;
 
 }
 
@@ -3151,6 +3474,15 @@ async function saveSettings(e){
   
   settings.workers = validWorkers.slice(0, 48);
 
+  // Queue Auto Reset settings
+  const queueSettings = {
+    autoResetEnabled: document.getElementById('queueAutoResetEnabled')?.checked === true || false,
+    autoResetTime: document.getElementById('queueAutoResetTime')?.value || '02:00',
+    autoResetForce: document.getElementById('queueAutoResetForce')?.checked === true || false,
+    lastAutoResetDate: JSON.parse(localStorage.getItem('ff_queue_settings_v1') || '{}').lastAutoResetDate || null
+  };
+  localStorage.setItem('ff_queue_settings_v1', JSON.stringify(queueSettings));
+
   // Save brandPalette (it's already updated in memory when edited)
 
   if(!settings.brandPalette) settings.brandPalette = DEFAULTS.brandPalette.slice();
@@ -3443,7 +3775,8 @@ async function handleReorderClick() {
 
   if (ok) {
     // Store the validated code for later use in addHistoryEntry
-    window.__ff_lastValidatedCode = code;
+    const actor = getActorForAction({ adminCode: code });
+    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
 
     reorderMode = !reorderMode; 
     renderQueue(); 
@@ -3503,6 +3836,11 @@ const historyBackdrop = document.querySelector('.history-modal-backdrop');
 function openHistoryModal() {
   if (!historyModal) return;
   historyModal.classList.remove('hidden');
+  // Sync filter dropdown with current state
+  const select = document.getElementById('historySourceFilter');
+  if (select) {
+    select.value = window.__historySourceFilter || 'all';
+  }
   renderHistory();
 }
 
@@ -3530,40 +3868,23 @@ const historyClearBtn = document.getElementById('historyClearBtn');
 const historyCloseBtn2 = document.getElementById('historyCloseBtn2');
 
 function exportHistory() {
-  const blob = new Blob([history.map(entry => {
-    const d = entry.timestamp;
-    // Backwards compatibility: handle old structure
-    let role = entry.role || entry.actorRole;
-    let performedBy = entry.performedBy || entry.actorName;
-    let worker = entry.worker || entry.workerName;
-    
-    // Try to get from old structure if missing
-    if (!performedBy) {
-      if (entry.actorName) {
-        performedBy = entry.actorName;
-      } else if (entry.performedBy && typeof entry.performedBy === 'object') {
-        performedBy = entry.performedBy.name || '-';
-      } else {
-        performedBy = '-';
-      }
+  // Read from ffv24_log localStorage
+  const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+  
+  const blob = new Blob([logArr.map(entry => {
+    // Handle legacy string entries
+    if (typeof entry === 'string') {
+      return `-,-,${entry},-,-,-`;
     }
     
-    if (!role) {
-      if (entry.actorRole) {
-        role = entry.actorRole;
-      } else if (entry.performedBy && typeof entry.performedBy === 'object') {
-        role = entry.performedBy.role || 'Tech';
-      } else {
-        role = 'Tech';
-      }
+    // Handle object entries
+    if (typeof entry === 'object' && entry !== null) {
+      return `${entry.date || '-'},${entry.time || '-'},${entry.action || ''},${entry.role || '-'},${entry.performedBy || '-'},${entry.worker || ''}`;
     }
     
-    if (!worker && entry.workerName) {
-      worker = entry.workerName;
-    }
-    
-    return `${formatHistoryDate(d)},${formatHistoryTime(d)},${entry.action},${role || '-'},${performedBy || '-'},${worker || ''}`;
-  }).join('\n')], {type: 'text/plain'});
+    // Skip invalid entries
+    return '';
+  }).filter(line => line !== '').join('\n')], {type: 'text/plain'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -3574,7 +3895,10 @@ function exportHistory() {
 
 function clearHistory() {
   if (!confirm("Clear history?")) return;
-  history.length = 0;
+  // Clear ffv24_log from localStorage
+  localStorage.setItem('ffv24_log', JSON.stringify([]));
+  // Update in-memory log variable
+  log = [];
   renderHistory();
 }
 
@@ -3590,6 +3914,15 @@ if (historyClearBtn) {
 
 if (historyCloseBtn2) {
   historyCloseBtn2.addEventListener('click', closeHistoryModal);
+}
+
+// Wire up history source filter dropdown
+const historySourceFilterSelect = document.getElementById('historySourceFilter');
+if (historySourceFilterSelect) {
+  historySourceFilterSelect.value = window.__historySourceFilter || 'all';
+  historySourceFilterSelect.addEventListener('change', function(e) {
+    setHistorySourceFilter(e.target.value);
+  });
 }
 
 // Helper function to hide tasksScreen if visible and restore main view
@@ -3696,16 +4029,53 @@ function loadTasksForSettingsTab(tab) {
       if (!task || typeof task !== 'object') return null;
       const keyId = task.taskId || task.id;
       if (!keyId) return null;
-      return {
+      const normalizedTask = {
         id: keyId,
         taskId: keyId,
         title: task.title || '',
         instructions: task.instructions || task.info || task.details || ''
       };
+      // For weekly tasks: convert old scheduleWeekday to scheduleWeekdays, preserve scheduleWeekdays
+      if (tab === 'weekly') {
+        if (task.scheduleWeekdays !== undefined) {
+          // Use existing scheduleWeekdays
+          normalizedTask.scheduleWeekdays = task.scheduleWeekdays;
+        } else if (task.scheduleWeekday !== undefined) {
+          // Backward compatibility: convert scheduleWeekday to scheduleWeekdays
+          if (task.scheduleWeekday === 'any') {
+            normalizedTask.scheduleWeekdays = 'any';
+          } else {
+            normalizedTask.scheduleWeekdays = [parseInt(task.scheduleWeekday, 10)];
+          }
+        } else {
+          // Default to "any"
+          normalizedTask.scheduleWeekdays = 'any';
+        }
+      }
+      // For monthly tasks: preserve scheduleDayOfMonth
+      if (tab === 'monthly' && task.scheduleDayOfMonth !== undefined) {
+        normalizedTask.scheduleDayOfMonth = task.scheduleDayOfMonth;
+      } else if (tab === 'monthly') {
+        // Default to "any"
+        normalizedTask.scheduleDayOfMonth = 'any';
+      }
+      // For yearly tasks: always preserve scheduleMonth and scheduleDay (even if null)
+      if (tab === 'yearly') {
+        normalizedTask.scheduleMonth = task.scheduleMonth ?? null;
+        normalizedTask.scheduleDay = task.scheduleDay ?? null;
+      }
+      return normalizedTask;
     }).filter(Boolean);
     
     tasksModalDraft[tab] = catalogTasks;
     console.log(`[Tasks] Loaded ${catalogTasks.length} catalog tasks for Settings tab: ${tab}`);
+    
+    // Debug logs for yearly
+    if (tab === 'yearly') {
+      console.log('[YEARLY] catalog load count', catalogTasks.length);
+      console.log('[YEARLY] draft count after load', tasksModalDraft.yearly?.length);
+      console.log('[YEARLY] loaded tasks:', catalogTasks);
+    }
   } catch (e) {
     console.error(`[Tasks] Error loading tasks for Settings tab ${tab}:`, e);
     tasksModalDraft[tab] = [];
@@ -3713,6 +4083,48 @@ function loadTasksForSettingsTab(tab) {
 }
 
 // Render tasks list in Settings modal from draft (all tasks, no filtering by status)
+// Helper function to compute days summary label for weekly tasks
+function getWeeklyDaysSummary(scheduleWeekdays) {
+  if (scheduleWeekdays === 'any' || scheduleWeekdays === undefined) {
+    return 'Any';
+  }
+  if (!Array.isArray(scheduleWeekdays) || scheduleWeekdays.length === 0) {
+    return 'Any';
+  }
+  const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const sortedDays = [...scheduleWeekdays].sort((a, b) => a - b);
+  return sortedDays.map(day => dayLabels[day]).join(', ');
+}
+
+// Helper function to compute monthly day summary
+function getMonthlyDaySummary(scheduleDayOfMonth) {
+  if (scheduleDayOfMonth === 'any' || scheduleDayOfMonth === undefined) {
+    return 'Any';
+  }
+  if (typeof scheduleDayOfMonth === 'number' && scheduleDayOfMonth >= 1 && scheduleDayOfMonth <= 31) {
+    return String(scheduleDayOfMonth);
+  }
+  return 'Any';
+}
+
+// Helper function to compute yearly date summary
+function getYearlyDateSummary(scheduleMonth, scheduleDay) {
+  if (scheduleMonth === undefined || scheduleMonth === null || scheduleDay === undefined || scheduleDay === null) {
+    return 'Required';
+  }
+  const monthNum = typeof scheduleMonth === 'number' ? scheduleMonth : 
+                   (typeof scheduleMonth === 'string' && /^\d+$/.test(scheduleMonth)) ? parseInt(scheduleMonth, 10) : null;
+  const dayNum = typeof scheduleDay === 'number' ? scheduleDay : 
+                 (typeof scheduleDay === 'string' && /^\d+$/.test(scheduleDay)) ? parseInt(scheduleDay, 10) : null;
+  
+  if (monthNum === null || dayNum === null || monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31) {
+    return 'Required';
+  }
+  
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${monthNames[monthNum - 1]} ${dayNum}`;
+}
+
 function renderSettingsTaskList(tabKey) {
   try {
     // Normalize tab key to lowercase
@@ -3840,6 +4252,129 @@ function renderSettingsTaskList(tabKey) {
           `;
         } else {
           // View mode: show title and instructions with Edit and Delete buttons (draggable)
+          // For weekly tasks, add multi-day selector
+          let daysSelectorHtml = '';
+          if (tab === 'weekly') {
+            // Normalize scheduleWeekdays: convert old scheduleWeekday to scheduleWeekdays, default to "any"
+            let scheduleWeekdays = task.scheduleWeekdays;
+            if (scheduleWeekdays === undefined && task.scheduleWeekday !== undefined) {
+              // Backward compatibility: convert scheduleWeekday to scheduleWeekdays
+              if (task.scheduleWeekday === 'any') {
+                scheduleWeekdays = 'any';
+              } else {
+                scheduleWeekdays = [parseInt(task.scheduleWeekday, 10)];
+              }
+            }
+            if (scheduleWeekdays === undefined) {
+              scheduleWeekdays = 'any';
+            }
+            
+            const isAnyWeek = scheduleWeekdays === 'any';
+            const selectedDays = Array.isArray(scheduleWeekdays) ? scheduleWeekdays : [];
+            const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const daysSummary = getWeeklyDaysSummary(scheduleWeekdays);
+            
+            daysSelectorHtml = `
+              <div class="tasks-weekly-days-selector-wrapper" data-task-id="${resolvedTaskId}" style="position:relative;margin-right:8px;">
+                <button class="tasks-weekly-days-summary" data-task-id="${resolvedTaskId}" type="button" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:#666;cursor:pointer;white-space:nowrap;">
+                  <span>Days: ${daysSummary}</span>
+                  <span style="font-size:10px;">▾</span>
+                </button>
+                <div class="tasks-weekly-days-panel" data-task-id="${resolvedTaskId}" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;padding:8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.1);z-index:1000;min-width:200px;">
+                  <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#666;margin-bottom:6px;">
+                    <input type="checkbox" class="tasks-weekly-all-week" data-task-id="${resolvedTaskId}" ${isAnyWeek ? 'checked' : ''} style="cursor:pointer;">
+                    <span>All week</span>
+                  </label>
+                  <div class="tasks-weekly-days-checkboxes" data-task-id="${resolvedTaskId}" style="display:flex;gap:4px;flex-wrap:wrap;${isAnyWeek ? 'opacity:0.5;pointer-events:none;' : ''}">
+                    ${dayLabels.map((label, dayIndex) => `
+                      <label style="display:flex;align-items:center;gap:2px;font-size:10px;cursor:pointer;">
+                        <input type="checkbox" class="tasks-weekly-day-checkbox" data-task-id="${resolvedTaskId}" data-day="${dayIndex}" ${selectedDays.includes(dayIndex) ? 'checked' : ''} style="cursor:pointer;">
+                        <span>${label}</span>
+                      </label>
+                    `).join('')}
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+          
+          // For yearly tasks, add date selector (month+day, required)
+          let yearlyDateSelectorHtml = '';
+          if (tab === 'yearly') {
+            const scheduleMonth = task.scheduleMonth;
+            const scheduleDay = task.scheduleDay;
+            const dateSummary = getYearlyDateSummary(scheduleMonth, scheduleDay);
+            const selectedMonth = (scheduleMonth !== undefined && scheduleMonth !== null) ? String(scheduleMonth) : '';
+            const selectedDay = (scheduleDay !== undefined && scheduleDay !== null) ? String(scheduleDay) : '';
+            const isRequired = scheduleMonth === undefined || scheduleMonth === null || scheduleDay === undefined || scheduleDay === null;
+            
+            yearlyDateSelectorHtml = `
+              <div class="tasks-yearly-date-selector-wrapper" data-task-id="${resolvedTaskId}" style="position:relative;margin-right:8px;">
+                <button class="tasks-yearly-date-summary" data-task-id="${resolvedTaskId}" type="button" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:${isRequired ? '#dc2626' : '#666'};cursor:pointer;white-space:nowrap;">
+                  <span>Date: ${dateSummary}</span>
+                  <span style="font-size:10px;">▾</span>
+                </button>
+                <div class="tasks-yearly-date-panel" data-task-id="${resolvedTaskId}" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;padding:8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.1);z-index:1000;min-width:180px;">
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <div>
+                      <label style="display:block;font-size:11px;color:#666;margin-bottom:4px;">Month:</label>
+                      <select class="tasks-yearly-month-select" data-ff="yearly-month" data-task-id="${resolvedTaskId}" style="width:100%;padding:4px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;font-family:inherit;cursor:pointer;">
+                        <option value="">Select month</option>
+                        <option value="1" ${selectedMonth === '1' ? 'selected' : ''}>January</option>
+                        <option value="2" ${selectedMonth === '2' ? 'selected' : ''}>February</option>
+                        <option value="3" ${selectedMonth === '3' ? 'selected' : ''}>March</option>
+                        <option value="4" ${selectedMonth === '4' ? 'selected' : ''}>April</option>
+                        <option value="5" ${selectedMonth === '5' ? 'selected' : ''}>May</option>
+                        <option value="6" ${selectedMonth === '6' ? 'selected' : ''}>June</option>
+                        <option value="7" ${selectedMonth === '7' ? 'selected' : ''}>July</option>
+                        <option value="8" ${selectedMonth === '8' ? 'selected' : ''}>August</option>
+                        <option value="9" ${selectedMonth === '9' ? 'selected' : ''}>September</option>
+                        <option value="10" ${selectedMonth === '10' ? 'selected' : ''}>October</option>
+                        <option value="11" ${selectedMonth === '11' ? 'selected' : ''}>November</option>
+                        <option value="12" ${selectedMonth === '12' ? 'selected' : ''}>December</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11px;color:#666;margin-bottom:4px;">Day:</label>
+                      <input type="number" class="tasks-yearly-day-input" data-ff="yearly-day" data-task-id="${resolvedTaskId}" min="1" max="31" value="${selectedDay}" placeholder="1-31" style="width:100%;padding:4px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;font-family:inherit;">
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+          
+          // For monthly tasks, add day-of-month selector
+          let monthlyDaySelectorHtml = '';
+          if (tab === 'monthly') {
+            const scheduleDayOfMonth = task.scheduleDayOfMonth !== undefined ? task.scheduleDayOfMonth : 'any';
+            const daySummary = getMonthlyDaySummary(scheduleDayOfMonth);
+            const selectedDay = scheduleDayOfMonth === 'any' ? 'any' : String(scheduleDayOfMonth);
+            
+            monthlyDaySelectorHtml = `
+              <div class="tasks-monthly-day-selector-wrapper" data-task-id="${resolvedTaskId}" style="position:relative;margin-right:8px;">
+                <button class="tasks-monthly-day-summary" data-task-id="${resolvedTaskId}" type="button" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:#666;cursor:pointer;white-space:nowrap;">
+                  <span>Day: ${daySummary}</span>
+                  <span style="font-size:10px;">▾</span>
+                </button>
+                <div class="tasks-monthly-day-panel" data-task-id="${resolvedTaskId}" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;padding:8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.1);z-index:1000;min-width:120px;max-height:200px;overflow-y:auto;">
+                  <div style="display:flex;flex-direction:column;gap:4px;">
+                    <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#666;cursor:pointer;padding:4px;">
+                      <input type="radio" name="monthly-day-${resolvedTaskId}" class="tasks-monthly-day-option" data-task-id="${resolvedTaskId}" data-day="any" ${selectedDay === 'any' ? 'checked' : ''} style="cursor:pointer;">
+                      <span>Any</span>
+                    </label>
+                    ${Array.from({length: 31}, (_, i) => i + 1).map(day => `
+                      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#666;cursor:pointer;padding:4px;">
+                        <input type="radio" name="monthly-day-${resolvedTaskId}" class="tasks-monthly-day-option" data-task-id="${resolvedTaskId}" data-day="${day}" ${selectedDay === String(day) ? 'checked' : ''} style="cursor:pointer;">
+                        <span>${day}</span>
+                      </label>
+                    `).join('')}
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+          
           return `
             <div class="tasks-modal-draft-item" draggable="true" data-task-key="${String(resolvedTaskId || '').trim()}" data-is-orphan="${isOrphan ? 'true' : 'false'}" style="display:flex;align-items:flex-start;justify-content:space-between;padding:8px 10px;margin-bottom:6px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;cursor:move;">
             <div style="flex:1;">
@@ -3848,9 +4383,14 @@ function renderSettingsTaskList(tabKey) {
             </div>
                 ${task.instructions ? `<div style="font-size:12px;color:#666;margin-top:2px;white-space:pre-wrap;">${escapeHtmlDraft(task.instructions)}</div>` : ''}
               </div>
-              <div style="display:flex;gap:6px;align-items:center;margin-left:10px;flex-shrink:0;">
-                <button class="tasks-modal-draft-edit" data-task-id="${resolvedTaskId}" style="background:none;border:none;color:#7b3fe4;cursor:pointer;font-size:12px;padding:3px 6px;border-radius:4px;text-decoration:underline;">Edit</button>
-                <button class="tasks-modal-draft-remove" data-task-id="${resolvedTaskId}" data-is-orphan="${isOrphan ? 'true' : 'false'}" data-settings-tab="${tab}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:12px;padding:3px 8px;border-radius:4px;text-decoration:underline;">DELETE</button>
+              <div style="display:flex;gap:6px;align-items:flex-start;margin-left:10px;flex-shrink:0;">
+                ${daysSelectorHtml}
+                ${monthlyDaySelectorHtml}
+                ${yearlyDateSelectorHtml}
+                <div style="display:flex;flex-direction:column;gap:4px;">
+                  <button class="tasks-modal-draft-edit" data-task-id="${resolvedTaskId}" style="background:none;border:none;color:#7b3fe4;cursor:pointer;font-size:12px;padding:3px 6px;border-radius:4px;text-decoration:underline;">Edit</button>
+                  <button class="tasks-modal-draft-remove" data-task-id="${resolvedTaskId}" data-is-orphan="${isOrphan ? 'true' : 'false'}" data-settings-tab="${tab}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:12px;padding:3px 8px;border-radius:4px;text-decoration:underline;">DELETE</button>
+                </div>
               </div>
           </div>
         `;
@@ -3944,6 +4484,12 @@ function renderSettingsTaskList(tabKey) {
                 const tId = t.taskId || t.id;
                 return !idVariants.has(String(tId || "").trim());
               });
+              try {
+                console.log('[CATALOG WRITE]', new Error().stack.split('\n').slice(0,4).join('\n'));
+                console.log('[CATALOG WRITE] yearly payload preview:',
+                  (catalogObj?.yearly || []).map(t => ({ id: t.taskId || t.id, m: t.scheduleMonth, d: t.scheduleDay }))
+                );
+              } catch(e) {}
               localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
               if (window.ff_tasks_catalog_v1) {
                 window.ff_tasks_catalog_v1[settingsTab] = catalogObj[settingsTab];
@@ -4024,8 +4570,8 @@ function renderSettingsTaskList(tabKey) {
         if (isOrphan) return; // Skip orphans, only allow reordering catalog tasks
         
         item.addEventListener('dragstart', (e) => {
-          // Don't start drag if clicking on a button
-          if (e.target.closest('button')) {
+          // Don't start drag if clicking on a button, checkbox, radio, label, or selector wrapper
+          if (e.target.closest('button') || e.target.closest('input[type="checkbox"]') || e.target.closest('input[type="radio"]') || e.target.closest('label') || e.target.closest('.tasks-weekly-days-selector-wrapper') || e.target.closest('.tasks-monthly-day-selector-wrapper') || e.target.closest('.tasks-yearly-date-selector-wrapper')) {
             e.preventDefault();
             return;
           }
@@ -4104,15 +4650,30 @@ function renderSettingsTaskList(tabKey) {
           // Update draft
           tasksModalDraft[tab] = reorderedCatalog;
           
-          // Persist to localStorage
+          // Persist to localStorage (ensure yearly tasks preserve scheduleMonth/scheduleDay)
           try {
             const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
-            catalogObj[tab] = reorderedCatalog;
+            // For yearly tasks, ensure scheduleMonth/scheduleDay are preserved
+            if (tab === 'yearly') {
+              catalogObj[tab] = reorderedCatalog.map(task => ({
+                ...task,
+                scheduleMonth: task.scheduleMonth ?? null,
+                scheduleDay: task.scheduleDay ?? null
+              }));
+            } else {
+              catalogObj[tab] = reorderedCatalog;
+            }
+            try {
+              console.log('[CATALOG WRITE]', new Error().stack.split('\n').slice(0,4).join('\n'));
+              console.log('[CATALOG WRITE] yearly payload preview:',
+                (catalogObj?.yearly || []).map(t => ({ id: t.taskId || t.id, m: t.scheduleMonth, d: t.scheduleDay }))
+              );
+            } catch(e) {}
             localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
             
-            // Update window cache if it exists
+            // Update window cache if it exists (use same sanitized data)
             if (window.ff_tasks_catalog_v1) {
-              window.ff_tasks_catalog_v1[tab] = reorderedCatalog;
+              window.ff_tasks_catalog_v1[tab] = catalogObj[tab];
             }
             
             console.log('[SETTINGS] Catalog reordered and saved for tab:', tab);
@@ -4124,6 +4685,316 @@ function renderSettingsTaskList(tabKey) {
           renderSettingsTaskList(tab);
         });
       });
+      
+      // Weekly multi-day selector handlers
+      if (tab === 'weekly') {
+        // Summary button click handler - toggle panel
+        modalListContainer.querySelectorAll('.tasks-weekly-days-summary').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const taskId = btn.dataset.taskId;
+            const panel = modalListContainer.querySelector(`.tasks-weekly-days-panel[data-task-id="${taskId}"]`);
+            
+            if (panel) {
+              const isCurrentlyOpen = panel.style.display !== 'none';
+              
+              // Close all panels first
+              modalListContainer.querySelectorAll('.tasks-weekly-days-panel').forEach(p => {
+                p.style.display = 'none';
+              });
+              
+              // Toggle this panel
+              if (!isCurrentlyOpen) {
+                panel.style.display = 'block';
+              }
+            }
+          });
+        });
+        
+        // Outside click handler to close panels (only attach once per render)
+        if (!window.__weeklyPanelsOutsideClickAttached) {
+          document.addEventListener('click', function closeWeeklyPanelsOnOutsideClick(e) {
+            const modalContainer = document.getElementById('tasksModalDraftList');
+            if (!modalContainer) return;
+            
+            const clickedInsideWrapper = e.target.closest('.tasks-weekly-days-selector-wrapper');
+            
+            // If clicked outside any panel wrapper, close all panels
+            if (!clickedInsideWrapper) {
+              modalContainer.querySelectorAll('.tasks-weekly-days-panel').forEach(p => {
+                p.style.display = 'none';
+              });
+            }
+          });
+          window.__weeklyPanelsOutsideClickAttached = true;
+        }
+        
+        // "All week" checkbox handler
+        modalListContainer.querySelectorAll('.tasks-weekly-all-week').forEach(checkbox => {
+          checkbox.addEventListener('change', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const taskId = checkbox.dataset.taskId;
+            const isChecked = checkbox.checked;
+            
+            // Find task in draft
+            const tasks = tasksModalDraft[tab] || [];
+            const taskIndex = tasks.findIndex(t => {
+              const tId = t.taskId || t.id;
+              return tId && String(tId) === String(taskId);
+            });
+            
+            if (taskIndex >= 0) {
+              if (isChecked) {
+                // Set to "any" and disable day checkboxes
+                tasks[taskIndex].scheduleWeekdays = 'any';
+                const dayCheckboxes = modalListContainer.querySelectorAll(`.tasks-weekly-day-checkbox[data-task-id="${taskId}"]`);
+                const daysContainer = modalListContainer.querySelector(`.tasks-weekly-days-checkboxes[data-task-id="${taskId}"]`);
+                dayCheckboxes.forEach(cb => cb.checked = false);
+                if (daysContainer) {
+                  daysContainer.style.opacity = '0.5';
+                  daysContainer.style.pointerEvents = 'none';
+                }
+              } else {
+                // Enable day checkboxes (but don't auto-select any)
+                const daysContainer = modalListContainer.querySelector(`.tasks-weekly-days-checkboxes[data-task-id="${taskId}"]`);
+                if (daysContainer) {
+                  daysContainer.style.opacity = '1';
+                  daysContainer.style.pointerEvents = 'auto';
+                }
+                // If no days selected, keep as "any" for now (will update when day is selected)
+                if (!Array.isArray(tasks[taskIndex].scheduleWeekdays) || tasks[taskIndex].scheduleWeekdays.length === 0) {
+                  tasks[taskIndex].scheduleWeekdays = [];
+                }
+              }
+              tasksModalDraft[tab] = tasks;
+              
+              // Update summary text
+              const summaryBtn = modalListContainer.querySelector(`.tasks-weekly-days-summary[data-task-id="${taskId}"]`);
+              if (summaryBtn) {
+                const newSummary = getWeeklyDaysSummary(tasks[taskIndex].scheduleWeekdays);
+                const summarySpan = summaryBtn.querySelector('span:first-child');
+                if (summarySpan) {
+                  summarySpan.textContent = `Days: ${newSummary}`;
+                }
+              }
+              
+              // Save immediately
+              if (typeof saveTasksToStorage === 'function') {
+                saveTasksToStorage();
+              }
+              
+              console.log('[SETTINGS] Updated scheduleWeekdays for task', taskId, 'to', tasks[taskIndex].scheduleWeekdays);
+            }
+          });
+        });
+        
+        // Individual day checkbox handlers
+        modalListContainer.querySelectorAll('.tasks-weekly-day-checkbox').forEach(checkbox => {
+          checkbox.addEventListener('change', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const taskId = checkbox.dataset.taskId;
+            const day = parseInt(checkbox.dataset.day, 10);
+            const isChecked = checkbox.checked;
+            
+            // Find task in draft
+            const tasks = tasksModalDraft[tab] || [];
+            const taskIndex = tasks.findIndex(t => {
+              const tId = t.taskId || t.id;
+              return tId && String(tId) === String(taskId);
+            });
+            
+            if (taskIndex >= 0) {
+              // Get current selected days
+              let selectedDays = [];
+              if (Array.isArray(tasks[taskIndex].scheduleWeekdays)) {
+                selectedDays = [...tasks[taskIndex].scheduleWeekdays];
+              } else if (tasks[taskIndex].scheduleWeekdays === 'any') {
+                // If was "any", start with empty array
+                selectedDays = [];
+              }
+              
+              // Update selected days
+              if (isChecked) {
+                if (!selectedDays.includes(day)) {
+                  selectedDays.push(day);
+                  selectedDays.sort((a, b) => a - b);
+                }
+              } else {
+                selectedDays = selectedDays.filter(d => d !== day);
+              }
+              
+              // If no days selected, revert to "any"
+              if (selectedDays.length === 0) {
+                tasks[taskIndex].scheduleWeekdays = 'any';
+                // Uncheck "All week" and disable day checkboxes
+                const allWeekCheckbox = modalListContainer.querySelector(`.tasks-weekly-all-week[data-task-id="${taskId}"]`);
+                const daysContainer = modalListContainer.querySelector(`.tasks-weekly-days-checkboxes[data-task-id="${taskId}"]`);
+                if (allWeekCheckbox) allWeekCheckbox.checked = true;
+                if (daysContainer) {
+                  daysContainer.style.opacity = '0.5';
+                  daysContainer.style.pointerEvents = 'none';
+                }
+              } else {
+                tasks[taskIndex].scheduleWeekdays = selectedDays;
+                // Ensure "All week" is unchecked
+                const allWeekCheckbox = modalListContainer.querySelector(`.tasks-weekly-all-week[data-task-id="${taskId}"]`);
+                if (allWeekCheckbox) allWeekCheckbox.checked = false;
+                const daysContainer = modalListContainer.querySelector(`.tasks-weekly-days-checkboxes[data-task-id="${taskId}"]`);
+                if (daysContainer) {
+                  daysContainer.style.opacity = '1';
+                  daysContainer.style.pointerEvents = 'auto';
+                }
+              }
+              
+              tasksModalDraft[tab] = tasks;
+              
+              // Update summary text
+              const summaryBtn = modalListContainer.querySelector(`.tasks-weekly-days-summary[data-task-id="${taskId}"]`);
+              if (summaryBtn) {
+                const newSummary = getWeeklyDaysSummary(tasks[taskIndex].scheduleWeekdays);
+                const summarySpan = summaryBtn.querySelector('span:first-child');
+                if (summarySpan) {
+                  summarySpan.textContent = `Days: ${newSummary}`;
+                }
+              }
+              
+              // Save immediately
+              if (typeof saveTasksToStorage === 'function') {
+                saveTasksToStorage();
+              }
+              
+              console.log('[SETTINGS] Updated scheduleWeekdays for task', taskId, 'to', tasks[taskIndex].scheduleWeekdays);
+            }
+          });
+        });
+      }
+      
+      // Monthly day-of-month selector handlers
+      if (tab === 'monthly') {
+        // Summary button click handler - toggle panel
+        modalListContainer.querySelectorAll('.tasks-monthly-day-summary').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const taskId = btn.dataset.taskId;
+            const panel = modalListContainer.querySelector(`.tasks-monthly-day-panel[data-task-id="${taskId}"]`);
+            
+            if (panel) {
+              const isCurrentlyOpen = panel.style.display !== 'none';
+              
+              // Close all monthly and weekly panels first
+              modalListContainer.querySelectorAll('.tasks-monthly-day-panel, .tasks-weekly-days-panel').forEach(p => {
+                p.style.display = 'none';
+              });
+              
+              // Toggle this panel
+              if (!isCurrentlyOpen) {
+                panel.style.display = 'block';
+              }
+            }
+          });
+        });
+        
+        // Radio option change handler
+        modalListContainer.querySelectorAll('.tasks-monthly-day-option').forEach(radio => {
+          radio.addEventListener('change', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const taskId = radio.dataset.taskId;
+            const selectedDay = radio.dataset.day;
+            
+            // Convert to number if not "any", otherwise keep as "any"
+            let scheduleDayOfMonth;
+            if (selectedDay === 'any') {
+              scheduleDayOfMonth = 'any';
+            } else {
+              const n = Number(selectedDay);
+              // Validate: must be a number between 1 and 31
+              if (n >= 1 && n <= 31 && !isNaN(n)) {
+                scheduleDayOfMonth = n; // Store as number
+              } else {
+                scheduleDayOfMonth = 'any'; // Fallback to "any" if invalid
+              }
+            }
+            
+            // Find task in draft
+            const tasks = tasksModalDraft[tab] || [];
+            const taskIndex = tasks.findIndex(t => {
+              const tId = t.taskId || t.id;
+              return tId && String(tId) === String(taskId);
+            });
+            
+            if (taskIndex >= 0) {
+              tasks[taskIndex].scheduleDayOfMonth = scheduleDayOfMonth;
+              tasksModalDraft[tab] = tasks;
+              
+              // Update summary text
+              const summaryBtn = modalListContainer.querySelector(`.tasks-monthly-day-summary[data-task-id="${taskId}"]`);
+              if (summaryBtn) {
+                const newSummary = getMonthlyDaySummary(scheduleDayOfMonth);
+                const summarySpan = summaryBtn.querySelector('span:first-child');
+                if (summarySpan) {
+                  summarySpan.textContent = `Day: ${newSummary}`;
+                }
+              }
+              
+              // Close panel
+              const panel = modalListContainer.querySelector(`.tasks-monthly-day-panel[data-task-id="${taskId}"]`);
+              if (panel) {
+                panel.style.display = 'none';
+              }
+              
+              // Save immediately
+              if (typeof saveTasksToStorage === 'function') {
+                saveTasksToStorage();
+              }
+              
+              console.log('[SETTINGS] Updated scheduleDayOfMonth for task', taskId, 'to', scheduleDayOfMonth);
+            }
+          });
+        });
+        
+        // Outside click handler to close monthly panels (reuse weekly handler logic)
+        if (!window.__monthlyPanelsOutsideClickAttached) {
+          document.addEventListener('click', function closeMonthlyPanelsOnOutsideClick(e) {
+            const modalContainer = document.getElementById('tasksModalDraftList');
+            if (!modalContainer) return;
+            
+            const clickedInsideWrapper = e.target.closest('.tasks-monthly-day-selector-wrapper');
+            
+            // If clicked outside any panel wrapper, close all monthly panels
+            if (!clickedInsideWrapper) {
+              modalContainer.querySelectorAll('.tasks-monthly-day-panel').forEach(p => {
+                p.style.display = 'none';
+              });
+            }
+          });
+          window.__monthlyPanelsOutsideClickAttached = true;
+        }
+        
+        // Yearly date selector handlers - delegated handler is attached globally (see below)
+        
+        // Outside click handler to close yearly panels
+        if (!window.__yearlyPanelsOutsideClickAttached) {
+          document.addEventListener('click', function closeYearlyPanelsOnOutsideClick(e) {
+            const modalContainer = document.getElementById('tasksModalDraftList');
+            if (!modalContainer) return;
+            
+            const clickedInsideWrapper = e.target.closest('.tasks-yearly-date-selector-wrapper');
+            
+            // If clicked outside any panel wrapper, close all yearly panels
+            if (!clickedInsideWrapper) {
+              modalContainer.querySelectorAll('.tasks-yearly-date-panel').forEach(p => {
+                p.style.display = 'none';
+              });
+            }
+          });
+          window.__yearlyPanelsOutsideClickAttached = true;
+        }
+      }
       
       // Remove buttons - now use taskId instead of index
       modalListContainer.querySelectorAll('.tasks-modal-draft-remove').forEach(btn => {
@@ -4161,6 +5032,31 @@ function renderSettingsTaskList(tabKey) {
       modalListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;">No tasks yet</div>';
     }
   }
+}
+
+// YEARLY DATE SELECTOR — click handler (attach once)
+if (!window.__ffYearlyDateClickAttached) {
+  window.__ffYearlyDateClickAttached = true;
+
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.tasks-yearly-date-summary');
+    if (!btn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const taskId = btn.getAttribute('data-task-id');
+    if (!taskId) return;
+
+    const panel = document.querySelector(
+      `.tasks-yearly-date-panel[data-task-id="${taskId}"]`
+    );
+    if (!panel) return;
+
+    // Toggle the panel
+    const isOpen = panel.style.display === 'block';
+    panel.style.display = isOpen ? 'none' : 'block';
+  }, true); // capture mode
 }
 
 // Ensure task storage is initialized for a specific tab
@@ -4686,6 +5582,27 @@ function openTasks() {
       initializeResetButton();
     }, 200);
     
+    // Check for auto-reset after storage is initialized and render complete (no setTimeout)
+    try {
+      if (typeof window.ffMaybeAutoResetOpening === 'function') {
+        window.ffMaybeAutoResetOpening(new Date());
+      }
+      if (typeof window.ffMaybeAutoResetClosing === 'function') {
+        window.ffMaybeAutoResetClosing(new Date());
+      }
+      if (typeof window.ffMaybeAutoResetWeekly === 'function') {
+        window.ffMaybeAutoResetWeekly(new Date());
+      }
+      if (typeof window.ffMaybeAutoResetMonthly === 'function') {
+        window.ffMaybeAutoResetMonthly(new Date());
+      }
+      if (typeof window.ffMaybeAutoResetYearly === 'function') {
+        window.ffMaybeAutoResetYearly(new Date());
+      }
+    } catch (e) {
+      // Silently ignore errors
+    }
+    
     console.log('[Tasks] Tasks screen opened');
   } catch (e) {
     console.error('[Tasks] Error opening Tasks screen:', e);
@@ -4996,12 +5913,23 @@ function setSettingsModalTab(tabName) {
     const alertTimeControl = document.getElementById('tasksAlertTimeControl');
     const alertTimeInput = document.getElementById('tasksAlertTimeInput');
     const alertWeekdayControl = document.getElementById('tasksAlertWeekdayControl');
-    const alertWeekdaySelect = document.getElementById('tasksAlertWeekdaySelect');
+    const alertWeekdayTimeInput = document.getElementById('tasksAlertWeekdayTimeInput');
     const alertDayControl = document.getElementById('tasksAlertDayControl');
     const alertDayInput = document.getElementById('tasksAlertDayInput');
     const alertYearlyControl = document.getElementById('tasksAlertYearlyControl');
-    const alertMonthSelect = document.getElementById('tasksAlertMonthSelect');
-    const alertYearlyDayInput = document.getElementById('tasksAlertYearlyDayInput');
+    const alertYearlyTimeInput = document.getElementById('tasksAlertYearlyTimeInput');
+    
+    // Cache Monthly Auto-Reset elements
+    const tasksMonthlyAutoResetSection = document.getElementById('tasksMonthlyAutoResetSection');
+    const tasksMonthlyAutoResetEnabled = document.getElementById('tasksMonthlyAutoResetEnabled');
+    const tasksMonthlyAutoResetTimeRow = document.getElementById('tasksMonthlyAutoResetTimeRow');
+    const tasksMonthlyAutoResetTime = document.getElementById('tasksMonthlyAutoResetTime');
+    
+    // Cache Yearly Auto-Reset elements
+    const tasksYearlyAutoResetSection = document.getElementById('tasksYearlyAutoResetSection');
+    const tasksYearlyAutoResetEnabled = document.getElementById('tasksYearlyAutoResetEnabled');
+    const tasksYearlyAutoResetTimeRow = document.getElementById('tasksYearlyAutoResetTimeRow');
+    const tasksYearlyAutoResetTime = document.getElementById('tasksYearlyAutoResetTime');
     
     // Hide all controls first
     if (alertTimeControl) alertTimeControl.style.display = 'none';
@@ -5057,20 +5985,177 @@ function setSettingsModalTab(tabName) {
             }
           };
         }
+        
+        // Auto-reset controls (only for opening tab)
+        if (tabName === 'opening') {
+          // Hide closing auto-reset section for opening tab
+          const autoResetSectionClosing = document.getElementById('tasksClosingAutoResetSection');
+          if (autoResetSectionClosing) {
+            autoResetSectionClosing.style.display = 'none';
+          }
+          if (tasksMonthlyAutoResetSection) {
+            tasksMonthlyAutoResetSection.style.display = 'none';
+          }
+          
+          const autoResetSection = document.getElementById('tasksOpeningAutoResetSection');
+          const autoResetEnabledCheckbox = document.getElementById('tasksOpeningAutoResetEnabled');
+          const autoResetTimeInput = document.getElementById('tasksOpeningAutoResetTime');
+          const autoResetTimeRow = document.getElementById('tasksOpeningAutoResetTimeRow');
+          
+          if (autoResetSection && autoResetEnabledCheckbox && autoResetTimeInput && autoResetTimeRow) {
+            // Show section for opening tab
+            autoResetSection.style.display = 'block';
+            
+            // Load config
+            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            const openingConfig = alertWindows.opening || {};
+            const enabled = openingConfig.autoResetEnabled === true;
+            const time = openingConfig.autoResetTime || '21:00';
+            
+            // Apply to UI
+            autoResetEnabledCheckbox.checked = enabled;
+            autoResetTimeInput.value = time;
+            autoResetTimeRow.style.display = enabled ? 'block' : 'none';
+            
+            // Checkbox change handler
+            autoResetEnabledCheckbox.onchange = function() {
+              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              if (!alertWindows.opening) {
+                alertWindows.opening = {};
+              }
+              const isChecked = autoResetEnabledCheckbox.checked;
+              alertWindows.opening.autoResetEnabled = isChecked;
+              
+              // If checked and time is empty, set default
+              if (isChecked && !autoResetTimeInput.value) {
+                autoResetTimeInput.value = '21:00';
+                alertWindows.opening.autoResetTime = '21:00';
+              }
+              
+              localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+              
+              // Toggle time row visibility
+              autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
+            };
+            
+            // Time input change handler
+            autoResetTimeInput.onchange = function() {
+              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              if (!alertWindows.opening) {
+                alertWindows.opening = {};
+              }
+              const timeValue = autoResetTimeInput.value;
+              if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
+                alertWindows.opening.autoResetTime = timeValue;
+                localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+              }
+            };
+            autoResetTimeInput.oninput = autoResetTimeInput.onchange;
+            
+            console.log('[AUTO-RESET UI] opening controls rendered');
+          }
+        } else if (tabName === 'closing') {
+          // Hide opening auto-reset section for closing tab
+          const autoResetSectionOpening = document.getElementById('tasksOpeningAutoResetSection');
+          if (autoResetSectionOpening) {
+            autoResetSectionOpening.style.display = 'none';
+          }
+          if (tasksMonthlyAutoResetSection) {
+            tasksMonthlyAutoResetSection.style.display = 'none';
+          }
+          if (tasksYearlyAutoResetSection) {
+            tasksYearlyAutoResetSection.style.display = 'none';
+          }
+          
+          // Show closing auto-reset section
+          const autoResetSection = document.getElementById('tasksClosingAutoResetSection');
+          const autoResetEnabledCheckbox = document.getElementById('tasksClosingAutoResetEnabled');
+          const autoResetTimeInput = document.getElementById('tasksClosingAutoResetTime');
+          const autoResetTimeRow = document.getElementById('tasksClosingAutoResetTimeRow');
+          
+          if (autoResetSection && autoResetEnabledCheckbox && autoResetTimeInput && autoResetTimeRow) {
+            // Show section for closing tab
+            autoResetSection.style.display = 'block';
+            
+            // Load config
+            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            const closingConfig = alertWindows.closing || {};
+            const enabled = closingConfig.autoResetEnabled === true;
+            const time = closingConfig.autoResetTime || '21:00';
+            
+            // Apply to UI
+            autoResetEnabledCheckbox.checked = enabled;
+            autoResetTimeInput.value = time;
+            autoResetTimeRow.style.display = enabled ? 'block' : 'none';
+            
+            // Checkbox change handler
+            autoResetEnabledCheckbox.onchange = function() {
+              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              if (!alertWindows.closing) {
+                alertWindows.closing = {};
+              }
+              const isChecked = autoResetEnabledCheckbox.checked;
+              alertWindows.closing.autoResetEnabled = isChecked;
+              
+              // If checked and time is empty, set default
+              if (isChecked && !autoResetTimeInput.value) {
+                autoResetTimeInput.value = '21:00';
+                alertWindows.closing.autoResetTime = '21:00';
+              }
+              
+              localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+              
+              // Toggle time row visibility
+              autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
+            };
+            
+            // Time input change handler
+            autoResetTimeInput.onchange = function() {
+              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              if (!alertWindows.closing) {
+                alertWindows.closing = {};
+              }
+              const timeValue = autoResetTimeInput.value;
+              if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
+                alertWindows.closing.autoResetTime = timeValue;
+                localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+              }
+            };
+            autoResetTimeInput.oninput = autoResetTimeInput.onchange;
+            
+            console.log('[AUTO-RESET UI] closing controls rendered');
+          }
+        }
       }
     } else if (tabName === 'weekly') {
-      if (alertWeekdayControl && alertWeekdaySelect) {
+      // Hide auto-reset sections for weekly tab
+      const autoResetSectionOpening = document.getElementById('tasksOpeningAutoResetSection');
+      if (autoResetSectionOpening) {
+        autoResetSectionOpening.style.display = 'none';
+      }
+      const autoResetSectionClosing = document.getElementById('tasksClosingAutoResetSection');
+      if (autoResetSectionClosing) {
+        autoResetSectionClosing.style.display = 'none';
+      }
+      if (tasksMonthlyAutoResetSection) {
+        tasksMonthlyAutoResetSection.style.display = 'none';
+      }
+      if (tasksYearlyAutoResetSection) {
+        tasksYearlyAutoResetSection.style.display = 'none';
+      }
+      
+      if (alertWeekdayControl && alertWeekdayTimeInput) {
         alertWeekdayControl.style.display = 'block';
-        const defaultWeekday = 4; // Thursday
-        alertWeekdaySelect.value = String(tabConfig.startWeekday !== undefined ? tabConfig.startWeekday : defaultWeekday);
+        const defaultTime = '09:00';
+        alertWeekdayTimeInput.value = tabConfig.startTime || defaultTime;
         
         // Save on change
-        alertWeekdaySelect.onchange = function() {
+        alertWeekdayTimeInput.onchange = function() {
           const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
           if (!alertWindows[tabName]) {
             alertWindows[tabName] = {};
           }
-          alertWindows[tabName].startWeekday = parseInt(alertWeekdaySelect.value, 10);
+          alertWindows[tabName].startTime = alertWeekdayTimeInput.value;
           localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
           
           // Update badges immediately
@@ -5078,6 +6163,7 @@ function setSettingsModalTab(tabName) {
             window.ffUpdateTasksTabBadges();
           }
         };
+        alertWeekdayTimeInput.oninput = alertWeekdayTimeInput.onchange;
         
         // Setup checkbox for showOnHome
         const showOnHomeCheckbox = document.getElementById('tasksAlertWeekdayShowOnHomeCheckbox');
@@ -5100,31 +6186,118 @@ function setSettingsModalTab(tabName) {
             }
           };
         }
+        
+        // Hide auto-reset sections for weekly tab (opening/closing)
+        const autoResetSectionOpening = document.getElementById('tasksOpeningAutoResetSection');
+        if (autoResetSectionOpening) {
+          autoResetSectionOpening.style.display = 'none';
+        }
+        const autoResetSectionClosing = document.getElementById('tasksClosingAutoResetSection');
+        if (autoResetSectionClosing) {
+          autoResetSectionClosing.style.display = 'none';
+        }
+        
+        // Show weekly auto-reset section
+        const autoResetSection = document.getElementById('tasksWeeklyAutoResetSection');
+        const autoResetEnabledCheckbox = document.getElementById('tasksWeeklyAutoResetEnabled');
+        const autoResetTimeInput = document.getElementById('tasksWeeklyAutoResetTime');
+        const autoResetTimeRow = document.getElementById('tasksWeeklyAutoResetTimeRow');
+        
+        if (autoResetSection && autoResetEnabledCheckbox && autoResetTimeInput && autoResetTimeRow) {
+          // Show section for weekly tab
+          autoResetSection.style.display = 'block';
+          
+          // Load config
+          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          const weeklyConfig = alertWindows.weekly || {};
+          const enabled = weeklyConfig.autoResetEnabled === true;
+          const time = weeklyConfig.autoResetTime || '21:00';
+          
+          // Apply to UI
+          autoResetEnabledCheckbox.checked = enabled;
+          autoResetTimeInput.value = time;
+          autoResetTimeRow.style.display = enabled ? 'block' : 'none';
+          
+          // Checkbox change handler
+          autoResetEnabledCheckbox.onchange = function() {
+            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            if (!alertWindows.weekly) {
+              alertWindows.weekly = {};
+            }
+            const isChecked = autoResetEnabledCheckbox.checked;
+            alertWindows.weekly.autoResetEnabled = isChecked;
+            
+            // If checked and time is empty, set default
+            if (isChecked && !autoResetTimeInput.value) {
+              autoResetTimeInput.value = '21:00';
+              alertWindows.weekly.autoResetTime = '21:00';
+            }
+            
+            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            
+            // Toggle time row visibility
+            autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
+          };
+          
+          // Time input change handler
+          autoResetTimeInput.onchange = function() {
+            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            if (!alertWindows.weekly) {
+              alertWindows.weekly = {};
+            }
+            const timeValue = autoResetTimeInput.value;
+            if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
+              alertWindows.weekly.autoResetTime = timeValue;
+              localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            }
+          };
+          autoResetTimeInput.oninput = autoResetTimeInput.onchange;
+          
+          console.log('[AUTO-RESET UI] weekly controls rendered');
+        }
       }
     } else if (tabName === 'monthly') {
-      if (alertDayControl && alertDayInput) {
-        alertDayControl.style.display = 'block';
-        const defaultDay = 20;
-        alertDayInput.value = String(tabConfig.startDayOfMonth !== undefined ? tabConfig.startDayOfMonth : defaultDay);
+      // Hide auto-reset sections for monthly tab
+      const autoResetSectionOpening = document.getElementById('tasksOpeningAutoResetSection');
+      if (autoResetSectionOpening) {
+        autoResetSectionOpening.style.display = 'none';
+      }
+      const autoResetSectionClosing = document.getElementById('tasksClosingAutoResetSection');
+      if (autoResetSectionClosing) {
+        autoResetSectionClosing.style.display = 'none';
+      }
+      
+      if (alertTimeControl && alertTimeInput) {
+        alertTimeControl.style.display = 'block';
+        const defaultTime = '09:00';
+        // Migration: if old startDayOfMonth exists, ignore it and use startTime (or default)
+        alertTimeInput.value = tabConfig.startTime || defaultTime;
         
         // Save on change
-        alertDayInput.onchange = function() {
+        alertTimeInput.onchange = function() {
           const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
           if (!alertWindows[tabName]) {
             alertWindows[tabName] = {};
           }
-          const dayValue = parseInt(alertDayInput.value, 10);
-          if (dayValue >= 1 && dayValue <= 31) {
-            alertWindows[tabName].startDayOfMonth = dayValue;
+          const timeValue = alertTimeInput.value;
+          if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
+            alertWindows[tabName].startTime = timeValue;
+            // Remove old startDayOfMonth if it exists (migration cleanup)
+            if (alertWindows[tabName].startDayOfMonth !== undefined) {
+              delete alertWindows[tabName].startDayOfMonth;
+            }
             localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
             
             // Update badges immediately
             if (typeof window.ffUpdateTasksTabBadges === 'function') {
               window.ffUpdateTasksTabBadges();
             }
+            if (typeof window.ffUpdateHomeTasksBadge === 'function') {
+              window.ffUpdateHomeTasksBadge();
+            }
           }
         };
-        alertDayInput.oninput = alertDayInput.onchange;
+        alertTimeInput.oninput = alertTimeInput.onchange;
         
         // Setup checkbox for showOnHome
         const showOnHomeCheckbox = document.getElementById('tasksAlertDayShowOnHomeCheckbox');
@@ -5147,37 +6320,146 @@ function setSettingsModalTab(tabName) {
             }
           };
         }
+        
+        // Wire Monthly Auto-Reset UI (use cached elements from top of function)
+        console.log('[AUTO-RESET UI] monthly section found?', !!tasksMonthlyAutoResetSection);
+        console.log('[AUTO-RESET UI] monthly tab render');
+        
+        if (tasksMonthlyAutoResetSection && tasksMonthlyAutoResetEnabled && tasksMonthlyAutoResetTime && tasksMonthlyAutoResetTimeRow) {
+          tasksMonthlyAutoResetSection.style.display = 'block';
+          
+          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          const cfg = alertWindows.monthly || {};
+          
+          tasksMonthlyAutoResetEnabled.checked = !!cfg.autoResetEnabled;
+          tasksMonthlyAutoResetTime.value = cfg.autoResetTime || '21:00';
+          tasksMonthlyAutoResetTimeRow.style.display = cfg.autoResetEnabled ? 'block' : 'none';
+          
+          // Event handlers
+          tasksMonthlyAutoResetEnabled.onchange = function() {
+            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            if (!alertWindows.monthly) {
+              alertWindows.monthly = {};
+            }
+            alertWindows.monthly.autoResetEnabled = tasksMonthlyAutoResetEnabled.checked;
+            
+            if (!alertWindows.monthly.autoResetTime) {
+              alertWindows.monthly.autoResetTime = '21:00';
+              tasksMonthlyAutoResetTime.value = '21:00';
+            }
+            
+            tasksMonthlyAutoResetTimeRow.style.display = tasksMonthlyAutoResetEnabled.checked ? 'block' : 'none';
+            
+            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+          };
+          
+          tasksMonthlyAutoResetTime.onchange = function() {
+            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            if (!alertWindows.monthly) {
+              alertWindows.monthly = {};
+            }
+            alertWindows.monthly.autoResetTime = tasksMonthlyAutoResetTime.value;
+            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+          };
+        } else {
+          console.warn('[AUTO-RESET UI] Monthly auto-reset elements not found:', {
+            section: !!tasksMonthlyAutoResetSection,
+            enabled: !!tasksMonthlyAutoResetEnabled,
+            time: !!tasksMonthlyAutoResetTime,
+            timeRow: !!tasksMonthlyAutoResetTimeRow
+          });
+        }
       }
     } else if (tabName === 'yearly') {
-      if (alertYearlyControl && alertMonthSelect && alertYearlyDayInput) {
+      // Hide auto-reset sections for yearly tab
+      const autoResetSectionOpening = document.getElementById('tasksOpeningAutoResetSection');
+      if (autoResetSectionOpening) {
+        autoResetSectionOpening.style.display = 'none';
+      }
+      const autoResetSectionClosing = document.getElementById('tasksClosingAutoResetSection');
+      if (autoResetSectionClosing) {
+        autoResetSectionClosing.style.display = 'none';
+      }
+      const autoResetSectionWeekly = document.getElementById('tasksWeeklyAutoResetSection');
+      if (autoResetSectionWeekly) {
+        autoResetSectionWeekly.style.display = 'none';
+      }
+      if (tasksMonthlyAutoResetSection) {
+        tasksMonthlyAutoResetSection.style.display = 'none';
+      }
+      
+      // Wire Yearly Auto-Reset UI (use cached elements from top of function)
+      if (tasksYearlyAutoResetSection && tasksYearlyAutoResetEnabled && tasksYearlyAutoResetTime && tasksYearlyAutoResetTimeRow) {
+        tasksYearlyAutoResetSection.style.display = 'block';
+        
+        const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+        const cfg = alertWindows.yearly || {};
+        
+        tasksYearlyAutoResetEnabled.checked = !!cfg.autoResetEnabled;
+        tasksYearlyAutoResetTime.value = cfg.autoResetTime || '21:00';
+        tasksYearlyAutoResetTimeRow.style.display = cfg.autoResetEnabled ? 'block' : 'none';
+        
+        // Event handlers
+        tasksYearlyAutoResetEnabled.onchange = function() {
+          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          if (!alertWindows.yearly) {
+            alertWindows.yearly = {};
+          }
+          alertWindows.yearly.autoResetEnabled = tasksYearlyAutoResetEnabled.checked;
+          
+          if (!alertWindows.yearly.autoResetTime) {
+            alertWindows.yearly.autoResetTime = '21:00';
+            tasksYearlyAutoResetTime.value = '21:00';
+          }
+          
+          tasksYearlyAutoResetTimeRow.style.display = tasksYearlyAutoResetEnabled.checked ? 'block' : 'none';
+          
+          localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+        };
+        
+        tasksYearlyAutoResetTime.onchange = function() {
+          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          if (!alertWindows.yearly) {
+            alertWindows.yearly = {};
+          }
+          alertWindows.yearly.autoResetTime = tasksYearlyAutoResetTime.value;
+          localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+        };
+      }
+      
+      if (alertYearlyControl && alertYearlyTimeInput) {
         alertYearlyControl.style.display = 'block';
-        const defaultMonth = 11; // November
-        const defaultDay = 15;
-        alertMonthSelect.value = String(tabConfig.startMonth !== undefined ? tabConfig.startMonth : defaultMonth);
-        alertYearlyDayInput.value = String(tabConfig.startDay !== undefined ? tabConfig.startDay : defaultDay);
+        const defaultTime = '09:00';
+        alertYearlyTimeInput.value = tabConfig.startTime || defaultTime;
         
         // Save on change
-        const saveYearlyConfig = function() {
+        alertYearlyTimeInput.onchange = function() {
           const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
           if (!alertWindows[tabName]) {
             alertWindows[tabName] = {};
           }
-          const monthValue = parseInt(alertMonthSelect.value, 10);
-          const dayValue = parseInt(alertYearlyDayInput.value, 10);
-          if (monthValue >= 1 && monthValue <= 12 && dayValue >= 1 && dayValue <= 31) {
-            alertWindows[tabName].startMonth = monthValue;
-            alertWindows[tabName].startDay = dayValue;
+          const timeValue = alertYearlyTimeInput.value;
+          if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
+            alertWindows[tabName].startTime = timeValue;
+            // Remove old startMonth/startDay if they exist (migration cleanup)
+            if (alertWindows[tabName].startMonth !== undefined) {
+              delete alertWindows[tabName].startMonth;
+            }
+            if (alertWindows[tabName].startDay !== undefined) {
+              delete alertWindows[tabName].startDay;
+            }
             localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
             
             // Update badges immediately
             if (typeof window.ffUpdateTasksTabBadges === 'function') {
               window.ffUpdateTasksTabBadges();
             }
+            if (typeof window.ffUpdateHomeTasksBadge === 'function') {
+              window.ffUpdateHomeTasksBadge();
+            }
           }
         };
-        alertMonthSelect.onchange = saveYearlyConfig;
-        alertYearlyDayInput.onchange = saveYearlyConfig;
-        alertYearlyDayInput.oninput = saveYearlyConfig;
+        alertYearlyTimeInput.oninput = alertYearlyTimeInput.onchange;
         
         // Setup checkbox for showOnHome
         const showOnHomeCheckbox = document.getElementById('tasksAlertYearlyShowOnHomeCheckbox');
@@ -5237,21 +6519,53 @@ function saveTasksToStorage() {
       catalogObj = window.ff_tasks_catalog_v1 || {};
     }
     
-    // Sanitize tasks for catalog: keep only id/title/instructions (no runtime status fields)
+    // Sanitize tasks for catalog: keep only id/title/instructions/scheduleWeekdays/scheduleDayOfMonth (no runtime status fields)
     const catalogList = currentTabTasks.map(task => {
       if (!task || typeof task !== 'object') return null;
       const keyId = task.taskId || task.id;
       if (!keyId) return null;
-      return {
+      const catalogTask = {
         id: keyId,
+        taskId: keyId,
         title: task.title || '',
         instructions: task.instructions || task.info || task.details || ''
       };
+      // Preserve scheduleWeekdays for weekly tasks
+      if (tab === 'weekly' && task.scheduleWeekdays !== undefined) {
+        catalogTask.scheduleWeekdays = task.scheduleWeekdays;
+      }
+      // Preserve scheduleDayOfMonth for monthly tasks
+      if (tab === 'monthly' && task.scheduleDayOfMonth !== undefined) {
+        catalogTask.scheduleDayOfMonth = task.scheduleDayOfMonth;
+      }
+      // For yearly tasks: always include scheduleMonth and scheduleDay (even if null)
+      if (tab === 'yearly') {
+        catalogTask.scheduleMonth = task.scheduleMonth ?? null;
+        catalogTask.scheduleDay = task.scheduleDay ?? null;
+      }
+      return catalogTask;
     }).filter(Boolean);
     
     // Update catalog for this tab
     catalogObj[tab] = catalogList;
+    
+    // Debug log for yearly - before saving
+    if (tab === 'yearly') {
+      console.log('[SAVE] yearly draft:', tasksModalDraft.yearly.map(t => ({id:t.taskId||t.id, m:t.scheduleMonth, d:t.scheduleDay})));
+    }
+    try {
+      console.log('[CATALOG WRITE]', new Error().stack.split('\n').slice(0,4).join('\n'));
+      console.log('[CATALOG WRITE] yearly payload preview:',
+        (catalogObj?.yearly || []).map(t => ({ id: t.taskId || t.id, m: t.scheduleMonth, d: t.scheduleDay }))
+      );
+    } catch(e) {}
     localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
+    
+    // Debug log for yearly - after saving
+    if (tab === 'yearly') {
+      const saved = JSON.parse(localStorage.getItem('ff_tasks_catalog_v1'));
+      console.log('[SAVE] yearly saved:', (saved?.yearly||[]).map(t => ({id:t.taskId||t.id, m:t.scheduleMonth, d:t.scheduleDay})));
+    }
     
     // Update window object to keep it in sync
     if (typeof window.ff_tasks_catalog_v1 === 'undefined' || !window.ff_tasks_catalog_v1) {
@@ -5386,6 +6700,49 @@ function saveTasksToStorage() {
       setTimeout(() => window.ffUpdateTasksTabBadges(), 50);
     }
     
+    // Check for auto-reset after saving (if opening/closing/weekly tab, no setTimeout)
+    if (tab === 'opening') {
+      try {
+        if (typeof window.ffMaybeAutoResetOpening === 'function') {
+          window.ffMaybeAutoResetOpening(new Date());
+        }
+      } catch (e) {
+        // Silently ignore errors
+      }
+    } else if (tab === 'closing') {
+      try {
+        if (typeof window.ffMaybeAutoResetClosing === 'function') {
+          window.ffMaybeAutoResetClosing(new Date());
+        }
+      } catch (e) {
+        // Silently ignore errors
+      }
+    } else if (tab === 'weekly') {
+      try {
+        if (typeof window.ffMaybeAutoResetWeekly === 'function') {
+          window.ffMaybeAutoResetWeekly(new Date());
+        }
+      } catch (e) {
+        // Silently ignore errors
+      }
+    } else if (tab === 'monthly') {
+      try {
+        if (typeof window.ffMaybeAutoResetMonthly === 'function') {
+          window.ffMaybeAutoResetMonthly(new Date());
+        }
+      } catch (e) {
+        // Silently ignore errors
+      }
+    } else if (tab === 'yearly') {
+      try {
+        if (typeof window.ffMaybeAutoResetYearly === 'function') {
+          window.ffMaybeAutoResetYearly(new Date());
+        }
+      } catch (e) {
+        // Silently ignore errors
+      }
+    }
+    
     return true;
   } catch (e) {
     console.error('[Tasks] Error saving to storage:', e);
@@ -5428,6 +6785,9 @@ function migrateLegacyActiveToV1(tab) {
       });
     }
     
+    // Check if new key has data before migration
+    const hadDataBefore = !!localStorage.getItem(newKey);
+    
     // 1) Start with current v1 active as base
     try {
       const rawNew = localStorage.getItem(newKey);
@@ -5440,12 +6800,20 @@ function migrateLegacyActiveToV1(tab) {
     }
     
     // 2) Merge in all legacy keys (if present)
+    let migratedCount = 0;
+    const hadLegacy = legacyKeys.some(k => localStorage.getItem(k));
+    
     legacyKeys.forEach(k => {
       const raw = localStorage.getItem(k);
       if (!raw) return;
       try {
         const arr = JSON.parse(raw) || [];
+        const beforeCount = mergedById.size;
         mergeTasks(arr);
+        const afterCount = mergedById.size;
+        if (afterCount > beforeCount) {
+          migratedCount += (afterCount - beforeCount);
+        }
       } catch (e) {
         console.warn('[Tasks] Error parsing legacy active key', k, e);
       }
@@ -5453,6 +6821,12 @@ function migrateLegacyActiveToV1(tab) {
     
     // Save merged result back to v1 key
     const mergedArray = Array.from(mergedById.values());
+    
+    // Log migration if we moved data from old to new (specifically for monthly)
+    if (tab === 'monthly' && !hadDataBefore && hadLegacy && migratedCount > 0) {
+      console.log('[MIGRATE][MONTHLY] moved', migratedCount);
+    }
+    
     localStorage.setItem(newKey, JSON.stringify(mergedArray));
     
     // TEMP debug log for active v1 count after migration
@@ -5598,6 +6972,28 @@ function renderTasksList(tab, opts) {
           if (!isActiveFlag) return false;
           // Hide tasks that are pending (status='pending' or assignedTo exists)
           if (task.status === 'pending' || !!task.assignedTo) return false;
+          
+          // For weekly tab, filter by scheduleWeekdays (only show tasks scheduled for today)
+          if (mainTab === 'weekly' && typeof window.ffIsWeeklyTaskScheduledToday === 'function') {
+            if (!window.ffIsWeeklyTaskScheduledToday(keyId, new Date())) {
+              return false; // Skip this task - not scheduled for today
+            }
+          }
+          
+          // For monthly tab, filter by scheduleDayOfMonth (only show tasks scheduled for today)
+          if (mainTab === 'monthly' && typeof window.ffIsMonthlyTaskScheduledToday === 'function') {
+            if (!window.ffIsMonthlyTaskScheduledToday(keyId, new Date())) {
+              return false; // Skip this task - not scheduled for today
+            }
+          }
+          
+          // For yearly tab, filter by active status (appears if today >= scheduled date AND not completed)
+          if (mainTab === 'yearly' && typeof window.ffIsYearlyTaskActive === 'function') {
+            if (!window.ffIsYearlyTaskActive(task, new Date())) {
+              return false; // Skip this task - not active
+            }
+          }
+          
           return true;
         });
       
@@ -5771,7 +7167,31 @@ function renderTasksList(tab, opts) {
     if (pendingListContainer && !isTasksSettingsOpen) {
       // Get current tab for main Tasks screen
       const mainTab = currentTasksTab || 'opening';
-      const pendingTasks = getTabTasks(mainTab, 'pending');
+      const allPendingTasks = getTabTasks(mainTab, 'pending');
+      
+      // For weekly tab, filter by scheduleWeekdays (only show tasks scheduled for today)
+      // For monthly tab, filter by scheduleDayOfMonth (only show tasks scheduled for today)
+      let pendingTasks = allPendingTasks;
+      if (mainTab === 'weekly' && typeof window.ffIsWeeklyTaskScheduledToday === 'function') {
+        pendingTasks = allPendingTasks.filter(task => {
+          if (!task || typeof task !== 'object') return false;
+          const keyId = task.taskId || task.id;
+          if (!keyId) return false;
+          return window.ffIsWeeklyTaskScheduledToday(keyId, new Date());
+        });
+      } else if (mainTab === 'monthly' && typeof window.ffIsMonthlyTaskScheduledToday === 'function') {
+        pendingTasks = allPendingTasks.filter(task => {
+          if (!task || typeof task !== 'object') return false;
+          const keyId = task.taskId || task.id;
+          if (!keyId) return false;
+          return window.ffIsMonthlyTaskScheduledToday(keyId, new Date());
+        });
+      } else if (mainTab === 'yearly' && typeof window.ffIsYearlyTaskActive === 'function') {
+        pendingTasks = allPendingTasks.filter(task => {
+          if (!task || typeof task !== 'object') return false;
+          return window.ffIsYearlyTaskActive(task, new Date());
+        });
+      }
       
       if (pendingTasks.length === 0) {
         pendingListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">Pending (coming soon)</div>';
@@ -6047,6 +7467,12 @@ function addTaskToDraft() {
     renderTasksList(window.currentTasksTab);
     
     console.log('[Tasks] Task added to draft for tab:', tab);
+    
+    // Debug log for yearly
+    if (tab === 'yearly') {
+      console.log('[YEARLY] addTaskToDraft - added task with id:', id);
+      console.log('[YEARLY] draft count after add:', tasksModalDraft.yearly?.length);
+    }
   } catch (e) {
     console.error('[Tasks] Error in addTaskToDraft:', e);
   }
@@ -6142,6 +7568,12 @@ function removeTaskFromDraft(index) {
       }
       if (catalogObj[tab]) {
         catalogObj[tab] = catalogObj[tab].filter(filterTask);
+        try {
+          console.log('[CATALOG WRITE]', new Error().stack.split('\n').slice(0,4).join('\n'));
+          console.log('[CATALOG WRITE] yearly payload preview:',
+            (catalogObj?.yearly || []).map(t => ({ id: t.taskId || t.id, m: t.scheduleMonth, d: t.scheduleDay }))
+          );
+        } catch(e) {}
         localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
         // Update window object to keep it in sync
         if (typeof window.ff_tasks_catalog_v1 === 'undefined' || !window.ff_tasks_catalog_v1) {
@@ -6319,6 +7751,12 @@ function removeTaskFromDraftByTaskId(taskId, isOrphan, settingsTab) {
     }
     if (catalogObj[tab]) {
       catalogObj[tab] = catalogObj[tab].filter(filterByVariants);
+      try {
+        console.log('[CATALOG WRITE]', new Error().stack.split('\n').slice(0,4).join('\n'));
+        console.log('[CATALOG WRITE] yearly payload preview:',
+          (catalogObj?.yearly || []).map(t => ({ id: t.taskId || t.id, m: t.scheduleMonth, d: t.scheduleDay }))
+        );
+      } catch(e) {}
       localStorage.setItem("ff_tasks_catalog_v1", JSON.stringify(catalogObj));
       // Update window object to keep it in sync
       if (typeof window.ff_tasks_catalog_v1 === 'undefined' || !window.ff_tasks_catalog_v1) {
@@ -6638,19 +8076,49 @@ function openTasksSettings() {
       alertWindows.closing.showOnHome = true;
     }
     if (!alertWindows.weekly) {
-      alertWindows.weekly = { startWeekday: 4, showOnHome: false }; // Thursday
-    } else if (alertWindows.weekly.showOnHome === undefined) {
-      alertWindows.weekly.showOnHome = false;
+      alertWindows.weekly = { startTime: '09:00', showOnHome: false };
+    } else {
+      if (alertWindows.weekly.showOnHome === undefined) {
+        alertWindows.weekly.showOnHome = false;
+      }
+      // Migrate old startWeekday to startTime if needed
+      if (alertWindows.weekly.startTime === undefined && alertWindows.weekly.startWeekday !== undefined) {
+        alertWindows.weekly.startTime = '09:00'; // Default time
+        delete alertWindows.weekly.startWeekday;
+      }
+      // Ensure startTime exists
+      if (alertWindows.weekly.startTime === undefined) {
+        alertWindows.weekly.startTime = '09:00';
+      }
     }
     if (!alertWindows.monthly) {
-      alertWindows.monthly = { startDayOfMonth: 20, showOnHome: false };
-    } else if (alertWindows.monthly.showOnHome === undefined) {
-      alertWindows.monthly.showOnHome = false;
+      alertWindows.monthly = { startTime: '09:00', showOnHome: false };
+    } else {
+      // Migration: if startDayOfMonth exists (old), remove it and ensure startTime exists
+      if (alertWindows.monthly.startDayOfMonth !== undefined) {
+        delete alertWindows.monthly.startDayOfMonth;
+      }
+      if (!alertWindows.monthly.startTime) {
+        alertWindows.monthly.startTime = '09:00';
+      }
+      if (alertWindows.monthly.showOnHome === undefined) {
+        alertWindows.monthly.showOnHome = false;
+      }
     }
     if (!alertWindows.yearly) {
-      alertWindows.yearly = { startMonth: 11, startDay: 15, showOnHome: false }; // November 15
-    } else if (alertWindows.yearly.showOnHome === undefined) {
-      alertWindows.yearly.showOnHome = false;
+      alertWindows.yearly = { startTime: '09:00', showOnHome: false };
+    } else {
+      // Migration: if old startMonth/startDay exists, remove them and ensure startTime exists
+      if (alertWindows.yearly.startMonth !== undefined || alertWindows.yearly.startDay !== undefined) {
+        delete alertWindows.yearly.startMonth;
+        delete alertWindows.yearly.startDay;
+      }
+      if (!alertWindows.yearly.startTime) {
+        alertWindows.yearly.startTime = '09:00';
+      }
+      if (alertWindows.yearly.showOnHome === undefined) {
+        alertWindows.yearly.showOnHome = false;
+      }
     }
     localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
     
@@ -6979,10 +8447,607 @@ function resetTasksForCurrentTab() {
     console.log("[RESET] Re-rendering tasks list for tab:", window.currentTasksTab);
     renderTasksList(window.currentTasksTab);
     
+    // Log to Tasks history - call addHistoryEntry directly
+    if (typeof addHistoryEntry === 'function') {
+      const currentTab = window.currentTasksTab || 'unknown';
+      const actor = getHistoryActor();
+      addHistoryEntry(`Tasks Reset: ${currentTab}`, actor.role, actor.name, '', 'tasks');
+    }
+    
     console.log("[RESET] Completed");
 }
 
 window.resetTasksForCurrentTab = resetTasksForCurrentTab;
+
+// Function to open Tasks History modal with Tasks filter pre-selected
+function openTasksHistoryModal() {
+  console.log('[TASKS] History button clicked - opening main History modal with Tasks filter');
+  setHistorySourceFilter('tasks');
+  // Use the same admin-gated function as Queue History
+  if (typeof openLog === 'function') {
+    openLog();
+  } else {
+    // Fallback if openLog is not available
+    openHistoryModal();
+  }
+}
+window.openTasksHistoryModal = openTasksHistoryModal;
+
+// Internal reset function that accepts explicit tab parameter (uses existing reset logic)
+function resetTasksForTabInternal(tab) {
+  if (!tab) {
+    console.error("[RESET] ERROR: tab parameter is required");
+    return;
+  }
+  
+  console.log("[RESET] Running for tab:", tab);
+  
+  // Use getTabStorageKey to get correct storage keys (no hardcoding)
+  const keyActive = typeof getTabStorageKey === 'function' 
+    ? getTabStorageKey(tab, 'active')
+    : `ff_tasks_${tab}_active_v1`;
+  const keyPending = typeof getTabStorageKey === 'function'
+    ? getTabStorageKey(tab, 'pending')
+    : `ff_tasks_${tab}_pending_v1`;
+  const keyDone = typeof getTabStorageKey === 'function'
+    ? getTabStorageKey(tab, 'done')
+    : `ff_tasks_${tab}_done_v1`;
+  
+  console.log("[RESET] Clearing storage keys:", keyActive, keyPending, keyDone);
+  
+  // Clear all three lists
+  localStorage.removeItem(keyActive);
+  localStorage.removeItem(keyPending);
+  localStorage.removeItem(keyDone);
+  
+  // Reload catalog data for this tab
+  const catalog = window.ff_tasks_catalog_v1?.[tab] || [];
+  console.log("[RESET] Catalog data for tab:", tab, "items:", catalog.length);
+  
+  // Use existing writeTasksList function (same as resetTasksForCurrentTab)
+  if (typeof writeTasksList === 'function') {
+    writeTasksList(tab, 'active', catalog);
+    writeTasksList(tab, 'pending', []);
+    writeTasksList(tab, 'done', []);
+  } else {
+    localStorage.setItem(keyActive, JSON.stringify(catalog));
+    localStorage.setItem(keyPending, JSON.stringify([]));
+    localStorage.setItem(keyDone, JSON.stringify([]));
+  }
+  
+  console.log("[RESET] Storage cleared and reinitialized");
+  
+  // Re-render UI for this tab (renderTasksList accepts tab parameter, doesn't change selected tab)
+  if (typeof renderTasksList === 'function') {
+    renderTasksList(tab);
+  }
+  
+  console.log("[RESET] Completed for tab:", tab);
+}
+
+// Safe wrapper for auto-reset (does not change UI state or selected tab)
+window.resetTasksForTab = function(tab) {
+  if (!tab) {
+    console.error("[RESET] ERROR: tab parameter is required");
+    return;
+  }
+  
+  // Call internal reset function (uses existing reset logic and getTabStorageKey)
+  resetTasksForTabInternal(tab);
+};
+
+// Today-only reset for Weekly tab (only resets tasks scheduled for today)
+// Old resetWeeklyForToday removed - replaced with rollover version below
+
+// Today-only reset function for Yearly tab
+window.resetYearlyForToday = function(nowDate) {
+  try {
+    const tab = 'yearly';
+    const now = nowDate || new Date();
+    
+    // Get storage keys using getTabStorageKey (no hardcoding)
+    const keyActive = typeof getTabStorageKey === 'function' 
+      ? getTabStorageKey(tab, 'active')
+      : `ff_tasks_${tab}_active_v1`;
+    const keyPending = typeof getTabStorageKey === 'function'
+      ? getTabStorageKey(tab, 'pending')
+      : `ff_tasks_${tab}_pending_v1`;
+    const keyDone = typeof getTabStorageKey === 'function'
+      ? getTabStorageKey(tab, 'done')
+      : `ff_tasks_${tab}_done_v1`;
+    
+    console.log('[Yearly Auto-Reset] Performing today-only reset for keys:', keyActive, keyPending, keyDone);
+    
+    // Helper to check if a task is active (appears if today >= scheduled date AND not completed)
+    const isActive = function(task) {
+      if (!task || typeof task !== 'object') return false;
+      
+      if (typeof window.ffIsYearlyTaskActive === 'function') {
+        return window.ffIsYearlyTaskActive(task, now) === true;
+      }
+      return false; // If helper not available, don't reset
+    };
+    
+    // Read lists from localStorage (safe parse)
+    let activeList = [];
+    let pendingList = [];
+    let doneList = [];
+    
+    try {
+      const activeRaw = localStorage.getItem(keyActive);
+      if (activeRaw) activeList = JSON.parse(activeRaw) || [];
+    } catch (e) {
+      console.warn('[Yearly Auto-Reset] Error reading active list:', e);
+    }
+    
+    try {
+      const pendingRaw = localStorage.getItem(keyPending);
+      if (pendingRaw) pendingList = JSON.parse(pendingRaw) || [];
+    } catch (e) {
+      console.warn('[Yearly Auto-Reset] Error reading pending list:', e);
+    }
+    
+    try {
+      const doneRaw = localStorage.getItem(keyDone);
+      if (doneRaw) doneList = JSON.parse(doneRaw) || [];
+    } catch (e) {
+      console.warn('[Yearly Auto-Reset] Error reading done list:', e);
+    }
+    
+    // a) Remove scheduled-today tasks from pending list entirely
+    const pendingBefore = pendingList.length;
+    pendingList = pendingList.filter(task => !isActive(task));
+    const pendingRemoved = pendingBefore - pendingList.length;
+    
+    // b) Remove scheduled-today tasks from done list entirely
+    const doneBefore = doneList.length;
+    doneList = doneList.filter(task => !isActive(task));
+    const doneRemoved = doneBefore - doneList.length;
+    
+    // c) In active list: for scheduled-today tasks, clear completion/pending flags
+    let activeModified = false;
+    activeList = activeList.map(task => {
+      if (!isActive(task)) {
+        return task; // Not scheduled today, keep as-is
+      }
+      
+      // Scheduled today - clear completion/pending flags
+      const cleaned = { ...task };
+      delete cleaned.status;
+      delete cleaned.completed;
+      delete cleaned.isCompleted;
+      delete cleaned.done;
+      delete cleaned.isDone;
+      delete cleaned.completedAt;
+      delete cleaned.completedBy;
+      delete cleaned.selected;
+      delete cleaned.isSelected;
+      delete cleaned.inPending;
+      delete cleaned.pending;
+      delete cleaned.assignedTo;
+      
+      // Keep title, instructions, id, taskId, active, and other non-status fields
+      activeModified = true;
+      return cleaned;
+    });
+    
+    // Write updated lists back using existing writeTasksList
+    if (typeof writeTasksList === 'function') {
+      if (pendingRemoved > 0 || pendingList.length !== pendingBefore) {
+        writeTasksList(tab, 'pending', pendingList);
+        console.log(`[Yearly Auto-Reset] Removed ${pendingRemoved} scheduled-today task(s) from pending`);
+      }
+      
+      if (doneRemoved > 0 || doneList.length !== doneBefore) {
+        writeTasksList(tab, 'done', doneList);
+        console.log(`[Yearly Auto-Reset] Removed ${doneRemoved} active task(s) from done`);
+      }
+      
+      if (activeModified) {
+        writeTasksList(tab, 'active', activeList);
+        console.log(`[Yearly Auto-Reset] Cleared completion flags for active tasks in active`);
+      }
+    } else {
+      // Fallback to direct localStorage writes
+      if (pendingRemoved > 0 || pendingList.length !== pendingBefore) {
+        localStorage.setItem(keyPending, JSON.stringify(pendingList));
+      }
+      if (doneRemoved > 0 || doneList.length !== doneBefore) {
+        localStorage.setItem(keyDone, JSON.stringify(doneList));
+      }
+      if (activeModified) {
+        localStorage.setItem(keyActive, JSON.stringify(activeList));
+      }
+    }
+    
+    // Re-render yearly list (call existing render for yearly tab)
+    if (typeof renderTasksList === 'function') {
+      renderTasksList('yearly');
+    }
+    
+    console.log('[Yearly Auto-Reset] Today-only reset completed');
+    
+  } catch (e) {
+    console.error('[Yearly Auto-Reset] Error in resetYearlyForToday:', e);
+  }
+};
+
+// Monthly rollover: advance unfinished tasks to tomorrow (like yearly)
+function resetMonthlyForToday(nowTs = Date.now()) {
+  try {
+    console.log('[AUTO_RESET][MONTHLY] running', new Date().toISOString());
+    const tab = 'monthly';
+    // Handle both Date objects and timestamps
+    const now = nowTs instanceof Date ? nowTs : new Date(nowTs);
+    
+    // Get storage keys using getTabStorageKey (no hardcoding)
+    const keyActive = typeof getTabStorageKey === 'function' 
+      ? getTabStorageKey(tab, 'active')
+      : `ff_tasks_${tab}_active_v1`;
+    
+    console.log('[Monthly Auto-Reset] Performing today-only reset for key:', keyActive);
+    
+    // Helper to check if a monthly task is scheduled for today
+    const isScheduledToday = function(task, nowTs) {
+      if (!task || typeof task !== 'object') return false;
+      
+      // Handle both Date objects and timestamps
+      const now = nowTs instanceof Date ? nowTs : new Date(nowTs);
+      const todayDayOfMonth = now.getDate(); // 1..31
+      
+      // Get scheduleDayOfMonth from task or catalog
+      let scheduleDayOfMonth = task.scheduleDayOfMonth;
+      
+      // If not in task, try catalog lookup
+      if (scheduleDayOfMonth === undefined || scheduleDayOfMonth === null) {
+        const taskId = task.taskId || task.id;
+        if (taskId && typeof ffGetMonthlyCatalogMap === 'function') {
+          const catalogMap = ffGetMonthlyCatalogMap();
+          const catalogTask = catalogMap.get(String(taskId).trim());
+          if (catalogTask) {
+            scheduleDayOfMonth = catalogTask.scheduleDayOfMonth;
+          }
+        }
+      }
+      
+      // If "any" or undefined, treat as scheduled every day
+      if (scheduleDayOfMonth === 'any' || scheduleDayOfMonth === undefined) {
+        return true;
+      }
+      
+      // If number, check if equals today's day-of-month
+      if (typeof scheduleDayOfMonth === 'number' && scheduleDayOfMonth >= 1 && scheduleDayOfMonth <= 31) {
+        return scheduleDayOfMonth === todayDayOfMonth;
+      }
+      
+      // If string that represents a number, parse and compare
+      if (typeof scheduleDayOfMonth === 'string') {
+        const n = Number(scheduleDayOfMonth);
+        if (n >= 1 && n <= 31 && !isNaN(n)) {
+          return n === todayDayOfMonth;
+        }
+      }
+      
+      return false;
+    };
+    
+    // Read active list from localStorage
+    let activeList = [];
+    try {
+      const activeRaw = localStorage.getItem(keyActive);
+      if (activeRaw) activeList = JSON.parse(activeRaw) || [];
+    } catch (e) {
+      console.warn('[Monthly Auto-Reset] Error reading active list:', e);
+      return;
+    }
+    
+    // Process each task: rollover unfinished tasks to tomorrow
+    let activeModified = false;
+    // Calculate tomorrow timestamp - handle both Date objects and timestamps
+    const nowTsValue = nowTs instanceof Date ? nowTs.getTime() : nowTs;
+    const tomorrow = nowTsValue + 24 * 60 * 60 * 1000; // Tomorrow timestamp
+    
+    activeList = activeList.map(task => {
+      if (!task || typeof task !== 'object') return task;
+      
+      // Check if task is scheduled for today
+      if (!isScheduledToday(task, nowTs)) {
+        return task; // Not scheduled today, keep as-is
+      }
+      
+      // Check if task is completed
+      const isCompleted = task.status === 'done' || !!task.completedAt || 
+                          task.completed === true || task.isCompleted === true ||
+                          task.done === true || task.isDone === true;
+      
+      if (isCompleted) {
+        // Task is done - keep it done (preserve completion state)
+        return task;
+      }
+      
+      // Task is NOT done and scheduled for today - rollover to tomorrow
+      const taskId = task.taskId || task.id;
+      
+      // Get scheduleDayOfMonth from task or catalog (same logic as isScheduledToday)
+      let scheduleDayOfMonth = task.scheduleDayOfMonth;
+      if (scheduleDayOfMonth === undefined || scheduleDayOfMonth === null) {
+        if (taskId && typeof ffGetMonthlyCatalogMap === 'function') {
+          const catalogMap = ffGetMonthlyCatalogMap();
+          const catalogTask = catalogMap.get(String(taskId).trim());
+          if (catalogTask) {
+            scheduleDayOfMonth = catalogTask.scheduleDayOfMonth;
+          }
+        }
+      }
+      
+      // Only rollover if task has a specific day-of-month (not "any")
+      if (scheduleDayOfMonth !== 'any' && scheduleDayOfMonth !== undefined && scheduleDayOfMonth !== null) {
+        const updated = { ...task };
+        updated.requiredDate = tomorrow; // Set to tomorrow timestamp
+        activeModified = true;
+        
+        const fromDate = typeof scheduleDayOfMonth === 'number' ? `day ${scheduleDayOfMonth}` : String(scheduleDayOfMonth);
+        console.log('[AUTO_RESET][MONTHLY] rollover', { 
+          taskId, 
+          from: fromDate, 
+          to: new Date(tomorrow).toISOString() 
+        });
+        
+        return updated;
+      }
+      
+      return task;
+    });
+    
+    // Write updated active list back
+    if (activeModified) {
+      if (typeof writeTasksList === 'function') {
+        writeTasksList(tab, 'active', activeList);
+        console.log('[Monthly Auto-Reset] Rolled over unfinished tasks to tomorrow');
+      } else {
+        localStorage.setItem(keyActive, JSON.stringify(activeList));
+        console.log('[Monthly Auto-Reset] Rolled over unfinished tasks to tomorrow (fallback)');
+      }
+    }
+    
+    // Re-render monthly list
+    if (typeof renderTasksList === 'function') {
+      renderTasksList('monthly');
+    }
+    
+    console.log('[Monthly Auto-Reset] Today-only reset completed');
+    
+  } catch (e) {
+    console.error('[Monthly Auto-Reset] Error in resetMonthlyForToday:', e);
+  }
+}
+
+// Expose resetMonthlyForToday to window for testing
+window.resetMonthlyForToday = resetMonthlyForToday;
+console.log('[EXPOSE] resetMonthlyForToday', typeof window.resetMonthlyForToday);
+
+// Weekly rollover: advance unfinished tasks to tomorrow (like monthly/yearly)
+function resetWeeklyForToday(nowTs = Date.now()) {
+  try {
+    const now = nowTs instanceof Date ? nowTs : new Date(nowTs);
+    console.log('[AUTO_RESET][WEEKLY] running', now);
+
+    const key = typeof getTabStorageKey === 'function' 
+      ? getTabStorageKey('weekly', 'active')
+      : 'ff_tasks_weekly_active_v1';
+    
+    let list = [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) list = JSON.parse(raw) || [];
+    } catch (e) {
+      console.warn('[AUTO_RESET][WEEKLY] Error reading active list:', e);
+      return;
+    }
+
+    // Compute todayKey (YYYY-MM-DD format)
+    const todayKey = now.getFullYear() + '-' + 
+                     String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                     String(now.getDate()).padStart(2, '0');
+
+    // Calculate tomorrow timestamp (Date.now + 24h) - matches monthly/yearly pattern
+    const nowTsValue = nowTs instanceof Date ? nowTs.getTime() : nowTs;
+    const tomorrowTs = nowTsValue + 24 * 60 * 60 * 1000;
+
+    // Helper to check if a weekly task is scheduled for today
+    const isScheduledToday = function(task, nowDate) {
+      if (!task || typeof task !== 'object') return false;
+      
+      const now = nowDate instanceof Date ? nowDate : new Date(nowDate);
+      const taskId = task.taskId || task.id;
+      
+      // Use the existing helper function if available
+      if (taskId && typeof window.ffIsWeeklyTaskScheduledToday === 'function') {
+        return window.ffIsWeeklyTaskScheduledToday(taskId, now);
+      }
+      
+      // Fallback: check scheduleWeekdays directly from task
+      let scheduleWeekdays = task.scheduleWeekdays;
+      
+      // If "any" or undefined, treat as scheduled every day
+      if (scheduleWeekdays === 'any' || scheduleWeekdays === undefined) {
+        return true;
+      }
+      
+      // If array, check if today's weekday is included
+      const todayWeekday = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+      if (Array.isArray(scheduleWeekdays)) {
+        if (scheduleWeekdays.length === 0) {
+          return true; // Empty array = any day
+        }
+        return scheduleWeekdays.includes(todayWeekday);
+      }
+      
+      return false;
+    };
+
+    let changed = false;
+
+    const updated = list.map(t => {
+      if (!t || typeof t !== 'object') return t;
+      
+      // Check if task is scheduled for today
+      if (!isScheduledToday(t, now)) {
+        return t; // Not scheduled today, keep as-is
+      }
+      
+      // Check if task is completed (same logic as monthly reset, plus weekly-specific fields)
+      // Compute todayKey for comparison
+      const isCompleted = t.doneOn === todayKey ||
+                         (Array.isArray(t.doneDates) && t.doneDates.includes(todayKey)) ||
+                         t.status === 'done' || 
+                         !!t.completedAt || 
+                         t.completed === true || 
+                         t.isCompleted === true ||
+                         t.done === true || 
+                         t.isDone === true;
+      
+      if (isCompleted) {
+        // Task is done - keep it done (preserve completion state)
+        return t;
+      }
+      
+      // Task is NOT done and scheduled for today - rollover to tomorrow
+      const taskId = t.taskId || t.id;
+      
+      // Get scheduleWeekdays from task
+      let scheduleWeekdays = t.scheduleWeekdays;
+      
+      // If not in task, try to load from catalog directly (same pattern as monthly)
+      if (scheduleWeekdays === undefined || scheduleWeekdays === null) {
+        if (taskId) {
+          try {
+            const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
+            if (catalogRaw) {
+              const catalogObj = JSON.parse(catalogRaw);
+              const weeklyCatalog = catalogObj.weekly || [];
+              const catalogTask = weeklyCatalog.find(ct => 
+                String(ct.taskId || ct.id).trim() === String(taskId).trim()
+              );
+              if (catalogTask) {
+                scheduleWeekdays = catalogTask.scheduleWeekdays;
+              }
+            }
+          } catch (e) {
+            // Ignore catalog lookup errors
+          }
+        }
+      }
+      
+      // Only rollover if task has a specific schedule (not "any" and not empty) - matches monthly behavior
+      if (scheduleWeekdays !== 'any' && scheduleWeekdays !== undefined && scheduleWeekdays !== null && 
+          !(Array.isArray(scheduleWeekdays) && scheduleWeekdays.length === 0)) {
+        const updatedTask = { ...t };
+        updatedTask.requiredDate = tomorrowTs; // Set to tomorrow timestamp
+        changed = true;
+        
+        const fromDate = Array.isArray(scheduleWeekdays) 
+          ? scheduleWeekdays.join(',') 
+          : String(scheduleWeekdays);
+        console.log('[AUTO_RESET][WEEKLY] rollover', { 
+          taskId: taskId, 
+          from: fromDate, 
+          to: new Date(tomorrowTs).toISOString() 
+        });
+        
+        return updatedTask;
+      }
+      
+      return t;
+    });
+
+    if (changed) {
+      if (typeof writeTasksList === 'function') {
+        writeTasksList('weekly', 'active', updated);
+      } else {
+        localStorage.setItem(key, JSON.stringify(updated));
+      }
+      
+      // Re-render weekly list
+      if (typeof renderTasksList === 'function') {
+        renderTasksList('weekly');
+      }
+    }
+    
+    console.log('[AUTO_RESET][WEEKLY] completed');
+    
+  } catch (e) {
+    console.error('[AUTO_RESET][WEEKLY] Error in resetWeeklyForToday:', e);
+  }
+}
+
+// Expose resetWeeklyForToday to window for testing
+window.resetWeeklyForToday = resetWeeklyForToday;
+console.log('[EXPOSE] resetWeeklyForToday', typeof window.resetWeeklyForToday);
+
+// Queue Auto Reset scheduler
+function ffMaybeAutoResetQueue(now = new Date()) {
+  try {
+    // Load queue settings
+    const queueSettingsRaw = localStorage.getItem('ff_queue_settings_v1');
+    if (!queueSettingsRaw) return;
+    
+    const queueSettings = JSON.parse(queueSettingsRaw);
+    if (queueSettings.autoResetEnabled !== true) {
+      return; // Auto reset disabled
+    }
+    
+    // Compute todayKey as YYYY-MM-DD in local time
+    const today = now instanceof Date ? now : new Date(now);
+    const todayKey = today.getFullYear() + '-' +
+                     String(today.getMonth() + 1).padStart(2, '0') + '-' +
+                     String(today.getDate()).padStart(2, '0');
+    
+    // Check if already ran today
+    if (queueSettings.lastAutoResetDate === todayKey) {
+      return; // Already reset today
+    }
+    
+    // Parse autoResetTime "HH:MM"
+    const timeStr = queueSettings.autoResetTime || '02:00';
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    if (isNaN(hours) || isNaN(minutes)) {
+      console.warn('[AUTO_RESET][QUEUE] Invalid time format:', timeStr);
+      return;
+    }
+    
+    // Create target time for today
+    const targetToday = new Date(today);
+    targetToday.setHours(hours, minutes, 0, 0);
+    
+    // Check if current time >= target time
+    if (now < targetToday) {
+      return; // Not yet time
+    }
+    
+    // Check if force=false and there are people in service
+    const autoResetForce = queueSettings.autoResetForce === true;
+    if (!autoResetForce && ffQueueHasInService()) {
+      console.log('[AUTO_RESET][QUEUE] Skipped - people in service and force=false');
+      return; // Don't reset if people are in service and force is false
+    }
+    
+    // Perform reset
+    resetQueueState({ force: autoResetForce, source: 'auto' });
+    
+    // Update lastAutoResetDate
+    queueSettings.lastAutoResetDate = todayKey;
+    localStorage.setItem('ff_queue_settings_v1', JSON.stringify(queueSettings));
+    
+    console.log('[AUTO_RESET][QUEUE] ran', { todayKey, time: timeStr, force: autoResetForce });
+  } catch (e) {
+    console.error('[AUTO_RESET][QUEUE] Error:', e);
+  }
+}
+
+// Expose globally
+window.ffMaybeAutoResetQueue = ffMaybeAutoResetQueue;
+console.log('[EXPOSE] ffMaybeAutoResetQueue', typeof window.ffMaybeAutoResetQueue);
 
 // Safe initialization function for RESET button
 // Module-level flag to ensure one-time initialization
@@ -8413,6 +10478,7 @@ function renderTasks() {
       selectBtn.style.cursor = 'pointer';
       // Add click handler to open PIN modal for selecting task
       selectBtn.addEventListener('click', () => {
+        console.log('[RUNTIME TASK HANDLER HIT]', { handlerName: 'selectBtn_click', task: { category, taskName } });
         openSelectTaskModal(category, taskName);
       });
     }
@@ -8852,6 +10918,7 @@ function confirmSelectTask() {
       if (taskModal) {
         taskModal.style.display = 'none';
       }
+      console.log('[confirmSelectTask] returning', { ok: false, matchedName: null, taskName: currentSelectTask?.taskName });
       return;
     }
     
@@ -8874,7 +10941,8 @@ function confirmSelectTask() {
     // Check if code is empty
     if (!code || code === '') {
       if (error) error.textContent = 'Please enter code (admin, manager, or staff)';
-      return; // Don't close modal - user needs to enter code
+      console.log('[confirmSelectTask] returning', { ok: false, matchedName: null, taskName: currentSelectTask?.taskName });
+      return false; // Return false if code is empty
     }
     
     // Validate code - accept admin, manager, or tech (worker) codes
@@ -8948,6 +11016,7 @@ function confirmSelectTask() {
       taskStaffCode = '';
       if (input) input.value = '';
       setTimeout(() => input.focus(), 100);
+      console.log('[confirmSelectTask] returning', { ok: false, matchedName: null, taskName: currentSelectTask?.taskName });
       return; // Don't close modal - user needs to correct code
     }
     
@@ -8956,6 +11025,26 @@ function confirmSelectTask() {
       name: matchedName,
       code: codeStr
     });
+    
+    // Store matchedName globally so it's accessible in the handler
+    window.__ff_lastMatchedName = matchedName;
+    
+    // Explicit, guaranteed history write immediately after validation succeeds
+    // Compute and store actor first so getHistoryActor() can use it
+    if (typeof getActorForAction === 'function') {
+      let computedActor = { role: 'Admin', name: 'Admin' };
+      if (matchedRole === 'Admin') {
+        computedActor = getActorForAction({ adminCode: code });
+      } else if (matchedRole === 'Manager') {
+        computedActor = getActorForAction({ managerCode: code });
+      } else {
+        computedActor = getActorForAction({ workerName: matchedName });
+      }
+      window.__ff_lastValidatedCode = { role: computedActor.role, name: computedActor.name };
+    }
+    
+    const actor = getHistoryActor ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
+    addHistoryEntry(`Task Selected: ${currentSelectTask?.taskName || ''}`, actor.role, actor.name, matchedName || '', 'tasks');
     
     // PIN is valid - add task to pending with staff name
     try {
@@ -8966,19 +11055,6 @@ function confirmSelectTask() {
         console.warn('[Tasks] addTaskToPending function not found');
       }
       
-      // Record in history who selected it
-      // Use getActorInfo to properly determine role based on the code
-      if (typeof getActorForAction === 'function' && typeof addHistoryEntry === 'function') {
-        let actor = null;
-        if (matchedRole === 'Admin') {
-          actor = getActorForAction({ adminCode: code });
-        } else if (matchedRole === 'Manager') {
-          actor = getActorForAction({ managerCode: code });
-        } else {
-          actor = getActorForAction({ workerName: matchedName });
-        }
-        addHistoryEntry(`Select task: ${currentSelectTask.taskName} (${currentSelectTask.category})`, actor, matchedName);
-      }
       
       // Update tab badges
       if (typeof updateAllTabBadges === 'function') {
@@ -9012,6 +11088,9 @@ function confirmSelectTask() {
       taskModal.style.display = 'none';
       taskModal.style.pointerEvents = 'none'; // CRITICAL: Prevent blocking clicks after close
     }
+    
+    console.log('[confirmSelectTask] returning', { ok: true, matchedName: window.__ff_lastMatchedName, taskName: currentSelectTask?.taskName });
+    return true; // Return true on success
   } catch (err) {
     console.error('[Tasks] Error in confirmSelectTask:', err);
     
@@ -9033,6 +11112,9 @@ function confirmSelectTask() {
       taskModal.style.display = 'none';
       taskModal.style.pointerEvents = 'none'; // CRITICAL: Prevent blocking clicks after close
     }
+    
+    console.log('[confirmSelectTask] returning', { ok: false, matchedName: null, taskName: currentSelectTask?.taskName });
+    return false; // Return false on error
   }
 }
 
@@ -9122,6 +11204,7 @@ async function confirmFinishTask() {
   if (!input || !currentFinishTask.category || !currentFinishTask.taskName) {
     console.warn('[Tasks] confirmFinishTask: Missing required elements or task info');
     closeFinishTaskModal();
+    console.log('[confirmFinishTask] returning', { ok: false, matchedName: null, taskName: currentFinishTask?.taskName });
     return;
   }
   
@@ -9130,7 +11213,8 @@ async function confirmFinishTask() {
   
   if (!pin || pin === '') {
     if (error) error.textContent = 'Please enter code (admin, manager, or staff)';
-    return; // Don't close modal - user needs to enter code
+    console.log('[confirmFinishTask] returning', { ok: false, matchedName: null, taskName: currentFinishTask?.taskName });
+    return false; // Return false if pin is empty
   }
   
   // Validate PIN - accept admin, manager, or tech (worker) codes
@@ -9202,7 +11286,8 @@ async function confirmFinishTask() {
     if (error) error.textContent = 'Invalid code. Please enter admin, manager, or staff code.';
     input.value = '';
     setTimeout(() => input.focus(), 100);
-    return; // Don't close modal - user needs to correct code
+    console.log('[confirmFinishTask] returning', { ok: false, matchedName: null, taskName: currentFinishTask?.taskName });
+    return false; // Return false on validation failure
   }
   
   console.log('[Tasks] Code validation SUCCESS for finish task:', {
@@ -9211,19 +11296,27 @@ async function confirmFinishTask() {
     code: pinStr
   });
   
-  const worker = matchedWorker;
+  // Store matchedName globally so it's accessible in the handler
+  window.__ff_lastMatchedName = matchedName;
   
-  // PIN is valid - record in history who completed it
-  // Use getActorInfo to properly determine role based on the code
-  let actor = null;
-  if (matchedRole === 'Admin') {
-    actor = getActorForAction({ adminCode: pin });
-  } else if (matchedRole === 'Manager') {
-    actor = getActorForAction({ managerCode: pin });
-  } else {
-    actor = getActorForAction({ workerName: matchedName });
+  // Explicit, guaranteed history write immediately after validation succeeds
+  // Compute and store actor first so getHistoryActor() can use it
+  if (typeof getActorForAction === 'function') {
+    let computedActor = { role: 'Admin', name: 'Admin' };
+    if (matchedRole === 'Admin') {
+      computedActor = getActorForAction({ adminCode: pin });
+    } else if (matchedRole === 'Manager') {
+      computedActor = getActorForAction({ managerCode: pin });
+    } else {
+      computedActor = getActorForAction({ workerName: matchedName });
+    }
+    window.__ff_lastValidatedCode = { role: computedActor.role, name: computedActor.name };
   }
-  addHistoryEntry(`Complete task: ${currentFinishTask.taskName} (${currentFinishTask.category})`, actor, matchedName);
+  
+  const actor = getHistoryActor ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
+  addHistoryEntry(`Task Completed: ${currentFinishTask?.taskName || ''}`, actor.role, actor.name, matchedName || '', 'tasks');
+  
+  const worker = matchedWorker;
   
   // PIN is valid - mark task as done
   const today = getTodayDateString();
@@ -9276,6 +11369,9 @@ async function confirmFinishTask() {
   ).catch(err => {
     console.error('[Tasks] Firestore save failed (non-blocking):', err);
   });
+  
+  console.log('[confirmFinishTask] returning', { ok: true, matchedName: window.__ff_lastMatchedName, taskName: currentFinishTask?.taskName });
+  return true; // Return true on success
 }
 
 // Save task completion to Firestore
@@ -9423,6 +11519,7 @@ function renderPendingTasks() {
       markDoneBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        console.log('[RUNTIME TASK HANDLER HIT]', { handlerName: 'markDoneBtn_click', task: { category, taskName } });
         console.log('[Tasks] Mark Done button clicked directly:', { category, taskName });
         if (typeof openFinishTaskModal === 'function') {
           openFinishTaskModal(category, taskName);
@@ -10200,6 +12297,7 @@ function initTasksFunctionality() {
           const taskName = markDoneBtn.getAttribute('data-task-name');
           
           if (category && taskName) {
+            console.log('[RUNTIME TASK HANDLER HIT]', { handlerName: 'pendingTasksContainer_markDone', task: { category, taskName } });
             // Open the Finish task modal (requires PIN validation)
             if (typeof openFinishTaskModal === 'function') {
               openFinishTaskModal(category, taskName);
@@ -10272,20 +12370,36 @@ function initTasksFunctionality() {
       console.error('[Tasks] confirmSelectTask function not found');
     }
     
-    const confirmHandler = (e) => {
+    async function __debug_select_confirm_handler_wrapper(originalHandler) {
+      try {
+        console.log('[TASKS][SELECT][CONFIRM] handler fired',
+          { currentSelectTask, lastMatched: window.__ff_lastMatchedName, lastCode: window.__ff_lastValidatedCode });
+
+        const taskName = currentSelectTask?.taskName || currentSelectTask?.title || '';
+        const ok = await confirmSelectTask();   // MUST await
+        const workerName = window.__ff_lastMatchedName || '';
+
+        console.log('[TASKS][SELECT][CONFIRM] after confirmSelectTask()', { ok, taskName, workerName });
+
+        if (ok) {
+          console.log('[TASKS][SELECT] writing history now...');
+          const actor = (typeof getHistoryActor === 'function') ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
+          addHistoryEntry(`Task Selected: ${taskName}`, actor.role, actor.name, workerName, 'tasks');
+          console.log('[TASKS][SELECT] wrote history. last tasks entries:',
+            JSON.parse(localStorage.getItem('ffv24_log') || '[]').filter(e=>e && typeof e==='object' && e.source==='tasks').slice(-3)
+          );
+        } else {
+          console.warn('[TASKS][SELECT] ok=false so NO history write');
+        }
+      } catch (e) {
+        console.error('[TASKS][SELECT][CONFIRM] ERROR', e);
+      }
+    }
+    
+    const confirmHandler = async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      // Call the confirmation function
-      if (typeof confirmSelectTask === 'function') {
-        confirmSelectTask();
-      } else {
-        console.error('[Tasks] confirmSelectTask function not available');
-        // Fallback: close modal
-        const taskModal = document.getElementById('tasksSelectModal');
-        if (taskModal) {
-          taskModal.style.display = 'none';
-        }
-      }
+      await __debug_select_confirm_handler_wrapper();
     };
     // Use both addEventListener and onclick for maximum compatibility
     selectConfirmBtn.addEventListener('click', confirmHandler);
@@ -10384,16 +12498,36 @@ function initTasksFunctionality() {
   
   // Confirm button - validates PIN and marks task as done
   if (finishConfirmBtn) {
-    const confirmHandler = (e) => {
+    async function __debug_finish_confirm_handler_wrapper(originalHandler) {
+      try {
+        console.log('[TASKS][DONE][CONFIRM] handler fired',
+          { currentFinishTask, lastMatched: window.__ff_lastMatchedName, lastCode: window.__ff_lastValidatedCode });
+
+        const taskName = currentFinishTask?.taskName || currentFinishTask?.title || '';
+        const ok = await confirmFinishTask();   // MUST await
+        const workerName = window.__ff_lastMatchedName || '';
+
+        console.log('[TASKS][DONE][CONFIRM] after confirmFinishTask()', { ok, taskName, workerName });
+
+        if (ok) {
+          console.log('[TASKS][DONE] writing history now...');
+          const actor = (typeof getHistoryActor === 'function') ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
+          addHistoryEntry(`Task Completed: ${taskName}`, actor.role, actor.name, workerName, 'tasks');
+          console.log('[TASKS][DONE] wrote history. last tasks entries:',
+            JSON.parse(localStorage.getItem('ffv24_log') || '[]').filter(e=>e && typeof e==='object' && e.source==='tasks').slice(-3)
+          );
+        } else {
+          console.warn('[TASKS][DONE] ok=false so NO history write');
+        }
+      } catch (e) {
+        console.error('[TASKS][DONE][CONFIRM] ERROR', e);
+      }
+    }
+    
+    const confirmHandler = async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (typeof confirmFinishTask === 'function') {
-        confirmFinishTask();
-      } else {
-        console.error('[Tasks] confirmFinishTask function not found');
-        // Fallback: close modal
-        closeFinishTaskModal();
-      }
+      await __debug_finish_confirm_handler_wrapper();
     };
     // Use both addEventListener and onclick for maximum compatibility
     // Use only addEventListener to prevent double execution
@@ -10659,8 +12793,6 @@ function addTechnicianToQueue(){
 
   queue.push({name, held: false});
 
-  log.unshift(stamp() + ` REORDER: ADD ${name} BY MANAGER`);
-
   save();
 
   renderQueue();
@@ -10682,7 +12814,7 @@ function addTechnicianToQueue(){
     const actorName = window.__ff_actorName || 'Manager';
     actor = { role, name: actorName };
   }
-  addHistoryEntry('Add technician to queue', actor, name);
+  addHistoryEntry('Add technician to queue', actor.role, actor.name, name, 'queue');
 
 }
 
@@ -13046,6 +15178,24 @@ window.openLog = async function(){
       transform: translateY(-1px);
     }
     
+    .tasks-history-btn {
+      background-color: #fff;
+      color: #000000;
+      border: 2px solid #000000;
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 301;
+    }
+    
+    .tasks-history-btn:hover {
+      transform: translateY(-1px);
+      background-color: rgba(0, 0, 0, 0.04);
+    }
+    
     /* Tasks Settings Modal */
     #tasksScreen .tasks-modal-overlay {
       position: fixed;
@@ -13388,7 +15538,10 @@ window.openLog = async function(){
           <button id="btnTasksSettings" class="tasks-gear-btn" aria-label="Task settings" style="pointer-events:auto;z-index:301;">⚙️</button>
         </div>
       </div>
-      <button id="reset-btn" class="tasks-reset-btn" style="margin-left:auto;" onclick="resetTasksForCurrentTab()">RESET</button>
+      <div style="display:flex;gap:8px;margin-left:auto;">
+        <button id="history-btn" class="tasks-history-btn" onclick="openTasksHistoryModal()">HISTORY</button>
+        <button id="reset-btn" class="tasks-reset-btn" onclick="resetTasksForCurrentTab()">RESET</button>
+      </div>
     </div>
     
     <!-- Tab row -->
@@ -13461,33 +15614,58 @@ window.openLog = async function(){
               <input type="checkbox" id="tasksAlertTimeShowOnHomeCheckbox" style="cursor:pointer;">
               <span>Show this alert on Home screen</span>
             </label>
+            <!-- Auto-reset controls (only for opening tab) -->
+            <div id="tasksOpeningAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <input type="checkbox" id="tasksOpeningAutoResetEnabled" style="cursor:pointer;">
+                <span>Auto-reset when all Opening tasks are completed</span>
+              </label>
+              <div id="tasksOpeningAutoResetTimeRow" style="margin-top:8px;display:none;">
+                <label style="display:block;font-size:12px;color:#666;margin-bottom:4px;">Auto-reset time:</label>
+                <input type="time" id="tasksOpeningAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              </div>
+            </div>
+            <!-- Auto-reset controls (only for closing tab) -->
+            <div id="tasksClosingAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <input type="checkbox" id="tasksClosingAutoResetEnabled" style="cursor:pointer;">
+                <span>Auto-reset when all Closing tasks are completed</span>
+              </label>
+              <div id="tasksClosingAutoResetTimeRow" style="margin-top:8px;display:none;">
+                <label style="display:block;font-size:12px;color:#666;margin-bottom:4px;">Auto-reset time:</label>
+                <input type="time" id="tasksClosingAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              </div>
+            </div>
           </div>
           
           <!-- Alert Start Weekday control (only for weekly) -->
           <div id="tasksAlertWeekdayControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
             <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-              <span>Show alerts starting on:</span>
-              <select id="tasksAlertWeekdaySelect" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
-                <option value="0">Sunday</option>
-                <option value="1">Monday</option>
-                <option value="2">Tuesday</option>
-                <option value="3">Wednesday</option>
-                <option value="4">Thursday</option>
-                <option value="5">Friday</option>
-                <option value="6">Saturday</option>
-              </select>
+              <span>Show alerts starting at:</span>
+              <input type="time" id="tasksAlertWeekdayTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
             </label>
             <label id="tasksAlertWeekdayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;margin-top:8px;">
               <input type="checkbox" id="tasksAlertWeekdayShowOnHomeCheckbox" style="cursor:pointer;">
               <span>Show this alert on Home screen</span>
             </label>
+            <!-- Auto-reset controls (only for weekly tab) -->
+            <div id="tasksWeeklyAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <input type="checkbox" id="tasksWeeklyAutoResetEnabled" style="cursor:pointer;">
+                <span>Auto-reset when all Weekly tasks for today are completed</span>
+              </label>
+              <div id="tasksWeeklyAutoResetTimeRow" style="margin-top:8px;display:none;">
+                <label style="display:block;font-size:12px;color:#666;margin-bottom:4px;">Auto-reset time:</label>
+                <input type="time" id="tasksWeeklyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              </div>
+            </div>
           </div>
           
-          <!-- Alert Start Day control (only for monthly) -->
+          <!-- Alert Start Time control (for monthly, uses same time input as opening/closing) -->
           <div id="tasksAlertDayControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
             <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-              <span>Show alerts starting on day:</span>
-              <input type="number" id="tasksAlertDayInput" min="1" max="31" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;width:60px;">
+              <span>Show alerts starting at:</span>
+              <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
             </label>
             <label id="tasksAlertDayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;margin-top:8px;">
               <input type="checkbox" id="tasksAlertDayShowOnHomeCheckbox" style="cursor:pointer;">
@@ -13495,30 +15673,44 @@ window.openLog = async function(){
             </label>
           </div>
           
-          <!-- Alert Start Month/Day control (only for yearly) -->
+          <!-- Auto-reset controls (only for monthly tab) -->
+          <div id="tasksMonthlyAutoResetSection" style="display:none;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+              <input type="checkbox" id="tasksMonthlyAutoResetEnabled" style="cursor:pointer;">
+              <span>Auto-reset when all Monthly tasks for today are completed</span>
+            </label>
+            <div id="tasksMonthlyAutoResetTimeRow" style="display:none;margin-top:6px;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <span>Auto-reset time:</span>
+                <input type="time" id="tasksMonthlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              </label>
+            </div>
+          </div>
+          
+          <!-- Alert Start Time control (only for yearly) -->
           <div id="tasksAlertYearlyControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
             <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;flex-wrap:wrap;">
-              <span>Show alerts starting on:</span>
-              <select id="tasksAlertMonthSelect" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
-                <option value="1">January</option>
-                <option value="2">February</option>
-                <option value="3">March</option>
-                <option value="4">April</option>
-                <option value="5">May</option>
-                <option value="6">June</option>
-                <option value="7">July</option>
-                <option value="8">August</option>
-                <option value="9">September</option>
-                <option value="10">October</option>
-                <option value="11">November</option>
-                <option value="12">December</option>
-              </select>
-              <input type="number" id="tasksAlertYearlyDayInput" min="1" max="31" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;width:60px;">
+              <span>Show alerts starting at:</span>
+              <input type="time" id="tasksAlertYearlyTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
             </label>
             <label id="tasksAlertYearlyShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;margin-top:8px;">
               <input type="checkbox" id="tasksAlertYearlyShowOnHomeCheckbox" style="cursor:pointer;">
               <span>Show this alert on Home screen</span>
             </label>
+          </div>
+          
+          <!-- Auto-reset controls (only for yearly tab) -->
+          <div id="tasksYearlyAutoResetSection" style="display:none;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+              <input type="checkbox" id="tasksYearlyAutoResetEnabled" style="cursor:pointer;">
+              <span>Auto-reset when all Yearly tasks for today are completed</span>
+            </label>
+            <div id="tasksYearlyAutoResetTimeRow" style="display:none;margin-top:6px;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <span>Auto-reset time:</span>
+                <input type="time" id="tasksYearlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              </label>
+            </div>
           </div>
           
           <!-- Add Task section (always visible, fixed position above catalog) -->
