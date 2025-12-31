@@ -2723,17 +2723,40 @@ function renderSettings(){
 
   $("#salonInput").value=settings.brand.name||""; logoPreview.src=settings.brand.logo||"";
 
-  // Workers - only initialize if empty
-
+  // Workers - rebuild table to reflect palette changes
   const wb=$("#workersBox");
   
-  if (wb.children.length === 0) {
-    // First time rendering - build structure and all rows
-    
-    // Global Color Palette (inside workersBox, above workers)
-    const paletteRow = document.createElement("div");
-    paletteRow.className = "row";
-    paletteRow.style.cssText = "margin-bottom:12px;align-items:center;gap:12px";
+  // Backward compatibility: Migrate worker.color hex values to buttonColorIndex if they match palette colors
+  const palette = settings.brandPalette || DEFAULTS.brandPalette;
+  (settings.workers || []).forEach(worker => {
+    if (worker.buttonColorIndex === undefined && worker.color) {
+      // Try to find matching palette color
+      const colorHex = (worker.color || '').toLowerCase();
+      const paletteIndex = palette.findIndex(p => (p || '').toLowerCase() === colorHex);
+      if (paletteIndex >= 0 && paletteIndex <= 3) {
+        worker.buttonColorIndex = paletteIndex;
+      }
+    }
+  });
+  
+  // Find and remove existing palette row if present (to allow rebuilding when palette changes)
+  const existingPaletteRow = wb.querySelector('#settingsBrandPaletteRow');
+  if (existingPaletteRow) {
+    existingPaletteRow.remove();
+  }
+  
+  // Find and remove existing workers table if present (to allow rebuilding when palette changes)
+  const existingTable = wb.querySelector('.workers-table');
+  if (existingTable) {
+    existingTable.remove();
+  }
+  
+  // Always rebuild palette row with current palette values
+  // Global Color Palette (inside workersBox, above workers)
+  const paletteRow = document.createElement("div");
+  paletteRow.id = "settingsBrandPaletteRow";
+  paletteRow.className = "row";
+  paletteRow.style.cssText = "margin-bottom:12px;align-items:center;gap:12px";
 
     const paletteLabel = document.createElement("span");
     paletteLabel.textContent = "Color palette:";
@@ -2753,52 +2776,51 @@ function renderSettings(){
       paletteContainer.appendChild(dot);
     });
 
-    paletteRow.appendChild(paletteLabel);
-    paletteRow.appendChild(paletteContainer);
-    wb.appendChild(paletteRow);
+  paletteRow.appendChild(paletteLabel);
+  paletteRow.appendChild(paletteContainer);
+  wb.appendChild(paletteRow);
 
-    // Create workers table container
-    const workersTable = document.createElement("div");
-    workersTable.className = "workers-table";
+  // Create workers table container
+  const workersTable = document.createElement("div");
+  workersTable.className = "workers-table";
 
-    // Create grid header row
-    const workersHeader = document.createElement("div");
-    workersHeader.className = "workers-header";
+  // Create grid header row
+  const workersHeader = document.createElement("div");
+  workersHeader.className = "workers-header";
 
-    const nameHeader = document.createElement("span");
-    nameHeader.textContent = "";
-    const pinHeader = document.createElement("span");
-    pinHeader.textContent = "";
-    const eyeHeader = document.createElement("span");
-    eyeHeader.textContent = "";
-    const buttonHeader = document.createElement("span");
-    buttonHeader.textContent = "Button";
-    buttonHeader.style.cssText = "text-align:center";
-    const fontHeader = document.createElement("span");
-    fontHeader.textContent = "Font";
-    fontHeader.style.cssText = "text-align:center";
-    const paletteHeader = document.createElement("span");
-    paletteHeader.textContent = "";
-    const deleteHeader = document.createElement("span");
-    deleteHeader.textContent = "";
+  const nameHeader = document.createElement("span");
+  nameHeader.textContent = "";
+  const pinHeader = document.createElement("span");
+  pinHeader.textContent = "";
+  const eyeHeader = document.createElement("span");
+  eyeHeader.textContent = "";
+  const buttonHeader = document.createElement("span");
+  buttonHeader.textContent = "Button";
+  buttonHeader.style.cssText = "text-align:center";
+  const fontHeader = document.createElement("span");
+  fontHeader.textContent = "Font";
+  fontHeader.style.cssText = "text-align:center";
+  const paletteHeader = document.createElement("span");
+  paletteHeader.textContent = "";
+  const deleteHeader = document.createElement("span");
+  deleteHeader.textContent = "";
 
-    workersHeader.append(nameHeader, pinHeader, eyeHeader, buttonHeader, fontHeader, paletteHeader, deleteHeader);
-    workersTable.appendChild(workersHeader);
+  workersHeader.append(nameHeader, pinHeader, eyeHeader, buttonHeader, fontHeader, paletteHeader, deleteHeader);
+  workersTable.appendChild(workersHeader);
 
-    // Add worker rows (sorted A→Z by name for display only)
-    // Create sorted copy with original indices preserved for correct data-i references
-    const workersForDisplay = (settings.workers||[]).map((w, i) => ({ originalIndex: i, worker: w }))
-      .sort((a, b) => {
-        const aName = ((a.worker?.name ?? a.worker?.label ?? a.worker?.displayName ?? "") + "").trim().toLowerCase();
-        const bName = ((b.worker?.name ?? b.worker?.label ?? b.worker?.displayName ?? "") + "").trim().toLowerCase();
-        return aName.localeCompare(bName);
-      });
-    workersForDisplay.forEach(({ originalIndex, worker }) => {
-      workersTable.appendChild(workerRow(originalIndex, worker));
+  // Add worker rows (sorted A→Z by name for display only)
+  // Create sorted copy with original indices preserved for correct data-i references
+  const workersForDisplay = (settings.workers||[]).map((w, i) => ({ originalIndex: i, worker: w }))
+    .sort((a, b) => {
+      const aName = ((a.worker?.name ?? a.worker?.label ?? a.worker?.displayName ?? "") + "").trim().toLowerCase();
+      const bName = ((b.worker?.name ?? b.worker?.label ?? b.worker?.displayName ?? "") + "").trim().toLowerCase();
+      return aName.localeCompare(bName);
     });
+  workersForDisplay.forEach(({ originalIndex, worker }) => {
+    workersTable.appendChild(workerRow(originalIndex, worker));
+  });
 
-    wb.appendChild(workersTable);
-  }
+  wb.appendChild(workersTable);
   
   // Tasks-related UI removed (Task Reminders, Task Notes sections)
   // These will be rebuilt from scratch in the future
@@ -3230,8 +3252,8 @@ function appendWorkerRow() {
   const newWorker = {
     name: "",
     pin: "",
-    color: "#111827",
-    fcolor: "#ffffff"
+    buttonColorIndex: 2, // Default to blue palette color (index 2 = #79A7E5)
+    fcolor: "#000000" // Default font color: black
   };
   settings.workers.push(newWorker);
   
@@ -3484,21 +3506,46 @@ function workerRow(i,w){
 
 
 
-  // Colors
-
-  const bg = document.createElement("input"); bg.type="color"; bg.className="wcolor color"; bg.value=w.color||"#111827";
+  // Colors - Button color (index-based palette linkage)
+  const palette = settings.brandPalette || DEFAULTS.brandPalette;
+  
+  // Compute button color: prefer palette[buttonColorIndex], fallback to worker.color
+  let buttonColor = "#111827";
+  if (w.buttonColorIndex !== undefined && w.buttonColorIndex >= 0 && w.buttonColorIndex <= 3) {
+    buttonColor = palette[w.buttonColorIndex] || "#111827";
+  } else if (w.color) {
+    buttonColor = w.color;
+  }
+  
+  const bg = document.createElement("input"); bg.type="color"; bg.className="wcolor color"; bg.value=buttonColor;
   
   // Update settings.workers directly on change
   bg.dataset.index = i;
   bg.addEventListener("change", (e) => {
     const idx = Number(e.currentTarget.dataset.index);
     if (settings.workers[idx]) {
-      settings.workers[idx].color = e.currentTarget.value;
+      const newColor = e.currentTarget.value.toLowerCase();
+      const currentPalette = settings.brandPalette || DEFAULTS.brandPalette;
+      // Check if new color matches a palette color
+      const paletteIndex = currentPalette.findIndex(p => (p || '').toLowerCase() === newColor);
+      if (paletteIndex >= 0 && paletteIndex <= 3) {
+        // Matches palette - use index-based linkage
+        settings.workers[idx].buttonColorIndex = paletteIndex;
+        delete settings.workers[idx].color; // Clear direct color to ensure palette linkage
+      } else {
+        // Custom color - store directly and clear index
+        settings.workers[idx].color = e.currentTarget.value;
+        delete settings.workers[idx].buttonColorIndex;
+      }
       save(); // Auto-save on change
+      // Re-render to update button color display if palette-linked
+      if (paletteIndex >= 0) {
+        renderSettings();
+      }
     }
   });
 
-  const font = document.createElement("input"); font.type="color"; font.className="wfont color"; font.value=w.fcolor||"#ffffff";
+  const font = document.createElement("input"); font.type="color"; font.className="wfont color"; font.value=w.fcolor||"#000000";
   
   // Update settings.workers directly on change
   font.dataset.index = i;
@@ -3512,21 +3559,27 @@ function workerRow(i,w){
 
 
 
-  // Quick dots - now use global brandPalette
-
+  // Quick dots - per-worker palette selection (sets worker's buttonColorIndex)
   const quick = document.createElement("span"); quick.className="quick4";
 
-  const palette = settings.brandPalette || DEFAULTS.brandPalette;
-
-  palette.forEach((hex,idx)=>{
+  palette.forEach((hex,paletteIdx)=>{
 
     const d=document.createElement('span'); d.className='dot'; d.style.background=hex; d.title=hex;
 
-    d.dataset.paletteIndex = idx;
+    d.dataset.paletteIndex = paletteIdx;
+    d.dataset.workerIndex = i; // Store worker index for click handler
 
-    // Clicking a palette dot edits the global palette, not the worker's colors
-
-    d.onclick=()=>{ editPaletteColor(idx); };
+    // Clicking a palette dot sets this worker's buttonColorIndex to link to the palette
+    d.onclick=(e)=> { 
+      const workerIdx = Number(e.currentTarget.dataset.workerIndex);
+      const paletteIndex = Number(e.currentTarget.dataset.paletteIndex);
+      if (settings.workers[workerIdx] !== undefined) {
+        settings.workers[workerIdx].buttonColorIndex = paletteIndex;
+        delete settings.workers[workerIdx].color; // Clear direct color to ensure palette linkage
+        save();
+        renderSettings(); // Re-render to show updated color
+      }
+    };
 
     quick.appendChild(d);
 
