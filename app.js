@@ -1244,6 +1244,24 @@ function enforceHistoryRetention() {
 // Expose globally so it can be called from index.html's addHistoryEntry if needed
 window.enforceHistoryRetention = enforceHistoryRetention;
 
+// Helper function to load users from localStorage (prefer ffv24_users, else ff_users_v1)
+function ffGetUsers() {
+  try {
+    const ffv24Users = JSON.parse(localStorage.getItem('ffv24_users') || '[]');
+    if (Array.isArray(ffv24Users) && ffv24Users.length > 0) {
+      return ffv24Users;
+    }
+    const ffUsers = JSON.parse(localStorage.getItem('ff_users_v1') || '[]');
+    return Array.isArray(ffUsers) ? ffUsers : [];
+  } catch (e) {
+    console.error('[ffGetUsers] Error loading users:', e);
+    return [];
+  }
+}
+
+// Expose globally for use in index.html
+window.ffGetUsers = ffGetUsers;
+
 // Helper function to log Tasks actions to history
 function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, performedBy, extra }) {
   try {
@@ -1379,7 +1397,7 @@ function moveTaskToPending(taskId, workerName) {
                 
                 // Log to history after successful SELECT
                 const taskTitle = task.title || '';
-                const worker = (typeof getCurrentActorName === 'function' ? getCurrentActorName() : (window.__ff_actorName || window.currentUserName || null)) || '-';
+                const worker = workerName || '-';
                 const currentTab = (typeof getCurrentTasksTab === 'function') ? getCurrentTasksTab() : (window.currentTasksTab || tab || null);
                 addTasksHistoryEntry({
                     action: `Task Selected: ${taskTitle || taskId || ''}`.trim(),
@@ -1473,7 +1491,7 @@ function moveTaskToPending(taskId, workerName) {
                     
                     // Log to history after successful SELECT
                     const taskTitle = task.title || '';
-                    const worker = (typeof getCurrentActorName === 'function' ? getCurrentActorName() : (window.__ff_actorName || window.currentUserName || null)) || '-';
+                    const worker = workerName || '-';
                     const currentTab = (typeof getCurrentTasksTab === 'function') ? getCurrentTasksTab() : (window.currentTasksTab || tab || null);
                     addTasksHistoryEntry({
                         action: `Task Selected: ${taskTitle || taskId || ''}`.trim(),
@@ -1656,9 +1674,10 @@ function markTaskDone(taskId, workerName) {
     console.log(`[MARK DONE] Active saved: ${completedCount} completed task(s) in ACTIVE list`);
     
     // Log to history after successful DONE
+    // Use workerName (matched displayName from PIN validation) for history entry
     const completedTask = idx >= 0 ? activeTasks[idx] : (pendingTask || null);
     const taskTitle = completedTask?.title || pendingTask?.title || '';
-    const worker = assignedEmployee || '-';
+    const worker = workerName || '-'; // Use matched displayName from PIN validation
     const currentTab = (typeof getCurrentTasksTab === 'function') ? getCurrentTasksTab() : (window.currentTasksTab || tab || null);
     addTasksHistoryEntry({
         action: `Task Completed: ${taskTitle || keyId || ''}`.trim(),
@@ -1831,12 +1850,16 @@ async function validatePinAndMove() {
             return;
         }
         
-        const users = JSON.parse(localStorage.getItem("ff_users_v1") || "[]");
-        const match = users.find(u => u.pin === enteredPin);
+        const users = ffGetUsers();
+        const match = users.find(u => {
+            // Match by pin (string comparison) or pinHash if present
+            return (u.pin && String(u.pin).trim() === String(enteredPin).trim()) ||
+                   (u.pinHash && String(u.pinHash).trim() === String(enteredPin).trim());
+        });
         
         if (match) {
             matchedRole = 'Tech';
-            matchedName = match.displayName;
+            matchedName = match.displayName || match.name || '';
             console.log('✅ TASK_TAKE_OK', { role: matchedRole, userName: matchedName, taskId: __pendingTaskId });
         }
     }
@@ -1910,12 +1933,16 @@ function validatePinAndMarkDone() {
             return;
         }
         
-        const users = JSON.parse(localStorage.getItem("ff_users_v1") || "[]");
-        const user = users.find(u => u.pin === enteredPin);
+        const users = ffGetUsers();
+        const user = users.find(u => {
+            // Match by pin (string comparison) or pinHash if present
+            return (u.pin && String(u.pin).trim() === String(enteredPin).trim()) ||
+                   (u.pinHash && String(u.pinHash).trim() === String(enteredPin).trim());
+        });
         
         if (user) {
             matchedRole = 'Tech';
-            matchedName = user.displayName;
+            matchedName = user.displayName || user.name || '';
             console.log('✅ TASK_MARK_DONE_OK', { role: matchedRole, userName: matchedName, taskId: pinModalDoneTaskId });
         }
     }

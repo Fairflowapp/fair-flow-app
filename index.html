@@ -1491,6 +1491,21 @@ function getActorInfo(code = null, workerName = '') {
   };
 }
 
+// Helper function to load users from localStorage (prefer ffv24_users, else ff_users_v1)
+function ffGetUsers() {
+  try {
+    const ffv24Users = JSON.parse(localStorage.getItem('ffv24_users') || '[]');
+    if (Array.isArray(ffv24Users) && ffv24Users.length > 0) {
+      return ffv24Users;
+    }
+    const ffUsers = JSON.parse(localStorage.getItem('ff_users_v1') || '[]');
+    return Array.isArray(ffUsers) ? ffUsers : [];
+  } catch (e) {
+    console.error('[ffGetUsers] Error loading users:', e);
+    return [];
+  }
+}
+
 function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue') {
   console.log('[BUILD MARKER] addHistoryEntry is THIS version', addHistoryEntry.toString().slice(0,120));
   console.log('[ADD_HISTORY_ENTRY CALLED]', { args: Array.from(arguments) });
@@ -11054,18 +11069,34 @@ function confirmSelectTask() {
       }
       // Check if code matches worker (tech) (check THIRD)
       else {
-        const workersList = settings.workers || [];
-        for (let i = 0; i < workersList.length; i++) {
-          const worker = workersList[i];
-          if (!worker.pin) continue;
-          // Use exact same comparison as JOIN: w.pin.toString() === code
-          const workerPinStr = worker.pin.toString().trim();
-          if (workerPinStr === codeStr) {
-            matchedWorker = worker;
-            matchedRole = 'Tech';
-            matchedName = worker.name;
-            console.log('[Tasks] Tech code validated:', matchedName);
-            break;
+        // Try to match from users (ffv24_users or ff_users_v1) first
+        const users = (typeof ffGetUsers === 'function' ? ffGetUsers() : (typeof window.ffGetUsers === 'function' ? window.ffGetUsers() : []));
+        const userMatch = users.find(u => {
+          // Match by pin (string comparison) or pinHash if present
+          return (u.pin && String(u.pin).trim() === codeStr) ||
+                 (u.pinHash && String(u.pinHash).trim() === codeStr);
+        });
+        
+        if (userMatch) {
+          matchedRole = 'Tech';
+          matchedName = userMatch.displayName || userMatch.name || '';
+          matchedWorker = { name: matchedName, pin: codeStr, role: 'Tech' };
+          console.log('[Tasks] Tech code validated (from users):', matchedName);
+        } else {
+          // Fallback to settings.workers
+          const workersList = settings.workers || [];
+          for (let i = 0; i < workersList.length; i++) {
+            const worker = workersList[i];
+            if (!worker.pin) continue;
+            // Use exact same comparison as JOIN: w.pin.toString() === code
+            const workerPinStr = worker.pin.toString().trim();
+            if (workerPinStr === codeStr) {
+              matchedWorker = worker;
+              matchedRole = 'Tech';
+              matchedName = worker.name;
+              console.log('[Tasks] Tech code validated (from settings.workers):', matchedName);
+              break;
+            }
           }
         }
       }
@@ -11326,18 +11357,34 @@ async function confirmFinishTask() {
     }
     // Check if PIN matches worker (tech) (check THIRD)
     else {
-      const workersList = settings.workers || [];
-      for (let i = 0; i < workersList.length; i++) {
-        const worker = workersList[i];
-        if (!worker.pin) continue;
-        // Use exact same comparison as JOIN: w.pin.toString() === pin
-        const workerPinStr = worker.pin.toString().trim();
-        if (workerPinStr === pinStr) {
-          matchedWorker = worker;
-          matchedRole = 'Tech';
-          matchedName = worker.name;
-          console.log('[Tasks] Tech code validated for finish task:', matchedName);
-          break;
+      // Try to match from users (ffv24_users or ff_users_v1) first
+      const users = (typeof ffGetUsers === 'function' ? ffGetUsers() : (typeof window.ffGetUsers === 'function' ? window.ffGetUsers() : []));
+      const userMatch = users.find(u => {
+        // Match by pin (string comparison) or pinHash if present
+        return (u.pin && String(u.pin).trim() === pinStr) ||
+               (u.pinHash && String(u.pinHash).trim() === pinStr);
+      });
+      
+      if (userMatch) {
+        matchedRole = 'Tech';
+        matchedName = userMatch.displayName || userMatch.name || '';
+        matchedWorker = { name: matchedName, pin: pinStr, role: 'Tech' };
+        console.log('[Tasks] Tech code validated for finish task (from users):', matchedName);
+      } else {
+        // Fallback to settings.workers
+        const workersList = settings.workers || [];
+        for (let i = 0; i < workersList.length; i++) {
+          const worker = workersList[i];
+          if (!worker.pin) continue;
+          // Use exact same comparison as JOIN: w.pin.toString() === pin
+          const workerPinStr = worker.pin.toString().trim();
+          if (workerPinStr === pinStr) {
+            matchedWorker = worker;
+            matchedRole = 'Tech';
+            matchedName = worker.name;
+            console.log('[Tasks] Tech code validated for finish task (from settings.workers):', matchedName);
+            break;
+          }
         }
       }
     }
