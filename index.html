@@ -2785,8 +2785,17 @@ function renderSettings(){
     workersHeader.append(nameHeader, pinHeader, eyeHeader, buttonHeader, fontHeader, paletteHeader, deleteHeader);
     workersTable.appendChild(workersHeader);
 
-    // Add worker rows
-    (settings.workers||[]).forEach((w,i)=>workersTable.appendChild(workerRow(i,w)));
+    // Add worker rows (sorted A→Z by name for display only)
+    // Create sorted copy with original indices preserved for correct data-i references
+    const workersForDisplay = (settings.workers||[]).map((w, i) => ({ originalIndex: i, worker: w }))
+      .sort((a, b) => {
+        const aName = ((a.worker?.name ?? a.worker?.label ?? a.worker?.displayName ?? "") + "").trim().toLowerCase();
+        const bName = ((b.worker?.name ?? b.worker?.label ?? b.worker?.displayName ?? "") + "").trim().toLowerCase();
+        return aName.localeCompare(bName);
+      });
+    workersForDisplay.forEach(({ originalIndex, worker }) => {
+      workersTable.appendChild(workerRow(originalIndex, worker));
+    });
 
     wb.appendChild(workersTable);
   }
