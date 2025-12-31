@@ -1,5 +1,47 @@
 console.log('[BUILD MARKER] app.js loaded', new Date().toISOString());
 
+// Migration: Move yearly done entries from old key to standard key
+(function migrateYearlyDoneStorage() {
+  try {
+    const oldKey = 'ff_tasks_yearly_done_v1';
+    const standardKey = (typeof getTabStorageKey === 'function')
+      ? getTabStorageKey('yearly', 'done')
+      : 'ff_tasks_yearly_done_v1';
+    
+    // Only migrate if keys are different and old key exists
+    if (oldKey !== standardKey) {
+      const oldData = localStorage.getItem(oldKey);
+      const standardData = localStorage.getItem(standardKey);
+      
+      if (oldData && (!standardData || JSON.parse(standardData || '[]').length === 0)) {
+        // Move/merge entries from old key to standard key
+        const oldList = JSON.parse(oldData);
+        const standardList = JSON.parse(standardData || '[]');
+        
+        // Merge: add entries from old list that don't exist in standard list
+        const standardIds = new Set(standardList.map(t => String(t.taskId || t.id || '').trim()));
+        oldList.forEach(oldTask => {
+          const oldId = String(oldTask.taskId || oldTask.id || '').trim();
+          if (oldId && !standardIds.has(oldId)) {
+            standardList.push(oldTask);
+            standardIds.add(oldId);
+          }
+        });
+        
+        // Save to standard key
+        localStorage.setItem(standardKey, JSON.stringify(standardList));
+        console.log('[Migration] Moved yearly done entries from', oldKey, 'to', standardKey, `(${standardList.length} entries)`);
+        
+        // Delete old key
+        localStorage.removeItem(oldKey);
+        console.log('[Migration] Deleted old yearly done key:', oldKey);
+      }
+    }
+  } catch (e) {
+    console.warn('[Migration] Error migrating yearly done storage:', e);
+  }
+})();
+
 // =====================
 // Global Error Logging
 // =====================
@@ -1606,6 +1648,67 @@ function markTaskDone(taskId, workerName) {
     
     console.log(`[MARK DONE] Active task index: ${idx}, keyId: ${keyId}`);
     
+    // For yearly tasks, store in done list with completedYear and scheduleYear
+    if (tab === 'yearly') {
+        // Use getTabStorageKey for standard storage key
+        const doneKey = (typeof getTabStorageKey === 'function') 
+            ? getTabStorageKey(tab, 'done')
+            : `ff_tasks_${tab}_done_v1`;
+        const doneList = JSON.parse(localStorage.getItem(doneKey) || '[]');
+        const currentYear = new Date().getFullYear();
+        
+        // Get task data to extract scheduleYear
+        const sourceTask = idx >= 0 ? activeTasks[idx] : pendingTask;
+        
+        // Get scheduleYear from task, or try catalog lookup
+        let scheduleYear = sourceTask?.scheduleYear;
+        if (scheduleYear === undefined && typeof ffGetYearlyCatalogMap === 'function') {
+            const catalogMap = ffGetYearlyCatalogMap();
+            const catalogTask = catalogMap.get(String(keyId).trim());
+            if (catalogTask) {
+                scheduleYear = catalogTask.scheduleYear;
+            }
+        }
+        
+        // Remove existing entry for this task if present
+        const existingDoneIndex = doneList.findIndex(t => {
+            const tId = t.taskId || t.id;
+            return tId && String(tId) === String(keyId);
+        });
+        
+        const doneTask = {
+            id: keyId,
+            taskId: keyId,
+            title: sourceTask?.title || '',
+            instructions: sourceTask?.instructions || sourceTask?.info || sourceTask?.details || '',
+            status: 'done',
+            completedAt: completionTime,
+            completedBy: assignedEmployee,
+            completedYear: currentYear,
+            scheduleYear: scheduleYear
+        };
+        
+        if (existingDoneIndex >= 0) {
+            doneList[existingDoneIndex] = doneTask;
+        } else {
+            doneList.push(doneTask);
+        }
+        
+        // Save done list
+        if (typeof writeTasksList === 'function') {
+            writeTasksList(tab, 'done', doneList);
+        } else {
+            localStorage.setItem(doneKey, JSON.stringify(doneList));
+        }
+        console.log(`[MARK DONE] Saved to yearly done list: ${doneKey}, count=${doneList.length}`);
+        
+        // Debug log (behind DEBUG_MODE check)
+        if (window.DEBUG_MODE || localStorage.getItem('DEBUG_MODE') === 'true') {
+            console.log('[DEBUG] Yearly done key:', doneKey);
+            console.log('[DEBUG] Last done entry after MARK DONE:', doneTask);
+        }
+    }
+    
     if (idx >= 0) {
         // Update existing active task
         const taskBefore = { ...activeTasks[idx] };
@@ -2428,49 +2531,122 @@ window.doResetCurrentTab = function doResetCurrentTab() {
             }
         });
 
-        // Merge catalog tasks into active list (add missing only)
-        if (Array.isArray(catalogList)) {
-            catalogList.forEach(task => {
-                if (!task || typeof task !== "object") return;
-                const keyId = task.taskId || task.id;
-                if (!keyId) return;
-                if (!activeById.has(keyId)) {
-                    activeById.set(keyId, {
-                        id: keyId,
-                        title: task.title,
-                        instructions: task.instructions || task.info || task.details || ""
-                    });
-                }
+        // For yearly tab, only reset tasks that are due today or overdue (not completed)
+        if (tab === 'yearly') {
+            const now = new Date();
+            // Only operate on tasks where ffIsYearlyTaskActive(task, now) is true
+            const tasksToReset = Array.from(activeById.values()).filter(task => {
+                if (!task || typeof task !== "object") return false;
+                return ffIsYearlyTaskActive(task, now);
             });
+            
+            // Add missing due tasks from catalog (same pattern as weekly/monthly)
+            if (Array.isArray(catalogList)) {
+                catalogList.forEach(catalogTask => {
+                    if (!catalogTask || typeof catalogTask !== "object") return;
+                    const keyId = catalogTask.taskId || catalogTask.id;
+                    if (!keyId) return;
+                    
+                    // Only add if task is active (due/overdue) per ffIsYearlyTaskActive
+                    if (ffIsYearlyTaskActive(catalogTask, now)) {
+                        // Check if already in tasksToReset
+                        const exists = tasksToReset.some(t => {
+                            const tId = t.taskId || t.id;
+                            return tId && String(tId) === String(keyId);
+                        });
+                        
+                        if (!exists) {
+                            // Add from catalog
+                            activeById.set(keyId, {
+                                id: keyId,
+                                taskId: keyId,
+                                title: catalogTask.title || '',
+                                instructions: catalogTask.instructions || catalogTask.info || catalogTask.details || "",
+                                scheduleMonth: catalogTask.scheduleMonth,
+                                scheduleDay: catalogTask.scheduleDay,
+                                scheduleYear: catalogTask.scheduleYear
+                            });
+                        }
+                    }
+                });
+            }
+            
+            // Rebuild tasksToReset from activeById (includes newly added catalog tasks)
+            const allTasksToReset = Array.from(activeById.values()).filter(task => {
+                if (!task || typeof task !== "object") return false;
+                return ffIsYearlyTaskActive(task, now);
+            });
+            
+            // Reset runtime fields for active tasks only
+            const normalizedActive = allTasksToReset.map(task => {
+                const keyId = task.taskId || task.id;
+                if (!keyId) return null;
+                const clone = { ...task };
+                // Normalize identity fields
+                clone.id = keyId;
+                clone.taskId = keyId;
+                // Ensure active flag exists and is true for active-list items
+                clone.active = clone.active == null ? true : clone.active;
+                // Remove transient runtime status fields
+                delete clone.status;
+                delete clone.completedBy;
+                delete clone.assignedTo;
+                delete clone.completedAt;
+                delete clone.selected;
+                delete clone.selectedBy;
+                delete clone.selectedAt;
+                delete clone.pending;
+                delete clone.done;
+                return clone;
+            }).filter(Boolean);
+            
+            localStorage.setItem(activeKey, JSON.stringify(normalizedActive));
+            console.log(`RESET: Yearly active list normalized (due/overdue only), count=${normalizedActive.length}`);
+        } else {
+            // Merge catalog tasks into active list (add missing only)
+            if (Array.isArray(catalogList)) {
+                catalogList.forEach(task => {
+                    if (!task || typeof task !== "object") return;
+                    const keyId = task.taskId || task.id;
+                    if (!keyId) return;
+                    if (!activeById.has(keyId)) {
+                        activeById.set(keyId, {
+                            id: keyId,
+                            title: task.title,
+                            instructions: task.instructions || task.info || task.details || ""
+                        });
+                    }
+                });
+            }
+
+            // Reset runtime fields in ACTIVE ONLY (status/assignment/completion), preserve roster
+            // and ensure stable id/taskId/active flags.
+            const normalizedActive = Array.from(activeById.values()).map(task => {
+                if (!task || typeof task !== "object") return null;
+                const keyId = task.taskId || task.id;
+                if (!keyId) return null;
+                const clone = { ...task };
+                // Normalize identity fields
+                clone.id = keyId;
+                clone.taskId = keyId;
+                // Ensure active flag exists and is true for active-list items
+                clone.active = clone.active == null ? true : clone.active;
+                // Remove transient runtime status fields
+                delete clone.status;
+                delete clone.completedBy;
+                delete clone.assignedTo;
+                delete clone.completedAt;
+                delete clone.selected;
+                delete clone.selectedBy;
+                delete clone.selectedAt;
+                delete clone.pending;
+                delete clone.done;
+                return clone;
+            }).filter(Boolean);
+
+            localStorage.setItem(activeKey, JSON.stringify(normalizedActive));
+            console.log(`RESET: Active list normalized for tab ${tab}, count=${normalizedActive.length}`);
         }
-
-        // Reset runtime fields in ACTIVE ONLY (status/assignment/completion), preserve roster
-        // and ensure stable id/taskId/active flags.
-        const normalizedActive = Array.from(activeById.values()).map(task => {
-            if (!task || typeof task !== "object") return null;
-            const keyId = task.taskId || task.id;
-            if (!keyId) return null;
-            const clone = { ...task };
-            // Normalize identity fields
-            clone.id = keyId;
-            clone.taskId = keyId;
-            // Ensure active flag exists and is true for active-list items
-            clone.active = clone.active == null ? true : clone.active;
-            // Remove transient runtime status fields
-            delete clone.status;
-            delete clone.completedBy;
-            delete clone.assignedTo;
-            delete clone.completedAt;
-            delete clone.selected;
-            delete clone.selectedBy;
-            delete clone.selectedAt;
-            delete clone.pending;
-            delete clone.done;
-            return clone;
-        }).filter(Boolean);
-
-        localStorage.setItem(activeKey, JSON.stringify(normalizedActive));
-        console.log(`RESET: Active list normalized for tab ${tab}, count=${normalizedActive.length}`);
     } catch (e) {
         console.error("RESET: Error normalizing active list from catalog:", e);
         // Continue with reset even if active normalization fails
@@ -3122,6 +3298,76 @@ window.ffIsMonthlyTaskScheduledToday = ffIsMonthlyTaskScheduledToday;
 // ============================================
 
 // Get yearly catalog map (taskId -> catalogTask)
+// Helper to normalize month index (handles both 0-based and 1-based)
+function normalizeMonthIndex(monthValue) {
+  const rawMonth = Number(monthValue);
+  if (!Number.isFinite(rawMonth)) return null;
+  
+  if (rawMonth >= 1 && rawMonth <= 12) {
+    return rawMonth - 1;  // 1-based (Jan=1) -> 0-based (Jan=0)
+  } else if (rawMonth >= 0 && rawMonth <= 11) {
+    return rawMonth; // 0-based (Jan=0) -> already 0-based
+  }
+  return null; // Invalid
+}
+
+// Helper to get yearly task due date as Date object
+function ffGetYearlyDueDate(task, nowDate) {
+  if (!task || typeof task !== 'object') return null;
+  
+  const now = nowDate || new Date();
+  const currentYear = now.getFullYear();
+  
+  // Get schedule from task (prefer task fields, fallback to catalog lookup)
+  let scheduleMonth = task.scheduleMonth;
+  let scheduleDay = task.scheduleDay;
+  let scheduleYear = task.scheduleYear; // May be undefined for legacy tasks
+  
+  // If not in task, try catalog lookup
+  if ((scheduleMonth === undefined || scheduleMonth === null) || 
+      (scheduleDay === undefined || scheduleDay === null) ||
+      (scheduleYear === undefined)) {
+    const taskId = task.taskId || task.id;
+    if (taskId) {
+      const catalogMap = ffGetYearlyCatalogMap();
+      const catalogTask = catalogMap.get(String(taskId).trim());
+      if (catalogTask) {
+        if (scheduleMonth === undefined || scheduleMonth === null) {
+          scheduleMonth = catalogTask.scheduleMonth;
+        }
+        if (scheduleDay === undefined || scheduleDay === null) {
+          scheduleDay = catalogTask.scheduleDay;
+        }
+        if (scheduleYear === undefined) {
+          scheduleYear = catalogTask.scheduleYear;
+        }
+      }
+    }
+  }
+  
+  // FAIL-CLOSED: Missing or invalid date
+  if (scheduleMonth === undefined || scheduleMonth === null || 
+      scheduleDay === undefined || scheduleDay === null) {
+    return null;
+  }
+  
+  // Normalize month index
+  const monthIndex = normalizeMonthIndex(scheduleMonth);
+  if (monthIndex === null) return null;
+  
+  // Validate day
+  const dayNum = Number(scheduleDay);
+  if (!Number.isFinite(dayNum) || dayNum < 1 || dayNum > 31) {
+    return null;
+  }
+  
+  // Use scheduleYear if present, else default to currentYear (for legacy tasks)
+  const yearToUse = scheduleYear !== undefined ? scheduleYear : currentYear;
+  
+  // Build taskDue date: Date(yearToUse, monthIndex, dayNum) at 00:00 local
+  return new Date(yearToUse, monthIndex, dayNum, 0, 0, 0, 0);
+}
+
 function ffGetYearlyCatalogMap() {
   const catalogMap = new Map();
   try {
@@ -3146,57 +3392,48 @@ function ffGetYearlyCatalogMap() {
 }
 
 // Check if a yearly task is active (appears in MY LIST/PENDING)
-// Logic: appears if has valid date AND today >= scheduled date AND not completed
+// Logic: appears if has valid date AND today >= scheduled date AND not completed in current year
 // If not completed, continues to appear every day after until completed
 function ffIsYearlyTaskActive(task, nowDate) {
   if (!task || typeof task !== 'object') return false;
   
   const now = nowDate || new Date();
-  const todayMonth = now.getMonth() + 1; // 1..12 (JS getMonth() returns 0..11)
-  const todayDay = now.getDate(); // 1..31
-  const todayYear = now.getFullYear();
+  const currentYear = now.getFullYear();
   
-  // Get schedule from task (prefer task fields, fallback to catalog lookup)
-  let scheduleMonth = task.scheduleMonth;
-  let scheduleDay = task.scheduleDay;
+  // Check if completed in scheduleYear (use scheduleYear from task, or default to currentYear for legacy)
+  const taskId = task.taskId || task.id;
+  const scheduleYear = task.scheduleYear; // May be undefined for legacy tasks
+  const checkYear = scheduleYear !== undefined ? scheduleYear : currentYear; // Use scheduleYear if present
   
-  // If not in task, try catalog lookup
-  if ((scheduleMonth === undefined || scheduleMonth === null) || 
-      (scheduleDay === undefined || scheduleDay === null)) {
-    const taskId = task.taskId || task.id;
-    if (taskId) {
-      const catalogMap = ffGetYearlyCatalogMap();
-      const catalogTask = catalogMap.get(String(taskId).trim());
-      if (catalogTask) {
-        if (scheduleMonth === undefined || scheduleMonth === null) {
-          scheduleMonth = catalogTask.scheduleMonth;
+  if (taskId) {
+    try {
+      // Use getTabStorageKey for standard storage key
+      const doneKey = (typeof getTabStorageKey === 'function')
+        ? getTabStorageKey('yearly', 'done')
+        : 'ff_tasks_yearly_done_v1';
+      const doneList = JSON.parse(localStorage.getItem(doneKey) || '[]');
+      const completedForYear = doneList.some(doneTask => {
+        const doneTaskId = doneTask.taskId || doneTask.id;
+        if (String(doneTaskId).trim() !== String(taskId).trim()) return false;
+        // Check if completed for the scheduleYear
+        const completedYear = doneTask.completedYear;
+        if (completedYear === checkYear) return true;
+        // Fallback: check completedAt timestamp if completedYear is missing
+        if (doneTask.completedAt) {
+          const completedDate = new Date(doneTask.completedAt);
+          return completedDate.getFullYear() === checkYear;
         }
-        if (scheduleDay === undefined || scheduleDay === null) {
-          scheduleDay = catalogTask.scheduleDay;
-        }
+        return false;
+      });
+      if (completedForYear) {
+        return false; // Completed for this scheduleYear, don't show
       }
+    } catch (e) {
+      console.warn('[Yearly Active Check] Error checking done list:', e);
     }
   }
   
-  // FAIL-CLOSED: Missing or invalid date
-  if (scheduleMonth === undefined || scheduleMonth === null || 
-      scheduleDay === undefined || scheduleDay === null) {
-    return false;
-  }
-  
-  // Parse and validate
-  const monthNum = typeof scheduleMonth === 'number' ? scheduleMonth : 
-                   (typeof scheduleMonth === 'string' && /^\d+$/.test(scheduleMonth)) ? parseInt(scheduleMonth, 10) : null;
-  const dayNum = typeof scheduleDay === 'number' ? scheduleDay : 
-                 (typeof scheduleDay === 'string' && /^\d+$/.test(scheduleDay)) ? parseInt(scheduleDay, 10) : null;
-  
-  // If invalid values, fail-closed
-  if (monthNum === null || monthNum < 1 || monthNum > 12 || 
-      dayNum === null || dayNum < 1 || dayNum > 31) {
-    return false;
-  }
-  
-  // Check if task is completed
+  // Check if task is completed (local status check)
   const isCompleted = task.status === 'done' || !!task.completedAt || 
                       task.completed === true || task.isCompleted === true ||
                       task.done === true || task.isDone === true;
@@ -3205,19 +3442,15 @@ function ffIsYearlyTaskActive(task, nowDate) {
     return false; // Completed tasks don't appear
   }
   
-  // Check if today >= scheduled date (year-agnostic comparison)
-  // Compare month first, then day
-  if (todayMonth > monthNum) {
-    return true; // Past the scheduled month
-  }
-  if (todayMonth < monthNum) {
-    return false; // Before the scheduled month
-  }
-  // Same month - compare day
-  if (todayDay >= dayNum) {
-    return true; // On or past the scheduled day
-  }
-  return false; // Before the scheduled day
+  // Get due date
+  const taskDue = ffGetYearlyDueDate(task, now);
+  if (!taskDue) return false; // Invalid date
+  
+  // Build todayStart: today at 00:00 (local)
+  const todayStart = new Date(currentYear, now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  
+  // Show task in MY LIST ONLY if taskDue <= todayStart
+  return taskDue.getTime() <= todayStart.getTime();
 }
 
 // Legacy function for backward compatibility (used by auto-reset)
