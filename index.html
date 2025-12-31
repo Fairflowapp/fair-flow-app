@@ -1247,11 +1247,37 @@ if (!window.__ffYearlyDraftHandlersAttached) {
     if (el.getAttribute('data-ff') === 'yearly-month') {
       const n = parseInt(el.value, 10);
       task.scheduleMonth = Number.isFinite(n) ? n : null;
+      // Recompute scheduleYear when month changes
+      if (task.scheduleMonth !== null && task.scheduleDay !== null) {
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const todayMonth = now.getMonth() + 1; // 1-12
+        const todayDay = now.getDate();
+        // If month/day is earlier than today's month/day, scheduleYear = currentYear + 1, else currentYear
+        if (task.scheduleMonth < todayMonth || (task.scheduleMonth === todayMonth && task.scheduleDay < todayDay)) {
+          task.scheduleYear = currentYear + 1;
+        } else {
+          task.scheduleYear = currentYear;
+        }
+      }
     }
 
     if (el.getAttribute('data-ff') === 'yearly-day') {
       const n = parseInt(el.value, 10);
       task.scheduleDay = (Number.isFinite(n) && n >= 1 && n <= 31) ? n : null;
+      // Recompute scheduleYear when day changes
+      if (task.scheduleMonth !== null && task.scheduleDay !== null) {
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const todayMonth = now.getMonth() + 1; // 1-12
+        const todayDay = now.getDate();
+        // If month/day is earlier than today's month/day, scheduleYear = currentYear + 1, else currentYear
+        if (task.scheduleMonth < todayMonth || (task.scheduleMonth === todayMonth && task.scheduleDay < todayDay)) {
+          task.scheduleYear = currentYear + 1;
+        } else {
+          task.scheduleYear = currentYear;
+        }
+      }
     }
 
     // update the visible button label immediately
@@ -4211,10 +4237,25 @@ function loadTasksForSettingsTab(tab) {
         // Default to "any"
         normalizedTask.scheduleDayOfMonth = 'any';
       }
-      // For yearly tasks: always preserve scheduleMonth and scheduleDay (even if null)
+      // For yearly tasks: always preserve scheduleMonth, scheduleDay, and scheduleYear (even if null/undefined)
       if (tab === 'yearly') {
         normalizedTask.scheduleMonth = task.scheduleMonth ?? null;
         normalizedTask.scheduleDay = task.scheduleDay ?? null;
+        // Preserve scheduleYear if present, otherwise compute it if month/day are set
+        if (task.scheduleYear !== undefined) {
+          normalizedTask.scheduleYear = task.scheduleYear;
+        } else if (normalizedTask.scheduleMonth !== null && normalizedTask.scheduleDay !== null) {
+          // Compute scheduleYear: if month/day is earlier than today's month/day, scheduleYear = currentYear + 1, else currentYear
+          const now = new Date();
+          const currentYear = now.getFullYear();
+          const todayMonth = now.getMonth() + 1; // 1-12
+          const todayDay = now.getDate();
+          if (normalizedTask.scheduleMonth < todayMonth || (normalizedTask.scheduleMonth === todayMonth && normalizedTask.scheduleDay < todayDay)) {
+            normalizedTask.scheduleYear = currentYear + 1;
+          } else {
+            normalizedTask.scheduleYear = currentYear;
+          }
+        }
       }
       return normalizedTask;
     }).filter(Boolean);
@@ -6732,10 +6773,25 @@ function saveTasksToStorage() {
       if (tab === 'monthly' && task.scheduleDayOfMonth !== undefined) {
         catalogTask.scheduleDayOfMonth = task.scheduleDayOfMonth;
       }
-      // For yearly tasks: always include scheduleMonth and scheduleDay (even if null)
+      // For yearly tasks: always include scheduleMonth, scheduleDay, and scheduleYear
       if (tab === 'yearly') {
         catalogTask.scheduleMonth = task.scheduleMonth ?? null;
         catalogTask.scheduleDay = task.scheduleDay ?? null;
+        // Include scheduleYear if present, otherwise compute it if month/day are set
+        if (task.scheduleYear !== undefined) {
+          catalogTask.scheduleYear = task.scheduleYear;
+        } else if (catalogTask.scheduleMonth !== null && catalogTask.scheduleDay !== null) {
+          // Compute scheduleYear: if month/day is earlier than today's month/day, scheduleYear = currentYear + 1, else currentYear
+          const now = new Date();
+          const currentYear = now.getFullYear();
+          const todayMonth = now.getMonth() + 1; // 1-12
+          const todayDay = now.getDate();
+          if (catalogTask.scheduleMonth < todayMonth || (catalogTask.scheduleMonth === todayMonth && catalogTask.scheduleDay < todayDay)) {
+            catalogTask.scheduleYear = currentYear + 1;
+          } else {
+            catalogTask.scheduleYear = currentYear;
+          }
+        }
       }
       return catalogTask;
     }).filter(Boolean);
@@ -7155,6 +7211,40 @@ function renderTasksList(tab, opts) {
       const doneTasks = getTabTasks(mainTab, 'done');
       const pendingTasks = getTabTasks(mainTab, 'pending');
       
+      // Helper to check if two timestamps are on the same local day
+      function isSameLocalDay(tsA, tsB) {
+        if (!tsA || !tsB) return false;
+        const dateA = new Date(tsA);
+        const dateB = new Date(tsB);
+        return dateA.getFullYear() === dateB.getFullYear() &&
+               dateA.getMonth() === dateB.getMonth() &&
+               dateA.getDate() === dateB.getDate();
+      }
+      
+      // For yearly tab, compute done-today items early (before empty-state check)
+      let yearlyDoneToday = [];
+      if (mainTab === 'yearly') {
+        const doneKey = (typeof getTabStorageKey === 'function')
+          ? getTabStorageKey('yearly', 'done')
+          : 'ff_tasks_yearly_done_v1';
+        const yearlyDoneList = getTabTasks('yearly', 'done');
+        const today = new Date();
+        
+        yearlyDoneToday = yearlyDoneList.filter(doneTask => {
+          if (!doneTask || typeof doneTask !== 'object') return false;
+          // Only show if completedAt exists and is today
+          if (!doneTask.completedAt) return false;
+          return isSameLocalDay(doneTask.completedAt, today.getTime());
+        });
+        
+        // Debug log (behind DEBUG_MODE check)
+        if (window.DEBUG_MODE || localStorage.getItem('DEBUG_MODE') === 'true') {
+          console.log('[DEBUG] Yearly done key:', doneKey);
+          console.log('[DEBUG] Yearly done list total:', yearlyDoneList.length);
+          console.log('[DEBUG] Yearly done today:', yearlyDoneToday.length);
+        }
+      }
+      
       // Build MY LIST directly from ACTIVE list only
       const myListTasks = activeTasks
         .filter(task => {
@@ -7191,8 +7281,9 @@ function renderTasksList(tab, opts) {
           return true;
         });
       
-      // Show "No tasks yet" only if ACTIVE list has no displayable tasks
-      if (myListTasks.length === 0) {
+      // Show "No tasks yet" only if ACTIVE list has no displayable tasks AND (for yearly) no done-today items
+      const hasYearlyDoneToday = (mainTab === 'yearly' && yearlyDoneToday.length > 0);
+      if (myListTasks.length === 0 && !hasYearlyDoneToday) {
         mainListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">No tasks yet</div>';
       } else {
         // Split tasks into incomplete and completed groups
@@ -7207,6 +7298,22 @@ function renderTasksList(tab, opts) {
             incomplete.push(task);
           }
         });
+        
+        // For yearly tab, add done tasks completed today (from done list, not active)
+        if (mainTab === 'yearly' && yearlyDoneToday.length > 0) {
+          // Add yearly done tasks to completed array (only those completed today)
+          yearlyDoneToday.forEach(doneTask => {
+            // Check if already in completed array (from activeTasks)
+            const keyId = doneTask.taskId || doneTask.id;
+            const alreadyInCompleted = completed.some(t => {
+              const tId = t.taskId || t.id;
+              return tId && String(tId) === String(keyId);
+            });
+            if (!alreadyInCompleted) {
+              completed.push(doneTask);
+            }
+          });
+        }
         
         // Apply catalog order to MY LIST (display order only, no state changes)
         let catalogOrder = [];
