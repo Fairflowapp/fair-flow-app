@@ -1941,9 +1941,16 @@ function renderSelect(){
   defaultOption.selected = true;
   selectEl.appendChild(defaultOption);
 
-  // Populate dropdown with technicians from settings
+  // Populate dropdown with technicians from settings (sorted A→Z)
+  // Create sorted copy for JOIN rendering only (do not mutate original)
+  const techniciansSorted = [...technicians].sort((a, b) => {
+    const aName = ((a?.name ?? a?.label ?? a?.displayName ?? a) + "").trim().toLowerCase();
+    const bName = ((b?.name ?? b?.label ?? b?.displayName ?? b) + "").trim().toLowerCase();
+    return aName.localeCompare(bName);
+  });
+  
   let addedCount = 0;
-  technicians.forEach(technician => { 
+  techniciansSorted.forEach(technician => { 
     if (technician && technician.name && technician.name.trim()) {
       const option = document.createElement("option"); 
       option.value = technician.name.trim(); // Use name as the ID/value
