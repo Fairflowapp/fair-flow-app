@@ -659,6 +659,8 @@ dialog footer button, .code-dialog footer button {
 
       <div class="toolbar">
 
+        <button id="queueBtn" class="btn-pill">QUEUE</button>
+
         <button id="settingsBtn" class="btn-pill">Settings</button>
 
         <button id="logBtn" class="btn-pill">History</button>
@@ -1135,7 +1137,7 @@ const joinBtn = document.getElementById("joinBtn") || $("#joinBtn");
 
 const startFirstBtn=$("#startFirstBtn"); // adminBtn removed
 
-const resetBtn=$("#resetBtn"), reorderBtn=$("#reorderBtn"), logBtn=$("#logBtn"), settingsBtn=$("#settingsBtn");
+const resetBtn=$("#resetBtn"), reorderBtn=$("#reorderBtn"), logBtn=$("#logBtn"), settingsBtn=$("#settingsBtn"), queueBtn=$("#queueBtn");
 
 // Declare salonName early to ensure it's available before renderBrand() is called
 const salonName=$("#salonName"), salonInput=$("#salonInput"), brandLogo=$("#brandLogo");
@@ -2703,6 +2705,37 @@ async function openSettingsSecure(){
 
 // Expose globally for onclick handlers
 window.openSettingsSecure = openSettingsSecure;
+
+// Navigation function to return to Queue view
+function goToQueue() {
+  // Close Settings modal if open
+  const settingsDlg = document.getElementById('settingsDlg');
+  if (settingsDlg && settingsDlg.open) {
+    settingsDlg.close();
+  }
+  
+  // Close Tasks modal if open (check for common task modal IDs/classes)
+  const tasksModal = document.querySelector('#tasksModal, .tasks-modal');
+  if (tasksModal) {
+    if (tasksModal.close && typeof tasksModal.close === 'function') {
+      tasksModal.close();
+    } else {
+      tasksModal.classList.add('hidden');
+      tasksModal.style.display = 'none';
+    }
+  }
+  
+  // Ensure owner-view (main queue view) is visible
+  const ownerView = document.getElementById('owner-view');
+  if (ownerView) {
+    ownerView.style.display = '';
+  }
+}
+
+// Wire up QUEUE button
+if (queueBtn) {
+  queueBtn.onclick = goToQueue;
+}
 
 function renderSettings(){
 
