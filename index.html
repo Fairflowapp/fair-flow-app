@@ -6054,6 +6054,22 @@ function setSettingsModalTab(tabName) {
             
             console.log('[AUTO-RESET UI] opening controls rendered');
           }
+          
+          // Show ENFORCE SELECT checkbox for opening tab
+          const enforceSelectSection = document.getElementById('tasksEnforceSelectSection');
+          const enforceSelectCheckbox = document.getElementById('tasksEnforceSelectCheckbox');
+          if (enforceSelectSection && enforceSelectCheckbox) {
+            enforceSelectSection.style.display = 'block';
+            // Load setting
+            const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+            enforceSelectCheckbox.checked = enforceSelectSettings.opening === true;
+            // Save on change
+            enforceSelectCheckbox.onchange = function() {
+              const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+              enforceSelectSettings.opening = enforceSelectCheckbox.checked === true;
+              localStorage.setItem('ff_tasks_enforce_select_v1', JSON.stringify(enforceSelectSettings));
+            };
+          }
         } else if (tabName === 'closing') {
           // Hide opening auto-reset section for closing tab
           const autoResetSectionOpening = document.getElementById('tasksOpeningAutoResetSection');
@@ -6125,6 +6141,22 @@ function setSettingsModalTab(tabName) {
             
             console.log('[AUTO-RESET UI] closing controls rendered');
           }
+          
+          // Show ENFORCE SELECT checkbox for closing tab
+          const enforceSelectSection = document.getElementById('tasksEnforceSelectSection');
+          const enforceSelectCheckbox = document.getElementById('tasksEnforceSelectCheckbox');
+          if (enforceSelectSection && enforceSelectCheckbox) {
+            enforceSelectSection.style.display = 'block';
+            // Load setting
+            const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+            enforceSelectCheckbox.checked = enforceSelectSettings.closing === true;
+            // Save on change
+            enforceSelectCheckbox.onchange = function() {
+              const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+              enforceSelectSettings.closing = enforceSelectCheckbox.checked === true;
+              localStorage.setItem('ff_tasks_enforce_select_v1', JSON.stringify(enforceSelectSettings));
+            };
+          }
         }
       }
     } else if (tabName === 'weekly') {
@@ -6195,6 +6227,11 @@ function setSettingsModalTab(tabName) {
         const autoResetSectionClosing = document.getElementById('tasksClosingAutoResetSection');
         if (autoResetSectionClosing) {
           autoResetSectionClosing.style.display = 'none';
+        }
+        // Hide ENFORCE SELECT checkbox for weekly tab
+        const enforceSelectSection = document.getElementById('tasksEnforceSelectSection');
+        if (enforceSelectSection) {
+          enforceSelectSection.style.display = 'none';
         }
         
         // Show weekly auto-reset section
@@ -6386,6 +6423,11 @@ function setSettingsModalTab(tabName) {
       }
       if (tasksMonthlyAutoResetSection) {
         tasksMonthlyAutoResetSection.style.display = 'none';
+      }
+      // Hide ENFORCE SELECT checkbox for yearly tab
+      const enforceSelectSection = document.getElementById('tasksEnforceSelectSection');
+      if (enforceSelectSection) {
+        enforceSelectSection.style.display = 'none';
       }
       
       // Wire Yearly Auto-Reset UI (use cached elements from top of function)
@@ -7106,10 +7148,39 @@ function renderTasksList(tab, opts) {
               const taskIdAttr = keyId ? ` data-task-id="${escapeHtmlAttr(keyId)}"` : '';
               infoButtonHtml = `<button type="button" class="tasks-info-icon" data-instructions="${escapedInstructions}"${taskIdAttr} style="background:#7b3fe4;border:none;color:#fff;cursor:pointer;font-size:12px;font-weight:700;padding:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;margin-left:12px;border-radius:50%;flex-shrink:0;line-height:1;" title="View instructions">i</button>`;
             }
+            
+            // ENFORCE SELECT logic: disable SELECT button if not first task and enforcement is enabled
+            let selectButtonDisabled = false;
+            let selectButtonTitle = '';
+            if (mainTab === 'opening' || mainTab === 'closing') {
+              // Check if user is admin (admins are never blocked)
+              const isAdmin = getCurrentActorRole() === 'Admin';
+              if (!isAdmin) {
+                // Check if ENFORCE SELECT is enabled for this tab
+                const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+                const isEnforced = enforceSelectSettings[mainTab] === true;
+                if (isEnforced) {
+                  // Find index of this task in sortedIncomplete array
+                  const taskIndex = sortedIncomplete.findIndex(t => {
+                    const tId = t.taskId || t.id;
+                    return String(tId) === String(keyId);
+                  });
+                  // Disable if not first (index >= 0 means found, index !== 0 means not first)
+                  if (taskIndex >= 0 && taskIndex !== 0) {
+                    selectButtonDisabled = true;
+                    selectButtonTitle = 'Select tasks in order';
+                  }
+                }
+              }
+            }
+            
+            const selectButtonDisabledAttr = selectButtonDisabled ? ' disabled' : '';
+            const selectButtonTitleAttr = selectButtonTitle ? ` title="${escapeHtmlAttr(selectButtonTitle)}"` : '';
+            const selectButtonStyle = selectButtonDisabled ? 'flex-shrink:0;opacity:0.6;cursor:not-allowed;' : 'flex-shrink:0;';
             buttonsHtml = `
               <div style="display:flex;align-items:center;gap:8px;">
                 ${infoButtonHtml}
-                <button type="button" class="task-select-btn btn-neutral" style="flex-shrink:0;">SELECT</button>
+                <button type="button" class="task-select-btn btn-neutral"${selectButtonDisabledAttr}${selectButtonTitleAttr} style="${selectButtonStyle}">SELECT</button>
               </div>
             `;
           }
@@ -15711,6 +15782,14 @@ window.openLog = async function(){
                 <input type="time" id="tasksYearlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
               </label>
             </div>
+          </div>
+          
+          <!-- ENFORCE SELECT checkbox (only for Opening and Closing tabs) -->
+          <div id="tasksEnforceSelectSection" style="flex-shrink:0;margin-bottom:12px;display:none;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+              <input type="checkbox" id="tasksEnforceSelectCheckbox" style="cursor:pointer;">
+              <span>ENFORCE SELECT</span>
+            </label>
           </div>
           
           <!-- Add Task section (always visible, fixed position above catalog) -->
