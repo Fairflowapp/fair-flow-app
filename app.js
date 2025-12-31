@@ -2494,13 +2494,16 @@ window.doResetCurrentTab = function doResetCurrentTab() {
 
     // Log to history after successful RESET
     const currentTab = (typeof getCurrentTasksTab === 'function') ? getCurrentTasksTab() : (window.currentTasksTab || tab || null);
+    // Get actor identity same way as Task Selected/Completed
+    const actor = (typeof getHistoryActor === 'function') ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
+    const workerName = actor.name || '-';
     addTasksHistoryEntry({
         action: `Tasks Reset: ${currentTab || ''}`.trim(),
         taskId: null,
         taskTitle: null,
-        worker: '-',
-        role: '-',
-        performedBy: '-',
+        worker: workerName,
+        role: actor.role || '-',
+        performedBy: actor.name || '-',
         extra: currentTab ? { tab: currentTab, reset: true } : { reset: true }
     });
 

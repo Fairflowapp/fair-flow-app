@@ -749,6 +749,21 @@ dialog footer button, .code-dialog footer button {
               <option value="tasks">Tasks</option>
             </select>
           </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
+            <span>Order:</span>
+            <select id="historyOrderFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
+            <span>Range:</span>
+            <select id="historyRangeFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
+              <option value="24h">Last 24 hours</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+          </label>
         </div>
         <button id="historyCloseBtn" class="history-close-btn" type="button">×</button>
       </div>
@@ -1103,8 +1118,8 @@ let log=ls("ffv24_log")||[];
 // Global state for history source filter
 window.__historySourceFilter = 'all';
 
-// Global state for history source filter
-window.__historySourceFilter = 'all';
+// Global state for history order filter (UI only, not persisted)
+window.__historyOrderFilter = 'newest';
 
 let reorderMode=false;
 
@@ -1595,6 +1610,71 @@ function getHistoryActor() {
   return { role: 'Admin', name: 'Admin' };
 }
 
+// Helper function to extract timestamp from a history entry
+function getEntryTs(entry) {
+  // If entry has ts field and it's a number, return it
+  if (entry && typeof entry === 'object' && typeof entry.ts === 'number') {
+    return entry.ts;
+  }
+  
+  // Attempt to parse from date + time fields
+  if (entry && typeof entry === 'object' && entry.date && entry.time) {
+    try {
+      // date format is MM/DD
+      // time format is HH:MM
+      const dateParts = entry.date.split('/');
+      const timeParts = entry.time.split(':');
+      
+      if (dateParts.length === 2 && timeParts.length >= 2) {
+        const month = parseInt(dateParts[0], 10) - 1; // 0-indexed
+        const day = parseInt(dateParts[1], 10);
+        const hour = parseInt(timeParts[0], 10);
+        const minute = parseInt(timeParts[1], 10);
+        
+        if (!isNaN(month) && !isNaN(day) && !isNaN(hour) && !isNaN(minute)) {
+          // Use current year as fallback
+          const currentYear = new Date().getFullYear();
+          const parsedDate = new Date(currentYear, month, day, hour, minute);
+          if (!isNaN(parsedDate.getTime())) {
+            return parsedDate.getTime();
+          }
+        }
+      }
+    } catch (e) {
+      // Parsing failed, return null
+    }
+  }
+  
+  // Return null if parsing fails (entry will be kept in filter)
+  return null;
+}
+
+// Helper function to apply range filter to history entries
+function applyHistoryRangeFilter(entries, rangeValue) {
+  const now = Date.now();
+  let threshold;
+  
+  switch (rangeValue) {
+    case '24h':
+      threshold = now - 24 * 60 * 60 * 1000;
+      break;
+    case '7d':
+      threshold = now - 7 * 24 * 60 * 60 * 1000;
+      break;
+    case '30d':
+      threshold = now - 30 * 24 * 60 * 60 * 1000;
+      break;
+    default:
+      threshold = now - 30 * 24 * 60 * 60 * 1000; // Default to 30 days
+  }
+  
+  return entries.filter(entry => {
+    const ts = getEntryTs(entry);
+    // Keep entry if: ts exists and ts >= threshold, OR ts is null (parsing failed)
+    return ts === null || ts >= threshold;
+  });
+}
+
 // Normalize history entry: convert string or object to consistent object format
 function normalizeHistoryEntry(entry) {
   // Handle legacy string entries
@@ -1709,6 +1789,16 @@ function renderHistory() {
     rows = normalizedEntries.filter(normalized => {
       return normalized.source.toLowerCase() === sourceFilter;
     });
+  }
+  
+  // Apply range filter BEFORE sorting
+  const rangeValue = localStorage.getItem('ff_history_range_v1') || '30d';
+  rows = applyHistoryRangeFilter(rows, rangeValue);
+  
+  // Apply order filter (newest first = reverse array, oldest first = as-is)
+  const orderFilter = window.__historyOrderFilter || 'newest';
+  if (orderFilter === 'newest') {
+    rows = [...rows].reverse(); // Create a copy before reversing
   }
   
   // Render the table using normalized fields
@@ -3851,10 +3941,18 @@ const historyBackdrop = document.querySelector('.history-modal-backdrop');
 function openHistoryModal() {
   if (!historyModal) return;
   historyModal.classList.remove('hidden');
-  // Sync filter dropdown with current state
-  const select = document.getElementById('historySourceFilter');
-  if (select) {
-    select.value = window.__historySourceFilter || 'all';
+  // Sync filter dropdowns with current state
+  const sourceSelect = document.getElementById('historySourceFilter');
+  if (sourceSelect) {
+    sourceSelect.value = window.__historySourceFilter || 'all';
+  }
+  const orderSelect = document.getElementById('historyOrderFilter');
+  if (orderSelect) {
+    orderSelect.value = window.__historyOrderFilter || 'newest';
+  }
+  const rangeSelect = document.getElementById('historyRangeFilter');
+  if (rangeSelect) {
+    rangeSelect.value = localStorage.getItem('ff_history_range_v1') || '30d';
   }
   renderHistory();
 }
@@ -3886,13 +3984,30 @@ function exportHistory() {
   // Read from ffv24_log localStorage
   const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
   
-  const blob = new Blob([logArr.map(entry => {
-    // Handle legacy string entries
-    if (typeof entry === 'string') {
-      return `-,-,${entry},-,-,-`;
-    }
-    
-    // Handle object entries
+  // Normalize entries first
+  const normalizedEntries = logArr.map(normalizeHistoryEntry);
+  
+  // Apply source filter if needed
+  const sourceFilter = (window.__historySourceFilter || 'all').toLowerCase();
+  let entries = normalizedEntries;
+  if (sourceFilter !== 'all') {
+    entries = normalizedEntries.filter(entry => {
+      return entry.source.toLowerCase() === sourceFilter;
+    });
+  }
+  
+  // Apply range filter BEFORE sorting
+  const rangeValue = localStorage.getItem('ff_history_range_v1') || '30d';
+  entries = applyHistoryRangeFilter(entries, rangeValue);
+  
+  // Apply order filter (respect the selected order)
+  const orderFilter = window.__historyOrderFilter || 'newest';
+  if (orderFilter === 'newest') {
+    entries = [...entries].reverse(); // Create a copy before reversing
+  }
+  
+  const blob = new Blob([entries.map(entry => {
+    // Entries are already normalized at this point
     if (typeof entry === 'object' && entry !== null) {
       return `${entry.date || '-'},${entry.time || '-'},${entry.action || ''},${entry.role || '-'},${entry.performedBy || '-'},${entry.worker || ''}`;
     }
@@ -3937,6 +4052,28 @@ if (historySourceFilterSelect) {
   historySourceFilterSelect.value = window.__historySourceFilter || 'all';
   historySourceFilterSelect.addEventListener('change', function(e) {
     setHistorySourceFilter(e.target.value);
+  });
+}
+
+// Wire up history order filter dropdown
+const historyOrderFilterSelect = document.getElementById('historyOrderFilter');
+if (historyOrderFilterSelect) {
+  historyOrderFilterSelect.value = window.__historyOrderFilter || 'newest';
+  historyOrderFilterSelect.addEventListener('change', function(e) {
+    window.__historyOrderFilter = e.target.value || 'newest';
+    renderHistory();
+  });
+}
+
+// Wire up history range filter dropdown
+const historyRangeFilterSelect = document.getElementById('historyRangeFilter');
+if (historyRangeFilterSelect) {
+  const savedRange = localStorage.getItem('ff_history_range_v1') || '30d';
+  historyRangeFilterSelect.value = savedRange;
+  historyRangeFilterSelect.addEventListener('change', function(e) {
+    const rangeValue = e.target.value || '30d';
+    localStorage.setItem('ff_history_range_v1', rangeValue);
+    renderHistory();
   });
 }
 
@@ -8536,8 +8673,8 @@ function resetTasksForCurrentTab() {
     // Log to Tasks history - call addHistoryEntry directly
     if (typeof addHistoryEntry === 'function') {
       const currentTab = window.currentTasksTab || 'unknown';
-      const actor = getHistoryActor();
-      addHistoryEntry(`Tasks Reset: ${currentTab}`, actor.role, actor.name, '', 'tasks');
+      const actor = getHistoryActor ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
+      addHistoryEntry(`Tasks Reset: ${currentTab}`, actor.role, actor.name, actor.name || '-', 'tasks');
     }
     
     console.log("[RESET] Completed");
