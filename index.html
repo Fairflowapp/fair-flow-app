@@ -36,23 +36,51 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:'Avenir Next', 
 
 /* Sticky header with left-aligned brand + toolbar */
 
-.header{position:sticky;top:0;z-index:100000;background:rgba(255,255,255,.96);
+.header{position:sticky;top:0;z-index:100000;background:#FFFFFF;
 
-  border-bottom:1px solid var(--border);backdrop-filter:saturate(1.2) blur(6px);pointer-events:auto}
+  border-bottom:1px solid #E6E9EF;pointer-events:auto}
   
 /* Ensure toolbar buttons are always clickable */
 .toolbar button{position:relative;z-index:100001;pointer-events:auto;cursor:pointer}
 
 
-.header-inner{max-width:1140px;margin:0 auto;padding:10px 24px;display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
+.header-inner{max-width:1140px;margin:0 auto;padding:6px 24px;display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
 
 .brandbox{display:flex;align-items:center;gap:12px}
 
 .logo{height:70px;width:auto;margin-right:12px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.15));background:none;border:none;box-shadow:none;padding:0;border-radius:10px;object-fit:cover}
 
+/* Header logo styling - Mangomint-style subtle SaaS branding */
+.header .logo img,
+.header .logo svg {
+  width: 36px;
+  height: 36px;
+}
+
+.header .logo-text {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 1;
+}
+
+.header .logo {
+  width: 18px;
+  height: 18px;
+  gap: 5px;
+  align-items: center;
+}
+
+#brandLogo {
+  width: 36px;
+  height: 36px;
+  display: block;
+  object-fit: contain;
+}
+
 .title{display:flex;flex-direction:column}
 
-.appname{font-size:14px;font-weight:900;letter-spacing:.3px}
+.appname{font-size:12px;font-weight:900;letter-spacing:.3px}
 
 header .brand{display:flex;align-items:center;gap:1rem}
 
@@ -62,9 +90,63 @@ header .brand{display:flex;align-items:center;gap:1rem}
 
 .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 
-.btn-pill{border-radius:999px;border:1px solid var(--border);background:#fff;padding:8px 14px;font-weight:700;cursor:pointer}
+.btn-pill{border-radius:999px;border:1px solid var(--border);background:#fff;padding:5px 14px;font-weight:500;cursor:pointer;font-size:17px;line-height:1.25;display:inline-flex;align-items:center}
 
-.btn-pill:hover{transform:translateY(-1px)}
+/* Active state for navigation tabs */
+#queueBtn.active {
+  background: #4f46e5;
+  border-color: #4f46e5;
+  color: #fff;
+  opacity: 1;
+}
+#queueBtn.active .nav-icon {
+  filter: brightness(0) invert(1);
+  opacity: 1;
+}
+
+#tasksBtn.active {
+  background: #7b3fe4;
+  border-color: #7b3fe4;
+  color: #fff;
+  opacity: 1;
+}
+#tasksBtn.active .nav-icon {
+  filter: brightness(0) invert(1);
+  opacity: 1;
+}
+
+.nav-icon{font-size:20px;margin-right:8px;line-height:1;display:inline-block}
+
+/* Compact top header buttons only */
+.header .btn-pill {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  color: #000;
+  opacity: 0.65;
+}
+
+.header .btn-pill .nav-icon {
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.55;
+}
+
+.header .btn-pill:hover {
+  transform: none;
+}
+
+.header .btn-pill:hover .nav-icon {
+  opacity: 0.75;
+}
+
+/* Active state for Queue button - subtle darker text */
+.btn-pill.active{color:#2563eb;border-color:#2563eb;font-weight:800}
 
 .btn-danger{border-color:#fca5a5;color:#b91c1c}
 
@@ -637,9 +719,8 @@ dialog footer button, .code-dialog footer button {
 
   <div id="main-app-content" style="display:none;">
 
-  <!-- Owner View (contains existing Fair Flow app) -->
-  <div id="owner-view" style="display:none;">
-    <div class="header">
+  <!-- Sticky Navigation Header (always visible across all pages) -->
+  <div class="header">
 
     <div class="header-inner">
 
@@ -659,25 +740,30 @@ dialog footer button, .code-dialog footer button {
 
       <div class="toolbar">
 
-        <button id="queueBtn" class="btn-pill">QUEUE</button>
+        <button id="queueBtn" class="btn-pill"><span class="nav-icon">👥</span>QUEUE</button>
 
-        <button id="settingsBtn" class="btn-pill">Settings</button>
+        <button id="tasksBtn" class="btn-pill"><span class="nav-icon">☑️</span>TASKS<span class="ff-home-tasks-badge"></span></button>
 
-        <button id="logBtn" class="btn-pill">History</button>
+        <button class="btn-pill" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon">📥</span>INBOX</button>
 
-        <button id="reorderBtn" class="btn-pill">Reorder</button>
+        <button class="btn-pill" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon">📦</span>INVENTORY</button>
 
-        <button id="tasksBtn" class="btn-pill">TASKS<span class="ff-home-tasks-badge"></span></button>
+        <button id="logBtn" class="btn-pill"><span class="nav-icon">🕘</span>History</button>
 
-        <button id="resetBtn" class="btn-pill btn-danger">RESET</button>
+        <button id="settingsBtn" class="btn-pill"><span class="nav-icon">⚙️</span>Settings</button>
 
-        <button id="logout-button" class="btn-pill">Log out</button>
+        <button id="logout-button" class="btn-pill"><span class="nav-icon">⎋</span>Log out</button>
 
       </div>
 
     </div>
 
-    <!-- Join row -->
+  </div>
+
+  <!-- Owner View (contains existing Fair Flow app) -->
+  <div id="owner-view" style="display:none;">
+
+    <!-- Join row (Queue-specific controls - only visible on QUEUE page) -->
 
     <div id="joinBar" class="joinbar">
 
@@ -697,7 +783,13 @@ dialog footer button, .code-dialog footer button {
 
       <span style="flex:1"></span>
 
-      <button id="startFirstBtn" class="btn-ghost">START top</button>
+      <div id="queueControls" style="display:flex;gap:8px;align-items:center;">
+        <button id="reorderBtn" class="queue-action-btn queue-action-btn--black">Reorder</button>
+
+        <button id="startFirstBtn" class="queue-action-btn queue-action-btn--black">START top</button>
+
+        <button id="resetBtn" class="queue-action-btn queue-action-btn--red">RESET</button>
+      </div>
 
     </div>
 
@@ -2708,13 +2800,20 @@ window.openSettingsSecure = openSettingsSecure;
 
 // Navigation function to return to Queue view
 function goToQueue() {
-  // Close Settings modal if open
+  // ALWAYS close Settings modal if open
   const settingsDlg = document.getElementById('settingsDlg');
   if (settingsDlg && settingsDlg.open) {
     settingsDlg.close();
   }
   
-  // Close Tasks modal if open (check for common task modal IDs/classes)
+  // ALWAYS close History modal if open
+  const historyModal = document.getElementById('historyModal');
+  if (historyModal) {
+    historyModal.classList.add('hidden');
+    historyModal.style.display = 'none';
+  }
+  
+  // ALWAYS close Tasks modal if open (check for common task modal IDs/classes)
   const tasksModal = document.querySelector('#tasksModal, .tasks-modal');
   if (tasksModal) {
     if (tasksModal.close && typeof tasksModal.close === 'function') {
@@ -2725,16 +2824,61 @@ function goToQueue() {
     }
   }
   
-  // Ensure owner-view (main queue view) is visible
+  // ALWAYS hide TASKS screen - regardless of current state
+  const tasksScreen = document.getElementById('tasksScreen');
+  if (tasksScreen) {
+    tasksScreen.style.display = 'none';
+    tasksScreen.style.pointerEvents = 'none';
+  }
+  
+  // ALWAYS show owner-view (main queue view) - regardless of current state
   const ownerView = document.getElementById('owner-view');
+  const joinBar = document.getElementById('joinBar');
+  const mainContent = document.querySelector('#owner-view .wrap');
   if (ownerView) {
     ownerView.style.display = '';
+    // Show Queue-specific controls (joinBar) when on QUEUE page
+    if (joinBar) joinBar.style.display = 'flex';
+    // Show main content
+    if (mainContent) mainContent.style.display = 'block';
   }
+  
+  // ALWAYS show Queue-only controls (Reorder, START top, RESET)
+  const queueControls = document.getElementById('queueControls');
+  if (queueControls) {
+    queueControls.style.display = 'flex';
+  }
+  
+  // Update active state for navigation tabs
+  if (queueBtn) {
+    queueBtn.classList.add('active');
+  }
+  const tasksBtn = document.getElementById('tasksBtn');
+  if (tasksBtn) {
+    tasksBtn.classList.remove('active');
+  }
+  
+  // Update active class on Queue button
+  if (queueBtn) {
+    queueBtn.classList.add('active');
+  }
+  // Remove active class from other toolbar buttons
+  const toolbarButtons = document.querySelectorAll('.toolbar .btn-pill');
+  toolbarButtons.forEach(btn => {
+    if (btn !== queueBtn) {
+      btn.classList.remove('active');
+    }
+  });
 }
 
 // Wire up QUEUE button
 if (queueBtn) {
   queueBtn.onclick = goToQueue;
+  // Set Queue button as active by default when owner-view is visible
+  const ownerView = document.getElementById('owner-view');
+  if (ownerView && ownerView.style.display !== 'none') {
+    queueBtn.classList.add('active');
+  }
 }
 
 function renderSettings(){
@@ -4228,28 +4372,18 @@ function ensureTasksScreenHidden() {
 let __headerSnapshot = null;
 
 function snapshotHeaderLayout() {
-  const header = document.querySelector('#owner-view .header');
+  // Header is now always visible outside owner-view, no snapshot needed
+  // This function is kept for backwards compatibility but is a no-op
+  const header = document.querySelector('.header');
   if (!header || __headerSnapshot) return;
-  __headerSnapshot = {
-    el: header,
-    className: header.className,
-    style: header.style.cssText
-  };
-  console.log('[Tasks] Header layout snapshotted');
+  // No longer needed since header is always visible, but keep structure for compatibility
 }
 
 function restoreHeaderLayout() {
+  // Header is now always visible outside owner-view, no restore needed
+  // This function is kept for backwards compatibility but is a no-op
   if (!__headerSnapshot) return;
-  const { el, className, style } = __headerSnapshot;
-  el.className = className;
-  el.style.cssText = style;
   __headerSnapshot = null;
-  console.log('[Tasks] Header layout restored');
-  
-  // Trigger layout refresh
-  requestAnimationFrame(() => {
-    window.dispatchEvent(new Event('resize'));
-  });
 }
 
 function loadTasks() {
@@ -5790,20 +5924,19 @@ function openTasks() {
     const tasksScreen = document.getElementById('tasksScreen');
     const mainContent = document.querySelector('#owner-view .wrap');
     const joinBar = document.getElementById('joinBar');
-    const header = document.querySelector('#owner-view .header');
+    const queueControls = document.getElementById('queueControls');
     
     if (!tasksScreen) {
       console.error('[Tasks] tasksScreen element not found');
       return;
     }
     
-    // Snapshot header layout before hiding
-    snapshotHeaderLayout();
-    
-    // Hide main content and header
+    // Hide main content and Queue-specific controls (joinBar and queueControls)
+    // Header remains visible (it's now outside owner-view and always sticky)
     if (mainContent) mainContent.style.display = 'none';
     if (joinBar) joinBar.style.display = 'none';
-    if (header) header.style.display = 'none';
+    // Hide Queue-only controls (Reorder, START top, RESET) when on TASKS screen
+    if (queueControls) queueControls.style.display = 'none';
     
     // Show Tasks screen
     tasksScreen.style.display = 'flex';
@@ -5898,6 +6031,15 @@ function openTasks() {
       // Silently ignore errors
     }
     
+    // Update active state for navigation tabs
+    const tasksBtn = document.getElementById('tasksBtn');
+    if (tasksBtn) {
+      tasksBtn.classList.add('active');
+    }
+    if (queueBtn) {
+      queueBtn.classList.remove('active');
+    }
+    
     console.log('[Tasks] Tasks screen opened');
   } catch (e) {
     console.error('[Tasks] Error opening Tasks screen:', e);
@@ -5909,7 +6051,7 @@ function closeTasks() {
     const tasksScreen = document.getElementById('tasksScreen');
     const mainContent = document.querySelector('#owner-view .wrap');
     const joinBar = document.getElementById('joinBar');
-    const header = document.querySelector('#owner-view .header');
+    const queueControls = document.getElementById('queueControls');
     
     if (!tasksScreen) {
       console.error('[Tasks] tasksScreen element not found');
@@ -5919,13 +6061,12 @@ function closeTasks() {
     // Hide Tasks screen
     tasksScreen.style.display = 'none';
     
-    // Restore header layout first (before showing elements)
-    restoreHeaderLayout();
-    
-    // Show main content and header (restoreHeaderLayout already restored header display)
+    // Show main content and Queue-specific controls (joinBar and queueControls)
+    // Header remains visible (it's now outside owner-view and always sticky)
     if (mainContent) mainContent.style.display = 'block';
     if (joinBar) joinBar.style.display = 'flex';
-    // Header display is restored by restoreHeaderLayout()
+    // Show Queue-only controls (Reorder, START top, RESET) when returning to Queue
+    if (queueControls) queueControls.style.display = 'flex';
     
     console.log('[Tasks] Tasks screen closed');
   } catch (e) {
@@ -9720,6 +9861,23 @@ if (!window.__originalResetDay) {
   window.__originalResetDay = resetDay;
 }
 
+async function openHistoryFromNav() {
+  try {
+    if (!window.securePromptOnce) {
+      alert("Admin only");
+      return;
+    }
+    const code = await window.securePromptOnce("Enter admin code to view log");
+    if (code == null || !isAdminCode(code)) {
+      alert("Admin only");
+      return;
+    }
+    openHistoryModal();
+  } catch (e) {
+    console.error('[Navigation] Error in openHistoryFromNav:', e);
+  }
+}
+
 async function openLogWithNav() {
   try {
   console.log('History clicked');
@@ -9756,7 +9914,7 @@ function initializeNavigationButtons() {
     // History button
     const logBtnEl = document.getElementById("logBtn") || logBtn;
     if (logBtnEl) {
-      logBtnEl.onclick = openLogWithNav;
+      logBtnEl.onclick = openHistoryFromNav;
       logBtnEl.style.cursor = 'pointer';
       logBtnEl.style.pointerEvents = 'auto';
       logBtnEl.disabled = false;
@@ -15609,26 +15767,86 @@ window.openLog = async function(){
       border-radius: 999px;
       border: 1px solid #e5e7eb;
       background: #fff;
-      padding: 8px;
-      width: 36px;
-      height: 36px;
-      display: flex;
+      padding: 6px 12px;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
+      gap: 4px;
       cursor: pointer;
-      font-size: 18px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #6b7280;
       line-height: 1;
+      white-space: nowrap;
     }
     
     #tasksScreen .tasks-gear-btn:hover {
       transform: translateY(-1px);
       background: #f9fafb;
+      border-color: #d1d5db;
     }
     
-    .tasks-reset-btn {
+    /* Tasks tab row layout */
+    .tasks-tabbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .tasks-tabs-left {
+      display: flex;
+      gap: 18px;
+      flex: 1;
+    }
+    
+    .tasks-tabs-right {
+      display: flex;
+      gap: 10px;
+      margin-left: 16px;
+      flex-shrink: 0;
+    }
+    
+    /* Unified Queue action buttons - shared base styling */
+    /* Unified Queue action buttons - RESET button as single source of truth */
+    .queue-action-btn {
       background-color: #fff;
+      padding: 8px 14px;
+      height: 38px;
+      border-width: 1px;
+      border-style: solid;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1;
+      box-sizing: border-box;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 301;
+    }
+    
+    /* Color variants */
+    .queue-action-btn--red {
       color: #e74c3c;
-      border: 2px solid #e74c3c;
+      border-color: #e74c3c;
+    }
+    
+    .queue-action-btn--black {
+      color: #111827;
+      border-color: #111827;
+    }
+    
+    .queue-action-btn:hover {
+      transform: translateY(-1px);
+    }
+    
+    /* Queue action buttons - exact RESET dimensions with neutral styling */
+    .joinbar .btn-pill {
+      background-color: #fff;
+      color: #111827;
+      border: 2px solid #e5e7eb;
       padding: 8px 14px;
       border-radius: 999px;
       font-size: 14px;
@@ -15638,7 +15856,7 @@ window.openLog = async function(){
       z-index: 301;
     }
     
-    .tasks-reset-btn:hover {
+    .joinbar .btn-pill:hover {
       transform: translateY(-1px);
     }
     
@@ -15658,6 +15876,24 @@ window.openLog = async function(){
     .tasks-history-btn:hover {
       transform: translateY(-1px);
       background-color: rgba(0, 0, 0, 0.04);
+    }
+    
+    /* Tasks RESET button - red outline style */
+    .tasks-reset-btn {
+      background-color: #fff;
+      color: #e74c3c;
+      border: 2px solid #e74c3c;
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 301;
+    }
+    
+    .tasks-reset-btn:hover {
+      transform: translateY(-1px);
     }
     
     /* Tasks Settings Modal */
@@ -15993,28 +16229,29 @@ window.openLog = async function(){
     }
   </style>
   <div id="tasksScreen" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#fff;z-index:300;flex-direction:column;pointer-events:auto;">
-    <!-- Top bar with BACK button, TASKS title, and RESET button -->
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#fff;">
+    <!-- Top bar with BACK button, TASKS title, and HISTORY button -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 20px;border-bottom:1px solid #e5e7eb;background:#fff;">
       <button id="btnTasksBack" class="btn-pill" style="pointer-events:auto;z-index:301;">BACK</button>
       <div style="flex:1;display:flex;justify-content:center;">
         <div class="tasks-title-wrapper">
           <h2>TASKS</h2>
-          <button id="btnTasksSettings" class="tasks-gear-btn" aria-label="Task settings" style="pointer-events:auto;z-index:301;">⚙️</button>
         </div>
-      </div>
-      <div style="display:flex;gap:8px;margin-left:auto;">
-        <button id="history-btn" class="tasks-history-btn" onclick="openTasksHistoryModal()">HISTORY</button>
-        <button id="reset-btn" class="tasks-reset-btn" onclick="resetTasksForCurrentTab()">RESET</button>
       </div>
     </div>
     
     <!-- Tab row -->
-    <div style="display:flex;border-bottom:1px solid #e5e7eb;background:#f9fafb;pointer-events:auto;z-index:301;">
-      <button class="tasks-tab" data-tab="opening" onclick="console.log('TAB CLICKED:', 'opening'); setTasksTab('opening')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Opening<span class="ff-tab-badge" data-ff-badge="opening"></span></button>
-      <button class="tasks-tab" data-tab="closing" onclick="console.log('TAB CLICKED:', 'closing'); setTasksTab('closing')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Closing<span class="ff-tab-badge" data-ff-badge="closing"></span></button>
-      <button class="tasks-tab" data-tab="weekly" onclick="console.log('TAB CLICKED:', 'weekly'); setTasksTab('weekly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Weekly<span class="ff-tab-badge" data-ff-badge="weekly"></span></button>
-      <button class="tasks-tab" data-tab="monthly" onclick="console.log('TAB CLICKED:', 'monthly'); setTasksTab('monthly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Monthly<span class="ff-tab-badge" data-ff-badge="monthly"></span></button>
-      <button class="tasks-tab" data-tab="yearly" onclick="console.log('TAB CLICKED:', 'yearly'); setTasksTab('yearly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Yearly<span class="ff-tab-badge" data-ff-badge="yearly"></span></button>
+    <div class="tasks-tabbar" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e5e7eb;background:#f9fafb;pointer-events:auto;z-index:301;">
+      <div class="tasks-tabs-left" style="display:flex;gap:18px;flex:1;">
+        <button class="tasks-tab" data-tab="opening" onclick="console.log('TAB CLICKED:', 'opening'); setTasksTab('opening')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Opening<span class="ff-tab-badge" data-ff-badge="opening"></span></button>
+        <button class="tasks-tab" data-tab="closing" onclick="console.log('TAB CLICKED:', 'closing'); setTasksTab('closing')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Closing<span class="ff-tab-badge" data-ff-badge="closing"></span></button>
+        <button class="tasks-tab" data-tab="weekly" onclick="console.log('TAB CLICKED:', 'weekly'); setTasksTab('weekly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Weekly<span class="ff-tab-badge" data-ff-badge="weekly"></span></button>
+        <button class="tasks-tab" data-tab="monthly" onclick="console.log('TAB CLICKED:', 'monthly'); setTasksTab('monthly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Monthly<span class="ff-tab-badge" data-ff-badge="monthly"></span></button>
+        <button class="tasks-tab" data-tab="yearly" onclick="console.log('TAB CLICKED:', 'yearly'); setTasksTab('yearly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Yearly<span class="ff-tab-badge" data-ff-badge="yearly"></span></button>
+      </div>
+      <div class="tasks-tabs-right" style="display:flex;gap:10px;margin-left:16px;flex-shrink:0;">
+        <button id="btnTasksSettings" class="tasks-gear-btn" aria-label="Task settings" style="pointer-events:auto;z-index:301;">⚙ Manage Tasks</button>
+        <button id="reset-btn" class="tasks-reset-btn" onclick="resetTasksForCurrentTab()" style="pointer-events:auto;z-index:301;">RESET</button>
+      </div>
     </div>
     
     <!-- Content area -->
