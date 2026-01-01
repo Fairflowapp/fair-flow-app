@@ -6045,6 +6045,9 @@ function openTasks() {
       if (typeof window.ffMaybeAutoResetOpening === 'function') {
         window.ffMaybeAutoResetOpening(new Date());
       }
+      if (typeof window.ffMaybeAutoResetOpeningAtTime === 'function') {
+        window.ffMaybeAutoResetOpeningAtTime(new Date());
+      }
       if (typeof window.ffMaybeAutoResetClosing === 'function') {
         window.ffMaybeAutoResetClosing(new Date());
       }
@@ -6059,6 +6062,22 @@ function openTasks() {
       }
     } catch (e) {
       // Silently ignore errors
+    }
+    
+    // Start periodic auto-check for Opening auto-reset at time (only when Tasks screen is visible)
+    if (typeof window.__ffOpeningAutoResetInterval === 'undefined' || window.__ffOpeningAutoResetInterval === null) {
+      window.__ffOpeningAutoResetInterval = setInterval(() => {
+        try {
+          const tasksScreen = document.getElementById('tasksScreen');
+          if (tasksScreen && tasksScreen.style.display !== 'none') {
+            if (typeof window.ffMaybeAutoResetOpeningAtTime === 'function') {
+              window.ffMaybeAutoResetOpeningAtTime(new Date());
+            }
+          }
+        } catch (e) {
+          // Silently ignore errors
+        }
+      }, 60000); // Check every 60 seconds
     }
     
     // Update active state for navigation tabs
@@ -6090,6 +6109,12 @@ function closeTasks() {
     
     // Hide Tasks screen
     tasksScreen.style.display = 'none';
+    
+    // Clear periodic auto-check interval when Tasks screen closes
+    if (window.__ffOpeningAutoResetInterval) {
+      clearInterval(window.__ffOpeningAutoResetInterval);
+      window.__ffOpeningAutoResetInterval = null;
+    }
     
     // Show main content and Queue-specific controls (joinBar and queueControls)
     // Header remains visible (it's now outside owner-view and always sticky)
@@ -9652,6 +9677,275 @@ function ffMaybeAutoResetQueue(now = new Date()) {
 window.ffMaybeAutoResetQueue = ffMaybeAutoResetQueue;
 console.log('[EXPOSE] ffMaybeAutoResetQueue', typeof window.ffMaybeAutoResetQueue);
 
+// Opening tasks auto-reset function
+function ffMaybeAutoResetOpening(now = new Date()) {
+  try {
+    // Load auto-reset state
+    const stateRaw = localStorage.getItem('ff_tasks_auto_reset_state_v1');
+    let state = stateRaw ? JSON.parse(stateRaw) : {};
+    if (!state.opening) {
+      state.opening = {};
+    }
+    
+    // Check if auto-reset is enabled for Opening
+    // (Assuming there's a settings check - if not, we'll proceed if state exists)
+    const settingsRaw = localStorage.getItem('ff_tasks_settings_v1');
+    let settings = settingsRaw ? JSON.parse(settingsRaw) : {};
+    if (settings.taskReminders && settings.taskReminders.opening && settings.taskReminders.opening.enabled === false) {
+      return; // Auto-reset disabled
+    }
+    
+    // Get Opening active list
+    const keyActive = typeof getTabStorageKey === 'function' 
+      ? getTabStorageKey('opening', 'active')
+      : 'ff_tasks_opening_active_v1';
+    
+    let active = [];
+    try {
+      const activeRaw = localStorage.getItem(keyActive);
+      if (activeRaw) {
+        active = JSON.parse(activeRaw) || [];
+      }
+    } catch (e) {
+      console.warn('[AUTO RESET][OPENING] Error reading active list:', e);
+      return;
+    }
+    
+    // Check if all tasks are completed
+    const allCompleted = active.length > 0 && active.every(t => {
+      const status = String(t.status || '').toLowerCase();
+      return status === 'done' || !!t.completedAt;
+    });
+    
+    if (!allCompleted) {
+      return; // Not all completed, no reset needed
+    }
+    
+    // Build signature: taskIds + maxCompletedAt
+    const taskIds = active
+      .map(t => String(t.taskId || t.id || ''))
+      .filter(id => id)
+      .sort();
+    
+    const completedAts = active
+      .map(t => t.completedAt)
+      .filter(ca => ca)
+      .map(ca => String(ca));
+    
+    const maxCompletedAt = completedAts.length > 0 
+      ? completedAts.reduce((max, ca) => ca > max ? ca : max, completedAts[0])
+      : '';
+    
+    const sig = taskIds.join(',') + '|' + String(maxCompletedAt || '');
+    
+    // Check if signature changed - normalize to null if missing/empty
+    const lastSig = (state.opening.lastAllCompletedSig && String(state.opening.lastAllCompletedSig).trim()) || null;
+    
+    // Only block if lastSig exists AND equals current sig (ignore lastRunDate for blocking)
+    if (lastSig && lastSig === sig) {
+      // Same completion cycle, already reset
+      if (window.DEBUG_MODE === true) {
+        console.log('[AUTO RESET][OPENING] allCompleted=true, sig=' + sig + ', lastSig=' + lastSig + ', lastRunDate=' + (state.opening.lastRunDate || 'none') + ' → SKIP (same cycle)');
+      }
+      return;
+    }
+    
+    // Signature changed - new completion cycle, run reset
+    if (window.DEBUG_MODE === true) {
+      console.log('[AUTO RESET][OPENING] allCompleted=true, sig=' + sig + ', lastSig=' + lastSig + ', lastRunDate=' + (state.opening.lastRunDate || 'none') + ' → RUNNING RESET');
+    }
+    
+    // Run the existing Opening reset routine (same as manual RESET)
+    if (typeof resetTasksForTabInternal === 'function') {
+      resetTasksForTabInternal('opening');
+    } else if (typeof window.resetTasksForTab === 'function') {
+      window.resetTasksForTab('opening');
+    } else {
+      console.warn('[AUTO RESET][OPENING] Reset function not available');
+      return;
+    }
+    
+    // Update state
+    const today = now instanceof Date ? now : new Date(now);
+    const todayKey = today.getFullYear() + '-' +
+                     String(today.getMonth() + 1).padStart(2, '0') + '-' +
+                     String(today.getDate()).padStart(2, '0');
+    
+    state.opening.lastRunDate = todayKey;
+    state.opening.lastAllCompletedSig = sig;
+    
+    // Save state back to localStorage
+    localStorage.setItem('ff_tasks_auto_reset_state_v1', JSON.stringify(state));
+    
+    console.log('[AUTO RESET][OPENING] Reset completed', { todayKey, sig });
+    
+  } catch (e) {
+    console.error('[AUTO RESET][OPENING] Error:', e);
+  }
+}
+
+// Expose globally
+window.ffMaybeAutoResetOpening = ffMaybeAutoResetOpening;
+console.log('[EXPOSE] ffMaybeAutoResetOpening', typeof window.ffMaybeAutoResetOpening);
+
+// Opening tasks auto-reset at configured time function
+function ffMaybeAutoResetOpeningAtTime(now = new Date()) {
+  try {
+    // Read Opening auto-reset settings from existing storage
+    const alertWindowsRaw = localStorage.getItem('ff_tasks_alert_windows_v1');
+    if (!alertWindowsRaw) {
+      if (window.DEBUG_MODE === true) {
+        console.log('[AUTO RESET][OPENING AT TIME] Settings not found → return');
+      }
+      return;
+    }
+    
+    const alertWindows = JSON.parse(alertWindowsRaw);
+    const openingConfig = alertWindows.opening || {};
+    const enabled = openingConfig.autoResetEnabled === true;
+    const timeStr = openingConfig.autoResetTime;
+    
+    // If disabled or missing time => return
+    if (!enabled || !timeStr) {
+      if (window.DEBUG_MODE === true) {
+        console.log('[AUTO RESET][OPENING AT TIME] Disabled or missing time (enabled=' + enabled + ', time=' + (timeStr || 'none') + ') → return');
+      }
+      return;
+    }
+    
+    // Load Opening active list
+    const keyActive = typeof getTabStorageKey === 'function' 
+      ? getTabStorageKey('opening', 'active')
+      : 'ff_tasks_opening_active_v1';
+    
+    let active = [];
+    try {
+      const activeRaw = localStorage.getItem(keyActive);
+      if (activeRaw) {
+        active = JSON.parse(activeRaw) || [];
+      }
+    } catch (e) {
+      console.warn('[AUTO RESET][OPENING AT TIME] Error reading active list:', e);
+      return;
+    }
+    
+    // If active list is empty => return
+    if (!active || active.length === 0) {
+      if (window.DEBUG_MODE === true) {
+        console.log('[AUTO RESET][OPENING AT TIME] Active list empty → return');
+      }
+      return;
+    }
+    
+    // Define "done" detection: ANY of these being true
+    const allDone = active.every(t => {
+      const status = String(t.status || '').toLowerCase();
+      return status === 'done' || 
+             t.completed === true || 
+             t.isCompleted === true || 
+             Boolean(t.completedAt);
+    });
+    
+    // If NOT all tasks are done => return (do NOT write state)
+    if (!allDone) {
+      if (window.DEBUG_MODE === true) {
+        console.log('[AUTO RESET][OPENING AT TIME] Not all tasks done → return');
+      }
+      return;
+    }
+    
+    // Compute todayStr = YYYY-MM-DD (local time)
+    const today = now instanceof Date ? now : new Date(now);
+    const todayStr = today.getFullYear() + '-' +
+                     String(today.getMonth() + 1).padStart(2, '0') + '-' +
+                     String(today.getDate()).padStart(2, '0');
+    
+    // Parse the configured auto-reset time into a Date for "today at that time"
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    if (isNaN(hours) || isNaN(minutes)) {
+      if (window.DEBUG_MODE === true) {
+        console.log('[AUTO RESET][OPENING AT TIME] Invalid time format: ' + timeStr);
+      }
+      return;
+    }
+    
+    const scheduledTimeToday = new Date(today);
+    scheduledTimeToday.setHours(hours, minutes, 0, 0);
+    
+    // If now < scheduledTimeToday => return
+    if (now < scheduledTimeToday) {
+      if (window.DEBUG_MODE === true) {
+        console.log('[AUTO RESET][OPENING AT TIME] Not yet time (now=' + now.toISOString() + ', scheduled=' + scheduledTimeToday.toISOString() + ') → return');
+      }
+      return;
+    }
+    
+    // Build completion signature
+    const ids = active
+      .map(t => String(t.taskId || t.id || ''))
+      .filter(id => id)
+      .sort();
+    
+    const doneTimestamps = active
+      .map(t => String(t.completedAt || t.doneAt || ''))
+      .filter(ts => ts);
+    
+    const maxDoneTs = doneTimestamps.length > 0
+      ? doneTimestamps.reduce((max, ts) => ts > max ? ts : max, doneTimestamps[0])
+      : '';
+    
+    const sig = ids.join(',') + '|' + String(maxDoneTs);
+    
+    // Load state
+    const stateRaw = localStorage.getItem('ff_tasks_auto_reset_state_v1');
+    let state = stateRaw ? JSON.parse(stateRaw) : {};
+    if (!state.opening) {
+      state.opening = {};
+    }
+    
+    // Blocking rule: If state.opening.lastRunDate === todayStr AND state.opening.lastAllCompletedSig === sig => return
+    if (state.opening.lastRunDate === todayStr && state.opening.lastAllCompletedSig === sig) {
+      if (window.DEBUG_MODE === true) {
+        console.log('[AUTO RESET][OPENING AT TIME] Blocked by same sig (today=' + todayStr + ', sig=' + sig + ') → return');
+      }
+      return;
+    }
+    
+    // Not blocked - call reset
+    if (window.DEBUG_MODE === true) {
+      console.log('[AUTO RESET][OPENING AT TIME] Running reset (today=' + todayStr + ', sig=' + sig + ', lastSig=' + (state.opening.lastAllCompletedSig || 'none') + ')');
+    }
+    
+    // Call the SAME internal reset used by manual RESET button for Opening
+    if (typeof resetTasksForTabInternal === 'function') {
+      resetTasksForTabInternal('opening');
+    } else if (typeof window.resetTasksForTab === 'function') {
+      window.resetTasksForTab('opening');
+    } else {
+      console.warn('[AUTO RESET][OPENING AT TIME] Reset function not available');
+      return;
+    }
+    
+    // Only after successful reset, write state
+    state.opening.lastRunDate = todayStr;
+    state.opening.lastAllCompletedSig = sig;
+    
+    // Save back to localStorage
+    localStorage.setItem('ff_tasks_auto_reset_state_v1', JSON.stringify(state));
+    
+    if (window.DEBUG_MODE === true) {
+      console.log('[AUTO RESET][OPENING AT TIME] Reset completed and state saved', { todayStr, sig });
+    }
+    
+  } catch (e) {
+    console.error('[AUTO RESET][OPENING AT TIME] Error:', e);
+  }
+}
+
+// Expose globally
+window.ffMaybeAutoResetOpeningAtTime = ffMaybeAutoResetOpeningAtTime;
+console.log('[EXPOSE] ffMaybeAutoResetOpeningAtTime', typeof window.ffMaybeAutoResetOpeningAtTime);
+
 // Safe initialization function for RESET button
 // Module-level flag to ensure one-time initialization
 let __resetInitDone = false;
@@ -10995,6 +11289,26 @@ function getCurrentTasksCategory() {
   return activeTab ? (activeTab.dataset.category || 'Opening') : 'Opening';
 }
 
+// Helper: Check if enforceSelect is enabled for a tab
+function enforceSelectEnabledForTab(tab) {
+  try {
+    const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+    return enforceSelectSettings[tab] === true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Helper: Check if a task is completed (using the 4 conditions)
+function isTaskCompleted(task) {
+  if (!task || typeof task !== 'object') return false;
+  const status = String(task.status || '').toLowerCase();
+  return status === 'done' || 
+         task.completed === true || 
+         task.isCompleted === true || 
+         Boolean(task.completedAt);
+}
+
 // Render tasks for current category (main Task List panel)
 function renderTasks() {
   const category = getCurrentTasksCategory();
@@ -11015,6 +11329,21 @@ function renderTasks() {
   }
   
   container.innerHTML = '';
+  
+  // Get current tab (lowercase) for enforceSelect check
+  const currentTab = getCurrentTasksTab();
+  const enforceSelect = enforceSelectEnabledForTab(currentTab);
+  
+  // Compute firstIncompleteIndex when enforceSelect is enabled
+  let firstIncompleteIndex = -1;
+  if (enforceSelect) {
+    for (let i = 0; i < tasks.length; i++) {
+      if (!isTaskCompleted(tasks[i])) {
+        firstIncompleteIndex = i;
+        break;
+      }
+    }
+  }
   
   tasks.forEach((task, index) => {
     const taskName = getTaskName(task);
@@ -11092,10 +11421,14 @@ function renderTasks() {
       selectBtn.style.opacity = '0.6';
       selectBtn.style.cursor = 'not-allowed';
     } else {
+      // Check if enforceSelect is enabled and this task is after the first incomplete
+      const shouldDisable = enforceSelect && firstIncompleteIndex !== -1 && index > firstIncompleteIndex;
+      
       selectBtn.textContent = 'Select';
-      selectBtn.disabled = false;
-      selectBtn.style.opacity = '1';
-      selectBtn.style.cursor = 'pointer';
+      selectBtn.disabled = shouldDisable;
+      selectBtn.style.opacity = shouldDisable ? '0.6' : '1';
+      selectBtn.style.cursor = shouldDisable ? 'not-allowed' : 'pointer';
+      
       // Add click handler to open PIN modal for selecting task
       selectBtn.addEventListener('click', () => {
         console.log('[RUNTIME TASK HANDLER HIT]', { handlerName: 'selectBtn_click', task: { category, taskName } });
@@ -11425,6 +11758,44 @@ let currentSelectTask = { category: null, taskName: null };
 let taskStaffCode = ''; // State for staff code in Select Task modal
 
 function openSelectTaskModal(category, taskName) {
+  // ENFORCE SELECT guard: block clicks if enforceSelect is enabled and this is not the first incomplete task
+  // Convert category (capitalized) to tab name (lowercase) for enforceSelect check
+  const tabForEnforce = (category || '').toLowerCase();
+  const enforceSelect = enforceSelectEnabledForTab(tabForEnforce);
+  
+  if (enforceSelect) {
+    // Use the same data source as renderTasks: tasksData[category] (capitalized)
+    const active = tasksData[category] || [];
+    
+    // Find first incomplete task index
+    let firstIncompleteIndex = -1;
+    for (let i = 0; i < active.length; i++) {
+      if (!isTaskCompleted(active[i])) {
+        firstIncompleteIndex = i;
+        break;
+      }
+    }
+    
+    // Find clicked task index
+    let clickedTaskIndex = -1;
+    for (let i = 0; i < active.length; i++) {
+      const t = active[i];
+      const tName = getTaskName(t);
+      if (tName === taskName) {
+        clickedTaskIndex = i;
+        break;
+      }
+    }
+    
+    // Block if clicked task is not the first incomplete
+    if (firstIncompleteIndex !== -1 && clickedTaskIndex > firstIncompleteIndex) {
+      if (window.DEBUG_MODE === true) {
+        console.log('[ENFORCE SELECT] Blocked click on task', taskName, 'at index', clickedTaskIndex, 'first incomplete at', firstIncompleteIndex);
+      }
+      return; // Do nothing
+    }
+  }
+  
   currentSelectTask = { category, taskName };
   taskStaffCode = ''; // Initialize state - CRITICAL: must be cleared
   const modal = document.getElementById('tasksSelectModal');
@@ -15835,6 +16206,34 @@ window.openLog = async function(){
       margin-left: 16px;
       margin-right: 12px;
       flex-shrink: 0;
+    }
+    
+    /* Tasks tabs styling - inactive tabs (darker and more readable) */
+    .tasks-tab {
+      color: #1a1a1a !important;
+      font-weight: 500 !important;
+      opacity: 1 !important;
+    }
+    
+    /* Tasks tabs inactive - badge/icon color matches text */
+    .tasks-tab .ff-tab-badge {
+      color: #1a1a1a !important;
+      opacity: 1 !important;
+    }
+    
+    /* Tasks tabs styling - active tab (brand purple, stronger weight) */
+    .tasks-tab[style*="border-bottom-color: #7b3fe4"],
+    .tasks-tab[style*="borderBottomColor: #7b3fe4"] {
+      color: #7b3fe4 !important;
+      font-weight: 600 !important;
+      opacity: 1 !important;
+    }
+    
+    /* Tasks tabs active - badge/icon color matches active text color */
+    .tasks-tab[style*="border-bottom-color: #7b3fe4"] .ff-tab-badge,
+    .tasks-tab[style*="borderBottomColor: #7b3fe4"] .ff-tab-badge {
+      color: #7b3fe4 !important;
+      opacity: 1 !important;
     }
     
     /* Unified Queue action buttons - shared base styling */
