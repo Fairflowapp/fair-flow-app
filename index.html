@@ -90,6 +90,12 @@ header .brand{display:flex;align-items:center;gap:1rem}
 
 .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 
+/* User avatar dropdown */
+.user-avatar-trigger:hover .user-avatar-circle{background:#e5e7eb;border-color:#d1d5db}
+.user-avatar-trigger:focus{outline:2px solid #7b3fe4;outline-offset:2px;border-radius:4px}
+.user-dropdown-item:hover{background:#f3f4f6}
+.user-dropdown-item:active{background:#e5e7eb}
+
 .btn-pill{border-radius:999px;border:1px solid var(--border);background:#fff;padding:5px 14px;font-weight:500;cursor:pointer;font-size:17px;line-height:1.25;display:inline-flex;align-items:center}
 
 /* Active state for navigation tabs */
@@ -784,10 +790,52 @@ dialog footer button, .code-dialog footer button {
 
         <button id="logout-button" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></span>Log out</button>
 
+        <div class="user-avatar-wrapper" style="margin-left:auto;position:relative;">
+          <button id="userAvatarBtn" class="user-avatar-trigger" aria-label="User menu" style="display:flex;align-items:center;gap:6px;background:none;border:none;padding:0;cursor:pointer;outline:none;">
+            <div class="user-avatar-circle" style="width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:#f3f4f6;display:flex;align-items:center;justify-content:center;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+            </div>
+            <span style="color:#6b7280;font-size:10px;line-height:1;">▼</span>
+          </button>
+          <div id="userAvatarDropdown" class="user-avatar-dropdown" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:160px;z-index:100002;padding:4px 0;">
+            <button class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">User Profile</button>
+          </div>
+        </div>
+
       </div>
 
     </div>
 
+  </div>
+
+  <!-- User Profile Screen -->
+  <div id="userProfileScreen" style="display:none;max-width:800px;margin:12px auto 40px;padding:0 24px;">
+    <!-- Compact Header Row: Back + Avatar + Name + Email -->
+    <div style="display:flex;align-items:center;gap:20px;margin-bottom:24px;">
+      <!-- Back Button -->
+      <button id="userProfileBackBtn" class="btn-pill" style="flex-shrink:0;">← Back</button>
+      
+      <!-- Avatar with upload button -->
+      <div style="position:relative;flex-shrink:0;">
+        <img id="userProfileAvatar" src="" alt="User Avatar" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--border);background:#f3f4f6;display:block;">
+        <button id="userProfileAvatarEditBtn" type="button" style="position:absolute;bottom:0;right:0;width:24px;height:24px;border-radius:50%;background:#fff;border:2px solid var(--border);box-shadow:0 2px 4px rgba(0,0,0,0.1);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;outline:none;" title="Upload avatar">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-8"></path>
+            <polyline points="18 2 22 6 12 16 8 16 8 12 18 2"></polyline>
+          </svg>
+        </button>
+        <input type="file" id="userProfileAvatarInput" accept="image/*" style="display:none;">
+      </div>
+      
+      <!-- Business Name and Email -->
+      <div style="flex:1;">
+        <h2 id="userProfileBusinessName" style="margin:0 0 4px 0;font-size:20px;font-weight:700;color:#111827;">Neo Nails</h2>
+        <p id="userProfileEmail" style="margin:0;font-size:14px;color:#6b7280;">service@neo-nails.com</p>
+      </div>
+    </div>
   </div>
 
   <!-- Owner View (contains existing Fair Flow app) -->
@@ -2861,16 +2909,27 @@ function goToQueue() {
     tasksScreen.style.pointerEvents = 'none';
   }
   
+  // Hide User Profile screen if visible
+  const userProfileScreen = document.getElementById('userProfileScreen');
+  if (userProfileScreen) {
+    userProfileScreen.style.display = 'none';
+  }
+  
   // ALWAYS show owner-view (main queue view) - regardless of current state
   const ownerView = document.getElementById('owner-view');
   const joinBar = document.getElementById('joinBar');
   const mainContent = document.querySelector('#owner-view .wrap');
+  const wrapContent = document.querySelector('.wrap'); // .wrap is a sibling of owner-view, not inside it
   if (ownerView) {
     ownerView.style.display = '';
     // Show Queue-specific controls (joinBar) when on QUEUE page
     if (joinBar) joinBar.style.display = 'flex';
-    // Show main content
+    // Show main content (if inside owner-view)
     if (mainContent) mainContent.style.display = 'block';
+  }
+  // Show .wrap content (AVAILABLE / IN SERVICE lists) - it's a sibling of owner-view
+  if (wrapContent) {
+    wrapContent.style.display = 'block';
   }
   
   // ALWAYS show Queue-only controls (Reorder, START top, RESET)
@@ -2899,6 +2958,118 @@ function goToQueue() {
       btn.classList.remove('active');
     }
   });
+}
+
+// Track previous view for User Profile back navigation
+let previousView = 'queue'; // Default to queue
+
+// Helper function to check if User Profile screen is currently active
+function isUserProfileActive() {
+  const userProfileScreen = document.getElementById('userProfileScreen');
+  return userProfileScreen && userProfileScreen.style.display !== 'none';
+}
+
+// Helper function to hide Queue UI elements when User Profile is active
+function ensureQueueUIHiddenForUserProfile() {
+  if (isUserProfileActive()) {
+    const joinBar = document.getElementById('joinBar');
+    if (joinBar) joinBar.style.display = 'none';
+    const joinError = document.getElementById('joinError');
+    if (joinError) joinError.style.display = 'none';
+    const queueControls = document.getElementById('queueControls');
+    if (queueControls) queueControls.style.display = 'none';
+    const wrap = document.querySelector('.wrap');
+    if (wrap) wrap.style.display = 'none';
+    const ownerView = document.getElementById('owner-view');
+    if (ownerView) ownerView.style.display = 'none';
+  }
+}
+
+function goToUserProfile() {
+  // Store current view before switching
+  const tasksScreen = document.getElementById('tasksScreen');
+  const ownerView = document.getElementById('owner-view');
+  
+  if (tasksScreen && tasksScreen.style.display !== 'none') {
+    previousView = 'tasks';
+  } else if (ownerView && ownerView.style.display !== 'none') {
+    previousView = 'queue';
+  } else {
+    previousView = 'queue'; // Default fallback
+  }
+  
+  // Hide all other screens
+  if (tasksScreen) {
+    tasksScreen.style.display = 'none';
+    tasksScreen.style.pointerEvents = 'none';
+  }
+  if (ownerView) {
+    ownerView.style.display = 'none';
+  }
+  
+  // Explicitly hide all Queue-related UI elements when User Profile is active
+  const joinBar = document.getElementById('joinBar');
+  if (joinBar) joinBar.style.display = 'none';
+  const joinError = document.getElementById('joinError');
+  if (joinError) joinError.style.display = 'none';
+  const queueControls = document.getElementById('queueControls');
+  if (queueControls) queueControls.style.display = 'none';
+  const wrap = document.querySelector('.wrap');
+  if (wrap) wrap.style.display = 'none';
+  
+  // Show User Profile screen
+  const userProfileScreen = document.getElementById('userProfileScreen');
+  if (userProfileScreen) {
+    userProfileScreen.style.display = 'block';
+  }
+  
+  // Load avatar from localStorage when User Profile screen is shown
+  if (typeof window.loadUserProfileAvatar === 'function') {
+    window.loadUserProfileAvatar();
+  }
+  
+  // Ensure Queue UI stays hidden when User Profile is active (safety check)
+  ensureQueueUIHiddenForUserProfile();
+  
+  // Close dropdown if open
+  const userAvatarDropdown = document.getElementById('userAvatarDropdown');
+  if (userAvatarDropdown) {
+    userAvatarDropdown.style.display = 'none';
+  }
+}
+
+function goBackFromUserProfile() {
+  const userProfileScreen = document.getElementById('userProfileScreen');
+  if (userProfileScreen) {
+    userProfileScreen.style.display = 'none';
+  }
+  
+  // Restore previous view - use the same navigation functions as the top tabs
+  if (previousView === 'tasks') {
+    // If coming from Tasks, restore Tasks screen
+    const tasksScreen = document.getElementById('tasksScreen');
+    if (tasksScreen) {
+      tasksScreen.style.display = 'block';
+      tasksScreen.style.pointerEvents = 'auto';
+    }
+    const ownerView = document.getElementById('owner-view');
+    if (ownerView) {
+      ownerView.style.display = 'none';
+    }
+    const joinBar = document.getElementById('joinBar');
+    if (joinBar) joinBar.style.display = 'none';
+    const queueControls = document.getElementById('queueControls');
+    if (queueControls) queueControls.style.display = 'none';
+    
+    // Update active state
+    const tasksBtn = document.getElementById('tasksBtn');
+    if (tasksBtn) tasksBtn.classList.add('active');
+    if (queueBtn) queueBtn.classList.remove('active');
+  } else {
+    // For queue (default or explicit), call the exact same function as QUEUE tab click
+    // This ensures full Queue UI initialization and data reload
+    goToQueue();
+  }
 }
 
 // Wire up QUEUE button
@@ -4383,6 +4554,12 @@ if (historyRangeFilterSelect) {
 // Tasks feature removed - this is now a no-op but kept for compatibility
 function ensureTasksScreenHidden() {
   try {
+    // Don't show Queue UI if User Profile is active
+    if (isUserProfileActive()) {
+      ensureQueueUIHiddenForUserProfile();
+      return;
+    }
+    
     // Tasks feature removed - just ensure main content is visible
     const mainContent = document.querySelector('#owner-view .wrap');
     const joinBar = document.getElementById('joinBar');
@@ -5961,6 +6138,12 @@ function openTasks() {
       return;
     }
     
+    // Hide User Profile screen if visible
+    const userProfileScreen = document.getElementById('userProfileScreen');
+    if (userProfileScreen) {
+      userProfileScreen.style.display = 'none';
+    }
+    
     // Hide main content and Queue-specific controls (joinBar and queueControls)
     // Header remains visible (it's now outside owner-view and always sticky)
     if (mainContent) mainContent.style.display = 'none';
@@ -6114,6 +6297,13 @@ function closeTasks() {
     if (window.__ffOpeningAutoResetInterval) {
       clearInterval(window.__ffOpeningAutoResetInterval);
       window.__ffOpeningAutoResetInterval = null;
+    }
+    
+    // Don't show Queue UI if User Profile is active
+    if (isUserProfileActive()) {
+      ensureQueueUIHiddenForUserProfile();
+      console.log('[Tasks] Tasks screen closed (User Profile is active, Queue UI hidden)');
+      return;
     }
     
     // Show main content and Queue-specific controls (joinBar and queueControls)
@@ -8778,6 +8968,28 @@ function openTasksSettings() {
     // Add ESC key listener
     document.addEventListener('keydown', handleTasksSettingsEsc);
     
+    // Set up close button handler
+    const closeBtn = document.getElementById('tasksSettingsClose');
+    if (closeBtn) {
+      closeBtn.onclick = closeTasksSettings;
+    }
+    
+    // Set up Cancel button handler (same as close button)
+    const cancelBtn = document.getElementById('tasksModalCancelBtn');
+    if (cancelBtn) {
+      cancelBtn.onclick = closeTasksSettings;
+    }
+    
+    // Set up Save button handler
+    const saveBtn = document.getElementById('tasksModalSaveBtn');
+    if (saveBtn) {
+      saveBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        saveTasksModal();
+      };
+    }
+    
     // Render Settings modal list from catalog
     renderSettingsTaskList(mainScreenTab);
     
@@ -10309,9 +10521,284 @@ function initializeNavigationButtons() {
     } else {
       console.warn('[Navigation] Missing element: tasksBtn');
     }
+
+    // User avatar dropdown
+    const userAvatarBtn = document.getElementById("userAvatarBtn");
+    const userAvatarDropdown = document.getElementById("userAvatarDropdown");
+    if (userAvatarBtn && userAvatarDropdown) {
+      userAvatarBtn.onclick = function(e) {
+        e.stopPropagation();
+        const isVisible = userAvatarDropdown.style.display !== 'none';
+        userAvatarDropdown.style.display = isVisible ? 'none' : 'block';
+      };
+      // Close dropdown when clicking outside
+      document.addEventListener('click', function(e) {
+        if (userAvatarBtn && userAvatarDropdown && 
+            !userAvatarBtn.contains(e.target) && 
+            !userAvatarDropdown.contains(e.target)) {
+          userAvatarDropdown.style.display = 'none';
+        }
+      });
+      
+      // Connect "User Profile" dropdown item
+      const userProfileItem = userAvatarDropdown.querySelector('.user-dropdown-item');
+      if (userProfileItem) {
+        userProfileItem.onclick = function(e) {
+          e.stopPropagation();
+          goToUserProfile();
+        };
+      }
+    }
+    
+    // User Profile back button
+    const userProfileBackBtn = document.getElementById("userProfileBackBtn");
+    if (userProfileBackBtn) {
+      userProfileBackBtn.onclick = goBackFromUserProfile;
+    }
+    
+    // User Profile avatar upload functionality
+    initializeUserProfileAvatar();
   } catch (e) {
     console.error('[Navigation] Error initializing navigation buttons:', e);
   }
+}
+
+// Helper functions for user data and avatar
+function ffGetCurrentUserInfo() {
+  let name = null;
+  let email = null;
+  let businessName = null;
+  
+  // Try Firebase auth currentUser first
+  try {
+    if (window.auth && window.auth.currentUser) {
+      const user = window.auth.currentUser;
+      email = user.email || null;
+      name = user.displayName || null;
+    }
+  } catch (e) {
+    console.warn('[User Profile] Error accessing auth.currentUser:', e);
+  }
+  
+  // Try sessionStorage
+  if (!name) {
+    try {
+      const storedName = sessionStorage.getItem('ff_actor_name');
+      if (storedName) name = storedName;
+    } catch (e) {
+      console.warn('[User Profile] Error reading sessionStorage ff_actor_name:', e);
+    }
+  }
+  
+  // Try localStorage user data
+  if (!email || !name) {
+    try {
+      const ffv24Users = JSON.parse(localStorage.getItem('ffv24_users') || '[]');
+      const ffUsers = JSON.parse(localStorage.getItem('ff_users_v1') || '[]');
+      const users = ffv24Users.length > 0 ? ffv24Users : ffUsers;
+      
+      if (users.length > 0 && users[0]) {
+        if (!email && users[0].email) email = users[0].email;
+        if (!name && (users[0].name || users[0].displayName)) {
+          name = users[0].name || users[0].displayName;
+        }
+      }
+    } catch (e) {
+      console.warn('[User Profile] Error reading user data from localStorage:', e);
+    }
+  }
+  
+  // Fallback: derive name from email if email exists but name doesn't
+  if (email && !name) {
+    const emailPrefix = email.split('@')[0];
+    if (emailPrefix) {
+      // Title case the email prefix
+      name = emailPrefix.split(/[._-]/).map(part => 
+        part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
+      ).join(' ');
+    }
+  }
+  
+  // Last resort fallbacks
+  if (!name) name = 'User';
+  if (!email) email = '—';
+  
+  // Try to get business name from settings
+  try {
+    const currentSettings = ls("ffv24_settings") || {};
+    if (currentSettings.brand && currentSettings.brand.name) {
+      businessName = currentSettings.brand.name;
+    }
+  } catch (e) {
+    console.warn('[User Profile] Error reading business name from settings:', e);
+  }
+  
+  return { name, email, businessName };
+}
+
+function ffGetAvatarDataUrl() {
+  try {
+    return localStorage.getItem('ff_user_avatar_v1');
+  } catch (e) {
+    console.warn('[User Profile] Error reading avatar from localStorage:', e);
+    return null;
+  }
+}
+
+function ffSetAvatarDataUrl(dataUrl) {
+  try {
+    localStorage.setItem('ff_user_avatar_v1', dataUrl);
+    // Update both avatars immediately
+    updateUserProfileAvatar(dataUrl);
+    updateTopBarAvatar(dataUrl);
+    return true;
+  } catch (e) {
+    console.error('[User Profile] Error saving avatar to localStorage:', e);
+    return false;
+  }
+}
+
+function updateUserProfileAvatar(dataUrl) {
+  const avatarImg = document.getElementById('userProfileAvatar');
+  if (avatarImg) {
+    if (dataUrl) {
+      avatarImg.src = dataUrl;
+    } else {
+      // Set default placeholder
+      avatarImg.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTA4IiBoZWlnaHQ9IjEwOCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxwYXRoIGQ9Ik0yMCAyMXYtMmE0IDQgMCAwIDAtNC00SDhhNCA0IDAgMCAwLTQgNHYyIiBzdHJva2U9IiM2YjcyODAiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PGNpcmNsZSBjeD0iMTIiIGN5PSI3IiByPSI0IiBzdHJva2U9IiM2YjcyODAiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+';
+    }
+  }
+}
+
+function updateTopBarAvatar(dataUrl) {
+  const topBarAvatar = document.querySelector('.user-avatar-circle');
+  if (topBarAvatar) {
+    if (dataUrl) {
+      // Replace SVG with img if avatar exists
+      const existingImg = topBarAvatar.querySelector('img');
+      if (existingImg) {
+        existingImg.src = dataUrl;
+      } else {
+        // Remove SVG and add img
+        topBarAvatar.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.style.width = '100%';
+        img.style.height = '100%';
+        img.style.borderRadius = '50%';
+        img.style.objectFit = 'cover';
+        topBarAvatar.appendChild(img);
+      }
+    } else {
+      // Restore default SVG if no avatar
+      const existingImg = topBarAvatar.querySelector('img');
+      if (existingImg) {
+        existingImg.remove();
+      }
+      if (!topBarAvatar.querySelector('svg')) {
+        topBarAvatar.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>';
+      }
+    }
+  }
+}
+
+// Initialize User Profile avatar upload and display
+function initializeUserProfileAvatar() {
+  const avatarImg = document.getElementById('userProfileAvatar');
+  const avatarEditBtn = document.getElementById('userProfileAvatarEditBtn');
+  const avatarInput = document.getElementById('userProfileAvatarInput');
+  const businessNameEl = document.getElementById('userProfileBusinessName');
+  const emailEl = document.getElementById('userProfileEmail');
+  
+  if (!avatarImg || !avatarEditBtn || !avatarInput) {
+    console.warn('[User Profile] Avatar elements not found');
+    return;
+  }
+  
+  // Load user data and populate header
+  const userInfo = ffGetCurrentUserInfo();
+  
+  // Update business name/name display
+  if (businessNameEl) {
+    // Prefer business name, fallback to user name
+    const displayName = userInfo.businessName || userInfo.name;
+    businessNameEl.textContent = displayName;
+  }
+  
+  // Update email
+  if (emailEl) {
+    emailEl.textContent = userInfo.email;
+  }
+  
+  // Load avatar from localStorage
+  const savedAvatar = ffGetAvatarDataUrl();
+  updateUserProfileAvatar(savedAvatar);
+  
+  // Handle edit button click - trigger file input
+  avatarEditBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    avatarInput.click();
+  });
+  
+  // Handle file selection
+  avatarInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file.');
+      return;
+    }
+    
+    // Read file as data URL
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataURL = event.target.result;
+      
+      // Save to localStorage and sync both avatars
+      if (ffSetAvatarDataUrl(dataURL)) {
+        console.log('[User Profile] Avatar saved and synced');
+      } else {
+        alert('Error saving avatar. Please try again.');
+      }
+    };
+    
+    reader.onerror = () => {
+      console.error('[User Profile] Error reading file');
+      alert('Error reading image file. Please try again.');
+    };
+    
+    reader.readAsDataURL(file);
+    
+    // Reset input so same file can be selected again
+    e.target.value = '';
+  });
+  
+  // Function to load avatar and user data from storage
+  function loadUserProfileData() {
+    // Reload user data (in case it changed)
+    const userInfo = ffGetCurrentUserInfo();
+    if (businessNameEl) {
+      const displayName = userInfo.businessName || userInfo.name;
+      businessNameEl.textContent = displayName;
+    }
+    if (emailEl) {
+      emailEl.textContent = userInfo.email;
+    }
+    
+    // Reload avatar
+    const savedAvatar = ffGetAvatarDataUrl();
+    updateUserProfileAvatar(savedAvatar);
+  }
+  
+  // Expose load function for use when User Profile screen is shown
+  window.loadUserProfileAvatar = loadUserProfileData;
+  
+  // Initialize top bar avatar on load
+  const topBarAvatarData = ffGetAvatarDataUrl();
+  updateTopBarAvatar(topBarAvatarData);
 }
 
 // Tasks screen buttons are now initialized in app.js via DOMContentLoaded
@@ -10321,9 +10808,19 @@ function initializeNavigationButtons() {
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     setTimeout(initializeNavigationButtons, 100);
+    // Initialize top bar avatar on page load
+    setTimeout(() => {
+      const topBarAvatarData = ffGetAvatarDataUrl();
+      updateTopBarAvatar(topBarAvatarData);
+    }, 200);
   });
 } else {
   setTimeout(initializeNavigationButtons, 100);
+  // Initialize top bar avatar on page load
+  setTimeout(() => {
+    const topBarAvatarData = ffGetAvatarDataUrl();
+    updateTopBarAvatar(topBarAvatarData);
+  }, 200);
 }
 
 // Expose for re-initialization after login
@@ -16357,6 +16854,12 @@ window.openLog = async function(){
       overflow: hidden;
     }
     
+    /* Raise Tasks Settings modal upward on desktop */
+    #tasksScreen #tasksSettingsModal {
+      align-items: flex-start;
+      padding-top: 40px;
+    }
+    
     /* Task Info Modal (appended to body) */
     #taskInfoModalRoot {
       position: fixed;
@@ -16537,6 +17040,14 @@ window.openLog = async function(){
       max-height: 90vh;
       display: flex;
       flex-direction: column;
+      margin-top: 28px; /* Add top offset to prevent modal from looking "stuck" under top nav */
+    }
+    
+    /* Fix Tasks Settings modal container height and margins */
+    #tasksScreen #tasksSettingsModal .tasks-modal-container {
+      max-height: calc(100vh - 140px);
+      margin-top: 24px;
+      margin-bottom: 24px;
     }
     
     #tasksScreen .tasks-modal-header {
@@ -16552,13 +17063,14 @@ window.openLog = async function(){
       font-size: 16px;
       font-weight: 500;
       color: #111;
+      display: none; /* Hide Settings title text */
     }
     
     #tasksScreen .tasks-modal-close {
       background: none;
       border: none;
       font-size: 24px;
-      color: #666;
+      color: #333; /* Darker icon/text for better visibility */
       cursor: pointer;
       padding: 0;
       width: 30px;
@@ -16570,18 +17082,56 @@ window.openLog = async function(){
       line-height: 1;
     }
     
+    /* Hide X close button in Tasks Settings modal only */
+    #tasksScreen #tasksSettingsModal .tasks-modal-close {
+      display: none;
+    }
+    
     #tasksScreen .tasks-modal-close:hover {
       background: #f3f4f6;
     }
     
     #tasksScreen .tasks-modal-content {
       padding: 16px 20px;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
+      overflow: hidden;
       flex: 1 1 auto;
       min-height: 0;
       display: flex;
       flex-direction: column;
+    }
+    
+    /* Make tabs row fixed at top in Tasks Settings modal */
+    #tasksScreen #tasksSettingsModal #tasksSettingsTabs {
+      position: relative;
+      background: #fff !important;
+      z-index: 20;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+      flex-shrink: 0;
+    }
+    
+    /* Scrollable body content wrapper - only this scrolls */
+    #tasksScreen #tasksSettingsModal .tasks-modal-scrollable-body {
+      overflow-y: auto;
+      overflow-x: hidden;
+      flex: 1 1 auto;
+      min-height: 0;
+      -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Alert time row - horizontal layout for time picker and checkbox on same row */
+    #tasksScreen #tasksSettingsModal .tasks-alert-time-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    
+    /* Auto-reset row - horizontal layout for checkbox, label, and time picker on same row */
+    #tasksScreen #tasksSettingsModal .tasks-auto-reset-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
     }
     
     #tasksScreen .tasks-modal-footer {
@@ -16751,112 +17301,138 @@ window.openLog = async function(){
             <button class="tasks-settings-tab" data-tab="yearly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Yearly</button>
           </div>
           
+          <!-- Scrollable body content wrapper -->
+          <div class="tasks-modal-scrollable-body">
           <!-- Alert Start Time control (only for opening/closing) -->
           <div id="tasksAlertTimeControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
-            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-              <span>Show alerts starting at:</span>
-              <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
-            </label>
-            <label id="tasksAlertTimeShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;margin-top:8px;">
-              <input type="checkbox" id="tasksAlertTimeShowOnHomeCheckbox" style="cursor:pointer;">
-              <span>Show this alert on Home screen</span>
-            </label>
+            <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <span>Show alerts starting at:</span>
+                <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              </label>
+              <label id="tasksAlertTimeShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <input type="checkbox" id="tasksAlertTimeShowOnHomeCheckbox" style="cursor:pointer;">
+                <span>Show this alert on Home screen</span>
+              </label>
+            </div>
             <!-- Auto-reset controls (only for opening tab) -->
             <div id="tasksOpeningAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                <input type="checkbox" id="tasksOpeningAutoResetEnabled" style="cursor:pointer;">
-                <span>Auto-reset when all Opening tasks are completed</span>
-              </label>
-              <div id="tasksOpeningAutoResetTimeRow" style="margin-top:8px;display:none;">
-                <label style="display:block;font-size:12px;color:#666;margin-bottom:4px;">Auto-reset time:</label>
-                <input type="time" id="tasksOpeningAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                  <input type="checkbox" id="tasksOpeningAutoResetEnabled" style="cursor:pointer;">
+                  <span>Auto-reset when all Opening tasks are completed</span>
+                </label>
+                <div id="tasksOpeningAutoResetTimeRow" style="display:none;">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                  <span>Auto-reset time:</span>
+                  <input type="time" id="tasksOpeningAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                </label>
+                </div>
               </div>
             </div>
             <!-- Auto-reset controls (only for closing tab) -->
             <div id="tasksClosingAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                <input type="checkbox" id="tasksClosingAutoResetEnabled" style="cursor:pointer;">
-                <span>Auto-reset when all Closing tasks are completed</span>
-              </label>
-              <div id="tasksClosingAutoResetTimeRow" style="margin-top:8px;display:none;">
-                <label style="display:block;font-size:12px;color:#666;margin-bottom:4px;">Auto-reset time:</label>
-                <input type="time" id="tasksClosingAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                  <input type="checkbox" id="tasksClosingAutoResetEnabled" style="cursor:pointer;">
+                  <span>Auto-reset when all Closing tasks are completed</span>
+                </label>
+                <div id="tasksClosingAutoResetTimeRow" style="display:none;">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                    <span>Auto-reset time:</span>
+                    <input type="time" id="tasksClosingAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                  </label>
+                </div>
               </div>
             </div>
           </div>
           
           <!-- Alert Start Weekday control (only for weekly) -->
           <div id="tasksAlertWeekdayControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
-            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-              <span>Show alerts starting at:</span>
-              <input type="time" id="tasksAlertWeekdayTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
-            </label>
-            <label id="tasksAlertWeekdayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;margin-top:8px;">
-              <input type="checkbox" id="tasksAlertWeekdayShowOnHomeCheckbox" style="cursor:pointer;">
-              <span>Show this alert on Home screen</span>
-            </label>
+            <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <span>Show alerts starting at:</span>
+                <input type="time" id="tasksAlertWeekdayTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              </label>
+              <label id="tasksAlertWeekdayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <input type="checkbox" id="tasksAlertWeekdayShowOnHomeCheckbox" style="cursor:pointer;">
+                <span>Show this alert on Home screen</span>
+              </label>
+            </div>
             <!-- Auto-reset controls (only for weekly tab) -->
             <div id="tasksWeeklyAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                <input type="checkbox" id="tasksWeeklyAutoResetEnabled" style="cursor:pointer;">
-                <span>Auto-reset when all Weekly tasks for today are completed</span>
-              </label>
-              <div id="tasksWeeklyAutoResetTimeRow" style="margin-top:8px;display:none;">
-                <label style="display:block;font-size:12px;color:#666;margin-bottom:4px;">Auto-reset time:</label>
-                <input type="time" id="tasksWeeklyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                  <input type="checkbox" id="tasksWeeklyAutoResetEnabled" style="cursor:pointer;">
+                  <span>Auto-reset when all Weekly tasks for today are completed</span>
+                </label>
+                <div id="tasksWeeklyAutoResetTimeRow" style="display:none;">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                    <span>Auto-reset time:</span>
+                    <input type="time" id="tasksWeeklyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                  </label>
+                </div>
               </div>
             </div>
           </div>
           
           <!-- Alert Start Time control (for monthly, uses same time input as opening/closing) -->
           <div id="tasksAlertDayControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
-            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-              <span>Show alerts starting at:</span>
-              <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
-            </label>
-            <label id="tasksAlertDayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;margin-top:8px;">
-              <input type="checkbox" id="tasksAlertDayShowOnHomeCheckbox" style="cursor:pointer;">
-              <span>Show this alert on Home screen</span>
-            </label>
+            <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <span>Show alerts starting at:</span>
+                <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              </label>
+              <label id="tasksAlertDayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <input type="checkbox" id="tasksAlertDayShowOnHomeCheckbox" style="cursor:pointer;">
+                <span>Show this alert on Home screen</span>
+              </label>
+            </div>
           </div>
           
           <!-- Auto-reset controls (only for monthly tab) -->
           <div id="tasksMonthlyAutoResetSection" style="display:none;">
-            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-              <input type="checkbox" id="tasksMonthlyAutoResetEnabled" style="cursor:pointer;">
-              <span>Auto-reset when all Monthly tasks for today are completed</span>
-            </label>
-            <div id="tasksMonthlyAutoResetTimeRow" style="display:none;margin-top:6px;">
+            <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
               <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                <span>Auto-reset time:</span>
-                <input type="time" id="tasksMonthlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                <input type="checkbox" id="tasksMonthlyAutoResetEnabled" style="cursor:pointer;">
+                <span>Auto-reset when all Monthly tasks for today are completed</span>
               </label>
+              <div id="tasksMonthlyAutoResetTimeRow" style="display:none;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                  <span>Auto-reset time:</span>
+                  <input type="time" id="tasksMonthlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                </label>
+              </div>
             </div>
           </div>
           
           <!-- Alert Start Time control (only for yearly) -->
           <div id="tasksAlertYearlyControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
-            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;flex-wrap:wrap;">
-              <span>Show alerts starting at:</span>
-              <input type="time" id="tasksAlertYearlyTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
-            </label>
-            <label id="tasksAlertYearlyShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;margin-top:8px;">
-              <input type="checkbox" id="tasksAlertYearlyShowOnHomeCheckbox" style="cursor:pointer;">
-              <span>Show this alert on Home screen</span>
-            </label>
+            <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <span>Show alerts starting at:</span>
+                <input type="time" id="tasksAlertYearlyTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+              </label>
+              <label id="tasksAlertYearlyShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <input type="checkbox" id="tasksAlertYearlyShowOnHomeCheckbox" style="cursor:pointer;">
+                <span>Show this alert on Home screen</span>
+              </label>
+            </div>
           </div>
           
           <!-- Auto-reset controls (only for yearly tab) -->
           <div id="tasksYearlyAutoResetSection" style="display:none;">
-            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-              <input type="checkbox" id="tasksYearlyAutoResetEnabled" style="cursor:pointer;">
-              <span>Auto-reset when all Yearly tasks for today are completed</span>
-            </label>
-            <div id="tasksYearlyAutoResetTimeRow" style="display:none;margin-top:6px;">
+            <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
               <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                <span>Auto-reset time:</span>
-                <input type="time" id="tasksYearlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                <input type="checkbox" id="tasksYearlyAutoResetEnabled" style="cursor:pointer;">
+                <span>Auto-reset when all Yearly tasks for today are completed</span>
               </label>
+              <div id="tasksYearlyAutoResetTimeRow" style="display:none;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                  <span>Auto-reset time:</span>
+                  <input type="time" id="tasksYearlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                </label>
+              </div>
             </div>
           </div>
           
@@ -16893,12 +17469,14 @@ window.openLog = async function(){
             <h4 style="margin:0 0 8px;font-size:13px;font-weight:600;color:#111;">Task Catalog</h4>
             <div id="tasksModalDraftList" style="height:auto;max-height:none;overflow:visible;"></div>
           </div>
+          </div>
+          <!-- End scrollable body content wrapper -->
         </div>
         
         <!-- Sticky Save button -->
-        <div class="tasks-modal-footer" style="padding:10px 20px;border-top:1px solid #e5e7eb;background:#fff;border-radius:0 0 12px 12px;">
-          <div style="font-size:11px;color:#666;margin-bottom:4px;text-align:center;">Save all changes to Task Catalog</div>
-          <button id="tasksModalSaveBtn" class="btn-primary" style="width:100%;padding:8px;font-size:13px;">Save</button>
+        <div class="tasks-modal-footer" style="padding:10px 20px;border-top:1px solid #e5e7eb;background:#fff;border-radius:0 0 12px 12px;display:flex;justify-content:flex-end;gap:8px;">
+          <button id="tasksModalCancelBtn" class="btn-pill" style="padding:8px 16px;font-size:13px;">Cancel</button>
+          <button id="tasksModalSaveBtn" class="btn-primary" style="padding:8px 16px;font-size:13px;">Save</button>
         </div>
       </div>
     </div>
