@@ -572,7 +572,156 @@ dialog footer button, .code-dialog footer button {
 
 }
 
+/* Apps Modal - Compact Launcher Layout */
+#appsPanel {
+  max-width: 900px !important;
+}
 
+#appsPanel > div:first-child {
+  padding: 10px 18px !important;
+}
+
+#appsPanel > div:last-child {
+  padding: 18px 20px !important;
+}
+
+/* 4-column grid layout */
+.apps-launcher-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.apps-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.apps-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #111827;
+  margin: 0 0 10px 0;
+  text-transform: uppercase;
+}
+
+.apps-section-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Clean row items (no border by default) */
+.apps-panel-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none !important;
+  background: transparent;
+  border-radius: 10px;
+  box-shadow: none !important;
+  width: 100%;
+  cursor: pointer;
+}
+
+.apps-panel-item:hover {
+  background: rgba(17, 24, 39, 0.06) !important;
+}
+
+.apps-panel-item:focus,
+.apps-panel-item:focus-visible {
+  outline: none;
+  background: rgba(17, 24, 39, 0.10) !important;
+}
+
+.apps-panel-item.is-active {
+  background: rgba(17, 24, 39, 0.10) !important;
+}
+
+/* Item content wrapper */
+.apps-panel-item__content {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  width: 100%;
+}
+
+/* Icon container - smaller */
+.apps-panel-item__content > div:first-child {
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 8px !important;
+  background: rgba(17, 24, 39, 0.05) !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+}
+
+.apps-panel-item__content > div:first-child svg {
+  width: 16px !important;
+  height: 16px !important;
+  stroke: #111827 !important;
+}
+
+/* Text container */
+.apps-panel-item__content > div:last-child {
+  margin-left: 0 !important;
+  flex: 1;
+}
+
+.apps-item-label,
+.apps-panel-item__content > div:last-child > div:first-child {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #111827 !important;
+  line-height: 1.2 !important;
+}
+
+.apps-item-sublabel,
+.apps-panel-item__content > div:last-child > div:last-child {
+  font-size: 12px !important;
+  color: rgba(17, 24, 39, 0.45) !important;
+  margin-top: 1px !important;
+  line-height: 1.2 !important;
+}
+
+/* Disabled items - keep readable */
+.apps-panel-item[style*="cursor:not-allowed"],
+.apps-panel-item.is-disabled {
+  opacity: 1 !important;
+  cursor: default !important;
+}
+
+.apps-panel-item[style*="cursor:not-allowed"] .apps-panel-item__content > div:last-child > div:first-child,
+.apps-panel-item.is-disabled .apps-item-label {
+  color: rgba(17, 24, 39, 0.55) !important;
+}
+
+.apps-panel-item[style*="cursor:not-allowed"]:hover,
+.apps-panel-item.is-disabled:hover {
+  background: transparent !important;
+}
+
+/* Responsive breakpoints */
+@media (max-width: 1000px) {
+  .apps-launcher-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .apps-launcher-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 </style>
 
@@ -786,9 +935,7 @@ dialog footer button, .code-dialog footer button {
 
         <button id="logBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></span>History</button>
 
-        <button id="settingsBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span>Settings</button>
-
-        <button id="logout-button" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></span>Log out</button>
+        <button id="appsBtn" class="btn-pill" style="position:relative;"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></span>APPS</button>
 
         <div class="user-avatar-wrapper" style="margin-left:auto;position:relative;">
           <button id="userAvatarBtn" class="user-avatar-trigger" aria-label="User menu" style="display:flex;align-items:center;gap:6px;background:none;border:none;padding:0;cursor:pointer;outline:none;">
@@ -802,6 +949,8 @@ dialog footer button, .code-dialog footer button {
           </button>
           <div id="userAvatarDropdown" class="user-avatar-dropdown" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:160px;z-index:100002;padding:4px 0;">
             <button class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">User Profile</button>
+            <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+            <button id="userDropdownLogoutBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">Log out</button>
           </div>
         </div>
 
@@ -811,10 +960,132 @@ dialog footer button, .code-dialog footer button {
 
   </div>
 
+  <!-- Apps Launcher Panel -->
+  <!-- Apps Overlay Backdrop -->
+  <div id="appsOverlayBackdrop" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:100002;backdrop-filter:blur(2px);"></div>
+  
+  <!-- Apps Panel (Full-screen overlay) -->
+  <div id="appsPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:92vw;max-height:85vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);z-index:100003;overflow:hidden;flex-direction:column;">
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:flex-end;padding:10px 18px;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <button id="appsPanelCloseBtn" style="background:none;border:none;cursor:pointer;padding:8px;display:flex;align-items:center;justify-content:center;border-radius:8px;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    
+    <!-- Content (scrollable) -->
+    <div style="overflow-y:auto;padding:18px 20px;flex:1;">
+      <div class="apps-launcher-grid">
+        <!-- Column 1: CORE APPS -->
+        <div class="apps-col">
+          <div class="apps-section-title">CORE APPS</div>
+          <div class="apps-section-grid">
+            <div class="apps-panel-item" data-app="queue" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                </div>
+                <div>
+                  <div>Queue</div>
+                </div>
+              </div>
+            </div>
+            <div class="apps-panel-item" data-app="tasks" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                </div>
+                <div>
+                  <div>Tasks</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Column 2: COMMUNICATIONS -->
+        <div class="apps-col">
+          <div class="apps-section-title">COMMUNICATIONS</div>
+          <div class="apps-section-grid">
+            <div class="apps-panel-item" data-app="inbox" style="cursor:not-allowed;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+                </div>
+                <div>
+                  <div>Inbox</div>
+                  <div>Coming soon</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Column 3: OPERATIONS -->
+        <div class="apps-col">
+          <div class="apps-section-title">OPERATIONS</div>
+          <div class="apps-section-grid">
+            <div class="apps-panel-item" data-app="inventory" style="cursor:not-allowed;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                </div>
+                <div>
+                  <div>Inventory</div>
+                  <div>Coming soon</div>
+                </div>
+              </div>
+            </div>
+            <div class="apps-panel-item" data-app="history" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                </div>
+                <div>
+                  <div>History</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Column 4: SETUP & MANAGEMENT -->
+        <div class="apps-col">
+          <div class="apps-section-title">SETUP & MANAGEMENT</div>
+          <div class="apps-section-grid">
+            <div class="apps-panel-item" data-app="settings" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                </div>
+                <div>
+                  <div>Settings</div>
+                </div>
+              </div>
+            </div>
+            <div class="apps-panel-item" data-app="settings" data-staff="true" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                </div>
+                <div>
+                  <div>Staff Members</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- User Profile Screen -->
   <div id="userProfileScreen" style="display:none;max-width:800px;margin:12px auto 40px;padding:0 24px;">
     <!-- Compact Header Row: Back + Avatar + Name + Email -->
-    <div style="display:flex;align-items:center;gap:20px;margin-bottom:24px;">
+    <div style="display:flex;align-items:center;gap:20px;margin-bottom:32px;">
       <!-- Back Button -->
       <button id="userProfileBackBtn" class="btn-pill" style="flex-shrink:0;">← Back</button>
       
@@ -835,6 +1106,92 @@ dialog footer button, .code-dialog footer button {
         <h2 id="userProfileBusinessName" style="margin:0 0 4px 0;font-size:20px;font-weight:700;color:#111827;">Neo Nails</h2>
         <p id="userProfileEmail" style="margin:0;font-size:14px;color:#6b7280;">service@neo-nails.com</p>
       </div>
+    </div>
+    
+    <!-- Left Menu + Right Card Layout -->
+    <div style="display:flex;gap:32px;align-items:flex-start;">
+      <!-- Left Side Menu -->
+      <div style="flex-shrink:0;width:200px;">
+        <nav style="display:flex;flex-direction:column;gap:4px;">
+          <button class="user-profile-menu-item" data-section="password" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Password</button>
+          <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Notifications</button>
+          <button class="user-profile-menu-item" data-section="preferences" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Preferences</button>
+        </nav>
+      </div>
+      
+      <!-- Right Side Card Container -->
+      <div style="flex:1;">
+        <!-- Password Card -->
+        <div id="userProfileCardPassword" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 8px 0;font-size:18px;font-weight:600;color:#111827;">Password</h3>
+          <p style="margin:0 0 20px 0;font-size:14px;color:#6b7280;">Update your password to keep your account secure.</p>
+          <button id="userProfileChangePasswordBtn" class="btn-primary" style="font-size:14px;">Change</button>
+        </div>
+        
+        <!-- Notifications Card -->
+        <div id="userProfileCardNotifications" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 20px 0;font-size:18px;font-weight:600;color:#111827;">Notifications</h3>
+          <div style="display:flex;flex-direction:column;gap:20px;">
+            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+              <div>
+                <div style="font-size:14px;font-weight:500;color:#111827;margin-bottom:4px;">Task reminders</div>
+                <div style="font-size:13px;color:#6b7280;">Receive reminders for scheduled tasks</div>
+              </div>
+              <input type="checkbox" id="userProfileToggleTaskReminders" style="width:44px;height:24px;cursor:pointer;accent-color:#2563eb;">
+            </label>
+            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+              <div>
+                <div style="font-size:14px;font-weight:500;color:#111827;margin-bottom:4px;">Daily summary</div>
+                <div style="font-size:13px;color:#6b7280;">Get a daily summary of activity</div>
+              </div>
+              <input type="checkbox" id="userProfileToggleDailySummary" style="width:44px;height:24px;cursor:pointer;accent-color:#2563eb;">
+            </label>
+            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+              <div>
+                <div style="font-size:14px;font-weight:500;color:#111827;margin-bottom:4px;">Queue alerts</div>
+                <div style="font-size:13px;color:#6b7280;">Get notified about queue changes</div>
+              </div>
+              <input type="checkbox" id="userProfileToggleQueueAlerts" style="width:44px;height:24px;cursor:pointer;accent-color:#2563eb;">
+            </label>
+          </div>
+        </div>
+        
+        <!-- Preferences Card -->
+        <div id="userProfileCardPreferences" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 20px 0;font-size:18px;font-weight:600;color:#111827;">Preferences</h3>
+          <div style="display:flex;flex-direction:column;gap:24px;">
+            <div>
+              <label style="display:block;font-size:14px;font-weight:500;color:#111827;margin-bottom:12px;">Time format</label>
+              <div style="display:flex;gap:16px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="radio" name="userProfileTimeFormat" value="12h" id="userProfileTimeFormat12h" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
+                  <span style="font-size:14px;color:#111827;">12-hour</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="radio" name="userProfileTimeFormat" value="24h" id="userProfileTimeFormat24h" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
+                  <span style="font-size:14px;color:#111827;">24-hour</span>
+                </label>
+              </div>
+            </div>
+            <div>
+              <label style="display:block;font-size:14px;font-weight:500;color:#111827;margin-bottom:8px;">Default screen</label>
+              <select id="userProfileDefaultScreen" style="width:100%;max-width:300px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
+                <option value="queue">Queue</option>
+                <option value="tasks">Tasks</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Password Change Modal -->
+  <div id="userProfilePasswordModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100000;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:12px;padding:24px;max-width:400px;width:90%;box-shadow:0 10px 30px rgba(0,0,0,0.2);">
+      <h3 style="margin:0 0 16px 0;font-size:18px;font-weight:600;color:#111827;">Change Password</h3>
+      <p id="userProfilePasswordModalMessage" style="margin:0 0 20px 0;font-size:14px;color:#6b7280;">This feature is coming soon.</p>
+      <button id="userProfilePasswordModalClose" class="btn-primary" style="width:100%;font-size:14px;">Close</button>
     </div>
   </div>
 
@@ -3026,6 +3383,11 @@ function goToUserProfile() {
   // Load avatar from localStorage when User Profile screen is shown
   if (typeof window.loadUserProfileAvatar === 'function') {
     window.loadUserProfileAvatar();
+  }
+  
+  // Load preferences when User Profile screen is shown
+  if (typeof window.loadUserProfilePreferences === 'function') {
+    window.loadUserProfilePreferences();
   }
   
   // Ensure Queue UI stays hidden when User Profile is active (safety check)
@@ -10541,11 +10903,41 @@ function initializeNavigationButtons() {
       });
       
       // Connect "User Profile" dropdown item
-      const userProfileItem = userAvatarDropdown.querySelector('.user-dropdown-item');
-      if (userProfileItem) {
-        userProfileItem.onclick = function(e) {
+      const userProfileItems = userAvatarDropdown.querySelectorAll('.user-dropdown-item');
+      if (userProfileItems.length > 0) {
+        // First item is "User Profile"
+        userProfileItems[0].onclick = function(e) {
           e.stopPropagation();
           goToUserProfile();
+        };
+      }
+      
+      // Connect "Log out" dropdown item
+      const logoutDropdownBtn = document.getElementById('userDropdownLogoutBtn');
+      if (logoutDropdownBtn) {
+        logoutDropdownBtn.onclick = async function(e) {
+          e.stopPropagation();
+          // Close dropdown
+          userAvatarDropdown.style.display = 'none';
+          // Call the same logout logic as the original logout button
+          try {
+            // Ensure tasksScreen is hidden before logout
+            const tasksScreen = document.getElementById('tasksScreen');
+            if (tasksScreen) {
+              tasksScreen.style.display = 'none';
+              tasksScreen.style.pointerEvents = 'none';
+            }
+            // Import signOut and call it
+            const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+            await signOut(window.auth);
+            // Call showLoginScreen if available
+            if (typeof window.showLoginScreen === 'function') {
+              window.showLoginScreen();
+            }
+          } catch (err) {
+            console.error("[Auth] Logout failed:", err);
+            alert("Logout failed, please try again.");
+          }
         };
       }
     }
@@ -10558,9 +10950,163 @@ function initializeNavigationButtons() {
     
     // User Profile avatar upload functionality
     initializeUserProfileAvatar();
+    
+    // User Profile menu and cards functionality
+    initializeUserProfileMenu();
+    
+    // Apps launcher panel
+    initializeAppsPanel();
   } catch (e) {
     console.error('[Navigation] Error initializing navigation buttons:', e);
   }
+}
+
+// Initialize Apps Launcher Panel
+function initializeAppsPanel() {
+  const appsBtn = document.getElementById('appsBtn');
+  const appsPanel = document.getElementById('appsPanel');
+  const appsOverlayBackdrop = document.getElementById('appsOverlayBackdrop');
+  const appsPanelCloseBtn = document.getElementById('appsPanelCloseBtn');
+  
+  if (!appsBtn || !appsPanel || !appsOverlayBackdrop) {
+    console.warn('[Navigation] Apps button, panel, or backdrop not found');
+    return;
+  }
+  
+  // Ensure panel and backdrop start hidden
+  appsPanel.style.display = 'none';
+  appsOverlayBackdrop.style.display = 'none';
+  
+  // Lock/unlock body scroll
+  function lockBodyScroll() {
+    document.body.style.overflow = 'hidden';
+  }
+  
+  function unlockBodyScroll() {
+    document.body.style.overflow = '';
+  }
+  
+  // Check if panel is visible
+  function isPanelVisible() {
+    const display = appsPanel.style.display || window.getComputedStyle(appsPanel).display;
+    return display !== 'none' && display !== '';
+  }
+  
+  // Open panel
+  function openAppsPanel() {
+    appsOverlayBackdrop.style.display = 'block';
+    appsPanel.style.display = 'flex';
+    lockBodyScroll();
+  }
+  
+  // Close panel
+  function closeAppsPanel() {
+    appsPanel.style.display = 'none';
+    appsOverlayBackdrop.style.display = 'none';
+    unlockBodyScroll();
+  }
+  
+  // Toggle panel visibility
+  function toggleAppsPanel() {
+    const isVisible = isPanelVisible();
+    if (isVisible) {
+      closeAppsPanel();
+    } else {
+      openAppsPanel();
+    }
+  }
+  
+  // Apps button click handler
+  appsBtn.onclick = function(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    toggleAppsPanel();
+  };
+  
+  // Close button handler
+  if (appsPanelCloseBtn) {
+    appsPanelCloseBtn.onclick = function(e) {
+      e.stopPropagation();
+      e.preventDefault();
+      closeAppsPanel();
+    };
+  }
+  
+  // Close panel when clicking backdrop
+  appsOverlayBackdrop.onclick = function(e) {
+    if (e.target === appsOverlayBackdrop) {
+      closeAppsPanel();
+    }
+  };
+  
+  // Close panel on Escape key (use a single handler to avoid duplicates)
+  if (!window.__appsPanelEscapeHandler) {
+    window.__appsPanelEscapeHandler = function(e) {
+      if (e.key === 'Escape' && isPanelVisible()) {
+        closeAppsPanel();
+      }
+    };
+    document.addEventListener('keydown', window.__appsPanelEscapeHandler);
+  }
+  
+  // Wire up tile clicks to existing navigation handlers
+  const panelItems = appsPanel.querySelectorAll('.apps-panel-item');
+  panelItems.forEach(item => {
+    const appType = item.getAttribute('data-app');
+    const isDisabled = item.style.cursor === 'not-allowed' || item.style.opacity === '0.6';
+    const content = item.querySelector('.apps-panel-item__content');
+    
+    if (!isDisabled && appType && content) {
+      // Add hover effects to content wrapper only
+      item.addEventListener('mouseenter', () => {
+        content.style.background = '#f9fafb';
+        content.style.borderColor = '#d1d5db';
+      });
+      item.addEventListener('mouseleave', () => {
+        content.style.background = '#fff';
+        content.style.borderColor = 'var(--border)';
+      });
+      
+      // Wire up click handlers to existing navigation functions
+      item.onclick = function(e) {
+        e.stopPropagation();
+        closeAppsPanel();
+        
+        // Route to existing navigation handlers
+        switch(appType) {
+          case 'queue':
+            if (typeof goToQueue === 'function') {
+              goToQueue();
+            }
+            break;
+          case 'tasks':
+            if (typeof window.openTasks === 'function') {
+              window.openTasks();
+            }
+            break;
+          case 'history':
+            if (typeof openHistoryFromNav === 'function') {
+              openHistoryFromNav();
+            }
+            break;
+          case 'settings':
+            if (typeof openSettingsSecureWithNav === 'function') {
+              openSettingsSecureWithNav();
+            }
+            break;
+          default:
+            console.warn('[Apps Panel] Unknown app type:', appType);
+        }
+      };
+    }
+  });
+  
+  /* SANITY TEST CHECKLIST:
+   * ✓ open/close works (X/backdrop/ESC)
+   * ✓ scroll locks when panel is open
+   * ✓ tiles navigate correctly (Queue/Tasks/History/Settings)
+   * ✓ disabled tiles (Inbox/Inventory) do nothing
+   */
 }
 
 // Helper functions for user data and avatar
@@ -10799,6 +11345,268 @@ function initializeUserProfileAvatar() {
   // Initialize top bar avatar on load
   const topBarAvatarData = ffGetAvatarDataUrl();
   updateTopBarAvatar(topBarAvatarData);
+}
+
+// Initialize User Profile menu and cards
+function initializeUserProfileMenu() {
+  const menuItems = document.querySelectorAll('.user-profile-menu-item');
+  const cards = document.querySelectorAll('.user-profile-card');
+  const passwordModal = document.getElementById('userProfilePasswordModal');
+  const passwordModalClose = document.getElementById('userProfilePasswordModalClose');
+  const changePasswordBtn = document.getElementById('userProfileChangePasswordBtn');
+  
+  // Get user email for localStorage key
+  const userInfo = ffGetCurrentUserInfo();
+  const userEmail = userInfo.email || 'default';
+  const storageKey = `ff_profile_prefs_v1::${userEmail}`;
+  
+  // Helper to get preferences from localStorage
+  function getProfilePrefs() {
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (e) {
+      console.warn('[User Profile] Error reading preferences:', e);
+    }
+    // Default values
+    return {
+      notifications: {
+        taskReminders: true,
+        dailySummary: true,
+        queueAlerts: true
+      },
+      preferences: {
+        timeFormat: '12h',
+        defaultScreen: 'queue'
+      }
+    };
+  }
+  
+  // Helper to save preferences to localStorage
+  function saveProfilePrefs(prefs) {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(prefs));
+    } catch (e) {
+      console.error('[User Profile] Error saving preferences:', e);
+    }
+  }
+  
+  // Menu item click handler
+  function handleMenuClick(section) {
+    // Update menu item active states
+    menuItems.forEach(item => {
+      if (item.dataset.section === section) {
+        item.style.background = '#f3f4f6';
+        item.style.color = '#111827';
+        item.style.fontWeight = '500';
+      } else {
+        item.style.background = 'none';
+        item.style.color = '#6b7280';
+        item.style.fontWeight = 'normal';
+      }
+    });
+    
+    // Show corresponding card
+    cards.forEach(card => {
+      card.style.display = 'none';
+    });
+    const targetCard = document.getElementById(`userProfileCard${section.charAt(0).toUpperCase() + section.slice(1)}`);
+    if (targetCard) {
+      targetCard.style.display = 'block';
+    }
+  }
+  
+  // Initialize menu items
+  menuItems.forEach(item => {
+    item.addEventListener('click', () => {
+      handleMenuClick(item.dataset.section);
+    });
+  });
+  
+  // Set default active menu item (Password)
+  if (menuItems.length > 0) {
+    handleMenuClick('password');
+  }
+  
+  // Password change button
+  if (changePasswordBtn) {
+    changePasswordBtn.addEventListener('click', async () => {
+      const modalMessage = document.getElementById('userProfilePasswordModalMessage');
+      
+      // Show modal first
+      if (passwordModal) {
+        passwordModal.style.display = 'flex';
+      }
+      
+      // Check if user is authenticated
+      if (!window.auth || !window.auth.currentUser) {
+        if (modalMessage) {
+          modalMessage.textContent = 'No authenticated user found. Please log in again.';
+          modalMessage.style.color = '#dc2626';
+        }
+        return;
+      }
+      
+      const user = window.auth.currentUser;
+      const email = user.email;
+      
+      if (!email) {
+        if (modalMessage) {
+          modalMessage.textContent = 'No email found for current user. Please log in again.';
+          modalMessage.style.color = '#dc2626';
+        }
+        return;
+      }
+      
+      // Show loading state
+      if (modalMessage) {
+        modalMessage.textContent = 'Sending password reset email...';
+        modalMessage.style.color = '#6b7280';
+      }
+      
+      try {
+        // Import sendPasswordResetEmail dynamically
+        const { sendPasswordResetEmail } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        
+        // Send password reset email
+        await sendPasswordResetEmail(window.auth, email);
+        
+        // Success message
+        if (modalMessage) {
+          modalMessage.textContent = 'We\'ve sent you an email with instructions to reset your password.';
+          modalMessage.style.color = '#059669';
+        }
+      } catch (error) {
+        // Error message
+        let errorMessage = 'Failed to send password reset email. Please try again.';
+        if (error.code === 'auth/user-not-found') {
+          errorMessage = 'No account found with this email address.';
+        } else if (error.code === 'auth/invalid-email') {
+          errorMessage = 'Invalid email address.';
+        } else if (error.code === 'auth/too-many-requests') {
+          errorMessage = 'Too many requests. Please try again later.';
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+        
+        if (modalMessage) {
+          modalMessage.textContent = errorMessage;
+          modalMessage.style.color = '#dc2626';
+        }
+      }
+    });
+  }
+  
+  
+  // Close password modal
+  if (passwordModalClose) {
+    passwordModalClose.addEventListener('click', () => {
+      const modalMessage = document.getElementById('userProfilePasswordModalMessage');
+      if (modalMessage) {
+        modalMessage.textContent = 'This feature is coming soon.';
+        modalMessage.style.color = '#6b7280';
+      }
+      if (passwordModal) {
+        passwordModal.style.display = 'none';
+      }
+    });
+  }
+  
+  // Close modal when clicking outside
+  if (passwordModal) {
+    passwordModal.addEventListener('click', (e) => {
+      if (e.target === passwordModal) {
+        const modalMessage = document.getElementById('userProfilePasswordModalMessage');
+        if (modalMessage) {
+          modalMessage.textContent = 'This feature is coming soon.';
+          modalMessage.style.color = '#6b7280';
+        }
+        passwordModal.style.display = 'none';
+      }
+    });
+  }
+  
+  // Load and bind notification toggles
+  const taskRemindersToggle = document.getElementById('userProfileToggleTaskReminders');
+  const dailySummaryToggle = document.getElementById('userProfileToggleDailySummary');
+  const queueAlertsToggle = document.getElementById('userProfileToggleQueueAlerts');
+  
+  function loadNotificationPrefs() {
+    const prefs = getProfilePrefs();
+    if (taskRemindersToggle) taskRemindersToggle.checked = prefs.notifications.taskReminders;
+    if (dailySummaryToggle) dailySummaryToggle.checked = prefs.notifications.dailySummary;
+    if (queueAlertsToggle) queueAlertsToggle.checked = prefs.notifications.queueAlerts;
+  }
+  
+  function saveNotificationPrefs() {
+    const prefs = getProfilePrefs();
+    prefs.notifications = {
+      taskReminders: taskRemindersToggle ? taskRemindersToggle.checked : true,
+      dailySummary: dailySummaryToggle ? dailySummaryToggle.checked : true,
+      queueAlerts: queueAlertsToggle ? queueAlertsToggle.checked : true
+    };
+    saveProfilePrefs(prefs);
+  }
+  
+  if (taskRemindersToggle) {
+    taskRemindersToggle.addEventListener('change', saveNotificationPrefs);
+  }
+  if (dailySummaryToggle) {
+    dailySummaryToggle.addEventListener('change', saveNotificationPrefs);
+  }
+  if (queueAlertsToggle) {
+    queueAlertsToggle.addEventListener('change', saveNotificationPrefs);
+  }
+  
+  // Load and bind preferences
+  const timeFormat12h = document.getElementById('userProfileTimeFormat12h');
+  const timeFormat24h = document.getElementById('userProfileTimeFormat24h');
+  const defaultScreenSelect = document.getElementById('userProfileDefaultScreen');
+  
+  function loadPreferences() {
+    const prefs = getProfilePrefs();
+    if (timeFormat12h && timeFormat24h) {
+      if (prefs.preferences.timeFormat === '24h') {
+        timeFormat24h.checked = true;
+      } else {
+        timeFormat12h.checked = true;
+      }
+    }
+    if (defaultScreenSelect) {
+      defaultScreenSelect.value = prefs.preferences.defaultScreen || 'queue';
+    }
+  }
+  
+  function savePreferences() {
+    const prefs = getProfilePrefs();
+    prefs.preferences = {
+      timeFormat: timeFormat24h && timeFormat24h.checked ? '24h' : '12h',
+      defaultScreen: defaultScreenSelect ? defaultScreenSelect.value : 'queue'
+    };
+    saveProfilePrefs(prefs);
+  }
+  
+  if (timeFormat12h) {
+    timeFormat12h.addEventListener('change', savePreferences);
+  }
+  if (timeFormat24h) {
+    timeFormat24h.addEventListener('change', savePreferences);
+  }
+  if (defaultScreenSelect) {
+    defaultScreenSelect.addEventListener('change', savePreferences);
+  }
+  
+  // Load preferences on initialization
+  loadNotificationPrefs();
+  loadPreferences();
+  
+  // Expose function to reload preferences when User Profile screen is shown
+  window.loadUserProfilePreferences = function() {
+    loadNotificationPrefs();
+    loadPreferences();
+  };
 }
 
 // Tasks screen buttons are now initialized in app.js via DOMContentLoaded
