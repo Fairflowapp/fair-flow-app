@@ -7605,31 +7605,90 @@ function saveTasksToStorage() {
     }
     
     // Sanitize tasks for catalog: keep only id/title/instructions/scheduleWeekdays/scheduleDayOfMonth (no runtime status fields)
+    // Merge with existing catalog to preserve fields that weren't edited
+    const existingCatalog = catalogObj[tab] || [];
     const catalogList = currentTabTasks.map(task => {
       if (!task || typeof task !== 'object') return null;
       const keyId = task.taskId || task.id;
       if (!keyId) return null;
+      
+      // Find existing catalog entry to preserve fields not in draft
+      const existingTask = existingCatalog.find(t => {
+        const tId = t.taskId || t.id;
+        return tId && String(tId) === String(keyId);
+      });
+      
       const catalogTask = {
         id: keyId,
         taskId: keyId,
-        title: task.title || '',
-        instructions: task.instructions || task.info || task.details || ''
+        // Always use draft title if present, otherwise preserve existing or default to empty
+        title: (task.title !== undefined && task.title !== null) ? task.title : (existingTask?.title || ''),
+        // Always use draft instructions if present, otherwise preserve existing or default to empty
+        instructions: (task.instructions !== undefined && task.instructions !== null) ? task.instructions : 
+                      (task.info !== undefined && task.info !== null) ? task.info :
+                      (task.details !== undefined && task.details !== null) ? task.details :
+                      (existingTask?.instructions || existingTask?.info || existingTask?.details || '')
       };
-      // Preserve scheduleWeekdays for weekly tasks
-      if (tab === 'weekly' && task.scheduleWeekdays !== undefined) {
-        catalogTask.scheduleWeekdays = task.scheduleWeekdays;
+      
+      // For weekly tasks: always include scheduleWeekdays
+      if (tab === 'weekly') {
+        if (task.scheduleWeekdays !== undefined) {
+          // Use draft value (can be 'any', array, or null)
+          catalogTask.scheduleWeekdays = task.scheduleWeekdays;
+        } else if (existingTask && existingTask.scheduleWeekdays !== undefined) {
+          // Preserve existing value if draft doesn't have it
+          catalogTask.scheduleWeekdays = existingTask.scheduleWeekdays;
+        } else {
+          // Default to 'any' if neither draft nor existing has it
+          catalogTask.scheduleWeekdays = 'any';
+        }
       }
-      // Preserve scheduleDayOfMonth for monthly tasks
-      if (tab === 'monthly' && task.scheduleDayOfMonth !== undefined) {
-        catalogTask.scheduleDayOfMonth = task.scheduleDayOfMonth;
+      
+      // For monthly tasks: always include scheduleDayOfMonth
+      if (tab === 'monthly') {
+        if (task.scheduleDayOfMonth !== undefined) {
+          // Use draft value (can be number, 'any', or null)
+          catalogTask.scheduleDayOfMonth = task.scheduleDayOfMonth;
+        } else if (existingTask && existingTask.scheduleDayOfMonth !== undefined) {
+          // Preserve existing value if draft doesn't have it
+          catalogTask.scheduleDayOfMonth = existingTask.scheduleDayOfMonth;
+        } else {
+          // Default to 'any' if neither draft nor existing has it
+          catalogTask.scheduleDayOfMonth = 'any';
+        }
       }
+      
       // For yearly tasks: always include scheduleMonth, scheduleDay, and scheduleYear
       if (tab === 'yearly') {
-        catalogTask.scheduleMonth = task.scheduleMonth ?? null;
-        catalogTask.scheduleDay = task.scheduleDay ?? null;
-        // Include scheduleYear if present, otherwise compute it if month/day are set
+        // scheduleMonth: use draft if present, otherwise preserve existing, otherwise null
+        if (task.scheduleMonth !== undefined && task.scheduleMonth !== null) {
+          catalogTask.scheduleMonth = task.scheduleMonth;
+        } else if (task.scheduleMonth === null) {
+          // Explicitly cleared by user
+          catalogTask.scheduleMonth = null;
+        } else if (existingTask && existingTask.scheduleMonth !== undefined) {
+          catalogTask.scheduleMonth = existingTask.scheduleMonth;
+        } else {
+          catalogTask.scheduleMonth = null;
+        }
+        
+        // scheduleDay: use draft if present, otherwise preserve existing, otherwise null
+        if (task.scheduleDay !== undefined && task.scheduleDay !== null) {
+          catalogTask.scheduleDay = task.scheduleDay;
+        } else if (task.scheduleDay === null) {
+          // Explicitly cleared by user
+          catalogTask.scheduleDay = null;
+        } else if (existingTask && existingTask.scheduleDay !== undefined) {
+          catalogTask.scheduleDay = existingTask.scheduleDay;
+        } else {
+          catalogTask.scheduleDay = null;
+        }
+        
+        // scheduleYear: preserve if present, otherwise compute if month/day are set
         if (task.scheduleYear !== undefined) {
           catalogTask.scheduleYear = task.scheduleYear;
+        } else if (existingTask && existingTask.scheduleYear !== undefined) {
+          catalogTask.scheduleYear = existingTask.scheduleYear;
         } else if (catalogTask.scheduleMonth !== null && catalogTask.scheduleDay !== null) {
           // Compute scheduleYear: if month/day is earlier than today's month/day, scheduleYear = currentYear + 1, else currentYear
           const now = new Date();
@@ -7643,6 +7702,7 @@ function saveTasksToStorage() {
           }
         }
       }
+      
       return catalogTask;
     }).filter(Boolean);
     
