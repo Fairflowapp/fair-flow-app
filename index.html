@@ -723,6 +723,59 @@ dialog footer button, .code-dialog footer button {
   }
 }
 
+.staff-form-section {
+  padding-top: 18px;
+}
+
+#staffAddForm {
+  margin-top: -20px;
+  align-self: flex-start;
+}
+
+.staff-form-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.staff-form-header {
+  margin-bottom: 12px;
+}
+
+.staff-form-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+  color: var(--text, var(--text-primary, #111827));
+}
+
+.staff-form-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+#staffAddForm .staff-form-header {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+#staffAddForm .staff-form-title {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  color: #111827 !important;
+}
+
+#staffAddForm .staff-form-divider {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  background: var(--border) !important;
+}
+
 </style>
 
 
@@ -1381,13 +1434,19 @@ dialog footer button, .code-dialog footer button {
 
 
 
-        <h4>Workers (name • PIN • color)</h4>
+        <!-- NEW STAFF MEMBER Form Container -->
+        <div class="staffNewFormContainer" style="margin-top:32px;padding:20px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+          <!-- Tab Header -->
+          <div style="background:var(--muted);border-radius:8px 8px 0 0;padding:10px 16px;margin:-20px -20px 20px -20px;border-bottom:1px solid var(--border);">
+            <h4 style="margin:0;font-size:11px;font-weight:600;color:#111827;text-transform:uppercase;letter-spacing:0.5px;">NEW STAFF MEMBER</h4>
+          </div>
 
-        <div id="workersBox"></div>
+          <div id="workersBox"></div>
 
-        <div class="row"><button id="addWorker" type="button" class="btn-mini">+ Add worker</button></div>
+          <div class="row" style="margin-top:16px;"><button id="addWorker" type="button" class="btn-mini" style="font-size:11px;padding:4px 10px;">+ Add worker</button></div>
 
-        <div class="row small">Only these names can join. Duplicates are blocked.</div>
+          <div class="row small" style="font-size:11px;color:#6b7280;margin-top:8px;">Only these names can join. Duplicates are blocked.</div>
+        </div>
 
         <h4>Queue Auto Reset</h4>
 
@@ -3496,20 +3555,24 @@ function renderSettings(){
     existingTable.remove();
   }
   
-  // Always rebuild palette row with current palette values
-  // Global Color Palette (inside workersBox, above workers)
-  const paletteRow = document.createElement("div");
-  paletteRow.id = "settingsBrandPaletteRow";
-  paletteRow.className = "row";
-  paletteRow.style.cssText = "margin-bottom:12px;align-items:center;gap:12px";
+  // Button Color Row (replaces old Color palette row)
+  const buttonColorRow = document.createElement("div");
+  buttonColorRow.id = "settingsBrandPaletteRow";
+  buttonColorRow.className = "row";
+  buttonColorRow.style.cssText = "margin-bottom:16px;align-items:center;gap:10px;flex-wrap:wrap;";
 
-    const paletteLabel = document.createElement("span");
-    paletteLabel.textContent = "Color palette:";
-    paletteLabel.style.cssText = "font-weight:600;font-size:13px";
+    const buttonColorLabel = document.createElement("span");
+    buttonColorLabel.textContent = "BUTTON COLOR";
+    buttonColorLabel.style.cssText = "font-weight:600;font-size:11px;color:#374151;text-transform:uppercase;letter-spacing:0.3px;min-width:90px;";
 
-    const paletteContainer = document.createElement("span");
-    paletteContainer.className = "quick4";
-    paletteContainer.style.cssText = "display:inline-flex;gap:6px;align-items:center";
+    // Preview box showing current selected color (default to first palette color)
+    const previewBox = document.createElement("div");
+    previewBox.id = "buttonColorPreview";
+    previewBox.style.cssText = "width:32px;height:32px;border-radius:6px;border:1px solid var(--border);background:"+(settings.brandPalette||DEFAULTS.brandPalette)[0]+";flex-shrink:0;";
+
+    const swatchesContainer = document.createElement("span");
+    swatchesContainer.className = "quick4";
+    swatchesContainer.style.cssText = "display:inline-flex;gap:6px;align-items:center;";
 
     (settings.brandPalette||DEFAULTS.brandPalette).forEach((color,idx)=>{
       const dot = document.createElement('span');
@@ -3517,21 +3580,85 @@ function renderSettings(){
       dot.style.cssText = "width:18px;height:18px;border-radius:50%;border:1px solid #d0d0d0;cursor:pointer;background:"+color;
       dot.title = color;
       dot.dataset.paletteIndex = idx;
-      dot.onclick = () => editPaletteColor(idx);
-      paletteContainer.appendChild(dot);
+      dot.onclick = () => {
+        editPaletteColor(idx);
+        // Update preview box when palette color is clicked
+        const preview = document.getElementById('buttonColorPreview');
+        if (preview) {
+          preview.style.background = color;
+        }
+      };
+      swatchesContainer.appendChild(dot);
     });
 
-  paletteRow.appendChild(paletteLabel);
-  paletteRow.appendChild(paletteContainer);
-  wb.appendChild(paletteRow);
+  buttonColorRow.appendChild(buttonColorLabel);
+  buttonColorRow.appendChild(previewBox);
+  buttonColorRow.appendChild(swatchesContainer);
+  wb.appendChild(buttonColorRow);
+  
+  // Font Color Row
+  const fontColorRow = document.createElement("div");
+  fontColorRow.className = "row";
+  fontColorRow.style.cssText = "margin-bottom:16px;align-items:center;gap:10px;flex-wrap:wrap;";
+
+    const fontColorLabel = document.createElement("span");
+    fontColorLabel.textContent = "FONT";
+    fontColorLabel.style.cssText = "font-weight:600;font-size:11px;color:#374151;text-transform:uppercase;letter-spacing:0.3px;min-width:90px;";
+
+    const fontSwatchesContainer = document.createElement("span");
+    fontSwatchesContainer.style.cssText = "display:inline-flex;gap:6px;align-items:center;";
+
+    // Black swatch
+    const blackSwatch = document.createElement('span');
+    blackSwatch.className = 'dot';
+    blackSwatch.style.cssText = "width:18px;height:18px;border-radius:50%;border:1px solid #d0d0d0;cursor:pointer;background:#000000;";
+    blackSwatch.title = "Black";
+    blackSwatch.dataset.fontColor = "#000000";
+    blackSwatch.onclick = () => {
+      // Store font color selection in form state (in-memory only for now)
+      if (window.currentWorkerFormState) {
+        window.currentWorkerFormState.fontColor = "#000000";
+      }
+      // Update preview if there's a current worker being edited
+      updateFontColorPreview("#000000");
+    };
+
+    // White swatch
+    const whiteSwatch = document.createElement('span');
+    whiteSwatch.className = 'dot';
+    whiteSwatch.style.cssText = "width:18px;height:18px;border-radius:50%;border:1px solid #d0d0d0;cursor:pointer;background:#ffffff;";
+    whiteSwatch.title = "White";
+    whiteSwatch.dataset.fontColor = "#ffffff";
+    whiteSwatch.onclick = () => {
+      // Store font color selection in form state (in-memory only for now)
+      if (window.currentWorkerFormState) {
+        window.currentWorkerFormState.fontColor = "#ffffff";
+      }
+      // Update preview if there's a current worker being edited
+      updateFontColorPreview("#ffffff");
+    };
+
+    fontSwatchesContainer.appendChild(blackSwatch);
+    fontSwatchesContainer.appendChild(whiteSwatch);
+
+  fontColorRow.appendChild(fontColorLabel);
+  fontColorRow.appendChild(fontSwatchesContainer);
+  wb.appendChild(fontColorRow);
+  
+  // Helper function to update font color preview (if needed)
+  function updateFontColorPreview(color) {
+    // This can be used to update UI when font color is selected
+    // For now, it's a placeholder that can be extended
+  }
 
   // Create workers table container
   const workersTable = document.createElement("div");
   workersTable.className = "workers-table";
 
-  // Create grid header row
+  // Create grid header row (smaller font)
   const workersHeader = document.createElement("div");
   workersHeader.className = "workers-header";
+  workersHeader.style.cssText = "font-size:11px;";
 
   const nameHeader = document.createElement("span");
   nameHeader.textContent = "";
@@ -3541,10 +3668,10 @@ function renderSettings(){
   eyeHeader.textContent = "";
   const buttonHeader = document.createElement("span");
   buttonHeader.textContent = "Button";
-  buttonHeader.style.cssText = "text-align:center";
+  buttonHeader.style.cssText = "text-align:center;font-size:11px;";
   const fontHeader = document.createElement("span");
   fontHeader.textContent = "Font";
-  fontHeader.style.cssText = "text-align:center";
+  fontHeader.style.cssText = "text-align:center;font-size:11px;";
   const paletteHeader = document.createElement("span");
   paletteHeader.textContent = "";
   const deleteHeader = document.createElement("span");
@@ -4196,7 +4323,7 @@ function workerRow(i,w){
 
   const wrap=document.createElement("div"); wrap.className="worker-row";
 
-  // Name
+  // Name (smaller font)
 
   const name = document.createElement("input");
 
@@ -4204,7 +4331,7 @@ function workerRow(i,w){
 
   name.value = (w.name||"");
 
-  name.style.cssText="flex:2;min-width:260px;height:32px;padding:0 10px";
+  name.style.cssText="flex:2;min-width:260px;height:32px;padding:0 10px;font-size:13px;";
   
   // Update settings.workers directly on input
   name.dataset.index = i;
@@ -11219,12 +11346,97 @@ function initializeAppsPanel() {
   function closeStaffMembersModal() {
     if (staffMembersModal) {
       staffMembersModal.style.display = 'none';
+      // Reset form state when closing
+      hideStaffAddForm();
     }
   }
   
   // Make function globally available
   window.openStaffMembersModal = openStaffMembersModal;
   window.closeStaffMembersModal = closeStaffMembersModal;
+  
+  // Staff Members Form Toggle Functions
+  function showStaffAddForm() {
+    const placeholder = document.getElementById('staffPlaceholderMessage');
+    const form = document.getElementById('staffAddForm');
+    const addBtn = document.getElementById('addStaffMemberBtn');
+    
+    if (placeholder) placeholder.style.display = 'none';
+    if (form) form.style.display = 'block';
+    if (addBtn) {
+      // Optional: subtle active state (slightly darker gradient)
+      addBtn.style.opacity = '0.9';
+    }
+  }
+  
+  function hideStaffAddForm() {
+    const placeholder = document.getElementById('staffPlaceholderMessage');
+    const form = document.getElementById('staffAddForm');
+    const addBtn = document.getElementById('addStaffMemberBtn');
+    
+    if (placeholder) placeholder.style.display = 'block';
+    if (form) form.style.display = 'none';
+    if (addBtn) {
+      addBtn.style.opacity = '1';
+    }
+    
+    // Clear form fields
+    if (form) {
+      const inputs = form.querySelectorAll('input, select');
+      inputs.forEach(input => {
+        if (input.type === 'password') {
+          input.type = 'password'; // Keep as password
+        }
+        input.value = '';
+      });
+    }
+  }
+  
+  // Wire up Add Staff Member button
+  const addStaffBtn = document.getElementById('addStaffMemberBtn');
+  if (addStaffBtn) {
+    addStaffBtn.onclick = function(e) {
+      e.stopPropagation();
+      showStaffAddForm();
+    };
+  }
+  
+  // Wire up Cancel button
+  const cancelBtn = document.getElementById('staffFormCancel');
+  if (cancelBtn) {
+    cancelBtn.onclick = function(e) {
+      e.stopPropagation();
+      hideStaffAddForm();
+    };
+  }
+  
+  // Wire up PIN toggle
+  const pinToggle = document.getElementById('staffPinToggle');
+  const pinInput = document.getElementById('staffPin');
+  if (pinToggle && pinInput) {
+    pinToggle.onmousedown = function(e) {
+      e.preventDefault();
+      pinInput.type = pinInput.type === 'password' ? 'text' : 'password';
+    };
+    pinToggle.onmouseup = function(e) {
+      e.preventDefault();
+    };
+    pinToggle.onmouseleave = function(e) {
+      e.preventDefault();
+      // Optional: hide on mouse leave, or keep visible until next click
+      // pinInput.type = 'password';
+    };
+  }
+  
+  // Create button does nothing (disabled state)
+  const createBtn = document.getElementById('staffFormCreate');
+  if (createBtn) {
+    createBtn.onclick = function(e) {
+      e.stopPropagation();
+      e.preventDefault();
+      // Button is disabled, does nothing
+    };
+  }
 }
 
 // Helper functions for user data and avatar
@@ -18445,7 +18657,68 @@ window.openLog = async function(){
       </div>
       <!-- Right Content Area -->
       <div class="staff-content-area" style="flex:1;overflow-y:auto;display:flex;align-items:center;justify-content:center;padding:40px 20px;">
-        <p style="margin:0;font-size:14px;color:#6b7280;text-align:center;">Select a staff member to view details</p>
+        <!-- Placeholder Message -->
+        <p id="staffPlaceholderMessage" style="margin:0;font-size:14px;color:#6b7280;text-align:center;">Select a staff member to view details</p>
+        
+        <!-- Add Staff Member Form (hidden by default) -->
+        <div class="staff-form-section" id="staffAddForm" style="display:none;width:100%;max-width:500px;">
+          <div class="staff-form-card">
+            <div class="staff-form-header">
+              <h2 class="staff-form-title">New Staff Member</h2>
+              <div class="staff-form-divider"></div>
+            </div>
+          <div style="display:flex;flex-direction:column;gap:16px;">
+            <!-- First Name -->
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">First Name</label>
+              <input type="text" id="staffFirstName" placeholder="First name" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;">
+            </div>
+            
+            <!-- Last Name -->
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Last Name</label>
+              <input type="text" id="staffLastName" placeholder="Last name" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;">
+            </div>
+            
+            <!-- Email -->
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Email</label>
+              <input type="email" id="staffEmail" placeholder="email@example.com" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;">
+            </div>
+            
+            <!-- Phone -->
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Phone</label>
+              <input type="tel" id="staffPhone" placeholder="Phone number" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;">
+            </div>
+            
+            <!-- Role -->
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Role</label>
+              <select id="staffRole" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;cursor:pointer;">
+                <option value="">Select role</option>
+                <option value="manager">Manager</option>
+                <option value="technician">Technician</option>
+              </select>
+            </div>
+            
+            <!-- PIN -->
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">PIN</label>
+              <div style="position:relative;">
+                <input type="password" id="staffPin" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" placeholder="4-6 digits" style="width:100%;height:42px;padding:0 45px 0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;">
+                <button type="button" id="staffPinToggle" aria-label="Toggle PIN visibility" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px;color:#6b7280;font-size:16px;line-height:1;">👁️</button>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Form Actions -->
+          <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px;padding-top:20px;border-top:1px solid var(--border);">
+            <button id="staffFormCancel" type="button" class="btn-ghost" style="border:1px solid var(--border);background:#fff;border-radius:8px;padding:8px 16px;font-weight:600;cursor:pointer;font-size:14px;color:#374151;">Cancel</button>
+            <button id="staffFormCreate" type="button" class="btn-primary" style="border:0;background-image:linear-gradient(90deg,var(--brand1),var(--brand2));color:#fff;border-radius:8px;padding:8px 16px;font-weight:600;cursor:not-allowed;font-size:14px;opacity:0.6;" disabled>Create</button>
+          </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
