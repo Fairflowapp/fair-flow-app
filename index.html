@@ -3272,6 +3272,11 @@ function goToQueue() {
     userProfileScreen.style.display = 'none';
   }
   
+  // Close Staff Members if open
+  if (typeof closeStaffMembersModal === 'function') {
+    closeStaffMembersModal();
+  }
+  
   // ALWAYS show owner-view (main queue view) - regardless of current state
   const ownerView = document.getElementById('owner-view');
   const joinBar = document.getElementById('joinBar');
@@ -6504,6 +6509,11 @@ function openTasks() {
     const userProfileScreen = document.getElementById('userProfileScreen');
     if (userProfileScreen) {
       userProfileScreen.style.display = 'none';
+    }
+    
+    // Close Staff Members if open
+    if (typeof closeStaffMembersModal === 'function') {
+      closeStaffMembersModal();
     }
     
     // Hide main content and Queue-specific controls (joinBar and queueControls)
@@ -10821,6 +10831,11 @@ if (!window.__originalResetDay) {
 
 async function openHistoryFromNav() {
   try {
+    // Close Staff Members if open
+    if (typeof closeStaffMembersModal === 'function') {
+      closeStaffMembersModal();
+    }
+    
     if (!window.securePromptOnce) {
       alert("Admin only");
       return;
@@ -10849,6 +10864,10 @@ async function openLogWithNav() {
 async function openSettingsSecureWithNav() {
   try {
   console.log('Settings clicked');
+  // Close Staff Members if open
+  if (typeof closeStaffMembersModal === 'function') {
+    closeStaffMembersModal();
+  }
   ensureTasksScreenHidden();
   return (window.__originalOpenSettingsSecure || openSettingsSecure)();
   } catch (e) {
@@ -11127,10 +11146,20 @@ function initializeAppsPanel() {
         content.style.borderColor = 'var(--border)';
       });
       
-      // Wire up click handlers to existing navigation functions
+      // Wire up click handlers to existing navigation handlers
       item.onclick = function(e) {
         e.stopPropagation();
         closeAppsPanel();
+        
+        // Check if this is the Staff Members button
+        const isStaffMembers = item.getAttribute('data-staff') === 'true';
+        if (isStaffMembers) {
+          // Open Staff Members modal
+          if (typeof openStaffMembersModal === 'function') {
+            openStaffMembersModal();
+          }
+          return;
+        }
         
         // Route to existing navigation handlers
         switch(appType) {
@@ -11167,6 +11196,35 @@ function initializeAppsPanel() {
    * ✓ tiles navigate correctly (Queue/Tasks/History/Settings)
    * ✓ disabled tiles (Inbox/Inventory) do nothing
    */
+  
+  // Staff Members Functions
+  const staffMembersModal = document.getElementById('staffMembersModal');
+  
+  function openStaffMembersModal() {
+    if (staffMembersModal) {
+      // Get the global header element to calculate its height
+      const header = document.querySelector('.header');
+      let headerHeight = 0;
+      if (header) {
+        headerHeight = header.offsetHeight || header.getBoundingClientRect().height || 0;
+      }
+      
+      // Position Staff Members below the header
+      staffMembersModal.style.top = headerHeight + 'px';
+      staffMembersModal.style.height = `calc(100vh - ${headerHeight}px)`;
+      staffMembersModal.style.display = 'flex';
+    }
+  }
+  
+  function closeStaffMembersModal() {
+    if (staffMembersModal) {
+      staffMembersModal.style.display = 'none';
+    }
+  }
+  
+  // Make function globally available
+  window.openStaffMembersModal = openStaffMembersModal;
+  window.closeStaffMembersModal = closeStaffMembersModal;
 }
 
 // Helper functions for user data and avatar
@@ -18359,6 +18417,35 @@ window.openLog = async function(){
       </div>
       <div class="tasks-modal-content" style="padding:20px;max-height:70vh;overflow-y:auto;">
         <div id="taskInstructionsText" style="font-size:14px;color:#333;line-height:1.6;white-space:pre-wrap;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Staff Members Full-Screen Overlay -->
+  <div id="staffMembersModal" class="staff-modal-overlay" style="display:none;position:fixed;left:0;right:0;bottom:0;width:100vw;background:#fff;z-index:99999;overflow:hidden;flex-direction:column;pointer-events:auto;">
+    <!-- 2-Column Layout Container -->
+    <div class="staff-modal-content" style="flex:1;overflow:hidden;display:flex;min-height:0;">
+      <!-- Left Sidebar -->
+      <div class="staff-sidebar" style="width:220px;flex-shrink:0;background:var(--muted);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;">
+        <!-- Add Staff Member Button -->
+        <div style="padding:20px 20px 16px 20px;">
+          <button id="addStaffMemberBtn" class="btn-primary" style="width:100%;border:0;background-image:linear-gradient(90deg,var(--brand1),var(--brand2));color:#fff;border-radius:999px;padding:5px 10px;font-weight:800;cursor:pointer;box-shadow:0 4px 10px rgba(0,0,0,.08);font-size:11px;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;line-height:1.2;">
+            <span style="font-size:13px;line-height:1;flex-shrink:0;">+</span>
+            <span style="flex-shrink:0;">Add Staff Member</span>
+          </button>
+        </div>
+        <!-- Managers Section -->
+        <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);padding-top:20px;">
+          <h3 style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Managers</h3>
+        </div>
+        <!-- Technicians Section -->
+        <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);margin-top:8px;padding-top:20px;">
+          <h3 style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Technicians</h3>
+        </div>
+      </div>
+      <!-- Right Content Area -->
+      <div class="staff-content-area" style="flex:1;overflow-y:auto;display:flex;align-items:center;justify-content:center;padding:40px 20px;">
+        <p style="margin:0;font-size:14px;color:#6b7280;text-align:center;">Select a staff member to view details</p>
       </div>
     </div>
   </div>
