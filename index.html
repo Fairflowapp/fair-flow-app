@@ -776,6 +776,26 @@ dialog footer button, .code-dialog footer button {
   background: var(--border) !important;
 }
 
+.staff-color-popover {
+  position: absolute;
+  top: 100%;
+  margin-top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 260px;
+  max-width: 260px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 12px;
+  z-index: 9999;
+}
+
+.staff-color-hue {
+  background: linear-gradient(to right, #ff0000 0%, #ffff00 16.66%, #00ff00 33.33%, #00ffff 50%, #0000ff 66.66%, #ff00ff 83.33%, #ff0000 100%);
+}
+
 </style>
 
 
@@ -2557,14 +2577,42 @@ function renderSelect(){
   }
 }
 
-function colorOf(name){ const f=settings.workers.find(w=>w.name===name); return f?f.color:"#111827"; }
+function colorOf(name){ 
+  const f=settings.workers.find(w=>w.name===name); 
+  if (f) {
+    // Prefer buttonColor, fallback to color, then first palette color
+    if (f.buttonColor) return f.buttonColor;
+    if (f.color) return f.color;
+  }
+  const palette = settings.brandPalette || DEFAULTS.brandPalette;
+  return palette[0] || "#111827";
+}
+
+// Helper function to calculate luminance of a hex color
+function getLuminance(hex) {
+  const rgb = hex.match(/[A-Za-z0-9]{2}/g)?.map(v => parseInt(v, 16)) || [0, 0, 0];
+  const [r, g, b] = rgb.map(val => {
+    val = val / 255;
+    return val <= 0.03928 ? val / 12.92 : Math.pow((val + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
 
 function fontColorOf(name){
-
   const w = (settings.workers||[]).find(x=>x.name===name);
-
-  return (w && w.fcolor) ? w.fcolor : '#ffffff';
-
+  
+  // If worker has explicit fontColor, use it
+  if (w && w.fontColor) return w.fontColor;
+  
+  // Otherwise calculate based on buttonColor/color luminance
+  const bgColor = w ? (w.buttonColor || w.color) : null;
+  if (bgColor) {
+    const luminance = getLuminance(bgColor);
+    return luminance > 0.5 ? '#000000' : '#ffffff';
+  }
+  
+  // Default fallback
+  return '#ffffff';
 }
 
 
@@ -11367,6 +11415,509 @@ function initializeAppsPanel() {
       // Optional: subtle active state (slightly darker gradient)
       addBtn.style.opacity = '0.9';
     }
+    
+    // Initialize button color swatches
+    const palette = settings.brandPalette || DEFAULTS.brandPalette;
+    const preview = document.getElementById('staffButtonColorPreview');
+    const swatchesContainer = document.getElementById('staffButtonColorSwatches');
+    const moreBtn = document.getElementById('staffColorMoreBtn');
+    const popover = document.getElementById('staffColorPopover');
+    const color2D = document.getElementById('staffColorPicker2D');
+    const color2DIndicator = document.getElementById('staffColorPickerIndicator');
+    const colorHue = document.getElementById('staffColorPickerHue');
+    const colorHueIndicator = document.getElementById('staffColorPickerHueIndicator');
+    const colorHex = document.getElementById('staffColorPickerHex');
+    
+    // Color state (HSV)
+    let currentHue = 0;
+    let currentSaturation = 100;
+    let currentValue = 100;
+    
+    // Convert HSV to RGB
+    function hsvToRgb(h, s, v) {
+      h = h / 360;
+      s = s / 100;
+      v = v / 100;
+      const i = Math.floor(h * 6);
+      const f = h * 6 - i;
+      const p = v * (1 - s);
+      const q = v * (1 - f * s);
+      const t = v * (1 - (1 - f) * s);
+      let r, g, b;
+      switch (i % 6) {
+        case 0: r = v; g = t; b = p; break;
+        case 1: r = q; g = v; b = p; break;
+        case 2: r = p; g = v; b = t; break;
+        case 3: r = p; g = q; b = v; break;
+        case 4: r = t; g = p; b = v; break;
+        case 5: r = v; g = p; b = q; break;
+      }
+      return {
+        r: Math.round(r * 255),
+        g: Math.round(g * 255),
+        b: Math.round(b * 255)
+      };
+    }
+    
+    // Convert RGB to HEX
+    function rgbToHex(r, g, b) {
+      return '#' + [r, g, b].map(x => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? '0' + hex : hex;
+      }).join('').toUpperCase();
+    }
+    
+    // Convert HEX to HSV
+    function hexToHsv(hex) {
+      const r = parseInt(hex.slice(1, 3), 16) / 255;
+      const g = parseInt(hex.slice(3, 5), 16) / 255;
+      const b = parseInt(hex.slice(5, 7), 16) / 255;
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const delta = max - min;
+      let h = 0;
+      if (delta !== 0) {
+        if (max === r) h = ((g - b) / delta) % 6;
+        else if (max === g) h = (b - r) / delta + 2;
+        else h = (r - g) / delta + 4;
+      }
+      h = Math.round(h * 60);
+      if (h < 0) h += 360;
+      const s = max === 0 ? 0 : Math.round((delta / max) * 100);
+      const v = Math.round(max * 100);
+      return { h, s, v };
+    }
+    
+    // Update 2D gradient background based on current hue
+    function update2DGradient() {
+      const hueColor = hsvToRgb(currentHue, 100, 100);
+      const hueHex = rgbToHex(hueColor.r, hueColor.g, hueColor.b);
+      color2D.style.background = 
+        `linear-gradient(to right, #fff 0%, transparent 100%),
+         linear-gradient(to top, #000 0%, transparent 100%),
+         ${hueHex}`;
+    }
+    
+    // Update selected color from HSV
+    function updateColorFromHsv() {
+      const rgb = hsvToRgb(currentHue, currentSaturation, currentValue);
+      const hex = rgbToHex(rgb.r, rgb.g, rgb.b);
+      updateSelectedColor(hex);
+    }
+    
+    // Update HSV from hex
+    function updateHsvFromHex(hex) {
+      const hsv = hexToHsv(hex);
+      currentHue = hsv.h;
+      currentSaturation = hsv.s;
+      currentValue = hsv.v;
+      update2DGradient();
+      updateIndicators();
+    }
+    
+    // Update indicator positions
+    function updateIndicators() {
+      color2DIndicator.style.left = (currentSaturation) + '%';
+      color2DIndicator.style.top = (100 - currentValue) + '%';
+      colorHueIndicator.style.left = (currentHue / 360 * 100) + '%';
+    }
+    
+    // Helper function to update selected color
+    function updateSelectedColor(color) {
+      const normalizedColor = color.toUpperCase();
+      if (!normalizedColor.startsWith('#')) {
+        normalizedColor = '#' + normalizedColor;
+      }
+      preview.style.background = normalizedColor;
+      form.setAttribute('data-selected-color', normalizedColor);
+      
+      // Update hex input
+      if (colorHex && colorHex.value.toUpperCase() !== normalizedColor) {
+        colorHex.value = normalizedColor;
+      }
+      
+      // Clear all selected states in main row
+      swatchesContainer.querySelectorAll('[data-selected]').forEach(s => {
+        s.removeAttribute('data-selected');
+        s.style.border = '1px solid #d1d5db';
+      });
+      
+      // Mark as selected in main row if it's a base palette color
+      const paletteIndex = palette.indexOf(normalizedColor);
+      if (paletteIndex >= 0) {
+        const paletteSwatch = swatchesContainer.querySelector('[data-color="' + normalizedColor + '"]');
+        if (paletteSwatch) {
+          paletteSwatch.setAttribute('data-selected', 'true');
+          paletteSwatch.style.border = '2px solid #111827';
+        }
+      }
+    }
+    
+    // Function to close popover
+    function closePopover() {
+      if (popover) {
+        popover.hidden = true;
+      }
+    }
+    
+    // Function to toggle popover
+    function togglePopover() {
+      if (!popover) return;
+      const isHidden = popover.hidden;
+      popover.hidden = !isHidden;
+      if (!isHidden) {
+        // Initialize color picker with current color
+        const currentColor = form.getAttribute('data-selected-color') || palette[0] || '#FBE54D';
+        updateHsvFromHex(currentColor);
+      }
+    }
+    
+    if (preview && swatchesContainer && moreBtn && popover && color2D && colorHue && colorHex) {
+      // Set default to first palette color
+      const defaultColor = palette[0] || '#FBE54D';
+      preview.style.background = defaultColor;
+      form.setAttribute('data-selected-color', defaultColor);
+      updateHsvFromHex(defaultColor);
+      
+      // Clear and populate palette swatches in main row
+      swatchesContainer.innerHTML = '';
+      palette.forEach((color, index) => {
+        const swatch = document.createElement('div');
+        swatch.className = 'staff-color-swatch';
+        swatch.style.width = '28px';
+        swatch.style.height = '28px';
+        swatch.style.borderRadius = '50%';
+        swatch.style.background = color;
+        swatch.style.border = index === 0 ? '2px solid #111827' : '1px solid #d1d5db';
+        swatch.style.cursor = 'pointer';
+        swatch.style.flexShrink = '0';
+        swatch.setAttribute('data-color', color);
+        if (index === 0) swatch.setAttribute('data-selected', 'true');
+        
+        swatch.onclick = function() {
+          updateSelectedColor(color);
+          updateHsvFromHex(color);
+        };
+        
+        swatchesContainer.appendChild(swatch);
+      });
+      
+      // Initialize 2D gradient
+      update2DGradient();
+      
+      // Handle 2D picker mouse events
+      let isDragging2D = false;
+      color2D.addEventListener('mousedown', function(e) {
+        isDragging2D = true;
+        handle2DClick(e);
+      });
+      document.addEventListener('mousemove', function(e) {
+        if (isDragging2D) {
+          handle2DClick(e);
+        }
+      });
+      document.addEventListener('mouseup', function() {
+        isDragging2D = false;
+      });
+      
+      function handle2DClick(e) {
+        const rect = color2D.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+        currentSaturation = Math.round(x * 100);
+        currentValue = Math.round((1 - y) * 100);
+        updateIndicators();
+        updateColorFromHsv();
+      }
+      
+      // Handle hue slider mouse events
+      let isDraggingHue = false;
+      colorHue.addEventListener('mousedown', function(e) {
+        isDraggingHue = true;
+        handleHueClick(e);
+      });
+      document.addEventListener('mousemove', function(e) {
+        if (isDraggingHue) {
+          handleHueClick(e);
+        }
+      });
+      document.addEventListener('mouseup', function() {
+        isDraggingHue = false;
+      });
+      
+      function handleHueClick(e) {
+        const rect = colorHue.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        currentHue = Math.round(x * 360);
+        update2DGradient();
+        updateIndicators();
+        updateColorFromHsv();
+      }
+      
+      // Handle HEX input
+      colorHex.addEventListener('input', function(e) {
+        const value = e.target.value.trim();
+        if (/^#?[0-9A-Fa-f]{6}$/.test(value)) {
+          const hex = value.startsWith('#') ? value : '#' + value;
+          updateHsvFromHex(hex.toUpperCase());
+          updateSelectedColor(hex.toUpperCase());
+        }
+      });
+      
+      // Wire up "+" button to toggle popover
+      moreBtn.onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        togglePopover();
+      };
+      
+      // Close popover when clicking outside
+      document.addEventListener('click', function(e) {
+        if (!popover.hidden && !popover.contains(e.target) && e.target !== moreBtn) {
+          closePopover();
+        }
+      });
+      
+      // Close popover on Escape key
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && !popover.hidden) {
+          closePopover();
+        }
+      });
+    }
+    
+    // Initialize Font Color
+    const fontColorPreview = document.getElementById('staffFontColorPreview');
+    const fontColorSwatchesContainer = document.getElementById('staffFontColorSwatches');
+    const fontColorMoreBtn = document.getElementById('staffFontColorMoreBtn');
+    const fontColorPopover = document.getElementById('staffFontColorPopover');
+    const fontColor2D = document.getElementById('staffFontColorPicker2D');
+    const fontColor2DIndicator = document.getElementById('staffFontColorPickerIndicator');
+    const fontColorHue = document.getElementById('staffFontColorPickerHue');
+    const fontColorHueIndicator = document.getElementById('staffFontColorPickerHueIndicator');
+    const fontColorHex = document.getElementById('staffFontColorPickerHex');
+    
+    // Font color state (HSV)
+    let fontCurrentHue = 0;
+    let fontCurrentSaturation = 0;
+    let fontCurrentValue = 0;
+    
+    // Font color preset colors
+    const fontColorPresets = ['#111111', '#FFFFFF'];
+    const defaultFontColor = '#111111';
+    
+    // Update 2D gradient for font color
+    function updateFont2DGradient() {
+      const hueColor = hsvToRgb(fontCurrentHue, 100, 100);
+      const hueHex = rgbToHex(hueColor.r, hueColor.g, hueColor.b);
+      fontColor2D.style.background = 
+        `linear-gradient(to right, #fff 0%, transparent 100%),
+         linear-gradient(to top, #000 0%, transparent 100%),
+         ${hueHex}`;
+    }
+    
+    // Update font color from HSV
+    function updateFontColorFromHsv() {
+      const rgb = hsvToRgb(fontCurrentHue, fontCurrentSaturation, fontCurrentValue);
+      const hex = rgbToHex(rgb.r, rgb.g, rgb.b);
+      updateSelectedFontColor(hex);
+    }
+    
+    // Update HSV from hex for font color
+    function updateFontHsvFromHex(hex) {
+      const hsv = hexToHsv(hex);
+      fontCurrentHue = hsv.h;
+      fontCurrentSaturation = hsv.s;
+      fontCurrentValue = hsv.v;
+      updateFont2DGradient();
+      updateFontIndicators();
+    }
+    
+    // Update font color indicator positions
+    function updateFontIndicators() {
+      fontColor2DIndicator.style.left = (fontCurrentSaturation) + '%';
+      fontColor2DIndicator.style.top = (100 - fontCurrentValue) + '%';
+      fontColorHueIndicator.style.left = (fontCurrentHue / 360 * 100) + '%';
+    }
+    
+    // Helper function to update selected font color
+    function updateSelectedFontColor(color) {
+      const normalizedColor = color.toUpperCase();
+      if (!normalizedColor.startsWith('#')) {
+        normalizedColor = '#' + normalizedColor;
+      }
+      form.setAttribute('data-selected-font-color', normalizedColor);
+      
+      // Update preview swatch
+      if (fontColorPreview) {
+        fontColorPreview.style.background = normalizedColor;
+      }
+      
+      // Update hex input
+      if (fontColorHex && fontColorHex.value.toUpperCase() !== normalizedColor) {
+        fontColorHex.value = normalizedColor;
+      }
+      
+      // Clear all selected states in font color row
+      fontColorSwatchesContainer.querySelectorAll('[data-selected]').forEach(s => {
+        s.removeAttribute('data-selected');
+        s.style.border = '1px solid #d1d5db';
+      });
+      
+      // Clear "+" button selection
+      if (fontColorMoreBtn) {
+        fontColorMoreBtn.style.border = '1px solid #d1d5db';
+        fontColorMoreBtn.removeAttribute('data-selected');
+      }
+      
+      // Mark as selected if it's a preset color
+      const presetIndex = fontColorPresets.indexOf(normalizedColor);
+      if (presetIndex >= 0) {
+        const presetSwatch = fontColorSwatchesContainer.querySelector('[data-color="' + normalizedColor + '"]');
+        if (presetSwatch) {
+          presetSwatch.setAttribute('data-selected', 'true');
+          presetSwatch.style.border = '2px solid #111827';
+        }
+      } else {
+        // Custom color - mark "+" button
+        if (fontColorMoreBtn) {
+          fontColorMoreBtn.setAttribute('data-selected', 'true');
+          fontColorMoreBtn.style.border = '2px solid #111827';
+        }
+      }
+    }
+    
+    // Function to close font color popover
+    function closeFontColorPopover() {
+      if (fontColorPopover) {
+        fontColorPopover.hidden = true;
+      }
+    }
+    
+    // Function to toggle font color popover
+    function toggleFontColorPopover() {
+      if (!fontColorPopover) return;
+      const isHidden = fontColorPopover.hidden;
+      fontColorPopover.hidden = !isHidden;
+      if (!isHidden) {
+        // Initialize color picker with current font color
+        const currentColor = form.getAttribute('data-selected-font-color') || defaultFontColor;
+        updateFontHsvFromHex(currentColor);
+      }
+    }
+    
+    if (fontColorPreview && fontColorSwatchesContainer && fontColorMoreBtn && fontColorPopover && fontColor2D && fontColorHue && fontColorHex) {
+      // Set default font color
+      form.setAttribute('data-selected-font-color', defaultFontColor);
+      fontColorPreview.style.background = defaultFontColor;
+      
+      // Clear and populate font color preset swatches
+      fontColorSwatchesContainer.innerHTML = '';
+      fontColorPresets.forEach((color, index) => {
+        const swatch = document.createElement('div');
+        swatch.className = 'staff-color-swatch';
+        swatch.style.width = '28px';
+        swatch.style.height = '28px';
+        swatch.style.borderRadius = '50%';
+        swatch.style.background = color;
+        swatch.style.border = (index === 0) ? '2px solid #111827' : '1px solid #d1d5db';
+        swatch.style.cursor = 'pointer';
+        swatch.style.flexShrink = '0';
+        swatch.setAttribute('data-color', color);
+        if (index === 0) swatch.setAttribute('data-selected', 'true');
+        
+        swatch.onclick = function() {
+          updateSelectedFontColor(color);
+          closeFontColorPopover();
+        };
+        
+        fontColorSwatchesContainer.appendChild(swatch);
+      });
+      
+      // Initialize 2D gradient
+      updateFontHsvFromHex(defaultFontColor);
+      updateFont2DGradient();
+      
+      // Handle 2D picker mouse events for font color
+      let isDraggingFont2D = false;
+      fontColor2D.addEventListener('mousedown', function(e) {
+        isDraggingFont2D = true;
+        handleFont2DClick(e);
+      });
+      document.addEventListener('mousemove', function(e) {
+        if (isDraggingFont2D) {
+          handleFont2DClick(e);
+        }
+      });
+      document.addEventListener('mouseup', function() {
+        isDraggingFont2D = false;
+      });
+      
+      function handleFont2DClick(e) {
+        const rect = fontColor2D.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+        fontCurrentSaturation = Math.round(x * 100);
+        fontCurrentValue = Math.round((1 - y) * 100);
+        updateFontIndicators();
+        updateFontColorFromHsv();
+      }
+      
+      // Handle hue slider mouse events for font color
+      let isDraggingFontHue = false;
+      fontColorHue.addEventListener('mousedown', function(e) {
+        isDraggingFontHue = true;
+        handleFontHueClick(e);
+      });
+      document.addEventListener('mousemove', function(e) {
+        if (isDraggingFontHue) {
+          handleFontHueClick(e);
+        }
+      });
+      document.addEventListener('mouseup', function() {
+        isDraggingFontHue = false;
+      });
+      
+      function handleFontHueClick(e) {
+        const rect = fontColorHue.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        fontCurrentHue = Math.round(x * 360);
+        updateFont2DGradient();
+        updateFontIndicators();
+        updateFontColorFromHsv();
+      }
+      
+      // Handle HEX input for font color
+      fontColorHex.addEventListener('input', function(e) {
+        const value = e.target.value.trim();
+        if (/^#?[0-9A-Fa-f]{6}$/.test(value)) {
+          const hex = value.startsWith('#') ? value : '#' + value;
+          updateFontHsvFromHex(hex.toUpperCase());
+          updateSelectedFontColor(hex.toUpperCase());
+        }
+      });
+      
+      // Wire up "+" button to toggle font color popover
+      fontColorMoreBtn.onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleFontColorPopover();
+      };
+      
+      // Close font color popover when clicking outside
+      document.addEventListener('click', function(e) {
+        if (!fontColorPopover.hidden && !fontColorPopover.contains(e.target) && e.target !== fontColorMoreBtn) {
+          closeFontColorPopover();
+        }
+      });
+      
+      // Close font color popover on Escape key
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && !fontColorPopover.hidden) {
+          closeFontColorPopover();
+        }
+      });
+    }
   }
   
   function hideStaffAddForm() {
@@ -11389,6 +11940,59 @@ function initializeAppsPanel() {
         }
         input.value = '';
       });
+      
+      // Reset button color selection
+      const preview = document.getElementById('staffButtonColorPreview');
+      const swatchesContainer = document.getElementById('staffButtonColorSwatches');
+      const popover = document.getElementById('staffColorPopover');
+      if (preview && swatchesContainer) {
+        const palette = settings.brandPalette || DEFAULTS.brandPalette;
+        const defaultColor = palette[0] || '#FBE54D';
+        preview.style.background = defaultColor;
+        form.setAttribute('data-selected-color', defaultColor);
+        swatchesContainer.querySelectorAll('[data-selected]').forEach(s => {
+          s.removeAttribute('data-selected');
+          s.style.border = '1px solid #d1d5db';
+        });
+        const firstSwatch = swatchesContainer.querySelector('[data-color="' + defaultColor + '"]');
+        if (firstSwatch) {
+          firstSwatch.setAttribute('data-selected', 'true');
+          firstSwatch.style.border = '2px solid #111827';
+        }
+        // Close popover if open
+        if (popover) {
+          popover.hidden = true;
+        }
+      }
+      
+      // Reset font color selection
+      const fontColorPreview = document.getElementById('staffFontColorPreview');
+      const fontColorSwatchesContainer = document.getElementById('staffFontColorSwatches');
+      const fontColorPopover = document.getElementById('staffFontColorPopover');
+      const fontColorMoreBtn = document.getElementById('staffFontColorMoreBtn');
+      if (fontColorPreview && fontColorSwatchesContainer) {
+        const defaultFontColor = '#111111';
+        form.setAttribute('data-selected-font-color', defaultFontColor);
+        fontColorPreview.style.background = defaultFontColor;
+        fontColorSwatchesContainer.querySelectorAll('[data-selected]').forEach(s => {
+          s.removeAttribute('data-selected');
+          s.style.border = '1px solid #d1d5db';
+        });
+        const firstFontSwatch = fontColorSwatchesContainer.querySelector('[data-color="' + defaultFontColor + '"]');
+        if (firstFontSwatch) {
+          firstFontSwatch.setAttribute('data-selected', 'true');
+          firstFontSwatch.style.border = '2px solid #111827';
+        }
+        // Clear "+" button selection
+        if (fontColorMoreBtn) {
+          fontColorMoreBtn.style.border = '1px solid #d1d5db';
+          fontColorMoreBtn.removeAttribute('data-selected');
+        }
+        // Close popover if open
+        if (fontColorPopover) {
+          fontColorPopover.hidden = true;
+        }
+      }
     }
   }
   
@@ -11428,13 +12032,55 @@ function initializeAppsPanel() {
     };
   }
   
-  // Create button does nothing (disabled state)
+  // Create button handler
   const createBtn = document.getElementById('staffFormCreate');
   if (createBtn) {
     createBtn.onclick = function(e) {
       e.stopPropagation();
       e.preventDefault();
-      // Button is disabled, does nothing
+      
+      const firstName = document.getElementById('staffFirstName')?.value.trim();
+      const lastName = document.getElementById('staffLastName')?.value.trim();
+      const email = document.getElementById('staffEmail')?.value.trim();
+      const phone = document.getElementById('staffPhone')?.value.trim();
+      const role = document.getElementById('staffRole')?.value;
+      const pin = document.getElementById('staffPin')?.value.trim();
+      const form = document.getElementById('staffAddForm');
+      const selectedColor = form?.getAttribute('data-selected-color') || (settings.brandPalette || DEFAULTS.brandPalette)[0];
+      const selectedFontColor = form?.getAttribute('data-selected-font-color') || '#111111';
+      
+      // Create full name
+      const fullName = (firstName + ' ' + lastName).trim();
+      
+      if (!fullName || !pin || !role) {
+        return; // Form validation should prevent this
+      }
+      
+      // Create worker object
+      const newWorker = {
+        name: fullName,
+        pin: pin,
+        buttonColor: selectedColor,
+        fontColor: selectedFontColor,
+        email: email || undefined,
+        phone: phone || undefined,
+        role: role
+      };
+      
+      // Add to workers array
+      if (!settings.workers) settings.workers = [];
+      settings.workers.push(newWorker);
+      
+      // Save settings
+      save();
+      
+      // Hide form and reset
+      hideStaffAddForm();
+      
+      // Reload/render staff list if needed
+      if (typeof renderStaffMembers === 'function') {
+        renderStaffMembers();
+      }
     };
   }
 }
@@ -18700,6 +19346,58 @@ window.openLog = async function(){
                 <option value="manager">Manager</option>
                 <option value="technician">Technician</option>
               </select>
+            </div>
+            
+            <!-- Button Color -->
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Button Color</label>
+              <div class="staff-color-row" style="position:relative;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div id="staffButtonColorPreview" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--border);flex-shrink:0;background:#FBE54D;"></div>
+                <div id="staffButtonColorSwatches" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"></div>
+                <div id="staffColorMoreBtn" class="staff-color-swatch" style="width:28px;height:28px;border-radius:50%;border:1px solid #d1d5db;background:#f3f4f6;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:16px;line-height:1;font-weight:300;">+</div>
+                <div id="staffColorPopover" class="staff-color-popover" hidden>
+                  <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div id="staffColorPicker2D" class="staff-color-2d" style="width:100%;height:180px;border-radius:8px;border:1px solid var(--border);cursor:crosshair;position:relative;overflow:hidden;">
+                      <div id="staffColorPickerIndicator" style="position:absolute;width:12px;height:12px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,0.3);pointer-events:none;transform:translate(-50%,-50%);top:0%;left:100%;"></div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                      <div id="staffColorPickerHue" class="staff-color-hue" style="width:100%;height:12px;border-radius:6px;border:1px solid var(--border);cursor:pointer;position:relative;">
+                        <div id="staffColorPickerHueIndicator" style="position:absolute;width:14px;height:14px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,0.3);pointer-events:none;transform:translate(-50%,-50%);top:50%;left:0%;"></div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <label style="font-size:12px;color:#6b7280;flex-shrink:0;">HEX:</label>
+                        <input type="text" id="staffColorPickerHex" style="flex:1;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace;text-transform:uppercase;" maxlength="7" placeholder="#000000">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Font Color -->
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Font Color</label>
+              <div class="staff-color-row" style="position:relative;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div id="staffFontColorPreview" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--border);flex-shrink:0;background:#111111;"></div>
+                <div id="staffFontColorSwatches" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"></div>
+                <div id="staffFontColorMoreBtn" class="staff-color-swatch" style="width:28px;height:28px;border-radius:50%;border:1px solid #d1d5db;background:#f3f4f6;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:16px;line-height:1;font-weight:300;">+</div>
+                <div id="staffFontColorPopover" class="staff-color-popover" hidden>
+                  <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div id="staffFontColorPicker2D" class="staff-color-2d" style="width:100%;height:180px;border-radius:8px;border:1px solid var(--border);cursor:crosshair;position:relative;overflow:hidden;">
+                      <div id="staffFontColorPickerIndicator" style="position:absolute;width:12px;height:12px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,0.3);pointer-events:none;transform:translate(-50%,-50%);top:0%;left:100%;"></div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                      <div id="staffFontColorPickerHue" class="staff-color-hue" style="width:100%;height:12px;border-radius:6px;border:1px solid var(--border);cursor:pointer;position:relative;">
+                        <div id="staffFontColorPickerHueIndicator" style="position:absolute;width:14px;height:14px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,0.3);pointer-events:none;transform:translate(-50%,-50%);top:50%;left:0%;"></div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <label style="font-size:12px;color:#6b7280;flex-shrink:0;">HEX:</label>
+                        <input type="text" id="staffFontColorPickerHex" style="flex:1;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace;text-transform:uppercase;" maxlength="7" placeholder="#000000">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
             
             <!-- PIN -->
