@@ -12067,12 +12067,14 @@ function initializeAppsPanel() {
         role: role
       };
       
-      // Add to workers array
-      if (!settings.workers) settings.workers = [];
-      settings.workers.push(newWorker);
-      
-      // Save settings
-      save();
+      // AUTH FOUNDATION ONLY: Create staff profile and invite
+      const staffId = ffCreateStaffProfile(newWorker);
+      if (email && email.trim()) {
+        const invite = ffCreateInvite(email, staffId);
+        if (invite) {
+          ffSendInviteEmail(email, invite.token);
+        }
+      }
       
       // Hide form and reset
       hideStaffAddForm();
@@ -16182,6 +16184,185 @@ eye.addEventListener("mouseup",hide); eye.addEventListener("mouseleave",hide); e
 // Save
 
 function save(){ ls("ffv24_settings",settings); ls("ffv24_queue",queue); ls("ffv24_service",service); ls("ffv24_log",log); syncWorkersToUsers(); }
+
+// ===== AUTH FOUNDATION ONLY =====
+// Helper functions for staff profile and invite management
+
+/**
+ * Create or update a staff profile in settings.workers
+ * @param {Object} staffData - Staff data object with name, pin, role, buttonColor, fontColor, email, phone, etc.
+ * @returns {string} staffId - The ID of the created/updated staff member
+ */
+function ffCreateStaffProfile(staffData) {
+  if (!settings.workers) settings.workers = [];
+  
+  // Generate a unique ID if not provided
+  let staffId = staffData.id;
+  if (!staffId) {
+    // Generate a simple ID based on timestamp and random
+    staffId = 'staff_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
+  
+  // Check if staff with this ID already exists
+  const existingIndex = settings.workers.findIndex(w => w.id === staffId);
+  
+  const staffProfile = {
+    id: staffId,
+    name: staffData.name,
+    pin: staffData.pin,
+    role: staffData.role,
+    buttonColor: staffData.buttonColor,
+    fontColor: staffData.fontColor || '#111111',
+    email: staffData.email || undefined,
+    phone: staffData.phone || undefined,
+    firebaseUid: staffData.firebaseUid || undefined
+  };
+  
+  if (existingIndex >= 0) {
+    // Update existing
+    settings.workers[existingIndex] = { ...settings.workers[existingIndex], ...staffProfile };
+  } else {
+    // Add new
+    settings.workers.push(staffProfile);
+  }
+  
+  save();
+  return staffId;
+}
+
+/**
+ * Create an invite record for a staff member
+ * @param {string} email - Email address for the invite
+ * @param {string} staffId - The ID of the staff member
+ * @returns {Object} invite - The created invite object
+ */
+function ffCreateInvite(email, staffId) {
+  if (!email || !staffId) {
+    console.warn('[ffCreateInvite] Missing email or staffId');
+    return null;
+  }
+  
+  // Generate unique token
+  const token = 'inv_' + Date.now() + '_' + Math.random().toString(36).substr(2, 16);
+  
+  const invite = {
+    email: email.toLowerCase().trim(),
+    staffId: staffId,
+    token: token,
+    status: 'pending',
+    createdAt: Date.now()
+  };
+  
+  // Load existing invites
+  let invites = [];
+  try {
+    const stored = localStorage.getItem('ff_staff_invites_v1');
+    if (stored) {
+      invites = JSON.parse(stored);
+      if (!Array.isArray(invites)) invites = [];
+    }
+  } catch (e) {
+    console.warn('[ffCreateInvite] Error loading invites:', e);
+    invites = [];
+  }
+  
+  // Remove any existing pending invites for this email/staffId
+  invites = invites.filter(inv => 
+    !(inv.email === invite.email && inv.staffId === invite.staffId && inv.status === 'pending')
+  );
+  
+  // Add new invite
+  invites.push(invite);
+  
+  // Save invites
+  try {
+    localStorage.setItem('ff_staff_invites_v1', JSON.stringify(invites));
+  } catch (e) {
+    console.error('[ffCreateInvite] Error saving invites:', e);
+    return null;
+  }
+  
+  return invite;
+}
+
+/**
+ * Accept an invite and link staff profile to Firebase UID
+ * @param {string} token - The invite token
+ * @param {string} firebaseUid - The Firebase user ID
+ * @returns {Object|null} staffProfile - The staff profile if successful, null otherwise
+ */
+function ffAcceptInvite(token, firebaseUid) {
+  if (!token || !firebaseUid) {
+    console.warn('[ffAcceptInvite] Missing token or firebaseUid');
+    return null;
+  }
+  
+  // Load invites
+  let invites = [];
+  try {
+    const stored = localStorage.getItem('ff_staff_invites_v1');
+    if (stored) {
+      invites = JSON.parse(stored);
+      if (!Array.isArray(invites)) invites = [];
+    }
+  } catch (e) {
+    console.warn('[ffAcceptInvite] Error loading invites:', e);
+    return null;
+  }
+  
+  // Find pending invite with matching token
+  const inviteIndex = invites.findIndex(inv => inv.token === token && inv.status === 'pending');
+  if (inviteIndex < 0) {
+    console.warn('[ffAcceptInvite] Invite not found or already accepted:', token);
+    return null;
+  }
+  
+  const invite = invites[inviteIndex];
+  
+  // Mark invite as accepted
+  invites[inviteIndex] = {
+    ...invite,
+    status: 'accepted',
+    acceptedAt: Date.now(),
+    firebaseUid: firebaseUid
+  };
+  
+  // Save updated invites
+  try {
+    localStorage.setItem('ff_staff_invites_v1', JSON.stringify(invites));
+  } catch (e) {
+    console.error('[ffAcceptInvite] Error saving invites:', e);
+    return null;
+  }
+  
+  // Link Firebase UID to staff profile
+  if (!settings.workers) settings.workers = [];
+  const staffIndex = settings.workers.findIndex(w => w.id === invite.staffId);
+  if (staffIndex >= 0) {
+    settings.workers[staffIndex] = {
+      ...settings.workers[staffIndex],
+      firebaseUid: firebaseUid
+    };
+    save();
+    return settings.workers[staffIndex];
+  } else {
+    console.warn('[ffAcceptInvite] Staff profile not found:', invite.staffId);
+    return null;
+  }
+}
+
+/**
+ * Placeholder function to send invite email (console.logs invite link for now)
+ * @param {string} email - Email address
+ * @param {string} token - Invite token
+ */
+function ffSendInviteEmail(email, token) {
+  const inviteLink = `https://app.fairflowapp.com/invite?token=${token}`;
+  console.log('[ffSendInviteEmail] Invite link for', email, ':', inviteLink);
+  // TODO: Implement actual email sending
+}
+
+// ===== END AUTH FOUNDATION =====
 
 // Sync workers to both ffv24_users and ff_users_v1 storage keys
 function syncWorkersToUsers() {
