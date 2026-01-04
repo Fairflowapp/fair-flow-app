@@ -822,6 +822,16 @@ dialog footer button, .code-dialog footer button {
 
 <style>#reorderBtn.active{filter:brightness(1.2);box-shadow:0 0 0 2px rgba(255,255,255,.35) inset}</style>
 
+  <!-- Firebase v9 Modular SDK (Auth only) -->
+  <script type="module">
+    import { getApps, getApp, initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js';
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js';
+    
+    // Make Firebase functions available globally
+    window.__firebaseApp = null;
+    window.__firebaseAuth = null;
+    window.__firebaseAuthFunctions = { getApps, getApp, initializeApp, getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut };
+  </script>
 </head>
 
 <body>
@@ -974,6 +984,12 @@ dialog footer button, .code-dialog footer button {
       <button id="reset-pin-try-again" class="btn-pill" style="font-size:14px;width:100%;">Request New Reset Link</button>
     </div>
   </section>
+
+  <!-- Auth Banner (shown when signed out) -->
+  <div id="authBanner" style="display:none;position:sticky;top:0;z-index:100001;background:#fff3cd;border-bottom:1px solid #ffc107;padding:8px 24px;text-align:center;font-size:13px;">
+    <span style="color:#856404;">Not signed in</span>
+    <button id="authSignInBtn" style="margin-left:12px;padding:4px 12px;border:1px solid #856404;background:#fff;border-radius:4px;cursor:pointer;font-size:12px;color:#856404;">Sign In (Debug)</button>
+  </div>
 
   <div id="main-app-content" style="display:none;">
 
@@ -1588,6 +1604,110 @@ dialog footer button, .code-dialog footer button {
 <script>
 
 console.log('[BUILD MARKER] app.js logic loaded at', new Date().toISOString());
+
+// ===== FIREBASE AUTH FOUNDATION =====
+// Minimal Firebase Auth wiring (no full auth UI)
+
+// Firebase config placeholder (TODO: Replace with actual config)
+const firebaseConfig = window.firebaseConfig || {
+  apiKey: "TODO_REPLACE_WITH_ACTUAL_API_KEY",
+  authDomain: "TODO_REPLACE_WITH_ACTUAL_AUTH_DOMAIN",
+  projectId: "TODO_REPLACE_WITH_ACTUAL_PROJECT_ID",
+  storageBucket: "TODO_REPLACE_WITH_ACTUAL_STORAGE_BUCKET",
+  messagingSenderId: "TODO_REPLACE_WITH_ACTUAL_MESSAGING_SENDER_ID",
+  appId: "TODO_REPLACE_WITH_ACTUAL_APP_ID"
+};
+
+// Initialize Firebase Auth
+let ffAuth = null;
+let ffCurrentUser = null;
+
+async function initFirebaseAuth() {
+  try {
+    // Wait for Firebase modules to load
+    if (!window.__firebaseAuthFunctions) {
+      console.warn('[AUTH] Firebase modules not loaded yet, retrying...');
+      setTimeout(initFirebaseAuth, 100);
+      return;
+    }
+    
+    const { getApps, getApp, initializeApp, getAuth, onAuthStateChanged } = window.__firebaseAuthFunctions;
+    
+    // Initialize Firebase app (avoid duplicate initialization)
+    let app;
+    if (window.__firebaseApp) {
+      app = window.__firebaseApp;
+    } else {
+      const apps = getApps();
+      app = apps.length ? getApp() : initializeApp(firebaseConfig);
+      window.__firebaseApp = app;
+    }
+    
+    // Get Auth instance
+    ffAuth = getAuth(app);
+    window.ffAuth = ffAuth;
+    
+    // Set up auth state listener
+    onAuthStateChanged(ffAuth, (user) => {
+      ffCurrentUser = user;
+      window.ffCurrentUser = user;
+      
+      const mainContent = document.getElementById('main-app-content');
+      const authBanner = document.getElementById('authBanner');
+      
+      if (user) {
+        // Signed in
+        console.log('[AUTH] signed in:', user.email, user.uid);
+        if (mainContent) mainContent.style.display = '';
+        if (authBanner) authBanner.style.display = 'none';
+      } else {
+        // Signed out
+        console.log('[AUTH] signed out');
+        if (mainContent) mainContent.style.display = 'none';
+        if (authBanner) authBanner.style.display = 'block';
+      }
+    });
+    
+    console.log('[AUTH] init ok');
+  } catch (error) {
+    console.error('[AUTH] initialization error:', error);
+    // Fallback: show app content if auth fails (backward compatibility)
+    const mainContent = document.getElementById('main-app-content');
+    if (mainContent) mainContent.style.display = '';
+  }
+}
+
+// Wire up sign-in button (temporary debug only)
+document.addEventListener('DOMContentLoaded', function() {
+  const signInBtn = document.getElementById('authSignInBtn');
+  if (signInBtn) {
+    signInBtn.onclick = async function() {
+      try {
+        const email = prompt('Email (debug):');
+        if (!email) return;
+        
+        const password = prompt('Password (debug):');
+        if (!password) return;
+        
+        if (!window.__firebaseAuthFunctions) {
+          alert('Firebase not loaded yet');
+          return;
+        }
+        
+        const { signInWithEmailAndPassword } = window.__firebaseAuthFunctions;
+        await signInWithEmailAndPassword(ffAuth, email, password);
+      } catch (error) {
+        console.error('[AUTH] sign-in error:', error);
+        alert('Sign-in failed: ' + (error.message || error));
+      }
+    };
+  }
+  
+  // Initialize auth after DOM is ready
+  initFirebaseAuth();
+});
+
+// ===== END FIREBASE AUTH FOUNDATION =====
 
 // Helpers
 
@@ -2467,22 +2587,25 @@ function renderBrand(){
   }
 }
 
-function loadTechniciansFromSettings() {
-  // Load technicians from settings.workers (stored in localStorage)
-  // This is the same data source used in Settings page
-  console.log('[loadTechniciansFromSettings] Loading technicians from settings.workers');
-  
+// Single source of truth for staff/workers list reads
+// Returns the staff array from settings.workers (legacy localStorage storage)
+function ffGetStaffList() {
   // Ensure settings.workers exists and is an array
   if (!settings.workers || !Array.isArray(settings.workers)) {
-    console.warn('[loadTechniciansFromSettings] settings.workers is not defined or not an array, using defaults');
+    console.warn('[ffGetStaffList] settings.workers is not defined or not an array, using defaults');
     settings.workers = DEFAULTS.workers ? [...DEFAULTS.workers] : [];
     save();
   }
-  
-  console.log('[loadTechniciansFromSettings] Found', settings.workers.length, 'technicians');
-  console.log('[loadTechniciansFromSettings] Technicians:', settings.workers.map(w => ({ name: w.name, hasPin: !!w.pin })));
-  
   return settings.workers;
+}
+
+function loadTechniciansFromSettings() {
+  // Load technicians from the centralized staff list
+  console.log('[loadTechniciansFromSettings] Loading technicians from ffGetStaffList');
+  const technicians = ffGetStaffList();
+  console.log('[loadTechniciansFromSettings] Found', technicians.length, 'technicians');
+  console.log('[loadTechniciansFromSettings] Technicians:', technicians.map(w => ({ name: w.name, hasPin: !!w.pin })));
+  return technicians;
 }
 
 function renderSelect(){
@@ -2578,7 +2701,7 @@ function renderSelect(){
 }
 
 function colorOf(name){ 
-  const f=settings.workers.find(w=>w.name===name); 
+  const f=ffGetStaffList().find(w=>w.name===name); 
   if (f) {
     // Prefer buttonColor, fallback to color, then first palette color
     if (f.buttonColor) return f.buttonColor;
@@ -2599,7 +2722,7 @@ function getLuminance(hex) {
 }
 
 function fontColorOf(name){
-  const w = (settings.workers||[]).find(x=>x.name===name);
+  const w = ffGetStaffList().find(x=>x.name===name);
   
   // If worker has explicit fontColor, use it
   if (w && w.fontColor) return w.fontColor;
@@ -2783,12 +2906,12 @@ function handleJoin(){
     return;
   }
 
-  // Load the selected technician from settings.workers
-  const technician = settings.workers.find(w => w.name === selectedTechnicianName);
+  // Load the selected technician from staff list
+  const technician = ffGetStaffList().find(w => w.name === selectedTechnicianName);
   
   if (!technician) {
     console.error('[handleJoin] Technician not found:', selectedTechnicianName);
-    console.log('[handleJoin] Available technicians:', settings.workers.map(w => w.name));
+    console.log('[handleJoin] Available technicians:', ffGetStaffList().map(w => w.name));
     if (joinErrorEl) {
       joinErrorEl.textContent = 'Technician not found in settings';
       joinErrorEl.style.display = 'block';
