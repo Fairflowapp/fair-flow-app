@@ -11498,6 +11498,508 @@ function initializeAppsPanel() {
   // Staff Members Functions
   const staffMembersModal = document.getElementById('staffMembersModal');
   
+  // Staff Members independent storage functions
+  function ffGetStaffStore() {
+    try {
+      const stored = localStorage.getItem('ff_staff_v1');
+      const data = stored ? JSON.parse(stored) : { staff: [] };
+      if (!Array.isArray(data.staff)) {
+        data.staff = [];
+      }
+      return data;
+    } catch (e) {
+      console.error('[ffGetStaffStore] Error loading staff store:', e);
+      return { staff: [] };
+    }
+  }
+  
+  function ffSaveStaffStore(data) {
+    try {
+      localStorage.setItem('ff_staff_v1', JSON.stringify(data));
+    } catch (e) {
+      console.error('[ffSaveStaffStore] Error saving staff store:', e);
+    }
+  }
+  
+  // Selected staff ID state
+  let selectedStaffId = null;
+  
+  // Render staff list in LEFT sidebar grouped by role (names only)
+  function renderStaffList() {
+    try {
+      const staffData = ffGetStaffStore();
+      const staff = staffData.staff;
+      const managersList = document.getElementById('staffManagersList');
+      const techniciansList = document.getElementById('staffTechniciansList');
+      
+      if (!managersList || !techniciansList) {
+        console.error('[renderStaffList] Staff list containers not found');
+        return;
+      }
+      
+      managersList.innerHTML = '';
+      techniciansList.innerHTML = '';
+      
+      const managers = staff.filter(m => m.role === 'manager');
+      const technicians = staff.filter(t => t.role === 'technician');
+      
+      if (managers.length === 0) {
+        managersList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">No managers yet.</p>';
+      } else {
+        managers.forEach(function(m) {
+          const item = document.createElement('div');
+          const isSelected = selectedStaffId === m.id;
+          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '500'};color:#111827;font-size:13px;">${escapeHtml(m.name)}</span>`;
+          item.onclick = function() {
+            selectStaffMember(m.id);
+          };
+          managersList.appendChild(item);
+        });
+      }
+      
+      if (technicians.length === 0) {
+        techniciansList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">No technicians yet.</p>';
+      } else {
+        technicians.forEach(function(t) {
+          const item = document.createElement('div');
+          const isSelected = selectedStaffId === t.id;
+          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '500'};color:#111827;font-size:13px;">${escapeHtml(t.name)}</span>`;
+          item.onclick = function() {
+            selectStaffMember(t.id);
+          };
+          techniciansList.appendChild(item);
+        });
+      }
+    } catch (error) {
+      console.error('[renderStaffList] Error rendering staff list:', error);
+    }
+  }
+  
+  // Select a staff member and show their details
+  function selectStaffMember(staffId) {
+    selectedStaffId = staffId;
+    renderStaffList(); // Re-render to update highlights
+    renderStaffDetails();
+    
+    // Hide the form when showing details
+    const form = document.getElementById('staffAddForm');
+    if (form) {
+      form.style.display = 'none';
+    }
+  }
+  
+  // Get initials from name
+  function getInitials(name) {
+    if (!name) return '?';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] || '').toUpperCase() + (parts[parts.length - 1][0] || '').toUpperCase();
+    }
+    return (name[0] || '?').toUpperCase();
+  }
+  
+  // Render staff details view with tabs
+  function renderStaffDetails() {
+    try {
+      const placeholder = document.getElementById('staffPlaceholderMessage');
+      const detailsContainer = document.getElementById('staffDetailsContainer');
+      
+      if (!selectedStaffId) {
+        if (placeholder) placeholder.style.display = 'block';
+        if (detailsContainer) detailsContainer.style.display = 'none';
+        return;
+      }
+      
+      if (placeholder) placeholder.style.display = 'none';
+      if (detailsContainer) detailsContainer.style.display = 'block';
+      
+      const staffData = ffGetStaffStore();
+      const staff = staffData.staff.find(s => s.id === selectedStaffId);
+      
+      if (!staff) {
+        if (placeholder) placeholder.style.display = 'block';
+        if (detailsContainer) detailsContainer.style.display = 'none';
+        return;
+      }
+      
+      // Render header with avatar and name
+      const headerEl = document.getElementById('staffDetailsHeader');
+      if (headerEl) {
+        const initials = getInitials(staff.name);
+        const roleLabel = staff.role === 'manager' ? 'Manager' : 'Technician';
+        headerEl.innerHTML = `
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;">
+            <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:600;flex-shrink:0;">
+              ${escapeHtml(initials)}
+            </div>
+            <div>
+              <h2 style="margin:0 0 4px 0;font-size:20px;font-weight:600;color:#111827;">${escapeHtml(staff.name)}</h2>
+              <p style="margin:0;font-size:14px;color:#6b7280;">${escapeHtml(roleLabel)}</p>
+            </div>
+          </div>
+        `;
+      }
+      
+      // Render tabs
+      const tabsEl = document.getElementById('staffDetailsTabs');
+      if (tabsEl) {
+        tabsEl.innerHTML = `
+          <div style="display:flex;gap:8px;border-bottom:1px solid var(--border);margin-bottom:24px;">
+            <button class="staff-tab-btn" data-tab="details" style="padding:12px 16px;background:none;border:none;border-bottom:2px solid #6366f1;color:#6366f1;font-weight:600;font-size:14px;cursor:pointer;">Details</button>
+            <button class="staff-tab-btn" data-tab="locations" style="padding:12px 16px;background:none;border:none;border-bottom:2px solid transparent;color:#6b7280;font-weight:500;font-size:14px;cursor:pointer;">Locations</button>
+            <button class="staff-tab-btn" data-tab="notifications" style="padding:12px 16px;background:none;border:none;border-bottom:2px solid transparent;color:#6b7280;font-weight:500;font-size:14px;cursor:pointer;">Notifications</button>
+            <button class="staff-tab-btn" data-tab="permissions" style="padding:12px 16px;background:none;border:none;border-bottom:2px solid transparent;color:#6b7280;font-weight:500;font-size:14px;cursor:pointer;">Permissions</button>
+          </div>
+        `;
+        
+        // Wire up tab clicks
+        tabsEl.querySelectorAll('.staff-tab-btn').forEach(function(btn) {
+          btn.onclick = function() {
+            const tab = btn.getAttribute('data-tab');
+            switchTab(tab);
+          };
+        });
+      }
+      
+      // Render Details tab content
+      renderDetailsTab(staff, isEditingStaffDetails);
+      
+    } catch (error) {
+      console.error('[renderStaffDetails] Error rendering staff details:', error);
+    }
+  }
+  
+  // Switch between tabs
+  let currentTab = 'details';
+  function switchTab(tab) {
+    currentTab = tab;
+    
+    // Update tab buttons
+    const tabsEl = document.getElementById('staffDetailsTabs');
+    if (tabsEl) {
+      tabsEl.querySelectorAll('.staff-tab-btn').forEach(function(btn) {
+        const btnTab = btn.getAttribute('data-tab');
+        if (btnTab === tab) {
+          btn.style.borderBottomColor = '#6366f1';
+          btn.style.color = '#6366f1';
+          btn.style.fontWeight = '600';
+        } else {
+          btn.style.borderBottomColor = 'transparent';
+          btn.style.color = '#6b7280';
+          btn.style.fontWeight = '500';
+        }
+      });
+    }
+    
+    // Show/hide tab content
+    const detailsContent = document.getElementById('staffDetailsTabContent');
+    const locationsContent = document.getElementById('staffLocationsTabContent');
+    const notificationsContent = document.getElementById('staffNotificationsTabContent');
+    const permissionsContent = document.getElementById('staffPermissionsTabContent');
+    
+    if (detailsContent) detailsContent.style.display = tab === 'details' ? 'block' : 'none';
+    if (locationsContent) locationsContent.style.display = tab === 'locations' ? 'block' : 'none';
+    if (notificationsContent) notificationsContent.style.display = tab === 'notifications' ? 'block' : 'none';
+    if (permissionsContent) permissionsContent.style.display = tab === 'permissions' ? 'block' : 'none';
+  }
+  
+  // Edit mode state
+  let isEditingStaffDetails = false;
+  
+  // Render Details tab content (view or edit mode)
+  function renderDetailsTab(staff, editMode) {
+    const detailsContent = document.getElementById('staffDetailsTabContent');
+    if (!detailsContent) return;
+    
+    const phone = staff.phone || '';
+    const email = staff.email || '';
+    const roleLabel = staff.role === 'manager' ? 'Manager' : 'Technician';
+    
+    if (editMode) {
+      // Edit mode
+      detailsContent.innerHTML = `
+        <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <h3 style="margin:0;font-size:18px;font-weight:600;color:#111827;">Details</h3>
+            <div style="display:flex;gap:8px;">
+              <button id="staffDetailsSaveBtn" style="padding:6px 12px;background:#6366f1;border:1px solid #6366f1;border-radius:6px;color:#fff;font-size:13px;font-weight:500;cursor:pointer;">Save</button>
+              <button id="staffDetailsCancelBtn" style="padding:6px 12px;background:#f3f4f6;border:1px solid var(--border);border-radius:6px;color:#374151;font-size:13px;font-weight:500;cursor:pointer;">Cancel</button>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:16px;">
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Name</label>
+              <input type="text" id="staffEditName" value="${escapeHtml(staff.name)}" style="width:100%;height:42px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:15px;font-family:inherit;outline:none;">
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Role</label>
+              <select id="staffEditRole" style="width:100%;height:42px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:15px;font-family:inherit;outline:none;cursor:pointer;">
+                <option value="technician" ${staff.role === 'technician' ? 'selected' : ''}>Technician</option>
+                <option value="manager" ${staff.role === 'manager' ? 'selected' : ''}>Manager</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Phone</label>
+              <input type="tel" id="staffEditPhone" value="${escapeHtml(phone)}" placeholder="Phone number" style="width:100%;height:42px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:15px;font-family:inherit;outline:none;">
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Email</label>
+              <input type="email" id="staffEditEmail" value="${escapeHtml(email)}" placeholder="email@example.com" style="width:100%;height:42px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:15px;font-family:inherit;outline:none;">
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">PIN</label>
+              <div style="font-size:15px;color:#111827;padding:10px 12px;background:#f9fafb;border:1px solid var(--border);border-radius:8px;">****</div>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Wire up Save and Cancel buttons
+      const saveBtn = document.getElementById('staffDetailsSaveBtn');
+      const cancelBtn = document.getElementById('staffDetailsCancelBtn');
+      if (saveBtn) {
+        saveBtn.onclick = function() {
+          saveStaffDetails();
+        };
+      }
+      if (cancelBtn) {
+        cancelBtn.onclick = function() {
+          cancelEditStaffDetails();
+        };
+      }
+    } else {
+      // View mode
+      detailsContent.innerHTML = `
+        <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <h3 style="margin:0;font-size:18px;font-weight:600;color:#111827;">Details</h3>
+            <button id="staffDetailsEditBtn" style="padding:6px 12px;background:#f3f4f6;border:1px solid var(--border);border-radius:6px;color:#374151;font-size:13px;font-weight:500;cursor:pointer;">Edit</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:16px;">
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Name</label>
+              <div style="font-size:15px;color:#111827;">${escapeHtml(staff.name)}</div>
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Role</label>
+              <div style="font-size:15px;color:#111827;">${escapeHtml(roleLabel)}</div>
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Phone</label>
+              <div style="font-size:15px;color:#111827;">${phone ? escapeHtml(phone) : '<span style="color:#9ca3af;">—</span>'}</div>
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Email</label>
+              <div style="font-size:15px;color:#111827;">${email ? escapeHtml(email) : '<span style="color:#9ca3af;">—</span>'}</div>
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">PIN</label>
+              <div style="font-size:15px;color:#111827;">****</div>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Wire up Edit button
+      const editBtn = document.getElementById('staffDetailsEditBtn');
+      if (editBtn) {
+        editBtn.onclick = function() {
+          startEditStaffDetails();
+        };
+      }
+    }
+  }
+  
+  // Start editing staff details
+  function startEditStaffDetails() {
+    if (!selectedStaffId) return;
+    isEditingStaffDetails = true;
+    const staffData = ffGetStaffStore();
+    const staff = staffData.staff.find(s => s.id === selectedStaffId);
+    if (staff) {
+      renderDetailsTab(staff, true);
+    }
+  }
+  
+  // Cancel editing staff details
+  function cancelEditStaffDetails() {
+    isEditingStaffDetails = false;
+    if (!selectedStaffId) return;
+    const staffData = ffGetStaffStore();
+    const staff = staffData.staff.find(s => s.id === selectedStaffId);
+    if (staff) {
+      renderDetailsTab(staff, false);
+    }
+  }
+  
+  // Save staff details
+  function saveStaffDetails() {
+    try {
+      if (!selectedStaffId) return;
+      
+      const nameInput = document.getElementById('staffEditName');
+      const roleInput = document.getElementById('staffEditRole');
+      const phoneInput = document.getElementById('staffEditPhone');
+      const emailInput = document.getElementById('staffEditEmail');
+      
+      if (!nameInput || !roleInput) {
+        console.error('[saveStaffDetails] Edit inputs not found');
+        return;
+      }
+      
+      const newName = nameInput.value.trim();
+      const newRole = roleInput.value;
+      const newPhone = phoneInput?.value.trim() || '';
+      const newEmail = emailInput?.value.trim() || '';
+      
+      // Validate name
+      if (!newName) {
+        console.error('[saveStaffDetails] Name is required');
+        return;
+      }
+      
+      // Get staff store
+      const staffStore = ffGetStaffStore();
+      const staffIndex = staffStore.staff.findIndex(s => s.id === selectedStaffId);
+      
+      if (staffIndex === -1) {
+        console.error('[saveStaffDetails] Staff member not found');
+        return;
+      }
+      
+      const oldStaff = staffStore.staff[staffIndex];
+      const nameChanged = oldStaff.name !== newName;
+      const roleChanged = oldStaff.role !== newRole;
+      
+      // Update staff member
+      staffStore.staff[staffIndex] = {
+        ...oldStaff,
+        name: newName,
+        role: newRole,
+        phone: newPhone ? String(newPhone) : undefined,
+        email: newEmail ? String(newEmail) : undefined
+      };
+      
+      // Save to storage
+      ffSaveStaffStore(staffStore);
+      
+      // Exit edit mode
+      isEditingStaffDetails = false;
+      
+      // Re-render details
+      renderStaffDetails();
+      
+      // Re-render list if name or role changed (to update grouping)
+      if (nameChanged || roleChanged) {
+        renderStaffList();
+      }
+      
+    } catch (error) {
+      console.error('[saveStaffDetails] Error saving staff details:', error);
+    }
+  }
+  
+  // Save staff member function (extracted for reuse)
+  function saveStaffMember() {
+    try {
+      const firstName = document.getElementById('staffFirstName')?.value.trim();
+      const lastName = document.getElementById('staffLastName')?.value.trim();
+      const role = document.getElementById('staffRole')?.value;
+      const pin = document.getElementById('staffPin')?.value.trim();
+      const errorDiv = document.getElementById('staffFormError');
+      
+      // Clear previous error
+      if (errorDiv) {
+        errorDiv.style.display = 'none';
+        errorDiv.textContent = '';
+      }
+      
+      // Create full name
+      const fullName = (firstName + ' ' + lastName).trim();
+      
+      // Validate required fields
+      if (!fullName) {
+        if (errorDiv) {
+          errorDiv.textContent = 'Name is required';
+          errorDiv.style.display = 'block';
+        }
+        return false;
+      }
+      
+      if (!pin) {
+        if (errorDiv) {
+          errorDiv.textContent = 'PIN is required';
+          errorDiv.style.display = 'block';
+        }
+        return false;
+      }
+      
+      if (!role) {
+        if (errorDiv) {
+          errorDiv.textContent = 'Role is required';
+          errorDiv.style.display = 'block';
+        }
+        return false;
+      }
+      
+      // Check for duplicate PIN in existing staff
+      const staffStore = ffGetStaffStore();
+      const existingWithPin = staffStore.staff.find(function(s) {
+        return s.pin && String(s.pin) === String(pin);
+      });
+      
+      if (existingWithPin) {
+        if (errorDiv) {
+          errorDiv.textContent = 'This PIN is already in use';
+          errorDiv.style.display = 'block';
+        }
+        return false;
+      }
+      
+      // Get optional fields from form
+      const email = document.getElementById('staffEmail')?.value.trim() || '';
+      const phone = document.getElementById('staffPhone')?.value.trim() || '';
+      
+      // Create new staff member object
+      const newStaffMember = {
+        id: 'staff_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        name: fullName,
+        firstName: firstName || undefined,
+        lastName: lastName || undefined,
+        pin: String(pin),
+        role: role,
+        email: email ? String(email) : undefined,
+        phone: phone ? String(phone) : undefined,
+        createdAt: Date.now()
+      };
+      
+      // Add to staff store and save
+      staffStore.staff.push(newStaffMember);
+      ffSaveStaffStore(staffStore);
+      
+      // Clear form inputs (keep all fields intact)
+      if (document.getElementById('staffFirstName')) document.getElementById('staffFirstName').value = '';
+      if (document.getElementById('staffLastName')) document.getElementById('staffLastName').value = '';
+      if (document.getElementById('staffEmail')) document.getElementById('staffEmail').value = '';
+      if (document.getElementById('staffPhone')) document.getElementById('staffPhone').value = '';
+      if (document.getElementById('staffRole')) document.getElementById('staffRole').value = '';
+      if (document.getElementById('staffPin')) document.getElementById('staffPin').value = '';
+      
+      // Re-render left sidebar list immediately
+      renderStaffList();
+      
+      // Automatically select the newly created staff member and show their details
+      selectStaffMember(newStaffMember.id);
+      
+      return true;
+    } catch (error) {
+      console.error('[saveStaffMember] Error saving staff member:', error);
+      return false;
+    }
+  }
+  
   function openStaffMembersModal() {
     if (staffMembersModal) {
       // Get the global header element to calculate its height
@@ -11511,6 +12013,109 @@ function initializeAppsPanel() {
       staffMembersModal.style.top = headerHeight + 'px';
       staffMembersModal.style.height = `calc(100vh - ${headerHeight}px)`;
       staffMembersModal.style.display = 'flex';
+      
+      // Render staff list when modal opens
+      renderStaffList();
+      
+      // Reset selection and edit mode when modal opens
+      selectedStaffId = null;
+      isEditingStaffDetails = false;
+      renderStaffDetails();
+      
+      // Hide form initially
+      const form = document.getElementById('staffAddForm');
+      if (form) {
+        form.style.display = 'none';
+      }
+      
+      // Bind direct click handler to Create control (after DOM is ready)
+      setTimeout(function() {
+        bindCreateButton();
+      }, 0);
+    }
+  }
+  
+  // Bind Create button directly when modal opens
+  function bindCreateButton() {
+    try {
+      const staffModal = document.getElementById('staffMembersModal');
+      if (!staffModal) {
+        return;
+      }
+      
+      // First try: find by ID
+      let createEl = document.getElementById('staffFormCreate') ||
+                     document.getElementById('staffCreateBtn') ||
+                     document.getElementById('staffSaveBtn');
+      
+      // If not found by ID, search for element with "Create" text
+      if (!createEl) {
+        const allElements = staffModal.querySelectorAll('button, a, div, span, input[type="button"], input[type="submit"]');
+        for (let i = 0; i < allElements.length; i++) {
+          const el = allElements[i];
+          const text = (el.textContent || el.value || '').trim();
+          if (text.toLowerCase().includes('create')) {
+            // Check if element is clickable (has cursor pointer or is a button/link)
+            const style = window.getComputedStyle(el);
+            const isClickable = (
+              el.tagName === 'BUTTON' ||
+              el.tagName === 'A' ||
+              el.tagName === 'INPUT' ||
+              style.cursor === 'pointer' ||
+              el.onclick ||
+              el.getAttribute('onclick')
+            );
+            if (isClickable) {
+              createEl = el;
+              break;
+            }
+          }
+        }
+      }
+      
+      if (!createEl) {
+        console.error('[bindCreateButton] Create control not found');
+        return;
+      }
+      
+      // Ensure button is always enabled (remove disabled attribute and styles)
+      if (createEl.disabled !== undefined) {
+        createEl.disabled = false;
+      }
+      if (createEl.hasAttribute('disabled')) {
+        createEl.removeAttribute('disabled');
+      }
+      // Remove disabled styles
+      if (createEl.style) {
+        createEl.style.cursor = 'pointer';
+        createEl.style.opacity = '';
+      }
+      
+      // Check if already bound using data attribute
+      if (createEl.dataset.ffBoundCreate === '1') {
+        return;
+      }
+      
+      // Bind direct click handler
+      createEl.addEventListener('click', function(e) {
+        console.log('FF STAFF CREATE CLICK FIRED');
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const result = saveStaffMember();
+        if (result === false) {
+          const errorDiv = document.getElementById('staffFormError');
+          if (errorDiv && !errorDiv.textContent) {
+            errorDiv.textContent = 'Failed to save staff member';
+            errorDiv.style.display = 'block';
+          }
+        }
+      });
+      
+      // Mark as bound
+      createEl.dataset.ffBoundCreate = '1';
+    } catch (error) {
+      console.error('[bindCreateButton] Error binding Create button:', error);
     }
   }
   
@@ -11528,6 +12133,14 @@ function initializeAppsPanel() {
   
   // Staff Members Form Toggle Functions
   function showStaffAddForm() {
+    // Clear selected staff profile state
+    selectedStaffId = null;
+    
+    // Re-render to clear highlights and hide details view
+    renderStaffList(); // Clear selection highlights in sidebar
+    renderStaffDetails(); // Hide details view (will show placeholder since selectedStaffId is null)
+    
+    // Show the form and hide placeholder
     const placeholder = document.getElementById('staffPlaceholderMessage');
     const form = document.getElementById('staffAddForm');
     const addBtn = document.getElementById('addStaffMemberBtn');
@@ -12155,58 +12768,53 @@ function initializeAppsPanel() {
     };
   }
   
-  // Create button handler
+  // Create button handler (direct binding for immediate availability)
   const createBtn = document.getElementById('staffFormCreate');
   if (createBtn) {
     createBtn.onclick = function(e) {
       e.stopPropagation();
       e.preventDefault();
-      
-      const firstName = document.getElementById('staffFirstName')?.value.trim();
-      const lastName = document.getElementById('staffLastName')?.value.trim();
-      const email = document.getElementById('staffEmail')?.value.trim();
-      const phone = document.getElementById('staffPhone')?.value.trim();
-      const role = document.getElementById('staffRole')?.value;
-      const pin = document.getElementById('staffPin')?.value.trim();
-      const form = document.getElementById('staffAddForm');
-      const selectedColor = form?.getAttribute('data-selected-color') || (settings.brandPalette || DEFAULTS.brandPalette)[0];
-      const selectedFontColor = form?.getAttribute('data-selected-font-color') || '#111111';
-      
-      // Create full name
-      const fullName = (firstName + ' ' + lastName).trim();
-      
-      if (!fullName || !pin || !role) {
-        return; // Form validation should prevent this
-      }
-      
-      // Create worker object
-      const newWorker = {
-        name: fullName,
-        pin: pin,
-        buttonColor: selectedColor,
-        fontColor: selectedFontColor,
-        email: email || undefined,
-        phone: phone || undefined,
-        role: role
-      };
-      
-      // AUTH FOUNDATION ONLY: Create staff profile and invite
-      const staffId = ffCreateStaffProfile(newWorker);
-      if (email && email.trim()) {
-        const invite = ffCreateInvite(email, staffId);
-        if (invite) {
-          ffSendInviteEmail(email, invite.token);
-        }
-      }
-      
-      // Hide form and reset
-      hideStaffAddForm();
-      
-      // Reload/render staff list if needed
-      if (typeof renderStaffMembers === 'function') {
-        renderStaffMembers();
-      }
+      saveStaffMember();
     };
+  }
+  
+  // Document-level event delegation for Create button (survives DOM re-renders)
+  if (!window.__ffStaffCreateBound) {
+    window.__ffStaffCreateBound = true;
+    document.addEventListener('click', function(e) {
+      try {
+        const target = e.target;
+        if (!target || target.tagName !== 'BUTTON') {
+          return;
+        }
+        
+        // Check if button is inside Staff Members modal
+        const staffModal = document.getElementById('staffMembersModal');
+        if (!staffModal || !staffModal.contains(target)) {
+          return;
+        }
+        
+        // Match by ID first
+        const buttonId = target.id || '';
+        const isCreateById = (
+          buttonId === 'staffFormCreate' ||
+          buttonId === 'staffCreateBtn' ||
+          buttonId === 'staffSaveBtn'
+        );
+        
+        // Match by textContent if ID doesn't match
+        const buttonText = (target.textContent || '').trim().toLowerCase();
+        const isCreateByText = buttonText === 'create';
+        
+        if (isCreateById || isCreateByText) {
+          e.preventDefault();
+          e.stopPropagation();
+          saveStaffMember();
+        }
+      } catch (error) {
+        console.error('[Staff Create Delegation] Error:', error);
+      }
+    }, true);
   }
 }
 
@@ -19584,11 +20192,11 @@ window.openLog = async function(){
   </div>
 
   <!-- Staff Members Full-Screen Overlay -->
-  <div id="staffMembersModal" class="staff-modal-overlay" style="display:none;position:fixed;left:0;right:0;bottom:0;width:100vw;background:#fff;z-index:99999;overflow:hidden;flex-direction:column;pointer-events:auto;">
+  <div id="staffMembersModal" class="staff-modal-overlay" style="display:none;position:fixed;left:0;right:0;bottom:0;width:100vw;background:#fff;z-index:100001;overflow:hidden;flex-direction:column;pointer-events:auto;">
     <!-- 2-Column Layout Container -->
     <div class="staff-modal-content" style="flex:1;overflow:hidden;display:flex;min-height:0;">
       <!-- Left Sidebar -->
-      <div class="staff-sidebar" style="width:220px;flex-shrink:0;background:var(--muted);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;">
+      <div class="staff-sidebar" style="width:220px;flex-shrink:0;background:var(--muted);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;position:relative;z-index:100002;">
         <!-- Add Staff Member Button -->
         <div style="padding:20px 20px 16px 20px;">
           <button id="addStaffMemberBtn" class="btn-primary" style="width:100%;border:0;background-image:linear-gradient(90deg,var(--brand1),var(--brand2));color:#fff;border-radius:999px;padding:5px 10px;font-weight:800;cursor:pointer;box-shadow:0 4px 10px rgba(0,0,0,.08);font-size:11px;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;line-height:1.2;">
@@ -19599,19 +20207,37 @@ window.openLog = async function(){
         <!-- Managers Section -->
         <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);padding-top:20px;">
           <h3 style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Managers</h3>
+          <div id="staffManagersList" style="display:flex;flex-direction:column;gap:8px;"></div>
         </div>
         <!-- Technicians Section -->
         <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);margin-top:8px;padding-top:20px;">
           <h3 style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Technicians</h3>
+          <div id="staffTechniciansList" style="display:flex;flex-direction:column;gap:8px;"></div>
         </div>
       </div>
       <!-- Right Content Area -->
-      <div class="staff-content-area" style="flex:1;overflow-y:auto;display:flex;align-items:center;justify-content:center;padding:40px 20px;">
+      <div class="staff-content-area" style="flex:1;overflow-y:auto;padding:40px 20px;">
         <!-- Placeholder Message -->
-        <p id="staffPlaceholderMessage" style="margin:0;font-size:14px;color:#6b7280;text-align:center;">Select a staff member to view details</p>
+        <p id="staffPlaceholderMessage" style="margin:0;font-size:14px;color:#6b7280;text-align:center;display:flex;align-items:center;justify-content:center;height:100%;">Select a staff member to view details</p>
+        
+        <!-- Staff Details Container -->
+        <div id="staffDetailsContainer" style="display:none;max-width:800px;margin:0 auto;">
+          <div id="staffDetailsHeader"></div>
+          <div id="staffDetailsTabs"></div>
+          <div id="staffDetailsTabContent"></div>
+          <div id="staffLocationsTabContent" style="display:none;padding:24px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+            <p style="color:#6b7280;font-size:14px;margin:0;">Locations settings coming soon.</p>
+          </div>
+          <div id="staffNotificationsTabContent" style="display:none;padding:24px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+            <p style="color:#6b7280;font-size:14px;margin:0;">Notification settings coming soon.</p>
+          </div>
+          <div id="staffPermissionsTabContent" style="display:none;padding:24px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+            <p style="color:#6b7280;font-size:14px;margin:0;">Permission settings coming soon.</p>
+          </div>
+        </div>
         
         <!-- Add Staff Member Form (hidden by default) -->
-        <div class="staff-form-section" id="staffAddForm" style="display:none;width:100%;max-width:500px;">
+        <div class="staff-form-section" id="staffAddForm" style="display:none;width:100%;max-width:500px;margin:0 auto;">
           <div class="staff-form-card">
             <div class="staff-form-header">
               <h2 class="staff-form-title">New Staff Member</h2>
@@ -19715,9 +20341,12 @@ window.openLog = async function(){
           </div>
           
           <!-- Form Actions -->
-          <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px;padding-top:20px;border-top:1px solid var(--border);">
-            <button id="staffFormCancel" type="button" class="btn-ghost" style="border:1px solid var(--border);background:#fff;border-radius:8px;padding:8px 16px;font-weight:600;cursor:pointer;font-size:14px;color:#374151;">Cancel</button>
-            <button id="staffFormCreate" type="button" class="btn-primary" style="border:0;background-image:linear-gradient(90deg,var(--brand1),var(--brand2));color:#fff;border-radius:8px;padding:8px 16px;font-weight:600;cursor:not-allowed;font-size:14px;opacity:0.6;" disabled>Create</button>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:24px;padding-top:20px;border-top:1px solid var(--border);">
+            <div id="staffFormError" style="display:none;color:#dc2626;font-size:12px;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;"></div>
+            <div style="display:flex;gap:12px;justify-content:flex-end;">
+              <button id="staffFormCancel" type="button" class="btn-ghost" style="border:1px solid var(--border);background:#fff;border-radius:8px;padding:8px 16px;font-weight:600;cursor:pointer;font-size:14px;color:#374151;">Cancel</button>
+              <button id="staffFormCreate" type="button" class="btn-primary" style="border:0;background-image:linear-gradient(90deg,var(--brand1),var(--brand2));color:#fff;border-radius:8px;padding:8px 16px;font-weight:600;cursor:pointer;font-size:14px;">Create</button>
+            </div>
           </div>
           </div>
         </div>
