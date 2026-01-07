@@ -11506,6 +11506,16 @@ function initializeAppsPanel() {
       if (!Array.isArray(data.staff)) {
         data.staff = [];
       }
+      // Normalize staff objects with new fields (non-breaking)
+      data.staff = data.staff.map(function(staff) {
+        return {
+          ...staff,
+          invited: staff.invited === true,
+          invitedAt: staff.invitedAt || null,
+          lastActiveAt: staff.lastActiveAt || null,
+          archived: staff.archived === true
+        };
+      });
       return data;
     } catch (e) {
       console.error('[ffGetStaffStore] Error loading staff store:', e);
@@ -11518,6 +11528,42 @@ function initializeAppsPanel() {
       localStorage.setItem('ff_staff_v1', JSON.stringify(data));
     } catch (e) {
       console.error('[ffSaveStaffStore] Error saving staff store:', e);
+    }
+  }
+  
+  // Send invite (sets invited flag only)
+  function ffStaffSendInvite(staffId) {
+    try {
+      const staffStore = ffGetStaffStore();
+      const staffIndex = staffStore.staff.findIndex(s => s.id === staffId);
+      if (staffIndex === -1) return;
+      
+      staffStore.staff[staffIndex].invited = true;
+      staffStore.staff[staffIndex].invitedAt = new Date().toISOString();
+      ffSaveStaffStore(staffStore);
+      
+      // Re-render header
+      renderStaffDetails();
+    } catch (e) {
+      console.error('[ffStaffSendInvite] Error:', e);
+    }
+  }
+  
+  // Archive staff member
+  function ffStaffArchive(staffId) {
+    try {
+      const staffStore = ffGetStaffStore();
+      const staffIndex = staffStore.staff.findIndex(s => s.id === staffId);
+      if (staffIndex === -1) return;
+      
+      staffStore.staff[staffIndex].archived = true;
+      ffSaveStaffStore(staffStore);
+      
+      // Re-render list and details
+      renderStaffList();
+      renderStaffDetails();
+    } catch (e) {
+      console.error('[ffStaffArchive] Error:', e);
     }
   }
   
@@ -11540,17 +11586,32 @@ function initializeAppsPanel() {
       managersList.innerHTML = '';
       techniciansList.innerHTML = '';
       
-      const managers = staff.filter(m => m.role === 'manager');
-      const technicians = staff.filter(t => t.role === 'technician');
+      // Separate active and archived staff
+      const activeManagers = staff.filter(m => m.role === 'manager' && !m.archived);
+      const archivedManagers = staff.filter(m => m.role === 'manager' && m.archived);
+      const activeTechnicians = staff.filter(t => t.role === 'technician' && !t.archived);
+      const archivedTechnicians = staff.filter(t => t.role === 'technician' && t.archived);
       
-      if (managers.length === 0) {
+      if (activeManagers.length === 0 && archivedManagers.length === 0) {
         managersList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">No managers yet.</p>';
       } else {
-        managers.forEach(function(m) {
+        // Render active managers
+        activeManagers.forEach(function(m) {
           const item = document.createElement('div');
           const isSelected = selectedStaffId === m.id;
           item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;`;
-          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '500'};color:#111827;font-size:13px;">${escapeHtml(m.name)}</span>`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:#111827;font-size:12px;">${escapeHtml(m.name)}</span>`;
+          item.onclick = function() {
+            selectStaffMember(m.id);
+          };
+          managersList.appendChild(item);
+        });
+        // Render archived managers at bottom
+        archivedManagers.forEach(function(m) {
+          const item = document.createElement('div');
+          const isSelected = selectedStaffId === m.id;
+          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;opacity:0.6;`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:#6b7280;font-size:12px;">${escapeHtml(m.name)} <span style="color:#9ca3af;font-size:10px;">(Archived)</span></span>`;
           item.onclick = function() {
             selectStaffMember(m.id);
           };
@@ -11558,14 +11619,26 @@ function initializeAppsPanel() {
         });
       }
       
-      if (technicians.length === 0) {
+      if (activeTechnicians.length === 0 && archivedTechnicians.length === 0) {
         techniciansList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">No technicians yet.</p>';
       } else {
-        technicians.forEach(function(t) {
+        // Render active technicians
+        activeTechnicians.forEach(function(t) {
           const item = document.createElement('div');
           const isSelected = selectedStaffId === t.id;
           item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;`;
-          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '500'};color:#111827;font-size:13px;">${escapeHtml(t.name)}</span>`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:#111827;font-size:12px;">${escapeHtml(t.name)}</span>`;
+          item.onclick = function() {
+            selectStaffMember(t.id);
+          };
+          techniciansList.appendChild(item);
+        });
+        // Render archived technicians at bottom
+        archivedTechnicians.forEach(function(t) {
+          const item = document.createElement('div');
+          const isSelected = selectedStaffId === t.id;
+          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;opacity:0.6;`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:#6b7280;font-size:12px;">${escapeHtml(t.name)} <span style="color:#9ca3af;font-size:10px;">(Archived)</span></span>`;
           item.onclick = function() {
             selectStaffMember(t.id);
           };
@@ -11624,47 +11697,155 @@ function initializeAppsPanel() {
         return;
       }
       
-      // Render header with avatar and name
+      // Render header with avatar, name, status line, and kebab menu
       const headerEl = document.getElementById('staffDetailsHeader');
       if (headerEl) {
         const initials = getInitials(staff.name);
         const roleLabel = staff.role === 'manager' ? 'Manager' : 'Technician';
+        const invited = staff.invited === true;
+        const archived = staff.archived === true;
+        
+        // Format date for status line
+        let statusText = '';
+        let statusAction = '';
+        if (!invited) {
+          statusText = 'Not invited yet';
+          statusAction = '<button id="ffStaffSendInviteBtn" style="background:none;border:none;color:#6366f1;font-size:12px;font-weight:500;cursor:pointer;text-decoration:underline;padding:0;margin-left:8px;">Send invite</button>';
+        } else {
+          const dateToShow = staff.lastActiveAt || staff.invitedAt;
+          if (dateToShow) {
+            try {
+              const date = new Date(dateToShow);
+              const formatted = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+              statusText = `Last active on ${formatted}`;
+            } catch (e) {
+              statusText = 'Last active on —';
+            }
+          } else {
+            statusText = 'Last active on —';
+          }
+        }
+        
         headerEl.innerHTML = `
-          <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;">
-            <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:600;flex-shrink:0;">
-              ${escapeHtml(initials)}
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);position:relative;">
+            <div style="display:flex;align-items:flex-start;gap:12px;flex:1;">
+              <div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;flex-shrink:0;">
+                ${escapeHtml(initials)}
+              </div>
+              <div style="flex:1;">
+                <h2 style="margin:0 0 4px 0;font-size:16px;font-weight:600;color:#111827;">${escapeHtml(staff.name)}</h2>
+                <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">${escapeHtml(roleLabel)}</p>
+                <div style="display:flex;align-items:center;margin-top:4px;">
+                  <span style="font-size:11px;color:#6b7280;">${statusText}</span>
+                  ${statusAction}
+                </div>
+              </div>
             </div>
-            <div>
-              <h2 style="margin:0 0 4px 0;font-size:20px;font-weight:600;color:#111827;">${escapeHtml(staff.name)}</h2>
-              <p style="margin:0;font-size:14px;color:#6b7280;">${escapeHtml(roleLabel)}</p>
+            <div style="position:absolute;right:calc(100% - (180px + 20px + 400px));top:0;display:flex;align-items:center;height:20px;">
+              <div style="position:relative;">
+                <button id="ffStaffDetailsKebabBtn" style="width:30px;height:30px;border:none;background:#f3f4f6;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;color:#6b7280;padding:0;flex-shrink:0;" title="More options">⋯</button>
+                <div id="ffStaffDetailsKebabMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:150px;z-index:1001;padding:4px 0;">
+                  <button id="ffStaffDetailsArchiveBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Archive</button>
+                  ${invited && !archived ? '<button id="ffStaffDetailsChangePasswordBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Change password</button>' : ''}
+                </div>
+              </div>
             </div>
-          </div>
-        `;
-      }
-      
-      // Render tabs
-      const tabsEl = document.getElementById('staffDetailsTabs');
-      if (tabsEl) {
-        tabsEl.innerHTML = `
-          <div style="display:flex;gap:8px;border-bottom:1px solid var(--border);margin-bottom:24px;">
-            <button class="staff-tab-btn" data-tab="details" style="padding:12px 16px;background:none;border:none;border-bottom:2px solid #6366f1;color:#6366f1;font-weight:600;font-size:14px;cursor:pointer;">Details</button>
-            <button class="staff-tab-btn" data-tab="locations" style="padding:12px 16px;background:none;border:none;border-bottom:2px solid transparent;color:#6b7280;font-weight:500;font-size:14px;cursor:pointer;">Locations</button>
-            <button class="staff-tab-btn" data-tab="notifications" style="padding:12px 16px;background:none;border:none;border-bottom:2px solid transparent;color:#6b7280;font-weight:500;font-size:14px;cursor:pointer;">Notifications</button>
-            <button class="staff-tab-btn" data-tab="permissions" style="padding:12px 16px;background:none;border:none;border-bottom:2px solid transparent;color:#6b7280;font-weight:500;font-size:14px;cursor:pointer;">Permissions</button>
           </div>
         `;
         
-        // Wire up tab clicks
-        tabsEl.querySelectorAll('.staff-tab-btn').forEach(function(btn) {
+        // Wire up kebab menu in header
+        const kebabBtn = document.getElementById('ffStaffDetailsKebabBtn');
+        const kebabMenu = document.getElementById('ffStaffDetailsKebabMenu');
+        if (kebabBtn && kebabMenu) {
+          kebabBtn.onclick = function(e) {
+            e.stopPropagation();
+            const isOpen = kebabMenu.style.display === 'block';
+            kebabMenu.style.display = isOpen ? 'none' : 'block';
+          };
+        }
+        
+        // Wire up Archive button
+        const archiveBtn = document.getElementById('ffStaffDetailsArchiveBtn');
+        if (archiveBtn) {
+          archiveBtn.onclick = function(e) {
+            e.stopPropagation();
+            ffStaffArchive(staff.id);
+            if (kebabMenu) kebabMenu.style.display = 'none';
+          };
+        }
+        
+        // Wire up Change password button
+        const changePasswordBtn = document.getElementById('ffStaffDetailsChangePasswordBtn');
+        if (changePasswordBtn) {
+          changePasswordBtn.onclick = function(e) {
+            e.stopPropagation();
+            alert('Password change will be available after account activation.');
+            if (kebabMenu) kebabMenu.style.display = 'none';
+          };
+        }
+        
+        // Wire up Send invite button
+        const sendInviteBtn = document.getElementById('ffStaffSendInviteBtn');
+        if (sendInviteBtn) {
+          sendInviteBtn.onclick = function(e) {
+            e.stopPropagation();
+            ffStaffSendInvite(staff.id);
+          };
+        }
+      }
+      
+      // Close kebab menus when clicking outside
+      if (!window.ffStaffKebabBound) {
+        window.ffStaffKebabBound = true;
+        document.addEventListener('click', function(e) {
+          const profileKebabMenu = document.getElementById('ffStaffKebabMenu');
+          const profileKebabBtn = document.getElementById('ffStaffKebabBtn');
+          const detailsKebabMenu = document.getElementById('ffStaffDetailsKebabMenu');
+          const detailsKebabBtn = document.getElementById('ffStaffDetailsKebabBtn');
+          
+          if (detailsKebabMenu && detailsKebabBtn && !detailsKebabMenu.contains(e.target) && e.target !== detailsKebabBtn) {
+            detailsKebabMenu.style.display = 'none';
+          }
+          if (profileKebabMenu && profileKebabBtn && !profileKebabMenu.contains(e.target) && e.target !== profileKebabBtn) {
+            profileKebabMenu.style.display = 'none';
+          }
+        });
+      }
+      
+      // Render right-side navigation
+      const navEl = document.getElementById('staffDetailsNav');
+      if (navEl) {
+        const tabs = ['details', 'locations', 'notifications', 'permissions'];
+        const labels = ['Details', 'Locations', 'Notifications', 'Permissions'];
+        navEl.innerHTML = tabs.map(function(tab, idx) {
+          const isActive = currentTab === tab;
+          return `<button class="staff-nav-item" data-tab="${tab}" style="width:100%;padding:8px 10px;min-height:36px;background:${isActive ? '#6366f1' : 'transparent'};border:none;border-radius:6px;color:${isActive ? '#fff' : '#111827'};font-weight:${isActive ? '600' : '400'};font-size:12px;cursor:pointer;text-align:left;transition:all 0.2s;">${labels[idx]}</button>`;
+        }).join('');
+        
+        // Wire up navigation clicks and hover effects
+        navEl.querySelectorAll('.staff-nav-item').forEach(function(btn) {
           btn.onclick = function() {
             const tab = btn.getAttribute('data-tab');
             switchTab(tab);
           };
+          // Add hover effect
+          btn.onmouseenter = function() {
+            if (btn.style.background !== '#6366f1') {
+              btn.style.background = '#f3f4f6';
+            }
+          };
+          btn.onmouseleave = function() {
+            if (btn.style.background !== '#6366f1') {
+              btn.style.background = 'transparent';
+            }
+          };
         });
       }
       
-      // Render Details tab content
+      // Render Details tab content (default active tab)
       renderDetailsTab(staff, isEditingStaffDetails);
+      // Ensure Details tab is shown by default
+      switchTab('details');
       
     } catch (error) {
       console.error('[renderStaffDetails] Error rendering staff details:', error);
@@ -11676,19 +11857,19 @@ function initializeAppsPanel() {
   function switchTab(tab) {
     currentTab = tab;
     
-    // Update tab buttons
-    const tabsEl = document.getElementById('staffDetailsTabs');
-    if (tabsEl) {
-      tabsEl.querySelectorAll('.staff-tab-btn').forEach(function(btn) {
+    // Update navigation items
+    const navEl = document.getElementById('staffDetailsNav');
+    if (navEl) {
+      navEl.querySelectorAll('.staff-nav-item').forEach(function(btn) {
         const btnTab = btn.getAttribute('data-tab');
         if (btnTab === tab) {
-          btn.style.borderBottomColor = '#6366f1';
-          btn.style.color = '#6366f1';
+          btn.style.background = '#6366f1';
+          btn.style.color = '#fff';
           btn.style.fontWeight = '600';
         } else {
-          btn.style.borderBottomColor = 'transparent';
-          btn.style.color = '#6b7280';
-          btn.style.fontWeight = '500';
+          btn.style.background = 'transparent';
+          btn.style.color = '#111827';
+          btn.style.fontWeight = '400';
         }
       });
     }
@@ -11720,37 +11901,37 @@ function initializeAppsPanel() {
     if (editMode) {
       // Edit mode
       detailsContent.innerHTML = `
-        <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-            <h3 style="margin:0;font-size:18px;font-weight:600;color:#111827;">Details</h3>
-            <div style="display:flex;gap:8px;">
-              <button id="staffDetailsSaveBtn" style="padding:6px 12px;background:#6366f1;border:1px solid #6366f1;border-radius:6px;color:#fff;font-size:13px;font-weight:500;cursor:pointer;">Save</button>
-              <button id="staffDetailsCancelBtn" style="padding:6px 12px;background:#f3f4f6;border:1px solid var(--border);border-radius:6px;color:#374151;font-size:13px;font-weight:500;cursor:pointer;">Cancel</button>
+        <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px 12px;width:fit-content;min-width:280px;max-width:400px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <h3 style="margin:0;font-size:13px;font-weight:600;color:#111827;">Details</h3>
+            <div style="display:flex;gap:3px;">
+              <button id="staffDetailsSaveBtn" style="padding:3px 7px;background:#6366f1;border:1px solid #6366f1;border-radius:4px;color:#fff;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;">Save</button>
+              <button id="staffDetailsCancelBtn" style="padding:3px 7px;background:#f3f4f6;border:1px solid var(--border);border-radius:4px;color:#374151;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;">Cancel</button>
             </div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="display:flex;flex-direction:column;gap:4px;">
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Name</label>
-              <input type="text" id="staffEditName" value="${escapeHtml(staff.name)}" style="width:100%;height:42px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:15px;font-family:inherit;outline:none;">
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Name</label>
+              <input type="text" id="staffEditName" value="${escapeHtml(staff.name)}" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
             </div>
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Role</label>
-              <select id="staffEditRole" style="width:100%;height:42px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:15px;font-family:inherit;outline:none;cursor:pointer;">
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Role</label>
+              <select id="staffEditRole" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
                 <option value="technician" ${staff.role === 'technician' ? 'selected' : ''}>Technician</option>
                 <option value="manager" ${staff.role === 'manager' ? 'selected' : ''}>Manager</option>
               </select>
             </div>
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Phone</label>
-              <input type="tel" id="staffEditPhone" value="${escapeHtml(phone)}" placeholder="Phone number" style="width:100%;height:42px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:15px;font-family:inherit;outline:none;">
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Phone</label>
+              <input type="tel" id="staffEditPhone" value="${escapeHtml(phone)}" placeholder="Phone number" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
             </div>
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Email</label>
-              <input type="email" id="staffEditEmail" value="${escapeHtml(email)}" placeholder="email@example.com" style="width:100%;height:42px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:15px;font-family:inherit;outline:none;">
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Email</label>
+              <input type="email" id="staffEditEmail" value="${escapeHtml(email)}" placeholder="email@example.com" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
             </div>
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">PIN</label>
-              <div style="font-size:15px;color:#111827;padding:10px 12px;background:#f9fafb;border:1px solid var(--border);border-radius:8px;">****</div>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">PIN</label>
+              <div style="font-size:12px;color:#111827;padding:5px 8px;background:#f9fafb;border:1px solid var(--border);border-radius:4px;">****</div>
             </div>
           </div>
         </div>
@@ -11771,32 +11952,34 @@ function initializeAppsPanel() {
       }
     } else {
       // View mode
+      const invited = staff.invited === true;
+      const archived = staff.archived === true;
       detailsContent.innerHTML = `
-        <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-            <h3 style="margin:0;font-size:18px;font-weight:600;color:#111827;">Details</h3>
-            <button id="staffDetailsEditBtn" style="padding:6px 12px;background:#f3f4f6;border:1px solid var(--border);border-radius:6px;color:#374151;font-size:13px;font-weight:500;cursor:pointer;">Edit</button>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px 12px;width:fit-content;min-width:280px;max-width:400px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
+              <h3 style="margin:0;font-size:13px;font-weight:600;color:#111827;">Details</h3>
+              <button id="staffDetailsEditBtn" style="padding:6px 10px;background:#f3f4f6;border:1px solid var(--border);border-radius:6px;color:#374151;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;">Edit</button>
+            </div>
+          <div style="display:flex;flex-direction:column;gap:4px;">
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Name</label>
-              <div style="font-size:15px;color:#111827;">${escapeHtml(staff.name)}</div>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Name</label>
+              <div style="font-size:12px;color:#111827;">${escapeHtml(staff.name)}</div>
             </div>
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Role</label>
-              <div style="font-size:15px;color:#111827;">${escapeHtml(roleLabel)}</div>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Role</label>
+              <div style="font-size:12px;color:#111827;">${escapeHtml(roleLabel)}</div>
             </div>
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Phone</label>
-              <div style="font-size:15px;color:#111827;">${phone ? escapeHtml(phone) : '<span style="color:#9ca3af;">—</span>'}</div>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Phone</label>
+              <div style="font-size:12px;color:#111827;">${phone ? escapeHtml(phone) : '<span style="color:#9ca3af;">—</span>'}</div>
             </div>
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Email</label>
-              <div style="font-size:15px;color:#111827;">${email ? escapeHtml(email) : '<span style="color:#9ca3af;">—</span>'}</div>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Email</label>
+              <div style="font-size:12px;color:#111827;">${email ? escapeHtml(email) : '<span style="color:#9ca3af;">—</span>'}</div>
             </div>
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:500;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">PIN</label>
-              <div style="font-size:15px;color:#111827;">****</div>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">PIN</label>
+              <div style="font-size:12px;color:#111827;">****</div>
             </div>
           </div>
         </div>
@@ -11807,6 +11990,37 @@ function initializeAppsPanel() {
       if (editBtn) {
         editBtn.onclick = function() {
           startEditStaffDetails();
+        };
+      }
+      
+      // Wire up kebab menu (positioned above Details card)
+      const kebabBtn = document.getElementById('ffStaffDetailsKebabBtn');
+      const kebabMenu = document.getElementById('ffStaffDetailsKebabMenu');
+      if (kebabBtn && kebabMenu) {
+        kebabBtn.onclick = function(e) {
+          e.stopPropagation();
+          const isOpen = kebabMenu.style.display === 'block';
+          kebabMenu.style.display = isOpen ? 'none' : 'block';
+        };
+      }
+      
+      // Wire up Archive button
+      const archiveBtn = document.getElementById('ffStaffDetailsArchiveBtn');
+      if (archiveBtn) {
+        archiveBtn.onclick = function(e) {
+          e.stopPropagation();
+          ffStaffArchive(staff.id);
+          if (kebabMenu) kebabMenu.style.display = 'none';
+        };
+      }
+      
+      // Wire up Change password button
+      const changePasswordBtn = document.getElementById('ffStaffDetailsChangePasswordBtn');
+      if (changePasswordBtn) {
+        changePasswordBtn.onclick = function(e) {
+          e.stopPropagation();
+          alert('Password change will be available after account activation.');
+          if (kebabMenu) kebabMenu.style.display = 'none';
         };
       }
     }
@@ -11972,6 +12186,10 @@ function initializeAppsPanel() {
         role: role,
         email: email ? String(email) : undefined,
         phone: phone ? String(phone) : undefined,
+        invited: false,
+        invitedAt: null,
+        lastActiveAt: null,
+        archived: false,
         createdAt: Date.now()
       };
       
@@ -20221,18 +20439,25 @@ window.openLog = async function(){
         <p id="staffPlaceholderMessage" style="margin:0;font-size:14px;color:#6b7280;text-align:center;display:flex;align-items:center;justify-content:center;height:100%;">Select a staff member to view details</p>
         
         <!-- Staff Details Container -->
-        <div id="staffDetailsContainer" style="display:none;max-width:800px;margin:0 auto;">
+        <div id="staffDetailsContainer" style="display:none;width:100%;">
           <div id="staffDetailsHeader"></div>
-          <div id="staffDetailsTabs"></div>
-          <div id="staffDetailsTabContent"></div>
-          <div id="staffLocationsTabContent" style="display:none;padding:24px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-            <p style="color:#6b7280;font-size:14px;margin:0;">Locations settings coming soon.</p>
-          </div>
-          <div id="staffNotificationsTabContent" style="display:none;padding:24px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-            <p style="color:#6b7280;font-size:14px;margin:0;">Notification settings coming soon.</p>
-          </div>
-          <div id="staffPermissionsTabContent" style="display:none;padding:24px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-            <p style="color:#6b7280;font-size:14px;margin:0;">Permission settings coming soon.</p>
+          <!-- Profile layout: sub-nav (left) | content (right) -->
+          <div style="display:flex;gap:20px;align-items:flex-start;margin-top:20px;">
+            <!-- Left sub-navigation column -->
+            <div id="staffDetailsNav" style="width:180px;flex-shrink:0;background:#f9fafb;border:1px solid var(--border);border-radius:12px;padding:6px;display:flex;flex-direction:column;gap:2px;"></div>
+            <!-- Right content column -->
+            <div style="flex:1;min-width:0;">
+              <div id="staffDetailsTabContent"></div>
+              <div id="staffLocationsTabContent" style="display:none;padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+                <p style="color:#6b7280;font-size:13px;margin:0;">Coming soon.</p>
+              </div>
+              <div id="staffNotificationsTabContent" style="display:none;padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+                <p style="color:#6b7280;font-size:13px;margin:0;">Coming soon.</p>
+              </div>
+              <div id="staffPermissionsTabContent" style="display:none;padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+                <p style="color:#6b7280;font-size:13px;margin:0;">Coming soon.</p>
+              </div>
+            </div>
           </div>
         </div>
         
