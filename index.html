@@ -873,6 +873,15 @@ dialog footer button, .code-dialog footer button {
   pointer-events: auto;
 }
 
+/* Archive Confirmation Modal Button Hover Styles */
+#staffArchiveConfirmCancel:hover {
+  background: #f9fafb !important;
+}
+
+#staffArchiveConfirmArchive:hover {
+  background: #b91c1c !important;
+}
+
 </style>
 
 
@@ -1407,6 +1416,35 @@ dialog footer button, .code-dialog footer button {
       <button id="userProfilePasswordModalClose" class="btn-primary" style="width:100%;font-size:14px;">Close</button>
     </div>
   </div>
+  
+  <!-- Archive Staff Confirmation Modal -->
+  <div id="staffArchiveConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100002;align-items:center;justify-content:center;pointer-events:auto;">
+    <div class="history-modal-backdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.25);z-index:0;"></div>
+    <div style="position:relative;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.15);padding:24px;max-width:450px;width:90%;z-index:1;pointer-events:auto;">
+      <h3 style="margin:0 0 16px 0;font-size:18px;font-weight:600;color:#111827;">Archive Staff Member?</h3>
+      <p id="staffArchiveConfirmBody" style="margin:0 0 24px 0;font-size:14px;color:#6b7280;line-height:1.5;">This staff member will be removed from active staff and access will be revoked. Their data will be kept and can be re-activated later.</p>
+      <div style="display:flex;gap:12px;justify-content:flex-end;">
+        <button id="staffArchiveConfirmCancel" style="padding:10px 20px;border:1px solid var(--border);background:#fff;border-radius:8px;font-size:14px;font-weight:600;color:#374151;cursor:pointer;transition:background 0.2s;">Cancel</button>
+        <button id="staffArchiveConfirmArchive" style="padding:10px 20px;border:none;background:#dc2626;border-radius:8px;font-size:14px;font-weight:600;color:#fff;cursor:pointer;transition:background 0.2s;">Archive</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Archived User Block Screen -->
+  <div id="archivedUserBlockScreen" style="display:none;position:fixed;inset:0;background:#fff;z-index:999999;align-items:center;justify-content:center;flex-direction:column;padding:40px;">
+    <div style="text-align:center;max-width:500px;">
+      <div style="width:80px;height:80px;margin:0 auto 24px;border-radius:50%;background:#fef2f2;display:flex;align-items:center;justify-content:center;">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </div>
+      <h1 style="margin:0 0 16px 0;font-size:24px;font-weight:600;color:#111827;">Account Inactive</h1>
+      <p style="margin:0 0 24px 0;font-size:16px;color:#6b7280;line-height:1.5;">Your account has been archived and access has been revoked. Please contact an administrator if you believe this is an error.</p>
+      <p style="margin:0;font-size:14px;color:#9ca3af;">You will be signed out automatically.</p>
+    </div>
+  </div>
 
   <!-- Owner View (contains existing Fair Flow app) -->
   <div id="owner-view" style="display:none;">
@@ -1778,17 +1816,51 @@ async function initFirebaseAuth() {
       
       const mainContent = document.getElementById('main-app-content');
       const authBanner = document.getElementById('authBanner');
+      const loginSection = document.getElementById('login-section');
+      const archivedBlockScreen = document.getElementById('archivedUserBlockScreen');
       
       if (user) {
-        // Signed in
+        // Signed in - check if user is archived
         console.log('[AUTH] signed in:', user.email, user.uid);
+        
+        // Check access guard: block archived users
+        if (typeof checkArchivedUserAccessGuard === 'function') {
+          const isBlocked = checkArchivedUserAccessGuard(user.email);
+          if (isBlocked) {
+            console.log('[AUTH] Access guard triggered: User is archived:', user.email);
+            // Show blocking screen and hide app
+            if (archivedBlockScreen) archivedBlockScreen.style.display = 'flex';
+            if (mainContent) mainContent.style.display = 'none';
+            if (authBanner) authBanner.style.display = 'none';
+            if (loginSection) loginSection.style.display = 'none';
+            // Force logout
+            setTimeout(async () => {
+              try {
+                const { signOut } = window.__firebaseAuthFunctions;
+                if (signOut && ffAuth) {
+                  await signOut(ffAuth);
+                  console.log('[AUTH] Forced logout for archived user');
+                }
+              } catch (e) {
+                console.error('[AUTH] Error forcing logout:', e);
+              }
+            }, 100);
+            return;
+          }
+        }
+        
+        // User is active - allow access
         if (mainContent) mainContent.style.display = '';
         if (authBanner) authBanner.style.display = 'none';
+        if (loginSection) loginSection.style.display = 'none';
+        if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
       } else {
         // Signed out
         console.log('[AUTH] signed out');
         if (mainContent) mainContent.style.display = 'none';
         if (authBanner) authBanner.style.display = 'block';
+        if (loginSection) loginSection.style.display = 'block';
+        if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
       }
     });
     
@@ -12186,14 +12258,21 @@ function initializeAppsPanel() {
         data.staff = [];
       }
       // Normalize staff objects with new fields (non-breaking)
+      // Support both 'archived' and 'isArchived' for backward compatibility
       data.staff = data.staff.map(function(staff) {
-        return {
+        const isArchived = staff.isArchived === true || staff.archived === true;
+        const normalized = {
           ...staff,
           invited: staff.invited === true,
           invitedAt: staff.invitedAt || null,
           lastActiveAt: staff.lastActiveAt || null,
-          archived: staff.archived === true
+          isArchived: isArchived
         };
+        // Remove old 'archived' field to normalize to 'isArchived'
+        if ('archived' in normalized && normalized.isArchived !== undefined) {
+          delete normalized.archived;
+        }
+        return normalized;
       });
       return data;
     } catch (e) {
@@ -12232,22 +12311,138 @@ function initializeAppsPanel() {
   function ffStaffArchive(staffId) {
     try {
       const staffStore = ffGetStaffStore();
-      const staffIndex = staffStore.staff.findIndex(s => s.id === staffId);
-      if (staffIndex === -1) return;
+      const staff = staffStore.staff.find(s => s.id === staffId);
+      if (!staff) {
+        console.error('[ffStaffArchive] Staff member not found:', staffId);
+        return;
+      }
       
-      staffStore.staff[staffIndex].archived = true;
-      ffSaveStaffStore(staffStore);
+      // Show custom confirmation modal
+      const modal = document.getElementById('staffArchiveConfirmModal');
+      const bodyText = document.getElementById('staffArchiveConfirmBody');
+      const staffName = staff.name || 'this staff member';
       
-      // Re-render list and details
-      renderStaffList();
-      renderStaffDetails();
+      if (!modal) {
+        console.error('[ffStaffArchive] Archive confirmation modal not found');
+        return;
+      }
+      
+      // Update body text to include staff member name
+      if (bodyText) {
+        bodyText.textContent = `${staffName} will be removed from active staff and access will be revoked. Their data will be kept and can be re-activated later.`;
+      }
+      
+      // Store pending staff ID for archive action
+      modal.dataset.pendingStaffId = staffId;
+      
+      // Show modal
+      modal.style.display = 'flex';
     } catch (e) {
       console.error('[ffStaffArchive] Error:', e);
     }
   }
   
+  // Perform the actual archive action (called after modal confirmation)
+  function ffStaffArchiveConfirm(staffId) {
+    try {
+      const staffStore = ffGetStaffStore();
+      const staff = staffStore.staff.find(s => s.id === staffId);
+      if (!staff) {
+        console.error('[ffStaffArchiveConfirm] Staff member not found:', staffId);
+        return;
+      }
+      
+      const staffIndex = staffStore.staff.findIndex(s => s.id === staffId);
+      if (staffIndex === -1) return;
+      
+      staffStore.staff[staffIndex].isArchived = true;
+      ffSaveStaffStore(staffStore);
+      
+      const staffName = staff.name || 'this staff member';
+      console.log('[ffStaffArchiveConfirm] Archived staff member:', staffId, staffName);
+      
+      // Clear selection if the archived staff member was selected
+      if (selectedStaffId === staffId) {
+        selectedStaffId = null;
+      }
+      
+      // Re-render list and details
+      renderStaffList();
+      renderStaffDetails();
+    } catch (e) {
+      console.error('[ffStaffArchiveConfirm] Error:', e);
+    }
+  }
+  
+  // Close archive confirmation modal
+  function ffStaffArchiveModalClose() {
+    const modal = document.getElementById('staffArchiveConfirmModal');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.dataset.pendingStaffId = '';
+    }
+  }
+  
+  // Re-activate staff member
+  function ffStaffReactivate(staffId) {
+    try {
+      const staffStore = ffGetStaffStore();
+      const staff = staffStore.staff.find(s => s.id === staffId);
+      if (!staff) {
+        console.error('[ffStaffReactivate] Staff member not found:', staffId);
+        return;
+      }
+      
+      const staffIndex = staffStore.staff.findIndex(s => s.id === staffId);
+      if (staffIndex === -1) return;
+      
+      staffStore.staff[staffIndex].isArchived = false;
+      ffSaveStaffStore(staffStore);
+      
+      console.log('[ffStaffReactivate] Re-activated staff member:', staffId, staff.name || '');
+      
+      // Keep selection on the re-activated staff member
+      // Switch to active view to show them in active list
+      showArchivedStaff = false;
+      updateArchiveToggleUI();
+      
+      // Re-render list and details
+      renderStaffList();
+      renderStaffDetails();
+    } catch (e) {
+      console.error('[ffStaffReactivate] Error:', e);
+    }
+  }
+  
+  // Access guard: Check if logged-in user (by email) is archived
+  function checkArchivedUserAccessGuard(userEmail) {
+    try {
+      if (!userEmail) return false;
+      
+      const staffStore = ffGetStaffStore();
+      const staff = staffStore.staff.find(s => s.email && s.email.toLowerCase() === userEmail.toLowerCase());
+      
+      if (staff && staff.isArchived === true) {
+        console.log('[checkArchivedUserAccessGuard] BLOCKED: User is archived', userEmail, staff.name || '');
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      console.error('[checkArchivedUserAccessGuard] Error:', e);
+      // Fail open: don't block if check fails
+      return false;
+    }
+  }
+  
+  // Expose access guard globally for use in auth state handler
+  window.checkArchivedUserAccessGuard = checkArchivedUserAccessGuard;
+  
   // Selected staff ID state
   let selectedStaffId = null;
+  
+  // Toggle state for showing archived staff
+  let showArchivedStaff = false;
   
   // Render staff list in LEFT sidebar grouped by role (names only)
   function renderStaffList() {
@@ -12265,32 +12460,27 @@ function initializeAppsPanel() {
       managersList.innerHTML = '';
       techniciansList.innerHTML = '';
       
-      // Separate active and archived staff
-      const activeManagers = staff.filter(m => m.role === 'manager' && !m.archived);
-      const archivedManagers = staff.filter(m => m.role === 'manager' && m.archived);
-      const activeTechnicians = staff.filter(t => t.role === 'technician' && !t.archived);
-      const archivedTechnicians = staff.filter(t => t.role === 'technician' && t.archived);
+      // Filter based on toggle state: if showArchivedStaff is true, show only archived; otherwise show only active
+      const managers = staff.filter(m => m.role === 'manager' && (showArchivedStaff ? m.isArchived === true : m.isArchived !== true));
+      const technicians = staff.filter(t => t.role === 'technician' && (showArchivedStaff ? t.isArchived === true : t.isArchived !== true));
       
-      if (activeManagers.length === 0 && archivedManagers.length === 0) {
-        managersList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">No managers yet.</p>';
+      // Separate active and archived staff (for backward compatibility with existing render logic)
+      const activeManagers = showArchivedStaff ? [] : managers;
+      const archivedManagers = showArchivedStaff ? managers : [];
+      const activeTechnicians = showArchivedStaff ? [] : technicians;
+      const archivedTechnicians = showArchivedStaff ? technicians : [];
+      
+      // Render managers based on toggle state
+      if (managers.length === 0) {
+        managersList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">' + (showArchivedStaff ? 'No archived managers.' : 'No managers yet.') + '</p>';
       } else {
-        // Render active managers
-        activeManagers.forEach(function(m) {
+        managers.forEach(function(m) {
           const item = document.createElement('div');
           const isSelected = selectedStaffId === m.id;
-          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;`;
-          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:#111827;font-size:12px;">${escapeHtml(m.name)}</span>`;
-          item.onclick = function() {
-            selectStaffMember(m.id);
-          };
-          managersList.appendChild(item);
-        });
-        // Render archived managers at bottom
-        archivedManagers.forEach(function(m) {
-          const item = document.createElement('div');
-          const isSelected = selectedStaffId === m.id;
-          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;opacity:0.6;`;
-          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:#6b7280;font-size:12px;">${escapeHtml(m.name)} <span style="color:#9ca3af;font-size:10px;">(Archived)</span></span>`;
+          const opacity = showArchivedStaff ? '0.6' : '1';
+          const textColor = showArchivedStaff ? '#6b7280' : '#111827';
+          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;opacity:${opacity};`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(m.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}</span>`;
           item.onclick = function() {
             selectStaffMember(m.id);
           };
@@ -12298,26 +12488,17 @@ function initializeAppsPanel() {
         });
       }
       
-      if (activeTechnicians.length === 0 && archivedTechnicians.length === 0) {
-        techniciansList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">No technicians yet.</p>';
+      // Render technicians based on toggle state
+      if (technicians.length === 0) {
+        techniciansList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">' + (showArchivedStaff ? 'No archived technicians.' : 'No technicians yet.') + '</p>';
       } else {
-        // Render active technicians
-        activeTechnicians.forEach(function(t) {
+        technicians.forEach(function(t) {
           const item = document.createElement('div');
           const isSelected = selectedStaffId === t.id;
-          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;`;
-          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:#111827;font-size:12px;">${escapeHtml(t.name)}</span>`;
-          item.onclick = function() {
-            selectStaffMember(t.id);
-          };
-          techniciansList.appendChild(item);
-        });
-        // Render archived technicians at bottom
-        archivedTechnicians.forEach(function(t) {
-          const item = document.createElement('div');
-          const isSelected = selectedStaffId === t.id;
-          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;opacity:0.6;`;
-          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:#6b7280;font-size:12px;">${escapeHtml(t.name)} <span style="color:#9ca3af;font-size:10px;">(Archived)</span></span>`;
+          const opacity = showArchivedStaff ? '0.6' : '1';
+          const textColor = showArchivedStaff ? '#6b7280' : '#111827';
+          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;opacity:${opacity};`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(t.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}</span>`;
           item.onclick = function() {
             selectStaffMember(t.id);
           };
@@ -12326,6 +12507,28 @@ function initializeAppsPanel() {
       }
     } catch (error) {
       console.error('[renderStaffList] Error rendering staff list:', error);
+    }
+  }
+  
+  // Update archive toggle UI and section headers
+  function updateArchiveToggleUI() {
+    const toggleBtn = document.getElementById('staffArchiveToggleBtn');
+    const managersHeader = document.getElementById('staffManagersHeader');
+    const techniciansHeader = document.getElementById('staffTechniciansHeader');
+    
+    if (toggleBtn) {
+      toggleBtn.textContent = showArchivedStaff ? 'Show Active Staff' : 'Show Archived Staff';
+      toggleBtn.style.background = showArchivedStaff ? '#fef2f2' : '#fff';
+      toggleBtn.style.borderColor = showArchivedStaff ? '#fca5a5' : 'var(--border)';
+      toggleBtn.style.color = showArchivedStaff ? '#991b1b' : '#6b7280';
+    }
+    
+    if (managersHeader) {
+      managersHeader.textContent = showArchivedStaff ? 'Archived Managers' : 'Managers';
+    }
+    
+    if (techniciansHeader) {
+      techniciansHeader.textContent = showArchivedStaff ? 'Archived Technicians' : 'Technicians';
     }
   }
   
@@ -12382,7 +12585,7 @@ function initializeAppsPanel() {
         const initials = getInitials(staff.name);
         const roleLabel = staff.role === 'manager' ? 'Manager' : 'Technician';
         const invited = staff.invited === true;
-        const archived = staff.archived === true;
+        const isArchived = staff.isArchived === true;
         
         // Format date for status line
         let statusText = '';
@@ -12424,8 +12627,8 @@ function initializeAppsPanel() {
               <div style="position:relative;">
                 <button id="ffStaffDetailsKebabBtn" style="width:30px;height:30px;border:none;background:#f3f4f6;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;color:#6b7280;padding:0;flex-shrink:0;" title="More options">⋯</button>
                 <div id="ffStaffDetailsKebabMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:150px;z-index:1001;padding:4px 0;">
-                  <button id="ffStaffDetailsArchiveBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Archive</button>
-                  ${invited && !archived ? '<button id="ffStaffDetailsChangePasswordBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Change password</button>' : ''}
+                  ${!isArchived ? '<button id="ffStaffDetailsArchiveBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Archive</button>' : '<button id="ffStaffDetailsReactivateBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#16a34a;display:block;font-weight:500;">Re-Activate</button>'}
+                  ${invited && !isArchived ? '<button id="ffStaffDetailsChangePasswordBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Change password</button>' : ''}
                 </div>
               </div>
             </div>
@@ -12443,12 +12646,22 @@ function initializeAppsPanel() {
           };
         }
         
-        // Wire up Archive button
+        // Wire up Archive button (only shown for active staff)
         const archiveBtn = document.getElementById('ffStaffDetailsArchiveBtn');
         if (archiveBtn) {
           archiveBtn.onclick = function(e) {
             e.stopPropagation();
             ffStaffArchive(staff.id);
+            if (kebabMenu) kebabMenu.style.display = 'none';
+          };
+        }
+        
+        // Wire up Re-Activate button (only shown for archived staff)
+        const reactivateBtn = document.getElementById('ffStaffDetailsReactivateBtn');
+        if (reactivateBtn) {
+          reactivateBtn.onclick = function(e) {
+            e.stopPropagation();
+            ffStaffReactivate(staff.id);
             if (kebabMenu) kebabMenu.style.display = 'none';
           };
         }
@@ -12872,7 +13085,7 @@ function initializeAppsPanel() {
         invited: false,
         invitedAt: null,
         lastActiveAt: null,
-        archived: false,
+        isArchived: false,
         createdAt: Date.now()
       };
       
@@ -12915,7 +13128,12 @@ function initializeAppsPanel() {
       staffMembersModal.style.height = `calc(100vh - ${headerHeight}px)`;
       staffMembersModal.style.display = 'flex';
       
+      // Reset toggle to show active staff by default
+      showArchivedStaff = false;
+      updateArchiveToggleUI();
+      
       // Render staff list when modal opens
+      updateArchiveToggleUI();
       renderStaffList();
       
       // Reset selection and edit mode when modal opens
@@ -12927,6 +13145,58 @@ function initializeAppsPanel() {
       const form = document.getElementById('staffAddForm');
       if (form) {
         form.style.display = 'none';
+      }
+      
+      // Bind archive toggle button
+      const archiveToggleBtn = document.getElementById('staffArchiveToggleBtn');
+      if (archiveToggleBtn && !archiveToggleBtn.__ffBound) {
+        archiveToggleBtn.__ffBound = true;
+        archiveToggleBtn.onclick = function(e) {
+          e.stopPropagation();
+          showArchivedStaff = !showArchivedStaff;
+          selectedStaffId = null; // Clear selection when toggling
+          updateArchiveToggleUI();
+          renderStaffList();
+          renderStaffDetails();
+        };
+      }
+      
+      // Bind archive confirmation modal buttons (only once)
+      const archiveConfirmModal = document.getElementById('staffArchiveConfirmModal');
+      const archiveConfirmCancel = document.getElementById('staffArchiveConfirmCancel');
+      const archiveConfirmArchive = document.getElementById('staffArchiveConfirmArchive');
+      
+      if (archiveConfirmModal && !archiveConfirmModal.__ffBound) {
+        archiveConfirmModal.__ffBound = true;
+        
+        // Cancel button
+        if (archiveConfirmCancel) {
+          archiveConfirmCancel.onclick = function(e) {
+            e.stopPropagation();
+            ffStaffArchiveModalClose();
+          };
+        }
+        
+        // Archive button (destructive action)
+        if (archiveConfirmArchive) {
+          archiveConfirmArchive.onclick = function(e) {
+            e.stopPropagation();
+            const pendingStaffId = archiveConfirmModal.dataset.pendingStaffId;
+            if (pendingStaffId) {
+              ffStaffArchiveConfirm(pendingStaffId);
+              ffStaffArchiveModalClose();
+            }
+          };
+        }
+        
+        // Close on backdrop click
+        const backdrop = archiveConfirmModal.querySelector('.history-modal-backdrop');
+        if (backdrop) {
+          backdrop.onclick = function(e) {
+            e.stopPropagation();
+            ffStaffArchiveModalClose();
+          };
+        }
       }
       
       // Bind direct click handler to Create control (after DOM is ready)
@@ -21364,13 +21634,17 @@ window.openLog = async function(){
         </div>
         <!-- Managers Section -->
         <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);padding-top:20px;">
-          <h3 style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Managers</h3>
+          <h3 id="staffManagersHeader" style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Managers</h3>
           <div id="staffManagersList" style="display:flex;flex-direction:column;gap:8px;"></div>
         </div>
         <!-- Technicians Section -->
         <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);margin-top:8px;padding-top:20px;">
-          <h3 style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Technicians</h3>
+          <h3 id="staffTechniciansHeader" style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Technicians</h3>
           <div id="staffTechniciansList" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
+        <!-- Show Archived Staff Toggle -->
+        <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);margin-top:8px;padding-top:16px;">
+          <button id="staffArchiveToggleBtn" style="width:100%;padding:8px 12px;border:1px solid var(--border);background:#fff;border-radius:6px;cursor:pointer;font-size:12px;color:#6b7280;text-align:center;transition:all 0.2s;">Show Archived Staff</button>
         </div>
       </div>
       <!-- Right Content Area -->
