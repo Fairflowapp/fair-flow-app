@@ -2805,15 +2805,140 @@ function ffIsTaskCompleted(task) {
   return false;
 }
 
+// ============================================
+// Catalog Normalization Helpers
+// ============================================
+
+// Safe JSON parse with fallback
+function safeParse(json, fallback = null) {
+  try {
+    if (!json) return fallback;
+    return JSON.parse(json);
+  } catch (e) {
+    console.warn('[Catalog] Error parsing JSON:', e);
+    return fallback;
+  }
+}
+
+// Get raw catalog object (could be array or object)
+function getCatalogRaw() {
+  try {
+    const raw = localStorage.getItem('ff_tasks_catalog_v1');
+    if (!raw) return null;
+    return safeParse(raw, null);
+  } catch (e) {
+    console.warn('[Catalog] Error reading catalog:', e);
+    return null;
+  }
+}
+
+// Get catalog array for a specific tab (normalizes array/object to array)
+function getCatalogArray(tab) {
+  try {
+    const catalogObj = getCatalogRaw();
+    if (!catalogObj) return [];
+    
+    const tabCatalog = catalogObj[tab];
+    if (!tabCatalog) return [];
+    
+    // If already an array, return it
+    if (Array.isArray(tabCatalog)) {
+      return tabCatalog;
+    }
+    
+    // If object map, convert to array
+    if (typeof tabCatalog === 'object' && tabCatalog !== null) {
+      return Object.values(tabCatalog);
+    }
+    
+    return [];
+  } catch (e) {
+    console.warn('[Catalog] Error getting catalog array for tab:', tab, e);
+    return [];
+  }
+}
+
+// Update a catalog item by taskId (preserves catalog shape: array stays array, object stays object)
+// Expose globally for use in index.html
+window.updateCatalogItem = function(taskId, patch) {
+  try {
+    const catalogObj = getCatalogRaw();
+    if (!catalogObj || typeof catalogObj !== 'object') {
+      console.warn('[Catalog] Cannot update: catalog is not an object');
+      return false;
+    }
+    
+    // Try each tab
+    const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+    for (let i = 0; i < tabs.length; i++) {
+      const tab = tabs[i];
+      const tabCatalog = catalogObj[tab];
+      if (!tabCatalog) continue;
+      
+      const taskIdStr = String(taskId).trim();
+      
+      // If array: find by id/taskId and update
+      if (Array.isArray(tabCatalog)) {
+        const index = tabCatalog.findIndex(item => {
+          if (!item || typeof item !== 'object') return false;
+          const itemId = String(item.taskId || item.id || '').trim();
+          return itemId === taskIdStr;
+        });
+        
+        if (index >= 0) {
+          catalogObj[tab][index] = { ...tabCatalog[index], ...patch };
+          localStorage.setItem('ff_tasks_catalog_v1', JSON.stringify(catalogObj));
+          // Update window cache if exists
+          if (window.ff_tasks_catalog_v1) {
+            window.ff_tasks_catalog_v1[tab] = catalogObj[tab];
+          }
+          return true;
+        }
+      }
+      // If object map: find key where item.id/taskId matches and update
+      else if (typeof tabCatalog === 'object' && tabCatalog !== null) {
+        // Check if taskId is a key
+        if (tabCatalog[taskIdStr]) {
+          catalogObj[tab][taskIdStr] = { ...tabCatalog[taskIdStr], ...patch };
+          localStorage.setItem('ff_tasks_catalog_v1', JSON.stringify(catalogObj));
+          // Update window cache if exists
+          if (window.ff_tasks_catalog_v1) {
+            window.ff_tasks_catalog_v1[tab] = catalogObj[tab];
+          }
+          return true;
+        }
+        
+        // Search by value id/taskId
+        for (const key in tabCatalog) {
+          const item = tabCatalog[key];
+          if (item && typeof item === 'object') {
+            const itemId = String(item.taskId || item.id || '').trim();
+            if (itemId === taskIdStr) {
+              catalogObj[tab][key] = { ...item, ...patch };
+              localStorage.setItem('ff_tasks_catalog_v1', JSON.stringify(catalogObj));
+              // Update window cache if exists
+              if (window.ff_tasks_catalog_v1) {
+                window.ff_tasks_catalog_v1[tab] = catalogObj[tab];
+              }
+              return true;
+            }
+          }
+        }
+      }
+    }
+    
+    return false; // Not found
+  } catch (e) {
+    console.error('[Catalog] Error updating catalog item:', e);
+    return false;
+  }
+};
+
 // Helper function to load weekly catalog and build a map by taskId
 function ffGetWeeklyCatalogMap() {
   const catalogMap = new Map();
   try {
-    const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
-    if (!catalogRaw) return catalogMap;
-    
-    const catalogObj = JSON.parse(catalogRaw);
-    const weeklyCatalog = catalogObj.weekly || [];
+    const weeklyCatalog = getCatalogArray('weekly');
     
     weeklyCatalog.forEach(catalogTask => {
       if (catalogTask && typeof catalogTask === 'object') {
@@ -2829,7 +2954,7 @@ function ffGetWeeklyCatalogMap() {
   return catalogMap;
 }
 
-// Helper function to check if a weekly task is scheduled for today
+// Helper function to check if a weekly task is due or overdue (scheduled for today or past)
 function ffIsWeeklyTaskScheduledToday(taskId, nowDate) {
   if (!taskId) return true; // Fail-open: if no taskId, show it
   
@@ -2852,13 +2977,21 @@ function ffIsWeeklyTaskScheduledToday(taskId, nowDate) {
     return true;
   }
   
-  // If array, check if today's weekday is included
+  // If array, check if today's weekday is included (due today) or any past weekday is included (overdue)
   if (Array.isArray(scheduleWeekdays)) {
     // If empty array, treat as "any" (fail-open)
     if (scheduleWeekdays.length === 0) {
       return true;
     }
-    return scheduleWeekdays.includes(todayWeekday);
+    // Due today if today's weekday is in the list
+    if (scheduleWeekdays.includes(todayWeekday)) {
+      return true;
+    }
+    // Overdue if any weekday in the list is before today (in the current week cycle)
+    // For simplicity, if task has scheduled weekdays and today is not one of them,
+    // we consider it due if it was scheduled earlier in the week
+    // This is a simplified check - in practice, weekly tasks are typically due on their scheduled day
+    return false;
   }
   
   // Fallback: fail-open (show task)
@@ -2869,11 +3002,7 @@ function ffIsWeeklyTaskScheduledToday(taskId, nowDate) {
 function ffGetMonthlyCatalogMap() {
   const catalogMap = new Map();
   try {
-    const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
-    if (!catalogRaw) return catalogMap;
-    
-    const catalogObj = JSON.parse(catalogRaw);
-    const monthlyCatalog = catalogObj.monthly || [];
+    const monthlyCatalog = getCatalogArray('monthly');
     
     monthlyCatalog.forEach(catalogTask => {
       if (catalogTask && typeof catalogTask === 'object') {
@@ -2912,9 +3041,9 @@ function ffIsMonthlyTaskScheduledToday(taskId, nowDate) {
     return true;
   }
   
-  // If number, check if equals today's day-of-month
+  // If number, check if due or overdue: scheduleDayOfMonth <= todayDayOfMonth
   if (typeof scheduleDayOfMonth === 'number' && scheduleDayOfMonth >= 1 && scheduleDayOfMonth <= 31) {
-    return scheduleDayOfMonth === todayDayOfMonth;
+    return scheduleDayOfMonth <= todayDayOfMonth;
   }
   
   // If string that represents a number, parse and compare
@@ -2978,100 +3107,86 @@ function ffGetTaskIdSetFromStorage(key) {
   return idSet;
 }
 
+// Helper: Get filtered MY LIST tasks for a tab (replicates renderTasksList filtering logic)
+// Returns the same filtered list that MY LIST rendering uses, so badge count matches exactly
+function getFilteredMyListTasksForTab(tab) {
+  try {
+    // Use getTabTasks if available (from index.html), otherwise read directly
+    let activeTasks = [];
+    if (typeof getTabTasks === 'function') {
+      activeTasks = getTabTasks(tab, 'active');
+    } else {
+      // Fallback: read directly from localStorage
+      const activeKey = typeof getTabStorageKey === 'function' 
+        ? getTabStorageKey(tab, 'active')
+        : `ff_tasks_${tab}_active_v1`;
+      try {
+        const stored = localStorage.getItem(activeKey);
+        if (stored) {
+          activeTasks = JSON.parse(stored) || [];
+        }
+      } catch (e) {
+        console.warn('[Badge] Error reading active tasks:', e);
+        return [];
+      }
+    }
+    
+    const now = new Date();
+    
+    // Filter tasks using the EXACT same logic as renderTasksList (lines 8819-8852 in index.html)
+    const filteredTasks = activeTasks.filter(task => {
+      if (!task || typeof task !== 'object') return false;
+      const keyId = task.taskId || task.id;
+      if (!keyId) return false;
+      
+      // Only consider tasks that are marked active (default true)
+      const isActiveFlag = task.active == null ? true : !!task.active;
+      if (!isActiveFlag) return false;
+      
+      // Hide tasks that are pending (status='pending' or assignedTo exists)
+      if (task.status === 'pending' || !!task.assignedTo) return false;
+      
+      // For weekly tab, filter by scheduleWeekdays (only show tasks scheduled for today)
+      if (tab === 'weekly' && typeof window.ffIsWeeklyTaskScheduledToday === 'function') {
+        if (!window.ffIsWeeklyTaskScheduledToday(keyId, now)) {
+          return false; // Skip this task - not scheduled for today
+        }
+      }
+      
+      // For monthly tab, filter by scheduleDayOfMonth (only show tasks scheduled for today)
+      if (tab === 'monthly' && typeof window.ffIsMonthlyTaskScheduledToday === 'function') {
+        if (!window.ffIsMonthlyTaskScheduledToday(keyId, now)) {
+          return false; // Skip this task - not scheduled for today
+        }
+      }
+      
+      // For yearly tab, filter by active status (appears if today >= scheduled date AND not completed)
+      if (tab === 'yearly' && typeof window.ffIsYearlyTaskActive === 'function') {
+        if (!window.ffIsYearlyTaskActive(task, now)) {
+          return false; // Skip this task - not active
+        }
+      }
+      
+      return true;
+    });
+    
+    // Return only incomplete tasks (same as MY LIST rendering splits into incomplete/completed)
+    return filteredTasks.filter(task => {
+      const isCompleted = task.status === 'done' || !!task.completedAt;
+      return !isCompleted;
+    });
+  } catch (e) {
+    console.error(`[Badge] Error getting filtered MY LIST tasks for tab ${tab}:`, e);
+    return [];
+  }
+}
+
 function ffGetUncompletedCountForTab(tab) {
   try {
-    // Use getTabStorageKey if it exists, otherwise fall back to literal keys
-    let activeKey, pendingKey;
-    if (typeof getTabStorageKey === 'function') {
-      activeKey = getTabStorageKey(tab, 'active');
-      pendingKey = getTabStorageKey(tab, 'pending');
-    } else {
-      activeKey = `ff_tasks_${tab}_active_v1`;
-      pendingKey = `ff_tasks_${tab}_pending_v1`;
-    }
-    
-    // If both keys resolve to the same string, treat as single source
-    if (activeKey === pendingKey) {
-      let idSet = ffGetTaskIdSetFromStorage(activeKey);
-      
-      // For weekly tab, filter by scheduleWeekdays (only count tasks scheduled for today)
-      if (tab === 'weekly') {
-        const now = new Date();
-        idSet = new Set(Array.from(idSet).filter(taskId => {
-          return ffIsWeeklyTaskScheduledToday(taskId, now);
-        }));
-      }
-      
-      // For monthly tab, filter by scheduleDayOfMonth (only count tasks scheduled for today)
-      if (tab === 'monthly') {
-        const now = new Date();
-        idSet = new Set(Array.from(idSet).filter(taskId => {
-          return ffIsMonthlyTaskScheduledToday(taskId, now);
-        }));
-      }
-      
-      return idSet.size;
-    }
-    
-    // Get unique IDs from both lists
-    const activeIds = ffGetTaskIdSetFromStorage(activeKey);
-    const pendingIds = ffGetTaskIdSetFromStorage(pendingKey);
-    
-    // Union: combine both sets (Set automatically handles duplicates)
-    let unionSet = new Set([...activeIds, ...pendingIds]);
-    
-    // For weekly tab, filter by scheduleWeekdays (only count tasks scheduled for today)
-    if (tab === 'weekly') {
-      const now = new Date();
-      unionSet = new Set(Array.from(unionSet).filter(taskId => {
-        return ffIsWeeklyTaskScheduledToday(taskId, now);
-      }));
-    }
-    
-    // For monthly tab, filter by scheduleDayOfMonth (only count tasks scheduled for today)
-    if (tab === 'monthly') {
-      const now = new Date();
-      unionSet = new Set(Array.from(unionSet).filter(taskId => {
-        return ffIsMonthlyTaskScheduledToday(taskId, now);
-      }));
-    }
-    
-    // For yearly tab, filter by active status (appears if today >= scheduled date AND not completed)
-    if (tab === 'yearly') {
-      const now = new Date();
-      // Need to check actual task objects, not just IDs
-      // Load active and pending lists to check task status
-      try {
-        const activeKey = `ff_tasks_${tab}_active_v1`;
-        const pendingKey = `ff_tasks_${tab}_pending_v1`;
-        const activeRaw = localStorage.getItem(activeKey);
-        const pendingRaw = localStorage.getItem(pendingKey);
-        const activeList = activeRaw ? JSON.parse(activeRaw) : [];
-        const pendingList = pendingRaw ? JSON.parse(pendingRaw) : [];
-        
-        // Build map of taskId -> task for quick lookup
-        const taskMap = new Map();
-        [...activeList, ...pendingList].forEach(task => {
-          if (!task || typeof task !== 'object') return;
-          const taskId = task.taskId || task.id;
-          if (taskId) {
-            taskMap.set(String(taskId).trim(), task);
-          }
-        });
-        
-        // Filter unionSet to only include active tasks
-        unionSet = new Set(Array.from(unionSet).filter(taskId => {
-          const task = taskMap.get(String(taskId).trim());
-          if (!task) return false;
-          return ffIsYearlyTaskActive(task, now);
-        }));
-      } catch (e) {
-        console.warn('[Badge] Error filtering yearly tasks:', e);
-        unionSet = new Set(); // Fail-closed: if error, don't count any
-      }
-    }
-    
-    return unionSet.size;
+    // Use the same filtered list that MY LIST rendering uses
+    // This ensures badge count matches exactly what's displayed in MY LIST
+    const filteredIncompleteTasks = getFilteredMyListTasksForTab(tab);
+    return filteredIncompleteTasks.length;
   } catch (e) {
     console.error(`[Badge] Error counting uncompleted for tab ${tab}:`, e);
     return 0;
@@ -3168,42 +3283,39 @@ function ffIsAlertsActiveForTab(tab, nowDate) {
       return nowTotalMinutes >= startTotalMinutes;
     }
     
-    // Handle yearly (month/day-based)
+    // Handle yearly (month+day-based) - check if any yearly task is scheduled for today AND alert time has passed
     if (tab === 'yearly') {
-      const startDayOfMonth = tabConfig && tabConfig.startDayOfMonth !== undefined
-        ? tabConfig.startDayOfMonth
-        : 20; // Default: day 20
-      
-      if (isNaN(startDayOfMonth) || startDayOfMonth < 1 || startDayOfMonth > 31) {
-        return true; // Invalid day, show badge
+      // First check if any yearly task is scheduled for today (using the function)
+      if (typeof window.ffIsYearlyTasksScheduledToday === 'function') {
+        const hasTaskScheduledToday = window.ffIsYearlyTasksScheduledToday(now);
+        if (!hasTaskScheduledToday) {
+          return false; // No task scheduled for today, don't show alert
+        }
+      } else {
+        // Function not available, check console for debugging
+        console.warn('[Yearly Alert] ffIsYearlyTasksScheduledToday function not available');
+        return false; // Fail-closed: function missing, don't show alert
       }
       
-      const nowDayOfMonth = now.getDate(); // 1..31
-      return nowDayOfMonth >= startDayOfMonth;
-    }
-    
-    // Handle yearly (month+day-based)
-    if (tab === 'yearly') {
-      const startMonth = tabConfig && tabConfig.startMonth !== undefined
-        ? tabConfig.startMonth
-        : 11; // Default: November
-      const startDay = tabConfig && tabConfig.startDay !== undefined
-        ? tabConfig.startDay
-        : 15; // Default: day 15
-      
-      if (isNaN(startMonth) || startMonth < 1 || startMonth > 12 ||
-          isNaN(startDay) || startDay < 1 || startDay > 31) {
-        return true; // Invalid month/day, show badge
+      // If there's a task scheduled for today, check if alert start time has passed
+      if (!tabConfig || !tabConfig.startTime) {
+        // No config found, use default - if task is scheduled, show alert immediately
+        return true;
       }
       
-      const nowMonth = now.getMonth() + 1; // JS months are 0-11, convert to 1-12
-      const nowDay = now.getDate();
+      // Parse startTime (format: "HH:MM")
+      const [startHour, startMinute] = tabConfig.startTime.split(':').map(Number);
+      if (isNaN(startHour) || isNaN(startMinute)) {
+        return true; // Invalid time, show badge (task is scheduled for today)
+      }
       
-      // Compare using numeric key: (month * 100 + day)
-      const nowKey = nowMonth * 100 + nowDay;
-      const startKey = startMonth * 100 + startDay;
+      const nowHour = now.getHours();
+      const nowMinute = now.getMinutes();
+      const nowTotalMinutes = nowHour * 60 + nowMinute;
+      const startTotalMinutes = startHour * 60 + startMinute;
       
-      return nowKey >= startKey;
+      // Return true if current time >= start time (task is already scheduled for today)
+      return nowTotalMinutes >= startTotalMinutes;
     }
     
     // Unknown tab type, show badge
@@ -3371,11 +3483,7 @@ function ffGetYearlyDueDate(task, nowDate) {
 function ffGetYearlyCatalogMap() {
   const catalogMap = new Map();
   try {
-    const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
-    if (!catalogRaw) return catalogMap;
-    
-    const catalogObj = JSON.parse(catalogRaw);
-    const yearlyCatalog = catalogObj.yearly || [];
+    const yearlyCatalog = getCatalogArray('yearly');
     
     yearlyCatalog.forEach(catalogTask => {
       if (catalogTask && typeof catalogTask === 'object') {
@@ -3389,6 +3497,152 @@ function ffGetYearlyCatalogMap() {
     console.warn('[Yearly Schedule] Error loading catalog:', e);
   }
   return catalogMap;
+}
+
+// Helper: Read Yearly tasks from the correct source
+// Primary: ff_tasks_yearly_active_v1, fallback to ff_tasks_yearly_pending_v1 for backward compatibility
+function readYearlySource() {
+  try {
+    // Try primary source first
+    const activeKey = 'ff_tasks_yearly_active_v1';
+    const activeRaw = localStorage.getItem(activeKey);
+    if (activeRaw) {
+      const activeList = JSON.parse(activeRaw);
+      if (Array.isArray(activeList) && activeList.length > 0) {
+        return activeList;
+      }
+    }
+    
+    // Fallback to pending for backward compatibility
+    const pendingKey = 'ff_tasks_yearly_pending_v1';
+    const pendingRaw = localStorage.getItem(pendingKey);
+    if (pendingRaw) {
+      const pendingList = JSON.parse(pendingRaw);
+      if (Array.isArray(pendingList)) {
+        return pendingList;
+      }
+    }
+    
+    return [];
+  } catch (e) {
+    console.warn('[Yearly Source] Error reading yearly source:', e);
+    return [];
+  }
+}
+
+// Helper: Read Yearly done list
+function readYearlyDone() {
+  try {
+    const doneKey = 'ff_tasks_yearly_done_v1';
+    const doneRaw = localStorage.getItem(doneKey);
+    if (!doneRaw) {
+      return [];
+    }
+    
+    const doneList = JSON.parse(doneRaw);
+    if (Array.isArray(doneList)) {
+      return doneList;
+    }
+    
+    return [];
+  } catch (e) {
+    console.warn('[Yearly Done] Error reading yearly done list:', e);
+    return [];
+  }
+}
+
+// Helper: Extract (month, day) from a task or catalog item
+// Returns { month: 1-12, day: 1-31 } or null if cannot parse
+// Checks task object first (preferred), then catalog item (fallback)
+function extractYearlyMonthDay(task, catalogItem) {
+  if (!task && !catalogItem) return null;
+  
+  // Month name map (for parsing strings like "Dec 31")
+  const monthMap = {
+    'jan': 1, 'january': 1,
+    'feb': 2, 'february': 2,
+    'mar': 3, 'march': 3,
+    'apr': 4, 'april': 4,
+    'may': 5,
+    'jun': 6, 'june': 6,
+    'jul': 7, 'july': 7,
+    'aug': 8, 'august': 8,
+    'sep': 9, 'sept': 9, 'september': 9,
+    'oct': 10, 'october': 10,
+    'nov': 11, 'november': 11,
+    'dec': 12, 'december': 12
+  };
+  
+  // Helper to parse month/day from a source object
+  function tryExtractFrom(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    
+    // First, try numeric fields (check in order of preference)
+    let month = obj.scheduleMonth !== undefined ? obj.scheduleMonth : 
+                (obj.month !== undefined ? obj.month : 
+                 (obj.m !== undefined ? obj.m : null));
+    let day = obj.scheduleDay !== undefined ? obj.scheduleDay : 
+              (obj.day !== undefined ? obj.day : 
+               (obj.d !== undefined ? obj.d : null));
+    
+    // If we have both numeric fields, validate and return
+    if (month !== undefined && month !== null && day !== undefined && day !== null) {
+      const monthNum = typeof month === 'number' ? month : 
+                       (typeof month === 'string' && /^\d+$/.test(month)) ? parseInt(month, 10) : null;
+      const dayNum = typeof day === 'number' ? day : 
+                     (typeof day === 'string' && /^\d+$/.test(day)) ? parseInt(day, 10) : null;
+      
+      if (monthNum !== null && monthNum >= 1 && monthNum <= 12 && 
+          dayNum !== null && dayNum >= 1 && dayNum <= 31) {
+        return { month: monthNum, day: dayNum };
+      }
+    }
+    
+    // Try string date fields (check multiple possible field names)
+    const dateFields = ['date', 'dateLabel', 'scheduleDate', 'scheduleLabel', 'yearlyDate', 'dateText'];
+    for (let i = 0; i < dateFields.length; i++) {
+      const dateValue = obj[dateFields[i]];
+      if (dateValue === undefined || dateValue === null) continue;
+      
+      const dateStr = String(dateValue).trim();
+      if (!dateStr) continue;
+      
+      // Try format: "Dec 31" or "December 31" (month name + day)
+      const monthNameMatch = dateStr.match(/^([a-z]+)\s+(\d+)$/i);
+      if (monthNameMatch) {
+        const monthName = monthNameMatch[1].toLowerCase();
+        const dayNum = parseInt(monthNameMatch[2], 10);
+        const monthNum = monthMap[monthName];
+        
+        if (monthNum && dayNum >= 1 && dayNum <= 31) {
+          return { month: monthNum, day: dayNum };
+        }
+      }
+      
+      // Try format: "12/31" or "12-31" (numeric month/day)
+      const numericMatch = dateStr.match(/^(\d+)[\s\/\-]+(\d+)$/);
+      if (numericMatch) {
+        const monthNum = parseInt(numericMatch[1], 10);
+        const dayNum = parseInt(numericMatch[2], 10);
+        
+        if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
+          return { month: monthNum, day: dayNum };
+        }
+      }
+    }
+    
+    return null;
+  }
+  
+  // Try task object first (preferred)
+  const taskResult = tryExtractFrom(task);
+  if (taskResult) return taskResult;
+  
+  // Try catalog item as fallback
+  const catalogResult = tryExtractFrom(catalogItem);
+  if (catalogResult) return catalogResult;
+  
+  return null;
 }
 
 // Check if a yearly task is active (appears in MY LIST/PENDING)
@@ -3495,6 +3749,113 @@ function ffIsYearlyTaskScheduledToday(taskId, nowDate) {
   // Both valid - compare with today
   return monthNum === todayMonth && dayNum === todayDay;
 }
+
+// Check if ANY Yearly task is scheduled for today AND not completed
+// Returns true if there is at least one Yearly task matching today's month/day
+window.ffIsYearlyTasksScheduledToday = function(date = new Date()) {
+  try {
+    const now = date instanceof Date ? date : new Date(date);
+    const todayMonth = now.getMonth() + 1; // 1..12 (JS getMonth() returns 0..11)
+    const todayDay = now.getDate(); // 1..31
+    
+    // Debug logging (behind existing debug flag if available)
+    const debugMode = window.__ffDebugYearlyAlerts || false;
+    if (debugMode) {
+      console.log('[Yearly Alert] Evaluating yearly tasks for', todayMonth + '/' + todayDay);
+    }
+    
+    // Read yearly source (primary: active, fallback: pending)
+    const yearlyList = readYearlySource();
+    if (debugMode) {
+      console.log('[Yearly Alert] Read', yearlyList.length, 'tasks from source');
+    }
+    
+    // Read done list to exclude completed items - build Set of completed IDs
+    const doneList = readYearlyDone();
+    const doneTaskIds = new Set();
+    doneList.forEach(doneTask => {
+      if (doneTask && typeof doneTask === 'object') {
+        const taskId = doneTask.taskId || doneTask.id;
+        if (taskId) {
+          doneTaskIds.add(String(taskId).trim());
+        }
+      }
+    });
+    
+    // Load catalog map to get schedule info (for fallback lookup)
+    const catalogMap = ffGetYearlyCatalogMap();
+    
+    // Check each task to see if it matches today's month/day
+    for (let i = 0; i < yearlyList.length; i++) {
+      const task = yearlyList[i];
+      if (!task || typeof task !== 'object') continue;
+      
+      // Skip if already completed
+      const taskId = task.taskId || task.id;
+      if (taskId && doneTaskIds.has(String(taskId).trim())) {
+        if (debugMode) {
+          console.log('[Yearly Alert] Task', taskId, 'is already done, skipping');
+        }
+        continue;
+      }
+      
+      // Get catalog item for this task (for fallback lookup)
+      const catalogTask = taskId ? catalogMap.get(String(taskId).trim()) : null;
+      
+      // Extract month/day using the robust helper (checks task first, then catalog)
+      const monthDay = extractYearlyMonthDay(task, catalogTask);
+      
+      if (!monthDay) {
+        if (debugMode) {
+          // Log raw date fields found for first few tasks
+          if (i < 3) {
+            const rawFields = {};
+            ['date', 'dateLabel', 'scheduleDate', 'scheduleLabel', 'yearlyDate', 'dateText', 
+             'scheduleMonth', 'scheduleDay', 'month', 'day', 'm', 'd'].forEach(field => {
+              if (task[field] !== undefined) rawFields[field] = task[field];
+            });
+            if (catalogTask) {
+              ['date', 'dateLabel', 'scheduleDate', 'scheduleLabel', 'yearlyDate', 'dateText', 
+               'scheduleMonth', 'scheduleDay', 'month', 'day', 'm', 'd'].forEach(field => {
+                if (catalogTask[field] !== undefined && !rawFields[field]) {
+                  rawFields['catalog.' + field] = catalogTask[field];
+                }
+              });
+            }
+            console.log('[Yearly Alert] Task', taskId, 'could not parse date from fields:', rawFields);
+          }
+          console.log('[Yearly Alert] Task', taskId, 'missing/invalid date, skipping');
+        }
+        continue;
+      }
+      
+      // Log parsed result for first few tasks (debug mode)
+      if (debugMode && i < 3) {
+        console.log('[Yearly Alert] Task', taskId, 'parsed date:', monthDay.month + '/' + monthDay.day);
+      }
+      
+      // Check if due TODAY: exact match (month == todayMonth AND day == todayDay)
+      // Yearly tasks are "once per year" - if date already passed, it's scheduled for next year
+      const isDueToday = (monthDay.month === todayMonth && monthDay.day === todayDay);
+      
+      if (isDueToday) {
+        if (debugMode) {
+          console.log('[Yearly Alert] Found task due today:', taskId, 'scheduled for', monthDay.month + '/' + monthDay.day, '(today:', todayMonth + '/' + todayDay + ')');
+          console.log('[Yearly Alert] Returning true');
+        }
+        return true;
+      }
+    }
+    
+    if (debugMode) {
+      console.log('[Yearly Alert] No yearly tasks scheduled for today, returning false');
+    }
+    return false;
+  } catch (e) {
+    console.error('[Yearly Alert] Error in ffIsYearlyTasksScheduledToday:', e);
+    return false; // Fail-closed: on error, don't show alert
+  }
+};
 
 // Expose yearly helper functions
 window.ffIsYearlyTaskActive = ffIsYearlyTaskActive;

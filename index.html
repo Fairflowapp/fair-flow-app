@@ -28,6 +28,12 @@
 
   --badge:#e5e7eb;
 
+  /* Staff Details brand color tokens (matching Add Staff Member button) */
+  --ff-brand-gradient: linear-gradient(90deg, var(--brand1), var(--brand2));
+  --ff-brand-purple: #9d68b9;
+  --ff-brand-pink: #ff9580;
+  --ff-brand-text-on-brand: #ffffff;
+
 }
 
 *{box-sizing:border-box}
@@ -36,12 +42,12 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:'Avenir Next', 
 
 /* Sticky header with left-aligned brand + toolbar */
 
-.header{position:sticky;top:0;z-index:100000;background:#FFFFFF;
+.header{position:sticky;top:0;z-index:100003;background:#FFFFFF;
 
   border-bottom:1px solid #E6E9EF;pointer-events:auto}
   
 /* Ensure toolbar buttons are always clickable */
-.toolbar button{position:relative;z-index:100001;pointer-events:auto;cursor:pointer}
+.toolbar button{position:relative;z-index:100004;pointer-events:auto;cursor:pointer}
 
 
 .header-inner{max-width:1140px;margin:0 auto;padding:6px 24px;display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
@@ -95,6 +101,30 @@ header .brand{display:flex;align-items:center;gap:1rem}
 .user-avatar-trigger:focus{outline:2px solid #7b3fe4;outline-offset:2px;border-radius:4px}
 .user-dropdown-item:hover{background:#f3f4f6}
 .user-dropdown-item:active{background:#e5e7eb}
+
+/* Ensure user dropdown is always clickable - above staff modal */
+.user-avatar-wrapper {
+  position: relative;
+  z-index: 100005;
+}
+.user-avatar-dropdown {
+  z-index: 100005 !important;
+  pointer-events: auto !important;
+}
+.user-avatar-dropdown * {
+  pointer-events: auto !important;
+}
+
+/* Fallback: disable pointer-events on header overlay when dropdown is open */
+body.ff-avatar-dropdown-open .header-inner {
+  pointer-events: none;
+}
+body.ff-avatar-dropdown-open #userAvatarDropdown {
+  pointer-events: auto !important;
+}
+body.ff-avatar-dropdown-open #userAvatarDropdown * {
+  pointer-events: auto !important;
+}
 
 .btn-pill{border-radius:999px;border:1px solid var(--border);background:#fff;padding:5px 14px;font-weight:500;cursor:pointer;font-size:17px;line-height:1.25;display:inline-flex;align-items:center}
 
@@ -796,6 +826,53 @@ dialog footer button, .code-dialog footer button {
   background: linear-gradient(to right, #ff0000 0%, #ffff00 16.66%, #00ff00 33.33%, #00ffff 50%, #0000ff 66.66%, #ff00ff 83.33%, #ff0000 100%);
 }
 
+#ffStaffDetailsKebabBtn {
+  transform: translateX(-140px);
+}
+
+/* Active staff nav tab - use brand gradient matching Add Staff Member button */
+.staff-nav-item.is-active,
+#staffDetailsNav .staff-nav-item.is-active {
+  background: var(--ff-brand-gradient) !important;
+  background-image: var(--ff-brand-gradient) !important;
+  color: var(--ff-brand-text-on-brand) !important;
+  font-weight: 600 !important;
+}
+
+/* Target all text elements inside active tab */
+.staff-nav-item.is-active *,
+#staffDetailsNav .staff-nav-item.is-active * {
+  color: var(--ff-brand-text-on-brand) !important;
+}
+
+/* Hover state for inactive tabs - subtle brand hint */
+#staffDetailsNav .staff-nav-item:not(.is-active):hover {
+  background: rgba(157, 104, 185, 0.08) !important;
+}
+
+/* Hover state for active tab - slightly darker gradient */
+#staffDetailsNav .staff-nav-item.is-active:hover {
+  background: linear-gradient(90deg, #8d58a9, #ef8580) !important;
+  background-image: linear-gradient(90deg, #8d58a9, #ef8580) !important;
+}
+
+/* Staff modal pointer-events fix - allow header/dropdown clicks to pass through */
+.staff-modal-overlay {
+  pointer-events: none;
+}
+.staff-modal-content,
+.staff-sidebar,
+.staff-content-area,
+.staff-modal-overlay button,
+.staff-modal-overlay a,
+.staff-modal-overlay input,
+.staff-modal-overlay select,
+.staff-modal-overlay textarea,
+.staff-modal-overlay [onclick],
+.staff-modal-overlay [role="button"] {
+  pointer-events: auto;
+}
+
 </style>
 
 
@@ -1026,7 +1103,7 @@ dialog footer button, .code-dialog footer button {
 
         <button id="appsBtn" class="btn-pill" style="position:relative;"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></span>APPS</button>
 
-        <div class="user-avatar-wrapper" style="margin-left:auto;position:relative;">
+        <div class="user-avatar-wrapper" style="margin-left:auto;position:relative;z-index:100005;">
           <button id="userAvatarBtn" class="user-avatar-trigger" aria-label="User menu" style="display:flex;align-items:center;gap:6px;background:none;border:none;padding:0;cursor:pointer;outline:none;">
             <div class="user-avatar-circle" style="width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:#f3f4f6;display:flex;align-items:center;justify-content:center;">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1036,7 +1113,7 @@ dialog footer button, .code-dialog footer button {
             </div>
             <span style="color:#6b7280;font-size:10px;line-height:1;">▼</span>
           </button>
-          <div id="userAvatarDropdown" class="user-avatar-dropdown" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:160px;z-index:100002;padding:4px 0;">
+          <div id="userAvatarDropdown" class="user-avatar-dropdown" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:160px;z-index:100005;padding:4px 0;pointer-events:auto;">
             <button class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">User Profile</button>
             <div style="height:1px;background:var(--border);margin:4px 0;"></div>
             <button id="userDropdownLogoutBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">Log out</button>
@@ -1205,6 +1282,7 @@ dialog footer button, .code-dialog footer button {
           <button class="user-profile-menu-item" data-section="password" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Password</button>
           <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Notifications</button>
           <button class="user-profile-menu-item" data-section="preferences" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Preferences</button>
+          <button class="user-profile-menu-item" data-section="billing" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Billing</button>
         </nav>
       </div>
       
@@ -1268,6 +1346,52 @@ dialog footer button, .code-dialog footer button {
                 <option value="queue">Queue</option>
                 <option value="tasks">Tasks</option>
               </select>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Billing Card -->
+        <div id="userProfileCardBilling" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <!-- Billing Overview -->
+          <div style="margin-bottom:24px;">
+            <div style="display:grid;grid-template-columns:auto 1fr;gap:12px 20px;align-items:center;">
+              <span style="font-size:10px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Current Plan</span>
+              <span id="billingCurrentPlan" style="font-size:12px;font-weight:400;color:#111827;text-align:right;">—</span>
+              <span style="font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Monthly Price</span>
+              <span id="billingMonthlyPrice" style="font-size:12px;font-weight:400;color:#111827;text-align:right;">—</span>
+              <span style="font-size:10px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Status</span>
+              <span id="billingStatus" style="font-size:12px;font-weight:400;color:#111827;text-align:right;">Not connected</span>
+              <span style="font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Next Billing Date</span>
+              <span id="billingNextDate" style="font-size:12px;font-weight:400;color:#111827;text-align:right;">—</span>
+            </div>
+          </div>
+          
+          <!-- Action Buttons -->
+          <div style="display:flex;gap:12px;margin-bottom:24px;align-items:center;">
+            <button id="billingSubscribeBtn" class="btn-primary" style="font-size:14px;padding:8px 16px;">Subscribe / Upgrade</button>
+            <button id="billingManageBtn" class="btn-ghost" style="font-size:14px;padding:8px 16px;">Manage Billing</button>
+          </div>
+          
+          <!-- Invoices / Receipts -->
+          <div>
+            <h4 style="margin:0 0 16px 0;font-size:16px;font-weight:600;color:#111827;">Invoices / Receipts</h4>
+            <div style="overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;padding:12px 8px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;border-bottom:1px solid var(--border);">Date</th>
+                    <th style="text-align:left;padding:12px 8px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;border-bottom:1px solid var(--border);">Description</th>
+                    <th style="text-align:right;padding:12px 8px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;border-bottom:1px solid var(--border);">Amount</th>
+                    <th style="text-align:center;padding:12px 8px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;border-bottom:1px solid var(--border);">Status</th>
+                    <th style="text-align:center;padding:12px 8px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;border-bottom:1px solid var(--border);">Receipt</th>
+                  </tr>
+                </thead>
+                <tbody id="billingInvoicesBody">
+                  <tr>
+                    <td colspan="5" style="text-align:center;padding:24px;font-size:12px;font-weight:400;color:#111827;">No invoices yet.</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -4744,12 +4868,21 @@ $("#saveSettings").addEventListener("click", e=>{e.preventDefault(); saveSetting
 
 
 async function openLog(){ 
+  // Check if History is already unlocked in this session
+  if (sessionStorage.getItem("ff_history_unlocked_v1") === "1") {
+    openHistoryModal();
+    return;
+  }
+  
   if (!window.securePromptOnce) return alert("Admin only");
   const code = await window.securePromptOnce("Enter admin code to view log");
   if (code == null || !isAdminCode(code)) {
     alert("Admin only");
     return;
   }
+  
+  // PIN is correct - unlock for this session and open History immediately
+  sessionStorage.setItem("ff_history_unlocked_v1", "1");
   openHistoryModal();
 }
 
@@ -4899,7 +5032,7 @@ function removeBlockingOverlays() {
       if (
         (position === 'fixed' || position === 'absolute') &&
         zIndex >= 1000 &&
-        zIndex < 100000 && // Don't touch header (z-index: 100000)
+        zIndex < 100003 && // Don't touch header (z-index: 100003)
         display !== 'none' &&
         pointerEvents !== 'none' &&
         !el.closest('.header') && // Don't touch header elements
@@ -4934,10 +5067,10 @@ function removeBlockingOverlays() {
       console.log('[Overlay Audit] No blocking overlays found');
     }
     
-    // Ensure header is always on top
+    // Ensure header is always on top (above staff modal z-index:100001)
     const header = document.querySelector('.header');
     if (header) {
-      header.style.zIndex = '100000';
+      header.style.zIndex = '100003';
       header.style.pointerEvents = 'auto';
       header.style.position = 'sticky';
     }
@@ -5100,7 +5233,8 @@ function closeHistoryModal() {
   historyModal.classList.add('hidden');
 }
 
-if (historyButton) {
+if (historyButton && !historyButton.__ffHistoryBound) {
+  historyButton.__ffHistoryBound = true;
   historyButton.addEventListener('click', () => {
     openLog();
   });
@@ -6340,6 +6474,16 @@ if (!window.__ffYearlyDateClickAttached) {
   window.__ffYearlyDateClickAttached = true;
 
   document.addEventListener('click', function (e) {
+    // Skip clicks inside user dropdown menu and wrapper - allow them to propagate normally
+    const userDropdown = document.getElementById('userAvatarDropdown');
+    const userAvatarWrapper = document.querySelector('.user-avatar-wrapper');
+    if (userDropdown && (userDropdown.contains(e.target) || e.target.closest('#userAvatarDropdown'))) {
+      return;
+    }
+    if (userAvatarWrapper && (userAvatarWrapper.contains(e.target) || e.target.closest('.user-avatar-wrapper'))) {
+      return;
+    }
+    
     const btn = e.target.closest('.tasks-yearly-date-summary');
     if (!btn) return;
 
@@ -7966,48 +8110,68 @@ function saveTasksToStorage() {
         }
       }
       
-      // For yearly tasks: always include scheduleMonth, scheduleDay, and scheduleYear
+      // For yearly tasks: use updateCatalogItem to preserve catalog shape (array vs object)
       if (tab === 'yearly') {
-        // scheduleMonth: use draft if present, otherwise preserve existing, otherwise null
+        // Determine scheduleMonth: use draft if present, otherwise preserve existing, otherwise null
+        let scheduleMonth = null;
         if (task.scheduleMonth !== undefined && task.scheduleMonth !== null) {
-          catalogTask.scheduleMonth = task.scheduleMonth;
+          scheduleMonth = task.scheduleMonth;
         } else if (task.scheduleMonth === null) {
           // Explicitly cleared by user
-          catalogTask.scheduleMonth = null;
+          scheduleMonth = null;
         } else if (existingTask && existingTask.scheduleMonth !== undefined) {
-          catalogTask.scheduleMonth = existingTask.scheduleMonth;
-        } else {
-          catalogTask.scheduleMonth = null;
+          scheduleMonth = existingTask.scheduleMonth;
         }
         
-        // scheduleDay: use draft if present, otherwise preserve existing, otherwise null
+        // Determine scheduleDay: use draft if present, otherwise preserve existing, otherwise null
+        let scheduleDay = null;
         if (task.scheduleDay !== undefined && task.scheduleDay !== null) {
-          catalogTask.scheduleDay = task.scheduleDay;
+          scheduleDay = task.scheduleDay;
         } else if (task.scheduleDay === null) {
           // Explicitly cleared by user
-          catalogTask.scheduleDay = null;
+          scheduleDay = null;
         } else if (existingTask && existingTask.scheduleDay !== undefined) {
-          catalogTask.scheduleDay = existingTask.scheduleDay;
-        } else {
-          catalogTask.scheduleDay = null;
+          scheduleDay = existingTask.scheduleDay;
         }
         
-        // scheduleYear: preserve if present, otherwise compute if month/day are set
+        // Determine scheduleYear: preserve if present, otherwise compute if month/day are set
+        let scheduleYear = undefined;
         if (task.scheduleYear !== undefined) {
-          catalogTask.scheduleYear = task.scheduleYear;
+          scheduleYear = task.scheduleYear;
         } else if (existingTask && existingTask.scheduleYear !== undefined) {
-          catalogTask.scheduleYear = existingTask.scheduleYear;
-        } else if (catalogTask.scheduleMonth !== null && catalogTask.scheduleDay !== null) {
+          scheduleYear = existingTask.scheduleYear;
+        } else if (scheduleMonth !== null && scheduleDay !== null) {
           // Compute scheduleYear: if month/day is earlier than today's month/day, scheduleYear = currentYear + 1, else currentYear
           const now = new Date();
           const currentYear = now.getFullYear();
           const todayMonth = now.getMonth() + 1; // 1-12
           const todayDay = now.getDate();
-          if (catalogTask.scheduleMonth < todayMonth || (catalogTask.scheduleMonth === todayMonth && catalogTask.scheduleDay < todayDay)) {
-            catalogTask.scheduleYear = currentYear + 1;
+          if (scheduleMonth < todayMonth || (scheduleMonth === todayMonth && scheduleDay < todayDay)) {
+            scheduleYear = currentYear + 1;
           } else {
-            catalogTask.scheduleYear = currentYear;
+            scheduleYear = currentYear;
           }
+        }
+        
+        // Update catalog item using updateCatalogItem (preserves catalog shape)
+        const patch = {
+          scheduleMonth: scheduleMonth,
+          scheduleDay: scheduleDay
+        };
+        if (scheduleYear !== undefined) {
+          patch.scheduleYear = scheduleYear;
+        }
+        
+        // Use updateCatalogItem if available (from app.js), otherwise fall back to building catalogTask
+        if (typeof window.updateCatalogItem === 'function') {
+          window.updateCatalogItem(keyId, patch);
+        }
+        
+        // Also set on catalogTask for the array building (fallback)
+        catalogTask.scheduleMonth = scheduleMonth;
+        catalogTask.scheduleDay = scheduleDay;
+        if (scheduleYear !== undefined) {
+          catalogTask.scheduleYear = scheduleYear;
         }
       }
       
@@ -8141,6 +8305,194 @@ function saveTasksToStorage() {
     
     // Save updated active list
     saveTabTasks(tab, 'active', activeTasks);
+    
+    // 2.5) Propagate schedule changes to runtime instances (active/pending/done lists)
+    // This ensures date edits persist and completed tasks are reset when schedule changes
+    // Do this AFTER active list sync so we work with the final state
+    if (tab === 'weekly' || tab === 'monthly' || tab === 'yearly') {
+      try {
+        const pendingKey = getTabStorageKey(tab, 'pending');
+        const doneKey = getTabStorageKey(tab, 'done');
+        
+        // Get pending and done lists
+        let pendingTasks = [];
+        let doneTasks = [];
+        
+        try {
+          const pendingRaw = localStorage.getItem(pendingKey);
+          if (pendingRaw) pendingTasks = JSON.parse(pendingRaw) || [];
+        } catch (e) {
+          console.warn('[Schedule Update] Error reading pending list:', e);
+        }
+        
+        try {
+          const doneRaw = localStorage.getItem(doneKey);
+          if (doneRaw) doneTasks = JSON.parse(doneRaw) || [];
+        } catch (e) {
+          console.warn('[Schedule Update] Error reading done list:', e);
+        }
+        
+        // For each task in the draft, check if schedule changed and propagate
+        currentTabTasks.forEach(draftTask => {
+          if (!draftTask || typeof draftTask !== 'object') return;
+          const taskId = String(draftTask.taskId || draftTask.id || '').trim();
+          if (!taskId) return;
+          
+          // Get the catalog task to get the final schedule values
+          const catalogTask = catalogList.find(t => {
+            const tId = String(t.taskId || t.id || '').trim();
+            return tId === taskId;
+          });
+          
+          if (!catalogTask) return;
+          
+          // Determine schedule fields based on tab
+          let scheduleChanged = false;
+          let schedulePatch = {};
+          
+          if (tab === 'weekly') {
+            const newSchedule = catalogTask.scheduleWeekdays;
+            schedulePatch.scheduleWeekdays = newSchedule;
+            // Check if schedule changed by comparing with existing active/pending tasks
+            const existingTask = [...activeTasks, ...pendingTasks].find(t => {
+              const tId = String(t.taskId || t.id || '').trim();
+              return tId === taskId;
+            });
+            if (existingTask) {
+              const oldSchedule = existingTask.scheduleWeekdays;
+              // Compare schedules (handle 'any', arrays, etc.)
+              const schedulesEqual = (oldSchedule === 'any' && newSchedule === 'any') ||
+                                     (Array.isArray(oldSchedule) && Array.isArray(newSchedule) &&
+                                      oldSchedule.length === newSchedule.length &&
+                                      oldSchedule.every((v, i) => v === newSchedule[i])) ||
+                                     (oldSchedule === newSchedule);
+              scheduleChanged = !schedulesEqual;
+            } else {
+              scheduleChanged = true; // New task, consider it changed
+            }
+          } else if (tab === 'monthly') {
+            const newSchedule = catalogTask.scheduleDayOfMonth;
+            schedulePatch.scheduleDayOfMonth = newSchedule;
+            const existingTask = [...activeTasks, ...pendingTasks].find(t => {
+              const tId = String(t.taskId || t.id || '').trim();
+              return tId === taskId;
+            });
+            if (existingTask) {
+              const oldSchedule = existingTask.scheduleDayOfMonth;
+              scheduleChanged = (oldSchedule !== newSchedule);
+            } else {
+              scheduleChanged = true;
+            }
+          } else if (tab === 'yearly') {
+            const newMonth = catalogTask.scheduleMonth;
+            const newDay = catalogTask.scheduleDay;
+            const newYear = catalogTask.scheduleYear;
+            schedulePatch.scheduleMonth = newMonth;
+            schedulePatch.scheduleDay = newDay;
+            if (newYear !== undefined) {
+              schedulePatch.scheduleYear = newYear;
+            }
+            const existingTask = [...activeTasks, ...pendingTasks].find(t => {
+              const tId = String(t.taskId || t.id || '').trim();
+              return tId === taskId;
+            });
+            if (existingTask) {
+              const oldMonth = existingTask.scheduleMonth;
+              const oldDay = existingTask.scheduleDay;
+              scheduleChanged = (oldMonth !== newMonth || oldDay !== newDay);
+            } else {
+              scheduleChanged = true;
+            }
+          }
+          
+          // If schedule changed, update all runtime instances and reset completion
+          if (scheduleChanged) {
+            console.log(`[Schedule Update] Schedule changed for task ${taskId}, propagating to runtime instances`);
+            
+            // Update active tasks (use the already-loaded activeTasks array)
+            let activeUpdated = false;
+            activeTasks = activeTasks.map(task => {
+              const tId = String(task.taskId || task.id || '').trim();
+              if (tId === taskId) {
+                activeUpdated = true;
+                // Update schedule fields
+                const updated = { ...task, ...schedulePatch };
+                // Reset completion state
+                delete updated.completedAt;
+                delete updated.completedBy;
+                updated.status = 'active';
+                updated.completed = false;
+                updated.isCompleted = false;
+                updated.done = false;
+                updated.isDone = false;
+                return updated;
+              }
+              return task;
+            });
+            
+            // Update pending tasks
+            pendingTasks = pendingTasks.map(task => {
+              const tId = String(task.taskId || task.id || '').trim();
+              if (tId === taskId) {
+                const updated = { ...task, ...schedulePatch };
+                delete updated.completedAt;
+                delete updated.completedBy;
+                updated.status = 'active';
+                updated.completed = false;
+                updated.isCompleted = false;
+                updated.done = false;
+                updated.isDone = false;
+                return updated;
+              }
+              return task;
+            });
+            
+            // Remove from done list
+            const doneBeforeLength = doneTasks.length;
+            doneTasks = doneTasks.filter(task => {
+              const tId = String(task.taskId || task.id || '').trim();
+              return tId !== taskId;
+            });
+            const doneRemoved = doneTasks.length < doneBeforeLength;
+            
+            // Save updated lists
+            try {
+              if (activeUpdated) {
+                // Save active list using saveTabTasks helper
+                if (typeof saveTabTasks === 'function') {
+                  saveTabTasks(tab, 'active', activeTasks);
+                } else {
+                  localStorage.setItem(activeKey, JSON.stringify(activeTasks));
+                }
+              }
+              if (pendingTasks.length > 0 || localStorage.getItem(pendingKey)) {
+                if (typeof saveTabTasks === 'function') {
+                  saveTabTasks(tab, 'pending', pendingTasks);
+                } else {
+                  localStorage.setItem(pendingKey, JSON.stringify(pendingTasks));
+                }
+              }
+              if (doneRemoved || doneTasks.length > 0) {
+                if (typeof saveTabTasks === 'function') {
+                  saveTabTasks(tab, 'done', doneTasks);
+                } else {
+                  localStorage.setItem(doneKey, JSON.stringify(doneTasks));
+                }
+              }
+              console.log(`[Schedule Update] Updated runtime instances for task ${taskId}`, {
+                activeUpdated,
+                pendingUpdated: pendingTasks.some(t => String(t.taskId || t.id || '').trim() === taskId),
+                doneRemoved
+              });
+            } catch (e) {
+              console.error('[Schedule Update] Error saving updated lists:', e);
+            }
+          }
+        });
+      } catch (e) {
+        console.error('[Schedule Update] Error propagating schedule changes:', e);
+      }
+    }
     
     console.log(`%c[SYNC/SAVE] COMPLETE - ACTIVE repopulated from catalog`, 'color:green;font-weight:bold', {
       tab,
@@ -8813,6 +9165,16 @@ function setupTasksInfoIconHandler() {
   if (document.__tasksInfoHandlerAttached) return;
   
   document.addEventListener('click', (e) => {
+    // Skip clicks inside user dropdown menu and wrapper - allow them to propagate normally
+    const userDropdown = document.getElementById('userAvatarDropdown');
+    const userAvatarWrapper = document.querySelector('.user-avatar-wrapper');
+    if (userDropdown && (userDropdown.contains(e.target) || e.target.closest('#userAvatarDropdown'))) {
+      return;
+    }
+    if (userAvatarWrapper && (userAvatarWrapper.contains(e.target) || e.target.closest('.user-avatar-wrapper'))) {
+      return;
+    }
+    
     const btn = e.target.closest('.tasks-info-icon');
     if (!btn) return;
     
@@ -11115,6 +11477,159 @@ if (document.readyState === 'loading') {
   initializeNavigation();
 }
 
+// Global capture-phase fallback for avatar dropdown (installed once at app startup)
+// This ensures dropdown clicks work even when overlays block normal click propagation
+(function installAvatarDropdownCaptureFallback() {
+  if (window.__ff_avatarDropdownCaptureInstalled) return;
+  window.__ff_avatarDropdownCaptureInstalled = true;
+  
+  // Helper function to find dropdown element using fallback selectors
+  function findAvatarDropdown() {
+    // Try primary selector first
+    let dropdown = document.getElementById('userAvatarDropdown');
+    if (dropdown) return dropdown;
+    
+    // Fallback: try by class
+    dropdown = document.querySelector('.user-avatar-dropdown');
+    if (dropdown) return dropdown;
+    
+    // Fallback: try by data attribute
+    dropdown = document.querySelector('[data-avatar-dropdown]');
+    if (dropdown) return dropdown;
+    
+    // Fallback: find element containing "User Profile" and "Log out" text
+    const allElements = document.querySelectorAll('*');
+    for (let el of allElements) {
+      const text = el.textContent || '';
+      if (text.includes('User Profile') && text.includes('Log out')) {
+        // Check if it's a dropdown-like container
+        const style = window.getComputedStyle(el);
+        if (style.position !== 'static' || el.id || el.classList.length > 0) {
+          return el;
+        }
+      }
+    }
+    
+    return null;
+  }
+  
+  // Helper function to check if dropdown is open
+  function isDropdownOpen(dropdown) {
+    if (!dropdown) return false;
+    
+    // Check computed display style
+    const computedStyle = window.getComputedStyle(dropdown);
+    if (computedStyle.display === 'none') return false;
+    
+    // Check inline display style
+    if (dropdown.style.display === 'none') return false;
+    
+    // Check bounding rect dimensions
+    const rect = dropdown.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    
+    return true;
+  }
+  
+  // Helper function to get logout handler
+  function triggerLogout() {
+    // Prefer the existing logout buttons so we reuse the same, already-wired logout logic
+    const existingLogoutBtn =
+      document.getElementById('logout-button') ||
+      document.getElementById('logout-button-reception') ||
+      document.getElementById('logout-button-staff');
+    
+    if (existingLogoutBtn && typeof existingLogoutBtn.click === 'function') {
+      existingLogoutBtn.click();
+      return;
+    }
+    
+    // Fallback: perform signOut directly
+    (async function() {
+      try {
+        const tasksScreen = document.getElementById('tasksScreen');
+        if (tasksScreen) {
+          tasksScreen.style.display = 'none';
+          tasksScreen.style.pointerEvents = 'none';
+        }
+        
+        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        const auth = window.auth || window.ffAuth;
+        if (auth) await signOut(auth);
+        if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
+      } catch (err) {
+        console.error('[Auth] Logout failed:', err);
+        alert('Logout failed, please try again.');
+      }
+    })();
+  }
+  
+  // Capture-phase listener for pointerdown events
+  document.addEventListener('pointerdown', function(e) {
+    const dropdown = findAvatarDropdown();
+    if (!dropdown) return;
+    
+    // Only process when dropdown is open
+    if (!isDropdownOpen(dropdown)) return;
+    
+    // Get dropdown bounding rect
+    const rect = dropdown.getBoundingClientRect();
+    const clickX = e.clientX;
+    const clickY = e.clientY;
+    
+    // Debug logging (if flag is enabled)
+    if (window.__ff_debugAvatarDropdown) {
+      console.log('[FF] dropdown open', {
+        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+        click: { clientX: clickX, clientY: clickY }
+      });
+    }
+    
+    // Check if click is inside dropdown rectangle
+    if (clickX >= rect.left && clickX <= rect.right && 
+        clickY >= rect.top && clickY <= rect.bottom) {
+      
+      // Stop all event propagation immediately (capture phase)
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      
+      // Determine which item based on Y position (top half = User Profile, bottom half = Logout)
+      const dropdownHeight = rect.bottom - rect.top;
+      const relativeY = clickY - rect.top;
+      const isTopHalf = relativeY < (dropdownHeight / 2);
+      
+      // Debug logging
+      if (window.__ff_debugAvatarDropdown) {
+        console.log('[FF] inside dropdown', {
+          relativeY: relativeY,
+          dropdownHeight: dropdownHeight,
+          isTopHalf: isTopHalf,
+          action: isTopHalf ? 'User Profile' : 'Logout'
+        });
+      }
+      
+      // Close dropdown and remove body class
+      dropdown.style.display = 'none';
+      if (document.body.classList.contains('ff-avatar-dropdown-open')) {
+        document.body.classList.remove('ff-avatar-dropdown-open');
+      }
+      
+      if (isTopHalf) {
+        // User Profile: call existing navigation function
+        if (typeof goToUserProfile === 'function') {
+          goToUserProfile();
+        } else if (typeof window.goToUserProfile === 'function') {
+          window.goToUserProfile();
+        }
+      } else {
+        // Logout: trigger existing logout logic
+        triggerLogout();
+      }
+    }
+  }, true); // Capture phase
+})();
+
 // Wrap navigation handlers to ensure tasksScreen is hidden
 // Use window properties to avoid TDZ issues - functions are hoisted but consts are not
 if (!window.__originalOpenLog) {
@@ -11134,6 +11649,13 @@ async function openHistoryFromNav() {
       closeStaffMembersModal();
     }
     
+    // Check if History is already unlocked in this session
+    if (sessionStorage.getItem("ff_history_unlocked_v1") === "1") {
+      openHistoryModal();
+      return;
+    }
+    
+    // Not unlocked - prompt for PIN
     if (!window.securePromptOnce) {
       alert("Admin only");
       return;
@@ -11143,6 +11665,9 @@ async function openHistoryFromNav() {
       alert("Admin only");
       return;
     }
+    
+    // PIN is correct - unlock for this session and open History immediately
+    sessionStorage.setItem("ff_history_unlocked_v1", "1");
     openHistoryModal();
   } catch (e) {
     console.error('[Navigation] Error in openHistoryFromNav:', e);
@@ -11188,7 +11713,8 @@ function initializeNavigationButtons() {
   try {
     // History button
     const logBtnEl = document.getElementById("logBtn") || logBtn;
-    if (logBtnEl) {
+    if (logBtnEl && !logBtnEl.__ffHistoryBound) {
+      logBtnEl.__ffHistoryBound = true;
       logBtnEl.onclick = openHistoryFromNav;
       logBtnEl.style.cursor = 'pointer';
       logBtnEl.style.pointerEvents = 'auto';
@@ -11196,7 +11722,9 @@ function initializeNavigationButtons() {
       logBtnEl.removeAttribute('disabled');
       console.log('[Navigation] History button initialized');
     } else {
-      console.warn('[Navigation] Missing element: logBtn');
+      if (!logBtnEl) {
+        console.warn('[Navigation] Missing element: logBtn');
+      }
     }
 
     // Settings button
@@ -11268,7 +11796,108 @@ function initializeNavigationButtons() {
       userAvatarBtn.onclick = function(e) {
         e.stopPropagation();
         const isVisible = userAvatarDropdown.style.display !== 'none';
-        userAvatarDropdown.style.display = isVisible ? 'none' : 'block';
+        
+        if (isVisible) {
+          // Closing: hide it and remove body class
+          userAvatarDropdown.style.display = 'none';
+          document.body.classList.remove('ff-avatar-dropdown-open');
+        } else {
+          // Opening: move dropdown to body as portal (ensures it's above all stacking contexts)
+          // Move it each time to handle cases where DOM might be recreated
+          if (userAvatarDropdown.parentNode !== document.body) {
+            document.body.appendChild(userAvatarDropdown);
+          }
+          
+          // Calculate position from avatar button and show
+          const btnRect = userAvatarBtn.getBoundingClientRect();
+          const dropdown = userAvatarDropdown;
+          
+          // Position using fixed positioning relative to viewport
+          // This ensures it's not clipped by any parent overflow/transform
+          dropdown.style.position = 'fixed';
+          dropdown.style.top = (btnRect.bottom + 8) + 'px';
+          dropdown.style.right = (window.innerWidth - btnRect.right) + 'px';
+          dropdown.style.left = 'auto';
+          dropdown.style.bottom = 'auto';
+          dropdown.style.zIndex = '2147483647';
+          dropdown.style.pointerEvents = 'auto';
+          dropdown.style.overflow = 'visible';
+          dropdown.style.transform = 'none';
+          dropdown.style.display = 'block';
+          
+          // Add body class to disable pointer-events on header overlay (fallback layer)
+          document.body.classList.add('ff-avatar-dropdown-open');
+          
+          // Bind directly to dropdown buttons when dropdown is shown
+          // Use setTimeout to ensure dropdown HTML is rendered before binding
+          setTimeout(function() {
+            const userProfileItem = userAvatarDropdown.querySelector('.user-dropdown-item:not(#userDropdownLogoutBtn)');
+            const logoutBtn = document.getElementById('userDropdownLogoutBtn');
+            
+            // Bind User Profile handler with guard flag
+            if (userProfileItem && !userProfileItem.__ffBound) {
+              userProfileItem.__ffBound = true;
+              userProfileItem.onclick = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+                
+                // Close dropdown and remove body class
+                userAvatarDropdown.style.display = 'none';
+                document.body.classList.remove('ff-avatar-dropdown-open');
+                
+                // Navigate to User Profile
+                if (typeof goToUserProfile === 'function') {
+                  goToUserProfile();
+                } else if (typeof window.goToUserProfile === 'function') {
+                  window.goToUserProfile();
+                }
+              };
+            }
+            
+            // Bind Logout handler with guard flag
+            if (logoutBtn && !logoutBtn.__ffBound) {
+              logoutBtn.__ffBound = true;
+              logoutBtn.onclick = async function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+                
+                // Close dropdown and remove body class
+                userAvatarDropdown.style.display = 'none';
+                document.body.classList.remove('ff-avatar-dropdown-open');
+                
+                // Prefer the existing logout buttons so we reuse the same, already-wired logout logic
+                const existingLogoutBtn =
+                  document.getElementById('logout-button') ||
+                  document.getElementById('logout-button-reception') ||
+                  document.getElementById('logout-button-staff');
+                
+                if (existingLogoutBtn && typeof existingLogoutBtn.click === 'function') {
+                  existingLogoutBtn.click();
+                  return;
+                }
+                
+                // Fallback: perform signOut directly if no logout button exists
+                try {
+                  const tasksScreen = document.getElementById('tasksScreen');
+                  if (tasksScreen) {
+                    tasksScreen.style.display = 'none';
+                    tasksScreen.style.pointerEvents = 'none';
+                  }
+                  
+                  const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+                  const auth = window.auth || window.ffAuth;
+                  if (auth) await signOut(auth);
+                  if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
+                } catch (err) {
+                  console.error('[Auth] Logout failed:', err);
+                  alert('Logout failed, please try again.');
+                }
+              };
+            }
+          }, 0);
+        }
       };
       // Close dropdown when clicking outside
       document.addEventListener('click', function(e) {
@@ -11276,47 +11905,14 @@ function initializeNavigationButtons() {
             !userAvatarBtn.contains(e.target) && 
             !userAvatarDropdown.contains(e.target)) {
           userAvatarDropdown.style.display = 'none';
+          document.body.classList.remove('ff-avatar-dropdown-open');
         }
       });
       
-      // Connect "User Profile" dropdown item
-      const userProfileItems = userAvatarDropdown.querySelectorAll('.user-dropdown-item');
-      if (userProfileItems.length > 0) {
-        // First item is "User Profile"
-        userProfileItems[0].onclick = function(e) {
-          e.stopPropagation();
-          goToUserProfile();
-        };
-      }
-      
-      // Connect "Log out" dropdown item
-      const logoutDropdownBtn = document.getElementById('userDropdownLogoutBtn');
-      if (logoutDropdownBtn) {
-        logoutDropdownBtn.onclick = async function(e) {
-          e.stopPropagation();
-          // Close dropdown
-          userAvatarDropdown.style.display = 'none';
-          // Call the same logout logic as the original logout button
-          try {
-            // Ensure tasksScreen is hidden before logout
-            const tasksScreen = document.getElementById('tasksScreen');
-            if (tasksScreen) {
-              tasksScreen.style.display = 'none';
-              tasksScreen.style.pointerEvents = 'none';
-            }
-            // Import signOut and call it
-            const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
-            await signOut(window.auth);
-            // Call showLoginScreen if available
-            if (typeof window.showLoginScreen === 'function') {
-              window.showLoginScreen();
-            }
-          } catch (err) {
-            console.error("[Auth] Logout failed:", err);
-            alert("Logout failed, please try again.");
-          }
-        };
-      }
+      // NOTE: User Profile and Logout dropdown handlers are now handled by direct binding
+      // when the dropdown is shown, ensuring they work from ALL screens (Staff, Queue, Tasks, etc.).
+      // The dropdown is moved to body as a portal with fixed positioning to ensure it appears
+      // above all stacking contexts (e.g., header overlays on Staff Member screen).
     }
     
     // User Profile back button
@@ -11819,7 +12415,7 @@ function initializeAppsPanel() {
         const labels = ['Details', 'Locations', 'Notifications', 'Permissions'];
         navEl.innerHTML = tabs.map(function(tab, idx) {
           const isActive = currentTab === tab;
-          return `<button class="staff-nav-item" data-tab="${tab}" style="width:100%;padding:8px 10px;min-height:36px;background:${isActive ? '#6366f1' : 'transparent'};border:none;border-radius:6px;color:${isActive ? '#fff' : '#111827'};font-weight:${isActive ? '600' : '400'};font-size:12px;cursor:pointer;text-align:left;transition:all 0.2s;">${labels[idx]}</button>`;
+          return `<button class="staff-nav-item${isActive ? ' is-active' : ''}" data-tab="${tab}" style="width:100%;padding:8px 10px;min-height:36px;background:${isActive ? 'linear-gradient(90deg, #9d68b9, #ff9580)' : 'transparent'};border:none;border-radius:6px;color:${isActive ? '#fff' : '#111827'};font-weight:${isActive ? '600' : '400'};font-size:12px;cursor:pointer;text-align:left;transition:all 0.2s;">${labels[idx]}</button>`;
         }).join('');
         
         // Wire up navigation clicks and hover effects
@@ -11828,14 +12424,14 @@ function initializeAppsPanel() {
             const tab = btn.getAttribute('data-tab');
             switchTab(tab);
           };
-          // Add hover effect
+          // Add hover effect (handled by CSS for active, inline for inactive)
           btn.onmouseenter = function() {
-            if (btn.style.background !== '#6366f1') {
+            if (!btn.classList.contains('is-active')) {
               btn.style.background = '#f3f4f6';
             }
           };
           btn.onmouseleave = function() {
-            if (btn.style.background !== '#6366f1') {
+            if (!btn.classList.contains('is-active')) {
               btn.style.background = 'transparent';
             }
           };
@@ -11863,11 +12459,15 @@ function initializeAppsPanel() {
       navEl.querySelectorAll('.staff-nav-item').forEach(function(btn) {
         const btnTab = btn.getAttribute('data-tab');
         if (btnTab === tab) {
-          btn.style.background = '#6366f1';
+          btn.classList.add('is-active');
+          btn.style.background = 'linear-gradient(90deg, #9d68b9, #ff9580)';
+          btn.style.backgroundImage = 'linear-gradient(90deg, #9d68b9, #ff9580)';
           btn.style.color = '#fff';
           btn.style.fontWeight = '600';
         } else {
+          btn.classList.remove('is-active');
           btn.style.background = 'transparent';
+          btn.style.backgroundImage = 'none';
           btn.style.color = '#111827';
           btn.style.fontWeight = '400';
         }
@@ -13002,6 +13602,17 @@ function initializeAppsPanel() {
     document.addEventListener('click', function(e) {
       try {
         const target = e.target;
+        
+        // Skip clicks inside user dropdown menu and wrapper - allow them to propagate normally
+        const userDropdown = document.getElementById('userAvatarDropdown');
+        const userAvatarWrapper = document.querySelector('.user-avatar-wrapper');
+        if (userDropdown && (userDropdown.contains(target) || target.closest('#userAvatarDropdown'))) {
+          return;
+        }
+        if (userAvatarWrapper && (userAvatarWrapper.contains(target) || target.closest('.user-avatar-wrapper'))) {
+          return;
+        }
+        
         if (!target || target.tagName !== 'BUTTON') {
           return;
         }
@@ -13177,6 +13788,10 @@ function updateTopBarAvatar(dataUrl) {
 
 // Initialize User Profile avatar upload and display
 function initializeUserProfileAvatar() {
+  // Guard flag to prevent duplicate initialization
+  if (window.__ff_userProfileAvatarInitialized) return;
+  window.__ff_userProfileAvatarInitialized = true;
+  
   const avatarImg = document.getElementById('userProfileAvatar');
   const avatarEditBtn = document.getElementById('userProfileAvatarEditBtn');
   const avatarInput = document.getElementById('userProfileAvatarInput');
@@ -13276,6 +13891,10 @@ function initializeUserProfileAvatar() {
 
 // Initialize User Profile menu and cards
 function initializeUserProfileMenu() {
+  // Guard flag to prevent duplicate initialization
+  if (window.__ff_userProfileMenuInitialized) return;
+  window.__ff_userProfileMenuInitialized = true;
+  
   const menuItems = document.querySelectorAll('.user-profile-menu-item');
   const cards = document.querySelectorAll('.user-profile-card');
   const passwordModal = document.getElementById('userProfilePasswordModal');
@@ -13342,23 +13961,33 @@ function initializeUserProfileMenu() {
     const targetCard = document.getElementById(`userProfileCard${section.charAt(0).toUpperCase() + section.slice(1)}`);
     if (targetCard) {
       targetCard.style.display = 'block';
+      
+      // Update billing panel if it's the selected section
+      if (section === 'billing' && typeof window.updateBillingPanel === 'function') {
+        window.updateBillingPanel();
+      }
     }
   }
   
-  // Initialize menu items
+  // Initialize menu items (with guard flags to prevent duplicates)
   menuItems.forEach(item => {
-    item.addEventListener('click', () => {
-      handleMenuClick(item.dataset.section);
-    });
+    if (!item.__ffBound) {
+      item.__ffBound = true;
+      item.addEventListener('click', () => {
+        handleMenuClick(item.dataset.section);
+      });
+    }
   });
   
-  // Set default active menu item (Password)
-  if (menuItems.length > 0) {
+  // Set default active menu item (Password) only if not already set
+  if (menuItems.length > 0 && !window.__ff_userProfileMenuDefaultSet) {
+    window.__ff_userProfileMenuDefaultSet = true;
     handleMenuClick('password');
   }
   
   // Password change button
-  if (changePasswordBtn) {
+  if (changePasswordBtn && !changePasswordBtn.__ffBound) {
+    changePasswordBtn.__ffBound = true;
     changePasswordBtn.addEventListener('click', async () => {
       const modalMessage = document.getElementById('userProfilePasswordModalMessage');
       
@@ -13428,7 +14057,8 @@ function initializeUserProfileMenu() {
   
   
   // Close password modal
-  if (passwordModalClose) {
+  if (passwordModalClose && !passwordModalClose.__ffBound) {
+    passwordModalClose.__ffBound = true;
     passwordModalClose.addEventListener('click', () => {
       const modalMessage = document.getElementById('userProfilePasswordModalMessage');
       if (modalMessage) {
@@ -13442,7 +14072,8 @@ function initializeUserProfileMenu() {
   }
   
   // Close modal when clicking outside
-  if (passwordModal) {
+  if (passwordModal && !passwordModal.__ffBound) {
+    passwordModal.__ffBound = true;
     passwordModal.addEventListener('click', (e) => {
       if (e.target === passwordModal) {
         const modalMessage = document.getElementById('userProfilePasswordModalMessage');
@@ -13477,13 +14108,16 @@ function initializeUserProfileMenu() {
     saveProfilePrefs(prefs);
   }
   
-  if (taskRemindersToggle) {
+  if (taskRemindersToggle && !taskRemindersToggle.__ffBound) {
+    taskRemindersToggle.__ffBound = true;
     taskRemindersToggle.addEventListener('change', saveNotificationPrefs);
   }
-  if (dailySummaryToggle) {
+  if (dailySummaryToggle && !dailySummaryToggle.__ffBound) {
+    dailySummaryToggle.__ffBound = true;
     dailySummaryToggle.addEventListener('change', saveNotificationPrefs);
   }
-  if (queueAlertsToggle) {
+  if (queueAlertsToggle && !queueAlertsToggle.__ffBound) {
+    queueAlertsToggle.__ffBound = true;
     queueAlertsToggle.addEventListener('change', saveNotificationPrefs);
   }
   
@@ -13515,13 +14149,16 @@ function initializeUserProfileMenu() {
     saveProfilePrefs(prefs);
   }
   
-  if (timeFormat12h) {
+  if (timeFormat12h && !timeFormat12h.__ffBound) {
+    timeFormat12h.__ffBound = true;
     timeFormat12h.addEventListener('change', savePreferences);
   }
-  if (timeFormat24h) {
+  if (timeFormat24h && !timeFormat24h.__ffBound) {
+    timeFormat24h.__ffBound = true;
     timeFormat24h.addEventListener('change', savePreferences);
   }
-  if (defaultScreenSelect) {
+  if (defaultScreenSelect && !defaultScreenSelect.__ffBound) {
+    defaultScreenSelect.__ffBound = true;
     defaultScreenSelect.addEventListener('change', savePreferences);
   }
   
@@ -13530,18 +14167,267 @@ function initializeUserProfileMenu() {
   loadPreferences();
   
   // Expose function to reload preferences when User Profile screen is shown
+  // This function is safe to call multiple times - it only loads data, doesn't add listeners
   window.loadUserProfilePreferences = function() {
     loadNotificationPrefs();
     loadPreferences();
   };
 }
 
+// Initialize Billing panel (optional placeholder state and handlers)
+(function initializeBillingPanel() {
+  // Optional placeholder state object (no persistence)
+  if (!window.__ff_billingState) {
+    window.__ff_billingState = {
+      planName: null,
+      monthlyPrice: null,
+      status: "not_connected",
+      nextBillingDate: null,
+      invoices: []
+    };
+  }
+  
+  // Helper function to render billing data from state
+  function renderBillingData() {
+    const state = window.__ff_billingState || {};
+    
+    const currentPlanEl = document.getElementById('billingCurrentPlan');
+    const monthlyPriceEl = document.getElementById('billingMonthlyPrice');
+    const statusEl = document.getElementById('billingStatus');
+    const nextDateEl = document.getElementById('billingNextDate');
+    const invoicesBodyEl = document.getElementById('billingInvoicesBody');
+    
+    if (currentPlanEl) {
+      currentPlanEl.textContent = state.planName || '—';
+    }
+    if (monthlyPriceEl) {
+      monthlyPriceEl.textContent = state.monthlyPrice || '—';
+    }
+    if (statusEl) {
+      statusEl.textContent = state.status === 'not_connected' ? 'Not connected' : (state.status || 'Not connected');
+    }
+    if (nextDateEl) {
+      nextDateEl.textContent = state.nextBillingDate || '—';
+    }
+    if (invoicesBodyEl) {
+      if (state.invoices && state.invoices.length > 0) {
+        invoicesBodyEl.innerHTML = state.invoices.map(invoice => {
+          return `<tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:12px 8px;font-size:12px;font-weight:400;color:#111827;text-align:left;">${invoice.date || '—'}</td>
+            <td style="padding:12px 8px;font-size:12px;font-weight:400;color:#111827;text-align:left;">${invoice.description || '—'}</td>
+            <td style="padding:12px 8px;font-size:12px;font-weight:400;color:#111827;text-align:right;">${invoice.amount || '—'}</td>
+            <td style="padding:12px 8px;font-size:12px;font-weight:400;color:#111827;text-align:center;">${invoice.status || '—'}</td>
+            <td style="padding:12px 8px;font-size:12px;font-weight:400;color:#111827;text-align:center;">${invoice.receipt ? '<button class="btn-mini" style="font-size:12px;">Download</button>' : '—'}</td>
+          </tr>`;
+        }).join('');
+      } else {
+        invoicesBodyEl.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;font-size:12px;font-weight:400;color:#111827;">No invoices yet.</td></tr>';
+      }
+    }
+  }
+  
+  // Initialize billing buttons with guard flags
+  function initializeBillingButtons() {
+    const subscribeBtn = document.getElementById('billingSubscribeBtn');
+    const manageBtn = document.getElementById('billingManageBtn');
+    
+    if (subscribeBtn && !subscribeBtn.__ffBound) {
+      subscribeBtn.__ffBound = true;
+      subscribeBtn.addEventListener('click', function() {
+        console.log('[FF] Billing: Subscribe/Upgrade (coming soon)');
+      });
+    }
+    
+    if (manageBtn && !manageBtn.__ffBound) {
+      manageBtn.__ffBound = true;
+      manageBtn.addEventListener('click', function() {
+        console.log('[FF] Billing: Manage Billing (coming soon)');
+      });
+    }
+  }
+  
+  // Render billing data when Billing panel is shown
+  function updateBillingPanel() {
+    renderBillingData();
+    initializeBillingButtons();
+  }
+  
+  // Expose update function for when Billing panel is shown
+  window.updateBillingPanel = updateBillingPanel;
+  
+  // Initialize buttons on DOM ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+      setTimeout(initializeBillingButtons, 100);
+    });
+  } else {
+    setTimeout(initializeBillingButtons, 100);
+  }
+})();
+
 // Tasks screen buttons are now initialized in app.js via DOMContentLoaded
 // This ensures proper event listener attachment and avoids conflicts
+
+// Global delegated handlers for the avatar dropdown (works even if the header/dropdown is re-rendered)
+function installGlobalUserAvatarDropdownDelegates() {
+  if (window.__ff_userAvatarDropdownDelegatesInstalled) return;
+  window.__ff_userAvatarDropdownDelegatesInstalled = true;
+
+  // Global event delegation handler (bubble phase) for avatar dropdown items
+  // Works from all screens including Staff Member by using event delegation
+  document.addEventListener('click', async function (ev) {
+    const target = ev.target;
+    if (!target || !target.closest) return;
+
+    // Logout from dropdown
+    const logoutBtn = target.closest('#userDropdownLogoutBtn');
+    if (logoutBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+
+      // Close dropdown if open
+      const userAvatarDropdown = document.getElementById('userAvatarDropdown');
+      if (userAvatarDropdown) userAvatarDropdown.style.display = 'none';
+
+      // Prefer the existing logout buttons so we reuse the same, already-wired logout logic (app.js)
+      const existingLogoutBtn =
+        document.getElementById('logout-button') ||
+        document.getElementById('logout-button-reception') ||
+        document.getElementById('logout-button-staff');
+
+      if (existingLogoutBtn && typeof existingLogoutBtn.click === 'function') {
+        existingLogoutBtn.click();
+        return;
+      }
+
+      // Fallback: perform signOut directly if no logout button exists for some reason
+      try {
+        // Ensure tasksScreen is hidden before logout
+        const tasksScreen = document.getElementById('tasksScreen');
+        if (tasksScreen) {
+          tasksScreen.style.display = 'none';
+          tasksScreen.style.pointerEvents = 'none';
+        }
+
+        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        const auth = window.auth || window.ffAuth;
+        if (auth) await signOut(auth);
+        if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
+      } catch (err) {
+        console.error('[Auth] Logout failed:', err);
+        alert('Logout failed, please try again.');
+      }
+
+      return;
+    }
+
+    // User Profile from dropdown (delegated) - match .user-dropdown-item inside #userAvatarDropdown (not logout)
+    const dropdownItem = target.closest('#userAvatarDropdown .user-dropdown-item');
+    if (dropdownItem && dropdownItem.id !== 'userDropdownLogoutBtn') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+
+      // Close dropdown if open and remove body class
+      const userAvatarDropdown = document.getElementById('userAvatarDropdown');
+      if (userAvatarDropdown) {
+        userAvatarDropdown.style.display = 'none';
+        document.body.classList.remove('ff-avatar-dropdown-open');
+      }
+
+      // Call the existing function that opens User Profile (same one used by Queue)
+      if (typeof goToUserProfile === 'function') {
+        goToUserProfile();
+      } else if (typeof window.goToUserProfile === 'function') {
+        window.goToUserProfile();
+      } else {
+        console.warn('[Navigation] goToUserProfile function not found');
+      }
+    }
+  });
+
+  // Also handle pointerdown events (bubble phase) as fallback for Staff Member screen
+  document.addEventListener('pointerdown', async function (ev) {
+    const target = ev.target;
+    if (!target || !target.closest) return;
+
+    // Logout from dropdown
+    const logoutBtn = target.closest('#userDropdownLogoutBtn');
+    if (logoutBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+
+      // Close dropdown if open and remove body class
+      const userAvatarDropdown = document.getElementById('userAvatarDropdown');
+      if (userAvatarDropdown) {
+        userAvatarDropdown.style.display = 'none';
+        document.body.classList.remove('ff-avatar-dropdown-open');
+      }
+
+      // Prefer the existing logout buttons so we reuse the same, already-wired logout logic (app.js)
+      const existingLogoutBtn =
+        document.getElementById('logout-button') ||
+        document.getElementById('logout-button-reception') ||
+        document.getElementById('logout-button-staff');
+
+      if (existingLogoutBtn && typeof existingLogoutBtn.click === 'function') {
+        existingLogoutBtn.click();
+        return;
+      }
+
+      // Fallback: perform signOut directly if no logout button exists for some reason
+      try {
+        // Ensure tasksScreen is hidden before logout
+        const tasksScreen = document.getElementById('tasksScreen');
+        if (tasksScreen) {
+          tasksScreen.style.display = 'none';
+          tasksScreen.style.pointerEvents = 'none';
+        }
+
+        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        const auth = window.auth || window.ffAuth;
+        if (auth) await signOut(auth);
+        if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
+      } catch (err) {
+        console.error('[Auth] Logout failed:', err);
+        alert('Logout failed, please try again.');
+      }
+
+      return;
+    }
+
+    // User Profile from dropdown (delegated)
+    const userBtn = target.closest('#userAvatarDropdown .user-dropdown-item, #userAvatarDropdown button.user-dropdown-item');
+    if (userBtn && userBtn.id !== 'userDropdownLogoutBtn') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+
+      // Close dropdown if open and remove body class
+      const userAvatarDropdown = document.getElementById('userAvatarDropdown');
+      if (userAvatarDropdown) {
+        userAvatarDropdown.style.display = 'none';
+        document.body.classList.remove('ff-avatar-dropdown-open');
+      }
+
+      // Call the existing function that opens User Profile (same one used by Queue)
+      if (typeof goToUserProfile === 'function') {
+        goToUserProfile();
+      } else if (typeof window.goToUserProfile === 'function') {
+        window.goToUserProfile();
+      } else {
+        console.warn('[Navigation] goToUserProfile function not found');
+      }
+    }
+  });
+}
 
 // Initialize buttons when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
+    installGlobalUserAvatarDropdownDelegates();
     setTimeout(initializeNavigationButtons, 100);
     // Initialize top bar avatar on page load
     setTimeout(() => {
@@ -13550,6 +14436,7 @@ if (document.readyState === 'loading') {
     }, 200);
   });
 } else {
+  installGlobalUserAvatarDropdownDelegates();
   setTimeout(initializeNavigationButtons, 100);
   // Initialize top bar avatar on page load
   setTimeout(() => {
@@ -19248,6 +20135,15 @@ window.openLog = async function(){
   // Global click safety net (in case some actions bypass wrappers)
 
   document.addEventListener("click", function(ev){
+    // Skip clicks inside user dropdown menu and wrapper - allow them to propagate normally
+    const userDropdown = document.getElementById('userAvatarDropdown');
+    const userAvatarWrapper = document.querySelector('.user-avatar-wrapper');
+    if (userDropdown && (userDropdown.contains(ev.target) || ev.target.closest('#userAvatarDropdown'))) {
+      return;
+    }
+    if (userAvatarWrapper && (userAvatarWrapper.contains(ev.target) || ev.target.closest('.user-avatar-wrapper'))) {
+      return;
+    }
 
     var btn = ev.target.closest("button, [role='button']"); if(!btn) return;
 
@@ -19502,6 +20398,15 @@ window.openLog = async function(){
 
 
   window.__ff_click_handler = function(ev){
+    // Skip clicks inside user dropdown menu and wrapper - allow them to propagate normally
+    const userDropdown = document.getElementById('userAvatarDropdown');
+    const userAvatarWrapper = document.querySelector('.user-avatar-wrapper');
+    if (userDropdown && (userDropdown.contains(ev.target) || ev.target.closest('#userAvatarDropdown'))) {
+      return;
+    }
+    if (userAvatarWrapper && (userAvatarWrapper.contains(ev.target) || ev.target.closest('.user-avatar-wrapper'))) {
+      return;
+    }
 
     var t = ev.target.closest('button, [role=\"button\"]'); if(!t) return;
 
@@ -20410,9 +21315,9 @@ window.openLog = async function(){
   </div>
 
   <!-- Staff Members Full-Screen Overlay -->
-  <div id="staffMembersModal" class="staff-modal-overlay" style="display:none;position:fixed;left:0;right:0;bottom:0;width:100vw;background:#fff;z-index:100001;overflow:hidden;flex-direction:column;pointer-events:auto;">
+  <div id="staffMembersModal" class="staff-modal-overlay" style="display:none;position:fixed;left:0;right:0;bottom:0;width:100vw;background:#fff;z-index:100001;overflow:hidden;flex-direction:column;pointer-events:none;">
     <!-- 2-Column Layout Container -->
-    <div class="staff-modal-content" style="flex:1;overflow:hidden;display:flex;min-height:0;">
+    <div class="staff-modal-content" style="flex:1;overflow:hidden;display:flex;min-height:0;pointer-events:auto;">
       <!-- Left Sidebar -->
       <div class="staff-sidebar" style="width:220px;flex-shrink:0;background:var(--muted);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;position:relative;z-index:100002;">
         <!-- Add Staff Member Button -->
