@@ -1114,7 +1114,7 @@ dialog footer button, .code-dialog footer button {
             <span style="color:#6b7280;font-size:10px;line-height:1;">▼</span>
           </button>
           <div id="userAvatarDropdown" class="user-avatar-dropdown" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:160px;z-index:100005;padding:4px 0;pointer-events:auto;">
-            <button class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">User Profile</button>
+            <button id="userDropdownProfileBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">User Profile</button>
             <div style="height:1px;background:var(--border);margin:4px 0;"></div>
             <button id="userDropdownLogoutBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">Log out</button>
           </div>
@@ -3702,10 +3702,82 @@ function ensureQueueUIHiddenForUserProfile() {
 }
 
 function goToUserProfile() {
-  // Store current view before switching
+  // Minimal instrumentation: START log with current view flags and screen existence
   const tasksScreen = document.getElementById('tasksScreen');
   const ownerView = document.getElementById('owner-view');
+  const userProfileScreen = document.getElementById('userProfileScreen');
+  const tasksScreenVisible = tasksScreen ? tasksScreen.style.display !== 'none' : false;
+  const ownerViewVisible = ownerView ? ownerView.style.display !== 'none' : false;
+  const userProfileScreenExists = !!userProfileScreen;
   
+  console.log('goToUserProfile START', {
+    tasksScreenVisible: tasksScreenVisible,
+    ownerViewVisible: ownerViewVisible,
+    userProfileScreenExists: userProfileScreenExists
+  });
+  
+  // Check if screen exists - if missing, log error and return
+  if (!userProfileScreen) {
+    console.error('goToUserProfile RETURN: Missing #userProfileScreen in DOM');
+    return;
+  }
+  
+  // Reset Staff Member state BEFORE navigation to prevent re-render override
+  const staffMembersModal = document.getElementById('staffMembersModal');
+  const staffDetailsContainer = document.getElementById('staffDetailsContainer');
+  const staffPlaceholderMessage = document.getElementById('staffPlaceholderMessage');
+  
+  if (staffMembersModal && staffMembersModal.style.display !== 'none') {
+    // Staff Member view is active - reset state
+    console.log('[goToUserProfile] Resetting Staff Member state');
+    
+    // Close Staff Members modal (this should prevent re-renders)
+    if (typeof closeStaffMembersModal === 'function') {
+      closeStaffMembersModal();
+    } else if (typeof window.closeStaffMembersModal === 'function') {
+      window.closeStaffMembersModal();
+    } else if (staffMembersModal) {
+      staffMembersModal.style.display = 'none';
+    }
+    
+    // Hide staff details container to clear selection visually
+    if (staffDetailsContainer) {
+      staffDetailsContainer.style.display = 'none';
+    }
+    
+    // Show placeholder to indicate no selection
+    if (staffPlaceholderMessage) {
+      staffPlaceholderMessage.style.display = 'block';
+    }
+    
+    // Hide staff add form if visible
+    const staffAddForm = document.getElementById('staffAddForm');
+    if (staffAddForm) {
+      staffAddForm.style.display = 'none';
+    }
+    
+    // Clear selection highlights in staff list (remove selected styling)
+    const managersList = document.getElementById('staffManagersList');
+    const techniciansList = document.getElementById('staffTechniciansList');
+    if (managersList) {
+      managersList.querySelectorAll('div').forEach(item => {
+        item.style.background = '#f9fafb';
+        item.style.borderColor = 'var(--border)';
+        const span = item.querySelector('span');
+        if (span) span.style.fontWeight = '400';
+      });
+    }
+    if (techniciansList) {
+      techniciansList.querySelectorAll('div').forEach(item => {
+        item.style.background = '#f9fafb';
+        item.style.borderColor = 'var(--border)';
+        const span = item.querySelector('span');
+        if (span) span.style.fontWeight = '400';
+      });
+    }
+  }
+  
+  // Store current view before switching
   if (tasksScreen && tasksScreen.style.display !== 'none') {
     previousView = 'tasks';
   } else if (ownerView && ownerView.style.display !== 'none') {
@@ -3734,10 +3806,7 @@ function goToUserProfile() {
   if (wrap) wrap.style.display = 'none';
   
   // Show User Profile screen
-  const userProfileScreen = document.getElementById('userProfileScreen');
-  if (userProfileScreen) {
-    userProfileScreen.style.display = 'block';
-  }
+  userProfileScreen.style.display = 'block';
   
   // Load avatar from localStorage when User Profile screen is shown
   if (typeof window.loadUserProfileAvatar === 'function') {
@@ -3756,8 +3825,20 @@ function goToUserProfile() {
   const userAvatarDropdown = document.getElementById('userAvatarDropdown');
   if (userAvatarDropdown) {
     userAvatarDropdown.style.display = 'none';
+    document.body.classList.remove('ff-avatar-dropdown-open');
   }
+  
+  // Minimal instrumentation: END log with computed styles
+  const computedStyle = window.getComputedStyle(userProfileScreen);
+  console.log('goToUserProfile END (attempted show)', {
+    display: computedStyle.display,
+    visibility: computedStyle.visibility,
+    opacity: computedStyle.opacity
+  });
 }
+
+// Expose goToUserProfile on window for accessibility
+window.goToUserProfile = goToUserProfile;
 
 function goBackFromUserProfile() {
   const userProfileScreen = document.getElementById('userProfileScreen');
@@ -11831,16 +11912,18 @@ function initializeNavigationButtons() {
           // Bind directly to dropdown buttons when dropdown is shown
           // Use setTimeout to ensure dropdown HTML is rendered before binding
           setTimeout(function() {
-            const userProfileItem = userAvatarDropdown.querySelector('.user-dropdown-item:not(#userDropdownLogoutBtn)');
+            const profileBtn = document.getElementById('userDropdownProfileBtn');
             const logoutBtn = document.getElementById('userDropdownLogoutBtn');
             
             // Bind User Profile handler with guard flag
-            if (userProfileItem && !userProfileItem.__ffBound) {
-              userProfileItem.__ffBound = true;
-              userProfileItem.onclick = function(e) {
+            if (profileBtn && !profileBtn.__ffBound) {
+              profileBtn.__ffBound = true;
+              profileBtn.onclick = function(e) {
                 e.preventDefault();
                 e.stopPropagation();
                 if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+                
+                console.log("User Profile clicked ✅");
                 
                 // Close dropdown and remove body class
                 userAvatarDropdown.style.display = 'none';
@@ -14321,30 +14404,6 @@ function installGlobalUserAvatarDropdownDelegates() {
 
       return;
     }
-
-    // User Profile from dropdown (delegated) - match .user-dropdown-item inside #userAvatarDropdown (not logout)
-    const dropdownItem = target.closest('#userAvatarDropdown .user-dropdown-item');
-    if (dropdownItem && dropdownItem.id !== 'userDropdownLogoutBtn') {
-      ev.preventDefault();
-      ev.stopPropagation();
-      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
-
-      // Close dropdown if open and remove body class
-      const userAvatarDropdown = document.getElementById('userAvatarDropdown');
-      if (userAvatarDropdown) {
-        userAvatarDropdown.style.display = 'none';
-        document.body.classList.remove('ff-avatar-dropdown-open');
-      }
-
-      // Call the existing function that opens User Profile (same one used by Queue)
-      if (typeof goToUserProfile === 'function') {
-        goToUserProfile();
-      } else if (typeof window.goToUserProfile === 'function') {
-        window.goToUserProfile();
-      } else {
-        console.warn('[Navigation] goToUserProfile function not found');
-      }
-    }
   });
 
   // Also handle pointerdown events (bubble phase) as fallback for Staff Member screen
@@ -14396,30 +14455,6 @@ function installGlobalUserAvatarDropdownDelegates() {
       }
 
       return;
-    }
-
-    // User Profile from dropdown (delegated)
-    const userBtn = target.closest('#userAvatarDropdown .user-dropdown-item, #userAvatarDropdown button.user-dropdown-item');
-    if (userBtn && userBtn.id !== 'userDropdownLogoutBtn') {
-      ev.preventDefault();
-      ev.stopPropagation();
-      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
-
-      // Close dropdown if open and remove body class
-      const userAvatarDropdown = document.getElementById('userAvatarDropdown');
-      if (userAvatarDropdown) {
-        userAvatarDropdown.style.display = 'none';
-        document.body.classList.remove('ff-avatar-dropdown-open');
-      }
-
-      // Call the existing function that opens User Profile (same one used by Queue)
-      if (typeof goToUserProfile === 'function') {
-        goToUserProfile();
-      } else if (typeof window.goToUserProfile === 'function') {
-        window.goToUserProfile();
-      } else {
-        console.warn('[Navigation] goToUserProfile function not found');
-      }
     }
   });
 }
