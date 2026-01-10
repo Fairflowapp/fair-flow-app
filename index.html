@@ -1583,6 +1583,13 @@ dialog footer button, .code-dialog footer button {
         <button id="startFirstBtn" class="queue-action-btn queue-action-btn--black">START top</button>
 
         <button id="resetBtn" class="queue-action-btn queue-action-btn--red">RESET</button>
+
+        <button id="manageQueueBtn" class="queue-action-btn queue-action-btn--black ff-gear-icon" style="display:none;padding:6px 10px;min-width:auto;" title="Manage Queue">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+        </button>
       </div>
 
     </div>
@@ -1621,6 +1628,74 @@ dialog footer button, .code-dialog footer button {
 
     </div>
 
+  </div>
+
+  <!-- Manage Queue Screen -->
+  <div id="manageQueueScreen" style="display:none;max-width:800px;margin:40px auto;padding:0 24px;">
+    <div style="margin-bottom:32px;">
+      <button id="manageQueueBackBtn" class="btn-pill" style="margin-bottom:16px;">← Back to Queue</button>
+      <h1 style="margin:0 0 8px 0;font-size:24px;font-weight:600;color:#111827;">Manage Queue</h1>
+      <p style="margin:0;font-size:14px;color:#6b7280;">Queue behavior and automation settings</p>
+    </div>
+
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+      <!-- Queue Auto Reset Section -->
+      <div style="margin-bottom:24px;">
+        <h3 style="margin:0 0 16px 0;font-size:16px;font-weight:600;color:#111827;">Queue Auto Reset</h3>
+        
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <!-- Enable queue auto reset checkbox -->
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="manageQueueAutoResetEnabled" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
+            <span style="font-size:14px;color:#111827;">Enable queue auto reset</span>
+          </label>
+
+          <!-- Reset time input -->
+          <div style="display:flex;align-items:center;gap:12px;">
+            <label style="font-size:14px;color:#111827;min-width:100px;">Reset time:</label>
+            <input type="time" id="manageQueueAutoResetTime" value="04:00" style="height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
+          </div>
+
+          <!-- Reset even if people are In Service checkbox -->
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="manageQueueAutoResetForce" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
+            <span style="font-size:14px;color:#111827;">Reset even if people are In Service</span>
+          </label>
+        </div>
+      </div>
+
+      <div style="height:1px;background:#f3f4f6;margin:24px 0;"></div>
+
+      <!-- Start from top rules -->
+      <div style="padding:16px 0;border-bottom:1px solid #f3f4f6;opacity:0.5;pointer-events:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:500;color:#111827;margin-bottom:4px;">Start from top rules</div>
+            <div style="font-size:13px;color:#6b7280;">Configure rules for starting services from the top of the queue</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Allow reorder -->
+      <div style="padding:16px 0;border-bottom:1px solid #f3f4f6;opacity:0.5;pointer-events:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:500;color:#111827;margin-bottom:4px;">Allow reorder</div>
+            <div style="font-size:13px;color:#6b7280;">Enable or disable the ability to reorder queue items</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Allow reset queue -->
+      <div style="padding:16px 0;opacity:0.5;pointer-events:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:500;color:#111827;margin-bottom:4px;">Allow reset queue</div>
+            <div style="font-size:13px;color:#6b7280;">Enable or disable the ability to reset the queue</div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="historyModal" class="history-modal code-dialog hidden">
@@ -1962,6 +2037,19 @@ async function initFirebaseAuth() {
         if (authBanner) authBanner.style.display = 'none';
         if (loginSection) loginSection.style.display = 'none';
         if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
+        
+        // Initialize Queue screen on sign-in (default view) - ensures gear icon appears on initial load
+        // Call goToQueue() to set up Queue UI and check permissions for gear icon visibility
+        if (typeof goToQueue === 'function') {
+          goToQueue();
+        }
+        // Initialize Manage Queue button handlers after Queue is shown
+        if (typeof initManageQueueButtons === 'function') {
+          // Use setTimeout to ensure DOM is ready after goToQueue()
+          setTimeout(function() {
+            initManageQueueButtons();
+          }, 0);
+        }
       } else {
         // Signed out
         console.log('[AUTH] signed out');
@@ -1978,6 +2066,15 @@ async function initFirebaseAuth() {
     // Fallback: show app content if auth fails (backward compatibility)
     const mainContent = document.getElementById('main-app-content');
     if (mainContent) mainContent.style.display = '';
+    // Initialize Queue screen on fallback (ensures gear icon appears even if auth check fails)
+    if (typeof goToQueue === 'function') {
+      goToQueue();
+    }
+    if (typeof initManageQueueButtons === 'function') {
+      setTimeout(function() {
+        initManageQueueButtons();
+      }, 0);
+    }
   }
 }
 
@@ -3436,6 +3533,11 @@ async function resetDay(){
 // Reusable queue reset function (extracted from resetDay)
 function resetQueueState({ force = false, source = 'manual' }) {
   try {
+    // Exit reorder mode when resetting queue (ensures clean state)
+    if (typeof exitReorderMode === 'function' && reorderMode) {
+      exitReorderMode();
+    }
+    
     // Clear Available queue
     queue = [];
     
@@ -3769,6 +3871,11 @@ window.openSettingsSecure = openSettingsSecure;
 
 // Navigation function to return to Queue view
 function goToQueue() {
+  // Exit reorder mode when navigating to Queue (ensures clean state)
+  if (typeof exitReorderMode === 'function' && reorderMode) {
+    exitReorderMode();
+  }
+  
   // ALWAYS close Settings modal if open
   const settingsDlg = document.getElementById('settingsDlg');
   if (settingsDlg && settingsDlg.open) {
@@ -3806,6 +3913,12 @@ function goToQueue() {
     userProfileScreen.style.display = 'none';
   }
   
+  // Hide Manage Queue screen if visible
+  const manageQueueScreen = document.getElementById('manageQueueScreen');
+  if (manageQueueScreen) {
+    manageQueueScreen.style.display = 'none';
+  }
+  
   // Close Staff Members if open
   if (typeof closeStaffMembersModal === 'function') {
     closeStaffMembersModal();
@@ -3834,6 +3947,31 @@ function goToQueue() {
     queueControls.style.display = 'flex';
   }
   
+  // Show/hide Manage Queue button based on permission and initialize handlers
+  const manageQueueBtn = document.getElementById('manageQueueBtn');
+  if (manageQueueBtn) {
+    const hasPermission = checkQueueManagePermission();
+    manageQueueBtn.style.display = hasPermission ? 'flex' : 'none';
+    // Always initialize button handler if not already attached (for testing)
+    if (!manageQueueBtn.hasAttribute('data-handler-attached')) {
+      manageQueueBtn.setAttribute('data-handler-attached', 'true');
+      manageQueueBtn.onclick = function(e) {
+        e.preventDefault();
+        openManageQueue();
+      };
+    }
+  }
+  
+  // Initialize back button handler
+  const manageQueueBackBtn = document.getElementById('manageQueueBackBtn');
+  if (manageQueueBackBtn && !manageQueueBackBtn.hasAttribute('data-handler-attached')) {
+    manageQueueBackBtn.setAttribute('data-handler-attached', 'true');
+    manageQueueBackBtn.onclick = function(e) {
+      e.preventDefault();
+      closeManageQueue();
+    };
+  }
+  
   // Update active state for navigation tabs
   if (queueBtn) {
     queueBtn.classList.add('active');
@@ -3854,6 +3992,68 @@ function goToQueue() {
       btn.classList.remove('active');
     }
   });
+}
+
+// Manage Queue Screen Functions
+// Placeholder permission check - to be connected to actual permission system
+function checkQueueManagePermission() {
+  // TODO: Implement actual permission check
+  // TEMPORARY: return true to make gear icon visible for testing
+  // This should check if current user has queue_manage permission
+  return true;
+}
+
+function openManageQueue() {
+  // Hide Queue view
+  const ownerView = document.getElementById('owner-view');
+  const joinBar = document.getElementById('joinBar');
+  const wrapContent = document.querySelector('.wrap');
+  const queueControls = document.getElementById('queueControls');
+  
+  if (ownerView) ownerView.style.display = 'none';
+  if (joinBar) joinBar.style.display = 'none';
+  if (wrapContent) wrapContent.style.display = 'none';
+  if (queueControls) queueControls.style.display = 'none';
+  
+  // Show Manage Queue screen
+  const manageQueueScreen = document.getElementById('manageQueueScreen');
+  if (manageQueueScreen) {
+    manageQueueScreen.style.display = 'block';
+  }
+}
+
+function closeManageQueue() {
+  // Hide Manage Queue screen
+  const manageQueueScreen = document.getElementById('manageQueueScreen');
+  if (manageQueueScreen) {
+    manageQueueScreen.style.display = 'none';
+  }
+  
+  // Show Queue view
+  goToQueue();
+}
+
+// Initialize Manage Queue button handlers
+function initManageQueueButtons() {
+  // Manage Queue gear button
+  const manageQueueBtn = document.getElementById('manageQueueBtn');
+  if (manageQueueBtn && !manageQueueBtn.hasAttribute('data-handler-attached')) {
+    manageQueueBtn.setAttribute('data-handler-attached', 'true');
+    manageQueueBtn.onclick = function(e) {
+      e.preventDefault();
+      openManageQueue();
+    };
+  }
+  
+  // Back to Queue button
+  const manageQueueBackBtn = document.getElementById('manageQueueBackBtn');
+  if (manageQueueBackBtn && !manageQueueBackBtn.hasAttribute('data-handler-attached')) {
+    manageQueueBackBtn.setAttribute('data-handler-attached', 'true');
+    manageQueueBackBtn.onclick = function(e) {
+      e.preventDefault();
+      closeManageQueue();
+    };
+  }
 }
 
 // Track previous view for User Profile back navigation
@@ -5350,12 +5550,35 @@ function removeBlockingOverlays() {
 }
 
 // Run overlay audit on page load
+// Fix: Ensure Queue screen and gear icon are initialized on initial page load
+// This ensures gear icon appears on refresh when QUEUE is the default screen
+function initializeDefaultQueueView() {
+  const mainContent = document.getElementById('main-app-content');
+  // If main content is visible (user is signed in), ensure Queue is shown
+  if (mainContent && mainContent.style.display !== 'none') {
+    // Initialize Queue screen (default view) - this sets up gear icon visibility
+    if (typeof goToQueue === 'function') {
+      goToQueue();
+    }
+    // Initialize Manage Queue button handlers after Queue is set up
+    if (typeof initManageQueueButtons === 'function') {
+      setTimeout(function() {
+        initManageQueueButtons();
+      }, 0);
+    }
+  }
+}
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     setTimeout(removeBlockingOverlays, 100);
+    // Initialize default Queue view on initial load (if user is signed in)
+    initializeDefaultQueueView();
   });
 } else {
   setTimeout(removeBlockingOverlays, 100);
+  // Initialize default Queue view if DOM already loaded
+  initializeDefaultQueueView();
 }
 
 // Expose globally for manual calls
@@ -5373,6 +5596,62 @@ startFirstBtn.onclick=startFirst;
 // resetBtn.onclick=resetDay; // Removed - now using resetDayWithNav wrapper
 
 // Reorder handler - wrapped in try/catch for safety
+// Cleanup function to fully exit reorder mode and restore UI to normal state
+function exitReorderMode() {
+  console.log("[QUEUE] exitReorderMode cleanup ran");
+  
+  // Reset reorder mode flag (ensure it's the same global flag used by renderQueue)
+  reorderMode = false;
+  // Also set on window for global access
+  if (typeof window !== 'undefined') {
+    window.reorderMode = false;
+  }
+  
+  // Aggressively clean up reorder button appearance
+  const btn = document.getElementById('reorderBtn');
+  if (btn) {
+    // Reset text
+    btn.textContent = 'Reorder';
+    
+    // Remove all possible active classes
+    btn.classList.remove('btn-primary');
+    btn.classList.remove('active');
+    btn.classList.remove('is-active');
+    btn.classList.remove('selected');
+    btn.classList.remove('on');
+    
+    // Add back default class
+    btn.classList.add('btn-pill');
+    
+    // Clear ALL inline styles that could cause bold/active look
+    btn.style.fontWeight = '';
+    btn.style.outline = '';
+    btn.style.boxShadow = '';
+    btn.style.border = '';
+    btn.style.opacity = '';
+    btn.style.cursor = '';
+    btn.style.pointerEvents = '';
+    
+    // Reset ARIA attributes
+    btn.setAttribute('aria-pressed', 'false');
+    
+    // Remove focus (important - fixes bold due to focus styles)
+    btn.blur();
+    
+    // Log button className after cleanup for verification
+    console.log("[QUEUE] Reorder button className after cleanup:", btn.className);
+  }
+  
+  // Hide reorder header
+  const header = document.getElementById('reorderHeader');
+  if (header) {
+    header.style.display = 'none';
+  }
+  
+  // Re-render queue to remove reorder controls (up/down/delete buttons)
+  renderQueue();
+}
+
 async function handleReorderClick() {
   try {
   console.log('Reorder clicked');
@@ -5415,35 +5694,39 @@ async function handleReorderClick() {
     const actor = getActorForAction({ adminCode: code });
     window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
 
-    reorderMode = !reorderMode; 
-    renderQueue(); 
-    
-    // Update button appearance based on reorder mode
-    const btn = document.getElementById('reorderBtn');
-    const header = document.getElementById('reorderHeader');
-      if (btn) {
+    // Check current state and toggle accordingly
     if (reorderMode) {
-      btn.textContent = 'Reorder mode';
-      btn.classList.remove('btn-pill');
-      btn.classList.add('btn-primary');
-      if (header) header.style.display = 'block';
-      
-      // Ensure "+ Add technician" button handler is properly attached when entering reorder mode
-      const addTechBtn = document.getElementById('addTechBtn');
-      if (addTechBtn) {
-        // Reattach handler to ensure it works in reorder mode
-        addTechBtn.onclick = openAddTechDialog;
-        addTechBtn.style.pointerEvents = 'auto';
-        addTechBtn.style.cursor = 'pointer';
-        console.log('[Reorder] Add technician button handler reattached');
-      }
+      // Currently in reorder mode - exiting (cleanup function handles setting flag to false)
+      exitReorderMode();
     } else {
-      btn.textContent = 'Reorder';
-      btn.classList.remove('btn-primary');
-      btn.classList.add('btn-pill');
-      if (header) header.style.display = 'none';
-    }
+      // Currently not in reorder mode - entering
+      reorderMode = true;
+      // Also set on window for global access
+      if (typeof window !== 'undefined') {
+        window.reorderMode = true;
       }
+      renderQueue();
+      
+      // Update button appearance for reorder mode
+      const btn = document.getElementById('reorderBtn');
+      const header = document.getElementById('reorderHeader');
+      if (btn) {
+        btn.textContent = 'Reorder mode';
+        btn.classList.remove('btn-pill');
+        btn.classList.add('btn-primary');
+        if (header) header.style.display = 'block';
+        
+        // Ensure "+ Add technician" button handler is properly attached when entering reorder mode
+        const addTechBtn = document.getElementById('addTechBtn');
+        if (addTechBtn) {
+          // Reattach handler to ensure it works in reorder mode
+          addTechBtn.onclick = openAddTechDialog;
+          addTechBtn.style.pointerEvents = 'auto';
+          addTechBtn.style.cursor = 'pointer';
+          console.log('[Reorder] Add technician button handler reattached');
+        }
+      }
+    }
   } else {
     alert("Not authorized");
     }
@@ -7132,6 +7415,11 @@ function writeTasksList(tab, kind, arr) {
 
 function openTasks() {
   try {
+    // Exit reorder mode when navigating to Tasks (switching tabs)
+    if (typeof exitReorderMode === 'function' && reorderMode) {
+      exitReorderMode();
+    }
+    
     // HARD GUARANTEE: Patch localStorage.setItem to filter tombstoned tasks (one-time)
     if (!window.__ffTombstonePatchInstalled) {
       window.__ffTombstonePatchInstalled = true;
@@ -12969,7 +13257,7 @@ function initializeAppsPanel() {
         permissions: [
           { key: 'queue_view', label: 'View queue', desc: 'View the queue and active services' },
           { key: 'queue_join', label: 'Join queue', desc: 'Join yourself to the queue' },
-          { key: 'queue_reorder', label: 'Reorder queue', desc: 'Change order of queue items' },
+          { key: 'queue_reorder', label: 'Show Reorder', desc: 'Show the Reorder button on the Queue screen' },
           { key: 'queue_reset', label: 'Reset queue', desc: 'Reset/clear the queue' },
           { key: 'queue_manage', label: 'Manage queue', desc: 'Access queue settings such as auto-reset and queue rules.' }
         ]
@@ -21224,7 +21512,7 @@ window.openLog = async function(){
       border-style: solid;
       border-radius: 999px;
       font-size: 13px;
-      font-weight: 500;
+      font-weight: 400;
       line-height: 32px;
       box-sizing: border-box;
       display: inline-flex;
@@ -21242,7 +21530,7 @@ window.openLog = async function(){
       background-color: transparent;
       color: #111;
       border-color: rgba(0, 0, 0, 0.18);
-      font-weight: 500;
+      font-weight: 400;
     }
     
     .queue-action-btn--black:hover,
@@ -21279,6 +21567,13 @@ window.openLog = async function(){
     .tasks-reset-btn:hover {
       background-color: rgba(180, 0, 0, 0.05);
       transform: none;
+    }
+    
+    /* Gear icon - thinner stroke for lighter appearance */
+    /* Targeted rule: only applies to SVG inside .ff-gear-icon button, won't affect other SVGs */
+    #manageQueueBtn.ff-gear-icon svg {
+      stroke: currentColor;
+      stroke-width: 1.5;
     }
     
     /* Queue action buttons - exact RESET dimensions with neutral styling */
@@ -21701,6 +21996,21 @@ window.openLog = async function(){
       border: none;
       padding: 10px 16px;
       border-radius: 6px;
+    }
+    
+    /* Reorder button font-weight override - force normal weight in all states */
+    #reorderBtn {
+      font-weight: 400 !important;
+    }
+    #reorderBtn:focus,
+    #reorderBtn:active,
+    #reorderBtn:hover,
+    #reorderBtn.active,
+    #reorderBtn.btn-primary,
+    #reorderBtn.btn-pill,
+    #reorderBtn[aria-pressed="true"],
+    #reorderBtn[aria-pressed="false"] {
+      font-weight: 400 !important;
     }
   </style>
   <div id="tasksScreen" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#fff;z-index:300;flex-direction:column;pointer-events:auto;">
