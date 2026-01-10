@@ -122,6 +122,14 @@ body.ff-avatar-dropdown-open .header-inner {
 body.ff-avatar-dropdown-open #userAvatarDropdown {
   pointer-events: auto !important;
 }
+
+/* Disable pointer-events on header when editing staff details (allows clicking inputs) */
+body.ff-staff-editing .header-inner {
+  pointer-events: none;
+}
+body.ff-staff-editing .toolbar button {
+  pointer-events: auto; /* Keep toolbar buttons clickable */
+}
 body.ff-avatar-dropdown-open #userAvatarDropdown * {
   pointer-events: auto !important;
 }
@@ -880,6 +888,106 @@ dialog footer button, .code-dialog footer button {
 
 #staffArchiveConfirmArchive:hover {
   background: #b91c1c !important;
+}
+
+/* Permission Toggle Switch Styles */
+.staff-permission-toggle {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.staff-permission-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.staff-permission-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #d1d5db;
+  transition: 0.3s;
+  border-radius: 24px;
+}
+
+.staff-permission-toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.staff-permission-toggle input:checked + .staff-permission-toggle-slider {
+  background: linear-gradient(90deg, #9d68b9, #ff9580);
+  background-image: linear-gradient(90deg, #9d68b9, #ff9580);
+}
+
+.staff-permission-toggle input:checked + .staff-permission-toggle-slider:before {
+  transform: translateX(20px);
+}
+
+.staff-permission-toggle input:focus + .staff-permission-toggle-slider {
+  box-shadow: 0 0 0 3px rgba(157, 104, 185, 0.2);
+}
+
+.staff-permission-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  margin-bottom: 16px;
+}
+
+.staff-permission-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 16px 0;
+}
+
+.staff-permission-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.staff-permission-row:last-child {
+  border-bottom: none;
+}
+
+.staff-permission-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.staff-permission-label-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 4px 0;
+}
+
+.staff-permission-label-desc {
+  font-size: 11px;
+  color: #6b7280;
+  margin: 0;
+  line-height: 1.4;
 }
 
 </style>
@@ -12266,7 +12374,8 @@ function initializeAppsPanel() {
           invited: staff.invited === true,
           invitedAt: staff.invitedAt || null,
           lastActiveAt: staff.lastActiveAt || null,
-          isArchived: isArchived
+          isArchived: isArchived,
+          permissions: staff.permissions || {} // Initialize permissions object
         };
         // Remove old 'archived' field to normalize to 'isArchived'
         if ('archived' in normalized && normalized.isArchived !== undefined) {
@@ -12736,6 +12845,8 @@ function initializeAppsPanel() {
       
       // Render Details tab content (default active tab)
       renderDetailsTab(staff, isEditingStaffDetails);
+      // Render Permissions tab
+      renderPermissionsTab(staff);
       // Ensure Details tab is shown by default
       switchTab('details');
       
@@ -12779,11 +12890,182 @@ function initializeAppsPanel() {
     if (detailsContent) detailsContent.style.display = tab === 'details' ? 'block' : 'none';
     if (locationsContent) locationsContent.style.display = tab === 'locations' ? 'block' : 'none';
     if (notificationsContent) notificationsContent.style.display = tab === 'notifications' ? 'block' : 'none';
-    if (permissionsContent) permissionsContent.style.display = tab === 'permissions' ? 'block' : 'none';
+    if (permissionsContent) {
+      permissionsContent.style.display = tab === 'permissions' ? 'block' : 'none';
+      // Re-render permissions when switching to this tab
+      if (tab === 'permissions' && selectedStaffId) {
+        const staffData = ffGetStaffStore();
+        const staff = staffData.staff.find(s => s.id === selectedStaffId);
+        if (staff) {
+          renderPermissionsTab(staff);
+        }
+      }
+    }
   }
   
   // Edit mode state
   let isEditingStaffDetails = false;
+  
+  // Render permission toggle row
+  function renderPermissionToggleRow(permissionKey, label, description, value) {
+    const checked = value === true ? 'checked' : '';
+    return `
+      <div class="staff-permission-row">
+        <label class="staff-permission-toggle">
+          <input type="checkbox" data-permission-key="${escapeHtml(permissionKey)}" ${checked}>
+          <span class="staff-permission-toggle-slider"></span>
+        </label>
+        <div class="staff-permission-label">
+          <div class="staff-permission-label-title">${escapeHtml(label)}</div>
+          <div class="staff-permission-label-desc">${escapeHtml(description)}</div>
+        </div>
+      </div>
+    `;
+  }
+  
+  // Render permission card
+  function renderPermissionCard(title, rows) {
+    return `
+      <div class="staff-permission-card">
+        <h3 class="staff-permission-card-title">${escapeHtml(title)}</h3>
+        ${rows.join('')}
+      </div>
+    `;
+  }
+  
+  // Render Permissions tab content
+  function renderPermissionsTab(staff) {
+    const permissionsContent = document.getElementById('staffPermissionsTabContent');
+    if (!permissionsContent) return;
+    
+    // Get permissions object from staff (default to empty object)
+    const permissions = staff.permissions || {};
+    
+    // Migrate old permission key: tasks_mark_done -> tasks_use
+    if (permissions.hasOwnProperty('tasks_mark_done') && !permissions.hasOwnProperty('tasks_use')) {
+      permissions['tasks_use'] = permissions['tasks_mark_done'];
+      delete permissions['tasks_mark_done'];
+      
+      // Save migrated permissions back to store
+      const staffStore = ffGetStaffStore();
+      const staffIndex = staffStore.staff.findIndex(s => s.id === staff.id);
+      if (staffIndex !== -1) {
+        if (!staffStore.staff[staffIndex].permissions) {
+          staffStore.staff[staffIndex].permissions = {};
+        }
+        staffStore.staff[staffIndex].permissions = permissions;
+        ffSaveStaffStore(staffStore);
+        staff.permissions = permissions;
+        console.log('[renderPermissionsTab] Migrated tasks_mark_done -> tasks_use for staff:', staff.id);
+      }
+    }
+    
+    console.log('[renderPermissionsTab] Loading permissions for staff:', staff.id, permissions);
+    
+    // Define all permissions grouped by category
+    const permissionGroups = [
+      {
+        title: 'Queue',
+        permissions: [
+          { key: 'queue_view', label: 'View queue', desc: 'View the queue and active services' },
+          { key: 'queue_join', label: 'Join queue', desc: 'Join yourself to the queue' },
+          { key: 'queue_reorder', label: 'Reorder queue', desc: 'Change order of queue items' },
+          { key: 'queue_reset', label: 'Reset queue', desc: 'Reset/clear the queue' },
+          { key: 'queue_manage', label: 'Manage queue', desc: 'Access queue settings such as auto-reset and queue rules.' }
+        ]
+      },
+      {
+        title: 'Tasks',
+        permissions: [
+          { key: 'tasks_view', label: 'View tasks', desc: 'View task lists and schedules' },
+          { key: 'tasks_use', label: 'Use tasks', desc: 'Select, complete, and work with tasks' },
+          { key: 'tasks_manage', label: 'Manage tasks (templates)', desc: 'Edit task templates and schedules' }
+        ]
+      },
+      {
+        title: 'Staff',
+        permissions: [
+          { key: 'staff_view', label: 'View staff list', desc: 'View staff members' },
+          { key: 'staff_manage', label: 'Add/Edit/Archive/Re-activate staff', desc: 'Manage staff members' },
+          { key: 'staff_permissions_manage', label: 'Edit staff permissions', desc: 'Change permissions for other staff' }
+        ]
+      },
+      {
+        title: 'History',
+        permissions: [
+          { key: 'history_view', label: 'View history', desc: 'View activity history and logs' },
+          { key: 'history_export', label: 'Export history', desc: 'Export history data to a file' },
+          { key: 'history_clear', label: 'Clear history', desc: 'Clear all history entries' }
+        ]
+      },
+      {
+        title: 'Inventory',
+        permissions: [
+          { key: 'inventory_view', label: 'View inventory', desc: 'View inventory items' },
+          { key: 'inventory_manage', label: 'Manage inventory', desc: 'Add, edit, or remove inventory items' }
+        ]
+      },
+      {
+        title: 'Inbox',
+        permissions: [
+          { key: 'inbox_view', label: 'View inbox', desc: 'View inbox messages' },
+          { key: 'inbox_manage', label: 'Manage inbox', desc: 'Send, reply, or manage messages' }
+        ]
+      },
+      {
+        title: 'Settings',
+        permissions: [
+          { key: 'settings_manage', label: 'Manage general settings', desc: 'Edit app-wide settings and preferences' }
+        ]
+      }
+    ];
+    
+    // Build permission cards
+    const cards = permissionGroups.map(function(group) {
+      const rows = group.permissions.map(function(perm) {
+        const value = permissions[perm.key] === true;
+        return renderPermissionToggleRow(perm.key, perm.label, perm.desc, value);
+      });
+      return renderPermissionCard(group.title, rows);
+    });
+    
+    // Render all cards
+    permissionsContent.innerHTML = '<div style="display:flex;flex-direction:column;">' + cards.join('') + '</div>';
+    
+    // Wire up toggle change handlers
+    permissionsContent.querySelectorAll('input[data-permission-key]').forEach(function(checkbox) {
+      checkbox.onchange = function() {
+        const permissionKey = checkbox.getAttribute('data-permission-key');
+        const newValue = checkbox.checked;
+        
+        // Get current staff from store (refresh to get latest)
+        const staffStore = ffGetStaffStore();
+        const staffIndex = staffStore.staff.findIndex(s => s.id === staff.id);
+        
+        if (staffIndex === -1) {
+          console.error('[renderPermissionsTab] Staff member not found:', staff.id);
+          return;
+        }
+        
+        // Update permissions in store
+        if (!staffStore.staff[staffIndex].permissions) {
+          staffStore.staff[staffIndex].permissions = {};
+        }
+        staffStore.staff[staffIndex].permissions[permissionKey] = newValue;
+        
+        console.log('[renderPermissionsTab] Permission toggled:', permissionKey, newValue);
+        console.log('[renderPermissionsTab] Updated permissions:', staffStore.staff[staffIndex].permissions);
+        
+        // Auto-save permissions immediately
+        ffSaveStaffStore(staffStore);
+        
+        // Update local staff object reference
+        staff.permissions = staffStore.staff[staffIndex].permissions;
+        
+        console.log('[renderPermissionsTab] Saved permissions for staff:', staff.id);
+      };
+    });
+  }
   
   // Render Details tab content (view or edit mode)
   function renderDetailsTab(staff, editMode) {
@@ -12827,7 +13109,10 @@ function initializeAppsPanel() {
             </div>
             <div>
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">PIN</label>
-              <div style="font-size:12px;color:#111827;padding:5px 8px;background:#f9fafb;border:1px solid var(--border);border-radius:4px;">****</div>
+              <div style="position:relative;">
+                <input type="password" id="staffEditPin" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" value="${escapeHtml(staff.pin || '')}" placeholder="4-6 digits" style="width:100%;height:30px;padding:0 32px 0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
+                <button type="button" id="staffEditPinToggle" aria-label="Toggle PIN visibility" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:2px 4px;color:#6b7280;font-size:14px;line-height:1;z-index:1;">👁️</button>
+              </div>
             </div>
           </div>
         </div>
@@ -12844,6 +13129,23 @@ function initializeAppsPanel() {
       if (cancelBtn) {
         cancelBtn.onclick = function() {
           cancelEditStaffDetails();
+        };
+      }
+      
+      // Wire up PIN toggle (eye button)
+      const pinToggle = document.getElementById('staffEditPinToggle');
+      const pinInput = document.getElementById('staffEditPin');
+      if (pinToggle && pinInput) {
+        pinToggle.onclick = function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (pinInput.type === 'password') {
+            pinInput.type = 'text';
+            pinToggle.textContent = '🙈';
+          } else {
+            pinInput.type = 'password';
+            pinToggle.textContent = '👁️';
+          }
         };
       }
     } else {
@@ -12926,6 +13228,10 @@ function initializeAppsPanel() {
   function startEditStaffDetails() {
     if (!selectedStaffId) return;
     isEditingStaffDetails = true;
+    
+    // Disable pointer-events on header-inner to allow clicking inputs in edit mode
+    document.body.classList.add('ff-staff-editing');
+    
     const staffData = ffGetStaffStore();
     const staff = staffData.staff.find(s => s.id === selectedStaffId);
     if (staff) {
@@ -12936,6 +13242,10 @@ function initializeAppsPanel() {
   // Cancel editing staff details
   function cancelEditStaffDetails() {
     isEditingStaffDetails = false;
+    
+    // Re-enable pointer-events on header-inner when exiting edit mode
+    document.body.classList.remove('ff-staff-editing');
+    
     if (!selectedStaffId) return;
     const staffData = ffGetStaffStore();
     const staff = staffData.staff.find(s => s.id === selectedStaffId);
@@ -12953,6 +13263,7 @@ function initializeAppsPanel() {
       const roleInput = document.getElementById('staffEditRole');
       const phoneInput = document.getElementById('staffEditPhone');
       const emailInput = document.getElementById('staffEditEmail');
+      const pinInput = document.getElementById('staffEditPin');
       
       if (!nameInput || !roleInput) {
         console.error('[saveStaffDetails] Edit inputs not found');
@@ -12963,6 +13274,7 @@ function initializeAppsPanel() {
       const newRole = roleInput.value;
       const newPhone = phoneInput?.value.trim() || '';
       const newEmail = emailInput?.value.trim() || '';
+      const newPinValue = pinInput?.value.trim() || '';
       
       // Validate name
       if (!newName) {
@@ -12983,13 +13295,47 @@ function initializeAppsPanel() {
       const nameChanged = oldStaff.name !== newName;
       const roleChanged = oldStaff.role !== newRole;
       
+      // Handle PIN update (only validate if PIN is provided)
+      let newPin = oldStaff.pin;
+      if (newPinValue) {
+        // Validate PIN is numeric only
+        if (!/^\d+$/.test(newPinValue)) {
+          alert('PIN must contain only digits');
+          return;
+        }
+        
+        // Validate PIN length (4-6 digits)
+        if (newPinValue.length < 4 || newPinValue.length > 6) {
+          alert('PIN must be 4-6 digits');
+          return;
+        }
+        
+        // Check for duplicate PIN (excluding current staff member)
+        const existingWithPin = staffStore.staff.find(function(s) {
+          return s.id !== selectedStaffId && s.pin && String(s.pin) === String(newPinValue);
+        });
+        
+        if (existingWithPin) {
+          alert('This PIN is already in use');
+          return;
+        }
+        
+        // PIN is valid
+        newPin = String(newPinValue);
+      }
+      
+      // Preserve permissions (they're saved separately via toggle handlers)
+      const currentPermissions = oldStaff.permissions || {};
+      
       // Update staff member
       staffStore.staff[staffIndex] = {
         ...oldStaff,
         name: newName,
         role: newRole,
         phone: newPhone ? String(newPhone) : undefined,
-        email: newEmail ? String(newEmail) : undefined
+        email: newEmail ? String(newEmail) : undefined,
+        pin: newPin,
+        permissions: currentPermissions // Preserve permissions
       };
       
       // Save to storage
@@ -12998,7 +13344,10 @@ function initializeAppsPanel() {
       // Exit edit mode
       isEditingStaffDetails = false;
       
-      // Re-render details
+      // Re-enable pointer-events on header-inner when exiting edit mode
+      document.body.classList.remove('ff-staff-editing');
+      
+      // Re-render details and permissions
       renderStaffDetails();
       
       // Re-render list if name or role changed (to update grouping)
@@ -13008,6 +13357,8 @@ function initializeAppsPanel() {
       
     } catch (error) {
       console.error('[saveStaffDetails] Error saving staff details:', error);
+      // Also remove the class on error to restore pointer events
+      document.body.classList.remove('ff-staff-editing');
     }
   }
   
@@ -13086,6 +13437,7 @@ function initializeAppsPanel() {
         invitedAt: null,
         lastActiveAt: null,
         isArchived: false,
+        permissions: {}, // Initialize empty permissions object
         createdAt: Date.now()
       };
       
@@ -13295,6 +13647,9 @@ function initializeAppsPanel() {
       staffMembersModal.style.display = 'none';
       // Reset form state when closing
       hideStaffAddForm();
+      // Exit edit mode and clean up pointer-events class
+      isEditingStaffDetails = false;
+      document.body.classList.remove('ff-staff-editing');
     }
   }
   
