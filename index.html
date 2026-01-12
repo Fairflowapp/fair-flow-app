@@ -2976,8 +2976,24 @@ function renderSelect(){
     return;
   }
 
-  // Load technicians from the same data source as Settings page
-  const technicians = loadTechniciansFromSettings();
+  // Load staff from ff_staff_v1 (new primary source) - direct localStorage read
+  let technicians = [];
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    // Filter to only active staff (exclude archived)
+    technicians = staffList.filter(s => s.isArchived !== true && s.name && s.name.trim());
+    console.log('[renderSelect] Loaded', technicians.length, 'active staff from ff_staff_v1');
+  } catch (e) {
+    console.error('[renderSelect] Error loading from ff_staff_v1:', e);
+  }
+  
+  // Backward compatibility: If ff_staff_v1 is missing or has zero staff, fall back to settings.workers
+  if (technicians.length === 0) {
+    console.log('[renderSelect] No staff in ff_staff_v1, falling back to settings.workers');
+    technicians = loadTechniciansFromSettings();
+    console.log('[renderSelect] Loaded', technicians.length, 'technicians from settings.workers (fallback)');
+  }
   
   console.log('[renderSelect] Rendering dropdown with', technicians.length, 'technicians');
   
@@ -2992,7 +3008,7 @@ function renderSelect(){
   selectEl.removeAttribute('disabled');
 
   if (technicians.length === 0) {
-    console.warn('[renderSelect] No technicians found in settings.workers');
+    console.warn('[renderSelect] No technicians found in ff_staff_v1 or settings.workers');
     // Add a placeholder option
     const placeholder = document.createElement("option");
     placeholder.value = "";
@@ -3012,7 +3028,7 @@ function renderSelect(){
   defaultOption.selected = true;
   selectEl.appendChild(defaultOption);
 
-  // Populate dropdown with technicians from settings (sorted A→Z)
+  // Populate dropdown with technicians from staff store (sorted A→Z)
   // Create sorted copy for JOIN rendering only (do not mutate original)
   const techniciansSorted = [...technicians].sort((a, b) => {
     const aName = ((a?.name ?? a?.label ?? a?.displayName ?? a) + "").trim().toLowerCase();
@@ -3184,6 +3200,73 @@ function renderService(){
 
 // Actions
 
+// Minimal global helper for resolving staff name to ID in Queue scope
+// Returns staffId if found in ff_staff_v1, undefined otherwise
+function resolveStaffNameToId(name) {
+  if (!name) return undefined;
+  
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    const staff = staffList.find(s => s.name === name);
+    return staff ? staff.id : undefined;
+  } catch (e) {
+    console.error('[resolveStaffNameToId] Error resolving staff name to ID:', e);
+    return undefined;
+  }
+}
+
+// Minimal global helper for PIN lookup in Queue scope
+// Accepts staffIdOrName, reads ff_staff_v1 first, falls back to settings.workers
+function getCurrentStaffPin(staffIdOrName) {
+  if (!staffIdOrName) return undefined;
+  
+  try {
+    // First, try to get PIN from ff_staff_v1
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    let staff = null;
+    
+    // Try to find by staffId first (preferred method)
+    staff = staffList.find(s => s.id === staffIdOrName);
+    
+    // If not found by ID, try to find by name (backward compatibility)
+    if (!staff) {
+      staff = staffList.find(s => s.name === staffIdOrName);
+    }
+    
+    // If found in ff_staff_v1, return PIN
+    if (staff && staff.pin !== undefined && staff.pin !== null && staff.pin !== '') {
+      return String(staff.pin);
+    }
+    
+    // Fallback to old Settings PIN (from settings.workers) - only if we have a name
+    // If staffIdOrName looks like an ID (contains 'staff_' prefix), skip name-based fallback
+    if (!staffIdOrName.startsWith('staff_')) {
+      const oldWorker = settings.workers && settings.workers.find(w => w.name === staffIdOrName);
+      if (oldWorker && oldWorker.pin !== undefined && oldWorker.pin !== null && oldWorker.pin !== '') {
+        return String(oldWorker.pin);
+      }
+    }
+    
+    return undefined;
+  } catch (e) {
+    console.error('[getCurrentStaffPin] Error getting staff PIN:', e);
+    // Fallback to old Settings PIN on error - only if we have a name
+    if (staffIdOrName && !staffIdOrName.startsWith('staff_')) {
+      try {
+        const oldWorker = settings.workers && settings.workers.find(w => w.name === staffIdOrName);
+        if (oldWorker && oldWorker.pin !== undefined && oldWorker.pin !== null && oldWorker.pin !== '') {
+          return String(oldWorker.pin);
+        }
+      } catch (e2) {
+        console.error('[getCurrentStaffPin] Error in fallback:', e2);
+      }
+    }
+    return undefined;
+  }
+}
+
 function handleJoin(){
   try {
   console.log('[handleJoin] Join button clicked');
@@ -3246,14 +3329,35 @@ function handleJoin(){
     return;
   }
 
-  // Load the selected technician from staff list
-  const technician = ffGetStaffList().find(w => w.name === selectedTechnicianName);
+  // Load the selected technician from ff_staff_v1 first (primary source)
+  let technician = null;
+  let foundInStaffStore = false;
   
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    technician = staffList.find(s => s.name === selectedTechnicianName);
+    if (technician) {
+      foundInStaffStore = true;
+      console.log('[handleJoin] Found technician in ff_staff_v1:', technician.name);
+    }
+  } catch (e) {
+    console.error('[handleJoin] Error loading from ff_staff_v1:', e);
+  }
+  
+  // Backward compatibility: If not found in ff_staff_v1, fall back to settings.workers
   if (!technician) {
-    console.error('[handleJoin] Technician not found:', selectedTechnicianName);
-    console.log('[handleJoin] Available technicians:', ffGetStaffList().map(w => w.name));
+    technician = ffGetStaffList().find(w => w.name === selectedTechnicianName);
+    if (technician) {
+      console.log('[handleJoin] Found technician in settings.workers (fallback):', technician.name);
+    }
+  }
+  
+  // Only show error if technician not found in BOTH stores
+  if (!technician) {
+    console.error('[handleJoin] Technician not found in ff_staff_v1 or settings.workers:', selectedTechnicianName);
     if (joinErrorEl) {
-      joinErrorEl.textContent = 'Technician not found in settings';
+      joinErrorEl.textContent = 'Technician not found';
       joinErrorEl.style.display = 'block';
     } else {
       alert('Technician not found');
@@ -3263,11 +3367,17 @@ function handleJoin(){
 
   console.log('[handleJoin] Found technician:', technician.name, 'Stored PIN:', technician.pin);
 
+  // Resolve name to staffId for stable identifier-based lookup
+  // If found in ff_staff_v1, use the staffId; otherwise use name
+  const staffId = foundInStaffStore && technician.id ? technician.id : resolveStaffNameToId(selectedTechnicianName);
+  const currentStaffId = staffId || selectedTechnicianName; // Fallback to name if ID not found
+
   // Verify that the entered PIN matches the technician's stored PIN
-  const storedPin = (technician.pin || "").toString();
+  // Use getCurrentStaffPin() with staffId (preferred) or name (fallback)
+  const storedPin = getCurrentStaffPin(currentStaffId);
   const enteredPin = pin.toString();
   
-  if (storedPin !== enteredPin) {
+  if (!storedPin || storedPin !== enteredPin) {
     console.error('[handleJoin] PIN mismatch. Expected:', storedPin, 'Got:', enteredPin);
     if (joinErrorEl) {
       joinErrorEl.textContent = 'Incorrect PIN';
@@ -3684,7 +3794,7 @@ function gateAdmin(){ const code=prompt("Admin code"); if(code===null) return fa
 
 function gateManager(){ const code=prompt("Manager code"); if(code===null) return false; return isManagerCode(code); }
 
-function workerGate(name){ const w=settings.workers.find(x=>x.name===name); if(!w) return false; const code=prompt(`PIN for ${name}`); if(code===null) return false; return code.toString()===(w.pin||"").toString(); }
+function workerGate(name){ const staffId = resolveStaffNameToId(name); const currentStaffId = staffId || name; const storedPin = getCurrentStaffPin(currentStaffId); if(!storedPin) return false; const code=prompt(`PIN for ${name}`); if(code===null) return false; return code.toString()===storedPin; }
 
 async function guardHold(fn){
 
@@ -3736,9 +3846,12 @@ async function guardStart(workerName, idx, fn){
     return fn();
   }
 
-  const w=settings.workers.find(x=>x.name===workerName);
+  // Resolve name to staffId for stable identifier-based lookup
+  const staffId = resolveStaffNameToId(workerName);
+  const currentStaffId = staffId || workerName; // Fallback to name if ID not found
+  const storedPin = getCurrentStaffPin(currentStaffId);
 
-  if(w && entry.toString()===(w.pin||"").toString()) {
+  if(storedPin && entry.toString()===storedPin) {
     // Worker PIN - Tech action, clear any previous actor info
     window.__ff_actorRole = 'Tech';
     window.__ff_actorName = workerName;
@@ -3771,9 +3884,12 @@ async function guardFinish(workerName, fn){
     return fn();
   }
 
-  const w=settings.workers.find(x=>x.name===workerName);
+  // Resolve name to staffId for stable identifier-based lookup
+  const staffId = resolveStaffNameToId(workerName);
+  const currentStaffId = staffId || workerName; // Fallback to name if ID not found
+  const storedPin = getCurrentStaffPin(currentStaffId);
 
-  if(w && entry.toString()===(w.pin||"").toString()) {
+  if(storedPin && entry.toString()===storedPin) {
     // Worker PIN - Tech action, clear any previous actor info
     window.__ff_actorRole = 'Tech';
     window.__ff_actorName = workerName;
@@ -12780,13 +12896,59 @@ function initializeAppsPanel() {
   // Staff Members independent storage functions
   function ffGetStaffStore() {
     try {
+      // One-time migration: If ff_staff_v1 doesn't exist, migrate from settings.workers
       const stored = localStorage.getItem('ff_staff_v1');
-      const data = stored ? JSON.parse(stored) : { staff: [] };
+      if (!stored) {
+        // Migration needed: copy from old Settings location
+        console.log('[ffGetStaffStore] Migrating staff data from settings.workers to ff_staff_v1');
+        
+        // Get staff from old Settings location
+        const oldStaff = settings.workers || [];
+        
+        // Convert old worker format to new staff format
+        const migratedStaff = oldStaff.map(function(worker, index) {
+          // Generate ID if missing
+          const id = worker.id || ('staff_' + Date.now() + '_' + index + '_' + Math.random().toString(36).substr(2, 9));
+          
+          // Map old worker fields to new staff format
+          return {
+            id: id,
+            name: worker.name || '',
+            pin: worker.pin || '',
+            role: worker.role || 'technician', // Default to technician if role not specified
+            color: worker.color || undefined,
+            fcolor: worker.fcolor || undefined,
+            buttonColorIndex: worker.buttonColorIndex || undefined,
+            quickColors: worker.quickColors || undefined,
+            email: worker.email || undefined,
+            phone: worker.phone || undefined,
+            invited: worker.invited === true,
+            invitedAt: worker.invitedAt || null,
+            lastActiveAt: worker.lastActiveAt || null,
+            isArchived: worker.isArchived === true || worker.archived === true || false,
+            permissions: worker.permissions || {},
+            createdAt: worker.createdAt || Date.now()
+          };
+        });
+        
+        // Save migrated data to new location
+        const migratedData = { staff: migratedStaff };
+        localStorage.setItem('ff_staff_v1', JSON.stringify(migratedData));
+        console.log('[ffGetStaffStore] Migration complete: migrated', migratedStaff.length, 'staff members');
+        
+        // Return migrated data
+        return migratedData;
+      }
+      
+      // Normal path: read from ff_staff_v1
+      const data = JSON.parse(stored);
       if (!Array.isArray(data.staff)) {
         data.staff = [];
       }
       // Normalize staff objects with new fields (non-breaking)
       // Support both 'archived' and 'isArchived' for backward compatibility
+      // ONE-TIME migration: if pin is missing but staffPin exists, migrate staffPin -> pin
+      let needsSave = false;
       data.staff = data.staff.map(function(staff) {
         const isArchived = staff.isArchived === true || staff.archived === true;
         const normalized = {
@@ -12797,12 +12959,31 @@ function initializeAppsPanel() {
           isArchived: isArchived,
           permissions: staff.permissions || {} // Initialize permissions object
         };
+        
+        // ONE-TIME migration: if pin is missing but staffPin exists, migrate staffPin -> pin
+        if (!normalized.pin && normalized.staffPin !== undefined && normalized.staffPin !== null && normalized.staffPin !== '') {
+          normalized.pin = String(normalized.staffPin).trim();
+          delete normalized.staffPin;
+          needsSave = true;
+        }
+        
+        // Normalize pin to trimmed string if it exists
+        if (normalized.pin !== undefined && normalized.pin !== null) {
+          normalized.pin = String(normalized.pin).trim();
+        }
+        
         // Remove old 'archived' field to normalize to 'isArchived'
         if ('archived' in normalized && normalized.isArchived !== undefined) {
           delete normalized.archived;
         }
         return normalized;
       });
+      
+      // Save if migration occurred
+      if (needsSave) {
+        localStorage.setItem('ff_staff_v1', JSON.stringify(data));
+        console.log('[ffGetStaffStore] Migrated staffPin -> pin for staff records');
+      }
       return data;
     } catch (e) {
       console.error('[ffGetStaffStore] Error loading staff store:', e);
@@ -12815,6 +12996,71 @@ function initializeAppsPanel() {
       localStorage.setItem('ff_staff_v1', JSON.stringify(data));
     } catch (e) {
       console.error('[ffSaveStaffStore] Error saving staff store:', e);
+    }
+  }
+  
+  // Resolve staff name to staffId from ff_staff_v1
+  // Returns staffId if found, undefined otherwise
+  function resolveStaffNameToId(name) {
+    if (!name) return undefined;
+    
+    try {
+      const staffStore = ffGetStaffStore();
+      const staff = staffStore.staff.find(s => s.name === name);
+      return staff ? staff.id : undefined;
+    } catch (e) {
+      console.error('[resolveStaffNameToId] Error resolving staff name to ID:', e);
+      return undefined;
+    }
+  }
+  
+  // Get current staff PIN with fallback to old Settings PIN
+  // Accepts either staffId (preferred) or name (for backward compatibility)
+  // Returns the PIN for a staff member, checking ff_staff_v1 first, then falling back to settings.workers
+  function getCurrentStaffPin(staffIdOrName) {
+    if (!staffIdOrName) return undefined;
+    
+    try {
+      const staffStore = ffGetStaffStore();
+      let staff = null;
+      
+      // Try to find by staffId first (preferred method)
+      staff = staffStore.staff.find(s => s.id === staffIdOrName);
+      
+      // If not found by ID, try to find by name (backward compatibility)
+      if (!staff) {
+        staff = staffStore.staff.find(s => s.name === staffIdOrName);
+      }
+      
+      // If found in ff_staff_v1, return PIN
+      if (staff && staff.pin !== undefined && staff.pin !== null && staff.pin !== '') {
+        return String(staff.pin);
+      }
+      
+      // Fallback to old Settings PIN (from settings.workers) - only if we have a name
+      // If staffIdOrName looks like an ID (contains 'staff_' prefix), skip name-based fallback
+      if (!staffIdOrName.startsWith('staff_')) {
+        const oldWorker = settings.workers && settings.workers.find(w => w.name === staffIdOrName);
+        if (oldWorker && oldWorker.pin !== undefined && oldWorker.pin !== null && oldWorker.pin !== '') {
+          return String(oldWorker.pin);
+        }
+      }
+      
+      return undefined;
+    } catch (e) {
+      console.error('[getCurrentStaffPin] Error getting staff PIN:', e);
+      // Fallback to old Settings PIN on error - only if we have a name
+      if (staffIdOrName && !staffIdOrName.startsWith('staff_')) {
+        try {
+          const oldWorker = settings.workers && settings.workers.find(w => w.name === staffIdOrName);
+          if (oldWorker && oldWorker.pin !== undefined && oldWorker.pin !== null && oldWorker.pin !== '') {
+            return String(oldWorker.pin);
+          }
+        } catch (e2) {
+          console.error('[getCurrentStaffPin] Error in fallback:', e2);
+        }
+      }
+      return undefined;
     }
   }
   
@@ -13740,8 +13986,8 @@ function initializeAppsPanel() {
           return;
         }
         
-        // PIN is valid
-        newPin = String(newPinValue);
+        // PIN is valid - store as trimmed string
+        newPin = String(newPinValue).trim();
       }
       
       // Preserve permissions (they're saved separately via toggle handlers)
@@ -13849,7 +14095,7 @@ function initializeAppsPanel() {
         name: fullName,
         firstName: firstName || undefined,
         lastName: lastName || undefined,
-        pin: String(pin),
+        pin: String(pin).trim(),
         role: role,
         email: email ? String(email) : undefined,
         phone: phone ? String(phone) : undefined,
@@ -16694,7 +16940,7 @@ function markTaskAsDone(category, taskName) {
 }
 
 // Add task to pending list
-function addTaskToPending(category, taskName, assignedToName) {
+function addTaskToPending(category, taskName, assignedToName, assignedToStaffId) {
   // Prevent adding done tasks to pending list
   if (isTaskCompletedToday(category, taskName)) {
     return; // Task is done, cannot be added to pending
@@ -16706,7 +16952,7 @@ function addTaskToPending(category, taskName, assignedToName) {
   const normalizedPending = pending.map(item => {
     if (typeof item === 'string') {
       // Old format: just task name string
-      return { taskName: item, assignedToName: undefined };
+      return { taskName: item, assignedToName: undefined, assignedToStaffId: undefined };
     }
     // New format: already an object
     return item;
@@ -16719,19 +16965,25 @@ function addTaskToPending(category, taskName, assignedToName) {
   });
   
   if (existingIndex === -1) {
-    // Add new task with staff name
+    // Add new task with staff name and staffId
     normalizedPending.push({
       taskName: taskName,
-      assignedToName: assignedToName || undefined
+      assignedToName: assignedToName || undefined,
+      assignedToStaffId: assignedToStaffId || undefined
     });
     pendingTasks[category] = normalizedPending;
     saveTasksData();
     renderTasks(); // Re-render to update button state
     renderPendingTasks(); // Update right column
   } else {
-    // Update existing task with staff name if provided
-    if (assignedToName) {
-      normalizedPending[existingIndex].assignedToName = assignedToName;
+    // Update existing task with staff name and staffId if provided
+    if (assignedToName || assignedToStaffId) {
+      if (assignedToName) {
+        normalizedPending[existingIndex].assignedToName = assignedToName;
+      }
+      if (assignedToStaffId) {
+        normalizedPending[existingIndex].assignedToStaffId = assignedToStaffId;
+      }
       pendingTasks[category] = normalizedPending;
       saveTasksData();
       renderPendingTasks(); // Update right column
@@ -17092,6 +17344,313 @@ function closeSelectTaskModal() {
   }
 }
 
+// Helper function to authenticate staff by PIN from TASK PIN modal
+// Finds PIN input in the currently open modal and matches against ff_staff_v1
+function ffAuthStaffByPinFromModal(modalElOrDocument) {
+  try {
+    // Find the visible modal (scope to modal container, not document-wide)
+    let modalContainer = null;
+    
+    // If modalElOrDocument is provided and is an element, use it
+    if (modalElOrDocument && modalElOrDocument.nodeType === 1) {
+      modalContainer = modalElOrDocument;
+    } else {
+      // Try to find visible modal by ID
+      const selectModal = document.getElementById('tasksSelectModal');
+      const finishModal = document.getElementById('tasksFinishModal');
+      
+      if (selectModal && selectModal.style.display !== 'none' && selectModal.offsetParent !== null) {
+        modalContainer = selectModal;
+      } else if (finishModal && finishModal.style.display !== 'none' && finishModal.offsetParent !== null) {
+        modalContainer = finishModal;
+      } else {
+        // Try to find by role="dialog" or common modal patterns
+        const dialogs = document.querySelectorAll('[role="dialog"]');
+        for (let i = 0; i < dialogs.length; i++) {
+          if (dialogs[i].offsetParent !== null && dialogs[i].style.display !== 'none') {
+            modalContainer = dialogs[i];
+            break;
+          }
+        }
+      }
+    }
+    
+    if (!modalContainer) {
+      // Fallback: search document-wide but prioritize modal-like containers
+      modalContainer = document;
+    }
+    
+    // Find PIN input: FIRST try explicit ID lookup for #pinModalTaskInput
+    let pinInput = null;
+    
+    // Step 1: Explicitly try to find #pinModalTaskInput by ID
+    const docToSearch = (modalElOrDocument?.getElementById ? modalElOrDocument : document);
+    const direct = docToSearch.getElementById("pinModalTaskInput");
+    
+    if (direct) {
+      // Check if element is visible (offsetParent != null and has dimensions)
+      const rect = direct.getBoundingClientRect();
+      const isVisible = direct.offsetParent !== null && rect.width > 0 && rect.height > 0;
+      
+      if (isVisible) {
+        pinInput = direct;
+      }
+    }
+    
+    // Step 2: Only if not found/visible, fallback to generic search
+    if (!pinInput) {
+      if (modalContainer !== document) {
+        pinInput = modalContainer.querySelector('input[type="password"]') ||
+                    modalContainer.querySelector('input[type="tel"]') ||
+                    modalContainer.querySelector('input[type="text"]');
+      } else {
+        // Document-wide fallback (shouldn't happen but handle gracefully)
+        const allInputs = document.querySelectorAll('input[type="password"], input[type="tel"], input[type="text"]');
+        for (let i = 0; i < allInputs.length; i++) {
+          const inp = allInputs[i];
+          // Prefer inputs that are in modal-like containers or have task-related IDs
+          if (inp.id && (inp.id.includes('task') || inp.id.includes('Pin'))) {
+            pinInput = inp;
+            break;
+          }
+        }
+        if (!pinInput && allInputs.length > 0) {
+          pinInput = allInputs[0];
+        }
+      }
+    }
+    
+    if (!pinInput) {
+      return { ok: false, reason: "empty", enteredPin: "" };
+    }
+    
+    // Get entered PIN and normalize it
+    const enteredPin = String(pinInput.value || "").trim();
+    
+    // Debug log: show which element was chosen
+    console.log("[TASKS PIN] chosenPinEl:", pinInput?.id || "(no id)", "len:", enteredPin.length);
+    
+    // Debug log
+    console.log("[TASKS PIN] enteredPin:", enteredPin);
+    
+    if (!enteredPin || enteredPin === '') {
+      return { ok: false, reason: "empty", enteredPin: "" };
+    }
+    
+    // Read ff_staff_v1 from localStorage - ONLY source of truth
+    const rawStoreStr = localStorage.getItem("ff_staff_v1") || "{}";
+    const rawStoreStrLength = rawStoreStr.length;
+    
+    let staffArr = [];
+    try {
+      const store = JSON.parse(rawStoreStr);
+      staffArr = Array.isArray(store.staff) ? store.staff : [];
+    } catch (e) {
+      console.error('[ffAuthStaffByPinFromModal] Error loading from ff_staff_v1:', e);
+      staffArr = [];
+    }
+    
+    // Normalize entered PIN
+    const enteredPinNorm = String(enteredPin).trim();
+    
+    // Debug logs before matching
+    console.log("[TASKS PIN] staffStoreCount:", staffArr.length);
+    console.log("[TASKS PIN] raw localStorage string length:", rawStoreStrLength);
+    
+    // Log each staff with masked PIN (last 2 digits only)
+    staffArr.forEach(function(s, idx) {
+      const pinStr = String(s.pin ?? "").trim();
+      const pinLen = pinStr.length;
+      const maskedPin = pinLen >= 2 ? "***" + pinStr.slice(-2) : (pinLen > 0 ? "***" : "(empty)");
+      console.log("[TASKS PIN] staff[" + idx + "]:", {
+        id: s.id || "(no id)",
+        name: s.name || "(no name)",
+        pinLen: pinLen,
+        pinMasked: maskedPin
+      });
+    });
+    
+    let matched = null;
+    
+    // Match against ff_staff_v1 ONLY (no fallback to settings.workers)
+    matched = staffArr.find(s => {
+      if (s.isArchived === true) return false;
+      // Normalize staff PIN: String(s.pin ?? "").trim()
+      const staffPinNorm = String(s.pin ?? "").trim();
+      // Match when staffPinNorm === enteredPinNorm
+      return staffPinNorm && staffPinNorm === enteredPinNorm;
+    });
+    
+    // Debug log
+    console.log("[TASKS PIN] matched:", matched ? {id: matched.id, name: matched.name} : null);
+    console.log("[TASKS PIN] usedFallbackToSettings: false (ff_staff_v1 only)");
+    
+    if (!matched) {
+      return { ok: false, reason: "no_match_ff_staff_v1", enteredPin: enteredPinNorm };
+    }
+    
+    // Success - extract staffId and name
+    const staffId = matched.id || matched.staffId || null;
+    const name = matched.name || matched.fullName || null;
+    
+    return { ok: true, staffId: staffId, name: name };
+  } catch (e) {
+    console.error('[ffAuthStaffByPinFromModal] Error:', e);
+    return { ok: false, reason: "error", enteredPin: "" };
+  }
+}
+
+// Helper function to get selected technician from MY LIST dropdown
+// Returns { staffId, name } where name is select.value or selected option text
+// Uses robust detection by scanning all selects and matching against staff names
+function ffTasksGetSelectedTechIdentifier() {
+  try {
+    // Step 1: Collect all staff names from both sources into a Set (lowercased, trimmed)
+    const staffNamesSet = new Set();
+    
+    // Collect from ff_staff_v1 (preferred source)
+    try {
+      if (typeof ffGetStaffStore === 'function') {
+        const staffStore = ffGetStaffStore();
+        const staffList = Array.isArray(staffStore.staff) ? staffStore.staff : [];
+        staffList.forEach(staff => {
+          if (staff.name && typeof staff.name === 'string') {
+            const normalized = staff.name.trim().toLowerCase();
+            if (normalized) {
+              staffNamesSet.add(normalized);
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('[ffTasksGetSelectedTechIdentifier] Error loading from ffGetStaffStore:', e);
+    }
+    
+    // Collect from settings.workers (fallback)
+    try {
+      if (typeof ffGetStaffList === 'function') {
+        const workersList = ffGetStaffList();
+        if (Array.isArray(workersList)) {
+          workersList.forEach(worker => {
+            if (worker.name && typeof worker.name === 'string') {
+              const normalized = worker.name.trim().toLowerCase();
+              if (normalized) {
+                staffNamesSet.add(normalized);
+              }
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[ffTasksGetSelectedTechIdentifier] Error loading from ffGetStaffList:', e);
+    }
+    
+    if (staffNamesSet.size === 0) {
+      console.warn('[ffTasksGetSelectedTechIdentifier] No staff names found in store');
+      return { staffId: undefined, name: undefined };
+    }
+    
+    // Step 2: Find the "My List" technician select by scanning ALL <select> elements
+    const allSelects = Array.from(document.querySelectorAll('select'));
+    let bestSelect = null;
+    let bestMatchCount = 0;
+    let bestIsVisible = false;
+    let bestIsInTasksContainer = false;
+    
+    // Try to find TASKS/My List container for proximity check
+    const tasksContainer = document.querySelector('.tasks-col, .tasks-list, [id*="task"], [class*="task"]');
+    
+    for (const select of allSelects) {
+      if (!select || select.options.length === 0) continue;
+      
+      // Count how many options match staff names
+      let matchCount = 0;
+      for (let i = 0; i < select.options.length; i++) {
+        const option = select.options[i];
+        const optionValue = (option.value || '').trim().toLowerCase();
+        const optionText = (option.textContent || '').trim().toLowerCase();
+        
+        // Skip placeholder options
+        if (optionValue === '' || optionValue === 'select technician...' || 
+            optionText === 'select technician...' || option.disabled) {
+          continue;
+        }
+        
+        // Check if option value or text matches a staff name
+        if (staffNamesSet.has(optionValue) || staffNamesSet.has(optionText)) {
+          matchCount++;
+        }
+      }
+      
+      // Require at least 2 matches to be considered the staff select
+      if (matchCount >= 2) {
+        const isVisible = select.offsetParent !== null;
+        const isInTasksContainer = tasksContainer ? tasksContainer.contains(select) : false;
+        
+        // Prefer selects that are visible and in tasks container
+        const score = (isVisible ? 10 : 0) + (isInTasksContainer ? 5 : 0) + matchCount;
+        const currentBestScore = (bestIsVisible ? 10 : 0) + (bestIsInTasksContainer ? 5 : 0) + bestMatchCount;
+        
+        if (!bestSelect || score > currentBestScore) {
+          bestSelect = select;
+          bestMatchCount = matchCount;
+          bestIsVisible = isVisible;
+          bestIsInTasksContainer = isInTasksContainer;
+        }
+      }
+    }
+    
+    if (!bestSelect) {
+      console.warn('[ffTasksGetSelectedTechIdentifier] No select element found with staff names');
+      return { staffId: undefined, name: undefined };
+    }
+    
+    // Step 3: Derive selectedName from select.value or selected option text
+    const selectedValue = bestSelect.value || '';
+    const selectedOption = bestSelect.options[bestSelect.selectedIndex];
+    const optionText = selectedOption ? selectedOption.textContent : '';
+    
+    // Prefer select.value if non-empty and not placeholder, else use option text
+    let selectedName = undefined;
+    if (selectedValue && selectedValue.trim() && 
+        selectedValue.toLowerCase() !== 'select technician...' &&
+        selectedValue.toLowerCase() !== '') {
+      selectedName = selectedValue.trim();
+    } else if (optionText && optionText.trim() && 
+               optionText.toLowerCase() !== 'select technician...' &&
+               optionText.toLowerCase() !== '') {
+      selectedName = optionText.trim();
+    }
+    
+    if (!selectedName) {
+      return { staffId: undefined, name: undefined };
+    }
+    
+    // Step 4: Resolve to staffId via resolveStaffNameToId when possible
+    let staffId = undefined;
+    if (selectedOption && selectedOption.dataset && selectedOption.dataset.technicianId) {
+      staffId = selectedOption.dataset.technicianId;
+    } else if (typeof resolveStaffNameToId === 'function') {
+      staffId = resolveStaffNameToId(selectedName);
+    }
+    
+    // Step 5: Debug log (once per action, not spam)
+    console.log("[TASKS] detected tech select", {
+      id: bestSelect.id || '(no id)',
+      name: bestSelect.name || '(no name)',
+      value: selectedValue,
+      selectedText: optionText,
+      selectedName: selectedName,
+      staffId: staffId
+    });
+    
+    return { staffId: staffId, name: selectedName };
+  } catch (e) {
+    console.error('[ffTasksGetSelectedTechIdentifier] Error:', e);
+    return { staffId: undefined, name: undefined };
+  }
+}
+
 // Validate PIN and add task to pending
 function confirmSelectTask() {
   try {
@@ -17125,138 +17684,53 @@ function confirmSelectTask() {
       }
     }
     
-    // Convert to string and trim (same as JOIN function does)
-    code = (code || '').toString().trim();
+    // Use ONLY ffAuthStaffByPinFromModal for PIN validation
+    const auth = ffAuthStaffByPinFromModal(document);
     
-    // Check if code is empty
-    if (!code || code === '') {
-      if (error) error.textContent = 'Please enter code (admin, manager, or staff)';
-      console.log('[confirmSelectTask] returning', { ok: false, matchedName: null, taskName: currentSelectTask?.taskName });
-      return false; // Return false if code is empty
-    }
+    // Debug log
+    console.log("[TASKS PIN] OK handler auth:", auth);
     
-    // Validate code - accept admin, manager, or tech (worker) codes
-    // This allows anyone (admin, manager, or tech) to select tasks
-    // CRITICAL: Use trimmed code for all comparisons
-    const codeStr = code;
-    
-    let matchedWorker = null;
-    let matchedRole = null;
-    let matchedName = null;
-    
-    // Check if code matches admin (check FIRST)
-    const adminCheck = isAdminCode(codeStr);
-    if (adminCheck) {
-      matchedRole = 'Admin';
-      matchedName = settings.ownerName || settings.adminName || 'Admin';
-      // Create a worker-like object for consistency
-      matchedWorker = { name: matchedName, pin: codeStr, role: 'Admin' };
-      console.log('[Tasks] Admin code validated:', matchedName);
-    }
-    // Check if code matches manager (check SECOND)
-    else {
-      const managerCheck = isManagerCode(codeStr);
-      if (managerCheck) {
-        const managers = settings.managers || [];
-        const manager = managers.find(m => {
-          if (!m.code) return false;
-          return m.code.toString().trim() === codeStr;
-        });
-        if (manager) {
-          matchedRole = 'Manager';
-          matchedName = manager.name || 'Manager';
-          matchedWorker = { name: matchedName, pin: codeStr, role: 'Manager' };
-          console.log('[Tasks] Manager code validated:', matchedName);
+    if (!auth.ok) {
+      if (error) {
+        if (auth.reason === "empty") {
+          error.textContent = 'Enter PIN';
         } else {
-          console.warn('[Tasks] isManagerCode returned true but manager not found in list');
+          error.textContent = 'Incorrect PIN';
         }
       }
-      // Check if code matches worker (tech) (check THIRD)
-      else {
-        // Try to match from users (ffv24_users or ff_users_v1) first
-        const users = (typeof ffGetUsers === 'function' ? ffGetUsers() : (typeof window.ffGetUsers === 'function' ? window.ffGetUsers() : []));
-        const userMatch = users.find(u => {
-          // Match by pin (string comparison) or pinHash if present
-          return (u.pin && String(u.pin).trim() === codeStr) ||
-                 (u.pinHash && String(u.pinHash).trim() === codeStr);
-        });
-        
-        if (userMatch) {
-          matchedRole = 'Tech';
-          matchedName = userMatch.displayName || userMatch.name || '';
-          matchedWorker = { name: matchedName, pin: codeStr, role: 'Tech' };
-          console.log('[Tasks] Tech code validated (from users):', matchedName);
-        } else {
-          // Fallback to settings.workers
-          const workersList = settings.workers || [];
-          for (let i = 0; i < workersList.length; i++) {
-            const worker = workersList[i];
-            if (!worker.pin) continue;
-            // Use exact same comparison as JOIN: w.pin.toString() === code
-            const workerPinStr = worker.pin.toString().trim();
-            if (workerPinStr === codeStr) {
-              matchedWorker = worker;
-              matchedRole = 'Tech';
-              matchedName = worker.name;
-              console.log('[Tasks] Tech code validated (from settings.workers):', matchedName);
-              break;
-            }
-          }
-        }
-      }
+      console.log('[confirmSelectTask] returning', { ok: false, matchedName: null, taskName: currentSelectTask?.taskName, reason: auth.reason });
+      return false;
     }
     
-    if (!matchedWorker) {
-      // Debug: log what we're comparing to help troubleshoot
-      console.log('[Tasks] Code validation failed - no match found:', {
-        enteredCode: codeStr,
-        codeType: typeof codeStr,
-        codeLength: codeStr.length,
-        isAdminCheck: isAdminCode(codeStr),
-        isManagerCheck: isManagerCode(codeStr),
-        workersCount: (settings.workers || []).length,
-        managersCount: (settings.managers || []).length
-      });
-      if (error) error.textContent = 'Invalid code. Please enter admin, manager, or staff code.';
-      // Clear input and state for retry
-      taskStaffCode = '';
-      if (input) input.value = '';
-      setTimeout(() => input.focus(), 100);
-      console.log('[confirmSelectTask] returning', { ok: false, matchedName: null, taskName: currentSelectTask?.taskName });
-      return; // Don't close modal - user needs to correct code
-    }
+    // Success - set authenticated staff
+    window.__ff_authedStaffId = auth.staffId || undefined;
+    window.__ff_authedStaffName = auth.name || undefined;
     
-    console.log('[Tasks] Code validation SUCCESS:', {
-      role: matchedRole,
+    const matchedName = auth.name || '';
+    const matchedStaffId = auth.staffId || undefined;
+    
+    console.log('[Tasks] PIN validation SUCCESS:', {
       name: matchedName,
-      code: codeStr
+      staffId: matchedStaffId
     });
     
     // Store matchedName globally so it's accessible in the handler
     window.__ff_lastMatchedName = matchedName;
     
     // Explicit, guaranteed history write immediately after validation succeeds
-    // Compute and store actor first so getHistoryActor() can use it
     if (typeof getActorForAction === 'function') {
-      let computedActor = { role: 'Admin', name: 'Admin' };
-      if (matchedRole === 'Admin') {
-        computedActor = getActorForAction({ adminCode: code });
-      } else if (matchedRole === 'Manager') {
-        computedActor = getActorForAction({ managerCode: code });
-      } else {
-        computedActor = getActorForAction({ workerName: matchedName });
-      }
+      const computedActor = getActorForAction({ workerName: matchedName });
       window.__ff_lastValidatedCode = { role: computedActor.role, name: computedActor.name };
     }
     
-    const actor = getHistoryActor ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
+    const actor = getHistoryActor ? getHistoryActor() : { role: 'Tech', name: matchedName };
     addHistoryEntry(`Task Selected: ${currentSelectTask?.taskName || ''}`, actor.role, actor.name, matchedName || '', 'tasks');
     
-    // PIN is valid - add task to pending with staff name
+    // PIN is valid - add task to pending with staff name and staffId
     try {
       if (typeof addTaskToPending === 'function') {
-        // Pass the matched staff name to addTaskToPending
-        addTaskToPending(currentSelectTask.category, currentSelectTask.taskName, matchedName);
+        // Pass the matched staff name and staffId to addTaskToPending
+        addTaskToPending(currentSelectTask.category, currentSelectTask.taskName, matchedName, matchedStaffId);
       } else {
         console.warn('[Tasks] addTaskToPending function not found');
       }
@@ -17414,131 +17888,47 @@ async function confirmFinishTask() {
     return;
   }
   
-  // Use the EXACT same pattern as JOIN function: pin=(pinInput.value||"").toString()
-  let pin = (input.value || '').toString().trim();
+  // Use ONLY ffAuthStaffByPinFromModal for PIN validation
+  const auth = ffAuthStaffByPinFromModal(document);
   
-  if (!pin || pin === '') {
-    if (error) error.textContent = 'Please enter code (admin, manager, or staff)';
-    console.log('[confirmFinishTask] returning', { ok: false, matchedName: null, taskName: currentFinishTask?.taskName });
-    return false; // Return false if pin is empty
-  }
+  // Debug log
+  console.log("[TASKS PIN] OK handler auth:", auth);
   
-  // Validate PIN - accept admin, manager, or tech (worker) codes
-  // This allows anyone (admin, manager, or tech) to mark tasks as done
-  // CRITICAL: Use trimmed PIN for all comparisons
-  const pinStr = pin;
-  
-  let matchedWorker = null;
-  let matchedRole = null;
-  let matchedName = null;
-  
-  // Check if PIN matches admin (check FIRST)
-  const adminCheck = isAdminCode(pinStr);
-  if (adminCheck) {
-    matchedRole = 'Admin';
-    matchedName = settings.ownerName || settings.adminName || 'Admin';
-    // Create a worker-like object for consistency
-    matchedWorker = { name: matchedName, pin: pinStr, role: 'Admin' };
-    console.log('[Tasks] Admin code validated for finish task:', matchedName);
-  }
-  // Check if PIN matches manager (check SECOND)
-  else {
-    const managerCheck = isManagerCode(pinStr);
-    if (managerCheck) {
-      const managers = settings.managers || [];
-      const manager = managers.find(m => {
-        if (!m.code) return false;
-        return m.code.toString().trim() === pinStr;
-      });
-      if (manager) {
-        matchedRole = 'Manager';
-        matchedName = manager.name || 'Manager';
-        matchedWorker = { name: matchedName, pin: pinStr, role: 'Manager' };
-        console.log('[Tasks] Manager code validated for finish task:', matchedName);
+  if (!auth.ok) {
+    if (error) {
+      if (auth.reason === "empty") {
+        error.textContent = 'Enter PIN';
       } else {
-        console.warn('[Tasks] isManagerCode returned true but manager not found in list');
+        error.textContent = 'Incorrect PIN';
       }
     }
-    // Check if PIN matches worker (tech) (check THIRD)
-    else {
-      // Try to match from users (ffv24_users or ff_users_v1) first
-      const users = (typeof ffGetUsers === 'function' ? ffGetUsers() : (typeof window.ffGetUsers === 'function' ? window.ffGetUsers() : []));
-      const userMatch = users.find(u => {
-        // Match by pin (string comparison) or pinHash if present
-        return (u.pin && String(u.pin).trim() === pinStr) ||
-               (u.pinHash && String(u.pinHash).trim() === pinStr);
-      });
-      
-      if (userMatch) {
-        matchedRole = 'Tech';
-        matchedName = userMatch.displayName || userMatch.name || '';
-        matchedWorker = { name: matchedName, pin: pinStr, role: 'Tech' };
-        console.log('[Tasks] Tech code validated for finish task (from users):', matchedName);
-      } else {
-        // Fallback to settings.workers
-        const workersList = settings.workers || [];
-        for (let i = 0; i < workersList.length; i++) {
-          const worker = workersList[i];
-          if (!worker.pin) continue;
-          // Use exact same comparison as JOIN: w.pin.toString() === pin
-          const workerPinStr = worker.pin.toString().trim();
-          if (workerPinStr === pinStr) {
-            matchedWorker = worker;
-            matchedRole = 'Tech';
-            matchedName = worker.name;
-            console.log('[Tasks] Tech code validated for finish task (from settings.workers):', matchedName);
-            break;
-          }
-        }
-      }
-    }
+    console.log('[confirmFinishTask] returning', { ok: false, matchedName: null, taskName: currentFinishTask?.taskName, reason: auth.reason });
+    return false;
   }
   
-  if (!matchedWorker) {
-    // Debug: log what we're comparing to help troubleshoot
-    console.log('[Tasks] Code validation failed for finish task - no match found:', {
-      enteredCode: pinStr,
-      codeType: typeof pinStr,
-      codeLength: pinStr.length,
-      isAdminCheck: isAdminCode(pinStr),
-      isManagerCheck: isManagerCode(pinStr),
-      workersCount: (settings.workers || []).length,
-      managersCount: (settings.managers || []).length
-    });
-    if (error) error.textContent = 'Invalid code. Please enter admin, manager, or staff code.';
-    input.value = '';
-    setTimeout(() => input.focus(), 100);
-    console.log('[confirmFinishTask] returning', { ok: false, matchedName: null, taskName: currentFinishTask?.taskName });
-    return false; // Return false on validation failure
-  }
+  // Success - set authenticated staff
+  window.__ff_authedStaffId = auth.staffId || undefined;
+  window.__ff_authedStaffName = auth.name || undefined;
   
-  console.log('[Tasks] Code validation SUCCESS for finish task:', {
-    role: matchedRole,
+  const matchedName = auth.name || '';
+  const matchedStaffId = auth.staffId || undefined;
+  
+  console.log('[Tasks] PIN validation SUCCESS for finish task:', {
     name: matchedName,
-    code: pinStr
+    staffId: matchedStaffId
   });
   
   // Store matchedName globally so it's accessible in the handler
   window.__ff_lastMatchedName = matchedName;
   
   // Explicit, guaranteed history write immediately after validation succeeds
-  // Compute and store actor first so getHistoryActor() can use it
   if (typeof getActorForAction === 'function') {
-    let computedActor = { role: 'Admin', name: 'Admin' };
-    if (matchedRole === 'Admin') {
-      computedActor = getActorForAction({ adminCode: pin });
-    } else if (matchedRole === 'Manager') {
-      computedActor = getActorForAction({ managerCode: pin });
-    } else {
-      computedActor = getActorForAction({ workerName: matchedName });
-    }
+    const computedActor = getActorForAction({ workerName: matchedName });
     window.__ff_lastValidatedCode = { role: computedActor.role, name: computedActor.name };
   }
   
-  const actor = getHistoryActor ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
+  const actor = getHistoryActor ? getHistoryActor() : { role: 'Tech', name: matchedName };
   addHistoryEntry(`Task Completed: ${currentFinishTask?.taskName || ''}`, actor.role, actor.name, matchedName || '', 'tasks');
-  
-  const worker = matchedWorker;
   
   // PIN is valid - mark task as done
   const today = getTodayDateString();
@@ -17586,8 +17976,8 @@ async function confirmFinishTask() {
   saveTaskCompletionToFirestore(
     currentFinishTask.category,
     currentFinishTask.taskName,
-    worker.name,
-    pin
+    matchedName,
+    '' // PIN not needed for Firestore
   ).catch(err => {
     console.error('[Tasks] Firestore save failed (non-blocking):', err);
   });
