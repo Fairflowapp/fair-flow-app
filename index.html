@@ -1632,34 +1632,28 @@ dialog footer button, .code-dialog footer button {
 
   <!-- Manage Queue Screen -->
   <div id="manageQueueScreen" style="display:none;max-width:800px;margin:40px auto;padding:0 24px;">
-    <div style="margin-bottom:32px;">
-      <button id="manageQueueBackBtn" class="btn-pill" style="margin-bottom:16px;">← Back to Queue</button>
-      <h1 style="margin:0 0 8px 0;font-size:24px;font-weight:600;color:#111827;">Manage Queue</h1>
-      <p style="margin:0;font-size:14px;color:#6b7280;">Queue behavior and automation settings</p>
-    </div>
-
     <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
       <!-- Queue Auto Reset Section -->
       <div style="margin-bottom:24px;">
-        <h3 style="margin:0 0 16px 0;font-size:16px;font-weight:600;color:#111827;">Queue Auto Reset</h3>
+        <div style="margin:0 0 16px 0;font-size:13px;font-weight:500;color:#111827;">Queue Auto Reset</div>
         
         <div style="display:flex;flex-direction:column;gap:16px;">
           <!-- Enable queue auto reset checkbox -->
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" id="manageQueueAutoResetEnabled" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
-            <span style="font-size:14px;color:#111827;">Enable queue auto reset</span>
+            <span style="font-size:12px;font-weight:400;color:#111827;">Enable queue auto reset</span>
           </label>
 
           <!-- Reset time input -->
           <div style="display:flex;align-items:center;gap:12px;">
-            <label style="font-size:14px;color:#111827;min-width:100px;">Reset time:</label>
+            <label style="font-size:12px;font-weight:400;color:#111827;min-width:100px;">Reset time:</label>
             <input type="time" id="manageQueueAutoResetTime" value="04:00" style="height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
           </div>
 
           <!-- Reset even if people are In Service checkbox -->
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" id="manageQueueAutoResetForce" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
-            <span style="font-size:14px;color:#111827;">Reset even if people are In Service</span>
+            <span style="font-size:12px;font-weight:400;color:#111827;">Reset even if people are In Service</span>
           </label>
         </div>
       </div>
@@ -1827,29 +1821,6 @@ dialog footer button, .code-dialog footer button {
           <div class="row" style="margin-top:16px;"><button id="addWorker" type="button" class="btn-mini" style="font-size:11px;padding:4px 10px;">+ Add worker</button></div>
 
           <div class="row small" style="font-size:11px;color:#6b7280;margin-top:8px;">Only these names can join. Duplicates are blocked.</div>
-        </div>
-
-        <h4>Queue Auto Reset</h4>
-
-        <div class="row">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="queueAutoResetEnabled" style="width:18px;height:18px;cursor:pointer;">
-            <span>Enable queue auto reset</span>
-          </label>
-        </div>
-
-        <div class="row">
-          <label style="display:flex;align-items:center;gap:8px;">
-            <span style="min-width:100px;">Reset time:</span>
-            <input type="time" id="queueAutoResetTime" style="height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
-          </label>
-        </div>
-
-        <div class="row">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="queueAutoResetForce" style="width:18px;height:18px;cursor:pointer;">
-            <span>Reset even if people are In Service</span>
-          </label>
         </div>
 
       </div>
@@ -4003,6 +3974,110 @@ function checkQueueManagePermission() {
   return true;
 }
 
+// Helper functions for queues structure (ff_queues_v1)
+function getQueuesData() {
+  const data = localStorage.getItem('ff_queues_v1');
+  return data ? JSON.parse(data) : {};
+}
+
+function setQueuesData(data) {
+  localStorage.setItem('ff_queues_v1', JSON.stringify(data));
+}
+
+function getQueueAutoResetSettings() {
+  const queues = getQueuesData();
+  
+  // Check if new structure exists
+  if (queues.default && queues.default.settings && queues.default.settings.autoReset) {
+    return queues.default.settings.autoReset;
+  }
+  
+  // Fallback: read from old structure and initialize new structure
+  const oldSettings = JSON.parse(localStorage.getItem('ff_queue_settings_v1') || '{}');
+  if (oldSettings.autoResetEnabled !== undefined || oldSettings.autoResetTime || oldSettings.autoResetForce !== undefined) {
+    const autoReset = {
+      enabled: oldSettings.autoResetEnabled === true,
+      time: oldSettings.autoResetTime || '04:00',
+      resetWhileInService: oldSettings.autoResetForce === true
+    };
+    
+    // Initialize new structure
+    if (!queues.default) queues.default = {};
+    if (!queues.default.settings) queues.default.settings = {};
+    queues.default.settings.autoReset = autoReset;
+    setQueuesData(queues);
+    
+    return autoReset;
+  }
+  
+  // Default values
+  return {
+    enabled: false,
+    time: '04:00',
+    resetWhileInService: false
+  };
+}
+
+function getQueueRuntime() {
+  const queues = getQueuesData();
+  
+  // Check if new structure exists
+  if (queues.default && queues.default.runtime) {
+    return queues.default.runtime;
+  }
+  
+  // Fallback: migrate from old structure
+  const oldSettings = JSON.parse(localStorage.getItem('ff_queue_settings_v1') || '{}');
+  if (oldSettings.lastAutoResetDate !== undefined) {
+    // Initialize new structure and migrate
+    if (!queues.default) queues.default = {};
+    if (!queues.default.runtime) queues.default.runtime = {};
+    queues.default.runtime.lastAutoResetDate = oldSettings.lastAutoResetDate;
+    setQueuesData(queues);
+    return queues.default.runtime;
+  }
+  
+  // Default: empty runtime object
+  if (!queues.default) queues.default = {};
+  if (!queues.default.runtime) queues.default.runtime = {};
+  return queues.default.runtime;
+}
+
+function setQueueRuntime(runtime) {
+  const queues = getQueuesData();
+  if (!queues.default) queues.default = {};
+  queues.default.runtime = runtime;
+  setQueuesData(queues);
+}
+
+function getQueueLastAutoResetDate() {
+  const runtime = getQueueRuntime();
+  return runtime.lastAutoResetDate || null;
+}
+
+function setQueueLastAutoResetDate(dateKey) {
+  const runtime = getQueueRuntime();
+  runtime.lastAutoResetDate = dateKey;
+  setQueueRuntime(runtime);
+}
+
+function clearQueueLastAutoResetDate() {
+  const runtime = getQueueRuntime();
+  runtime.lastAutoResetDate = null;
+  setQueueRuntime(runtime);
+}
+
+function saveQueueAutoResetSettings(autoReset) {
+  const queues = getQueuesData();
+  if (!queues.default) queues.default = {};
+  if (!queues.default.settings) queues.default.settings = {};
+  queues.default.settings.autoReset = autoReset;
+  setQueuesData(queues);
+  
+  // Clear lastAutoResetDate when settings change so next scheduled check can run
+  clearQueueLastAutoResetDate();
+}
+
 function openManageQueue() {
   // Hide Queue view
   const ownerView = document.getElementById('owner-view');
@@ -4014,6 +4089,16 @@ function openManageQueue() {
   if (joinBar) joinBar.style.display = 'none';
   if (wrapContent) wrapContent.style.display = 'none';
   if (queueControls) queueControls.style.display = 'none';
+  
+  // Load auto reset settings from new structure
+  const autoReset = getQueueAutoResetSettings();
+  const enabledEl = document.getElementById('manageQueueAutoResetEnabled');
+  const timeEl = document.getElementById('manageQueueAutoResetTime');
+  const forceEl = document.getElementById('manageQueueAutoResetForce');
+  
+  if (enabledEl) enabledEl.checked = autoReset.enabled === true;
+  if (timeEl) timeEl.value = autoReset.time || '04:00';
+  if (forceEl) forceEl.checked = autoReset.resetWhileInService === true;
   
   // Show Manage Queue screen
   const manageQueueScreen = document.getElementById('manageQueueScreen');
@@ -4053,6 +4138,43 @@ function initManageQueueButtons() {
       e.preventDefault();
       closeManageQueue();
     };
+  }
+  
+  // Auto Reset input handlers (save to new structure)
+  const enabledEl = document.getElementById('manageQueueAutoResetEnabled');
+  const timeEl = document.getElementById('manageQueueAutoResetTime');
+  const forceEl = document.getElementById('manageQueueAutoResetForce');
+  
+  if (enabledEl && !enabledEl.hasAttribute('data-handler-attached')) {
+    enabledEl.setAttribute('data-handler-attached', 'true');
+    enabledEl.addEventListener('change', function() {
+      const autoReset = getQueueAutoResetSettings();
+      autoReset.enabled = enabledEl.checked === true;
+      saveQueueAutoResetSettings(autoReset);
+    });
+  }
+  
+  if (timeEl && !timeEl.hasAttribute('data-handler-attached')) {
+    timeEl.setAttribute('data-handler-attached', 'true');
+    timeEl.addEventListener('change', function() {
+      const autoReset = getQueueAutoResetSettings();
+      autoReset.time = timeEl.value || '04:00';
+      saveQueueAutoResetSettings(autoReset);
+    });
+    timeEl.addEventListener('input', function() {
+      const autoReset = getQueueAutoResetSettings();
+      autoReset.time = timeEl.value || '04:00';
+      saveQueueAutoResetSettings(autoReset);
+    });
+  }
+  
+  if (forceEl && !forceEl.hasAttribute('data-handler-attached')) {
+    forceEl.setAttribute('data-handler-attached', 'true');
+    forceEl.addEventListener('change', function() {
+      const autoReset = getQueueAutoResetSettings();
+      autoReset.resetWhileInService = forceEl.checked === true;
+      saveQueueAutoResetSettings(autoReset);
+    });
   }
 }
 
@@ -4453,15 +4575,6 @@ function renderSettings(){
   // Tasks-related UI removed (Task Reminders, Task Notes sections)
   // These will be rebuilt from scratch in the future
 
-  // Queue Auto Reset settings
-  const queueSettings = JSON.parse(localStorage.getItem('ff_queue_settings_v1') || '{}');
-  const enabledEl = document.getElementById('queueAutoResetEnabled');
-  const timeEl = document.getElementById('queueAutoResetTime');
-  const forceEl = document.getElementById('queueAutoResetForce');
-  
-  if (enabledEl) enabledEl.checked = queueSettings.autoResetEnabled === true;
-  if (timeEl) timeEl.value = queueSettings.autoResetTime || '02:00';
-  if (forceEl) forceEl.checked = queueSettings.autoResetForce === true;
 
 }
 
@@ -11466,15 +11579,63 @@ function resetWeeklyForToday(nowTs = Date.now()) {
 window.resetWeeklyForToday = resetWeeklyForToday;
 console.log('[EXPOSE] resetWeeklyForToday', typeof window.resetWeeklyForToday);
 
+// Helper function to parse reset time string to minutes since midnight
+// Supports both "HH:mm" (24-hour) and "hh:mm AM/PM" (12-hour) formats
+function parseResetTimeToMinutes(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') {
+    return null;
+  }
+  
+  const upperTime = timeStr.toUpperCase().trim();
+  const hasAmPm = upperTime.includes('AM') || upperTime.includes('PM');
+  
+  if (hasAmPm) {
+    // Parse 12-hour format: "hh:mm AM/PM"
+    const match = upperTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+    if (!match) {
+      return null;
+    }
+    
+    let hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const ampm = match[3];
+    
+    if (isNaN(hours) || isNaN(minutes) || hours < 1 || hours > 12 || minutes < 0 || minutes > 59) {
+      return null;
+    }
+    
+    // Convert to 24-hour format
+    if (ampm === 'PM' && hours !== 12) {
+      hours += 12;
+    } else if (ampm === 'AM' && hours === 12) {
+      hours = 0;
+    }
+    
+    return hours * 60 + minutes;
+  } else {
+    // Parse 24-hour format: "HH:mm"
+    const match = upperTime.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) {
+      return null;
+    }
+    
+    const hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    
+    if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+      return null;
+    }
+    
+    return hours * 60 + minutes;
+  }
+}
+
 // Queue Auto Reset scheduler
 function ffMaybeAutoResetQueue(now = new Date()) {
   try {
-    // Load queue settings
-    const queueSettingsRaw = localStorage.getItem('ff_queue_settings_v1');
-    if (!queueSettingsRaw) return;
-    
-    const queueSettings = JSON.parse(queueSettingsRaw);
-    if (queueSettings.autoResetEnabled !== true) {
+    // Load auto reset settings from new queue-specific structure (with fallback)
+    const autoReset = getQueueAutoResetSettings();
+    if (autoReset.enabled !== true) {
       return; // Auto reset disabled
     }
     
@@ -11484,18 +11645,22 @@ function ffMaybeAutoResetQueue(now = new Date()) {
                      String(today.getMonth() + 1).padStart(2, '0') + '-' +
                      String(today.getDate()).padStart(2, '0');
     
-    // Check if already ran today
-    if (queueSettings.lastAutoResetDate === todayKey) {
+    // Check if already ran today (read from new structure with backward compatibility)
+    const lastAutoResetDate = getQueueLastAutoResetDate();
+    if (lastAutoResetDate === todayKey) {
       return; // Already reset today
     }
     
-    // Parse autoResetTime "HH:MM"
-    const timeStr = queueSettings.autoResetTime || '02:00';
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    if (isNaN(hours) || isNaN(minutes)) {
+    // Parse autoResetTime (supports both "HH:mm" and "hh:mm AM/PM" formats)
+    const timeStr = autoReset.time || '04:00';
+    const minutesSinceMidnight = parseResetTimeToMinutes(timeStr);
+    if (minutesSinceMidnight === null) {
       console.warn('[AUTO_RESET][QUEUE] Invalid time format:', timeStr);
       return;
     }
+    
+    const hours = Math.floor(minutesSinceMidnight / 60);
+    const minutes = minutesSinceMidnight % 60;
     
     // Create target time for today
     const targetToday = new Date(today);
@@ -11507,7 +11672,7 @@ function ffMaybeAutoResetQueue(now = new Date()) {
     }
     
     // Check if force=false and there are people in service
-    const autoResetForce = queueSettings.autoResetForce === true;
+    const autoResetForce = autoReset.resetWhileInService === true;
     if (!autoResetForce && ffQueueHasInService()) {
       console.log('[AUTO_RESET][QUEUE] Skipped - people in service and force=false');
       return; // Don't reset if people are in service and force is false
@@ -11516,9 +11681,8 @@ function ffMaybeAutoResetQueue(now = new Date()) {
     // Perform reset
     resetQueueState({ force: autoResetForce, source: 'auto' });
     
-    // Update lastAutoResetDate
-    queueSettings.lastAutoResetDate = todayKey;
-    localStorage.setItem('ff_queue_settings_v1', JSON.stringify(queueSettings));
+    // Update lastAutoResetDate in new structure
+    setQueueLastAutoResetDate(todayKey);
     
     console.log('[AUTO_RESET][QUEUE] ran', { todayKey, time: timeStr, force: autoResetForce });
   } catch (e) {
