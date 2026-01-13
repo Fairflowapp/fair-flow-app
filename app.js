@@ -1906,81 +1906,32 @@ function closePinModal() {
 }
 
 async function validatePinAndMove() {
-    const pinInput = document.getElementById("pinModalTaskInput");
     const pinError = document.getElementById("pinError");
-    if (!pinInput) return;
     
-    const enteredPin = pinInput.value.trim();
+    // Use ONLY ffAuthStaffByPinFromModal for PIN validation
+    const auth = ffAuthStaffByPinFromModal(document);
     
-    if (!enteredPin || enteredPin === '') {
+    // Debug log
+    console.log("[TASKS PIN] OK handler auth result:", auth);
+    
+    if (!auth.ok) {
         if (pinError) {
-            pinError.textContent = "Please enter PIN";
-            pinError.style.display = "block";
-        }
-        return;
-    }
-    
-    let matchedRole = null;
-    let matchedName = null;
-    
-    // Check admin code first (no length restriction)
-    if (typeof isAdminCode === 'function' && isAdminCode(enteredPin)) {
-        matchedRole = 'Admin';
-        matchedName = (typeof settings !== 'undefined' && settings) 
-            ? (settings.ownerName || settings.adminName || 'Admin')
-            : 'Admin';
-        console.log('✅ TASK_TAKE_OK', { role: matchedRole, userName: matchedName, taskId: __pendingTaskId });
-    }
-    // Check manager code second (no length restriction)
-    else if (typeof isManagerCode === 'function' && isManagerCode(enteredPin)) {
-        matchedRole = 'Manager';
-        const managers = (typeof settings !== 'undefined' && settings && settings.managers) ? settings.managers : [];
-        const manager = managers.find(m => {
-            if (!m.code) return false;
-            return m.code.toString().trim() === enteredPin;
-        });
-        matchedName = manager ? (manager.name || 'Manager') : 'Manager';
-        console.log('✅ TASK_TAKE_OK', { role: matchedRole, userName: matchedName, taskId: __pendingTaskId });
-    }
-    // Check technician (worker) PIN third (with length validation)
-    else {
-        // Validate PIN length for workers only (4-6 digits)
-        if (enteredPin.length < 4 || enteredPin.length > 6) {
-            if (pinError) {
-                pinError.textContent = "PIN must be 4–6 digits";
-                pinError.style.display = "block";
+            if (auth.reason === "empty") {
+                pinError.textContent = "Enter PIN";
+            } else {
+                pinError.textContent = "Incorrect PIN";
             }
-            return;
-        }
-        
-        const users = ffGetUsers();
-        const match = users.find(u => {
-            // Match by pin (string comparison) or pinHash if present
-            return (u.pin && String(u.pin).trim() === String(enteredPin).trim()) ||
-                   (u.pinHash && String(u.pinHash).trim() === String(enteredPin).trim());
-        });
-        
-        if (match) {
-            matchedRole = 'Tech';
-            matchedName = match.displayName || match.name || '';
-            console.log('✅ TASK_TAKE_OK', { role: matchedRole, userName: matchedName, taskId: __pendingTaskId });
-        }
-    }
-    
-    if (!matchedName) {
-        // Determine current role for logging
-        let currentRole = 'Tech';
-        if (typeof getCurrentActorRole === 'function') {
-            currentRole = getCurrentActorRole() || 'Tech';
-        }
-        console.log('❌ TASK_TAKE_BAD_PIN', { role: currentRole, taskId: __pendingTaskId });
-        if (pinError) {
-            pinError.textContent = "Incorrect PIN";
             pinError.style.display = "block";
         }
         return;
     }
-
+    
+    // Success - set authenticated staff
+    window.__ff_authedStaffId = auth.staffId || undefined;
+    window.__ff_authedStaffName = auth.name || undefined;
+    
+    const matchedName = auth.name || '';
+    
     if (__pendingTaskId) {
         moveTaskToPending(__pendingTaskId, matchedName);
     }
@@ -1989,80 +1940,31 @@ async function validatePinAndMove() {
 }
 
 function validatePinAndMarkDone() {
-    const pinInput = document.getElementById("pinModalTaskInput");
     const pinError = document.getElementById("pinError");
-    if (!pinInput) return;
     
-    const enteredPin = pinInput.value.trim();
+    // Use ONLY ffAuthStaffByPinFromModal for PIN validation
+    const auth = ffAuthStaffByPinFromModal(document);
     
-    if (!enteredPin || enteredPin === '') {
+    // Debug log
+    console.log("[TASKS PIN] OK handler auth result:", auth);
+    
+    if (!auth.ok) {
         if (pinError) {
-            pinError.textContent = "Please enter PIN";
-            pinError.style.display = "block";
-        }
-        return;
-    }
-    
-    let matchedRole = null;
-    let matchedName = null;
-    
-    // Check admin code first (no length restriction)
-    if (typeof isAdminCode === 'function' && isAdminCode(enteredPin)) {
-        matchedRole = 'Admin';
-        matchedName = (typeof settings !== 'undefined' && settings) 
-            ? (settings.ownerName || settings.adminName || 'Admin')
-            : 'Admin';
-        console.log('✅ TASK_MARK_DONE_OK', { role: matchedRole, userName: matchedName, taskId: pinModalDoneTaskId });
-    }
-    // Check manager code second (no length restriction)
-    else if (typeof isManagerCode === 'function' && isManagerCode(enteredPin)) {
-        matchedRole = 'Manager';
-        const managers = (typeof settings !== 'undefined' && settings && settings.managers) ? settings.managers : [];
-        const manager = managers.find(m => {
-            if (!m.code) return false;
-            return m.code.toString().trim() === enteredPin;
-        });
-        matchedName = manager ? (manager.name || 'Manager') : 'Manager';
-        console.log('✅ TASK_MARK_DONE_OK', { role: matchedRole, userName: matchedName, taskId: pinModalDoneTaskId });
-    }
-    // Check technician (worker) PIN third (with length validation)
-    else {
-        // Validate PIN length for workers only (4-6 digits)
-        if (enteredPin.length < 4 || enteredPin.length > 6) {
-            if (pinError) {
-                pinError.textContent = "PIN must be 4–6 digits";
-                pinError.style.display = "block";
+            if (auth.reason === "empty") {
+                pinError.textContent = "Enter PIN";
+            } else {
+                pinError.textContent = "Incorrect PIN";
             }
-            return;
-        }
-        
-        const users = ffGetUsers();
-        const user = users.find(u => {
-            // Match by pin (string comparison) or pinHash if present
-            return (u.pin && String(u.pin).trim() === String(enteredPin).trim()) ||
-                   (u.pinHash && String(u.pinHash).trim() === String(enteredPin).trim());
-        });
-        
-        if (user) {
-            matchedRole = 'Tech';
-            matchedName = user.displayName || user.name || '';
-            console.log('✅ TASK_MARK_DONE_OK', { role: matchedRole, userName: matchedName, taskId: pinModalDoneTaskId });
-        }
-    }
-    
-    if (!matchedName) {
-        // Determine current role for logging
-        let currentRole = 'Tech';
-        if (typeof getCurrentActorRole === 'function') {
-            currentRole = getCurrentActorRole() || 'Tech';
-        }
-        console.log('❌ TASK_MARK_DONE_BAD_PIN', { role: currentRole, taskId: pinModalDoneTaskId });
-        if (pinError) {
-            pinError.textContent = "Incorrect PIN";
             pinError.style.display = "block";
         }
         return;
     }
+    
+    // Success - set authenticated staff
+    window.__ff_authedStaffId = auth.staffId || undefined;
+    window.__ff_authedStaffName = auth.name || undefined;
+    
+    const matchedName = auth.name || '';
 
     if (pinModalDoneTaskId) {
         markTaskDone(pinModalDoneTaskId, matchedName);
