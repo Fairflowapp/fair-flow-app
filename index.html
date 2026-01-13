@@ -3797,32 +3797,18 @@ function gateManager(){ const code=prompt("Manager code"); if(code===null) retur
 function workerGate(name){ const staffId = resolveStaffNameToId(name); const currentStaffId = staffId || name; const storedPin = getCurrentStaffPin(currentStaffId); if(!storedPin) return false; const code=prompt(`PIN for ${name}`); if(code===null) return false; return code.toString()===storedPin; }
 
 async function guardHold(fn){
-
-  const entry = window.securePromptOnce
-
-    ? await window.securePromptOnce('Enter admin or manager code')
-
-    : prompt('Enter admin or manager code');
-
-  if (entry == null) return;
-
-  if (isAdminCode(entry) || isManagerCode(entry)) { 
-    // Store the validated code for later use in addHistoryEntry
-    const actor = isAdminCode(entry) 
-      ? getActorForAction({ adminCode: entry })
-      : getActorForAction({ managerCode: entry });
-    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
-    // Actor info is already set by securePromptOnce wrapper, but if using prompt, set it here
-    if (!window.securePromptOnce) {
-      const actorInfo = getActorInfo(entry, '');
-      window.__ff_actorRole = actorInfo.actorRole;
-      window.__ff_actorName = actorInfo.actorName;
-    }
-    fn(); 
+  // Store pending action and open modal
+  window.__ff_holdPendingAction = fn;
+  
+  // Open the HOLD modal (validation happens in modal OK handler)
+  if (typeof window.showHoldModal === 'function') {
+    window.showHoldModal();
+  } else {
+    // Fallback if modal handler not ready
+    console.error('[guardHold] showHoldModal not available');
+    alert('HOLD modal not available');
+    window.__ff_holdPendingAction = null; // Clear on error
   }
-
-  else alert('Not authorized');
-
 }
 
 async function guardStart(workerName, idx, fn){
@@ -17500,6 +17486,341 @@ function ffAuthStaffByPinFromModal(modalElOrDocument) {
   }
 }
 
+// Helper function to get the visible hold/code prompt modal root
+function ffGetHoldModalRoot() {
+  // First try explicit IDs that match the actual overlay element
+  const explicitIds = ["codePromptModal", "holdCodeModal", "codePromptOverlay", "holdCodeOverlay"];
+  for (const id of explicitIds) {
+    const el = document.getElementById(id);
+    if (el) {
+      // Verify it contains both an input and OK/Cancel buttons
+      const hasInput = el.querySelector('input[type="password"],input[type="tel"],input[type="text"],input');
+      const hasOkBtn = el.querySelector('#holdCodeOk, #codePromptOk');
+      const hasCancelBtn = el.querySelector('#holdCodeCancel, #codePromptCancel');
+      if (hasInput && (hasOkBtn || hasCancelBtn)) {
+        return el;
+      }
+    }
+  }
+  
+  // Fallback: find the visible button with id "holdCodeOk" or "holdCodeCancel" and climb to parent
+  const button = document.getElementById("holdCodeOk") || document.getElementById("holdCodeCancel") || 
+                 document.getElementById("codePromptOk") || document.getElementById("codePromptCancel");
+  if (button) {
+    // Climb parents until we find a node that contains both an input and the button
+    let current = button.parentElement;
+    while (current && current !== document.body) {
+      const hasInput = current.querySelector('input[type="password"],input[type="tel"],input[type="text"],input');
+      const hasButton = current.contains(button);
+      if (hasInput && hasButton) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+  }
+  
+  return null;
+}
+
+// Check if HOLD modal is open and visible
+function ffIsHoldModalOpen() {
+  const overlay = document.getElementById('holdCodeOverlay');
+  if (!overlay) return false;
+  const s = getComputedStyle(overlay);
+  return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+}
+
+// Get the visible input inside the modal root
+function ffGetHoldModalInput(modalRoot) {
+  if (!modalRoot) return null;
+  // Prefer explicit modal input by ID first
+  const direct = modalRoot.querySelector("#codePromptInput") || modalRoot.querySelector("#holdCodeInput");
+  if (direct) {
+    const rect = direct.getBoundingClientRect();
+    if (direct.offsetParent !== null && rect.width > 0 && rect.height > 0) {
+      return direct;
+    }
+  }
+  // Fallback: any visible input inside modalRoot
+  const candidates = [...modalRoot.querySelectorAll('input[type="password"],input[type="tel"],input[type="text"],input')];
+  for (const inp of candidates) {
+    const rect = inp.getBoundingClientRect();
+    if (inp.offsetParent !== null && rect.width > 0 && rect.height > 0) {
+      return inp;
+    }
+  }
+  return null;
+}
+
+// Helper function to get the visible input from HOLD modal
+function ffGetVisibleHoldCodeInput(modalElOrDocument) {
+  // Determine modal root first
+  const modalRoot =
+    document.getElementById("codePromptModal") ||
+    document.getElementById("holdCodeModal") ||
+    document.getElementById("codePromptOverlay") ||
+    document.querySelector(".code-prompt-modal") ||
+    document.querySelector('[data-modal="codePrompt"]') ||
+    document.querySelector('[role="dialog"]') ||
+    null;
+  
+  // If no modal root found, return empty (should not happen in normal flow)
+  if (!modalRoot) {
+    console.warn("[HOLD AUTH] No modal root found");
+    return { input: null, value: "" };
+  }
+  
+  // Prefer explicit modal input by ID first (only search inside modalRoot)
+  // Try codePromptInput first, then holdCodeInput
+  const direct = modalRoot.querySelector("#codePromptInput") || modalRoot.querySelector("#holdCodeInput");
+  if (direct) {
+    const rect = direct.getBoundingClientRect();
+    if (direct.offsetParent !== null && rect.width > 0 && rect.height > 0) {
+      const value = String(direct.value ?? "").trim();
+      console.log("[HOLD AUTH] chosenInput:", direct?.id, "isInsideModal:", modalRoot?.contains(direct), "val:", value);
+      return { input: direct, value: value };
+    }
+  }
+  
+  // Fallback: search all inputs inside modalRoot only
+  const candidates = [...modalRoot.querySelectorAll('input[type="password"],input[type="tel"],input[type="text"],input')];
+  let chosen = null;
+  
+  // Prefer active element ONLY if it's contained in modalRoot
+  if (document.activeElement && modalRoot.contains(document.activeElement) && candidates.includes(document.activeElement)) {
+    const active = document.activeElement;
+    const rect = active.getBoundingClientRect();
+    if (active.offsetParent !== null && rect.width > 0 && rect.height > 0) {
+      chosen = active;
+    }
+  }
+  
+  // If no active element chosen, pick first visible input inside modal
+  if (!chosen) {
+    for (const inp of candidates) {
+      const rect = inp.getBoundingClientRect();
+      if (inp.offsetParent !== null && rect.width > 0 && rect.height > 0) {
+        chosen = inp;
+        break;
+      }
+    }
+  }
+  
+  const value = String(chosen?.value ?? "").trim();
+  console.log("[HOLD AUTH] chosenInput:", chosen?.id, "isInsideModal:", modalRoot?.contains(chosen), "val:", value);
+  return { input: chosen, value: value };
+}
+
+// Helper function to authenticate admin/manager by code from HOLD modal
+// Reads ONLY from the modal input, matches against ff_staff_v1
+function ffAuthAdminOrManagerByCodeFromHoldModal() {
+  try {
+    // Read ONLY from modal input (scoped to modal)
+    const overlay = document.getElementById('holdCodeOverlay');
+    const modal = document.getElementById('holdCodeModal');
+    const input = modal?.querySelector('#codePromptInput');
+    
+    const enteredPin = input ? String(input.value || "").trim() : "";
+    
+    if (!enteredPin || enteredPin === '') {
+      return { ok: false, reason: "empty", enteredPin: "" };
+    }
+    
+    // Read staff list ONLY from ff_staff_v1
+    const staff = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}")?.staff || [];
+    
+    // Match by PIN
+    const match = staff.find(s => {
+      if (s.isArchived === true) return false;
+      const staffPin = String(s.pin ?? "").trim();
+      return staffPin === enteredPin;
+    });
+    
+    if (!match) {
+      return { ok: false, reason: "no_match", enteredPin: enteredPin };
+    }
+    
+    // Normalize roles
+    const roleStr = String(match.role || "").toLowerCase();
+    const rolesArray = Array.isArray(match.roles) ? match.roles.map(r => String(r).toLowerCase()) : [];
+    
+    const isAdmin = match.isAdmin === true || 
+                    roleStr === "admin" || 
+                    rolesArray.includes("admin");
+    
+    const isManager = match.isManager === true || 
+                      roleStr === "manager" || 
+                      rolesArray.includes("manager");
+    
+    // Authorization passes only if match exists AND (isAdmin || isManager)
+    if (!isAdmin && !isManager) {
+      return { ok: false, reason: "not_authorized", enteredPin: enteredPin };
+    }
+    
+    // Debug log
+    console.log("[HOLD AUTH] len:", enteredPin.length, "match:", !!match, "isAdmin:", isAdmin, "isManager:", isManager);
+    
+    // Success
+    return { 
+      ok: true, 
+      staffId: match.id || match.staffId || null, 
+      name: match.name || "", 
+      isAdmin: isAdmin, 
+      isManager: isManager, 
+      enteredPin: enteredPin 
+    };
+  } catch (e) {
+    console.error('[ffAuthAdminOrManagerByCodeFromHoldModal] Error:', e);
+    return { ok: false, reason: "error", enteredPin: "" };
+  }
+}
+
+// Install focus trap listeners for HOLD modal (only once)
+if (!window.__ff_holdFocusTrapInstalled) {
+  window.__ff_holdFocusTrapInstalled = true;
+  
+  // Capture-phase focusin listener to redirect focus back to modal input
+  document.addEventListener("focusin", function(e) {
+    if (!ffIsHoldModalOpen()) return;
+    const modalRoot = ffGetHoldModalRoot();
+    if (!modalRoot) return;
+    if (modalRoot.contains(e.target)) return; // ok, inside modal
+    
+    // Only redirect if focus went to JOIN PIN or anywhere outside modal
+    const joinPin = document.getElementById("pinInput");
+    if (e.target === joinPin || !modalRoot.contains(e.target)) {
+      const inp = ffGetHoldModalInput(modalRoot);
+      if (inp) {
+        inp.focus({preventScroll:true});
+      }
+      console.log("[HOLD TRAP] modalRootId:", modalRoot?.id, "target:", e.target?.id);
+      e.stopPropagation(); // NO preventDefault
+    }
+  }, true);
+}
+
+// Helper function to authenticate admin/manager by PIN from modal
+// Tries codePromptInput first, then pinInput, then fallback to visible password/tel/text input
+// Uses ONLY ff_staff_v1 (no settings fallback)
+function ffAuthAdminOrManagerFromModal(modalElOrDocument) {
+  try {
+    // Determine docToSearch
+    const docToSearch = (modalElOrDocument && modalElOrDocument.getElementById) ? modalElOrDocument : document;
+    
+    // Step 1: Explicitly try to select the real modal input by ID FIRST (in this order): "codePromptInput", then "pinInput"
+    let pinEl = null;
+    
+    // Try codePromptInput first (for codePromptOverlay modal)
+    const codePromptEl = docToSearch.getElementById("codePromptInput");
+    if (codePromptEl) {
+      const rect = codePromptEl.getBoundingClientRect();
+      const isVisible = codePromptEl.offsetParent !== null && rect.width > 0 && rect.height > 0;
+      if (isVisible) {
+        pinEl = codePromptEl;
+      }
+    }
+    
+    // If codePromptInput not found/visible, try pinInput
+    if (!pinEl) {
+      const pinInputEl = docToSearch.getElementById("pinInput");
+      if (pinInputEl) {
+        const rect = pinInputEl.getBoundingClientRect();
+        const isVisible = pinInputEl.offsetParent !== null && rect.width > 0 && rect.height > 0;
+        if (isVisible) {
+          pinEl = pinInputEl;
+        }
+      }
+    }
+    
+    // Fallback: search for visible password/tel/text input in modal containers
+    if (!pinEl) {
+      const modalContainers = [
+        docToSearch.getElementById("holdCodeModal"),
+        docToSearch.getElementById("codePromptOverlay")
+      ].filter(Boolean);
+      
+      for (const container of modalContainers) {
+        if (container && container.offsetParent !== null) {
+          const inputs = container.querySelectorAll('input[type="password"], input[type="tel"], input[type="text"]');
+          for (let i = 0; i < inputs.length; i++) {
+            const inp = inputs[i];
+            const rect = inp.getBoundingClientRect();
+            if (inp.offsetParent !== null && rect.width > 0 && rect.height > 0) {
+              pinEl = inp;
+              break;
+            }
+          }
+          if (pinEl) break;
+        }
+      }
+    }
+    
+    // Get entered PIN
+    const enteredPin = pinEl ? String(pinEl.value ?? "").trim() : "";
+    
+    // Debug log
+    console.log("[HOLD PIN] chosenPinEl:", pinEl?.id || "(no id)", "len:", enteredPin.length);
+    
+    if (!pinEl) {
+      return { ok: false, reason: "no_input", enteredPin: "" };
+    }
+    
+    if (!enteredPin || enteredPin === '') {
+      return { ok: false, reason: "empty", enteredPin: "" };
+    }
+    
+    // Step 2: Load staff ONLY from ff_staff_v1 (NO settings fallback)
+    let staffArr = [];
+    try {
+      if (typeof ffGetStaffStore === 'function') {
+        const store = ffGetStaffStore();
+        staffArr = Array.isArray(store.staff) ? store.staff : [];
+      } else {
+        const raw = localStorage.getItem("ff_staff_v1");
+        const parsed = raw ? JSON.parse(raw) : null;
+        staffArr = Array.isArray(parsed?.staff) ? parsed.staff : [];
+      }
+    } catch (e) {
+      console.error('[ffAuthAdminOrManagerFromModal] Error loading staff:', e);
+      staffArr = [];
+    }
+    
+    console.log("[HOLD PIN] staffStoreCount:", staffArr.length);
+    
+    // Step 3: Find match by pin AND check if admin/manager
+    // Normalize PIN: String(value).trim() on both stored and entered
+    const match = staffArr.find(s => {
+      if (s.isArchived === true) return false;
+      
+      // Normalize stored PIN
+      const staffPin = String(s.pin ?? s.staffPin ?? "").trim();
+      if (!staffPin || staffPin !== enteredPin) return false;
+      
+      // A user is authorized if their staff entry has:
+      // isAdmin===true OR isManager===true OR role includes "admin"/"manager"
+      const isAdmin = Boolean(s.isAdmin);
+      const isManager = Boolean(s.isManager);
+      const roleLower = String(s.role || "").toLowerCase();
+      const isAdminByRole = roleLower.includes("admin");
+      const isManagerByRole = roleLower.includes("manager");
+      
+      return isAdmin || isManager || isAdminByRole || isManagerByRole;
+    });
+    
+    console.log("[HOLD PIN] match:", match ? {id: match.id, name: match.name, isAdmin: match.isAdmin, isManager: match.isManager, role: match.role} : null);
+    
+    if (!match) {
+      return { ok: false, reason: "no_match", enteredPin: enteredPin };
+    }
+    
+    // Step 4: Success
+    return { ok: true, staffId: match.id || null, name: match.name || null, enteredPin: enteredPin };
+  } catch (e) {
+    console.error('[ffAuthAdminOrManagerFromModal] Error:', e);
+    return { ok: false, reason: "error", enteredPin: "" };
+  }
+}
+
 // Helper function to get selected technician from MY LIST dropdown
 // Returns { staffId, name } where name is select.value or selected option text
 // Uses robust detection by scanning all selects and matching against staff names
@@ -20010,6 +20331,22 @@ function hookSettingsGuard_DISABLED(){
 
 </div>
 
+<!-- HOLD Code Modal -->
+<div id="holdCodeOverlay" class="code-dialog" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:1100;align-items:center;justify-content:center;">
+  <div id="holdCodeModal" style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:20px;min-width:280px;max-width:90%;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+    <div id="holdCodeMsg" style="font-weight:600;margin-bottom:10px">Enter admin or manager code</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="codePromptInput" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="6" style="flex:1;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:16px" />
+      <button id="holdPinEye" aria-label="Show" style="border:1px solid #ddd;background:#fff;border-radius:8px;padding:8px 10px;cursor:pointer">👁️</button>
+    </div>
+    <div id="holdCodeError" style="color:#dc2626;font-size:13px;margin-top:8px;min-height:20px;display:none;text-align:center;"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button id="holdCodeCancel" style="padding:8px 14px;border-radius:8px;border:1px solid #ddd;background:#fff;cursor:pointer">Cancel</button>
+      <button id="holdCodeOk" style="padding:8px 14px;border-radius:8px;border:0;background:#111;color:#fff;cursor:pointer">OK</button>
+    </div>
+  </div>
+</div>
+
 <!-- RESET Confirmation Modal (Step 1) -->
 <div id="resetConfirmOverlay" class="code-dialog" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:1100;align-items:center;justify-content:center;">
 
@@ -20218,6 +20555,255 @@ function hookSettingsGuard_DISABLED(){
 
   window.securePromptOnce = show; // expose
 
+})();
+
+// HOLD Code Modal handler
+(function() {
+  // Global pending action slot
+  if (typeof window.__ff_holdPendingAction === 'undefined') {
+    window.__ff_holdPendingAction = null;
+  }
+  
+  let currentHoldCallback = null; // Keep for backward compatibility during transition
+  
+  function hideHoldModal() {
+    const overlay = document.getElementById('holdCodeOverlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+    }
+    
+    // Clear error text
+    const errorEl = document.getElementById("holdCodeError");
+    if (errorEl) {
+      errorEl.style.display = "none";
+      errorEl.textContent = "";
+    }
+    
+    // Clear modal input and blur it
+    const modal = document.getElementById('holdCodeModal');
+    const input = modal ? modal.querySelector('#codePromptInput') : null;
+    if (input) {
+      input.value = "";
+      input.defaultValue = "";
+      input.type = "password";
+      input.blur();
+    }
+    
+    // Restore JOIN PIN input
+    const joinPin = document.getElementById('pinInput');
+    if (joinPin && joinPin.dataset.prevDisabled !== undefined) {
+      joinPin.disabled = joinPin.dataset.prevDisabled === 'true';
+      delete joinPin.dataset.prevDisabled;
+    }
+    
+    window.__ff_holdOpen = false;
+    currentHoldCallback = null;
+    // Clear pending action on hide (safety)
+    window.__ff_holdPendingAction = null;
+  }
+  
+  function showHoldModal(callback) {
+    // Callback parameter kept for backward compatibility but not used
+    if (callback) {
+      currentHoldCallback = callback;
+    }
+    
+    const overlay = document.getElementById('holdCodeOverlay');
+    if (!overlay) {
+      console.error('[HOLD modal] Overlay element not found');
+      return;
+    }
+    
+    const modal = document.getElementById('holdCodeModal');
+    if (!modal) {
+      console.error('[HOLD modal] Modal element not found');
+      return;
+    }
+    
+    // Remove any duplicate inputs (keep only one)
+    const allInputs = modal.querySelectorAll('#codePromptInput');
+    if (allInputs.length > 1) {
+      for (let i = 1; i < allInputs.length; i++) {
+        allInputs[i].remove();
+      }
+    }
+    
+    // Find existing input to replace
+    const existingInput = modal.querySelector('#codePromptInput');
+    if (!existingInput) {
+      console.error('[HOLD modal] Input element not found');
+      return;
+    }
+    
+    // Replace input with fresh clone to prevent browser autofill/form-restore
+    const cloned = existingInput.cloneNode(true);
+    cloned.value = "";
+    cloned.defaultValue = "";
+    cloned.setAttribute('autocomplete', 'new-password');
+    cloned.setAttribute('name', 'ff_hold_code');
+    cloned.setAttribute('inputmode', 'numeric');
+    cloned.setAttribute('autocapitalize', 'off');
+    cloned.setAttribute('autocorrect', 'off');
+    cloned.setAttribute('spellcheck', 'false');
+    cloned.type = "password";
+    
+    // Replace the old input with the fresh clone
+    existingInput.parentNode.replaceChild(cloned, existingInput);
+    const input = cloned; // Use the new cloned input
+    
+    console.log("[HOLD MODAL] input replaced, id:", input.id, "value:", JSON.stringify(input.value));
+    
+    // Clear error message
+    const errorEl = document.getElementById("holdCodeError");
+    if (errorEl) {
+      errorEl.style.display = "none";
+      errorEl.textContent = "";
+    }
+    
+    // Disable JOIN PIN input
+    const joinPin = document.getElementById('pinInput');
+    if (joinPin) {
+      joinPin.dataset.prevDisabled = String(joinPin.disabled);
+      joinPin.disabled = true;
+    }
+    
+    // Show modal
+    overlay.style.display = 'flex';
+    window.__ff_holdOpen = true;
+    
+    // Focus input
+    setTimeout(() => {
+      if (input) input.focus();
+    }, 0);
+  }
+  
+  // Install capture-phase document listener to block global handlers from seeing inside-modal clicks
+  if (!window.__ff_holdModalCaptureInstalled) {
+    window.__ff_holdModalCaptureInstalled = true;
+    document.addEventListener('pointerdown', (e) => {
+      if (!ffIsHoldModalOpen()) return;
+      const overlay = document.getElementById('holdCodeOverlay');
+      if (!overlay) return;
+      if (overlay.contains(e.target)) {
+        // allow default (so inputs focus), but block other global handlers
+        e.stopImmediatePropagation();
+      }
+    }, true);
+  }
+  
+  // Wire overlay and modal click handlers (run once on DOM ready)
+  function setupHoldModalHandlers() {
+    const overlay = document.getElementById('holdCodeOverlay');
+    const modal = document.getElementById('holdCodeModal');
+    const input = document.getElementById('codePromptInput');
+    const okBtn = document.getElementById('holdCodeOk');
+    const cancelBtn = document.getElementById('holdCodeCancel');
+    
+    if (!overlay || !modal || !input || !okBtn || !cancelBtn) {
+      // Retry if DOM not ready
+      setTimeout(setupHoldModalHandlers, 100);
+      return;
+    }
+    
+    // Close only when clicking the overlay background (not the modal body)
+    overlay.addEventListener('pointerdown', (e) => {
+      if (e.target === overlay) {
+        window.__ff_holdPendingAction = null;
+        hideHoldModal();
+      }
+    });
+    
+    // Prevent modal clicks from bubbling to overlay
+    modal.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+    });
+    
+    // Wire OK button
+    okBtn.onclick = () => {
+      const auth = ffAuthAdminOrManagerByCodeFromHoldModal();
+      console.log("[HOLD AUTH] result:", auth);
+      
+      if (!auth.ok) {
+        // Show error text and KEEP modal open
+        const errorEl = document.getElementById("holdCodeError");
+        if (errorEl) {
+          if (auth.reason === "empty") {
+            errorEl.textContent = "Enter code";
+          } else if (auth.reason === "no_match") {
+            errorEl.textContent = "Incorrect code";
+          } else {
+            errorEl.textContent = "Not authorized";
+          }
+          errorEl.style.display = "block";
+        }
+        return;
+      }
+      
+      // Success: capture pending action and clear it immediately
+      const pending = window.__ff_holdPendingAction;
+      window.__ff_holdPendingAction = null;
+      
+      // Close modal
+      hideHoldModal();
+      
+      // Store authenticated manager info
+      if (auth.staffId) {
+        window.__ff_authedManagerId = auth.staffId;
+      }
+      if (auth.name) {
+        window.__ff_authedManagerName = auth.name;
+      }
+      
+      // Set actor info for history logging
+      try {
+        let actorRole = auth.isAdmin ? "Admin" : "Manager";
+        window.__ff_actorRole = actorRole;
+        window.__ff_actorName = auth.name || "";
+        window.__ff_lastValidatedCode = { role: actorRole, name: auth.name || "" };
+      } catch (e) {
+        console.error('[HOLD modal] Error setting actor info:', e);
+        window.__ff_actorRole = 'Manager';
+        window.__ff_actorName = auth.name || "";
+      }
+      
+      // Execute pending action (proceed with HOLD action)
+      console.log("[HOLD AUTH] ok, running pending action:", typeof pending);
+      if (typeof pending === "function") {
+        pending();
+      }
+    };
+    
+    // Wire Cancel button
+    cancelBtn.onclick = () => {
+      window.__ff_holdPendingAction = null;
+      hideHoldModal();
+    };
+    
+    // Keyboard support (attach to modal, re-query input each time)
+    modal.addEventListener('keydown', (e) => {
+      // Re-query input to get fresh reference (input is replaced on each open)
+      const currentInput = modal.querySelector('#codePromptInput');
+      if (e.target === currentInput || e.target === modal) {
+        if (e.key === 'Enter' && e.target === currentInput) {
+          okBtn.click();
+        }
+        if (e.key === 'Escape') {
+          window.__ff_holdPendingAction = null;
+          hideHoldModal();
+        }
+      }
+    });
+  }
+  
+  // Setup handlers when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupHoldModalHandlers);
+  } else {
+    setupHoldModalHandlers();
+  }
+  
+  // Expose show function globally
+  window.showHoldModal = showHoldModal;
 })();
 
 // PIN Reset Success Modal handler
