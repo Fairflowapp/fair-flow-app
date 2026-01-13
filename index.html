@@ -2380,12 +2380,20 @@ const logDlg=$("#logDlg"), logBox=$("#logBox");
 
 function isManagerCode(code){ return (settings.managers||[]).some(m=>m.code.toString()===code.toString()); }
 
+// DEPRECATED: Admin PIN mechanism is deprecated.
+// Admin ownership has been moved to Staff Members (isAdmin flag on each staff member).
+// The functions below are kept for backward compatibility only and should not be used for role truth.
+// Use ffCountAdmins() and check staff.isAdmin flags instead.
+
 // Cache for admin PIN from Firestore
 let cachedAdminPin = null;
 let adminPinCacheTime = 0;
 const ADMIN_PIN_CACHE_DURATION = 60000; // 1 minute cache
 
 // Get admin PIN (checks Firestore first, then falls back to local settings)
+// DEPRECATED: This function and the admin PIN mechanism are deprecated.
+// Admin ownership has been moved to Staff Members (isAdmin flag on each staff member).
+// This is kept for backward compatibility only and should not be used for role truth.
 async function getAdminPin() {
   // Try Firestore first
   if (window.getAdminPinFromFirestore && typeof window.getAdminPinFromFirestore === 'function') {
@@ -2942,8 +2950,17 @@ function ffGetStaffList() {
 function loadTechniciansFromSettings() {
   // Load technicians from the centralized staff list
   console.log('[loadTechniciansFromSettings] Loading technicians from ffGetStaffList');
-  const technicians = ffGetStaffList();
-  console.log('[loadTechniciansFromSettings] Found', technicians.length, 'technicians');
+  const allStaff = ffGetStaffList();
+  // Filter to exclude Admins and Managers (only show Technicians)
+  // Note: Old settings.workers format may not have isAdmin/isManager flags, so undefined will pass through
+  const technicians = allStaff.filter(w => 
+    w && 
+    w.name && 
+    w.name.trim() && 
+    w.isAdmin !== true && 
+    w.isManager !== true
+  );
+  console.log('[loadTechniciansFromSettings] Found', technicians.length, 'technicians (filtered from', allStaff.length, 'total staff)');
   console.log('[loadTechniciansFromSettings] Technicians:', technicians.map(w => ({ name: w.name, hasPin: !!w.pin })));
   return technicians;
 }
@@ -2981,9 +2998,15 @@ function renderSelect(){
   try {
     const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
     const staffList = Array.isArray(store.staff) ? store.staff : [];
-    // Filter to only active staff (exclude archived)
-    technicians = staffList.filter(s => s.isArchived !== true && s.name && s.name.trim());
-    console.log('[renderSelect] Loaded', technicians.length, 'active staff from ff_staff_v1');
+    // Filter to only active Technicians (exclude archived, Admins, and Managers)
+    technicians = staffList.filter(s => 
+      s.isArchived !== true && 
+      s.name && 
+      s.name.trim() && 
+      s.isAdmin !== true && 
+      s.isManager !== true
+    );
+    console.log('[renderSelect] Loaded', technicians.length, 'active technicians from ff_staff_v1');
   } catch (e) {
     console.error('[renderSelect] Error loading from ff_staff_v1:', e);
   }
@@ -3516,13 +3539,17 @@ function finish(i){
 function move(i,d){ const j=i+d; if(j<0||j>=queue.length) return; const t=queue[j]; queue[j]=queue[i]; queue[i]=t; save(); renderQueue(); 
 
   // Reorder is done in reorder mode which requires manager/admin code
-  const lastCode = window.__ff_lastValidatedCode;
+  const lastValidated = window.__ff_lastValidatedCode;
   let actor;
-  if (lastCode && (isAdminCode(lastCode) || isManagerCode(lastCode))) {
-    if (isAdminCode(lastCode)) {
-      actor = getActorForAction({ adminCode: lastCode });
+  // Check if lastValidated is an object with role/name (new staff-based format)
+  if (lastValidated && typeof lastValidated === 'object' && lastValidated.role && lastValidated.name) {
+    actor = { role: lastValidated.role, name: lastValidated.name };
+  } else if (lastValidated && (isAdminCode(lastValidated) || isManagerCode(lastValidated))) {
+    // Legacy: handle code string format (backward compatibility)
+    if (isAdminCode(lastValidated)) {
+      actor = getActorForAction({ adminCode: lastValidated });
     } else {
-      actor = getActorForAction({ managerCode: lastCode });
+      actor = getActorForAction({ managerCode: lastValidated });
     }
   } else {
     // Fallback to current actor state
@@ -5844,6 +5871,7 @@ async function handleReorderClick() {
 
   let ok = false;
   let code = null;
+  let authResult = null;
 
   if (window.securePromptOnce) {
 
@@ -5851,7 +5879,9 @@ async function handleReorderClick() {
 
     if (code == null) return;
 
-    ok = (isAdminCode(code) || isManagerCode(code));
+    // Use staff-based auth instead of legacy admin PIN
+    authResult = ffAuthByPin(code);
+    ok = authResult.ok && authResult.staff && (authResult.staff.isAdmin === true || authResult.staff.isManager === true);
 
   } else {
 
@@ -5861,21 +5891,25 @@ async function handleReorderClick() {
 
     if (code == null) return;
 
-    ok = (isAdminCode(code) || isManagerCode(code));
+    // Use staff-based auth instead of legacy admin PIN
+    authResult = ffAuthByPin(code);
+    ok = authResult.ok && authResult.staff && (authResult.staff.isAdmin === true || authResult.staff.isManager === true);
     
     // If using prompt, set actor info manually
-    if (ok) {
-      const actorInfo = getActorInfo(code, '');
-      window.__ff_actorRole = actorInfo.actorRole;
-      window.__ff_actorName = actorInfo.actorName;
+    if (ok && authResult.staff) {
+      const role = authResult.staff.isAdmin === true ? 'Admin' : 'Manager';
+      const name = authResult.staff.name || '';
+      window.__ff_actorRole = role;
+      window.__ff_actorName = name;
     }
 
   }
 
   if (ok) {
-    // Store the validated code for later use in addHistoryEntry
-    const actor = getActorForAction({ adminCode: code });
-    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
+    // Store the validated staff info for later use in addHistoryEntry
+    const staff = authResult.staff;
+    const role = staff.isAdmin === true ? 'Admin' : 'Manager';
+    window.__ff_lastValidatedCode = { role: role, name: staff.name || '' };
 
     // Check current state and toggle accordingly
     if (reorderMode) {
@@ -12913,7 +12947,10 @@ function initializeAppsPanel() {
             lastActiveAt: worker.lastActiveAt || null,
             isArchived: worker.isArchived === true || worker.archived === true || false,
             permissions: worker.permissions || {},
-            createdAt: worker.createdAt || Date.now()
+            createdAt: worker.createdAt || Date.now(),
+            // Default missing isAdmin and isManager flags to false
+            isAdmin: worker.isAdmin === true || false,
+            isManager: worker.isManager === true || false
           };
         });
         
@@ -12943,7 +12980,10 @@ function initializeAppsPanel() {
           invitedAt: staff.invitedAt || null,
           lastActiveAt: staff.lastActiveAt || null,
           isArchived: isArchived,
-          permissions: staff.permissions || {} // Initialize permissions object
+          permissions: staff.permissions || {}, // Initialize permissions object
+          // Default missing isAdmin and isManager flags to false
+          isAdmin: staff.isAdmin === true || false,
+          isManager: staff.isManager === true || false
         };
         
         // ONE-TIME migration: if pin is missing but staffPin exists, migrate staffPin -> pin
@@ -12970,6 +13010,40 @@ function initializeAppsPanel() {
         localStorage.setItem('ff_staff_v1', JSON.stringify(data));
         console.log('[ffGetStaffStore] Migrated staffPin -> pin for staff records');
       }
+      
+      // ONE-TIME migration: Migrate legacy admin PIN to staff roles
+      const migrationFlag = localStorage.getItem('ff_roles_migrated_v1');
+      if (!migrationFlag && data.staff && data.staff.length > 0) {
+        const adminCount = data.staff.filter(s => s.isAdmin === true && s.isArchived !== true).length;
+        if (adminCount === 0) {
+          // Check for legacy admin PIN in settings
+          const legacyAdminPin = settings.adminCode || '';
+          if (legacyAdminPin) {
+            console.log('[ffGetStaffStore] Migrating legacy admin PIN to staff roles');
+            
+            // Try to find a staff member that matches the admin PIN
+            let adminStaff = data.staff.find(s => s.pin && String(s.pin) === String(legacyAdminPin) && s.isArchived !== true);
+            
+            // If no match found, assign the first non-archived staff member as Admin
+            if (!adminStaff) {
+              adminStaff = data.staff.find(s => s.isArchived !== true);
+            }
+            
+            if (adminStaff) {
+              const staffIndex = data.staff.findIndex(s => s.id === adminStaff.id);
+              if (staffIndex !== -1) {
+                data.staff[staffIndex].isAdmin = true;
+                localStorage.setItem('ff_staff_v1', JSON.stringify(data));
+                console.log('[ffGetStaffStore] Assigned admin role to staff member:', adminStaff.name || adminStaff.id);
+              }
+            }
+          }
+          
+          // Set migration flag so it runs only once
+          localStorage.setItem('ff_roles_migrated_v1', 'true');
+        }
+      }
+      
       return data;
     } catch (e) {
       console.error('[ffGetStaffStore] Error loading staff store:', e);
@@ -13199,6 +13273,75 @@ function initializeAppsPanel() {
   // Expose access guard globally for use in auth state handler
   window.checkArchivedUserAccessGuard = checkArchivedUserAccessGuard;
   
+  // Helper function: Count number of staff with isAdmin === true
+  function ffCountAdmins() {
+    try {
+      const staffData = ffGetStaffStore();
+      const staff = staffData.staff || [];
+      return staff.filter(s => s.isAdmin === true && s.isArchived !== true).length;
+    } catch (e) {
+      console.error('[ffCountAdmins] Error counting admins:', e);
+      return 0;
+    }
+  }
+  
+  // Helper function: Check if current user is admin
+  // Uses existing admin verification mechanism temporarily for guarding role toggles
+  function ffIsCurrentUserAdmin() {
+    // If there's a current staff/user concept, use it
+    // Otherwise, prompt for admin PIN using existing admin verification function
+    // This is only for guarding Staff role editing, not for HOLD modal
+    return new Promise(function(resolve) {
+      // For now, use the existing isAdminCode function with a prompt
+      // This is acceptable for role editing guards only
+      const code = prompt('Enter Admin PIN to change roles');
+      if (code === null) {
+        resolve(false);
+        return;
+      }
+      // Use existing isAdminCode function (checks Firestore first, then local settings)
+      // DEPRECATED: This uses the old admin PIN mechanism temporarily
+      const isAdmin = isAdminCode(code);
+      resolve(isAdmin);
+    });
+  }
+  
+  // Expose helpers globally
+  window.ffCountAdmins = ffCountAdmins;
+  window.ffIsCurrentUserAdmin = ffIsCurrentUserAdmin;
+  
+  // Helper function: Authenticate by PIN and return staff if found
+  // Returns { ok: true, staff } if PIN matches an active staff member, otherwise { ok: false }
+  function ffAuthByPin(pin) {
+    try {
+      if (!pin) return { ok: false };
+      
+      // Normalize PIN (trim)
+      const normalizedPin = String(pin).trim();
+      if (!normalizedPin) return { ok: false };
+      
+      // Find active (not archived) staff with matching PIN
+      const staffStore = ffGetStaffStore();
+      const staff = staffStore.staff.find(s => 
+        s.isArchived !== true && 
+        s.pin && 
+        String(s.pin).trim() === normalizedPin
+      );
+      
+      if (staff) {
+        return { ok: true, staff: staff };
+      }
+      
+      return { ok: false };
+    } catch (e) {
+      console.error('[ffAuthByPin] Error authenticating by PIN:', e);
+      return { ok: false };
+    }
+  }
+  
+  // Expose helper globally
+  window.ffAuthByPin = ffAuthByPin;
+  
   // Selected staff ID state
   let selectedStaffId = null;
   
@@ -13210,26 +13353,44 @@ function initializeAppsPanel() {
     try {
       const staffData = ffGetStaffStore();
       const staff = staffData.staff;
+      const adminsList = document.getElementById('staffAdminsList');
       const managersList = document.getElementById('staffManagersList');
       const techniciansList = document.getElementById('staffTechniciansList');
       
-      if (!managersList || !techniciansList) {
+      if (!adminsList || !managersList || !techniciansList) {
         console.error('[renderStaffList] Staff list containers not found');
         return;
       }
       
+      adminsList.innerHTML = '';
       managersList.innerHTML = '';
       techniciansList.innerHTML = '';
       
       // Filter based on toggle state: if showArchivedStaff is true, show only archived; otherwise show only active
-      const managers = staff.filter(m => m.role === 'manager' && (showArchivedStaff ? m.isArchived === true : m.isArchived !== true));
-      const technicians = staff.filter(t => t.role === 'technician' && (showArchivedStaff ? t.isArchived === true : t.isArchived !== true));
+      // Admins: staff where isAdmin === true
+      const admins = staff.filter(a => a.isAdmin === true && (showArchivedStaff ? a.isArchived === true : a.isArchived !== true));
+      // Managers: staff where isManager === true AND isAdmin !== true (admins should not appear in managers list)
+      const managers = staff.filter(m => m.isManager === true && m.isAdmin !== true && (showArchivedStaff ? m.isArchived === true : m.isArchived !== true));
+      // Technicians: the rest (not admin, not manager)
+      const technicians = staff.filter(t => t.isAdmin !== true && t.isManager !== true && (showArchivedStaff ? t.isArchived === true : t.isArchived !== true));
       
-      // Separate active and archived staff (for backward compatibility with existing render logic)
-      const activeManagers = showArchivedStaff ? [] : managers;
-      const archivedManagers = showArchivedStaff ? managers : [];
-      const activeTechnicians = showArchivedStaff ? [] : technicians;
-      const archivedTechnicians = showArchivedStaff ? technicians : [];
+      // Render admins based on toggle state
+      if (admins.length === 0) {
+        adminsList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">' + (showArchivedStaff ? 'No archived admins.' : 'No admins yet.') + '</p>';
+      } else {
+        admins.forEach(function(a) {
+          const item = document.createElement('div');
+          const isSelected = selectedStaffId === a.id;
+          const opacity = showArchivedStaff ? '0.6' : '1';
+          const textColor = showArchivedStaff ? '#6b7280' : '#111827';
+          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;opacity:${opacity};`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(a.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}</span>`;
+          item.onclick = function() {
+            selectStaffMember(a.id);
+          };
+          adminsList.appendChild(item);
+        });
+      }
       
       // Render managers based on toggle state
       if (managers.length === 0) {
@@ -13274,6 +13435,7 @@ function initializeAppsPanel() {
   // Update archive toggle UI and section headers
   function updateArchiveToggleUI() {
     const toggleBtn = document.getElementById('staffArchiveToggleBtn');
+    const adminsHeader = document.getElementById('staffAdminsHeader');
     const managersHeader = document.getElementById('staffManagersHeader');
     const techniciansHeader = document.getElementById('staffTechniciansHeader');
     
@@ -13282,6 +13444,10 @@ function initializeAppsPanel() {
       toggleBtn.style.background = showArchivedStaff ? '#fef2f2' : '#fff';
       toggleBtn.style.borderColor = showArchivedStaff ? '#fca5a5' : 'var(--border)';
       toggleBtn.style.color = showArchivedStaff ? '#991b1b' : '#6b7280';
+    }
+    
+    if (adminsHeader) {
+      adminsHeader.textContent = showArchivedStaff ? 'Archived Admins' : 'Admins';
     }
     
     if (managersHeader) {
@@ -13344,7 +13510,8 @@ function initializeAppsPanel() {
       const headerEl = document.getElementById('staffDetailsHeader');
       if (headerEl) {
         const initials = getInitials(staff.name);
-        const roleLabel = staff.role === 'manager' ? 'Manager' : 'Technician';
+        // Compute role label from isAdmin/isManager flags (source of truth)
+        const roleLabel = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Technician');
         const invited = staff.invited === true;
         const isArchived = staff.isArchived === true;
         
@@ -13726,7 +13893,8 @@ function initializeAppsPanel() {
     
     const phone = staff.phone || '';
     const email = staff.email || '';
-    const roleLabel = staff.role === 'manager' ? 'Manager' : 'Technician';
+    // Compute role label from isAdmin/isManager flags (source of truth)
+    const roleLabel = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Technician');
     
     if (editMode) {
       // Edit mode
@@ -13747,8 +13915,9 @@ function initializeAppsPanel() {
             <div>
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Role</label>
               <select id="staffEditRole" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
-                <option value="technician" ${staff.role === 'technician' ? 'selected' : ''}>Technician</option>
-                <option value="manager" ${staff.role === 'manager' ? 'selected' : ''}>Manager</option>
+                <option value="admin" ${staff.isAdmin === true ? 'selected' : ''}>Admin</option>
+                <option value="manager" ${staff.isAdmin !== true && staff.isManager === true ? 'selected' : ''}>Manager</option>
+                <option value="technician" ${staff.isAdmin !== true && staff.isManager !== true ? 'selected' : ''}>Technician</option>
               </select>
             </div>
             <div>
@@ -13804,6 +13973,9 @@ function initializeAppsPanel() {
       // View mode
       const invited = staff.invited === true;
       const archived = staff.archived === true;
+      const isAdmin = staff.isAdmin === true;
+      const isManager = staff.isManager === true;
+      
       detailsContent.innerHTML = `
         <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px 12px;width:fit-content;min-width:280px;max-width:400px;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
@@ -13879,6 +14051,7 @@ function initializeAppsPanel() {
   // Start editing staff details
   function startEditStaffDetails() {
     if (!selectedStaffId) return;
+    
     isEditingStaffDetails = true;
     
     // Disable pointer-events on header-inner to allow clicking inputs in edit mode
@@ -13945,7 +14118,31 @@ function initializeAppsPanel() {
       
       const oldStaff = staffStore.staff[staffIndex];
       const nameChanged = oldStaff.name !== newName;
-      const roleChanged = oldStaff.role !== newRole;
+      
+      // Map role selection to flags to check if role actually changed
+      let newIsAdmin = false;
+      let newIsManager = false;
+      if (newRole === 'admin') {
+        newIsAdmin = true;
+        newIsManager = false;
+      } else if (newRole === 'manager') {
+        newIsAdmin = false;
+        newIsManager = true;
+      } else if (newRole === 'technician') {
+        newIsAdmin = false;
+        newIsManager = false;
+      }
+      const roleChanged = (oldStaff.isAdmin !== newIsAdmin) || (oldStaff.isManager !== newIsManager);
+      
+      // Safety rule: Prevent removing/demoting the last remaining Admin
+      if (roleChanged && oldStaff.isAdmin === true && newIsAdmin !== true) {
+        // Check if this is the last admin
+        const otherAdmins = staffStore.staff.filter(s => s.id !== selectedStaffId && s.isAdmin === true && s.isArchived !== true);
+        if (otherAdmins.length === 0) {
+          alert('At least one Admin is required.');
+          return;
+        }
+      }
       
       // Handle PIN update (only validate if PIN is provided)
       let newPin = oldStaff.pin;
@@ -13979,15 +14176,19 @@ function initializeAppsPanel() {
       // Preserve permissions (they're saved separately via toggle handlers)
       const currentPermissions = oldStaff.permissions || {};
       
+      // Use the flags we already computed above
+      
       // Update staff member
       staffStore.staff[staffIndex] = {
         ...oldStaff,
         name: newName,
-        role: newRole,
+        role: newRole, // Keep role field for backward compatibility, but isAdmin/isManager are source of truth
         phone: newPhone ? String(newPhone) : undefined,
         email: newEmail ? String(newEmail) : undefined,
         pin: newPin,
-        permissions: currentPermissions // Preserve permissions
+        permissions: currentPermissions, // Preserve permissions
+        isAdmin: newIsAdmin, // Set based on role selection
+        isManager: newIsManager // Set based on role selection
       };
       
       // Save to storage
@@ -14075,6 +14276,20 @@ function initializeAppsPanel() {
       const email = document.getElementById('staffEmail')?.value.trim() || '';
       const phone = document.getElementById('staffPhone')?.value.trim() || '';
       
+      // Map role selection to isAdmin/isManager flags (source of truth)
+      let isAdmin = false;
+      let isManager = false;
+      if (role === 'admin') {
+        isAdmin = true;
+        isManager = false;
+      } else if (role === 'manager') {
+        isAdmin = false;
+        isManager = true;
+      } else if (role === 'technician') {
+        isAdmin = false;
+        isManager = false;
+      }
+      
       // Create new staff member object
       const newStaffMember = {
         id: 'staff_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
@@ -14082,7 +14297,7 @@ function initializeAppsPanel() {
         firstName: firstName || undefined,
         lastName: lastName || undefined,
         pin: String(pin).trim(),
-        role: role,
+        role: role, // Keep role field for backward compatibility, but isAdmin/isManager are source of truth
         email: email ? String(email) : undefined,
         phone: phone ? String(phone) : undefined,
         invited: false,
@@ -14090,7 +14305,9 @@ function initializeAppsPanel() {
         lastActiveAt: null,
         isArchived: false,
         permissions: {}, // Initialize empty permissions object
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        isAdmin: isAdmin, // Set based on role selection
+        isManager: isManager // Set based on role selection
       };
       
       // Add to staff store and save
@@ -23405,8 +23622,13 @@ window.openLog = async function(){
             <span style="flex-shrink:0;">Add Staff Member</span>
           </button>
         </div>
-        <!-- Managers Section -->
+        <!-- Admins Section -->
         <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);padding-top:20px;">
+          <h3 id="staffAdminsHeader" style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Admins</h3>
+          <div id="staffAdminsList" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
+        <!-- Managers Section -->
+        <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);margin-top:8px;padding-top:20px;">
           <h3 id="staffManagersHeader" style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Managers</h3>
           <div id="staffManagersList" style="display:flex;flex-direction:column;gap:8px;"></div>
         </div>
@@ -23485,6 +23707,7 @@ window.openLog = async function(){
               <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Role</label>
               <select id="staffRole" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;cursor:pointer;">
                 <option value="">Select role</option>
+                <option value="admin">Admin</option>
                 <option value="manager">Manager</option>
                 <option value="technician">Technician</option>
               </select>
