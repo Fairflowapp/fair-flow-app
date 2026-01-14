@@ -8262,14 +8262,8 @@ function getCurrentTasksTab() {
 
 function setSettingsModalTab(tabName) {
   try {
-    // Check admin access (owner role OR admin code override)
-    if (!ffHasAdminAccess()) {
-      showAdminCodeModal(() => {
-        // Retry tab switch after successful unlock
-        setSettingsModalTab(tabName);
-      });
-      return;
-    }
+    // Admin access check removed for Manage Tasks - access is controlled by role (Admin/Manager)
+    // No PIN prompt needed - switch tabs directly
     
     const tabs = document.querySelectorAll('.tasks-settings-tab');
     
@@ -8372,13 +8366,20 @@ function setSettingsModalTab(tabName) {
         
         // Auto-reset controls (only for opening tab)
         if (tabName === 'opening') {
-          // Hide closing auto-reset section for opening tab
+          // Hide ALL other auto-reset sections first (clear previous tab's rows)
           const autoResetSectionClosing = document.getElementById('tasksClosingAutoResetSection');
           if (autoResetSectionClosing) {
             autoResetSectionClosing.style.display = 'none';
           }
+          const autoResetSectionWeekly = document.getElementById('tasksWeeklyAutoResetSection');
+          if (autoResetSectionWeekly) {
+            autoResetSectionWeekly.style.display = 'none';
+          }
           if (tasksMonthlyAutoResetSection) {
             tasksMonthlyAutoResetSection.style.display = 'none';
+          }
+          if (tasksYearlyAutoResetSection) {
+            tasksYearlyAutoResetSection.style.display = 'none';
           }
           
           const autoResetSection = document.getElementById('tasksOpeningAutoResetSection');
@@ -8387,8 +8388,10 @@ function setSettingsModalTab(tabName) {
           const autoResetTimeRow = document.getElementById('tasksOpeningAutoResetTimeRow');
           
           if (autoResetSection && autoResetEnabledCheckbox && autoResetTimeInput && autoResetTimeRow) {
-            // Show section for opening tab
-            autoResetSection.style.display = 'block';
+            // Show section for opening tab (only if not already shown to prevent duplicate rendering)
+            if (autoResetSection.style.display !== 'block') {
+              autoResetSection.style.display = 'block';
+            }
             
             // Load config
             const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
@@ -8401,8 +8404,10 @@ function setSettingsModalTab(tabName) {
             autoResetTimeInput.value = time;
             autoResetTimeRow.style.display = enabled ? 'block' : 'none';
             
-            // Checkbox change handler
-            autoResetEnabledCheckbox.onchange = function() {
+            // Checkbox change handler (bind only once using guard flag)
+            if (!autoResetEnabledCheckbox.__ffChangeBound) {
+              autoResetEnabledCheckbox.__ffChangeBound = true;
+              autoResetEnabledCheckbox.onchange = function() {
               const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
               if (!alertWindows.opening) {
                 alertWindows.opening = {};
@@ -8434,7 +8439,8 @@ function setSettingsModalTab(tabName) {
                 localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
               }
             };
-            autoResetTimeInput.oninput = autoResetTimeInput.onchange;
+              autoResetTimeInput.oninput = autoResetTimeInput.onchange;
+            }
             
             console.log('[AUTO-RESET UI] opening controls rendered');
           }
@@ -8455,10 +8461,14 @@ function setSettingsModalTab(tabName) {
             };
           }
         } else if (tabName === 'closing') {
-          // Hide opening auto-reset section for closing tab
+          // Hide ALL other auto-reset sections first (clear previous tab's rows)
           const autoResetSectionOpening = document.getElementById('tasksOpeningAutoResetSection');
           if (autoResetSectionOpening) {
             autoResetSectionOpening.style.display = 'none';
+          }
+          const autoResetSectionWeekly = document.getElementById('tasksWeeklyAutoResetSection');
+          if (autoResetSectionWeekly) {
+            autoResetSectionWeekly.style.display = 'none';
           }
           if (tasksMonthlyAutoResetSection) {
             tasksMonthlyAutoResetSection.style.display = 'none';
@@ -8474,8 +8484,10 @@ function setSettingsModalTab(tabName) {
           const autoResetTimeRow = document.getElementById('tasksClosingAutoResetTimeRow');
           
           if (autoResetSection && autoResetEnabledCheckbox && autoResetTimeInput && autoResetTimeRow) {
-            // Show section for closing tab
-            autoResetSection.style.display = 'block';
+            // Show section for closing tab (only if not already shown to prevent duplicate rendering)
+            if (autoResetSection.style.display !== 'block') {
+              autoResetSection.style.display = 'block';
+            }
             
             // Load config
             const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
@@ -8488,8 +8500,10 @@ function setSettingsModalTab(tabName) {
             autoResetTimeInput.value = time;
             autoResetTimeRow.style.display = enabled ? 'block' : 'none';
             
-            // Checkbox change handler
-            autoResetEnabledCheckbox.onchange = function() {
+            // Checkbox change handler (bind only once using guard flag)
+            if (!autoResetEnabledCheckbox.__ffChangeBound) {
+              autoResetEnabledCheckbox.__ffChangeBound = true;
+              autoResetEnabledCheckbox.onchange = function() {
               const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
               if (!alertWindows.closing) {
                 alertWindows.closing = {};
@@ -8508,20 +8522,24 @@ function setSettingsModalTab(tabName) {
               // Toggle time row visibility
               autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
             };
+            }
             
-            // Time input change handler
-            autoResetTimeInput.onchange = function() {
-              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
-              if (!alertWindows.closing) {
-                alertWindows.closing = {};
-              }
-              const timeValue = autoResetTimeInput.value;
-              if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
-                alertWindows.closing.autoResetTime = timeValue;
-                localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
-              }
-            };
-            autoResetTimeInput.oninput = autoResetTimeInput.onchange;
+            // Time input change handler (bind only once using guard flag)
+            if (!autoResetTimeInput.__ffChangeBound) {
+              autoResetTimeInput.__ffChangeBound = true;
+              autoResetTimeInput.onchange = function() {
+                const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+                if (!alertWindows.closing) {
+                  alertWindows.closing = {};
+                }
+                const timeValue = autoResetTimeInput.value;
+                if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
+                  alertWindows.closing.autoResetTime = timeValue;
+                  localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+                }
+              };
+              autoResetTimeInput.oninput = autoResetTimeInput.onchange;
+            }
             
             console.log('[AUTO-RESET UI] closing controls rendered');
           }
@@ -8544,7 +8562,7 @@ function setSettingsModalTab(tabName) {
         }
       }
     } else if (tabName === 'weekly') {
-      // Hide auto-reset sections for weekly tab
+      // Hide ALL other auto-reset sections first (clear previous tab's rows)
       const autoResetSectionOpening = document.getElementById('tasksOpeningAutoResetSection');
       if (autoResetSectionOpening) {
         autoResetSectionOpening.style.display = 'none';
@@ -8639,46 +8657,52 @@ function setSettingsModalTab(tabName) {
           autoResetTimeInput.value = time;
           autoResetTimeRow.style.display = enabled ? 'block' : 'none';
           
-          // Checkbox change handler
-          autoResetEnabledCheckbox.onchange = function() {
-            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
-            if (!alertWindows.weekly) {
-              alertWindows.weekly = {};
-            }
-            const isChecked = autoResetEnabledCheckbox.checked;
-            alertWindows.weekly.autoResetEnabled = isChecked;
-            
-            // If checked and time is empty, set default
-            if (isChecked && !autoResetTimeInput.value) {
-              autoResetTimeInput.value = '21:00';
-              alertWindows.weekly.autoResetTime = '21:00';
-            }
-            
-            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
-            
-            // Toggle time row visibility
-            autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
-          };
-          
-          // Time input change handler
-          autoResetTimeInput.onchange = function() {
-            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
-            if (!alertWindows.weekly) {
-              alertWindows.weekly = {};
-            }
-            const timeValue = autoResetTimeInput.value;
-            if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
-              alertWindows.weekly.autoResetTime = timeValue;
+          // Checkbox change handler (bind only once using guard flag)
+          if (!autoResetEnabledCheckbox.__ffChangeBound) {
+            autoResetEnabledCheckbox.__ffChangeBound = true;
+            autoResetEnabledCheckbox.onchange = function() {
+              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              if (!alertWindows.weekly) {
+                alertWindows.weekly = {};
+              }
+              const isChecked = autoResetEnabledCheckbox.checked;
+              alertWindows.weekly.autoResetEnabled = isChecked;
+              
+              // If checked and time is empty, set default
+              if (isChecked && !autoResetTimeInput.value) {
+                autoResetTimeInput.value = '21:00';
+                alertWindows.weekly.autoResetTime = '21:00';
+              }
+              
               localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
-            }
-          };
-          autoResetTimeInput.oninput = autoResetTimeInput.onchange;
+              
+              // Toggle time row visibility
+              autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
+            };
+          }
+          
+          // Time input change handler (bind only once using guard flag)
+          if (!autoResetTimeInput.__ffChangeBound) {
+            autoResetTimeInput.__ffChangeBound = true;
+            autoResetTimeInput.onchange = function() {
+              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              if (!alertWindows.weekly) {
+                alertWindows.weekly = {};
+              }
+              const timeValue = autoResetTimeInput.value;
+              if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
+                alertWindows.weekly.autoResetTime = timeValue;
+                localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+              }
+            };
+            autoResetTimeInput.oninput = autoResetTimeInput.onchange;
+          }
           
           console.log('[AUTO-RESET UI] weekly controls rendered');
         }
       }
     } else if (tabName === 'monthly') {
-      // Hide auto-reset sections for monthly tab
+      // Hide ALL auto-reset sections first (clear previous tab's rows)
       const autoResetSectionOpening = document.getElementById('tasksOpeningAutoResetSection');
       if (autoResetSectionOpening) {
         autoResetSectionOpening.style.display = 'none';
@@ -8686,6 +8710,18 @@ function setSettingsModalTab(tabName) {
       const autoResetSectionClosing = document.getElementById('tasksClosingAutoResetSection');
       if (autoResetSectionClosing) {
         autoResetSectionClosing.style.display = 'none';
+      }
+      const autoResetSectionWeekly = document.getElementById('tasksWeeklyAutoResetSection');
+      if (autoResetSectionWeekly) {
+        autoResetSectionWeekly.style.display = 'none';
+      }
+      if (tasksYearlyAutoResetSection) {
+        tasksYearlyAutoResetSection.style.display = 'none';
+      }
+      // Hide ENFORCE SELECT checkbox for monthly tab
+      const enforceSelectSection = document.getElementById('tasksEnforceSelectSection');
+      if (enforceSelectSection) {
+        enforceSelectSection.style.display = 'none';
       }
       
       if (alertTimeControl && alertTimeInput) {
@@ -8747,7 +8783,10 @@ function setSettingsModalTab(tabName) {
         console.log('[AUTO-RESET UI] monthly tab render');
         
         if (tasksMonthlyAutoResetSection && tasksMonthlyAutoResetEnabled && tasksMonthlyAutoResetTime && tasksMonthlyAutoResetTimeRow) {
-          tasksMonthlyAutoResetSection.style.display = 'block';
+          // Show section for monthly tab (only if not already shown to prevent duplicate rendering)
+          if (tasksMonthlyAutoResetSection.style.display !== 'block') {
+            tasksMonthlyAutoResetSection.style.display = 'block';
+          }
           
           const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
           const cfg = alertWindows.monthly || {};
@@ -8756,8 +8795,10 @@ function setSettingsModalTab(tabName) {
           tasksMonthlyAutoResetTime.value = cfg.autoResetTime || '21:00';
           tasksMonthlyAutoResetTimeRow.style.display = cfg.autoResetEnabled ? 'block' : 'none';
           
-          // Event handlers
-          tasksMonthlyAutoResetEnabled.onchange = function() {
+          // Event handlers (bind only once using guard flag)
+          if (!tasksMonthlyAutoResetEnabled.__ffChangeBound) {
+            tasksMonthlyAutoResetEnabled.__ffChangeBound = true;
+            tasksMonthlyAutoResetEnabled.onchange = function() {
             const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
             if (!alertWindows.monthly) {
               alertWindows.monthly = {};
@@ -8773,15 +8814,23 @@ function setSettingsModalTab(tabName) {
             
             localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
           };
+          }
           
-          tasksMonthlyAutoResetTime.onchange = function() {
-            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
-            if (!alertWindows.monthly) {
-              alertWindows.monthly = {};
-            }
-            alertWindows.monthly.autoResetTime = tasksMonthlyAutoResetTime.value;
-            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
-          };
+          // Time input change handler (bind only once using guard flag)
+          if (!tasksMonthlyAutoResetTime.__ffChangeBound) {
+            tasksMonthlyAutoResetTime.__ffChangeBound = true;
+            tasksMonthlyAutoResetTime.onchange = function() {
+              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              if (!alertWindows.monthly) {
+                alertWindows.monthly = {};
+              }
+              alertWindows.monthly.autoResetTime = tasksMonthlyAutoResetTime.value;
+              localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            };
+            tasksMonthlyAutoResetTime.oninput = tasksMonthlyAutoResetTime.onchange;
+          }
+          
+          console.log('[AUTO-RESET UI] monthly controls rendered');
         } else {
           console.warn('[AUTO-RESET UI] Monthly auto-reset elements not found:', {
             section: !!tasksMonthlyAutoResetSection,
@@ -8792,7 +8841,7 @@ function setSettingsModalTab(tabName) {
         }
       }
     } else if (tabName === 'yearly') {
-      // Hide auto-reset sections for yearly tab
+      // Hide ALL auto-reset sections first (clear previous tab's rows)
       const autoResetSectionOpening = document.getElementById('tasksOpeningAutoResetSection');
       if (autoResetSectionOpening) {
         autoResetSectionOpening.style.display = 'none';
@@ -8816,7 +8865,10 @@ function setSettingsModalTab(tabName) {
       
       // Wire Yearly Auto-Reset UI (use cached elements from top of function)
       if (tasksYearlyAutoResetSection && tasksYearlyAutoResetEnabled && tasksYearlyAutoResetTime && tasksYearlyAutoResetTimeRow) {
-        tasksYearlyAutoResetSection.style.display = 'block';
+        // Show section for yearly tab (only if not already shown to prevent duplicate rendering)
+        if (tasksYearlyAutoResetSection.style.display !== 'block') {
+          tasksYearlyAutoResetSection.style.display = 'block';
+        }
         
         const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
         const cfg = alertWindows.yearly || {};
@@ -8825,8 +8877,10 @@ function setSettingsModalTab(tabName) {
         tasksYearlyAutoResetTime.value = cfg.autoResetTime || '21:00';
         tasksYearlyAutoResetTimeRow.style.display = cfg.autoResetEnabled ? 'block' : 'none';
         
-        // Event handlers
-        tasksYearlyAutoResetEnabled.onchange = function() {
+        // Event handlers (bind only once using guard flag)
+        if (!tasksYearlyAutoResetEnabled.__ffChangeBound) {
+          tasksYearlyAutoResetEnabled.__ffChangeBound = true;
+          tasksYearlyAutoResetEnabled.onchange = function() {
           const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
           if (!alertWindows.yearly) {
             alertWindows.yearly = {};
@@ -8842,15 +8896,23 @@ function setSettingsModalTab(tabName) {
           
           localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
         };
+        }
         
-        tasksYearlyAutoResetTime.onchange = function() {
-          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
-          if (!alertWindows.yearly) {
-            alertWindows.yearly = {};
-          }
-          alertWindows.yearly.autoResetTime = tasksYearlyAutoResetTime.value;
-          localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
-        };
+        // Time input change handler (bind only once using guard flag)
+        if (!tasksYearlyAutoResetTime.__ffChangeBound) {
+          tasksYearlyAutoResetTime.__ffChangeBound = true;
+          tasksYearlyAutoResetTime.onchange = function() {
+            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            if (!alertWindows.yearly) {
+              alertWindows.yearly = {};
+            }
+            alertWindows.yearly.autoResetTime = tasksYearlyAutoResetTime.value;
+            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+          };
+          tasksYearlyAutoResetTime.oninput = tasksYearlyAutoResetTime.onchange;
+        }
+        
+        console.log('[AUTO-RESET UI] yearly controls rendered');
       }
       
       if (alertYearlyControl && alertYearlyTimeInput) {
@@ -10810,19 +10872,17 @@ function saveTasksModal() {
 
 function openTasksSettings() {
   try {
+    // Guard: prevent re-entrance and duplicate opening
     if (isTasksSettingsOpen) return;
+    if (window.__ffTasksSettingsOpening) return;
+    window.__ffTasksSettingsOpening = true;
     
-    // Check admin access (owner role OR admin code override)
-    if (!ffHasAdminAccess()) {
-      showAdminCodeModal(() => {
-        // Retry opening settings after successful unlock
-        openTasksSettings();
-      });
-      return;
-    }
+    // PIN/admin code check removed - access is controlled by role (Admin/Manager)
+    // No PIN prompt needed - open settings directly
     
     const modal = document.getElementById('tasksSettingsModal');
     if (!modal) {
+      window.__ffTasksSettingsOpening = false;
       console.error('[Tasks] Settings modal not found');
       return;
     }
@@ -10830,6 +10890,7 @@ function openTasksSettings() {
     // Store reference to modal container element
     tasksSettingsModalContainer = modal.querySelector('.tasks-modal-container');
     if (!tasksSettingsModalContainer) {
+      window.__ffTasksSettingsOpening = false;
       console.error('[Tasks] Modal container not found');
       return;
     }
@@ -10838,19 +10899,21 @@ function openTasksSettings() {
     // Get main screen tab (not using getCurrentTasksTab() since modal isn't open yet)
     const mainScreenTab = window.currentTasksTab || 'opening';
     
-    // Set up event listeners for Settings modal tabs first
-    const settingsTabs = document.querySelectorAll('.tasks-settings-tab');
-    settingsTabs.forEach(tab => {
-      // Remove existing listeners by cloning
-      const newTab = tab.cloneNode(true);
-      tab.parentNode.replaceChild(newTab, tab);
-      
-      // Add click listener
-      newTab.addEventListener('click', () => {
-        const tabName = newTab.dataset.tab;
-        setSettingsModalTab(tabName);
+    // Set up event listeners for Settings modal tabs with guard flag
+    if (!modal.__ffTasksTabsBound) {
+      modal.__ffTasksTabsBound = true;
+      const settingsTabs = document.querySelectorAll('.tasks-settings-tab');
+      settingsTabs.forEach(tab => {
+        // Clear any existing onclick handler
+        tab.onclick = null;
+        
+        // Add click listener (only once)
+        tab.addEventListener('click', () => {
+          const tabName = tab.dataset.tab;
+          setSettingsModalTab(tabName);
+        });
       });
-    });
+    }
     
     // Initialize alert window settings with defaults if missing
     let alertWindows = {};
@@ -10942,6 +11005,8 @@ function openTasksSettings() {
     
     modal.style.display = 'flex';
     isTasksSettingsOpen = true;
+    window.__ffTasksSettingsOpening = false; // Clear opening flag
+    window.__ffTasksSettingsOpening = false; // Clear opening flag
     
     // Disable body scrolling
     document.body.style.overflow = 'hidden';
@@ -10987,9 +11052,12 @@ function closeTasksSettings() {
     const modal = document.getElementById('tasksSettingsModal');
     if (modal) {
       modal.style.display = 'none';
+      // Clear guard flags when closing
+      modal.__ffTasksTabsBound = false;
     }
     
     isTasksSettingsOpen = false;
+    window.__ffTasksSettingsOpening = false;
     
     // Re-enable body scrolling
     document.body.style.overflow = '';
