@@ -1580,8 +1580,6 @@ dialog footer button, .code-dialog footer button {
       <div id="queueControls" style="display:flex;gap:8px;align-items:center;">
         <button id="reorderBtn" class="queue-action-btn queue-action-btn--black">Reorder</button>
 
-        <button id="startFirstBtn" class="queue-action-btn queue-action-btn--black">START top</button>
-
         <button id="resetBtn" class="queue-action-btn queue-action-btn--red">RESET</button>
 
         <button id="manageQueueBtn" class="queue-action-btn queue-action-btn--black ff-gear-icon" style="display:none;padding:6px 10px;min-width:auto;" title="Manage Queue">
@@ -2051,6 +2049,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Helpers
 
+// Safe fallback for ffIsHoldModalOpen to prevent runtime crashes
+window.ffIsHoldModalOpen = window.ffIsHoldModalOpen || (() => false);
+
 const ls=(k,v)=>v===undefined?JSON.parse(localStorage.getItem(k)||"null"):localStorage.setItem(k,JSON.stringify(v));
 
 const $=s=>document.querySelector(s); const $$=s=>Array.from(document.querySelectorAll(s));
@@ -2200,8 +2201,6 @@ const nameSelect = document.getElementById("nameSelect") || $("#nameSelect");
 const pinInput = document.getElementById("pinInput") || $("#pinInput");
 const togglePin = document.getElementById("togglePin") || $("#togglePin");
 const joinBtn = document.getElementById("joinBtn") || $("#joinBtn");
-
-const startFirstBtn=$("#startFirstBtn"); // adminBtn removed
 
 const resetBtn=$("#resetBtn"), reorderBtn=$("#reorderBtn"), logBtn=$("#logBtn"), settingsBtn=$("#settingsBtn"), queueBtn=$("#queueBtn");
 
@@ -2630,14 +2629,18 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
     // Read existing log array from ffv24_log
     const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
     
+    // Use fallback values if no operator/session exists
+    const finalRole = role || 'Unknown';
+    const finalPerformedBy = performedBy || 'System';
+    
     // Create new entry object with date/time formatted using formatHistoryDate/formatHistoryTime
     const now = new Date();
     const entry = {
       date: formatHistoryDate(now),
       time: formatHistoryTime(now),
       action: actionText || '',
-      role: role || '',
-      performedBy: performedBy || '',
+      role: finalRole,
+      performedBy: finalPerformedBy,
       worker: worker || '',
       source: source || 'queue',
       ts: Date.now()
@@ -3459,24 +3462,20 @@ function join() {
   return handleJoin();
 }
 
-function startFirst(){
-
-  const idx=queue.findIndex(x=>!x.held); if(idx===-1) return alert("No available worker (empty or all on HOLD)");
-
-  const target=queue[idx]; guardStart(target.name, idx, ()=>startSpecific(idx));
-
-}
-
 function startSpecific(idx){
 
   const [it]=queue.splice(idx,1); service.push({name:it.name});
 
   save(); renderQueue(); renderService();
 
-  // Actor info is already set by guardStart (manager/admin code or worker PIN)
+  // Actor info: check if set by caller (for row buttons, may be set by guardStart)
   const lastCode = window.__ff_lastValidatedCode;
   let actor;
-  if (lastCode && (isAdminCode(lastCode) || isManagerCode(lastCode))) {
+  if (lastCode && typeof lastCode === 'object' && lastCode.role && lastCode.name) {
+    // New format: object with role/name (from staff-based auth)
+    actor = { role: lastCode.role, name: lastCode.name };
+  } else if (lastCode && (isAdminCode(lastCode) || isManagerCode(lastCode))) {
+    // Legacy: code string format (backward compatibility)
     if (isAdminCode(lastCode)) {
       actor = getActorForAction({ adminCode: lastCode });
     } else {
@@ -3519,18 +3518,15 @@ function finish(i){
 
   save(); renderQueue(); renderService();
 
-  // Actor info is already set by guardFinish (manager/admin code or worker PIN)
-  const lastCode = window.__ff_lastValidatedCode;
+  // Actor info is already set by guardFinish (staff-based auth)
+  const lastValidated = window.__ff_lastValidatedCode;
   let actor;
-  if (lastCode && (isAdminCode(lastCode) || isManagerCode(lastCode))) {
-    if (isAdminCode(lastCode)) {
-      actor = getActorForAction({ adminCode: lastCode });
-    } else {
-      actor = getActorForAction({ managerCode: lastCode });
-    }
+  if (lastValidated && typeof lastValidated === 'object' && lastValidated.role && lastValidated.name) {
+    // Staff-based actor info format (from guardFinish)
+    actor = { role: lastValidated.role, name: lastValidated.name };
   } else {
-    // Worker PIN was used - tech action
-    actor = getActorForAction({ workerName: it.name });
+    // Fallback to target technician (should not happen if guardFinish is correct)
+    actor = { role: 'Tech', name: it.name };
   }
   addHistoryEntry('Finish (In service → Available)', actor.role, actor.name, it.name, 'queue');
 
@@ -3840,77 +3836,117 @@ async function guardHold(fn){
 
 async function guardStart(workerName, idx, fn){
 
-  const entry = window.securePromptOnce ? await window.securePromptOnce('Enter admin/manager code or worker PIN to START') : prompt('Enter admin/manager code or worker PIN to START');
+  const entry = window.securePromptOnce ? await window.securePromptOnce('Enter PIN to START') : prompt('Enter PIN to START');
 
   if(entry==null) return;
 
-  if(isAdminCode(entry)||isManagerCode(entry)) {
-    // Store the validated code for later use in addHistoryEntry
-    const actor = isAdminCode(entry) 
-      ? getActorForAction({ adminCode: entry })
-      : getActorForAction({ managerCode: entry });
-    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
-    // Actor info is already set by securePromptOnce wrapper, but if using prompt, set it here
-    if (!window.securePromptOnce) {
-      const actorInfo = getActorInfo(entry, workerName);
-      window.__ff_actorRole = actorInfo.actorRole;
-      window.__ff_actorName = actorInfo.actorName;
-    }
-    return fn();
+  // Use staff-based PIN authentication
+  if (!window.ffAuthByPin) {
+    alert("Not authorized - staff authentication unavailable");
+    return;
   }
 
-  // Resolve name to staffId for stable identifier-based lookup
-  const staffId = resolveStaffNameToId(workerName);
-  const currentStaffId = staffId || workerName; // Fallback to name if ID not found
-  const storedPin = getCurrentStaffPin(currentStaffId);
+  const authResult = window.ffAuthByPin(entry);
+  if (!authResult.ok || !authResult.staff) {
+    alert("Not authorized");
+    return;
+  }
 
-  if(storedPin && entry.toString()===storedPin) {
-    // Worker PIN - Tech action, clear any previous actor info
+  const authenticatedStaff = authResult.staff;
+
+  // Find target technician by name
+  let targetStaff = null;
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    targetStaff = staffList.find(s => s.name === workerName && s.isArchived !== true);
+  } catch (e) {
+    console.error('[guardStart] Error finding target staff:', e);
+  }
+
+  // Check authorization: allow if PIN matches target technician OR Admin/Manager
+  const isTargetTechnician = targetStaff && authenticatedStaff.id === targetStaff.id;
+  const isAdminOrManager = authenticatedStaff.isAdmin === true || authenticatedStaff.isManager === true;
+
+  if (!isTargetTechnician && !isAdminOrManager) {
+    alert("Not authorized");
+    return;
+  }
+
+  // Store actor info for history logging
+  if (isTargetTechnician) {
+    // Target technician starting themselves
+    window.__ff_lastValidatedCode = { role: 'Tech', name: workerName };
     window.__ff_actorRole = 'Tech';
     window.__ff_actorName = workerName;
-    window.__ff_lastValidatedCode = null; // Clear code since it's worker action
-    return fn();
+  } else {
+    // Admin or Manager starting the target technician
+    const role = authenticatedStaff.isAdmin === true ? 'Admin' : 'Manager';
+    const name = authenticatedStaff.name || '';
+    window.__ff_lastValidatedCode = { role: role, name: name };
+    window.__ff_actorRole = role;
+    window.__ff_actorName = name;
   }
 
-  alert("Not authorized");
+  return fn();
 
 }
 
 async function guardFinish(workerName, fn){
 
-  const entry = window.securePromptOnce ? await window.securePromptOnce('Enter admin/manager code or worker PIN to FINISH') : prompt('Enter admin/manager code or worker PIN to FINISH');
+  const entry = window.securePromptOnce ? await window.securePromptOnce('Enter PIN to FINISH') : prompt('Enter PIN to FINISH');
 
   if(entry==null) return;
 
-  if(isAdminCode(entry)||isManagerCode(entry)) {
-    // Store the validated code for later use in addHistoryEntry
-    const actor = isAdminCode(entry) 
-      ? getActorForAction({ adminCode: entry })
-      : getActorForAction({ managerCode: entry });
-    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
-    // Actor info is already set by securePromptOnce wrapper, but if using prompt, set it here
-    if (!window.securePromptOnce) {
-      const actorInfo = getActorInfo(entry, workerName);
-      window.__ff_actorRole = actorInfo.actorRole;
-      window.__ff_actorName = actorInfo.actorName;
-    }
-    return fn();
+  // Use staff-based PIN authentication
+  if (!window.ffAuthByPin) {
+    alert("Not authorized - staff authentication unavailable");
+    return;
   }
 
-  // Resolve name to staffId for stable identifier-based lookup
-  const staffId = resolveStaffNameToId(workerName);
-  const currentStaffId = staffId || workerName; // Fallback to name if ID not found
-  const storedPin = getCurrentStaffPin(currentStaffId);
+  const authResult = window.ffAuthByPin(entry);
+  if (!authResult.ok || !authResult.staff) {
+    alert("Not authorized");
+    return;
+  }
 
-  if(storedPin && entry.toString()===storedPin) {
-    // Worker PIN - Tech action, clear any previous actor info
+  const authenticatedStaff = authResult.staff;
+
+  // Find target technician by name
+  let targetStaff = null;
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    targetStaff = staffList.find(s => s.name === workerName && s.isArchived !== true);
+  } catch (e) {
+    console.error('[guardFinish] Error finding target staff:', e);
+  }
+
+  // Check authorization: allow if PIN matches target technician OR Admin/Manager
+  const isTargetTechnician = targetStaff && authenticatedStaff.id === targetStaff.id;
+  const isAdminOrManager = authenticatedStaff.isAdmin === true || authenticatedStaff.isManager === true;
+
+  if (!isTargetTechnician && !isAdminOrManager) {
+    alert("Not authorized");
+    return;
+  }
+
+  // Store actor info for history logging
+  if (isTargetTechnician) {
+    // Target technician finishing themselves
+    window.__ff_lastValidatedCode = { role: 'Tech', name: workerName };
     window.__ff_actorRole = 'Tech';
     window.__ff_actorName = workerName;
-    window.__ff_lastValidatedCode = null; // Clear code since it's worker action
-    return fn();
+  } else {
+    // Admin or Manager finishing the target technician
+    const role = authenticatedStaff.isAdmin === true ? 'Admin' : 'Manager';
+    const name = authenticatedStaff.name || '';
+    window.__ff_lastValidatedCode = { role: role, name: name };
+    window.__ff_actorRole = role;
+    window.__ff_actorName = name;
   }
 
-  alert("Not authorized");
+  return fn();
 
 }
 
@@ -4009,7 +4045,7 @@ function goToQueue() {
     wrapContent.style.display = 'block';
   }
   
-  // ALWAYS show Queue-only controls (Reorder, START top, RESET)
+  // ALWAYS show Queue-only controls (Reorder, RESET)
   const queueControls = document.getElementById('queueControls');
   if (queueControls) {
     queueControls.style.display = 'flex';
@@ -5538,22 +5574,9 @@ $("#saveSettings").addEventListener("click", e=>{e.preventDefault(); saveSetting
 
 
 
-async function openLog(){ 
-  // Check if History is already unlocked in this session
-  if (sessionStorage.getItem("ff_history_unlocked_v1") === "1") {
-    openHistoryModal();
-    return;
-  }
-  
-  if (!window.securePromptOnce) return alert("Admin only");
-  const code = await window.securePromptOnce("Enter admin code to view log");
-  if (code == null || !isAdminCode(code)) {
-    alert("Admin only");
-    return;
-  }
-  
-  // PIN is correct - unlock for this session and open History immediately
-  sessionStorage.setItem("ff_history_unlocked_v1", "1");
+function openLog(){ 
+  console.log('[History] openLog called');
+  // History is a passive audit log - no PIN or authorization required
   openHistoryModal();
 }
 
@@ -5794,9 +5817,8 @@ if (document.readyState === 'loading') {
 // Expose globally for manual calls
 window.removeBlockingOverlays = removeBlockingOverlays;
 
-startFirstBtn.onclick=startFirst;
-
 // adminBtn.onclick handler removed - button no longer exists
+// startFirstBtn.onclick handler removed - START top button no longer exists
 // adminBtn.onclick = async () => {
 //   const code = window.securePromptOnce ? await window.securePromptOnce("Enter admin code") : prompt("Enter admin code");
 //   if(code!==null) alert(isAdminCode(code)?"Admin verified.":"Wrong code");
@@ -5971,8 +5993,46 @@ const historyCloseBtn = document.getElementById('historyCloseBtn');
 const historyBackdrop = document.querySelector('.history-modal-backdrop');
 
 function openHistoryModal() {
-  if (!historyModal) return;
-  historyModal.classList.remove('hidden');
+  // Try to get modal element fresh in case it wasn't found at page load
+  const modalElement = document.getElementById('historyModal') || historyModal;
+  if (!modalElement) {
+    console.error('[History] historyModal element not found');
+    return;
+  }
+  const overlayExists = !!document.getElementById('historyModal') || !!document.querySelector('.history-modal');
+  console.log('[History] showing modal', { 
+    overlayExists: overlayExists, 
+    modalExists: !!modalElement,
+    modalHasHiddenClass: modalElement.classList.contains('hidden'),
+    modalDisplay: getComputedStyle(modalElement).display,
+    modalVisibility: getComputedStyle(modalElement).visibility
+  });
+  // Remove hidden class and ensure visibility
+  modalElement.classList.remove('hidden');
+  modalElement.style.display = 'flex'; // Ensure it's visible
+  modalElement.style.visibility = 'visible';
+  modalElement.style.pointerEvents = 'auto'; // Ensure modal is interactive
+  
+  // Ensure dialog is above backdrop and clickable
+  const dialog = modalElement.querySelector('.history-modal-dialog');
+  if (dialog) {
+    dialog.style.pointerEvents = 'auto';
+    dialog.style.position = 'relative';
+    dialog.style.zIndex = '1';
+  }
+  
+  // Wire Escape key handler (only once per open)
+  if (!window.__ffHistoryEscapeHandler) {
+    window.__ffHistoryEscapeHandler = (e) => {
+      if (e.key === 'Escape' && !modalElement.classList.contains('hidden')) {
+        closeHistoryModal();
+        document.removeEventListener('keydown', window.__ffHistoryEscapeHandler);
+        window.__ffHistoryEscapeHandler = null;
+      }
+    };
+    document.addEventListener('keydown', window.__ffHistoryEscapeHandler);
+  }
+  
   // Sync filter dropdowns with current state
   const sourceSelect = document.getElementById('historySourceFilter');
   if (sourceSelect) {
@@ -5990,23 +6050,62 @@ function openHistoryModal() {
 }
 
 function closeHistoryModal() {
-  if (!historyModal) return;
-  historyModal.classList.add('hidden');
+  const modalElement = document.getElementById('historyModal') || historyModal;
+  if (!modalElement) {
+    console.warn('[History] closeHistoryModal: modal element not found');
+    return;
+  }
+  // Hide modal by adding hidden class and removing display style
+  modalElement.classList.add('hidden');
+  modalElement.style.display = 'none';
+  modalElement.style.visibility = 'hidden';
+  console.log('[History] Modal closed');
 }
 
+// History button handler - wire directly to openLog() - no PIN, no wrappers
+// Note: This handler will be set up by initializeNavigationButtons() if it runs later
+// This is a fallback in case initializeNavigationButtons hasn't run yet
 if (historyButton && !historyButton.__ffHistoryBound) {
   historyButton.__ffHistoryBound = true;
-  historyButton.addEventListener('click', () => {
-    openLog();
+  historyButton.addEventListener('click', (e) => {
+    console.log('[History] click fired');
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof openLog === 'function') {
+      openLog();
+    } else {
+      console.error('[History] openLog function not found');
+    }
   });
+  console.log('[History] Button wired to openLog() (fallback handler) - no PIN checks');
 }
 
-if (historyCloseBtn) {
-  historyCloseBtn.addEventListener('click', closeHistoryModal);
+// Wire close buttons with guard flags to prevent duplicate listeners
+if (historyCloseBtn && !historyCloseBtn.__ffCloseBound) {
+  historyCloseBtn.__ffCloseBound = true;
+  historyCloseBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeHistoryModal();
+  });
+  // Ensure button is clickable
+  historyCloseBtn.style.pointerEvents = 'auto';
+  historyCloseBtn.style.cursor = 'pointer';
+  console.log('[History] X button wired to closeHistoryModal()');
 }
 
-if (historyBackdrop) {
-  historyBackdrop.addEventListener('click', closeHistoryModal);
+// Wire backdrop click to close (only if clicking backdrop itself, not dialog)
+if (historyBackdrop && !historyBackdrop.__ffCloseBound) {
+  historyBackdrop.__ffCloseBound = true;
+  historyBackdrop.addEventListener('click', (e) => {
+    // Only close if clicking the backdrop itself, not if event bubbled from dialog
+    if (e.target === historyBackdrop) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeHistoryModal();
+    }
+  });
+  console.log('[History] Backdrop wired to closeHistoryModal()');
 }
 
 const historyExportBtn = document.getElementById('historyExportBtn');
@@ -6075,8 +6174,18 @@ if (historyClearBtn) {
   });
 }
 
-if (historyCloseBtn2) {
-  historyCloseBtn2.addEventListener('click', closeHistoryModal);
+// Wire bottom Close button with guard flag
+if (historyCloseBtn2 && !historyCloseBtn2.__ffCloseBound) {
+  historyCloseBtn2.__ffCloseBound = true;
+  historyCloseBtn2.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeHistoryModal();
+  });
+  // Ensure button is clickable
+  historyCloseBtn2.style.pointerEvents = 'auto';
+  historyCloseBtn2.style.cursor = 'pointer';
+  console.log('[History] Close button wired to closeHistoryModal()');
 }
 
 // Wire up history source filter dropdown
@@ -7728,7 +7837,7 @@ function openTasks() {
     // Header remains visible (it's now outside owner-view and always sticky)
     if (mainContent) mainContent.style.display = 'none';
     if (joinBar) joinBar.style.display = 'none';
-    // Hide Queue-only controls (Reorder, START top, RESET) when on TASKS screen
+    // Hide Queue-only controls (Reorder, RESET) when on TASKS screen
     if (queueControls) queueControls.style.display = 'none';
     
     // Show Tasks screen
@@ -7890,7 +7999,7 @@ function closeTasks() {
     // Header remains visible (it's now outside owner-view and always sticky)
     if (mainContent) mainContent.style.display = 'block';
     if (joinBar) joinBar.style.display = 'flex';
-    // Show Queue-only controls (Reorder, START top, RESET) when returning to Queue
+    // Show Queue-only controls (Reorder, RESET) when returning to Queue
     if (queueControls) queueControls.style.display = 'flex';
     
     console.log('[Tasks] Tasks screen closed');
@@ -12459,32 +12568,14 @@ if (!window.__originalResetDay) {
   window.__originalResetDay = resetDay;
 }
 
-async function openHistoryFromNav() {
+function openHistoryFromNav() {
   try {
     // Close Staff Members if open
     if (typeof closeStaffMembersModal === 'function') {
       closeStaffMembersModal();
     }
     
-    // Check if History is already unlocked in this session
-    if (sessionStorage.getItem("ff_history_unlocked_v1") === "1") {
-      openHistoryModal();
-      return;
-    }
-    
-    // Not unlocked - prompt for PIN
-    if (!window.securePromptOnce) {
-      alert("Admin only");
-      return;
-    }
-    const code = await window.securePromptOnce("Enter admin code to view log");
-    if (code == null || !isAdminCode(code)) {
-      alert("Admin only");
-      return;
-    }
-    
-    // PIN is correct - unlock for this session and open History immediately
-    sessionStorage.setItem("ff_history_unlocked_v1", "1");
+    // History is a passive audit log - no PIN or authorization required
     openHistoryModal();
   } catch (e) {
     console.error('[Navigation] Error in openHistoryFromNav:', e);
@@ -12528,20 +12619,56 @@ async function resetDayWithNav() {
 // Safe button initialization function
 function initializeNavigationButtons() {
   try {
-    // History button
-    const logBtnEl = document.getElementById("logBtn") || logBtn;
-    if (logBtnEl && !logBtnEl.__ffHistoryBound) {
-      logBtnEl.__ffHistoryBound = true;
-      logBtnEl.onclick = openHistoryFromNav;
+    // History button - wire directly to openLog() with no PIN checks
+    // Use multiple selector strategies to find the top nav History button
+    let logBtnEl = document.getElementById("logBtn");
+    if (!logBtnEl && typeof logBtn !== 'undefined' && logBtn) {
+      logBtnEl = logBtn;
+    }
+    // Fallback: find by text content in top nav
+    if (!logBtnEl) {
+      const header = document.querySelector('.header') || document.querySelector('.toolbar');
+      if (header) {
+        const buttons = header.querySelectorAll('button');
+        for (const btn of buttons) {
+          if (btn.textContent && btn.textContent.trim().toLowerCase().includes('history')) {
+            logBtnEl = btn;
+            console.log('[Navigation] Found History button by text content');
+            break;
+          }
+        }
+      }
+    }
+    if (logBtnEl) {
+      // Remove any existing onclick handler that might interfere
+      logBtnEl.onclick = null;
+      
+      // Set up handler only once using flag
+      if (!logBtnEl.__ffHistoryBound) {
+        logBtnEl.__ffHistoryBound = true;
+        // Use addEventListener to avoid conflicts with other handlers
+        logBtnEl.addEventListener('click', (e) => {
+          console.log('[History] click fired');
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof openLog === 'function') {
+            openLog();
+          } else if (typeof openHistoryModal === 'function') {
+            console.warn('[History] openLog not found, using openHistoryModal directly');
+            openHistoryModal();
+          } else {
+            console.error('[History] Neither openLog nor openHistoryModal found');
+          }
+        });
+        console.log('[Navigation] History button initialized - wired to openLog()');
+      }
+      
       logBtnEl.style.cursor = 'pointer';
       logBtnEl.style.pointerEvents = 'auto';
       logBtnEl.disabled = false;
       logBtnEl.removeAttribute('disabled');
-      console.log('[Navigation] History button initialized');
     } else {
-      if (!logBtnEl) {
-        console.warn('[Navigation] Missing element: logBtn');
-      }
+      console.warn('[Navigation] Missing element: logBtn');
     }
 
     // Settings button
@@ -12887,8 +13014,11 @@ function initializeAppsPanel() {
             }
             break;
           case 'history':
-            if (typeof openHistoryFromNav === 'function') {
-              openHistoryFromNav();
+            // History is a passive audit log - open directly with no PIN checks
+            if (typeof openLog === 'function') {
+              openLog();
+            } else if (typeof openHistoryModal === 'function') {
+              openHistoryModal();
             }
             break;
           case 'settings':
@@ -20532,7 +20662,7 @@ function hookSettingsGuard_DISABLED(){
 
     </div>
 
-    <div style="text-align:center;margin-top:8px;margin-bottom:4px;">
+    <div id="codePromptForgotPinContainer" style="text-align:center;margin-top:8px;margin-bottom:4px;display:none;">
       <button id="codePromptForgotPin" type="button" style="background:none;border:none;color:#7b3fe4;cursor:pointer;text-decoration:underline;font-size:12px;padding:4px 8px;">Forgot Admin PIN?</button>
     </div>
 
@@ -21386,10 +21516,14 @@ function hookSettingsGuard_DISABLED(){
 
 
 <!-- Show Log: secure code input (hidden + single eye) wrapper only -->
+<!-- DISABLED: History is a passive audit log - no PIN or authorization required -->
 
 <script>
 
 (function(){
+
+  // History is a passive audit log - wrapper disabled to allow direct access
+  return; // Exit early - do not wrap openLog
 
   if (typeof window.openLog !== 'function') return; // keep everything if not found
 
@@ -21469,8 +21603,12 @@ function hookSettingsGuard_DISABLED(){
 <script>
 
 // --- injected: secure show log ---
+// DISABLED: History is a passive audit log - no PIN modal needed
 
 (function(){
+
+  // History is a passive audit log - modal injection disabled
+  return; // Exit early - do not inject History PIN modal HTML
 
   if (window.__logSecurePatched) return;
 
@@ -21577,37 +21715,8 @@ function hookSettingsGuard_DISABLED(){
 
 
 
-  // patch openLog to use secure prompt
-
-  const orig = window.openLog;
-
-  window.openLog = async function(){
-
-    try{
-
-      const code = await openSecurePrompt();
-
-      if(typeof orig === 'function'){ orig.call(this, code); } // let original continue if it supports param
-
-      else {
-
-        // If original openLog expected to call prompt itself, we replicate a minimal flow:
-
-        if (window.showLogWithCode) { window.showLogWithCode(code); }
-
-        else {
-
-          // fallback: store to global expected variable
-
-          window.__lastLogCode = code;
-
-        }
-
-      }
-
-    }catch(e){ /* cancelled */ }
-
-  };
+  // History is a passive audit log - no PIN or authorization required
+  // Wrapper disabled: openLog now opens directly without PIN checks
 
 })();
 
@@ -21619,94 +21728,13 @@ function hookSettingsGuard_DISABLED(){
 
 (function(){
 
+  // History is a passive audit log - no PIN or authorization required
+  // Wrapper disabled: openLog now opens directly without PIN checks
   if (typeof window.openLog !== 'function' || window.__showlog_secure_wrapped) return;
 
   window.__showlog_secure_wrapped = true;
 
-  const __origOpenLog = window.openLog;
-
-
-
-  function showSecureCodePrompt(title){
-
-    return new Promise(resolve => {
-
-      const ov = document.createElement('div');
-
-      ov.className = 'code-dialog';
-      ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:99999';
-
-      const box = document.createElement('div');
-
-      box.style.cssText = 'background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);padding:18px;min-width:360px;font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Arial';
-
-      box.innerHTML = ''
-
-        + '<div style="font-weight:600;margin-bottom:10px">'+ (title||'Enter admin code') +'</div>'
-
-        + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">'
-
-        +   '<input id="__sl_code" type="password" autocomplete="off" inputmode="numeric" '
-
-        +   'style="flex:1;border:2px solid #111;border-radius:10px;padding:10px 12px;font-size:16px" />'
-
-        +   '<button id="__sl_eye" type="button" aria-label="toggle" '
-
-        +   'style="width:40px;height:40px;border:1px solid #ddd;border-radius:10px;background:#fafafa;cursor:pointer">👁️</button>'
-
-        + '</div>'
-
-        + '<div style="display:flex;gap:8px;justify-content:flex-end">'
-
-        +   '<button id="__sl_cancel" type="button" style="border:1px solid #ddd;border-radius:10px;padding:8px 14px;background:#eee">Cancel</button>'
-
-        +   '<button id="__sl_ok" type="button" style="border:0;border-radius:10px;padding:8px 16px;background:#111;color:#fff">OK</button>'
-
-        + '</div>';
-
-      ov.appendChild(box); document.body.appendChild(ov);
-
-      const inp = box.querySelector('#__sl_code');
-
-      const eye = box.querySelector('#__sl_eye');
-
-      const ok  = box.querySelector('#__sl_ok');
-
-      const cancel = box.querySelector('#__sl_cancel');
-
-      function close(v){ document.body.removeChild(ov); resolve(v); }
-
-      eye.onclick = ()=>{ inp.type = (inp.type==='password') ? 'text' : 'password'; };
-
-      ok.onclick = ()=> close(inp.value.trim());
-
-      cancel.onclick = ()=> close(null);
-
-      inp.addEventListener('keydown', e=>{ if(e.key==='Enter') ok.click(); if(e.key==='Escape') cancel.click(); });
-
-      setTimeout(()=>inp.focus(), 50);
-
-    });
-
-  }
-
-
-
-  window.openLog = async function(){
-
-    try{
-
-      const code = await showSecureCodePrompt('Enter admin code to view log');
-
-      if (!code) return;
-
-      try { if (typeof isAdminCode === 'function' && !isAdminCode(code)) { alert('Admin only'); return; } } catch(e){}
-
-      openHistoryModal();
-
-    }catch(e){ /* cancelled */ }
-
-  };
+  // Do not wrap openLog - let it open directly without PIN checks
 
 })();
 
@@ -21719,22 +21747,8 @@ function hookSettingsGuard_DISABLED(){
 <script>
 
 // SHOW LOG — secure code input only (hidden + single eye), no other changes
-
-window.openLog = async function(){
-
-  if (!window.securePromptOnce) { alert("Admin only"); return; }
-
-  const code = await window.securePromptOnce("Enter admin code to view log");
-
-  try {
-
-    if (code == null || !isAdminCode(code)) { alert("Admin only"); return; }
-
-  } catch(e) { alert("Admin only"); return; }
-
-  openHistoryModal();
-
-};
+// DISABLED: History is a passive audit log - no PIN or authorization required
+// Do not replace openLog - let it open directly without PIN checks
 
 </script>
 
@@ -21745,9 +21759,14 @@ window.openLog = async function(){
 <script>
 
 /* SHOW LOG — safe wrapper ONLY. Does not delete or modify any existing functions. */
+/* DISABLED: History is a passive audit log - no PIN or authorization required */
 
 (function () {
 
+  // History is a passive audit log - wrapper disabled to allow direct access
+  return; // Exit early - do not intercept logBtn clicks
+
+  // Disabled code below - never executes
   if (window.__sl_secure_wrapped) return; window.__sl_secure_wrapped = true;
 
 
@@ -22139,7 +22158,7 @@ window.openLog = async function(){
 
     // Queue actions
 
-    if (label === 'START' || label === 'START TOP') addLog({ action:'START', whoType:'manager', target:rowName(btn) });
+    if (label === 'START') addLog({ action:'START', whoType:'manager', target:rowName(btn) });
 
     if (label === 'HOLD') addLog({ action:'HOLD', whoType:'manager', target:rowName(btn) });
 
@@ -22422,7 +22441,7 @@ window.openLog = async function(){
 
     var t = (btn.textContent||btn.value||"").trim().toUpperCase();
 
-    if (t === "START" || t === "FINISH" || t === "HOLD" || t === "RELEASE" || t === "START TOP" ||
+    if (t === "START" || t === "FINISH" || t === "HOLD" || t === "RELEASE" ||
 
         t === "UP" || t === "DOWN" || t === "ADMIN" || t === "SETTINGS" || t === "REORDER" || t === "RESET"){
 
@@ -22451,8 +22470,12 @@ window.openLog = async function(){
 <script>
 
 // --- Merge any auxiliary audit entries into the Show log view (non-destructive) ---
+// DISABLED: History is a passive audit log - no PIN or authorization required
 
 (function(){
+
+  // History is a passive audit log - wrapper disabled to allow direct access
+  return; // Exit early - do not wrap openLog
 
   if (window.__ff_merge_log) return; window.__ff_merge_log = true;
 
@@ -22706,8 +22729,6 @@ window.openLog = async function(){
     else if (txt === 'JOIN')   addLine('JOIN ' + nm);
 
     else if (txt === 'RESET' || txt === 'RESET DAY') addLine('RESET');
-
-    else if (txt === 'START TOP') addLine('START TOP');
 
     else if (/^(UP|DOWN)$/.test(txt) || t.classList.contains('reorder') || (t.dataset && t.dataset.action==='reorder')){
 
