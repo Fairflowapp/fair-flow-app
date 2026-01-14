@@ -3584,18 +3584,31 @@ async function resetDay(){
     return; // User cancelled or invalid code (error already shown)
   }
   
-  // Set actor info if using securePromptOnce wrapper
-  if (window.securePromptOnce) {
-    // Actor info is already set by securePromptOnce wrapper
-    const actor = getActorForAction({ adminCode: code });
-    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
+  // Set actor info from staff-based PIN validation
+  if (window.ffAuthByPin) {
+    const authResult = window.ffAuthByPin(code);
+    if (authResult.ok && authResult.staff) {
+      const staff = authResult.staff;
+      const role = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Tech');
+      const name = staff.name || 'Unknown';
+      window.__ff_lastValidatedCode = { role: role, name: name };
+      window.__ff_actorRole = role;
+      window.__ff_actorName = name;
+    } else {
+      // Fallback if staff lookup fails
+      const role = 'Admin';
+      const name = 'Admin';
+      window.__ff_lastValidatedCode = { role: role, name: name };
+      window.__ff_actorRole = role;
+      window.__ff_actorName = name;
+    }
   } else {
-    // If using prompt, set actor info manually
-    const actorInfo = getActorInfo(code, '');
-    window.__ff_actorRole = actorInfo.actorRole;
-    window.__ff_actorName = actorInfo.actorName;
-    const actor = getActorForAction({ adminCode: code });
-    window.__ff_lastValidatedCode = { role: actor.role, name: actor.name };
+    // Fallback if ffAuthByPin not available
+    const role = 'Admin';
+    const name = 'Admin';
+    window.__ff_lastValidatedCode = { role: role, name: name };
+    window.__ff_actorRole = role;
+    window.__ff_actorName = name;
   }
   
   // Proceed with reset - use resetQueueState function
@@ -3718,7 +3731,8 @@ async function showResetPinPrompt() {
     // Fallback: native prompt if securePromptOnce not available
     const code = prompt("Enter admin/manager code to RESET");
     if (code == null) return null;
-    if (isAdminCode(code) || isManagerCode(code)) {
+    // Use staff-based PIN validation instead of legacy admin/manager codes
+    if (window.ffIsAdminOrManagerPin && window.ffIsAdminOrManagerPin(code)) {
       return code;
     } else {
       alert('Invalid admin/manager code - Reset cancelled');
@@ -3732,8 +3746,8 @@ async function showResetPinPrompt() {
     return null; // User cancelled
   }
   
-  // Verify PIN
-  const isValid = isAdminCode(code) || isManagerCode(code);
+  // Verify PIN using staff-based validation (Admin or Manager PIN)
+  const isValid = window.ffIsAdminOrManagerPin && window.ffIsAdminOrManagerPin(code);
   if (!isValid) {
     // Show error inline - reopen modal with error message
     const overlay = document.getElementById('codePromptOverlay');
@@ -3786,8 +3800,8 @@ async function showResetPinPrompt() {
         return null; // User cancelled
       }
       
-      // Verify retry code
-      const retryValid = isAdminCode(retryCode) || isManagerCode(retryCode);
+      // Verify retry code using staff-based validation (Admin or Manager PIN)
+      const retryValid = window.ffIsAdminOrManagerPin && window.ffIsAdminOrManagerPin(retryCode);
       if (!retryValid) {
         // Still wrong - update error message
         if (errorEl) {
@@ -13471,6 +13485,38 @@ function initializeAppsPanel() {
   
   // Expose helper globally
   window.ffAuthByPin = ffAuthByPin;
+  
+  // Helper to check if a PIN belongs to an Admin or Manager staff member
+  function ffIsAdminOrManagerPin(pin) {
+    try {
+      if (!pin) return false;
+      
+      // Normalize PIN (trim)
+      const normalizedPin = String(pin).trim();
+      if (!normalizedPin) return false;
+      
+      // Find active (not archived) staff with matching PIN
+      const staffStore = ffGetStaffStore();
+      const staff = staffStore.staff.find(s => 
+        s.isArchived !== true && 
+        s.pin && 
+        String(s.pin).trim() === normalizedPin
+      );
+      
+      // Check if staff exists and is Admin or Manager
+      if (staff && (staff.isAdmin === true || staff.isManager === true)) {
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      console.error('[ffIsAdminOrManagerPin] Error checking PIN:', e);
+      return false;
+    }
+  }
+  
+  // Expose helper globally
+  window.ffIsAdminOrManagerPin = ffIsAdminOrManagerPin;
   
   // Selected staff ID state
   let selectedStaffId = null;
