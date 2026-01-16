@@ -8123,8 +8123,28 @@ function ffHasAdminAccess() {
 
 // Show admin code prompt modal
 function showAdminCodeModal(onSuccess) {
-  if (window.__ffBypassManageTasksAuth) {
-    window.__ffBypassManageTasksAuth = false;
+  const bypassForManageTasks = (() => {
+    try {
+      const modal = document.getElementById('tasksSettingsModal');
+      if (modal) {
+        if (isTasksSettingsOpen || modal.style.display === 'flex') return true;
+        const activeEl = document.activeElement;
+        if (activeEl && modal.contains(activeEl)) return true;
+      }
+      const activeEl = document.activeElement;
+      if (activeEl) {
+        if (activeEl.id === 'btnTasksSettings' || activeEl.id === 'tasksSettingsBtn') return true;
+        if (activeEl.closest && activeEl.closest('#btnTasksSettings, #tasksSettingsBtn')) return true;
+      }
+    } catch (e) {
+      // If anything goes wrong, fall back to the standard admin modal flow.
+    }
+    return false;
+  })();
+  if (bypassForManageTasks) {
+    if (typeof onSuccess === 'function') {
+      onSuccess();
+    }
     return true;
   }
   console.log("[MANAGE TASKS TRACE] PIN modal about to open", new Error().stack);
@@ -12525,6 +12545,40 @@ if (document.readyState === 'loading') {
 } else {
   initializeNavigation();
 }
+
+// Manage Tasks click fallback: bind once, log presence, and open settings reliably
+(function bindManageTasksClickFallback() {
+  if (window.__ffManageTasksClickFallbackBound) return;
+  window.__ffManageTasksClickFallbackBound = true;
+
+  function logManageTasksButtonFound() {
+    const btn = document.getElementById('btnTasksSettings') || document.getElementById('tasksSettingsBtn');
+    console.log("[MT] button found", btn);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', logManageTasksButtonFound);
+  } else {
+    logManageTasksButtonFound();
+  }
+
+  document.addEventListener('click', (e) => {
+    const target = e.target;
+    const btn = target && target.closest ? target.closest('#btnTasksSettings, #tasksSettingsBtn') : null;
+    if (!btn) return;
+    console.log("[MT] clicked");
+    console.trace("[MT] click trace");
+    if (typeof window.openTasksSettings === 'function') {
+      console.log("[MT] opening tasks settings");
+      window.openTasksSettings({ skipAuth: true });
+    } else if (typeof openTasksSettings === 'function') {
+      console.log("[MT] opening tasks settings");
+      openTasksSettings({ skipAuth: true });
+    } else {
+      console.error("[MT] openTasksSettings function not found");
+    }
+  }, true);
+})();
 
 // Global capture-phase fallback for avatar dropdown (installed once at app startup)
 // This ensures dropdown clicks work even when overlays block normal click propagation
