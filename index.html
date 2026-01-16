@@ -8123,11 +8123,11 @@ function ffHasAdminAccess() {
 
 // Show admin code prompt modal
 function showAdminCodeModal(onSuccess) {
-  if (window.__ff_manageTasksBypassAuth) {
-    window.__ff_manageTasksBypassAuth = false;
-    return;
+  if (window.__ffBypassManageTasksAuth) {
+    window.__ffBypassManageTasksAuth = false;
+    return true;
   }
-  console.log("[MANAGE TASKS TRACE] PIN modal opened from", new Error().stack);
+  console.log("[MANAGE TASKS TRACE] PIN modal about to open", new Error().stack);
   // Create modal if it doesn't exist
   let modal = document.getElementById('ffAdminCodeModal');
   if (!modal) {
@@ -12444,9 +12444,6 @@ function initializeTasksScreenButtons() {
     const settingsBtn = document.getElementById('btnTasksSettings');
     if (settingsBtn) {
       settingsBtn.onclick = () => {
-        console.log("[MANAGE TASKS TRACE] entry", { place: "initializeTasksScreenButtons(btnTasksSettings)", id: settingsBtn?.id, className: settingsBtn?.className });
-        console.log("[MANAGE TASKS TRACE] clicked", { fn: "initializeTasksScreenButtons", line: 12342 });
-        window.__ff_manageTasksBypassAuth = true;
         openTasksSettings({ skipAuth: true });
       };
       
@@ -16559,9 +16556,7 @@ window.updateTaskNoteDisplay = updateTaskNoteDisplay;
     
     // Initialize Settings button
     const settingsInitialized = initButton('tasksSettingsBtn', 'Settings', (e) => {
-      console.log("[MANAGE TASKS TRACE] entry", { place: "initButton(tasksSettingsBtn)", id: e?.currentTarget?.id, className: e?.currentTarget?.className });
       if (typeof openTasksSettings === 'function') {
-        window.__ff_manageTasksBypassAuth = true;
         openTasksSettings({ skipAuth: true });
       } else {
         console.error('[Tasks] openTasksSettings function not found');
