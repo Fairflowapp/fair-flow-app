@@ -8121,8 +8121,35 @@ function ffHasAdminAccess() {
   return false;
 }
 
+// Run an action only after admin access is confirmed
+function ensureAdminThen(actionFn, options) {
+  const skipAuth = options && options.skipAuth === true;
+  if (skipAuth || ffHasAdminAccess()) {
+    if (typeof actionFn === 'function') {
+      actionFn();
+    }
+    return true;
+  }
+  showAdminCodeModal(actionFn);
+  return false;
+}
+
 // Show admin code prompt modal
 function showAdminCodeModal(onSuccess) {
+  let didCallSuccess = false;
+  const scheduleSuccess = () => {
+    if (didCallSuccess) return;
+    didCallSuccess = true;
+    if (typeof onSuccess === 'function') {
+      setTimeout(() => {
+        try {
+          onSuccess();
+        } catch (e) {
+          console.error('[Tasks Settings] Admin success callback error:', e);
+        }
+      }, 0);
+    }
+  };
   const bypassForManageTasks = (() => {
     try {
       const modal = document.getElementById('tasksSettingsModal');
@@ -8142,11 +8169,11 @@ function showAdminCodeModal(onSuccess) {
     return false;
   })();
   if (bypassForManageTasks) {
-    if (typeof onSuccess === 'function') {
-      onSuccess();
-    }
+    scheduleSuccess();
     return true;
   }
+  if (window.__adminModalOpen) return false;
+  window.__adminModalOpen = true;
   console.log("[MANAGE TASKS TRACE] PIN modal about to open", new Error().stack);
   // Create modal if it doesn't exist
   let modal = document.getElementById('ffAdminCodeModal');
@@ -8174,6 +8201,7 @@ function showAdminCodeModal(onSuccess) {
     // Setup event handlers (only once when modal is created)
     const closeModal = () => {
       modal.style.display = 'none';
+      window.__adminModalOpen = false;
       const input = document.getElementById('ffAdminCodeInput');
       const error = document.getElementById('ffAdminCodeError');
       if (input) input.value = '';
@@ -8206,11 +8234,7 @@ function showAdminCodeModal(onSuccess) {
         window.ff_is_admin_cached = true;
         
         closeModal();
-        
-        // Call success callback
-        if (typeof onSuccess === 'function') {
-          onSuccess();
-        }
+        scheduleSuccess();
       } else {
         // Invalid code
         if (error) {
@@ -8281,17 +8305,6 @@ function getCurrentTasksTab() {
 
 function setSettingsModalTab(tabName, options) {
   try {
-    const skipAuth = options && options.skipAuth === true;
-    
-    // Check admin access (owner role OR admin code override)
-    if (!skipAuth && !ffHasAdminAccess()) {
-      showAdminCodeModal(() => {
-        // Retry tab switch after successful unlock
-        setSettingsModalTab(tabName);
-      });
-      return;
-    }
-    
     const tabs = document.querySelectorAll('.tasks-settings-tab');
     
     // Update tab styles
@@ -10973,7 +10986,7 @@ function openTasksSettings(options) {
         // Add click listener
         newTab.addEventListener('click', () => {
           const tabName = newTab.dataset.tab;
-          setSettingsModalTab(tabName);
+          ensureAdminThen(() => setSettingsModalTab(tabName));
         });
       });
       modal.__ffTasksTabsBound = true;
