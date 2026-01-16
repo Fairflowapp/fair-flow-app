@@ -8129,6 +8129,11 @@ function ffHasAdminAccess() {
 
 // Show admin code prompt modal
 function showAdminCodeModal(onSuccess) {
+  if (window.__ff_manageTasksBypassAuth) {
+    window.__ff_manageTasksBypassAuth = false;
+    return;
+  }
+  console.log("[MANAGE TASKS TRACE] PIN modal opened from", new Error().stack);
   // Create modal if it doesn't exist
   let modal = document.getElementById('ffAdminCodeModal');
   if (!modal) {
@@ -8260,10 +8265,12 @@ function getCurrentTasksTab() {
   return window.currentTasksTab || 'opening';
 }
 
-function setSettingsModalTab(tabName) {
+function setSettingsModalTab(tabName, options) {
   try {
+    const skipAuth = options && options.skipAuth === true;
+    
     // Check admin access (owner role OR admin code override)
-    if (!ffHasAdminAccess()) {
+    if (!skipAuth && !ffHasAdminAccess()) {
       showAdminCodeModal(() => {
         // Retry tab switch after successful unlock
         setSettingsModalTab(tabName);
@@ -10808,12 +10815,15 @@ function saveTasksModal() {
   }
 }
 
-function openTasksSettings() {
+function openTasksSettings(options) {
   try {
     if (isTasksSettingsOpen) return;
     
+    const skipAuth = options && options.skipAuth === true;
+    
     // Check admin access (owner role OR admin code override)
-    if (!ffHasAdminAccess()) {
+    if (!skipAuth && !ffHasAdminAccess()) {
+      console.log("[MANAGE TASKS TRACE] about to open PIN modal", { fn: "openTasksSettings", line: 10821 });
       showAdminCodeModal(() => {
         // Retry opening settings after successful unlock
         openTasksSettings();
@@ -10922,7 +10932,7 @@ function openTasksSettings() {
     localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
     
     // Now set up the tab bar visual state (after listeners are set up)
-    setSettingsModalTab(mainScreenTab);
+    setSettingsModalTab(mainScreenTab, { skipAuth: skipAuth });
     
     // Load tasks for current Settings tab
     loadTasksForSettingsTab(mainScreenTab);
@@ -12333,7 +12343,12 @@ function initializeTasksScreenButtons() {
     // Settings button
     const settingsBtn = document.getElementById('btnTasksSettings');
     if (settingsBtn) {
-      settingsBtn.onclick = openTasksSettings;
+      settingsBtn.onclick = () => {
+        console.log("[MANAGE TASKS TRACE] entry", { place: "initializeTasksScreenButtons(btnTasksSettings)", id: settingsBtn?.id, className: settingsBtn?.className });
+        console.log("[MANAGE TASKS TRACE] clicked", { fn: "initializeTasksScreenButtons", line: 12342 });
+        window.__ff_manageTasksBypassAuth = true;
+        openTasksSettings({ skipAuth: true });
+      };
       
       // Update button visibility based on admin access
       const updateButtonVisibility = () => {
@@ -16444,10 +16459,12 @@ window.updateTaskNoteDisplay = updateTaskNoteDisplay;
     
     // Initialize Settings button
     const settingsInitialized = initButton('tasksSettingsBtn', 'Settings', (e) => {
-      if (typeof openTasksAdminAccessModal === 'function') {
-        openTasksAdminAccessModal(e);
+      console.log("[MANAGE TASKS TRACE] entry", { place: "initButton(tasksSettingsBtn)", id: e?.currentTarget?.id, className: e?.currentTarget?.className });
+      if (typeof openTasksSettings === 'function') {
+        window.__ff_manageTasksBypassAuth = true;
+        openTasksSettings({ skipAuth: true });
       } else {
-        console.error('[Tasks] openTasksAdminAccessModal function not found');
+        console.error('[Tasks] openTasksSettings function not found');
       }
     });
     
