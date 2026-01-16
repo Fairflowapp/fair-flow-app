@@ -11152,35 +11152,32 @@ async function validateResetPinAndExecute() {
   
   if (!modal || !pinInput) return;
   
-  const pin = pinInput.value.trim();
+  const invalidMessage = "Invalid Admin PIN. Reset cancelled.";
+  const enteredPin = String(pinInput.value || "").trim();
   
-  if (!pin) {
-    errorMsg.textContent = "PIN is required.";
+  if (!enteredPin) {
+    errorMsg.textContent = invalidMessage;
+    setTimeout(() => pinInput.focus(), 100);
     return;
   }
   
   // Clear previous error
   errorMsg.textContent = "";
   
-  // Validate PIN using the helper from app.js
-  if (typeof window.validateResetPin === "function") {
-    try {
-      const isValid = await window.validateResetPin(pin);
-      if (!isValid) {
-        errorMsg.textContent = "Invalid Admin PIN. Reset cancelled.";
-        pinInput.value = "";
-        setTimeout(() => pinInput.focus(), 100);
-        return;
-      }
-    } catch (e) {
-      console.error("[RESET] Error validating PIN:", e);
-      errorMsg.textContent = "Invalid Admin PIN. Reset cancelled.";
-      pinInput.value = "";
-      setTimeout(() => pinInput.focus(), 100);
-      return;
-    }
-  } else {
-    errorMsg.textContent = "PIN validation function not available.";
+  const authResult = window.ffAuthByPin ? window.ffAuthByPin(enteredPin) : { ok: false };
+  const authOk = !!(authResult.ok && authResult.staff && window.ffIsAdminOrManagerPin && window.ffIsAdminOrManagerPin(enteredPin));
+  const matchedStaffIdOrNamePresent = !!(authResult.staff && (authResult.staff.id || authResult.staff.name));
+  
+  console.log("[RESET] Confirm clicked", {
+    enteredLen: enteredPin.length,
+    authOk: authOk,
+    matchedStaffIdOrNamePresent: matchedStaffIdOrNamePresent
+  });
+  
+  if (!authOk) {
+    errorMsg.textContent = invalidMessage;
+    pinInput.value = "";
+    setTimeout(() => pinInput.focus(), 100);
     return;
   }
   
