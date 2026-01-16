@@ -1731,22 +1731,6 @@ dialog footer button, .code-dialog footer button {
 
 
 
-        <h4>Codes</h4>
-
-        <div class="row">
-
-          <span class="pill">Admin code:
-
-            <input id="adminCode" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" style="height:32px;width:120px;padding:0 10px">
-
-            <button class="btn-mini" type="button" data-eye="adminCode">👁</button>
-
-          </span>
-
-        </div>
-
-
-
         <h4>Managers (name • code)</h4>
 
         <div id="managersBox"></div>
@@ -3970,14 +3954,6 @@ async function guardFinish(workerName, fn){
 
 async function openSettingsSecure(){
 
-  // Modal-based admin code prompt (with eye). No other logic changed.
-
-  if(!window.securePromptOnce){ return alert("Admin only"); }
-
-  const code = await window.securePromptOnce("Enter admin code");
-
-  if(code==null || !isAdminCode(code)) { alert("Admin only"); return; }
-
   renderSettings();
   
   settingsDlg.showModal();
@@ -4534,10 +4510,6 @@ if (queueBtn) {
 }
 
 function renderSettings(){
-
-  // Admin code
-
-  $("#adminCode").value=settings.adminCode||"";
 
   // Managers - only initialize if empty
 
@@ -5517,8 +5489,6 @@ $("#addWorker").onclick=() => {
 async function saveSettings(e){
 
   // collect
-
-  settings.adminCode=$("#adminCode").value||"5050";
 
   // managers
 
