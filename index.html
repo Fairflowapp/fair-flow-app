@@ -1731,11 +1731,13 @@ dialog footer button, .code-dialog footer button {
 
 
 
-        <h4>Managers (name • code)</h4>
+        <div id="legacySettingsManagersBlock" style="display:none;">
+          <h4>Managers (name • code)</h4>
 
-        <div id="managersBox"></div>
+          <div id="managersBox"></div>
 
-        <div class="row"><button id="addManager" type="button" class="btn-mini">+ Add manager</button></div>
+          <div class="row"><button id="addManager" type="button" class="btn-mini">+ Add manager</button></div>
+        </div>
 
 
 
@@ -1759,18 +1761,20 @@ dialog footer button, .code-dialog footer button {
 
 
 
-        <!-- NEW STAFF MEMBER Form Container -->
-        <div class="staffNewFormContainer" style="margin-top:32px;padding:20px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-          <!-- Tab Header -->
-          <div style="background:var(--muted);border-radius:8px 8px 0 0;padding:10px 16px;margin:-20px -20px 20px -20px;border-bottom:1px solid var(--border);">
-            <h4 style="margin:0;font-size:11px;font-weight:600;color:#111827;text-transform:uppercase;letter-spacing:0.5px;">NEW STAFF MEMBER</h4>
+        <div id="legacySettingsTechniciansBlock" style="display:none;">
+          <!-- NEW STAFF MEMBER Form Container -->
+          <div class="staffNewFormContainer" style="margin-top:32px;padding:20px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+            <!-- Tab Header -->
+            <div style="background:var(--muted);border-radius:8px 8px 0 0;padding:10px 16px;margin:-20px -20px 20px -20px;border-bottom:1px solid var(--border);">
+              <h4 style="margin:0;font-size:11px;font-weight:600;color:#111827;text-transform:uppercase;letter-spacing:0.5px;">NEW STAFF MEMBER</h4>
+            </div>
+
+            <div id="workersBox"></div>
+
+            <div class="row" style="margin-top:16px;"><button id="addWorker" type="button" class="btn-mini" style="font-size:11px;padding:4px 10px;">+ Add worker</button></div>
+
+            <div class="row small" style="font-size:11px;color:#6b7280;margin-top:8px;">Only these names can join. Duplicates are blocked.</div>
           </div>
-
-          <div id="workersBox"></div>
-
-          <div class="row" style="margin-top:16px;"><button id="addWorker" type="button" class="btn-mini" style="font-size:11px;padding:4px 10px;">+ Add worker</button></div>
-
-          <div class="row small" style="font-size:11px;color:#6b7280;margin-top:8px;">Only these names can join. Duplicates are blocked.</div>
         </div>
 
       </div>
