@@ -87,6 +87,13 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:'Avenir Next', 
 .title{display:flex;flex-direction:column}
 
 .appname{font-size:12px;font-weight:900;letter-spacing:.3px}
+.ff-app-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6B7280;
+}
 
 header .brand{display:flex;align-items:center;gap:1rem}
 
@@ -1198,7 +1205,7 @@ dialog footer button, .code-dialog footer button {
 
         <div class="title">
 
-          <div class="appname">FAIR FLOW APP</div>
+          <div class="appname ff-app-title">FAIR FLOW APP</div>
 
           <div class="owner owner-row" id="salonName">Owner: <strong>Shiri</strong></div>
 
@@ -2989,26 +2996,19 @@ function renderSelect(){
   try {
     const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
     const staffList = Array.isArray(store.staff) ? store.staff : [];
-    // Filter to only active Technicians (exclude archived, Admins, and Managers)
+    // Filter to only active Technicians (role-based)
     technicians = staffList.filter(s => 
       s.isArchived !== true && 
       s.name && 
-      s.name.trim() && 
-      s.isAdmin !== true && 
-      s.isManager !== true
+      s.name.trim() &&
+      typeof s.role === 'string' &&
+      s.role.trim().toLowerCase() === 'technician'
     );
     console.log('[renderSelect] Loaded', technicians.length, 'active technicians from ff_staff_v1');
   } catch (e) {
     console.error('[renderSelect] Error loading from ff_staff_v1:', e);
   }
-  
-  // Backward compatibility: If ff_staff_v1 is missing or has zero staff, fall back to settings.workers
-  if (technicians.length === 0) {
-    console.log('[renderSelect] No staff in ff_staff_v1, falling back to settings.workers');
-    technicians = loadTechniciansFromSettings();
-    console.log('[renderSelect] Loaded', technicians.length, 'technicians from settings.workers (fallback)');
-  }
-  
+
   console.log('[renderSelect] Rendering dropdown with', technicians.length, 'technicians');
   
   selectEl.innerHTML="";
@@ -3022,7 +3022,7 @@ function renderSelect(){
   selectEl.removeAttribute('disabled');
 
   if (technicians.length === 0) {
-    console.warn('[renderSelect] No technicians found in ff_staff_v1 or settings.workers');
+    console.warn('[renderSelect] No technicians found in ff_staff_v1');
     // Add a placeholder option
     const placeholder = document.createElement("option");
     placeholder.value = "";
@@ -6098,6 +6098,12 @@ async function handleReorderClick() {
   console.log('Reorder clicked');
   ensureTasksScreenHidden();
 
+  if (reorderMode) {
+    // Currently in reorder mode - exiting without auth
+    exitReorderMode();
+    return;
+  }
+
   // Secure prompt just for REORDER (no changes elsewhere)
 
   let ok = false;
@@ -6143,10 +6149,7 @@ async function handleReorderClick() {
     window.__ff_lastValidatedCode = { role: role, name: staff.name || '' };
 
     // Check current state and toggle accordingly
-    if (reorderMode) {
-      // Currently in reorder mode - exiting (cleanup function handles setting flag to false)
-      exitReorderMode();
-    } else {
+    if (!reorderMode) {
       // Currently not in reorder mode - entering
       reorderMode = true;
       // Also set on window for global access
@@ -20449,21 +20452,30 @@ function openAddTechDialog(){
 
   const options = [];
 
-  settings.workers.forEach(w => {
+  let staffList = [];
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    staffList = Array.isArray(store.staff) ? store.staff : [];
+  } catch (e) {
+    console.error('[AddTech] Error loading ff_staff_v1:', e);
+  }
 
-    if (!availableNames.has(w.name)) {
-
+  staffList.forEach(w => {
+    if (
+      w &&
+      w.name &&
+      w.name.trim() &&
+      w.isArchived !== true &&
+      typeof w.role === 'string' &&
+      w.role.trim().toLowerCase() === 'technician' &&
+      !availableNames.has(w.name)
+    ) {
       const opt = document.createElement('option');
-
       opt.value = w.name;
-
       opt.textContent = w.name;
-
       addTechSelect.appendChild(opt);
       options.push(w.name);
-
     }
-
   });
 
   // Log technician options for debugging
