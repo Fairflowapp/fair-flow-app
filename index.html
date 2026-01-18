@@ -3811,6 +3811,227 @@ async function showResetPinPrompt() {
   return code; // Valid code
 }
 
+// Helper function to show RETURN PIN prompt with inline error handling
+async function showReturnPinPrompt() {
+  if (!window.securePromptOnce) {
+    // Fallback: native prompt if securePromptOnce not available
+    const code = prompt("Enter Admin/Manager PIN to RETURN");
+    if (code == null) return null;
+    if (window.ffIsAdminOrManagerPin && window.ffIsAdminOrManagerPin(code)) {
+      return code;
+    } else {
+      alert('Invalid Admin/Manager PIN');
+      return null;
+    }
+  }
+  
+  // Use securePromptOnce but handle errors inline
+  let code = await window.securePromptOnce("Enter Admin/Manager PIN to RETURN");
+  if (code == null) {
+    return null; // User cancelled
+  }
+  
+  // Verify PIN using staff-based validation (Admin or Manager PIN)
+  const isValid = window.ffIsAdminOrManagerPin && window.ffIsAdminOrManagerPin(code);
+  if (!isValid) {
+    // Show error inline - reopen modal with error message
+    const overlay = document.getElementById('codePromptOverlay');
+    const msg = document.getElementById('codePromptMsg');
+    const input = document.getElementById('codePromptInput');
+    
+    if (overlay && msg && input) {
+      // Update message
+      msg.textContent = 'Enter Admin/Manager PIN to RETURN';
+      msg.style.color = '#111';
+      
+      // Clear input
+      input.value = '';
+      input.type = 'password';
+      
+      // Create or update error element
+      let errorEl = document.getElementById('codePromptError');
+      if (!errorEl) {
+        errorEl = document.createElement('div');
+        errorEl.id = 'codePromptError';
+        errorEl.style.cssText = 'color:#dc2626;font-size:13px;margin-top:8px;margin-bottom:8px;text-align:center;';
+        // Insert error before the "Forgot Admin PIN?" button container
+        const forgotPinContainer = document.getElementById('codePromptForgotPin')?.parentElement;
+        if (forgotPinContainer && forgotPinContainer.parentElement) {
+          forgotPinContainer.parentElement.insertBefore(errorEl, forgotPinContainer);
+        } else {
+          // Fallback: insert before buttons
+          const buttonsContainer = document.getElementById('codePromptOk')?.parentElement;
+          if (buttonsContainer && buttonsContainer.parentElement) {
+            buttonsContainer.parentElement.insertBefore(errorEl, buttonsContainer);
+          }
+        }
+      }
+      errorEl.textContent = 'Invalid Admin/Manager PIN';
+      errorEl.style.display = 'block';
+      
+      // Show modal again
+      overlay.style.display = 'flex';
+      overlay.style.pointerEvents = 'auto';
+      overlay.style.visibility = 'visible';
+      
+      // Focus input
+      setTimeout(() => input.focus(), 50);
+      
+      // Wait for retry or cancel
+      const retryCode = await window.securePromptOnce("Enter Admin/Manager PIN to RETURN");
+      if (retryCode == null) {
+        // Hide error on cancel
+        if (errorEl) errorEl.style.display = 'none';
+        return null; // User cancelled
+      }
+      
+      // Verify retry code using staff-based validation (Admin or Manager PIN)
+      const retryValid = window.ffIsAdminOrManagerPin && window.ffIsAdminOrManagerPin(retryCode);
+      if (!retryValid) {
+        // Still wrong - update error message
+        if (errorEl) {
+          errorEl.textContent = 'Invalid Admin/Manager PIN';
+        }
+        return null;
+      }
+      
+      // Retry code is valid
+      if (errorEl) errorEl.style.display = 'none';
+      return retryCode;
+    } else {
+      // Modal elements not found - fallback to alert
+      alert('Invalid Admin/Manager PIN');
+      return null;
+    }
+  }
+  
+  return code; // Valid code
+}
+
+// Helper function to show RETURN confirmation modal
+function showReturnConfirmation() {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('resetConfirmOverlay');
+    const msg = document.getElementById('resetConfirmMsg');
+    const cancelBtn = document.getElementById('resetConfirmCancel');
+    const continueBtn = document.getElementById('resetConfirmContinue');
+
+    if (!overlay || !msg || !cancelBtn || !continueBtn) {
+      resolve(confirm("Are you sure you want to return this task to My List and make it available for selection again?"));
+      return;
+    }
+
+    const originalMsg = msg.textContent;
+    const originalCancelText = cancelBtn.textContent;
+    const originalContinueText = continueBtn.textContent;
+
+    msg.textContent = "Are you sure you want to return this task to My List and make it available for selection again?";
+
+    // Show modal
+    overlay.style.display = 'flex';
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.visibility = 'visible';
+
+    // Clean up previous handlers
+    const newCancelBtn = cancelBtn.cloneNode(true);
+    const newContinueBtn = continueBtn.cloneNode(true);
+    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+    continueBtn.parentNode.replaceChild(newContinueBtn, continueBtn);
+
+    newCancelBtn.textContent = 'Cancel';
+    newContinueBtn.textContent = 'Yes, Return Task';
+
+    const cleanup = (result) => {
+      hideResetConfirmation();
+      const currentMsg = document.getElementById('resetConfirmMsg');
+      const currentCancel = document.getElementById('resetConfirmCancel');
+      const currentContinue = document.getElementById('resetConfirmContinue');
+      if (currentMsg) currentMsg.textContent = originalMsg;
+      if (currentCancel) currentCancel.textContent = originalCancelText;
+      if (currentContinue) currentContinue.textContent = originalContinueText;
+      overlay.removeEventListener('click', overlayClickHandler);
+      document.removeEventListener('keydown', escapeHandler);
+      resolve(result);
+    };
+
+    newCancelBtn.onclick = () => cleanup(false);
+    newContinueBtn.onclick = () => cleanup(true);
+
+    const overlayClickHandler = (e) => {
+      if (e.target === overlay) {
+        cleanup(false);
+      }
+    };
+    overlay.addEventListener('click', overlayClickHandler);
+
+    const escapeHandler = (e) => {
+      if (e.key === 'Escape') {
+        cleanup(false);
+      }
+    };
+    document.addEventListener('keydown', escapeHandler);
+  });
+}
+
+function returnPendingTaskToMyList(tab, taskId) {
+  if (!tab || !taskId) {
+    console.warn('[Tasks] returnPendingTaskToMyList: Missing tab or taskId');
+    return false;
+  }
+
+  const taskIdStr = String(taskId);
+  const pendingList = getTabTasks(tab, 'pending');
+  const pendingIndex = pendingList.findIndex(task => {
+    if (!task || typeof task !== 'object') return false;
+    const id = task.taskId || task.id;
+    return id != null && String(id) === taskIdStr;
+  });
+
+  if (pendingIndex === -1) {
+    console.warn('[Tasks] returnPendingTaskToMyList: Task not found in pending list', { tab, taskId });
+    return false;
+  }
+
+  const pendingTask = pendingList[pendingIndex];
+  pendingList.splice(pendingIndex, 1);
+  saveTabTasks(tab, 'pending', pendingList);
+
+  const activeList = getTabTasks(tab, 'active');
+  const activeIndex = activeList.findIndex(task => {
+    if (!task || typeof task !== 'object') return false;
+    const id = task.taskId || task.id;
+    return id != null && String(id) === taskIdStr;
+  });
+
+  if (activeIndex >= 0) {
+    const updated = { ...activeList[activeIndex] };
+    updated.assignedTo = null;
+    if ('assignedToId' in updated) updated.assignedToId = null;
+    if ('assignedToName' in updated) updated.assignedToName = null;
+    if ('status' in updated) updated.status = null;
+    activeList[activeIndex] = updated;
+  } else {
+    const baseId = (pendingTask && (pendingTask.taskId || pendingTask.id)) ? (pendingTask.taskId || pendingTask.id) : taskId;
+    const title = pendingTask && (pendingTask.title || pendingTask.name || pendingTask.taskName) ? (pendingTask.title || pendingTask.name || pendingTask.taskName) : '';
+    const instructions = pendingTask && pendingTask.instructions ? pendingTask.instructions : '';
+    activeList.push({
+      id: baseId,
+      taskId: baseId,
+      title: title,
+      instructions: instructions,
+      active: true,
+      status: null,
+      assignedTo: null,
+      completedBy: null,
+      completedAt: null
+    });
+  }
+
+  saveTabTasks(tab, 'active', activeList);
+  renderTasksList(tab);
+  return true;
+}
+
 
 
 // Guards
@@ -10117,6 +10338,7 @@ function renderTasksList(tab, opts) {
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 ${infoButtonHtml}
+                <button type="button" class="task-return-arrow" data-task-id="${keyId || ''}">↺</button>
                 <button type="button" class="task-done-btn" data-task-id="${keyId || ''}">MARK DONE</button>
               </div>
             </div>
@@ -10129,8 +10351,42 @@ function renderTasksList(tab, opts) {
         });
         
         // Rebind MARK DONE buttons after rendering tasks
+        document.querySelectorAll(".task-return-arrow").forEach(btn => {
+          btn.style.background = 'none';
+          btn.style.border = 'none';
+          btn.style.color = '#d0d0d0';
+          btn.style.fontSize = '16px';
+          btn.style.padding = '0';
+          btn.style.cursor = 'pointer';
+          btn.addEventListener('mouseenter', () => {
+            btn.style.color = '#888';
+          });
+          btn.addEventListener('mouseleave', () => {
+            btn.style.color = '#d0d0d0';
+          });
+          btn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            btn.style.color = 'red';
+            const taskId = btn.getAttribute("data-task-id");
+            console.log("[TASK_RETURN_CLICK]", { taskId });
+            const code = await showReturnPinPrompt();
+            if (!code) return;
+            const confirmed = await showReturnConfirmation();
+            if (!confirmed) return;
+            const tab = typeof window.getCurrentTasksTab === 'function'
+              ? window.getCurrentTasksTab()
+              : (window.currentTasksTab || 'opening');
+            const ok = returnPendingTaskToMyList(tab, taskId);
+            if (!ok) {
+              console.warn('[Tasks] Return action failed', { tab, taskId });
+            }
+          });
+        });
+
         document.querySelectorAll(".task-done-btn").forEach(btn => {
           btn.addEventListener("click", (e) => {
+            e.preventDefault();
             e.stopPropagation();
             const taskId = btn.getAttribute("data-task-id");
             if (window.openPinModalForDone) {
@@ -17363,12 +17619,12 @@ function renderTasks() {
     const taskSpan = document.createElement('span');
     taskSpan.textContent = taskName;
     taskSpan.style.cssText = 'font-size:13px;color:var(--text);';
-    
+
     leftDiv.appendChild(statusDot);
     leftDiv.appendChild(taskSpan);
     
     const rightDiv = document.createElement('div');
-    rightDiv.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    rightDiv.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;';
     
     // Info button (only show if task has instructions)
     if (taskInstructions && taskInstructions.trim() !== '') {
@@ -18978,10 +19234,28 @@ function renderPendingTasks() {
         nameSpan.style.cssText = 'font-size:11px;font-weight:700;color:var(--text);font-family:inherit;';
         rightDiv.appendChild(nameSpan);
       }
-      
+
+      const taskId = (taskObj && (taskObj.taskId || taskObj.id)) ? (taskObj.taskId || taskObj.id) : taskName;
+      const taskTitle = taskName;
+
+      const pendingActionBtnClass = 'btn-mini';
+
+      const returnBtn = document.createElement('button');
+      returnBtn.className = 'task-done-btn';
+      returnBtn.type = 'button';
+      returnBtn.textContent = 'RETURN';
+      returnBtn.style.flex = '0 0 auto';
+      returnBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log("[TASK_RETURN_UI_CLICK]", { taskId });
+      });
+      rightDiv.appendChild(returnBtn);
+
       const markDoneBtn = document.createElement('button');
-      markDoneBtn.className = 'btn-mini';
-      markDoneBtn.textContent = 'Mark Done';
+      markDoneBtn.className = pendingActionBtnClass;
+      markDoneBtn.textContent = 'MARK DONE (REAL)';
+      markDoneBtn.style.flex = '0 0 auto';
       markDoneBtn.style.fontSize = '11px';
       markDoneBtn.style.padding = '6px 10px';
       markDoneBtn.type = 'button';
