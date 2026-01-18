@@ -10369,7 +10369,6 @@ function renderTasksList(tab, opts) {
             e.stopPropagation();
             btn.style.color = 'red';
             const taskId = btn.getAttribute("data-task-id");
-            console.log("[TASK_RETURN_CLICK]", { taskId });
             const code = await showReturnPinPrompt();
             if (!code) return;
             const confirmed = await showReturnConfirmation();
@@ -10377,9 +10376,39 @@ function renderTasksList(tab, opts) {
             const tab = typeof window.getCurrentTasksTab === 'function'
               ? window.getCurrentTasksTab()
               : (window.currentTasksTab || 'opening');
+            const pendingList = getTabTasks(tab, 'pending');
+            const pendingTask = pendingList.find(task => {
+              if (!task || typeof task !== 'object') return false;
+              const id = task.taskId || task.id;
+              return id != null && String(id) === String(taskId);
+            });
+            const taskTitle = pendingTask
+              ? (pendingTask.title || pendingTask.name || pendingTask.taskName || '')
+              : '';
+            const workerName = pendingTask
+              ? (pendingTask.assignedTo || pendingTask.assignedToName || '')
+              : '';
             const ok = returnPendingTaskToMyList(tab, taskId);
             if (!ok) {
               console.warn('[Tasks] Return action failed', { tab, taskId });
+              return;
+            }
+            if (typeof addHistoryEntry === 'function') {
+              let actorRole = 'Admin';
+              let actorName = 'Admin';
+              if (window.ffAuthByPin) {
+                const authResult = window.ffAuthByPin(code);
+                if (authResult && authResult.ok && authResult.staff) {
+                  const staff = authResult.staff;
+                  actorName = staff.name || actorName;
+                  if (staff.isAdmin === true) {
+                    actorRole = 'Admin';
+                  } else if (staff.isManager === true) {
+                    actorRole = 'Manager';
+                  }
+                }
+              }
+              addHistoryEntry(`Task Returned: ${taskTitle}`, actorRole, actorName, workerName, 'tasks');
             }
           });
         });
