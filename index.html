@@ -875,6 +875,20 @@ dialog footer button, .code-dialog footer button {
 .staff-modal-overlay {
   pointer-events: none;
 }
+.staff-sidebar .staff-sidebar-item {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+}
+.staff-sidebar .staff-sidebar-item:hover {
+  background: rgba(99, 102, 241, 0.08);
+}
+.staff-sidebar .staff-sidebar-item.is-selected {
+  background: rgba(99, 102, 241, 0.12);
+  border-left-color: #6366f1;
+}
 .staff-modal-content,
 .staff-sidebar,
 .staff-content-area,
@@ -13982,11 +13996,14 @@ function initializeAppsPanel() {
       
       // Filter based on toggle state: if showArchivedStaff is true, show only archived; otherwise show only active
       // Admins: staff where isAdmin === true
-      const admins = staff.filter(a => a.isAdmin === true && (showArchivedStaff ? a.isArchived === true : a.isArchived !== true));
+      const admins = staff.filter(a => a.isAdmin === true && (showArchivedStaff ? a.isArchived === true : a.isArchived !== true))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: "base" }));
       // Managers: staff where isManager === true AND isAdmin !== true (admins should not appear in managers list)
-      const managers = staff.filter(m => m.isManager === true && m.isAdmin !== true && (showArchivedStaff ? m.isArchived === true : m.isArchived !== true));
+      const managers = staff.filter(m => m.isManager === true && m.isAdmin !== true && (showArchivedStaff ? m.isArchived === true : m.isArchived !== true))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: "base" }));
       // Technicians: the rest (not admin, not manager)
-      const technicians = staff.filter(t => t.isAdmin !== true && t.isManager !== true && (showArchivedStaff ? t.isArchived === true : t.isArchived !== true));
+      const technicians = staff.filter(t => t.isAdmin !== true && t.isManager !== true && (showArchivedStaff ? t.isArchived === true : t.isArchived !== true))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: "base" }));
       
       // Render admins based on toggle state
       if (admins.length === 0) {
@@ -13997,7 +14014,8 @@ function initializeAppsPanel() {
           const isSelected = selectedStaffId === a.id;
           const opacity = showArchivedStaff ? '0.6' : '1';
           const textColor = showArchivedStaff ? '#6b7280' : '#111827';
-          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;opacity:${opacity};`;
+          item.className = `staff-sidebar-item${isSelected ? ' is-selected' : ''}`;
+          item.style.cssText = `display:flex;align-items:center;padding:6px 10px;cursor:pointer;transition:background-color 0.15s;opacity:${opacity};`;
           item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(a.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}</span>`;
           item.onclick = function() {
             selectStaffMember(a.id);
@@ -14015,7 +14033,8 @@ function initializeAppsPanel() {
           const isSelected = selectedStaffId === m.id;
           const opacity = showArchivedStaff ? '0.6' : '1';
           const textColor = showArchivedStaff ? '#6b7280' : '#111827';
-          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;opacity:${opacity};`;
+          item.className = `staff-sidebar-item${isSelected ? ' is-selected' : ''}`;
+          item.style.cssText = `display:flex;align-items:center;padding:6px 10px;cursor:pointer;transition:background-color 0.15s;opacity:${opacity};`;
           item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(m.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}</span>`;
           item.onclick = function() {
             selectStaffMember(m.id);
@@ -14033,7 +14052,8 @@ function initializeAppsPanel() {
           const isSelected = selectedStaffId === t.id;
           const opacity = showArchivedStaff ? '0.6' : '1';
           const textColor = showArchivedStaff ? '#6b7280' : '#111827';
-          item.style.cssText = `display:flex;align-items:center;padding:10px 12px;background:${isSelected ? '#e0e7ff' : '#f9fafb'};border:1px solid ${isSelected ? '#6366f1' : 'var(--border)'};border-radius:6px;cursor:pointer;transition:all 0.2s;opacity:${opacity};`;
+          item.className = `staff-sidebar-item${isSelected ? ' is-selected' : ''}`;
+          item.style.cssText = `display:flex;align-items:center;padding:6px 10px;cursor:pointer;transition:background-color 0.15s;opacity:${opacity};`;
           item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(t.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}</span>`;
           item.onclick = function() {
             selectStaffMember(t.id);
@@ -24155,19 +24175,19 @@ function hookSettingsGuard_DISABLED(){
           </button>
         </div>
         <!-- Admins Section -->
-        <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);padding-top:20px;">
-          <h3 id="staffAdminsHeader" style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Admins</h3>
-          <div id="staffAdminsList" style="display:flex;flex-direction:column;gap:8px;"></div>
+        <div style="padding:0 16px 12px 16px;border-top:1px solid var(--border);padding-top:12px;">
+          <h3 id="staffAdminsHeader" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Admins</h3>
+          <div id="staffAdminsList" style="display:flex;flex-direction:column;gap:4px;"></div>
         </div>
         <!-- Managers Section -->
-        <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);margin-top:8px;padding-top:20px;">
-          <h3 id="staffManagersHeader" style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Managers</h3>
-          <div id="staffManagersList" style="display:flex;flex-direction:column;gap:8px;"></div>
+        <div style="padding:0 16px 12px 16px;border-top:1px solid var(--border);margin-top:4px;padding-top:12px;">
+          <h3 id="staffManagersHeader" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Managers</h3>
+          <div id="staffManagersList" style="display:flex;flex-direction:column;gap:4px;"></div>
         </div>
         <!-- Technicians Section -->
-        <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);margin-top:8px;padding-top:20px;">
-          <h3 id="staffTechniciansHeader" style="margin:0 0 12px 0;font-size:12px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Technicians</h3>
-          <div id="staffTechniciansList" style="display:flex;flex-direction:column;gap:8px;"></div>
+        <div style="padding:0 16px 12px 16px;border-top:1px solid var(--border);margin-top:4px;padding-top:12px;">
+          <h3 id="staffTechniciansHeader" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Technicians</h3>
+          <div id="staffTechniciansList" style="display:flex;flex-direction:column;gap:4px;"></div>
         </div>
         <!-- Show Archived Staff Toggle -->
         <div style="padding:0 20px 20px 20px;border-top:1px solid var(--border);margin-top:8px;padding-top:16px;">
