@@ -3160,7 +3160,7 @@ function renderQueue(){
 
     start.onclick=() =>guardStart(q.name, i, ()=>startSpecific(i));
 
-    hold.onclick=() =>guardHold(()=>toggleHold(i));
+    hold.onclick=() =>{ window.__ff_holdTargetName = q.name; window.__ff_holdWasHeld = !!q.held; guardHold(()=>toggleHold(i)); };
 
     ctrls.append(hold,start);
 
@@ -21598,7 +21598,59 @@ function hookSettingsGuard_DISABLED(){
     
     // Wire OK button
     okBtn.onclick = () => {
-      const auth = ffAuthAdminOrManagerByCodeFromHoldModal();
+      const pinResult = ffGetVisibleHoldCodeInput(document);
+      const enteredPin = String(pinResult?.value || "").trim();
+      let auth = { ok: false, reason: "empty", enteredPin: "" };
+      
+      if (!enteredPin) {
+        auth = { ok: false, reason: "empty", enteredPin: "" };
+      } else if (!window.ffAuthByPin) {
+        auth = { ok: false, reason: "no_match", enteredPin: enteredPin };
+      } else {
+        const authResult = window.ffAuthByPin(enteredPin);
+        if (!authResult.ok || !authResult.staff) {
+          auth = { ok: false, reason: "no_match", enteredPin: enteredPin };
+        } else {
+          const staff = authResult.staff;
+          const roleStr = String(staff.role || "").toLowerCase();
+          const rolesArray = Array.isArray(staff.roles) ? staff.roles.map(r => String(r).toLowerCase()) : [];
+          const isAdmin = staff.isAdmin === true || roleStr === "admin" || rolesArray.includes("admin");
+          const isManager = staff.isManager === true || roleStr === "manager" || rolesArray.includes("manager");
+          const isAdminOrManager = isAdmin || isManager;
+          const isReleaseAction = window.__ff_holdWasHeld === true;
+          let isSelfRelease = false;
+          
+          if (isReleaseAction) {
+            const targetName = window.__ff_holdTargetName || "";
+            if (targetName && staff.name && String(staff.name) === String(targetName)) {
+              isSelfRelease = true;
+            } else if (targetName && staff.id) {
+              try {
+                const store = typeof ffGetStaffStore === 'function' ? ffGetStaffStore() : (JSON.parse(localStorage.getItem("ff_staff_v1") || "{}") || {});
+                const staffList = Array.isArray(store.staff) ? store.staff : [];
+                const targetStaff = staffList.find(s => s.name === targetName && s.isArchived !== true);
+                if (targetStaff && targetStaff.id && staff.id === targetStaff.id) {
+                  isSelfRelease = true;
+                }
+              } catch (e) {}
+            }
+          }
+          
+          const isAuthorized = isReleaseAction ? (isAdminOrManager || isSelfRelease) : isAdminOrManager;
+          if (!isAuthorized) {
+            auth = { ok: false, reason: "not_authorized", enteredPin: enteredPin };
+          } else {
+            auth = { 
+              ok: true, 
+              staffId: staff.id || staff.staffId || null, 
+              name: staff.name || "", 
+              isAdmin: isAdmin, 
+              isManager: isManager, 
+              enteredPin: enteredPin 
+            };
+          }
+        }
+      }
       console.log("[HOLD AUTH] result:", auth);
       
       if (!auth.ok) {
@@ -21624,17 +21676,17 @@ function hookSettingsGuard_DISABLED(){
       // Close modal
       hideHoldModal();
       
-      // Store authenticated manager info
-      if (auth.staffId) {
+      // Store authenticated manager info (admin/manager only)
+      if ((auth.isAdmin || auth.isManager) && auth.staffId) {
         window.__ff_authedManagerId = auth.staffId;
       }
-      if (auth.name) {
+      if ((auth.isAdmin || auth.isManager) && auth.name) {
         window.__ff_authedManagerName = auth.name;
       }
       
       // Set actor info for history logging
       try {
-        let actorRole = auth.isAdmin ? "Admin" : "Manager";
+        let actorRole = auth.isAdmin ? "Admin" : (auth.isManager ? "Manager" : "Tech");
         window.__ff_actorRole = actorRole;
         window.__ff_actorName = auth.name || "";
         window.__ff_lastValidatedCode = { role: actorRole, name: auth.name || "" };
