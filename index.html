@@ -1037,15 +1037,64 @@ dialog footer button, .code-dialog footer button {
 
 <style>#reorderBtn.active{filter:brightness(1.2);box-shadow:0 0 0 2px rgba(255,255,255,.35) inset}</style>
 
-  <!-- Firebase v9 Modular SDK (Auth only) -->
+  <!-- Firebase compat SDK (globals) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-functions-compat.js"></script>
   <script type="module">
-    import { getApps, getApp, initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js';
-    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js';
-    
-    // Make Firebase functions available globally
+    import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
+    import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app-check.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
+    import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-functions.js";
+    window.getAuth = getAuth;
+    window.onAuthStateChanged = onAuthStateChanged;
+    window.getFunctions = getFunctions;
+    window.httpsCallable = httpsCallable;
+    window.__initFirebaseModular = () => {
+      if (window.__firebaseApp) return window.__firebaseApp;
+      const config = window.firebaseConfig;
+      if (!config) return null;
+      const apps = getApps();
+      const app = apps.length ? getApp() : initializeApp(config);
+      try {
+        if (window.firebase && (!firebase.apps || firebase.apps.length === 0)) {
+          firebase.initializeApp(firebaseConfig);
+        }
+      } catch (e) {
+        console.warn("compat initializeApp skipped:", e);
+      }
+      window.__firebaseApp = app;
+      const functions = getFunctions(app, "us-central1");
+      window.__sendStaffInviteFn = httpsCallable(functions, "sendStaffInvite");
+      if (!window.__appCheckInitialized) {
+        console.warn("[AppCheck] disabled temporarily for debugging");
+        // Optional for local/dev testing:
+        // self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+        // initializeAppCheck(app, {
+        //   provider: new ReCaptchaV3Provider("<RECAPTCHA_V3_SITE_KEY>"),
+        //   isTokenAutoRefreshEnabled: true,
+        // });
+        // window.__appCheckInitialized = true;
+        // console.log("[AppCheck] initialized");
+      }
+      return app;
+    };
+    window.__initFirebaseModular();
+  </script>
+  <script>
+    // Make Firebase functions available globally (compat)
     window.__firebaseApp = null;
     window.__firebaseAuth = null;
-    window.__firebaseAuthFunctions = { getApps, getApp, initializeApp, getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut };
+    window.__firebaseAuthFunctions = {
+      getApps: () => firebase.apps || [],
+      getApp: () => firebase.app(),
+      initializeApp: (config) => firebase.initializeApp(config),
+      getAuth: (appInstance) => window.getAuth(appInstance || window.__firebaseApp),
+      onAuthStateChanged: (authInstance, cb) => window.onAuthStateChanged(authInstance, cb),
+      signInWithEmailAndPassword: (authInstance, email, password) => authInstance.signInWithEmailAndPassword(email, password),
+      signOut: (authInstance) => authInstance.signOut(),
+      sendPasswordResetEmail: (authInstance, email) => authInstance.sendPasswordResetEmail(email)
+    };
   </script>
 </head>
 
@@ -1899,15 +1948,20 @@ console.log('[BUILD MARKER] app.js logic loaded at', new Date().toISOString());
 // ===== FIREBASE AUTH FOUNDATION =====
 // Minimal Firebase Auth wiring (no full auth UI)
 
-// Firebase config placeholder (TODO: Replace with actual config)
-const firebaseConfig = window.firebaseConfig || {
-  apiKey: "TODO_REPLACE_WITH_ACTUAL_API_KEY",
-  authDomain: "TODO_REPLACE_WITH_ACTUAL_AUTH_DOMAIN",
-  projectId: "TODO_REPLACE_WITH_ACTUAL_PROJECT_ID",
-  storageBucket: "TODO_REPLACE_WITH_ACTUAL_STORAGE_BUCKET",
-  messagingSenderId: "TODO_REPLACE_WITH_ACTUAL_MESSAGING_SENDER_ID",
-  appId: "TODO_REPLACE_WITH_ACTUAL_APP_ID"
+const firebaseConfig = {
+  apiKey: "AIzaSyCoj6A2Eoa0uDrelIJxycZCL6cTw570FCI",
+  authDomain: "fairflowapp-db841.firebaseapp.com",
+  projectId: "fairflowapp-db841",
+  storageBucket: "fairflowapp-db841.firebasestorage.app",
+  messagingSenderId: "823186963319",
+  appId: "1:823186963319:web:2bc2d386311b2898643f72",
+  measurementId: "G-S7T9WN343B"
 };
+window.firebaseConfig = firebaseConfig;
+
+if (typeof window !== 'undefined' && typeof window.__initFirebaseModular === 'function') {
+  window.__initFirebaseModular();
+}
 
 // Initialize Firebase Auth
 let ffAuth = null;
@@ -1922,18 +1976,18 @@ async function initFirebaseAuth() {
       return;
     }
     
-    const { getApps, getApp, initializeApp, getAuth, onAuthStateChanged } = window.__firebaseAuthFunctions;
+    const { getAuth, onAuthStateChanged } = window.__firebaseAuthFunctions;
     
     // Initialize Firebase app (avoid duplicate initialization)
-    let app;
-    if (window.__firebaseApp) {
-      app = window.__firebaseApp;
-    } else {
-      const apps = getApps();
-      app = apps.length ? getApp() : initializeApp(firebaseConfig);
-      window.__firebaseApp = app;
+    let app = window.__firebaseApp;
+    if (!app && typeof window.__initFirebaseModular === 'function') {
+      app = window.__initFirebaseModular();
     }
-    
+    if (!app) {
+      console.warn('[AUTH] Firebase app not initialized yet, retrying...');
+      setTimeout(initFirebaseAuth, 100);
+      return;
+    }
     // Get Auth instance
     ffAuth = getAuth(app);
     window.ffAuth = ffAuth;
@@ -10390,7 +10444,8 @@ function renderTasksList(tab, opts) {
             if (!code) return;
             const confirmed = await showReturnConfirmation();
             if (!confirmed) return;
-            const tab = typeof window.getCurrentTasksTab === 'function'
+            const tab = typeof window.currentTasksTab === 'function'
+            TasksTab === 'function'
               ? window.getCurrentTasksTab()
               : (window.currentTasksTab || 'opening');
             const pendingList = getTabTasks(tab, 'pending');
@@ -13720,19 +13775,81 @@ function initializeAppsPanel() {
     }
   }
   
-  // Send invite (sets invited flag only)
-  function ffStaffSendInvite(staffId) {
+  // Send invite (status-only update, no email/auth)
+  async function ffStaffSendInvite(staffId) {
+    alert('ffStaffSendInvite called!');
     try {
       const staffStore = ffGetStaffStore();
       const staffIndex = staffStore.staff.findIndex(s => s.id === staffId);
       if (staffIndex === -1) return;
       
-      staffStore.staff[staffIndex].invited = true;
-      staffStore.staff[staffIndex].invitedAt = new Date().toISOString();
-      ffSaveStaffStore(staffStore);
+      const staff = staffStore.staff[staffIndex];
+      const now = new Date();
+      const existingInvite = staff && typeof staff.invite === 'object' && staff.invite ? staff.invite : {};
+      const currentCount = Number(existingInvite.sentCount);
+      const nextCount = (Number.isFinite(currentCount) ? currentCount : 0) + 1;
       
+      staffStore.staff[staffIndex].status = 'invited';
+      staffStore.staff[staffIndex].invite = Object.assign({}, existingInvite, {
+        lastSentAt: now,
+        sentCount: nextCount
+      });
+      staffStore.staff[staffIndex].invited = true;
+      staffStore.staff[staffIndex].invitedAt = now.toISOString();
+      staffStore.staff[staffIndex].inviteStatus = 'sent';
+      
+      ffSaveStaffStore(staffStore);
       // Re-render header
       renderStaffDetails();
+      
+      try {
+        const salonId = (typeof window !== 'undefined' && window.currentSalonId)
+          ? window.currentSalonId
+          : (typeof globalThis !== 'undefined' ? globalThis.currentSalonId : null);
+        if (!salonId) {
+          throw new Error('Missing salonId');
+        }
+        
+        const modularApp = window.__firebaseApp;
+        if (!modularApp) {
+          console.error("Missing window.__firebaseApp");
+          alert("Firebase not initialized (modular app missing). Refresh.");
+          return;
+        }
+        
+        // Resolve requesterStaffId from current user's auth UID in the salon
+        const uid = (window.ffAuth || window.auth)?.currentUser?.uid || null;
+        if (!uid) {
+          console.error("[Invite] No auth UID - user not logged in");
+          return;
+        }
+
+        const app = modularApp;
+        const auth = (window.getAuth && app) ? window.getAuth(app) : null;
+        const user = auth ? auth.currentUser : null;
+        console.log("[Invite] auth.currentUser uid:", user?.uid || null);
+        if (!user) {
+          alert("Not logged in. Please log out and log back in.");
+          return;
+        }
+
+        if (!window.__sendStaffInviteFn) {
+          if (!window.getFunctions || !window.httpsCallable) {
+            throw new Error("Firebase functions SDK not available");
+          }
+          const functions = window.getFunctions(app, "us-central1");
+          window.__sendStaffInviteFn = window.httpsCallable(functions, "sendStaffInvite");
+        }
+        const sendInviteFn = window.__sendStaffInviteFn;
+        const payload = { salonId, email: staff.email, role: staff.role };
+
+        console.log("[UI] Sending payload:", payload);
+        const res = await sendInviteFn(payload);
+        console.log("[UI] sendStaffInvite RESULT", res?.data);
+      } catch (e) {
+        console.error('[ffStaffSendInvite] Invite email failed:', e);
+        alert('Invite email failed to send. Status remains Invited. Please try again.');
+      }
     } catch (e) {
       console.error('[ffStaffSendInvite] Error:', e);
     }
@@ -14154,20 +14271,21 @@ function initializeAppsPanel() {
         let statusAction = '';
         if (!invited) {
           statusText = 'Not invited yet';
-          statusAction = '<button id="ffStaffSendInviteBtn" style="background:none;border:none;color:#6366f1;font-size:12px;font-weight:500;cursor:pointer;text-decoration:underline;padding:0;margin-left:8px;">Send invite</button>';
+          statusAction = '<button type="button" data-action="send-invite" style="background:none;border:none;color:#6366f1;font-size:12px;font-weight:500;cursor:pointer;text-decoration:underline;padding:0;margin-left:8px;">Send invite</button>';
         } else {
-          const dateToShow = staff.lastActiveAt || staff.invitedAt;
+          const dateToShow = staff.invitedAt;
           if (dateToShow) {
             try {
               const date = new Date(dateToShow);
               const formatted = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-              statusText = `Last active on ${formatted}`;
+              statusText = `Invited on ${formatted}`;
             } catch (e) {
-              statusText = 'Last active on —';
+              statusText = 'Invited';
             }
           } else {
-            statusText = 'Last active on —';
+            statusText = 'Invited';
           }
+          statusAction = '<button type="button" data-action="send-invite" style="background:none;border:none;color:#6366f1;font-size:12px;font-weight:500;cursor:pointer;text-decoration:underline;padding:0;margin-left:8px;">Send invite</button>';
         }
         
         headerEl.innerHTML = `
@@ -14238,13 +14356,20 @@ function initializeAppsPanel() {
           };
         }
         
-        // Wire up Send invite button
-        const sendInviteBtn = document.getElementById('ffStaffSendInviteBtn');
-        if (sendInviteBtn) {
-          sendInviteBtn.onclick = function(e) {
-            e.stopPropagation();
-            ffStaffSendInvite(staff.id);
-          };
+        // Wire up Send invite button (delegated on details container)
+        if (detailsContainer && !detailsContainer.__ffInviteHandlerBound) {
+          detailsContainer.__ffInviteHandlerBound = true;
+          detailsContainer.addEventListener('click', function(e) {
+            const target = e.target && e.target.closest ? e.target.closest('[data-action="send-invite"]') : null;
+            if (!target) return;
+            e.preventDefault();
+            console.log("Send invite clicked", selectedStaffId);
+            if (selectedStaffId) {
+              const ok = window.confirm('Send invite to this staff member?');
+              if (!ok) return;
+              ffStaffSendInvite(selectedStaffId);
+            }
+          });
         }
       }
       
@@ -14936,6 +15061,7 @@ function initializeAppsPanel() {
         phone: phone ? String(phone) : undefined,
         invited: false,
         invitedAt: null,
+        inviteStatus: null,
         lastActiveAt: null,
         isArchived: false,
         permissions: {}, // Initialize empty permissions object
@@ -14961,6 +15087,11 @@ function initializeAppsPanel() {
       
       // Automatically select the newly created staff member and show their details
       selectStaffMember(newStaffMember.id);
+      
+      // Auto-send invite after successful save (if email looks valid)
+      if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        ffStaffSendInvite(newStaffMember.id);
+      }
       
       return true;
     } catch (error) {
@@ -20857,14 +20988,16 @@ function ffAcceptInvite(token, firebaseUid) {
 }
 
 /**
- * Placeholder function to send invite email (console.logs invite link for now)
+ * Placeholder function to send invite email
  * @param {string} email - Email address
  * @param {string} token - Invite token
  */
-function ffSendInviteEmail(email, token) {
-  const inviteLink = `https://app.fairflowapp.com/invite?token=${token}`;
-  console.log('[ffSendInviteEmail] Invite link for', email, ':', inviteLink);
-  // TODO: Implement actual email sending
+function ffSendInviteEmail(email, token, role, staffId) {
+  if (typeof window.ffSendStaffInviteEmail === 'function') {
+    return window.ffSendStaffInviteEmail({ email, token, role, staffId });
+  }
+  console.error('[ffSendInviteEmail] Missing window.ffSendStaffInviteEmail');
+  return { ok: false };
 }
 
 // ===== END AUTH FOUNDATION =====

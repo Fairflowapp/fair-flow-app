@@ -1,5 +1,9 @@
 console.log('[BUILD MARKER] app.js loaded', new Date().toISOString());
 
+if (!window.__ff_authedStaffId) {
+  window.__ff_authedStaffId = localStorage.getItem("ff_authedStaffId_v1") || null;
+}
+
 // Migration: Move yearly done entries from old key to standard key
 (function migrateYearlyDoneStorage() {
   try {
@@ -57,7 +61,7 @@ window.addEventListener("unhandledrejection", (e) => {
 // =====================
 // Firebase imports
 // =====================
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import { initializeApp, getApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
 import {
   getAuth,
   signInWithEmailAndPassword,
@@ -102,7 +106,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const functions = getFunctions(app);
+const functions = getFunctions(app, "us-central1");
 
 console.log("[Init] Firebase initialized");
 
@@ -1927,7 +1931,25 @@ async function validatePinAndMove() {
     }
     
     // Success - set authenticated staff
-    window.__ff_authedStaffId = auth.staffId || undefined;
+    console.log("[PIN] auth raw", auth);
+    console.log("[PIN] auth raw json", JSON.stringify(auth));
+    // ✅ PIN auth: persist authed staffId for invites & permissions
+    const authedStaffId =
+      auth?.staffId ||
+      auth?.id ||
+      auth?.staff?.id ||
+      auth?.staff?.staffId ||
+      null;
+    
+    window.__ff_authedStaffId = authedStaffId;
+    localStorage.setItem("ff_authedStaffId_v1", authedStaffId || "");
+    
+    console.log("[PIN] authed staff set", {
+      authedStaffId,
+      windowAuthed: window.__ff_authedStaffId,
+      lsAuthed: localStorage.getItem("ff_authedStaffId_v1"),
+    });
+    
     window.__ff_authedStaffName = auth.name || undefined;
     
     const matchedName = auth.name || '';
@@ -1961,7 +1983,25 @@ function validatePinAndMarkDone() {
     }
     
     // Success - set authenticated staff
-    window.__ff_authedStaffId = auth.staffId || undefined;
+    console.log("[PIN] auth raw", auth);
+    console.log("[PIN] auth raw json", JSON.stringify(auth));
+    // ✅ PIN auth: persist authed staffId for invites & permissions
+    const authedStaffId =
+      auth?.staffId ||
+      auth?.id ||
+      auth?.staff?.id ||
+      auth?.staff?.staffId ||
+      null;
+    
+    window.__ff_authedStaffId = authedStaffId;
+    localStorage.setItem("ff_authedStaffId_v1", authedStaffId || "");
+    
+    console.log("[PIN] authed staff set", {
+      authedStaffId,
+      windowAuthed: window.__ff_authedStaffId,
+      lsAuthed: localStorage.getItem("ff_authedStaffId_v1"),
+    });
+    
     window.__ff_authedStaffName = auth.name || undefined;
     
     const matchedName = auth.name || '';
@@ -2204,6 +2244,41 @@ async function confirmPinReset(token, newPin) {
   } catch (error) {
     console.error("[AdminPIN] Error confirming reset:", error);
     throw error;
+  }
+}
+
+// =====================
+// Staff Invite Email
+// =====================
+async function ffSendStaffInviteEmail({ email, role, staffId }) {
+  try {
+    if (!email) return { ok: false, reason: "no_email" };
+    const emailLower = String(email).trim().toLowerCase();
+    const roleValue = String(role || "technician").toLowerCase();
+    
+    const sendInviteFn = httpsCallable(functions, "sendStaffInvite");
+
+    const callableData = {
+      email: emailLower,
+      role: roleValue,
+      staffId: staffId || null,
+    };
+
+    console.log("[ffStaffSendInvite] payload:", callableData);
+
+    const result = await sendInviteFn(callableData);
+    
+    return { ok: true, token: result?.data?.token || null, inviteLink: result?.data?.inviteLink || null, data: result?.data ?? null };
+  } catch (error) {
+    console.error("[Invite] send failed", {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      name: error?.name,
+      stack: error?.stack,
+      raw: error,
+    });
+    return { ok: false, reason: "error" };
   }
 }
 
@@ -2660,6 +2735,7 @@ window.showLoginScreen = showLoginScreen;
 window.generatePinResetLink = generatePinResetLink;
 window.verifyPinResetToken = verifyPinResetToken;
 window.confirmPinReset = confirmPinReset;
+window.ffSendStaffInviteEmail = ffSendStaffInviteEmail;
 window.resetTasksForCurrentTab = resetTasksForCurrentTab;
 window.loadTasksForTab = loadTasksForTab;
 window.validateResetPin = validateResetPin;
