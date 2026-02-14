@@ -154,92 +154,108 @@ If you have questions, reply to this email.`
   return { ok: true, token: rawToken, inviteLink: inviteUrl, data: { success: true } };
 }
 
-exports.sendStaffInvite = functions.region("us-central1").https.onCall(async (data, context) => {
-  console.log(">>> ENTRY sendStaffInvite");
+async function _sendStaffInviteHttpAuth(req) {
+  console.log("[AUTH] GCLOUD_PROJECT:", process.env.GCLOUD_PROJECT);
+  const authHeader = req.get("Authorization") || req.get("authorization") || "";
+  console.log("[AUTH] has auth header:", !!authHeader);
+  console.log("[AUTH] auth header prefix:", authHeader.slice(0, 20));
+
+  const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  if (!idToken) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
   try {
-    console.log("[sendStaffInvite] STEP 1: entered");
-    console.log("[sendStaffInvite] STEP 2: auth check");
-    if (!context.auth || !context.auth.uid) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "Must be signed in."
-      );
-    }
-    const uid = context.auth.uid;
-    const requestData = data || {};
-    console.log("[sendStaffInvite] START - data:", requestData);
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log("[AUTH] decoded uid:", decoded.uid);
+    return decoded;
+  } catch (e) {
+    console.error("[AUTH] verifyIdToken failed:", {
+      name: e?.name,
+      code: e?.code,
+      message: e?.message,
+    });
+    throw new functions.https.HttpsError("unauthenticated", "Invalid ID token");
+  }
+}
 
-    console.log("[sendStaffInvite] RAW DATA", JSON.stringify(data || null));
-    const { email, role } = data || {};
-    console.log("[sendStaffInvite] STEP 3: load user doc");
-    const userRef = admin.firestore().doc(`users/${uid}`);
-    const userSnap = await userRef.get();
-    if (!userSnap.exists) {
-      throw new functions.https.HttpsError("permission-denied", "User profile not found.");
-    }
-    const userData = userSnap.data() || {};
-    const senderRole = String(userData.role || "").toLowerCase();
+exports.sendStaffInvite = functions
+  .region("us-central1")
+  .runWith({ invoker: "private" })
+  .https.onRequest(async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-    console.log("[sendStaffInvite] STEP 4: role check");
-    const allowedRoles = ["owner", "admin", "manager"];
-    if (!allowedRoles.includes(senderRole)) {
-      throw new functions.https.HttpsError("permission-denied", "Insufficient role to send invites.");
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
     }
 
-    console.log("[sendStaffInvite] STEP 5: determine salonId");
-    const salonId = userData.salonId;
-    if (!salonId) {
-      throw new functions.https.HttpsError("failed-precondition", "No salonId on user profile.");
-    }
-    if (requestData?.salonId && requestData.salonId !== salonId) {
-      throw new functions.https.HttpsError("permission-denied", "Not authorized to send invites for this salon.");
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "method-not-allowed" });
+      return;
     }
 
     try {
-      await admin.firestore().collection("_debug").add({
-        tag: "sendStaffInvite_entered",
-        at: admin.firestore.FieldValue.serverTimestamp(),
-        uid: uid,
-        role: senderRole,
-        salonId: salonId,
-        email: requestData?.email || requestData?.emailLower || null,
-      });
-      console.log("[sendStaffInvite] entered");
-    } catch (e) {
-      console.error("[sendStaffInvite] debug write failed", {
-        message: e?.message || String(e),
-        stack: e?.stack || null,
-      });
+      const data = typeof req.body === "object" ? req.body : {};
+      console.log("HTTP invite payload", data);
+
+      const decodedToken = await _sendStaffInviteHttpAuth(req);
+      const uid = decodedToken.uid;
+
+      const requestData = data || {};
+      const { email, role } = data || {};
+      const userRef = admin.firestore().doc(`users/${uid}`);
+      const userSnap = await userRef.get();
+      if (!userSnap.exists) {
+        throw new functions.https.HttpsError("permission-denied", "User profile not found.");
+      }
+      const userData = userSnap.data() || {};
+      const senderRole = String(userData.role || "").toLowerCase();
+
+      const allowedRoles = ["owner", "admin", "manager"];
+      if (!allowedRoles.includes(senderRole)) {
+        throw new functions.https.HttpsError("permission-denied", "Insufficient role to send invites.");
+      }
+
+      const salonId = userData.salonId;
+      if (!salonId) {
+        throw new functions.https.HttpsError("failed-precondition", "No salonId on user profile.");
+      }
+      if (requestData?.salonId && requestData.salonId !== salonId) {
+        throw new functions.https.HttpsError("permission-denied", "Not authorized to send invites for this salon.");
+      }
+
+      try {
+        await admin.firestore().collection("_debug").add({
+          tag: "sendStaffInvite_entered",
+          at: admin.firestore.FieldValue.serverTimestamp(),
+          uid: uid,
+          role: senderRole,
+          salonId: salonId,
+          email: requestData?.email || requestData?.emailLower || null,
+        });
+      } catch (e) {
+        console.error("[sendStaffInvite] debug write failed", e?.message || String(e));
+      }
+
+      const auth = { uid: uid, token: { role: senderRole } };
+      const result = await _sendStaffInviteInternal({ data: { ...requestData, email, role, salonId }, auth });
+      res.status(200).json(result);
+    } catch (err) {
+      console.error("HTTP invite error", err);
+      if (err instanceof functions.https.HttpsError) {
+        const code = err.code;
+        const status = code === "unauthenticated" ? 401
+          : code === "permission-denied" ? 403
+          : code === "not-found" ? 404
+          : (code === "invalid-argument" || code === "failed-precondition") ? 400
+          : 500;
+        res.status(status).json({ error: code, message: err.message });
+        return;
+      }
+      res.status(500).json({ error: "internal", message: err?.message || "unknown" });
     }
-
-    console.log("[sendStaffInvite] auth snapshot", {
-      hasAuth: !!context.auth,
-      uid: uid || null,
-    });
-
-    console.log("[sendStaffInvite] data keys", Object.keys(data || {}));
-
-    console.log("[sendStaffInvite] data snapshot", {
-      email: data?.email || null,
-      salonId: data?.salonId || null,
-      role: data?.role || null,
-      staffId: data?.staffId || null,
-    });
-
-    const auth = {
-      uid: uid,
-      token: { role: senderRole },
-    };
-    return await _sendStaffInviteInternal({ data: { ...requestData, email, role, salonId }, auth });
-  } catch (err) {
-    console.error("FULL ERROR:", err);
-    if (err instanceof functions.https.HttpsError) {
-      throw err;
-    }
-    throw new functions.https.HttpsError(
-      "internal",
-      err?.message || "unknown internal error"
-    );
-  }
-});
+  });
 
