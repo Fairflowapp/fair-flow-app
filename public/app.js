@@ -72,7 +72,8 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
   signOut,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  signInAnonymously
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 import {
   getStorage,
@@ -125,6 +126,29 @@ const db = getFirestore(app);
 console.log("[CLIENT] Firebase functions SDK available:", typeof firebase !== "undefined");
 const functions = getFunctions(app, "us-central1");
 const storage = getStorage(app);
+
+// Ensure we have an auth user (anonymous if needed) for callable invocations under domain-restricted sharing
+async function ensureSignedIn() {
+  if (!auth.currentUser) {
+    const cred = await signInAnonymously(auth);
+    console.log("[Invite] anonymous sign-in uid:", cred?.user?.uid || null);
+  }
+}
+
+/** Single source of truth for sendStaffInvite callable. */
+export async function callSendStaffInvite(payload) {
+  try {
+    await ensureSignedIn();
+    const fn = httpsCallable(functions, "sendStaffInvite");
+    const res = await fn(payload);
+    console.log("[Invite] success", res.data);
+    return res.data;
+  } catch (err) {
+    console.error("[Invite] sendStaffInvite error", err?.code, err?.message, err);
+    throw err;
+  }
+}
+window.callSendStaffInvite = callSendStaffInvite;
 
 console.log("[Init] Firebase initialized");
 
@@ -2763,25 +2787,14 @@ async function ffSendStaffInviteEmail({ email, role, staffId, salonId }) {
     if (!email) return { ok: false, reason: "no_email" };
     const emailLower = String(email).trim().toLowerCase();
     const roleValue = String(role || "technician").toLowerCase();
-
-    if (typeof getFunctions !== "function" || typeof httpsCallable !== "function") {
-      throw new Error("Firebase functions SDK not available");
-    }
-    console.log("[CLIENT] sendStaffInvite via httpsCallable ONLY (direct, no postJSON)");
-    const functionsInstance = getFunctions(app, "us-central1");
-    console.log("[CLIENT] BEFORE httpsCallable: app=", !!app, "region=us-central1");
-    const callable = httpsCallable(functionsInstance, "sendStaffInvite");
-    const body = {
+    const payload = {
       email: emailLower,
       role: roleValue,
       staffId: staffId || null,
       ...(salonId != null && { salonId }),
     };
-    console.log("[CLIENT] Calling sendStaffInvite with body:", JSON.stringify(body));
-    const result = await callable(body);
-    console.log("[CLIENT] AFTER httpsCallable: success, result=", result?.data || result);
-    console.log("[Invite] sendStaffInvite success", result?.data || result);
-    return { ok: true, token: result?.data?.token || null, inviteLink: result?.data?.inviteLink || null, data: result?.data ?? null };
+    const data = await callSendStaffInvite(payload);
+    return { ok: true, token: data?.token || null, inviteLink: data?.inviteLink || null, data: data ?? null };
   } catch (err) {
     console.error("[Invite] sendStaffInvite failed", {
       code: err?.code || "unknown",

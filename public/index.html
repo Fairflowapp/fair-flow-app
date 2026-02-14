@@ -1056,11 +1056,8 @@ dialog footer button, .code-dialog footer button {
       sendPasswordResetEmail
     } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
     import { getFirestore } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-    import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-functions.js";
     import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app-check.js";
-    console.log("[CLIENT] Using modular firebase/functions (no compat)");
-    window.getFunctions = getFunctions;
-    window.httpsCallable = httpsCallable;
+    console.log("[CLIENT] Using modular firebase (callable via app.js)");
     window.initializeApp = initializeApp;
     window.getApps = getApps;
     window.getApp = getApp;
@@ -13828,7 +13825,6 @@ function initializeAppsPanel() {
   
   // Send invite (status-only update, no email/auth)
   async function ffStaffSendInvite(staffId) {
-    alert('ffStaffSendInvite called!');
     try {
       const staffStore = ffGetStaffStore();
       const staffIndex = staffStore.staff.findIndex(s => s.id === staffId);
@@ -13850,62 +13846,29 @@ function initializeAppsPanel() {
       staffStore.staff[staffIndex].inviteStatus = 'sent';
       
       ffSaveStaffStore(staffStore);
-      // Re-render header
       renderStaffDetails();
       
-      try {
-        const salonId = (typeof window !== 'undefined' && window.currentSalonId)
-          ? window.currentSalonId
-          : (typeof globalThis !== 'undefined' ? globalThis.currentSalonId : null);
-        if (!salonId) {
-          throw new Error('Missing salonId');
-        }
-        
-        const modularApp = window.__firebaseApp;
-        if (!modularApp) {
-          console.error("Missing window.__firebaseApp");
-          alert("Firebase not initialized (modular app missing). Refresh.");
-          return;
-        }
-        
-        // Resolve requesterStaffId from current user's auth UID in the salon
-        const uid = (window.ffAuth || window.auth)?.currentUser?.uid || null;
-        if (!uid) {
-          console.error("[Invite] No auth UID - user not logged in");
-          return;
-        }
-
-        const app = modularApp;
-        const auth = (window.getAuth && app) ? window.getAuth(app) : null;
-        const user = auth ? auth.currentUser : null;
-        console.log("[Invite] auth.currentUser uid:", user?.uid || null);
-        if (!user) {
-          alert("Not logged in. Please log out and log back in.");
-          return;
-        }
-
-        const getFunctions = window.getFunctions;
-        const httpsCallable = window.httpsCallable;
-        if (!getFunctions || !httpsCallable) throw new Error("Firebase functions SDK not loaded");
-        const payload = { salonId, email: staff.email, role: staff.role, staffId: staffId || null };
-        console.log("[UI] Sending payload (via httpsCallable sendStaffInvite):", payload);
-        const functions = getFunctions(app, "us-central1");
-        const sendStaffInvite = httpsCallable(functions, "sendStaffInvite");
-        const result = await sendStaffInvite(payload);
-        console.log("[Invite] sendStaffInvite success", result?.data || result);
-      } catch (err) {
-        console.error("[CLIENT] sendStaffInvite error:", err);
-        console.error("[Invite] sendStaffInvite failed", {
-          code: err?.code || "unknown",
-          message: err?.message || String(err),
-          details: err?.details
-        });
-        console.error('[ffStaffSendInvite] Invite email failed:', err);
-        alert('Invite email failed to send. Status remains Invited. Please try again.');
-        throw err;
+      const salonId = (typeof window !== 'undefined' && window.currentSalonId)
+        ? window.currentSalonId
+        : (typeof globalThis !== 'undefined' ? globalThis.currentSalonId : null);
+      if (!salonId) {
+        throw new Error('Missing salonId');
       }
-    } catch (e) {
-      console.error('[ffStaffSendInvite] Error:', e);
+      
+      if (typeof window.callSendStaffInvite !== 'function') {
+        console.error("callSendStaffInvite not loaded (app.js?)");
+        alert("App not ready. Please refresh and try again.");
+        return;
+      }
+      
+      const payload = { salonId, email: staff.email, role: staff.role, staffId: staffId || null };
+      const data = await window.callSendStaffInvite(payload);
+      console.log("[Invite] success", data);
+    } catch (err) {
+      console.error("[Invite] sendStaffInvite error", err?.code, err?.message, err);
+      console.error('[ffStaffSendInvite] Invite email failed:', err);
+      alert('Invite email failed to send. Status remains Invited. Please try again.');
+      throw err;
     }
   }
   
@@ -21096,29 +21059,8 @@ function ffAcceptInvite(token, firebaseUid) {
 }
 
 window.ffSendStaffInviteEmailDirect = async function(payload) {
-  console.log("[ffSendStaffInviteEmailDirect] BEFORE: payload=", JSON.stringify(payload));
-  const app = window.__firebaseApp || (window.getApp && window.getApp()) || null;
-  if (!app) throw new Error("Firebase app not initialized");
-  const getFunctions = window.getFunctions;
-  const httpsCallable = window.httpsCallable;
-  if (!getFunctions || !httpsCallable) throw new Error("Firebase functions SDK not loaded");
-  const functions = getFunctions(app, "us-central1");
-  console.log("[ffSendStaffInviteEmailDirect] Calling sendStaffInvite, region=us-central1, app=", !!app);
-  const fn = httpsCallable(functions, "sendStaffInvite");
-  let res;
-  try {
-    res = await fn(payload);
-    console.log("[ffSendStaffInviteEmailDirect] AFTER: success, res.data=", res?.data);
-    return res.data;
-  } catch (err) {
-    console.error("[ffSendStaffInviteEmailDirect] AFTER: error", {
-      code: err?.code,
-      message: err?.message,
-      details: err?.details,
-      fullError: err
-    });
-    throw err;
-  }
+  if (typeof window.callSendStaffInvite !== 'function') throw new Error("callSendStaffInvite not loaded");
+  return await window.callSendStaffInvite(payload);
 };
 
 /**
@@ -24678,16 +24620,6 @@ function hookSettingsGuard_DISABLED(){
   </div> <!-- End main-app-content -->
 
   <script type="module" src="/app.js?v=20260205_3"></script>
-  <script>
-  window.addEventListener("load", () => {
-    if (window.ffSendStaffInviteEmailDirect) {
-      window.ffSendStaffInviteEmail = window.ffSendStaffInviteEmailDirect;
-      console.log("[Invite] override active");
-    } else {
-      console.warn("[Invite] direct helper missing");
-    }
-  });
-  </script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
