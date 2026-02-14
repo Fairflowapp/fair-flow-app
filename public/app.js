@@ -1,3 +1,4 @@
+console.log("[CLIENT BOOT] app.js v=20260205_3 loaded");
 console.log("FF APP.JS LOADED", new Date().toISOString(), "search=", location.search);
 console.log('[BUILD MARKER] app.js loaded', new Date().toISOString());
 
@@ -121,6 +122,7 @@ const auth = getAuth(app);
 window.__ffAuth = auth;
 window.__ffGetUid = () => auth.currentUser?.uid || null;
 const db = getFirestore(app);
+console.log("[CLIENT] Firebase functions SDK available:", typeof firebase !== "undefined");
 const functions = getFunctions(app, "us-central1");
 const storage = getStorage(app);
 
@@ -400,7 +402,6 @@ function ffShowInviteFlow(inviteToken) {
       try {
         // Do NOT call finalizeStaffInvite via fetch — must use httpsCallable to avoid CORS.
         console.log("[Invite] Calling finalizeStaffInvite via httpsCallable");
-        const functions = getFunctions(app, "us-central1");
         const finalizeStaffInvite = httpsCallable(functions, "finalizeStaffInvite");
         const result = await finalizeStaffInvite({ inviteToken });
         console.log("[Invite] Finalize success", result?.data || result);
@@ -1292,6 +1293,18 @@ window.addEventListener("DOMContentLoaded", () => {
       logoutStaffBtn.addEventListener("click", handleLogout);
     } else {
       console.warn("[UI] Missing element: logout-button-staff");
+    }
+
+    const testPingBtn = document.getElementById("test-ping-btn");
+    if (testPingBtn) {
+      testPingBtn.addEventListener("click", async () => {
+        try {
+          await testCallablePing();
+          alert("Ping OK – check console for PING RESULT");
+        } catch (err) {
+          alert("Ping failed: " + (err?.message || err) + " – check console for details");
+        }
+      });
     }
   } catch (e) {
     console.error("[UI] initLogout failed", e);
@@ -2745,25 +2758,28 @@ async function confirmPinReset(token, newPin) {
 // =====================
 // Staff Invite Email
 // =====================
-async function ffSendStaffInviteEmail({ email, role, staffId }) {
+async function ffSendStaffInviteEmail({ email, role, staffId, salonId }) {
   try {
     if (!email) return { ok: false, reason: "no_email" };
     const emailLower = String(email).trim().toLowerCase();
     const roleValue = String(role || "technician").toLowerCase();
-    
-    const sendInviteFn = httpsCallable(functions, "sendStaffInvite");
 
-    const callableData = {
+    if (typeof getFunctions !== "function" || typeof httpsCallable !== "function") {
+      throw new Error("Firebase functions SDK not available");
+    }
+    console.log("[CLIENT] sendStaffInvite via httpsCallable ONLY (direct, no postJSON)");
+    const functionsInstance = getFunctions(app, "us-central1");
+    console.log("[CLIENT] BEFORE httpsCallable: app=", !!app, "region=us-central1");
+    const callable = httpsCallable(functionsInstance, "sendStaffInvite");
+    const body = {
       email: emailLower,
       role: roleValue,
       staffId: staffId || null,
+      ...(salonId != null && { salonId }),
     };
-
-    console.log("[Invite] Calling sendStaffInvite via httpsCallable");
-    console.log("[ffStaffSendInvite] payload:", callableData);
-    console.log("[CLIENT] using httpsCallable sendStaffInvite");
-    const result = await sendInviteFn(callableData);
-
+    console.log("[CLIENT] Calling sendStaffInvite with body:", JSON.stringify(body));
+    const result = await callable(body);
+    console.log("[CLIENT] AFTER httpsCallable: success, result=", result?.data || result);
     console.log("[Invite] sendStaffInvite success", result?.data || result);
     return { ok: true, token: result?.data?.token || null, inviteLink: result?.data?.inviteLink || null, data: result?.data ?? null };
   } catch (err) {
@@ -2773,6 +2789,24 @@ async function ffSendStaffInviteEmail({ email, role, staffId }) {
       details: err?.details
     });
     return { ok: false, reason: "error" };
+  }
+}
+
+// Debug: minimal callable ping to verify infra (Gen1 callable execution)
+async function testCallablePing() {
+  const functionsInstance = getFunctions(app, "us-central1");
+  const ping = httpsCallable(functionsInstance, "testCallablePing");
+  try {
+    const res = await ping({ hello: "world" });
+    console.log("PING RESULT", res.data);
+    return res.data;
+  } catch (err) {
+    console.error("PING FAILED", {
+      code: err?.code,
+      message: err?.message,
+      details: err?.details
+    });
+    throw err;
   }
 }
 
@@ -3240,6 +3274,7 @@ window.resetTasksForCurrentTab = resetTasksForCurrentTab;
 window.loadTasksForTab = loadTasksForTab;
 window.validateResetPin = validateResetPin;
 window.doResetCurrentTab = doResetCurrentTab;
+window.testCallablePing = testCallablePing;
 
 // Expose auth for owner check
 window.auth = auth;

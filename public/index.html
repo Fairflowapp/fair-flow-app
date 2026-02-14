@@ -1045,35 +1045,38 @@ dialog footer button, .code-dialog footer button {
 
 <style>#reorderBtn.active{filter:brightness(1.2);box-shadow:0 0 0 2px rgba(255,255,255,.35) inset}</style>
 
-  <!-- Firebase compat SDK (globals) -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-functions-compat.js"></script>
+  <!-- Firebase SDK (modular) -->
   <script type="module">
-    import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
-    import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app-check.js";
-    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
-    import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-functions.js";
-    window.getAuth = getAuth;
-    window.onAuthStateChanged = onAuthStateChanged;
+    import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import {
+      getAuth,
+      onAuthStateChanged,
+      signInWithEmailAndPassword,
+      signOut,
+      sendPasswordResetEmail
+    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+    import { getFirestore } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+    import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-functions.js";
+    import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app-check.js";
+    console.log("[CLIENT] Using modular firebase/functions (no compat)");
     window.getFunctions = getFunctions;
     window.httpsCallable = httpsCallable;
+    window.initializeApp = initializeApp;
+    window.getApps = getApps;
+    window.getApp = getApp;
+    window.getAuth = getAuth;
+    window.onAuthStateChanged = onAuthStateChanged;
+    window.signInWithEmailAndPassword = signInWithEmailAndPassword;
+    window.signOut = signOut;
+    window.sendPasswordResetEmail = sendPasswordResetEmail;
+    window.getFirestore = getFirestore;
     window.__initFirebaseModular = () => {
       if (window.__firebaseApp) return window.__firebaseApp;
       const config = window.firebaseConfig;
       if (!config) return null;
       const apps = getApps();
       const app = apps.length ? getApp() : initializeApp(config);
-      try {
-        if (window.firebase && (!firebase.apps || firebase.apps.length === 0)) {
-          firebase.initializeApp(firebaseConfig);
-        }
-      } catch (e) {
-        console.warn("compat initializeApp skipped:", e);
-      }
       window.__firebaseApp = app;
-      const functions = getFunctions(app, "us-central1");
-      window.__sendStaffInviteFn = httpsCallable(functions, "sendStaffInvite");
       if (!window.__appCheckInitialized) {
         console.warn("[AppCheck] disabled temporarily for debugging");
         // Optional for local/dev testing:
@@ -1090,18 +1093,19 @@ dialog footer button, .code-dialog footer button {
     window.__initFirebaseModular();
   </script>
   <script>
-    // Make Firebase functions available globally (compat)
-    window.__firebaseApp = null;
+    // Make Firebase functions available globally (modular)
     window.__firebaseAuth = null;
     window.__firebaseAuthFunctions = {
-      getApps: () => firebase.apps || [],
-      getApp: () => firebase.app(),
-      initializeApp: (config) => firebase.initializeApp(config),
+      getApps: () => (window.getApps ? window.getApps() : []),
+      getApp: () => (window.getApps && window.getApps().length ? window.getApp() : null),
+      initializeApp: (config) => window.initializeApp(config),
       getAuth: (appInstance) => window.getAuth(appInstance || window.__firebaseApp),
       onAuthStateChanged: (authInstance, cb) => window.onAuthStateChanged(authInstance, cb),
-      signInWithEmailAndPassword: (authInstance, email, password) => authInstance.signInWithEmailAndPassword(email, password),
-      signOut: (authInstance) => authInstance.signOut(),
-      sendPasswordResetEmail: (authInstance, email) => authInstance.sendPasswordResetEmail(email)
+      signInWithEmailAndPassword: (authInstance, email, password) =>
+        window.signInWithEmailAndPassword(authInstance, email, password),
+      signOut: (authInstance) => window.signOut(authInstance),
+      sendPasswordResetEmail: (authInstance, email) =>
+        window.sendPasswordResetEmail(authInstance, email)
     };
   </script>
 </head>
@@ -1310,6 +1314,7 @@ dialog footer button, .code-dialog footer button {
           </button>
           <div id="userAvatarDropdown" class="user-avatar-dropdown" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:160px;z-index:100005;padding:4px 0;pointer-events:auto;">
             <button id="userDropdownProfileBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">User Profile</button>
+            <button id="userDropdownTestPingBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#6366f1;display:block;">Test Ping (debug)</button>
             <div style="height:1px;background:var(--border);margin:4px 0;"></div>
             <button id="userDropdownLogoutBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">Log out</button>
           </div>
@@ -13321,7 +13326,29 @@ function initializeNavigationButtons() {
           // Use setTimeout to ensure dropdown HTML is rendered before binding
           setTimeout(function() {
             const profileBtn = document.getElementById('userDropdownProfileBtn');
+            const testPingBtn = document.getElementById('userDropdownTestPingBtn');
             const logoutBtn = document.getElementById('userDropdownLogoutBtn');
+            
+            // Bind Test Ping handler (debug callable)
+            if (testPingBtn && !testPingBtn.__ffBound) {
+              testPingBtn.__ffBound = true;
+              testPingBtn.onclick = async function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                userAvatarDropdown.style.display = 'none';
+                document.body.classList.remove('ff-avatar-dropdown-open');
+                try {
+                  if (typeof window.testCallablePing === 'function') {
+                    await window.testCallablePing();
+                    alert('Ping OK – check console for PING RESULT');
+                  } else {
+                    alert('testCallablePing not loaded');
+                  }
+                } catch (err) {
+                  alert('Ping failed: ' + (err?.message || err) + ' – check console for details');
+                }
+              };
+            }
             
             // Bind User Profile handler with guard flag
             if (profileBtn && !profileBtn.__ffBound) {
@@ -13857,12 +13884,14 @@ function initializeAppsPanel() {
           return;
         }
 
-        if (typeof window.ffSendStaffInviteEmail !== "function") {
-          throw new Error("Invite email helper not available");
-        }
+        const getFunctions = window.getFunctions;
+        const httpsCallable = window.httpsCallable;
+        if (!getFunctions || !httpsCallable) throw new Error("Firebase functions SDK not loaded");
         const payload = { salonId, email: staff.email, role: staff.role, staffId: staffId || null };
-        console.log("[UI] Sending payload:", payload);
-        const result = await window.ffSendStaffInviteEmail(payload);
+        console.log("[UI] Sending payload (via httpsCallable sendStaffInvite):", payload);
+        const functions = getFunctions(app, "us-central1");
+        const sendStaffInvite = httpsCallable(functions, "sendStaffInvite");
+        const result = await sendStaffInvite(payload);
         console.log("[Invite] sendStaffInvite success", result?.data || result);
       } catch (err) {
         console.error("[CLIENT] sendStaffInvite error:", err);
@@ -21066,6 +21095,32 @@ function ffAcceptInvite(token, firebaseUid) {
   }
 }
 
+window.ffSendStaffInviteEmailDirect = async function(payload) {
+  console.log("[ffSendStaffInviteEmailDirect] BEFORE: payload=", JSON.stringify(payload));
+  const app = window.__firebaseApp || (window.getApp && window.getApp()) || null;
+  if (!app) throw new Error("Firebase app not initialized");
+  const getFunctions = window.getFunctions;
+  const httpsCallable = window.httpsCallable;
+  if (!getFunctions || !httpsCallable) throw new Error("Firebase functions SDK not loaded");
+  const functions = getFunctions(app, "us-central1");
+  console.log("[ffSendStaffInviteEmailDirect] Calling sendStaffInvite, region=us-central1, app=", !!app);
+  const fn = httpsCallable(functions, "sendStaffInvite");
+  let res;
+  try {
+    res = await fn(payload);
+    console.log("[ffSendStaffInviteEmailDirect] AFTER: success, res.data=", res?.data);
+    return res.data;
+  } catch (err) {
+    console.error("[ffSendStaffInviteEmailDirect] AFTER: error", {
+      code: err?.code,
+      message: err?.message,
+      details: err?.details,
+      fullError: err
+    });
+    throw err;
+  }
+};
+
 /**
  * Placeholder function to send invite email
  * @param {string} email - Email address
@@ -24617,11 +24672,22 @@ function hookSettingsGuard_DISABLED(){
   <div id="staff-view" style="display:none;">
     <h2>Staff view</h2>
     <button id="logout-button-staff">Log out</button>
+    <button id="test-ping-btn" type="button" style="margin-left:8px;padding:6px 12px;font-size:12px;background:#6366f1;color:#fff;border:none;border-radius:6px;cursor:pointer;">Test Ping</button>
   </div>
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="/app.js?v=20260205_3"></script>
+  <script>
+  window.addEventListener("load", () => {
+    if (window.ffSendStaffInviteEmailDirect) {
+      window.ffSendStaffInviteEmail = window.ffSendStaffInviteEmailDirect;
+      console.log("[Invite] override active");
+    } else {
+      console.warn("[Invite] direct helper missing");
+    }
+  });
+  </script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
