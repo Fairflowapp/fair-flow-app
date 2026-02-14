@@ -145,12 +145,15 @@ export async function callSendStaffInvite(payload) {
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
     if (!res.ok) {
-      const err = new Error(data?.message || `HTTP ${res.status}`);
-      err.code = data?.error || "http-error";
-      err.httpStatus = res.status;
-      throw err;
+      throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
     }
     console.log("[Invite] success", data);
     return data;
