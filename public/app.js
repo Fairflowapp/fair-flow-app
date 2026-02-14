@@ -135,11 +135,23 @@ async function ensureSignedIn() {
   }
 }
 
+function waitForAuthReady() {
+  return new Promise(resolve => {
+    const unsub = onAuthStateChanged(auth, user => {
+      if (user) {
+        unsub();
+        resolve(user);
+      }
+    });
+  });
+}
+
 /** Single source of truth for sendStaffInvite (HTTP POST via hosting rewrite, same-origin). */
 export async function callSendStaffInvite(payload) {
   try {
     await ensureSignedIn();
-    const token = await auth.currentUser.getIdToken();
+    const user = auth.currentUser || await waitForAuthReady();
+    const token = await user.getIdToken();
     const res = await fetch("/api/sendStaffInvite", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
