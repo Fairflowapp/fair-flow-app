@@ -127,7 +127,7 @@ console.log("[CLIENT] Firebase functions SDK available:", typeof firebase !== "u
 const functions = getFunctions(app, "us-central1");
 const storage = getStorage(app);
 
-// Ensure we have an auth user (anonymous if needed) for callable invocations under domain-restricted sharing
+// Ensure we have an auth user (anonymous if needed) for HTTP callable invocations under domain-restricted sharing
 async function ensureSignedIn() {
   if (!auth.currentUser) {
     const cred = await signInAnonymously(auth);
@@ -135,14 +135,25 @@ async function ensureSignedIn() {
   }
 }
 
-/** Single source of truth for sendStaffInvite callable. */
+/** Single source of truth for sendStaffInvite (HTTP POST via hosting rewrite, same-origin). */
 export async function callSendStaffInvite(payload) {
   try {
     await ensureSignedIn();
-    const fn = httpsCallable(functions, "sendStaffInvite");
-    const res = await fn(payload);
-    console.log("[Invite] success", res.data);
-    return res.data;
+    const token = await auth.currentUser.getIdToken();
+    const res = await fetch("/api/sendStaffInvite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const err = new Error(data?.message || `HTTP ${res.status}`);
+      err.code = data?.error || "http-error";
+      err.httpStatus = res.status;
+      throw err;
+    }
+    console.log("[Invite] success", data);
+    return data;
   } catch (err) {
     console.error("[Invite] sendStaffInvite error", err?.code, err?.message, err);
     throw err;
