@@ -146,29 +146,50 @@ function waitForAuthReady() {
   });
 }
 
-/** Single source of truth for sendStaffInvite (HTTP POST via hosting rewrite, same-origin). */
+/** Sends staff invite via Firestore write – no HTTP/Callable, no CORS. Trigger processes in backend. */
 export async function callSendStaffInvite(payload) {
   try {
     await ensureSignedIn();
     const user = auth.currentUser || await waitForAuthReady();
-    const token = await user.getIdToken();
-    const res = await fetch("/api/sendStaffInvite", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-      body: JSON.stringify(payload),
+    if (!user) throw new Error("Not signed in");
+    const docData = {
+      createdByUid: user.uid,
+      salonId: payload.salonId,
+      staffId: payload.staffId || null,
+      email: payload.email,
+      role: payload.role,
+      status: "pending",
+      createdAt: serverTimestamp()
+    };
+    const ref = await addDoc(collection(db, "staffInviteRequests"), docData);
+    console.log("[Invite] request created", ref.id);
+    await addDoc(collection(db, "processInviteNow"), { requestId: ref.id, createdAt: serverTimestamp() });
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        unsub();
+        resolve({ ok: true, requestId: ref.id, data: { success: true } });
+      }, 90000);
+      const unsub = onSnapshot(
+        doc(db, "staffInviteRequests", ref.id),
+        (snap) => {
+          const s = snap.data()?.status;
+          if (s === "done") {
+            clearTimeout(timeout);
+            unsub();
+            resolve({ ok: true, requestId: ref.id, data: { success: true } });
+          } else if (s === "error") {
+            clearTimeout(timeout);
+            unsub();
+            reject(new Error(snap.data()?.error || "Unknown error"));
+          }
+        },
+        (err) => {
+          clearTimeout(timeout);
+          unsub();
+          reject(err);
+        }
+      );
     });
-    const text = await res.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { raw: text };
-    }
-    if (!res.ok) {
-      throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
-    }
-    console.log("[Invite] success", data);
-    return data;
   } catch (err) {
     console.error("[Invite] sendStaffInvite error", err?.code, err?.message, err);
     throw err;
@@ -2849,6 +2870,50 @@ async function testCallablePing() {
   }
 }
 
+/** Test A: Trigger Email (mail collection). Call: testSendEmail("your@email.com") */
+async function testSendEmail(email) {
+  const fn = getFunctions(app, "us-central1");
+  const res = await httpsCallable(fn, "testSendEmail")({ to: email || auth.currentUser?.email });
+  console.log("[Test A - Trigger Email]", res.data);
+  return res.data;
+}
+
+/** Test B: Nodemailer (SMTP). Call: testSendEmailNodemailer("your@email.com") */
+async function testSendEmailNodemailer(email) {
+  const fn = getFunctions(app, "us-central1");
+  const res = await httpsCallable(fn, "testSendEmailNodemailer")({ to: email || auth.currentUser?.email });
+  console.log("[Test B - Nodemailer]", res.data);
+  return res.data;
+}
+
+/** Test via Firestore (no Callable = no CORS). Writes to mail, Trigger Email sends. */
+async function testEmailViaFirestore(email) {
+  const to = (email || auth.currentUser?.email || "").trim().toLowerCase();
+  if (!to) return alert("Sign in or pass email: testEmailViaFirestore('your@email.com')");
+  try {
+    await addDoc(collection(db, "mail"), {
+      to,
+      message: {
+        subject: "[Fair Flow] Test – Trigger Email",
+        text: "If you got this, Trigger Email extension works.",
+        html: "<p>If you got this, Trigger Email extension works.</p>"
+      }
+    });
+    console.log("[Test] Wrote to mail collection, to:", to);
+    alert("Test sent. Check " + to + " (and spam folder).");
+    return { ok: true };
+  } catch (e) {
+    console.error("[Test] Failed:", e);
+    alert("Error: " + (e?.message || e));
+    return { ok: false, error: e?.message };
+  }
+}
+
+/** Run email test (bypasses CORS – writes directly to Firestore). */
+async function runEmailTests(email) {
+  return testEmailViaFirestore(email);
+}
+
 // Load tasks for a specific tab from localStorage and refresh UI
 function loadTasksForTab(tab) {
     console.log(`Loading tasks for tab: ${tab}`);
@@ -3314,6 +3379,10 @@ window.loadTasksForTab = loadTasksForTab;
 window.validateResetPin = validateResetPin;
 window.doResetCurrentTab = doResetCurrentTab;
 window.testCallablePing = testCallablePing;
+window.testSendEmail = testSendEmail;
+window.testSendEmailNodemailer = testSendEmailNodemailer;
+window.testEmailViaFirestore = testEmailViaFirestore;
+window.runEmailTests = runEmailTests;
 
 // Expose auth for owner check
 window.auth = auth;
