@@ -234,8 +234,24 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   opacity: 0.75;
 }
 
-/* Active state for Queue button - subtle darker text */
-.btn-pill.active{color:#2563eb;border-color:#2563eb;font-weight:800}
+/* Active state for all navigation buttons - purple like Fair Flow logo */
+.btn-pill.active{
+  color:#7c3aed !important;
+  border-color:#a78bfa !important;
+  font-weight:800 !important;
+  background:#ede9fe !important;
+  opacity:1 !important;
+}
+
+/* Force INBOX to match exactly */
+#inboxBtn.active {
+  color:#7c3aed !important;
+  border-color:#a78bfa !important;
+  font-weight:800 !important;
+  background:#ede9fe !important;
+  opacity:1 !important;
+  filter:none !important;
+}
 
 .btn-danger{border-color:#fca5a5;color:#b91c1c}
 
@@ -1291,7 +1307,7 @@ dialog footer button, .code-dialog footer button {
 
         <button id="tasksBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>TASKS<span class="ff-home-tasks-badge"></span></button>
 
-        <button class="btn-pill" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg></span>INBOX</button>
+        <button id="inboxBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg></span>INBOX<span class="ff-inbox-badge" style="display:none;margin-left:4px;background:#ef4444;color:#fff;border-radius:10px;padding:2px 6px;font-size:10px;font-weight:600;"></span></button>
 
         <button class="btn-pill" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>INVENTORY</button>
 
@@ -4268,6 +4284,10 @@ window.openSettingsSecure = openSettingsSecure;
 
 // Navigation function to return to Queue view
 function goToQueue() {
+  // Close inbox screen if open
+  const inboxScreen = document.getElementById('inboxScreen');
+  if (inboxScreen) inboxScreen.style.display = 'none';
+  
   // Exit reorder mode when navigating to Queue (ensures clean state)
   if (typeof exitReorderMode === 'function' && reorderMode) {
     exitReorderMode();
@@ -8041,6 +8061,10 @@ function writeTasksList(tab, kind, arr) {
 
 function openTasks() {
   try {
+    // Close inbox screen if open
+    const inboxScreen = document.getElementById('inboxScreen');
+    if (inboxScreen) inboxScreen.style.display = 'none';
+    
     // Exit reorder mode when navigating to Tasks (switching tabs)
     if (typeof exitReorderMode === 'function' && reorderMode) {
       exitReorderMode();
@@ -13867,7 +13891,8 @@ function initializeAppsPanel() {
     } catch (err) {
       console.error("[Invite] sendStaffInvite error", err?.code, err?.message, err);
       console.error('[ffStaffSendInvite] Invite email failed:', err);
-      alert('Invite email failed to send. Status remains Invited. Please try again.');
+      const msg = err?.message || 'Unknown error';
+      alert('Invite email failed: ' + msg);
       throw err;
     }
   }
@@ -24619,7 +24644,8 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260205_3"></script>
+  <script type="module" src="/app.js?v=20260216_force"></script>
+  <script type="module" src="/inbox.js?v=20260216_force"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -24663,7 +24689,122 @@ function hookSettingsGuard_DISABLED(){
       display: flex;
       justify-content: space-between;
     }
+    
+    /* Inbox/Requests styles */
+    .inbox-screen {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #fff;
+      z-index: 300;
+      flex-direction: column;
+      pointer-events: auto;
+    }
+    
+    .inbox-tab {
+      flex: 1;
+      padding: 12px 16px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      color: #666;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    
+    .inbox-tab.active {
+      color: #111;
+      border-bottom-color: #111;
+    }
+    
+    .inbox-tab:hover:not(.active) {
+      color: #333;
+    }
+    
+    .inbox-item-card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .inbox-item-card:hover {
+      border-color: #d1d5db;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    
+    .inbox-status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    
+    .inbox-status-open { background: #dbeafe; color: #1e40af; }
+    .inbox-status-needs-info { background: #fef3c7; color: #92400e; }
+    .inbox-status-approved { background: #d1fae5; color: #065f46; }
+    .inbox-status-denied { background: #fee2e2; color: #991b1b; }
+    .inbox-status-archived { background: #e5e7eb; color: #374151; }
 </style>
+
+<!-- Inbox Screen -->
+<div id="inboxScreen" class="inbox-screen">
+  <!-- Top bar -->
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 20px;border-bottom:1px solid #e5e7eb;background:#fff;">
+    <button id="btnInboxBack" class="btn-pill" style="pointer-events:auto;">BACK</button>
+    <div style="flex:1;display:flex;justify-content:center;">
+      <h2 style="margin:0;font-size:18px;font-weight:600;">INBOX</h2>
+    </div>
+    <button id="btnNewRequest" class="btn-pill" style="background:#111;color:#fff;pointer-events:auto;">+ New Request</button>
+  </div>
+  
+  <!-- Tabs (only for managers/admins) -->
+  <div id="inboxTabs" class="inbox-tabbar" style="display:flex;align-items:center;border-bottom:1px solid #e5e7eb;background:#f9fafb;padding:0 20px;">
+    <button class="inbox-tab active" data-inbox-tab="open" onclick="setInboxTab('open')">Open</button>
+    <button class="inbox-tab" data-inbox-tab="needs_info" onclick="setInboxTab('needs_info')">Needs Info</button>
+    <button class="inbox-tab" data-inbox-tab="approved" onclick="setInboxTab('approved')">Approved</button>
+    <button class="inbox-tab" data-inbox-tab="denied" onclick="setInboxTab('denied')">Denied</button>
+    <button class="inbox-tab" data-inbox-tab="archived" onclick="setInboxTab('archived')">Archived</button>
+  </div>
+  
+  <!-- Content area -->
+  <div id="inboxContent" style="flex:1;padding:24px;overflow-y:auto;background:#f9fafb;">
+    <div id="inboxContentContainer" style="max-width:900px;margin:0 auto;">
+      <!-- Header with New Request button -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <h3 id="inboxListTitle" style="margin:0;font-size:16px;font-weight:600;color:#374151;">My Requests</h3>
+        <button onclick="openCreateRequestModal()" class="btn-pill" style="background:#111;color:#fff;padding:10px 20px;font-size:14px;">+ New Request</button>
+      </div>
+      <!-- Will be populated with request cards -->
+      <div id="inboxList" style="display:flex;flex-direction:column;gap:12px;">
+        <!-- Loading state -->
+        <div id="inboxLoading" style="text-align:center;padding:40px;color:#9ca3af;">
+          <div style="font-size:14px;">Loading requests...</div>
+        </div>
+        
+        <!-- Empty state -->
+        <div id="inboxEmpty" style="display:none;text-align:center;padding:60px 20px;color:#9ca3af;">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 16px;">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+            <polyline points="22,6 12,13 2,6"></polyline>
+          </svg>
+          <div style="font-size:16px;font-weight:500;color:#6b7280;margin-bottom:8px;">No requests</div>
+          <div id="emptyStateMessage" style="font-size:14px;margin-bottom:20px;">Create a new request to get started</div>
+          <button id="emptyStateNewRequestBtn" onclick="openCreateRequestModal()" class="btn-pill" style="background:#111;color:#fff;padding:12px 24px;">+ New Request</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>

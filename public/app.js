@@ -119,10 +119,10 @@ const firebaseConfig = {
 // Init
 // =====================
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+export const auth = getAuth(app);
 window.__ffAuth = auth;
 window.__ffGetUid = () => auth.currentUser?.uid || null;
-const db = getFirestore(app);
+export const db = getFirestore(app);
 console.log("[CLIENT] Firebase functions SDK available:", typeof firebase !== "undefined");
 const functions = getFunctions(app, "us-central1");
 const storage = getStorage(app);
@@ -471,17 +471,51 @@ function ffShowInviteFlow(inviteToken) {
 
       setLoading(true, "Finalizing your access...");
       try {
-        // Do NOT call finalizeStaffInvite via fetch — must use httpsCallable to avoid CORS.
-        console.log("[Invite] Calling finalizeStaffInvite via httpsCallable");
-        const finalizeStaffInvite = httpsCallable(functions, "finalizeStaffInvite");
-        const result = await finalizeStaffInvite({ inviteToken });
-        console.log("[Invite] Finalize success", result?.data || result);
+        // Write to Firestore → trigger will process (bypasses IAM/callable issues)
+        console.log("[Invite] Writing to finalizeInviteRequests");
+        const requestRef = await addDoc(collection(db, "finalizeInviteRequests"), {
+          inviteToken: inviteToken,
+          uid: credential.user.uid,
+          email: email,
+          createdAt: serverTimestamp()
+        });
+        console.log("[Invite] Request created", requestRef.id);
+        
+        // Wait for trigger to process (listen for status change)
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            unsub();
+            reject(new Error("Finalize timeout - please refresh and try signing in"));
+          }, 30000); // 30 second timeout
+          
+          const unsub = onSnapshot(
+            doc(db, "finalizeInviteRequests", requestRef.id),
+            (snap) => {
+              const s = snap.data()?.status;
+              if (s === "done") {
+                clearTimeout(timeout);
+                unsub();
+                console.log("[Invite] Finalize success");
+                resolve();
+              } else if (s === "error") {
+                clearTimeout(timeout);
+                unsub();
+                const errorMsg = snap.data()?.error || "Unknown error";
+                console.error("[Invite] Finalize failed", errorMsg);
+                reject(new Error(errorMsg));
+              }
+            },
+            (err) => {
+              clearTimeout(timeout);
+              unsub();
+              reject(err);
+            }
+          );
+        });
       } catch (finalizeErr) {
-        const code = finalizeErr?.code || "unknown";
         const msg = finalizeErr?.message || String(finalizeErr);
-        console.error("[Invite] Finalize failed", { code, message: msg, details: finalizeErr?.details });
-        const details = finalizeErr?.details ? JSON.stringify(finalizeErr.details) : "";
-        alert(`Invite finalize failed.\n\ncode: ${code}\nmessage: ${msg}\n${details}`);
+        console.error("[Invite] Finalize failed", { message: msg });
+        alert(`Invite finalize failed: ${msg}`);
         setLoading(false);
         setError("Invite finalize failed. Please try again or contact the owner.");
         return;
