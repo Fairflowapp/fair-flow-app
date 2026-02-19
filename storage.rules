@@ -1,16 +1,44 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    
-    // Public read for logo images inside "public/"
-    match /public/{allPaths=**} {
-      allow read;
+
+    function signedIn() {
+      return request.auth != null;
     }
 
-    // Everything else locked
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function userDoc() {
+      let doc = firestore.get(/databases/(default)/documents/users/$(uid()));
+      return doc == null ? null : doc.data;
+    }
+
+    // User private files
+    match /users/{userId}/{allFiles=**} {
+      allow read, write: if signedIn() && uid() == userId;
+    }
+
+    // Salon brand logo (only for users in that salon)
+    match /salons/{salonId}/brand/{allFiles=**} {
+      allow read: if signedIn();
+      allow write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+    }
+
+    // Staff documents: any signed-in user can read/write (tighten later: uid==staffId or same salon)
+    match /salons/{salonId}/staff/{staffId}/{allPaths=**} {
+      allow read, write: if signedIn();
+    }
+
+    // Inbox response documents (manager uploads response file for document requests)
+    match /salons/{salonId}/inboxDocuments/{allPaths=**} {
+      allow read, write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+    }
+
+    // deny everything else
     match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
     }
   }
 }
-

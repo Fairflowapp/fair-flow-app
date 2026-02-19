@@ -126,6 +126,7 @@ export const db = getFirestore(app);
 console.log("[CLIENT] Firebase functions SDK available:", typeof firebase !== "undefined");
 const functions = getFunctions(app, "us-central1");
 const storage = getStorage(app);
+export { storage };
 
 // Ensure we have an auth user (anonymous if needed) for HTTP callable invocations under domain-restricted sharing
 async function ensureSignedIn() {
@@ -709,10 +710,14 @@ function showLoginScreen() {
   const signupSection = document.getElementById("signup-section");
   const resetSection = document.getElementById("reset-password-section");
   const mainApp = document.getElementById("main-app-content");
+  const inboxScreen = document.getElementById("inboxScreen");
+  const tasksScreen = document.getElementById("tasksScreen");
   if (loginSection) loginSection.style.display = "block";
   if (signupSection) signupSection.style.display = "none";
   if (resetSection) resetSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
+  if (inboxScreen) inboxScreen.style.display = "none";
+  if (tasksScreen) tasksScreen.style.display = "none";
 }
 
 function showResetPasswordScreen() {

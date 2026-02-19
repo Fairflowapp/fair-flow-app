@@ -419,5 +419,106 @@ exports.sendStaffInviteCallable = functions
     return await _sendStaffInviteInternal({ data: { ...requestData, email, role, salonId }, auth });
   });
 
+/** Shared logic: resolve recipientStaffId -> uid and create inbox item. Used by trigger onInboxRequestDraftCreated. */
+async function _createInboxRequestFromDraft(creatorUid, salonId, recipientStaffId, recipientName, requestData) {
+  const creatorDoc = await admin.firestore().doc(`users/${creatorUid}`).get();
+  if (!creatorDoc.exists) throw new Error("User profile not found");
+  const creatorData = creatorDoc.data() || {};
+  if (String(creatorData.salonId || "") !== String(salonId)) throw new Error("Wrong salon");
+
+  let forUid = creatorUid;
+  let forStaffId = creatorData.staffId || "";
+  let forStaffName = creatorData.name || "";
+
+  if (recipientStaffId && String(recipientStaffId).trim()) {
+    const rid = String(recipientStaffId).trim();
+    const recName = (recipientName && String(recipientName).trim()) || "";
+    const recNameNorm = recName ? recName.toLowerCase().replace(/\s+/g, " ").trim() : "";
+    const allUsersSnap = await admin.firestore().collection("users").where("salonId", "==", salonId).get();
+    for (const d of allUsersSnap.docs) {
+      const data = d.data() || {};
+      const docStaffId = String(data.staffId || d.id || "").trim();
+      const docNameNorm = (data.name || "").trim().toLowerCase().replace(/\s+/g, " ").trim();
+      const matchById = rid && (docStaffId === rid || d.id === rid);
+      const matchByName = recNameNorm && docNameNorm && (docNameNorm === recNameNorm || docNameNorm.includes(recNameNorm) || recNameNorm.includes(docNameNorm));
+      if (matchById || matchByName) {
+        forUid = d.id;
+        forStaffId = data.staffId || rid;
+        forStaffName = recName || data.name || "";
+        break;
+      }
+    }
+    if (forUid === creatorUid) {
+      const directDoc = await admin.firestore().doc(`users/${rid}`).get();
+      if (directDoc.exists) {
+        const d = directDoc.data() || {};
+        if (String(d.salonId || "") === String(salonId)) {
+          forUid = rid;
+          forStaffId = d.staffId || rid;
+          forStaffName = recName || d.name || "";
+        }
+      }
+    }
+    if (forUid === creatorUid && rid !== creatorData.staffId)
+      throw new Error("Recipient not found. Make sure they have signed in at least once.");
+  }
+  if (recipientStaffId && String(recipientStaffId).trim() && forUid === creatorUid)
+    throw new Error("Could not resolve recipient. They may need to sign in first.");
+
+  const safeRequestData = { ...requestData };
+  delete safeRequestData.createdByUid;
+  delete safeRequestData.forUid;
+  delete safeRequestData.forStaffId;
+  delete safeRequestData.forStaffName;
+
+  const docToWrite = {
+    ...safeRequestData,
+    forUid,
+    forStaffId,
+    forStaffName,
+    createdByUid: creatorUid,
+    createdByStaffId: creatorData.staffId || "",
+    createdByName: creatorData.name || "",
+    createdByRole: creatorData.role || "",
+    tenantId: salonId,
+  };
+  delete docToWrite.createdAt;
+  delete docToWrite.lastActivityAt;
+  delete docToWrite.updatedAt;
+  Object.keys(docToWrite).forEach((k) => { if (docToWrite[k] === undefined) delete docToWrite[k]; });
+
+  const docRef = await admin.firestore().collection("salons").doc(salonId).collection("inboxItems").add({
+    ...docToWrite,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    lastActivityAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: null,
+  });
+  return docRef.id;
+}
+
+/** Firestore trigger: draft created → resolve recipient, create inbox item, delete draft. No CORS. */
+exports.onInboxRequestDraftCreated = onDocumentCreated(
+  { document: "salons/{salonId}/inboxRequestDrafts/{draftId}", region: "us-central1" },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const data = snap.data();
+    const salonId = event.params.salonId;
+    const draftId = event.params.draftId;
+    const { createdByUid, recipientStaffId, recipientName, requestDoc } = data || {};
+    if (!createdByUid || !requestDoc) {
+      console.warn("[onInboxRequestDraftCreated] missing fields", { createdByUid: !!createdByUid, requestDoc: !!requestDoc });
+      return;
+    }
+    try {
+      const docId = await _createInboxRequestFromDraft(createdByUid, salonId, recipientStaffId || "", recipientName || "", requestDoc);
+      console.log("[onInboxRequestDraftCreated] created", docId, "recipientStaffId=", recipientStaffId, "recipientName=", recipientName);
+      await snap.ref.delete();
+    } catch (err) {
+      console.error("[onInboxRequestDraftCreated] Error:", err.message, "recipientStaffId=", recipientStaffId, "recipientName=", recipientName);
+    }
+  }
+);
+
 /* sendStaffInvite HTTP removed – org policy blocks. Deploy with: firebase deploy --only "functions:testCallable,functions:testCallablePing,functions:testSendEmail,functions:onStaffInviteCreatedV2,functions:processPendingInvites,functions:sendStaffInviteCallable" */
 

@@ -14,22 +14,132 @@ import {
   limit,
   addDoc,
   updateDoc,
+  setDoc,
   doc,
   getDoc,
+  getDocs,
+  deleteDoc,
   onSnapshot,
   serverTimestamp,
   Timestamp
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
-import { db, auth } from "./app.js";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-storage.js";
+import { db, auth, storage } from "./app.js";
+
+// Category order for display (Schedule → Payments → Operations → Documents → Other at end)
+const REQUEST_CATEGORY_ORDER = ['schedule', 'payments', 'operations', 'documents', 'other'];
+const REQUEST_CATEGORY_LABELS = {
+  schedule: '🗓️ Schedule',
+  payments: '💰 Payments',
+  operations: '🛠️ Operations',
+  documents: '📄 Documents',
+  other: '⭐ Other'
+};
+
+// Built-in request types (id, icon, label, description, category)
+const BUILTIN_TYPES = [
+  // Schedule
+  { id: 'vacation', icon: '🏖️', label: 'Vacation Request', description: 'Request time off', category: 'schedule' },
+  { id: 'late_start', icon: '⏰', label: 'Late Start', description: 'Request to start later', category: 'schedule' },
+  { id: 'early_leave', icon: '🏃', label: 'Early Leave', description: 'Request to leave early', category: 'schedule' },
+  { id: 'schedule_change', icon: '📅', label: 'Schedule Change', description: 'Request schedule modification', category: 'schedule' },
+  { id: 'extra_shift', icon: '✅', label: 'Extra Shift / Pick Up Shift', description: 'Request to work on a day you\'re not scheduled', category: 'schedule' },
+  { id: 'swap_shift', icon: '🔄', label: 'Swap Shift', description: 'Swap a shift with another staff member', category: 'schedule' },
+  { id: 'break_change', icon: '☕', label: 'Break Change', description: 'Request to change break time', category: 'schedule' },
+  // Payments
+  { id: 'commission_review', icon: '💰', label: 'Commission Review', description: 'Question about commission or payment', category: 'payments' },
+  { id: 'tip_adjustment', icon: '💵', label: 'Tip Adjustment', description: 'Change tip after a service', category: 'payments' },
+  { id: 'payment_issue', icon: '📋', label: 'Payment Issue', description: 'Report a payment problem', category: 'payments' },
+  // Operations
+  { id: 'supplies', icon: '📦', label: 'Supplies', description: 'Request supplies or materials', category: 'operations' },
+  { id: 'maintenance', icon: '🔧', label: 'Maintenance', description: 'Report maintenance issue', category: 'operations' },
+  { id: 'client_issue', icon: '👤', label: 'Client Issue', description: 'Report or discuss a client-related matter', category: 'operations' },
+  // Documents
+  { id: 'document_request', icon: '📄', label: 'Request a Document', description: 'Request a document from management (1099, employment letter, contract, etc.)', category: 'documents' },
+  { id: 'document_upload', icon: '📤', label: 'Upload a Document', description: 'Upload a document to the business (license, insurance, certification)', category: 'documents' },
+  // Other (always last)
+  { id: 'other', icon: '📝', label: 'Other', description: 'Other request', category: 'other' }
+];
 
 // =====================
 // State
 // =====================
 let currentInboxTab = 'open';
+let inboxViewMode = 'to_handle'; // 'mine' | 'to_handle' — only for admin/manager
 let inboxUnsubscribe = null;
 let currentUserProfile = null;
 let currentRequests = [];
+let customRequestTypes = [];
+let inboxStaffFilterUid = '';
+let inboxHiddenTypes = []; // loaded from salons/{salonId}/requestTypes
+let _inboxUsersCache = null; // { uid, name, staffId, role }[] — loaded from Firestore users
+
+/** Load same-salon users from Firestore (managers/admins/owners can read via updated rules). Cached per session. */
+async function loadSalonUsersForRecipients() {
+  if (_inboxUsersCache !== null) return _inboxUsersCache;
+  if (!currentUserProfile?.salonId) return [];
+  try {
+    // Read from salons/{salonId}/members — readable by any salon member, no complex rules
+    const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/members`));
+    _inboxUsersCache = snap.docs
+      .filter(d => d.id !== currentUserProfile.uid)
+      .map(d => {
+        const u = d.data() || {};
+        return {
+          uid: d.id,
+          name: (u.name || '').trim(),
+          staffId: u.staffId || '',
+          role: (u.role || '').toLowerCase()
+        };
+      })
+      .filter(u => u.name);
+    console.log('[Inbox] members loaded:', _inboxUsersCache.length, '| managers/admins:', _inboxUsersCache.filter(u => ['manager','admin','owner'].includes(u.role)).length);
+    return _inboxUsersCache;
+  } catch (e) {
+    console.error('[Inbox] loadSalonUsersForRecipients failed:', e.code, e.message);
+    _inboxUsersCache = [];
+    return [];
+  }
+}
+
+/** Recipients for "Send to": managers/admins from Firestore users cache, falling back to ff_staff_v1. */
+function getInboxRecipientsList() {
+  // Prefer Firestore cache (has real Firebase UIDs)
+  if (_inboxUsersCache && _inboxUsersCache.length > 0) {
+    return _inboxUsersCache
+      .filter(u => ['manager', 'admin', 'owner'].includes(u.role))
+      .map(u => ({ uid: u.uid, id: u.staffId || u.uid, name: u.name }));
+  }
+  // Fallback: ff_staff_v1 (no uid, just staffId)
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('ff_staff_v1') : null;
+    const store = raw ? JSON.parse(raw) : {};
+    const staff = Array.isArray(store.staff) ? store.staff : [];
+    const currentStaffId = (currentUserProfile?.staffId || currentUserProfile?.id) || '';
+    const currentName = (currentUserProfile?.name) || '';
+    return staff
+      .filter(s => s && !s.isArchived && (s.isAdmin || s.isManager) && s.id !== currentStaffId && s.name !== currentName)
+      .map(s => ({ uid: '', id: s.id || '', name: (s.name || '').trim() }));
+  } catch (e) {
+    return [];
+  }
+}
+
+/** Selected recipients in create-request modal. Returns { uids: string[], staffIds: string[], names: string[] }. */
+function getCreateRequestSelectedRecipients() {
+  const modal = document.getElementById('createRequestModal');
+  if (!modal) return { uids: [], staffIds: [], names: [] };
+  const checked = modal.querySelectorAll('.create-request-send-to-cb:checked');
+  const uids = []; const staffIds = []; const names = [];
+  checked.forEach(cb => {
+    const uid = cb.getAttribute('data-uid') || '';
+    const id = cb.getAttribute('data-staff-id') || '';
+    const n = cb.getAttribute('data-staff-name') || '';
+    uids.push(uid); staffIds.push(id); if (n) names.push(n);
+  });
+  return { uids, staffIds, names };
+}
 
 // =====================
 // Navigation
@@ -37,46 +147,128 @@ let currentRequests = [];
 export function goToInbox() {
   console.log('[Inbox] Opening inbox');
   
-  // Hide other screens
   const tasksScreen = document.getElementById('tasksScreen');
   const ownerView = document.getElementById('owner-view');
   const joinBar = document.querySelector('.joinBar');
   const queueControls = document.getElementById('queueControls');
   const userProfileScreen = document.getElementById('userProfileScreen');
+  const wrap = document.querySelector('.wrap');
+  const inboxScreen = document.getElementById('inboxScreen');
+  const inboxContent = document.getElementById('inboxContent');
   
+  // Hide other screens first
   if (tasksScreen) tasksScreen.style.display = 'none';
   if (ownerView) ownerView.style.display = 'none';
   if (joinBar) joinBar.style.display = 'none';
   if (queueControls) queueControls.style.display = 'none';
   if (userProfileScreen) userProfileScreen.style.display = 'none';
+  if (wrap) wrap.style.display = 'none';
   
-  // Show inbox
-  const inboxScreen = document.getElementById('inboxScreen');
-  if (inboxScreen) {
-    inboxScreen.style.display = 'flex';
-  }
+  // Show inbox shell but hide content until ready (avoids flash of empty "My Requests")
+  if (inboxScreen) inboxScreen.style.display = 'flex';
+  if (inboxContent) inboxContent.style.opacity = '0';
   
-  // Update active button (CSS only - no inline styles)
   document.querySelectorAll('.btn-pill').forEach(btn => btn.classList.remove('active'));
   const inboxBtn = document.getElementById('inboxBtn');
   if (inboxBtn) inboxBtn.classList.add('active');
   
-  // Load current user profile and requests
   loadCurrentUserProfile().then(() => {
-    setupInboxUI();
-    loadInboxItems();
+    loadCustomTypes().then(() => {
+      loadInboxSettings().then(() => {
+        setupInboxUI();
+        loadInboxItems();
+        // Show content when UI is ready and loading has started
+        if (inboxContent) inboxContent.style.opacity = '1';
+      });
+    });
   });
+}
+
+async function loadCustomTypes() {
+  if (!currentUserProfile?.salonId) return;
+  try {
+    const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/requestTypes`));
+    customRequestTypes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    console.log('[Inbox] Custom request types loaded', customRequestTypes.length);
+  } catch (err) {
+    console.warn('[Inbox] Failed to load custom types', err);
+    customRequestTypes = [];
+  }
+}
+
+const INBOX_SETTINGS_DOC_ID = 'visibility';
+async function loadInboxSettings() {
+  if (!currentUserProfile?.salonId) return;
+  try {
+    const ref = doc(db, 'salons', currentUserProfile.salonId, 'inboxSettings', INBOX_SETTINGS_DOC_ID);
+    const snap = await getDoc(ref);
+    inboxHiddenTypes = Array.isArray(snap.data()?.hiddenRequestTypes) ? snap.data().hiddenRequestTypes : [];
+  } catch (err) {
+    console.warn('[Inbox] Failed to load inbox settings', err);
+    inboxHiddenTypes = [];
+  }
+}
+
+async function setInboxTypeVisibility(typeId, hidden) {
+  if (!currentUserProfile?.salonId) return;
+  if (hidden) {
+    if (!inboxHiddenTypes.includes(typeId)) inboxHiddenTypes = [...inboxHiddenTypes, typeId];
+  } else {
+    inboxHiddenTypes = inboxHiddenTypes.filter(id => id !== typeId);
+  }
+  const salonId = currentUserProfile.salonId;
+  const ref = doc(db, 'salons', salonId, 'inboxSettings', INBOX_SETTINGS_DOC_ID);
+  await setDoc(ref, { hiddenRequestTypes: inboxHiddenTypes }, { merge: true });
+}
+
+function getAllRequestTypes() {
+  const hidden = new Set(inboxHiddenTypes || []);
+  const custom = (customRequestTypes || []).map(t => ({
+    id: t.id,
+    icon: t.icon || '📝',
+    label: t.label || 'Request',
+    description: t.description || '',
+    category: 'custom',
+    fields: Array.isArray(t.fields) ? t.fields : []
+  }));
+  const withoutOther = BUILTIN_TYPES.filter(t => t.category !== 'other' && !hidden.has(t.id));
+  const otherOnly = BUILTIN_TYPES.filter(t => t.category === 'other' && !hidden.has(t.id));
+  const customVisible = custom.filter(t => !hidden.has(t.id));
+  return [...withoutOther, ...customVisible, ...otherOnly];
+}
+
+/** Returns types grouped by category for the New Request modal (Schedule, Payments, Operations, Documents, Custom, Other). */
+function getRequestTypesGroupedByCategory() {
+  const all = getAllRequestTypes();
+  const groups = { schedule: [], payments: [], operations: [], documents: [], custom: [], other: [] };
+  const categoryLabel = (t) => t.category || 'other';
+  all.forEach(t => {
+    const cat = categoryLabel(t);
+    if (groups[cat]) groups[cat].push(t);
+  });
+  return groups;
 }
 
 async function loadCurrentUserProfile() {
   const user = auth.currentUser;
   if (!user) return null;
-  
+  _inboxUsersCache = null; // reset recipients cache on each profile load
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (userDoc.exists()) {
       currentUserProfile = { uid: user.uid, ...userDoc.data() };
       console.log('[Inbox] User profile loaded', { role: currentUserProfile.role });
+      // Register in members directory so others can find this user in "Send to"
+      if (currentUserProfile.salonId) {
+        const memberData = {
+          name: currentUserProfile.name || currentUserProfile.displayName || user.email || '',
+          role: currentUserProfile.role || '',
+          staffId: currentUserProfile.staffId || '',
+          email: user.email || ''
+        };
+        setDoc(doc(db, `salons/${currentUserProfile.salonId}/members`, user.uid), memberData, { merge: true })
+          .catch(e => console.warn('[Inbox] Could not write member doc', e.message));
+      }
       return currentUserProfile;
     }
   } catch (err) {
@@ -87,40 +279,110 @@ async function loadCurrentUserProfile() {
 
 function setupInboxUI() {
   if (!currentUserProfile) return;
-  
-  const inboxTabs = document.getElementById('inboxTabs');
-  const newRequestBtn = document.querySelector('#inboxContentContainer button[onclick="openCreateRequestModal()"]');
-  const emptyStateBtn = document.getElementById('emptyStateNewRequestBtn');
-  const emptyStateMsg = document.getElementById('emptyStateMessage');
+
   const role = currentUserProfile.role || '';
-  
-  // Technicians see "My Requests" instead of status tabs
+
+  // "New Request" buttons — show for technician, manager, admin, owner
+  const contentNewBtn  = document.querySelector('#inboxContentContainer button[onclick="openCreateRequestModal()"]');
+  const emptyStateBtn  = document.getElementById('emptyStateNewRequestBtn');
+  const emptyStateMsg  = document.getElementById('emptyStateMessage');
+  const inboxTabs      = document.getElementById('inboxTabs');
+  const listTitle      = document.getElementById('inboxListTitle');
+
+  const canCreateRequests = ['technician', 'manager', 'admin', 'owner'].includes(role);
+  const isAdminOrOwner = (role === 'admin' || role === 'owner');
+  const manageTypesBtn = document.getElementById('btnManageRequestTypes');
+  const settingsBtn = document.getElementById('inboxSettingsBtn');
+
+  // New Request: show only in "My Requests" (or always for technician); hide in "To handle"
+  const showNewRequest = canCreateRequests && (role === 'technician' || inboxViewMode === 'mine');
+  if (contentNewBtn) contentNewBtn.style.display = showNewRequest ? '' : 'none';
+  // Hide empty-state New Request — only the header button is used
+  if (emptyStateBtn) emptyStateBtn.style.display = 'none';
+  if (manageTypesBtn) manageTypesBtn.style.display = 'none'; // use gear only
+  // Gear settings button — ONLY for admin/owner, after Archived tab
+  if (settingsBtn) {
+    settingsBtn.style.display = isAdminOrOwner ? 'flex' : 'none';
+    settingsBtn.onclick = () => window.openInboxSettingsModal();
+  }
+
+  const filterRow = document.getElementById('inboxFilterRow');
+  const staffFilterTrigger = document.getElementById('inboxStaffFilterTrigger');
+  const staffFilterPanel = document.getElementById('inboxStaffFilterPanel');
+  if (filterRow) filterRow.style.display = (role === 'technician') ? 'none' : 'flex';
+  if (staffFilterTrigger && staffFilterPanel) {
+    staffFilterTrigger.onclick = (e) => {
+      e.stopPropagation();
+      const open = staffFilterPanel.style.display === 'block';
+      staffFilterPanel.style.display = open ? 'none' : 'block';
+      staffFilterTrigger.setAttribute('aria-expanded', !open);
+    };
+    document.addEventListener('click', function closeStaffFilterPanel(e) {
+      const wrap = document.getElementById('inboxStaffFilterWrap');
+      if (staffFilterPanel.style.display === 'block' && wrap && !wrap.contains(e.target)) {
+        staffFilterPanel.style.display = 'none';
+        staffFilterTrigger.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
   if (role === 'technician') {
-    if (inboxTabs) {
-      inboxTabs.innerHTML = `
-        <div style="padding:12px 0;font-size:14px;font-weight:600;color:#374151;">My Requests</div>
-      `;
-    }
+    // Technicians see their own requests only — hide status tabs and view switcher
+    const viewSwitcher = document.getElementById('inboxViewSwitcher');
+    if (viewSwitcher) viewSwitcher.style.display = 'none';
+    if (inboxTabs) inboxTabs.classList.add('hidden');
+    if (listTitle) listTitle.textContent = 'My Requests';
     currentInboxTab = 'my_requests';
-    // Technician can create requests
-    if (newRequestBtn) newRequestBtn.style.display = 'inline-block';
-    if (emptyStateBtn) emptyStateBtn.style.display = 'inline-block';
-  } else if (role === 'manager') {
-    // Managers see status tabs and can create requests
-    currentInboxTab = 'open';
-    if (newRequestBtn) newRequestBtn.style.display = 'inline-block';
-    if (emptyStateBtn) emptyStateBtn.style.display = 'inline-block';
-  } else if (role === 'admin' || role === 'owner') {
-    // Admins/Owners see status tabs but DON'T create requests (only approve/deny)
-    currentInboxTab = 'open';
-    if (newRequestBtn) newRequestBtn.style.display = 'none';
-    if (emptyStateBtn) emptyStateBtn.style.display = 'none';
-    if (emptyStateMsg) emptyStateMsg.textContent = 'No requests in this category';
   } else {
-    // Default
-    currentInboxTab = 'open';
+    // Manager / Admin / Owner — show view switcher (My Requests | To handle)
+    const viewSwitcher = document.getElementById('inboxViewSwitcher');
+    if (viewSwitcher) viewSwitcher.style.display = 'flex';
+    document.querySelectorAll('.inbox-view-btn').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.inboxView || '') === inboxViewMode);
+    });
+    // Handlers are in HTML onclick; setInboxViewMode() does the work
+    if (filterRow) filterRow.style.display = inboxViewMode === 'mine' ? 'none' : 'flex';
+    if (listTitle) listTitle.textContent = inboxViewMode === 'mine' ? 'My Requests' : 'To handle';
+    // In "My Requests": hide status tabs (Open/Needs Info/etc) and center New Request button
+    if (inboxViewMode === 'mine') {
+      if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
+    } else {
+      if (inboxTabs) { inboxTabs.classList.remove('hidden'); inboxTabs.style.display = ''; }
+    }
+    if (emptyStateBtn) emptyStateBtn.style.display = 'none';
+    currentInboxTab = currentInboxTab || 'open';
+    if (emptyStateMsg) emptyStateMsg.textContent = 'No requests in this category';
+    document.querySelectorAll('.inbox-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.inboxTab === currentInboxTab);
+    });
   }
 }
+
+// =====================
+// View Mode (My Requests | To handle) — called from HTML onclick
+// =====================
+window.setInboxViewMode = function(mode) {
+  if (!currentUserProfile || ['technician'].includes(currentUserProfile.role || '')) return;
+  inboxViewMode = mode;
+  document.querySelectorAll('.inbox-view-btn').forEach(b => {
+    b.classList.toggle('active', (b.dataset.inboxView || '') === mode);
+  });
+  const listTitle = document.getElementById('inboxListTitle');
+  const filterRow = document.getElementById('inboxFilterRow');
+  const inboxTabs = document.getElementById('inboxTabs');
+  const emptyStateBtn = document.getElementById('emptyStateNewRequestBtn');
+  const contentNewBtn = document.querySelector('#inboxContentContainer button[onclick="openCreateRequestModal()"]');
+  if (listTitle) listTitle.textContent = mode === 'mine' ? 'My Requests' : 'To handle';
+  if (filterRow) filterRow.style.display = mode === 'mine' ? 'none' : 'flex';
+  if (mode === 'mine') {
+    if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
+  } else {
+    if (inboxTabs) { inboxTabs.classList.remove('hidden'); inboxTabs.style.display = ''; }
+  }
+  if (emptyStateBtn) emptyStateBtn.style.display = 'none';
+  if (contentNewBtn) contentNewBtn.style.display = (mode === 'mine') ? '' : 'none';
+  loadInboxItems();
+};
 
 // =====================
 // Tab Management
@@ -146,6 +408,26 @@ async function loadInboxItems() {
   const salonId = currentUserProfile.salonId;
   const role = currentUserProfile.role || '';
   const uid = currentUserProfile.uid;
+
+  console.log('[Inbox] loadInboxItems', { salonId, role, uid });
+
+  // Guard: salonId must exist, otherwise rules will always deny
+  if (!salonId) {
+    console.error('[Inbox] salonId is missing from user profile', currentUserProfile);
+    const emptyEl = document.getElementById('inboxEmpty');
+    const loadingEl = document.getElementById('inboxLoading');
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (emptyEl) {
+      emptyEl.style.display = 'block';
+      emptyEl.innerHTML = `
+        <div style="color:#ef4444;">
+          <div style="font-size:16px;font-weight:500;margin-bottom:8px;">Setup required</div>
+          <div style="font-size:14px;">Your account is not linked to a salon. Please contact support.</div>
+        </div>
+      `;
+    }
+    return;
+  }
   
   // Unsubscribe from previous listener
   if (inboxUnsubscribe) {
@@ -161,8 +443,7 @@ async function loadInboxItems() {
   if (loadingEl) loadingEl.style.display = 'block';
   if (emptyEl) emptyEl.style.display = 'none';
   if (listEl) {
-    const items = listEl.querySelectorAll('.inbox-item-card');
-    items.forEach(item => item.remove());
+    listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach(el => el.remove());
   }
   
   try {
@@ -177,11 +458,20 @@ async function loadInboxItems() {
         orderBy('lastActivityAt', 'desc'),
         limit(50)
       );
+    } else if (inboxViewMode === 'mine') {
+      // Admin/Manager "My Requests": all requests I created (no status tabs)
+      q = query(
+        collection(db, `salons/${salonId}/inboxItems`),
+        where('createdByUid', '==', uid),
+        orderBy('lastActivityAt', 'desc'),
+        limit(50)
+      );
     } else {
-      // Managers/Admins see all, filtered by status
+      // Admin/Manager "To handle": only requests sent TO me (forUid)
       if (currentInboxTab === 'open') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
+          where('forUid', '==', uid),
           where('status', '==', 'open'),
           orderBy('lastActivityAt', 'desc'),
           limit(50)
@@ -189,6 +479,7 @@ async function loadInboxItems() {
       } else if (currentInboxTab === 'needs_info') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
+          where('forUid', '==', uid),
           where('status', '==', 'needs_info'),
           orderBy('lastActivityAt', 'desc'),
           limit(50)
@@ -196,13 +487,15 @@ async function loadInboxItems() {
       } else if (currentInboxTab === 'approved') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
-          where('status', '==', 'approved'),
+          where('forUid', '==', uid),
+          where('status', 'in', ['approved', 'done']),
           orderBy('lastActivityAt', 'desc'),
           limit(50)
         );
       } else if (currentInboxTab === 'denied') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
+          where('forUid', '==', uid),
           where('status', '==', 'denied'),
           orderBy('lastActivityAt', 'desc'),
           limit(50)
@@ -210,14 +503,15 @@ async function loadInboxItems() {
       } else if (currentInboxTab === 'archived') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
+          where('forUid', '==', uid),
           where('status', '==', 'archived'),
           orderBy('lastActivityAt', 'desc'),
           limit(50)
         );
       } else {
-        // Default: open
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
+          where('forUid', '==', uid),
           where('status', '==', 'open'),
           orderBy('lastActivityAt', 'desc'),
           limit(50)
@@ -235,7 +529,7 @@ async function loadInboxItems() {
       }));
       
       console.log('[Inbox] Loaded', currentRequests.length, 'requests');
-      
+      updateInboxStaffFilterOptions();
       if (currentRequests.length === 0) {
         if (emptyEl) emptyEl.style.display = 'block';
       } else {
@@ -245,6 +539,8 @@ async function loadInboxItems() {
     }, (error) => {
       console.error('[Inbox] Query error', error);
       if (loadingEl) loadingEl.style.display = 'none';
+      currentRequests = [];
+      if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach(el => el.remove());
       if (emptyEl) {
         emptyEl.style.display = 'block';
         emptyEl.innerHTML = `
@@ -262,18 +558,170 @@ async function loadInboxItems() {
   }
 }
 
+function updateInboxStaffFilterOptions() {
+  const trigger = document.getElementById('inboxStaffFilterTrigger');
+  const labelEl = document.getElementById('inboxStaffFilterLabel');
+  const panel = document.getElementById('inboxStaffFilterPanel');
+  if (!trigger || !labelEl || !panel) return;
+  const role = (currentUserProfile && currentUserProfile.role) || '';
+  if (role === 'technician') return;
+
+  const seen = new Map();
+  currentRequests.forEach(req => {
+    const uid = req.forUid || req.createdByUid || '';
+    const name = (req.forStaffName || req.createdByName || '').trim() || uid || 'Unknown';
+    if (uid && !seen.has(uid)) seen.set(uid, name);
+  });
+  const options = [['', 'All staff']];
+  seen.forEach((name, uid) => options.push([uid, name]));
+  const current = inboxStaffFilterUid;
+  if (!options.some(([v]) => v === current)) inboxStaffFilterUid = '';
+
+  const currentLabel = options.find(([v]) => v === inboxStaffFilterUid)?.[1] || 'All staff';
+  labelEl.textContent = currentLabel;
+
+  panel.innerHTML = options.map(([val, lab]) => {
+    const isSelected = val === inboxStaffFilterUid;
+    const style = 'padding:10px 14px;cursor:pointer;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;' + (isSelected ? 'background:#f9fafb;font-weight:500;' : '');
+    return `<div role="option" data-value="${escapeHtml(val)}" aria-selected="${isSelected}" style="${style}">${isSelected ? '✓ ' : ''}${escapeHtml(lab)}</div>`;
+  }).join('');
+
+  panel.querySelectorAll('[role="option"]').forEach(opt => {
+    opt.onclick = (e) => {
+      e.stopPropagation();
+      inboxStaffFilterUid = opt.dataset.value || '';
+      labelEl.textContent = opt.textContent.replace(/^✓\s*/, '').trim();
+      panel.style.display = 'none';
+      trigger.setAttribute('aria-expanded', 'false');
+      renderInboxList();
+    };
+  });
+}
+
 function renderInboxList() {
   const listEl = document.getElementById('inboxList');
   if (!listEl) return;
-  
-  // Remove existing cards
-  const existing = listEl.querySelectorAll('.inbox-item-card');
-  existing.forEach(el => el.remove());
-  
-  // Render each request
-  currentRequests.forEach(request => {
-    const card = createRequestCard(request);
-    listEl.appendChild(card);
+
+  // Title by role and view: technician = "My Requests"; manager "mine" = "My Requests", "to_handle" = "To handle"
+  const listTitle = document.getElementById('inboxListTitle');
+  const role = (currentUserProfile && currentUserProfile.role) || '';
+  if (listTitle) {
+    if (role === 'technician') listTitle.textContent = 'My Requests';
+    else listTitle.textContent = inboxViewMode === 'mine' ? 'My Requests' : 'To handle';
+  }
+
+  // Remove only dynamically-added group elements (preserve loading/empty state divs)
+  listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach(el => el.remove());
+
+  const emptyEl = document.getElementById('inboxEmpty');
+  const loadingEl = document.getElementById('inboxLoading');
+
+  let requestsToShow = currentRequests;
+
+  // Client-side status filter to prevent flicker when Firestore sends intermediate snapshots
+  // (item reorders on lastActivityAt change before status change removes it from query)
+  if (inboxViewMode === 'to_handle' || role === 'technician') {
+    if (currentInboxTab === 'open') {
+      requestsToShow = requestsToShow.filter(r => r.status === 'open');
+    } else if (currentInboxTab === 'needs_info') {
+      requestsToShow = requestsToShow.filter(r => r.status === 'needs_info');
+    } else if (currentInboxTab === 'approved') {
+      requestsToShow = requestsToShow.filter(r => r.status === 'approved' || r.status === 'done');
+    } else if (currentInboxTab === 'denied') {
+      requestsToShow = requestsToShow.filter(r => r.status === 'denied');
+    } else if (currentInboxTab === 'archived') {
+      requestsToShow = requestsToShow.filter(r => r.status === 'archived');
+    }
+  }
+
+  if (role !== 'technician' && inboxViewMode !== 'mine' && inboxStaffFilterUid) {
+    requestsToShow = requestsToShow.filter(r => (r.forUid || r.createdByUid) === inboxStaffFilterUid);
+  }
+
+  if (requestsToShow.length === 0) {
+    if (emptyEl) {
+      emptyEl.style.display = 'block';
+      emptyEl.querySelector('#emptyStateMessage').textContent = inboxStaffFilterUid ? 'No requests from this staff in this tab' : 'No requests in this category';
+    }
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+  if (loadingEl) loadingEl.style.display = 'none';
+
+  const isManager = currentUserProfile && ['manager','admin','owner'].includes(currentUserProfile.role);
+
+  // Group requests by type (use filtered list)
+  const groups = {};
+  requestsToShow.forEach(req => {
+    const key = req.type || 'other';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(req);
+  });
+
+  // Order: by category (schedule → payments → operations), then custom type ids, then other last
+  const typeOrder = [
+    'vacation','late_start','early_leave','schedule_change','extra_shift','swap_shift','break_change',
+    'commission_review','tip_adjustment','payment_issue',
+    'supplies','maintenance','client_issue',
+    'document_request','document_upload',
+    'other'
+  ];
+  const sortedKeys = Object.keys(groups).sort((a, b) => {
+    const ai = typeOrder.indexOf(a);
+    const bi = typeOrder.indexOf(b);
+    if (ai === -1 && bi === -1) return a.localeCompare(b);
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+
+  sortedKeys.forEach(type => {
+    const requests = groups[type];
+    const typeInfo = getRequestTypeInfo(type);
+    const unreadCount = isManager ? requests.filter(r => r.unreadForManagers === true).length : 0;
+    const hasUnread = unreadCount > 0;
+
+    // Left: icon + label. Right: (total) grey, unread count red when > 0, then arrow
+    const header = document.createElement('div');
+    header.className = 'inbox-group-header';
+    header.style.cssText = `
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 16px; background:#fff; border:1px solid #e5e7eb;
+      border-radius:8px; cursor:pointer; margin-bottom:4px; user-select:none;
+    `;
+    header.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:18px;">${typeInfo.icon}</span>
+        <span style="font-weight:600;font-size:14px;color:#111;">${typeInfo.label}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="color:#6b7280;font-size:13px;font-weight:500;">(${requests.length})</span>
+        ${hasUnread ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;background:#ef4444;color:#fff;font-size:11px;font-weight:600;border-radius:50%;" title="Not yet opened">${unreadCount}</span>` : ''}
+        <span class="inbox-group-arrow" style="color:#9ca3af;font-size:11px;transition:transform 0.2s;">▼</span>
+      </div>
+    `;
+
+    // Group body — collapsed by default
+    const body = document.createElement('div');
+    body.className = 'inbox-group-body';
+    body.style.cssText = 'display:none; margin-bottom:8px; display:flex; flex-direction:column; gap:8px;';
+    body.style.display = 'none';
+
+    requests.forEach(req => {
+      const card = createRequestCard(req);
+      body.appendChild(card);
+    });
+
+    // Toggle on click
+    header.addEventListener('click', () => {
+      const isOpen = body.style.display !== 'none';
+      body.style.display = isOpen ? 'none' : 'flex';
+      const arrow = header.querySelector('.inbox-group-arrow');
+      if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(180deg)';
+    });
+
+    listEl.appendChild(header);
+    listEl.appendChild(body);
   });
 }
 
@@ -315,16 +763,112 @@ function createRequestCard(request) {
 }
 
 function getRequestTypeInfo(type) {
-  const types = {
-    vacation: { icon: '🏖️', label: 'Vacation Request' },
-    late_start: { icon: '⏰', label: 'Late Start' },
-    early_leave: { icon: '🏃', label: 'Early Leave' },
-    schedule_change: { icon: '📅', label: 'Schedule Change' },
-    supplies: { icon: '📦', label: 'Supplies Request' },
-    maintenance: { icon: '🔧', label: 'Maintenance' },
-    other: { icon: '📝', label: 'Other Request' }
-  };
-  return types[type] || { icon: '📝', label: 'Request' };
+  const all = getAllRequestTypes();
+  const found = all.find(t => t.id === type);
+  return found || { icon: '📝', label: type || 'Request', description: '', fields: [] };
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+/** Returns Promise<boolean> - true if confirmed, false if cancelled */
+function showConfirmModal(options) {
+  const { title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false } = options;
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.id = 'inboxConfirmModal';
+    modal.style.cssText = `
+      position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;
+      z-index:999999;padding:20px;backdrop-filter:blur(3px);
+    `;
+    modal.innerHTML = `
+      <div style="
+        background:#fff;border-radius:16px;padding:28px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.2);
+        text-align:center;
+      ">
+        <div style="font-size:40px;margin-bottom:16px;">${danger ? '🗑️' : '❓'}</div>
+        <h3 style="margin:0 0 12px;font-size:18px;font-weight:600;color:#111;">${escapeHtml(title)}</h3>
+        <p style="margin:0 0 24px;font-size:14px;color:#6b7280;line-height:1.5;">${escapeHtml(message)}</p>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+          <button class="inbox-confirm-cancel" style="
+            padding:12px 24px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:10px;
+            cursor:pointer;font-size:14px;font-weight:500;
+          ">${escapeHtml(cancelLabel)}</button>
+          <button class="inbox-confirm-ok" style="
+            padding:12px 24px;border:none;background:${danger ? '#dc2626' : '#111'};color:#fff;border-radius:10px;
+            cursor:pointer;font-size:14px;font-weight:600;
+          ">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>
+    `;
+    const remove = () => { modal.remove(); };
+    modal.querySelector('.inbox-confirm-ok').onclick = () => { remove(); resolve(true); };
+    modal.querySelector('.inbox-confirm-cancel').onclick = () => { remove(); resolve(false); };
+    modal.onclick = (e) => { if (e.target === modal) { remove(); resolve(false); } };
+    document.body.appendChild(modal);
+  });
+}
+
+/** Returns Promise<string | null> - the input value if confirmed, null if cancelled */
+function showPromptModal(options) {
+  const {
+    title,
+    message,
+    placeholder = '',
+    confirmLabel = 'OK',
+    cancelLabel = 'Cancel',
+    required = false
+  } = options;
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.id = 'inboxPromptModal';
+    modal.style.cssText = `
+      position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;
+      z-index:999999;padding:20px;backdrop-filter:blur(3px);
+    `;
+    modal.innerHTML = `
+      <div style="
+        background:#fff;border-radius:16px;padding:28px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.2);
+      ">
+        <div style="font-size:40px;margin-bottom:16px;text-align:center;">❓</div>
+        <h3 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#111;text-align:center;">${escapeHtml(title)}</h3>
+        <p style="margin:0 0 20px;font-size:14px;color:#6b7280;line-height:1.5;text-align:center;">${escapeHtml(message)}</p>
+        <textarea id="inboxPromptInput" rows="3" placeholder="${escapeHtml(placeholder)}" style="
+          width:100%;padding:12px 14px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;resize:vertical;min-height:80px;box-sizing:border-box;
+        "></textarea>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:20px;">
+          <button class="inbox-prompt-cancel" style="
+            padding:12px 24px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:10px;
+            cursor:pointer;font-size:14px;font-weight:500;
+          ">${escapeHtml(cancelLabel)}</button>
+          <button class="inbox-prompt-ok" style="
+            padding:12px 24px;border:none;background:#111;color:#fff;border-radius:10px;
+            cursor:pointer;font-size:14px;font-weight:600;
+          ">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>
+    `;
+    const input = modal.querySelector('#inboxPromptInput');
+    const remove = () => { modal.remove(); };
+    modal.querySelector('.inbox-prompt-ok').onclick = () => {
+      const val = (input.value || '').trim();
+      if (required && !val) {
+        input.style.borderColor = '#ef4444';
+        return;
+      }
+      remove();
+      resolve(required ? (val || null) : val);
+    };
+    input.oninput = () => { input.style.borderColor = ''; };
+    modal.querySelector('.inbox-prompt-cancel').onclick = () => { remove(); resolve(null); };
+    modal.onclick = (e) => { if (e.target === modal) { remove(); resolve(null); } };
+    document.body.appendChild(modal);
+    input.focus();
+  });
 }
 
 function getRequestSummary(request) {
@@ -334,19 +878,34 @@ function getRequestSummary(request) {
     case 'vacation':
       return `${data.startDate || ''} to ${data.endDate || ''} (${data.daysCount || 0} days)`;
     case 'late_start':
-      return `${data.date || ''} - Start at ${data.requestedTime || ''}`;
     case 'early_leave':
-      return `${data.date || ''} - Leave at ${data.requestedTime || ''}`;
+      return `${data.date || ''} - ${data.requestedTime || ''}`;
     case 'schedule_change':
       return data.reason || 'Schedule change request';
+    case 'extra_shift':
+    case 'swap_shift':
+    case 'break_change':
+      return data.date ? `${data.date} – ${(data.details || '').substring(0, 50)}` : (data.details || 'View details').substring(0, 80);
+    case 'commission_review':
+    case 'tip_adjustment':
+    case 'payment_issue':
+    case 'client_issue':
+      return data.subject || (data.details || 'View details').substring(0, 60);
     case 'supplies':
       const itemCount = data.items?.length || 0;
       return `${itemCount} item${itemCount !== 1 ? 's' : ''} - ${data.urgency || 'routine'}`;
     case 'maintenance':
       return `${data.area || 'Unknown area'} - ${data.severity || 'minor'} issue`;
+    case 'document_request':
+      return `${data.documentType || 'Document'} – ${(data.reason || '').substring(0, 40)}`;
+    case 'document_upload':
+      return `${data.documentType || 'Document'}${data.expirationDate ? ` · Expires ${data.expirationDate}` : ''}`;
     case 'other':
       return data.subject || data.details?.substring(0, 60) || 'Request details';
     default:
+      if (data.details) return data.details.substring(0, 80);
+      const keys = Object.keys(data || {}).filter(k => data[k]);
+      if (keys.length) return keys.map(k => String(data[k])).join(' · ').substring(0, 80);
       return 'View details';
   }
 }
@@ -401,76 +960,44 @@ window.openCreateRequestModal = function() {
     overflow-y: auto;
   `;
   
+  const grouped = getRequestTypesGroupedByCategory();
+  const renderTypeBtn = (t) => `
+    <button class="request-type-btn" data-type="${t.id}" onclick="selectRequestType('${t.id}')" style="padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:10px;">
+      <span style="font-size:20px;">${t.icon}</span>
+      <div>
+        <div style="font-weight:500;font-size:14px;">${t.label}</div>
+        ${t.description ? `<div style="font-size:12px;color:#6b7280;">${t.description}</div>` : ''}
+      </div>
+    </button>
+  `;
+  const categoryOrder = ['schedule', 'payments', 'operations', 'documents', 'custom', 'other'];
+  const sectionLabels = { ...REQUEST_CATEGORY_LABELS, custom: '📌 Custom' };
+  let typeSectionsHtml = '';
+  categoryOrder.forEach((cat) => {
+    const types = grouped[cat];
+    if (!types || types.length === 0) return;
+    const label = sectionLabels[cat] || cat;
+    typeSectionsHtml += `
+      <div class="request-type-section" data-category="${cat}" style="margin-bottom:8px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        <div class="request-category-header" role="button" tabindex="0" onclick="window.toggleRequestCategory('${cat}')" style="display:flex;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;user-select:none;font-size:13px;font-weight:600;color:#374151;background:#f9fafb;">
+          <span class="request-category-arrow" style="font-size:10px;transition:transform 0.2s;color:#6b7280;">▶</span>
+          <span>${label}</span>
+        </div>
+        <div class="request-category-body" style="display:none;flex-direction:column;gap:8px;padding:12px 14px 14px 32px;background:#fff;border-top:1px solid #e5e7eb;">${types.map(renderTypeBtn).join('')}</div>
+      </div>
+    `;
+  });
+
   content.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
       <h2 style="margin:0;font-size:18px;font-weight:600;">New Request</h2>
       <button onclick="closeCreateRequestModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#9ca3af;">&times;</button>
     </div>
-    
     <div id="createRequestForm">
-      <!-- Step 1: Select type -->
       <div id="stepSelectType" style="display:block;">
         <label style="display:block;margin-bottom:12px;font-size:14px;font-weight:500;color:#374151;">Request Type</label>
-        <div style="display:flex;flex-direction:column;gap:8px;">
-          <button class="request-type-btn" data-type="vacation" onclick="selectRequestType('vacation')" style="padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:10px;">
-            <span style="font-size:20px;">🏖️</span>
-            <div>
-              <div style="font-weight:500;font-size:14px;">Vacation</div>
-              <div style="font-size:12px;color:#6b7280;">Request time off</div>
-            </div>
-          </button>
-          
-          <button class="request-type-btn" data-type="late_start" onclick="selectRequestType('late_start')" style="padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:10px;">
-            <span style="font-size:20px;">⏰</span>
-            <div>
-              <div style="font-weight:500;font-size:14px;">Late Start</div>
-              <div style="font-size:12px;color:#6b7280;">Request to start later</div>
-            </div>
-          </button>
-          
-          <button class="request-type-btn" data-type="early_leave" onclick="selectRequestType('early_leave')" style="padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:10px;">
-            <span style="font-size:20px;">🏃</span>
-            <div>
-              <div style="font-weight:500;font-size:14px;">Early Leave</div>
-              <div style="font-size:12px;color:#6b7280;">Request to leave early</div>
-            </div>
-          </button>
-          
-          <button class="request-type-btn" data-type="schedule_change" onclick="selectRequestType('schedule_change')" style="padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:10px;">
-            <span style="font-size:20px;">📅</span>
-            <div>
-              <div style="font-weight:500;font-size:14px;">Schedule Change</div>
-              <div style="font-size:12px;color:#6b7280;">Request schedule modification</div>
-            </div>
-          </button>
-          
-          <button class="request-type-btn" data-type="supplies" onclick="selectRequestType('supplies')" style="padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:10px;">
-            <span style="font-size:20px;">📦</span>
-            <div>
-              <div style="font-weight:500;font-size:14px;">Supplies</div>
-              <div style="font-size:12px;color:#6b7280;">Request supplies or materials</div>
-            </div>
-          </button>
-          
-          <button class="request-type-btn" data-type="maintenance" onclick="selectRequestType('maintenance')" style="padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:10px;">
-            <span style="font-size:20px;">🔧</span>
-            <div>
-              <div style="font-weight:500;font-size:14px;">Maintenance</div>
-              <div style="font-size:12px;color:#6b7280;">Report maintenance issue</div>
-            </div>
-          </button>
-          
-          <button class="request-type-btn" data-type="other" onclick="selectRequestType('other')" style="padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:10px;">
-            <span style="font-size:20px;">📝</span>
-            <div>
-              <div style="font-weight:500;font-size:14px;">Other</div>
-              <div style="font-size:12px;color:#6b7280;">Other request</div>
-            </div>
-          </button>
-        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">${typeSectionsHtml}</div>
       </div>
-      
-      <!-- Step 2: Form for selected type (initially hidden) -->
       <div id="stepRequestForm" style="display:none;">
         <button onclick="backToTypeSelection()" style="margin-bottom:16px;background:none;border:none;color:#6b7280;cursor:pointer;font-size:14px;">← Back to request types</button>
         <div id="requestFormContainer"></div>
@@ -494,12 +1021,264 @@ window.closeCreateRequestModal = function() {
   if (modal) modal.remove();
 };
 
+window.toggleRequestCategory = function(cat) {
+  const modal = document.getElementById('createRequestModal');
+  if (!modal) return;
+  const section = modal.querySelector(`.request-type-section[data-category="${cat}"]`);
+  if (!section) return;
+  const body = section.querySelector('.request-category-body');
+  const arrow = section.querySelector('.request-category-arrow');
+  if (!body || !arrow) return;
+  const isOpen = body.style.display === 'flex';
+  body.style.display = isOpen ? 'none' : 'flex';
+  arrow.textContent = isOpen ? '▶' : '▼';
+};
+
+// =====================
+// Inbox Settings Modal (admin/owner only) — custom request types
+// =====================
+window.openInboxSettingsModal = function() {
+  if (!currentUserProfile?.salonId || !['admin', 'owner'].includes(currentUserProfile.role)) return;
+  const modal = document.createElement('div');
+  modal.id = 'inboxSettingsModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:999999;padding:20px;';
+  const content = document.createElement('div');
+  content.style.cssText = 'background:#fff;border-radius:12px;padding:24px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto;';
+
+  const categoryOrder = ['schedule', 'payments', 'operations', 'documents', 'other'];
+  const categoryLabels = { ...REQUEST_CATEGORY_LABELS };
+  let systemSectionsHtml = '';
+  categoryOrder.forEach(cat => {
+    const types = BUILTIN_TYPES.filter(t => (t.category || 'other') === cat);
+    if (types.length === 0) return;
+    const label = categoryLabels[cat] || cat;
+    const rows = types.map(t => {
+      const hidden = (inboxHiddenTypes || []).includes(t.id);
+      return `<div class="inbox-visibility-row" data-type-id="${t.id}" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;">
+        <span style="font-size:18px;">${t.icon || '📝'}</span>
+        <span style="flex:1;margin-left:10px;font-size:14px;font-weight:500;">${escapeHtml(t.label)}</span>
+        <button type="button" class="inbox-visibility-toggle" data-type-id="${t.id}" data-hidden="${hidden}" style="padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;border:1px solid #e5e7eb;background:${hidden ? '#fef2f2;color:#dc2626' : '#f0fdf4;color:#16a34a'};">${hidden ? '🚫 Hidden' : '👁 Enabled'}</button>
+      </div>`;
+    }).join('');
+    systemSectionsHtml += `
+      <div class="settings-category-section" data-category="${cat}" style="margin-bottom:8px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        <div class="settings-category-header" role="button" tabindex="0" style="display:flex;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;user-select:none;font-size:13px;font-weight:600;color:#374151;background:#f9fafb;">
+          <span class="settings-category-arrow" style="font-size:10px;transition:transform 0.2s;color:#6b7280;">▶</span>
+          <span>${label}</span>
+        </div>
+        <div class="settings-category-body" style="display:none;padding:12px 14px 14px 20px;background:#fff;border-top:1px solid #e5e7eb;">${rows}</div>
+      </div>
+    `;
+  });
+
+  content.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <h2 style="margin:0;font-size:18px;font-weight:600;">Inbox Settings</h2>
+      <button type="button" onclick="closeInboxSettingsModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#9ca3af;">&times;</button>
+    </div>
+    <div style="margin-bottom:20px;">
+      <h3 style="margin:0 0 10px;font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.03em;">System Request Types</h3>
+      <p style="margin:0 0 12px;font-size:12px;color:#9ca3af;">Control which types staff can see in New Request.</p>
+      <div id="systemTypesVisibilityList">${systemSectionsHtml}</div>
+    </div>
+    <div style="margin-bottom:16px;">
+      <h3 style="margin:0 0 10px;font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.03em;">Custom Request Types</h3>
+      <p style="margin:0 0 12px;font-size:12px;color:#9ca3af;">Add types and control visibility.</p>
+      <div id="customTypesList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
+      <button type="button" id="btnAddCustomType" style="padding:8px 14px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;color:#374151;">+ Add custom type</button>
+    </div>
+  `;
+  modal.appendChild(content);
+  document.body.appendChild(modal);
+  modal.onclick = (e) => { if (e.target === modal) closeInboxSettingsModal(); };
+
+  content.querySelectorAll('.settings-category-header').forEach(header => {
+    header.onclick = () => {
+      const section = header.closest('.settings-category-section');
+      const body = section.querySelector('.settings-category-body');
+      const arrow = header.querySelector('.settings-category-arrow');
+      const isOpen = body.style.display !== 'none';
+      body.style.display = isOpen ? 'none' : 'block';
+      if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(90deg)';
+    };
+  });
+
+  content.querySelectorAll('.inbox-visibility-toggle').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const typeId = btn.dataset.typeId;
+      const hidden = btn.dataset.hidden !== 'true';
+      try {
+        await setInboxTypeVisibility(typeId, hidden);
+        btn.dataset.hidden = String(hidden);
+        btn.textContent = hidden ? '🚫 Hidden' : '👁 Enabled';
+        btn.style.background = hidden ? '#fef2f2' : '#f0fdf4';
+        btn.style.color = hidden ? '#dc2626' : '#16a34a';
+        showToast(hidden ? 'Hidden from staff' : 'Visible to staff', 'success');
+      } catch (err) {
+        console.error('[Inbox] setInboxTypeVisibility', err);
+        showToast('Failed to update: ' + (err.message || 'check console'), 'error');
+      }
+    };
+  });
+  renderCustomTypesList(document.getElementById('customTypesList'));
+  document.getElementById('btnAddCustomType').onclick = () => openAddCustomTypeForm(content);
+};
+
+window.closeInboxSettingsModal = function() {
+  const m = document.getElementById('inboxSettingsModal');
+  if (m) m.remove();
+};
+
+function renderCustomTypesList(container) {
+  if (!container) return;
+  container.innerHTML = '';
+  const hiddenSet = new Set(inboxHiddenTypes || []);
+  (customRequestTypes || []).forEach(t => {
+    const hidden = hiddenSet.has(t.id);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;';
+    row.innerHTML = `
+      <span style="font-size:18px;">${t.icon || '📝'}</span>
+      <span style="flex:1;margin-left:10px;font-size:14px;font-weight:500;">${escapeHtml(t.label || t.id)}</span>
+      <button type="button" class="custom-type-visibility-toggle" data-type-id="${t.id}" data-hidden="${hidden}" style="padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;margin-right:6px;border:1px solid #e5e7eb;background:${hidden ? '#fef2f2;color:#dc2626' : '#f0fdf4;color:#16a34a'};">${hidden ? '🚫' : '👁'}</button>
+      <button type="button" onclick="editCustomType('${t.id}')" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;margin-right:6px;">Edit</button>
+      <button type="button" onclick="deleteCustomType('${t.id}')" style="padding:6px 10px;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;cursor:pointer;font-size:12px;">Delete</button>
+    `;
+    container.appendChild(row);
+  });
+  container.querySelectorAll('.custom-type-visibility-toggle').forEach(btn => {
+    btn.onclick = async () => {
+      const typeId = btn.dataset.typeId;
+      const hidden = btn.dataset.hidden !== 'true';
+      try {
+        await setInboxTypeVisibility(typeId, hidden);
+        btn.dataset.hidden = String(hidden);
+        btn.textContent = hidden ? '🚫' : '👁';
+        btn.style.background = hidden ? '#fef2f2' : '#f0fdf4';
+        btn.style.color = hidden ? '#dc2626' : '#16a34a';
+        showToast(hidden ? 'Hidden from staff' : 'Visible to staff', 'success');
+      } catch (err) {
+        console.error('[Inbox] setInboxTypeVisibility (custom)', err);
+        showToast('Failed to update: ' + (err.message || 'check console'), 'error');
+      }
+    };
+  });
+  if ((customRequestTypes || []).length === 0) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'font-size:13px;color:#9ca3af;padding:12px;';
+    empty.textContent = 'No custom types yet. Add one below.';
+    container.appendChild(empty);
+  }
+}
+
+window.editCustomType = function(typeId) {
+  const t = (customRequestTypes || []).find(x => x.id === typeId);
+  if (!t || !currentUserProfile?.salonId) return;
+  const modal = document.getElementById('inboxSettingsModal');
+  const content = modal?.firstElementChild;
+  openAddCustomTypeForm(content, typeId, t);
+};
+
+// Emojis the admin can pick from (no typing needed)
+const CUSTOM_TYPE_EMOJIS = ['📝', '📚', '📋', '📅', '⏰', '📦', '🔧', '✅', '🎯', '🪴', '📌', '🔔', '🏖️', '🏃', '💡', '📎'];
+
+function openAddCustomTypeForm(settingsContent, editTypeId, editData) {
+  if (!settingsContent) return;
+  const existing = settingsContent.querySelector('#addCustomTypeForm');
+  if (existing) existing.remove();
+  const isEdit = !!editTypeId;
+  const form = document.createElement('div');
+  form.id = 'addCustomTypeForm';
+  form.style.cssText = 'margin-top:16px;padding:16px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;';
+  const emojiRow = CUSTOM_TYPE_EMOJIS.map(e => `<button type="button" class="custom-type-emoji-btn" data-emoji="${e}" style="width:36px;height:36px;padding:0;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:18px;line-height:1;">${e}</button>`).join('');
+  form.innerHTML = `
+    <div style="margin-bottom:10px;">
+      <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:500;color:#374151;">Name</label>
+      <input type="text" id="customTypeLabel" placeholder="e.g. Training Request" style="width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;">
+    </div>
+    <div style="margin-bottom:10px;">
+      <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:500;color:#374151;">Instructions for staff</label>
+      <p style="margin:0 0 6px;font-size:12px;color:#6b7280;">What should staff write in the request? This text will appear under the type name.</p>
+      <textarea id="customTypeDescription" rows="2" placeholder="e.g. Write the course name, desired date, and why you need this training" style="width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;resize:vertical;"></textarea>
+    </div>
+    <div style="margin-bottom:12px;">
+      <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Icon — choose one</label>
+      <div id="customTypeEmojiRow" style="display:flex;flex-wrap:wrap;gap:6px;">${emojiRow}</div>
+      <input type="hidden" id="customTypeIcon" value="📝">
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button type="button" id="btnSaveCustomType" style="padding:8px 16px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Save</button>
+      <button type="button" onclick="document.getElementById('addCustomTypeForm').remove()" style="padding:8px 16px;border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;">Cancel</button>
+    </div>
+  `;
+  settingsContent.appendChild(form);
+  const iconInput = document.getElementById('customTypeIcon');
+  form.querySelectorAll('.custom-type-emoji-btn').forEach(btn => {
+    btn.onclick = () => {
+      const em = btn.dataset.emoji;
+      iconInput.value = em;
+      form.querySelectorAll('.custom-type-emoji-btn').forEach(b => { b.style.background = '#fff'; b.style.borderColor = '#e5e7eb'; });
+      btn.style.background = '#ede9fe';
+      btn.style.borderColor = '#7c3aed';
+    };
+  });
+  if (isEdit && editData) {
+    document.getElementById('customTypeLabel').value = editData.label || '';
+    document.getElementById('customTypeDescription').value = editData.description || '';
+    const icon = (editData.icon || '📝').slice(0, 2);
+    iconInput.value = icon;
+    const firstMatch = form.querySelector(`.custom-type-emoji-btn[data-emoji="${icon}"]`);
+    if (firstMatch) { firstMatch.style.background = '#ede9fe'; firstMatch.style.borderColor = '#7c3aed'; }
+  } else {
+    const firstBtn = form.querySelector('.custom-type-emoji-btn[data-emoji="📝"]');
+    if (firstBtn) { firstBtn.style.background = '#ede9fe'; firstBtn.style.borderColor = '#7c3aed'; }
+  }
+  document.getElementById('btnSaveCustomType').textContent = isEdit ? 'Update' : 'Save';
+  document.getElementById('btnSaveCustomType').onclick = async () => {
+    const label = document.getElementById('customTypeLabel')?.value?.trim();
+    const icon = (document.getElementById('customTypeIcon')?.value?.trim() || '📝').slice(0, 2);
+    const description = document.getElementById('customTypeDescription')?.value?.trim() || '';
+    if (!label) { showToast('Enter a name', 'error'); return; }
+    try {
+      const payload = { label, icon, description };
+      if (isEdit) {
+        await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/requestTypes`, editTypeId), payload);
+        showToast('Updated', 'success');
+      } else {
+        await addDoc(collection(db, `salons/${currentUserProfile.salonId}/requestTypes`), payload);
+        showToast('Custom type added', 'success');
+      }
+      await loadCustomTypes();
+      document.getElementById('addCustomTypeForm')?.remove();
+      renderCustomTypesList(document.getElementById('customTypesList'));
+    } catch (err) {
+      console.error(err);
+      showToast('Failed: ' + (err.message || ''), 'error');
+    }
+  };
+}
+
+window.deleteCustomType = async function(typeId) {
+  if (!currentUserProfile?.salonId || !confirm('Delete this request type? Existing requests of this type will keep their label.')) return;
+  try {
+    await deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/requestTypes`, typeId));
+    await loadCustomTypes();
+    const listEl = document.getElementById('customTypesList');
+    if (listEl) renderCustomTypesList(listEl);
+    showToast('Type removed', 'success');
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to delete: ' + (err.message || ''), 'error');
+  }
+};
+
 window.backToTypeSelection = function() {
   document.getElementById('stepSelectType').style.display = 'block';
   document.getElementById('stepRequestForm').style.display = 'none';
 };
 
-window.selectRequestType = function(type) {
+window.selectRequestType = async function(type) {
   console.log('[Inbox] Selected type:', type);
   
   document.getElementById('stepSelectType').style.display = 'none';
@@ -507,23 +1286,75 @@ window.selectRequestType = function(type) {
   
   const formContainer = document.getElementById('requestFormContainer');
   if (!formContainer) return;
+
+  // Pre-load salon users so recipient list has Firebase UIDs
+  await loadSalonUsersForRecipients();
   
   // Render form based on type
   const form = createRequestForm(type);
   formContainer.innerHTML = '';
   formContainer.appendChild(form);
+  if (type === 'document_request') {
+    const emailEl = document.getElementById('doc_req_email');
+    if (emailEl && auth.currentUser?.email) emailEl.value = auth.currentUser.email;
+  }
 };
 
 function createRequestForm(type) {
   const form = document.createElement('div');
   const typeInfo = getRequestTypeInfo(type);
-  
+  const recipientsList = getInboxRecipientsList();
+  const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const instructionsHtml = (typeInfo.description && typeInfo.description.trim())
+    ? `<p style="margin:8px 0 0;font-size:13px;color:#6b7280;text-align:center;max-width:400px;margin-left:auto;margin-right:auto;">${esc(typeInfo.description.trim())}</p>`
+    : '';
+  const sendToRowHtml = recipientsList.length === 0
+    ? `<div style="margin-bottom:16px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#6b7280;">Send to: No managers or admins in list.</div>`
+    : `
+    <div id="sendToFilterRow" role="button" tabindex="0" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;background:#f9fafb;font-size:13px;">
+      <span><span style="font-weight:500;color:#374151;">Send to:</span> <span id="sendToSummary">Choose who receives this request</span></span>
+      <span id="sendToArrow" style="color:#6b7280;font-size:10px;">▶</span>
+    </div>
+    <div id="sendToPanel" style="display:none;margin-bottom:16px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;max-height:180px;overflow-y:auto;">
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        ${recipientsList.map(s => `
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+            <input type="checkbox" class="create-request-send-to-cb" data-uid="${esc(s.uid || '')}" data-staff-id="${esc(s.id)}" data-staff-name="${esc(s.name)}" style="width:14px;height:14px;">
+            <span>${esc(s.name)}</span>
+          </label>
+        `).join('')}
+      </div>
+    </div>
+  `;
   form.innerHTML = `
     <div style="text-align:center;margin-bottom:20px;">
       <div style="font-size:32px;margin-bottom:8px;">${typeInfo.icon}</div>
       <h3 style="margin:0;font-size:16px;font-weight:600;">${typeInfo.label}</h3>
+      ${instructionsHtml}
+    </div>
+    <div style="margin-bottom:16px;">
+      ${sendToRowHtml}
     </div>
   `;
+  
+  if (recipientsList.length > 0) {
+    const row = form.querySelector('#sendToFilterRow');
+    const panel = form.querySelector('#sendToPanel');
+    const summary = form.querySelector('#sendToSummary');
+    const arrow = form.querySelector('#sendToArrow');
+    const updateSummary = () => {
+      const { names } = getCreateRequestSelectedRecipients();
+      if (summary) summary.textContent = names.length > 0 ? names.join(', ') : 'Choose who receives this request';
+    };
+    row.addEventListener('click', () => {
+      const open = panel.style.display !== 'none';
+      panel.style.display = open ? 'none' : 'block';
+      if (arrow) arrow.textContent = open ? '▶' : '▼';
+    });
+    form.querySelectorAll('.create-request-send-to-cb').forEach(cb => {
+      cb.addEventListener('change', updateSummary);
+    });
+  }
   
   const fieldsContainer = document.createElement('div');
   fieldsContainer.style.cssText = 'display:flex;flex-direction:column;gap:16px;';
@@ -595,6 +1426,110 @@ function createRequestForm(type) {
         </label>
       </div>
     `;
+  } else if (type === 'extra_shift') {
+    fieldsContainer.innerHTML = `
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Date (optional)</label>
+        <input type="date" id="extra_shift_date" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Details</label>
+        <textarea id="extra_shift_details" rows="3" required placeholder="Which day(s) and shift you want to pick up" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+    `;
+  } else if (type === 'swap_shift') {
+    fieldsContainer.innerHTML = `
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Date (optional)</label>
+        <input type="date" id="swap_shift_date" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Details</label>
+        <textarea id="swap_shift_details" rows="3" required placeholder="Who to swap with, which shift, and any details" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+    `;
+  } else if (type === 'break_change') {
+    fieldsContainer.innerHTML = `
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Date</label>
+        <input type="date" id="break_change_date" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Details</label>
+        <textarea id="break_change_details" rows="3" required placeholder="Requested break time and reason" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+    `;
+  } else if (type === 'commission_review' || type === 'tip_adjustment' || type === 'payment_issue' || type === 'client_issue') {
+    fieldsContainer.innerHTML = `
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Subject (optional)</label>
+        <input type="text" id="${type}_subject" placeholder="Brief description" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Details</label>
+        <textarea id="${type}_details" rows="4" required placeholder="Explain your request" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+    `;
+  } else if (type === 'document_request') {
+    fieldsContainer.innerHTML = `
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Document type</label>
+        <select id="doc_req_type" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+          <option value="">Select...</option>
+          <option value="1099">1099</option>
+          <option value="W-2">W-2</option>
+          <option value="Employment Letter">Employment Letter</option>
+          <option value="Contract">Contract</option>
+          <option value="Insurance">Insurance</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Reason / Notes</label>
+        <textarea id="doc_req_reason" rows="2" required placeholder="e.g. For bank, taxes, apartment" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Due date (optional)</label>
+        <input type="date" id="doc_req_due" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Delivery method</label>
+        <select id="doc_req_delivery" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+          <option value="Email">Email</option>
+          <option value="Download in app">Download in app</option>
+          <option value="Printed pickup">Printed pickup</option>
+        </select>
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Contact email</label>
+        <input type="email" id="doc_req_email" placeholder="Email to receive the document" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+    `;
+  } else if (type === 'document_upload') {
+    fieldsContainer.innerHTML = `
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Document type</label>
+        <select id="doc_up_type" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+          <option value="">Select...</option>
+          <option value="License">License</option>
+          <option value="Insurance">Insurance</option>
+          <option value="Certification">Certification</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Expiration date</label>
+        <input type="date" id="doc_up_expiry" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">File (PDF, JPG or PNG)</label>
+        <input type="file" id="doc_up_file" accept=".pdf,.jpg,.jpeg,.png" required style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Notes (optional)</label>
+        <textarea id="doc_up_notes" rows="2" placeholder="Additional details" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+    `;
   } else if (type === 'supplies') {
     fieldsContainer.innerHTML = `
       <div>
@@ -655,6 +1590,38 @@ function createRequestForm(type) {
         <textarea id="other_details" rows="4" required placeholder="Explain your request" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
       </div>
     `;
+  } else {
+    // Custom request type: dynamic fields from admin definition, or single Details
+    const customType = getRequestTypeInfo(type);
+    const fields = (customType.fields || []);
+    if (fields.length > 0) {
+      const inputStyle = 'width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;';
+      fields.forEach(f => {
+        const div = document.createElement('div');
+        const id = 'custom_field_' + f.id;
+        const req = f.required ? 'required' : '';
+        if (f.type === 'textarea') {
+          div.innerHTML = `<label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">${escapeHtml(f.label)}${f.required ? ' *' : ''}</label><textarea id="${id}" rows="3" ${req} placeholder="${escapeHtml(f.label)}" style="${inputStyle}resize:vertical;"></textarea>`;
+        } else if (f.type === 'date') {
+          div.innerHTML = `<label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">${escapeHtml(f.label)}${f.required ? ' *' : ''}</label><input type="date" id="${id}" ${req} style="${inputStyle}">`;
+        } else if (f.type === 'number') {
+          div.innerHTML = `<label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">${escapeHtml(f.label)}${f.required ? ' *' : ''}</label><input type="number" id="${id}" ${req} style="${inputStyle}">`;
+        } else {
+          div.innerHTML = `<label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">${escapeHtml(f.label)}${f.required ? ' *' : ''}</label><input type="text" id="${id}" ${req} placeholder="${escapeHtml(f.label)}" style="${inputStyle}">`;
+        }
+        fieldsContainer.appendChild(div);
+      });
+    } else {
+      const placeholder = (customType.description && customType.description.trim())
+        ? customType.description.trim().slice(0, 120) + (customType.description.trim().length > 120 ? '…' : '')
+        : 'Describe your request...';
+      fieldsContainer.innerHTML = `
+        <div>
+          <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Details</label>
+          <textarea id="custom_details" rows="4" required placeholder="${esc(placeholder)}" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+        </div>
+      `;
+    }
   }
   
   // Add submit button
@@ -768,6 +1735,58 @@ async function submitRequest(type) {
         affectedDates: []
       };
       
+    } else if (type === 'extra_shift') {
+      const date = document.getElementById('extra_shift_date')?.value || null;
+      const details = document.getElementById('extra_shift_details')?.value?.trim();
+      if (!details) { showToast('Please enter details', 'error'); return; }
+      data = { date, details };
+    } else if (type === 'swap_shift') {
+      const date = document.getElementById('swap_shift_date')?.value || null;
+      const details = document.getElementById('swap_shift_details')?.value?.trim();
+      if (!details) { showToast('Please enter details', 'error'); return; }
+      data = { date, details };
+    } else if (type === 'break_change') {
+      const date = document.getElementById('break_change_date')?.value;
+      const details = document.getElementById('break_change_details')?.value?.trim();
+      if (!date || !details) { showToast('Please fill in date and details', 'error'); return; }
+      data = { date, details };
+    } else if (type === 'commission_review' || type === 'tip_adjustment' || type === 'payment_issue' || type === 'client_issue') {
+      const subject = document.getElementById(type + '_subject')?.value?.trim() || null;
+      const details = document.getElementById(type + '_details')?.value?.trim();
+      if (!details) { showToast('Please enter details', 'error'); return; }
+      data = { subject, details };
+
+    } else if (type === 'document_request') {
+      const documentType = document.getElementById('doc_req_type')?.value;
+      const reason = document.getElementById('doc_req_reason')?.value?.trim();
+      const dueDate = document.getElementById('doc_req_due')?.value || null;
+      const deliveryMethod = document.getElementById('doc_req_delivery')?.value || 'Email';
+      const contactEmail = document.getElementById('doc_req_email')?.value?.trim() || auth.currentUser?.email || currentUserProfile?.email || null;
+      if (!documentType || !reason) { showToast('Please select document type and enter reason', 'error'); return; }
+      data = { documentType, reason, dueDate, deliveryMethod, contactEmail };
+
+    } else if (type === 'document_upload') {
+      const documentType = document.getElementById('doc_up_type')?.value;
+      const expirationDate = document.getElementById('doc_up_expiry')?.value || null;
+      const fileInput = document.getElementById('doc_up_file');
+      const notes = document.getElementById('doc_up_notes')?.value?.trim() || null;
+      if (!documentType || !fileInput?.files?.length) { showToast('Please select document type and choose a file', 'error'); return; }
+      const file = fileInput.files[0];
+      const maxSize = 10 * 1024 * 1024;
+      if (file.size > maxSize) { showToast('File must be under 10 MB', 'error'); return; }
+      const salonId = currentUserProfile.salonId;
+      const staffId = auth.currentUser?.uid || currentUserProfile.uid;
+      const yyyyMm = new Date().toISOString().slice(0, 7);
+      const fileId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      const safeName = (file.name || 'file').replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 80);
+      const ext = (file.name && file.name.includes('.')) ? file.name.split('.').pop().toLowerCase() : 'pdf';
+      const path = `salons/${salonId}/staff/${staffId}/documents/${documentType}/${yyyyMm}/${fileId}_${safeName}`;
+      showToast('Uploading file...', 'info');
+      const fileRef = storageRef(storage, path);
+      await uploadBytes(fileRef, file);
+      const fileUrl = await getDownloadURL(fileRef);
+      data = { documentType, expirationDate, filePath: path, fileUrl, fileName: file.name, notes };
+      
     } else if (type === 'supplies') {
       const rows = document.querySelectorAll('.supplies-item-row');
       const items = [];
@@ -815,56 +1834,123 @@ async function submitRequest(type) {
       }
       
       data = { subject, details };
+    } else {
+      // Custom request type: either dynamic fields or single Details
+      const customType = getRequestTypeInfo(type);
+      const fields = (customType.fields || []);
+      if (fields.length > 0) {
+        data = {};
+        for (const f of fields) {
+          const el = document.getElementById('custom_field_' + f.id);
+          const val = el?.value != null ? (el.type === 'number' ? (parseFloat(el.value) || null) : String(el.value).trim()) : '';
+          if (f.required && !val) {
+            showToast('Please fill in: ' + (f.label || f.id), 'error');
+            return;
+          }
+          data[f.id] = val;
+        }
+      } else {
+        const details = document.getElementById('custom_details')?.value?.trim();
+        if (!details) {
+          showToast('Please enter details', 'error');
+          return;
+        }
+        data = { details };
+      }
     }
     
-    // Create request document
+    const { uids: sentToUids, staffIds: sentToStaffIds, names: sentToNames } = getCreateRequestSelectedRecipients();
+    const hasAnySelected = (sentToUids && sentToUids.length > 0) || (sentToNames && sentToNames.length > 0);
+    const hasValidUid = sentToUids && sentToUids.some(u => u && u.trim());
+    if (getInboxRecipientsList().length > 0 && !hasAnySelected) {
+      showToast('Please choose who receives this request', 'error');
+      return;
+    }
+    if (hasAnySelected && !hasValidUid) {
+      // Recipient selected but uid not known — try one more time to load from members
+      await loadSalonUsersForRecipients();
+      const recipName = sentToNames[0] || '';
+      const found = (_inboxUsersCache || []).find(u =>
+        u.name && recipName && u.name.toLowerCase().trim() === recipName.toLowerCase().trim()
+      );
+      if (found && found.uid) {
+        sentToUids[0] = found.uid;
+      } else {
+        const recipNameDisplay = sentToNames[0] || 'the selected recipient';
+        showToast(`${recipNameDisplay} needs to log in to the app at least once before they can receive requests.`, 'error');
+        return;
+      }
+    }
+    
     const salonId = currentUserProfile.salonId;
-    const requestDoc = {
+
+    const baseDoc = {
       tenantId: salonId,
       locationId: null,
       type: type,
       status: 'open',
       priority: 'normal',
-      
-      // Identity
-      createdByUid: currentUserProfile.uid,
-      createdByStaffId: currentUserProfile.staffId || '',
-      createdByName: currentUserProfile.name || '',
-      createdByRole: currentUserProfile.role || '',
-      forUid: currentUserProfile.uid,  // For themselves (on-behalf comes later)
-      forStaffId: currentUserProfile.staffId || '',
-      forStaffName: currentUserProfile.name || '',
       assignedTo: null,
-      
-      // Timestamps
-      createdAt: serverTimestamp(),
-      lastActivityAt: serverTimestamp(),
-      updatedAt: null,
-      
-      // Data
+      sentToStaffIds: Array.isArray(sentToStaffIds) ? sentToStaffIds : [],
+      sentToNames: Array.isArray(sentToNames) ? sentToNames : [],
       data: data,
-      
-      // Manager fields (null on create)
       managerNotes: null,
       responseNote: null,
       decidedBy: null,
       decidedAt: null,
       needsInfoQuestion: null,
       staffReply: null,
-      
-      // Visibility
       visibility: 'managers_only',
       unreadForManagers: true
     };
     
-    console.log('[Inbox] Creating request', requestDoc);
-    
-    const docRef = await addDoc(
-      collection(db, `salons/${salonId}/inboxItems`),
-      requestDoc
-    );
-    
-    console.log('[Inbox] Request created', docRef.id);
+    const hasRecipients = sentToUids && sentToUids.some(u => u && u.trim());
+    if (hasRecipients) {
+      // forUid comes directly from data-uid (Firebase UID) — no lookup needed
+      const forUid = sentToUids.find(u => u && u.trim()) || sentToUids[0];
+      const forStaffId = sentToStaffIds[0] || '';
+      const forStaffName = sentToNames[0] || '';
+
+      console.log('[Inbox] Sending request: createdByUid=', currentUserProfile.uid, 'forUid=', forUid, 'forName=', forStaffName);
+
+      if (forUid === currentUserProfile.uid) {
+        showToast('Cannot send a request to yourself', 'error');
+        return;
+      }
+
+      const requestDoc = {
+        ...baseDoc,
+        createdByUid: currentUserProfile.uid,
+        createdByStaffId: currentUserProfile.staffId || '',
+        createdByName: currentUserProfile.name || '',
+        createdByRole: currentUserProfile.role || '',
+        forUid,
+        forStaffId,
+        forStaffName,
+        createdAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp(),
+        updatedAt: null
+      };
+      const docRef = await addDoc(collection(db, `salons/${salonId}/inboxItems`), requestDoc);
+      console.log('[Inbox] Request created with forUid=', forUid, 'docId=', docRef.id);
+    } else {
+      // Technician creating for self — direct Firestore (forUid = creator)
+      const requestDoc = {
+        ...baseDoc,
+        createdByUid: currentUserProfile.uid,
+        createdByStaffId: currentUserProfile.staffId || '',
+        createdByName: currentUserProfile.name || '',
+        createdByRole: currentUserProfile.role || '',
+        forUid: currentUserProfile.uid,
+        forStaffId: currentUserProfile.staffId || '',
+        forStaffName: currentUserProfile.name || '',
+        createdAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp(),
+        updatedAt: null
+      };
+      const docRef = await addDoc(collection(db, `salons/${salonId}/inboxItems`), requestDoc);
+      console.log('[Inbox] Request created', docRef.id);
+    }
     
     // Close modal
     closeCreateRequestModal();
@@ -877,7 +1963,14 @@ async function submitRequest(type) {
     
   } catch (error) {
     console.error('[Inbox] Submit error', error);
-    showToast(`Failed to submit request: ${error.message}`, 'error');
+    let msg = error?.details || error?.message || String(error);
+    if (msg === 'internal' || msg === 'Request creation failed.') {
+      msg = 'Server error. Try again later or check Firebase Functions logs.';
+    }
+    if (msg.includes('Recipient has not signed in') || msg.includes('failed-precondition') || msg.includes('not found')) {
+      msg = 'The selected recipient has not signed in yet. They need to accept their invite and create an account first.';
+    }
+    showToast(msg, 'error');
   }
 }
 
@@ -944,6 +2037,16 @@ function showRequestDetails(requestId) {
   if (!request) return;
   
   console.log('[Inbox] Showing request details', requestId);
+
+  // When manager/admin opens a request, mark it as read so red badge updates
+  const isManagerRole = currentUserProfile && ['manager', 'admin', 'owner'].includes(currentUserProfile.role);
+  if (isManagerRole && request.unreadForManagers === true && currentUserProfile.salonId) {
+    updateDoc(doc(db, `salons/${currentUserProfile.salonId}/inboxItems`, requestId), {
+      unreadForManagers: false,
+      lastActivityAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }).catch(err => console.warn('[Inbox] Mark read failed', err));
+  }
   
   const modal = document.createElement('div');
   modal.id = 'requestDetailsModal';
@@ -1004,6 +2107,12 @@ function showRequestDetails(requestId) {
           <div style="font-weight:500;">${createdDate.toLocaleDateString()} ${createdDate.toLocaleTimeString()}</div>
         </div>
       </div>
+      ${(request.sentToNames && request.sentToNames.length > 0) ? `
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:13px;">
+        <div style="color:#6b7280;margin-bottom:4px;">Sent to</div>
+        <div style="font-weight:500;">${escapeHtml(request.sentToNames.join(', '))}</div>
+      </div>
+      ` : ''}
     </div>
     
     <div style="margin-bottom:20px;">
@@ -1038,12 +2147,23 @@ function showRequestDetails(requestId) {
     `;
   }
   
-  // Manager actions (only for managers/admins)
-  if (isManager && request.status === 'open') {
+  // Manager actions — only for the RECIPIENT (who the request was sent TO), not the creator
+  const isRecipient = currentUserProfile && request.forUid === currentUserProfile.uid;
+  if (isManager && isRecipient && request.status === 'open') {
+    const isDocRequest = request.type === 'document_request';
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Manager Actions</h3>
-        
+        ${isDocRequest ? `
+        <div style="margin-bottom:16px;padding:12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;">
+          <div style="font-size:13px;font-weight:600;color:#166534;margin-bottom:8px;">📄 Upload response document</div>
+          <input type="file" id="docResponseFile_${requestId}" accept=".pdf,.jpg,.jpeg,.png" style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #d1d5db;border-radius:6px;">
+          <button onclick="uploadDocumentResponse('${requestId}')" style="width:100%;padding:10px;background:#059669;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+            Upload file & mark Done
+          </button>
+        </div>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:12px;">— or —</div>
+        ` : ''}
         <div style="display:flex;flex-direction:column;gap:12px;">
           <button onclick="needsMoreInfo('${requestId}')" style="padding:10px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:14px;font-weight:500;">
             ❓ Request More Info
@@ -1061,8 +2181,8 @@ function showRequestDetails(requestId) {
     `;
   }
   
-  // Manager actions for needs_info status
-  if (isManager && request.status === 'needs_info') {
+  // Manager actions for needs_info status — only for recipient
+  if (isManager && isRecipient && request.status === 'needs_info') {
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Manager Actions</h3>
@@ -1079,12 +2199,23 @@ function showRequestDetails(requestId) {
     `;
   }
   
-  // Archive button (for approved/denied requests)
-  if (isManager && (request.status === 'approved' || request.status === 'denied')) {
+  // Archive button (for approved/denied/done requests) — only for recipient
+  if (isManager && isRecipient && (request.status === 'approved' || request.status === 'denied' || request.status === 'done')) {
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <button onclick="archiveRequest('${requestId}')" style="padding:10px;border:1px solid #9ca3af;background:#fff;color:#374151;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500;width:100%;">
           📦 Move to Archive
+        </button>
+      </div>
+    `;
+  }
+  
+  // Delete button (only for archived requests — permanent delete) — only for recipient
+  if (isManager && isRecipient && request.status === 'archived') {
+    detailsHTML += `
+      <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
+        <button onclick="deleteArchivedRequest('${requestId}')" style="padding:10px;border:1px solid #ef4444;background:#fef2f2;color:#dc2626;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500;width:100%;">
+          🗑 Delete permanently
         </button>
       </div>
     `;
@@ -1218,9 +2349,66 @@ function renderRequestData(request) {
           </div>
         </div>
       `;
+
+    case 'extra_shift':
+    case 'swap_shift':
+    case 'break_change':
+      return `
+        <div style="display:grid;gap:12px;font-size:13px;">
+          ${data.date ? `<div><span style="color:#6b7280;">Date:</span><span style="font-weight:500;margin-left:8px;">${data.date}</span></div>` : ''}
+          ${data.subject ? `<div><span style="color:#6b7280;">Subject:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.subject)}</div></div>` : ''}
+          <div>
+            <span style="color:#6b7280;">Details:</span>
+            <div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.details || 'N/A')}</div>
+          </div>
+        </div>
+      `;
+
+    case 'commission_review':
+    case 'tip_adjustment':
+    case 'payment_issue':
+    case 'client_issue':
+      return `
+        <div style="display:grid;gap:12px;font-size:13px;">
+          ${data.subject ? `<div><span style="color:#6b7280;">Subject:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.subject)}</div></div>` : ''}
+          <div>
+            <span style="color:#6b7280;">Details:</span>
+            <div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.details || 'N/A')}</div>
+          </div>
+        </div>
+      `;
+
+    case 'document_request':
+      return `
+        <div style="display:grid;gap:12px;font-size:13px;">
+          <div><span style="color:#6b7280;">Document type:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.documentType || 'N/A')}</span></div>
+          <div><span style="color:#6b7280;">Reason / Notes:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.reason || 'N/A')}</div></div>
+          ${data.dueDate ? `<div><span style="color:#6b7280;">Due date:</span><span style="font-weight:500;margin-left:8px;">${data.dueDate}</span></div>` : ''}
+          <div><span style="color:#6b7280;">Delivery:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.deliveryMethod || 'Email')}</span></div>
+          ${data.contactEmail ? `<div><span style="color:#6b7280;">Contact email:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.contactEmail)}</span></div>` : ''}
+          ${data.responseFileUrl ? `<div><span style="color:#6b7280;">Response file:</span> <a href="${escapeHtml(data.responseFileUrl)}" target="_blank" rel="noopener" style="color:#2563eb;">Download</a></div>` : ''}
+        </div>
+      `;
+
+    case 'document_upload':
+      return `
+        <div style="display:grid;gap:12px;font-size:13px;">
+          <div><span style="color:#6b7280;">Document type:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.documentType || 'N/A')}</span></div>
+          ${data.expirationDate ? `<div><span style="color:#6b7280;">Expiration date:</span><span style="font-weight:500;margin-left:8px;">${data.expirationDate}</span></div>` : ''}
+          ${data.notes ? `<div><span style="color:#6b7280;">Notes:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.notes)}</div></div>` : ''}
+          ${data.fileUrl ? `<div><span style="color:#6b7280;">Uploaded file:</span> <a href="${escapeHtml(data.fileUrl)}" target="_blank" rel="noopener" style="color:#2563eb;">${escapeHtml(data.fileName || 'Download')}</a></div>` : ''}
+        </div>
+      `;
       
     default:
-      return '<div style="color:#9ca3af;">No details available</div>';
+      if (data.details) {
+        return `<div style="font-size:13px;"><span style="color:#6b7280;">Details:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.details)}</div></div>`;
+      }
+      const typeInfo = getRequestTypeInfo(request.type);
+      const fieldLabels = (typeInfo.fields || []).reduce((acc, f) => { acc[f.id] = f.label; return acc; }, {});
+      const entries = Object.entries(data || {}).filter(([, v]) => v != null && v !== '');
+      if (entries.length === 0) return '<div style="color:#9ca3af;">No details available</div>';
+      return `<div style="display:grid;gap:12px;font-size:13px;">${entries.map(([k, v]) => `<div><span style="color:#6b7280;">${escapeHtml(fieldLabels[k] || k)}:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(String(v))}</div></div>`).join('')}</div>`;
   }
 }
 
@@ -1255,7 +2443,14 @@ window.submitStaffReply = async function(requestId) {
 };
 
 window.needsMoreInfo = async function(requestId) {
-  const question = prompt('What information do you need from the staff member?');
+  const question = await showPromptModal({
+    title: 'Request More Info',
+    message: 'What information do you need from the staff member?',
+    placeholder: 'e.g. Please provide the exact dates...',
+    confirmLabel: 'Send',
+    cancelLabel: 'Cancel',
+    required: true
+  });
   if (!question) return;
   
   try {
@@ -1276,13 +2471,64 @@ window.needsMoreInfo = async function(requestId) {
   }
 };
 
+window.uploadDocumentResponse = async function(requestId) {
+  const request = currentRequests.find(r => r.id === requestId);
+  if (!request || request.type !== 'document_request') return;
+  const fileInput = document.getElementById('docResponseFile_' + requestId);
+  if (!fileInput?.files?.length) {
+    showToast('Please select a file', 'error');
+    return;
+  }
+  const file = fileInput.files[0];
+  const maxSize = 10 * 1024 * 1024;
+  if (file.size > maxSize) {
+    showToast('File must be under 10 MB', 'error');
+    return;
+  }
+  try {
+    const salonId = currentUserProfile.salonId;
+    const yyyyMm = new Date().toISOString().slice(0, 7);
+    const fileId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const safeName = (file.name || 'response').replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 80);
+    const path = `salons/${salonId}/inboxDocuments/${requestId}/${yyyyMm}/${fileId}_${safeName}`;
+    showToast('Uploading...', 'info');
+    const fileRef = storageRef(storage, path);
+    await uploadBytes(fileRef, file);
+    const responseFileUrl = await getDownloadURL(fileRef);
+    const currentData = request.data || {};
+    await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
+      data: { ...currentData, responseFileUrl, responseFilePath: path },
+      status: 'done',
+      decidedBy: currentUserProfile.uid,
+      decidedAt: serverTimestamp(),
+      lastActivityAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      unreadForManagers: false
+    });
+    closeRequestDetailsModal();
+    showToast('Response file uploaded and request marked Done!', 'success');
+    loadInboxItems();
+  } catch (err) {
+    console.error('[Inbox] uploadDocumentResponse error', err);
+    showToast('Upload failed: ' + err.message, 'error');
+  }
+};
+
 window.approveRequest = async function(requestId) {
-  // TODO: This will be a Cloud Function call in final version
-  // For now, direct Firestore update for testing
-  
-  const confirmed = confirm('Approve this request?');
+  const confirmed = await showConfirmModal({
+    title: 'Approve request?',
+    message: 'This will mark the request as approved.',
+    confirmLabel: 'Approve',
+    cancelLabel: 'Cancel',
+    danger: false
+  });
   if (!confirmed) return;
-  
+
+  // Optimistic: remove immediately from UI before Firestore confirms
+  closeRequestDetailsModal();
+  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  renderInboxList();
+
   try {
     const salonId = currentUserProfile.salonId;
     await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
@@ -1293,23 +2539,39 @@ window.approveRequest = async function(requestId) {
       updatedAt: serverTimestamp(),
       unreadForManagers: false
     });
-    
-    closeRequestDetailsModal();
     showToast('Request approved!', 'success');
   } catch (error) {
     console.error('[Inbox] approve error', error);
     showToast(`Error: ${error.message}`, 'error');
+    loadInboxItems(); // restore on failure
   }
 };
 
 window.denyRequest = async function(requestId) {
-  // TODO: This will be a Cloud Function call in final version
-  
-  const reason = prompt('Why is this request denied? (optional)');
-  
-  const confirmed = confirm('Deny this request?');
+  const confirmed = await showConfirmModal({
+    title: 'Deny request?',
+    message: 'This will mark the request as denied. You can add a note below.',
+    confirmLabel: 'Deny',
+    cancelLabel: 'Cancel',
+    danger: true
+  });
   if (!confirmed) return;
-  
+
+  const reason = await showPromptModal({
+    title: 'Add a note (optional)',
+    message: 'Why is this request denied?',
+    placeholder: 'Optional reason...',
+    confirmLabel: 'Deny',
+    cancelLabel: 'Back',
+    required: false
+  });
+  if (reason === null) return;
+
+  // Optimistic: remove immediately from UI before Firestore confirms
+  closeRequestDetailsModal();
+  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  renderInboxList();
+
   try {
     const salonId = currentUserProfile.salonId;
     await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
@@ -1321,17 +2583,22 @@ window.denyRequest = async function(requestId) {
       updatedAt: serverTimestamp(),
       unreadForManagers: false
     });
-    
-    closeRequestDetailsModal();
     showToast('Request denied', 'success');
   } catch (error) {
     console.error('[Inbox] deny error', error);
     showToast(`Error: ${error.message}`, 'error');
+    loadInboxItems(); // restore on failure
   }
 };
 
 window.archiveRequest = async function(requestId) {
-  const confirmed = confirm('Move this request to archive?');
+  const confirmed = await showConfirmModal({
+    title: 'Move to Archive?',
+    message: 'This request will be moved to the archive. You can delete it later from there.',
+    confirmLabel: 'Archive',
+    cancelLabel: 'Cancel',
+    danger: false
+  });
   if (!confirmed) return;
   
   try {
@@ -1350,6 +2617,29 @@ window.archiveRequest = async function(requestId) {
   }
 };
 
+window.deleteArchivedRequest = async function(requestId) {
+  const confirmed = await showConfirmModal({
+    title: 'Delete permanently?',
+    message: 'This request will be deleted and cannot be recovered.',
+    confirmLabel: 'Delete',
+    cancelLabel: 'Cancel',
+    danger: true
+  });
+  if (!confirmed) return;
+  
+  try {
+    const salonId = currentUserProfile.salonId;
+    await deleteDoc(doc(db, `salons/${salonId}/inboxItems`, requestId));
+    
+    closeRequestDetailsModal();
+    loadInboxItems();
+    showToast('Request deleted', 'success');
+  } catch (error) {
+    console.error('[Inbox] delete error', error);
+    showToast(`Error: ${error.message}`, 'error');
+  }
+};
+
 // =====================
 // Initialization
 // =====================
@@ -1362,33 +2652,16 @@ export function initInbox() {
     inboxBtn.onclick = goToInbox;
   }
   
-  // Wire up back button
-  const backBtn = document.getElementById('btnInboxBack');
-  if (backBtn) {
-    backBtn.onclick = () => {
-      const inboxScreen = document.getElementById('inboxScreen');
-      if (inboxScreen) inboxScreen.style.display = 'none';
-      
-      // Go back to queue (or wherever)
-      if (typeof window.goToQueue === 'function') {
-        window.goToQueue();
-      }
-    };
-  }
-  
-  // Wire up new request button
-  const newRequestBtn = document.getElementById('btnNewRequest');
-  if (newRequestBtn) {
-    newRequestBtn.onclick = window.openCreateRequestModal;
-  }
-  
-  // Global listener: close inbox when clicking ANY nav button (except inbox itself)
+  // Global listener: close inbox when clicking a main-nav button (not when clicking inside inbox)
   document.addEventListener('click', (e) => {
+    const inboxScreen = document.getElementById('inboxScreen');
+    if (inboxScreen && inboxScreen.contains(e.target)) return; // don't close when clicking inside inbox
     const navBtn = e.target.closest('.btn-pill');
     if (navBtn && navBtn.id !== 'inboxBtn' && navBtn !== inboxBtn) {
-      const inboxScreen = document.getElementById('inboxScreen');
       if (inboxScreen && inboxScreen.style.display === 'flex') {
         console.log('[Inbox] Closing inbox - nav button clicked:', navBtn.id || navBtn.textContent);
+        const inboxContent = document.getElementById('inboxContent');
+        if (inboxContent) inboxContent.style.opacity = '0';
         inboxScreen.style.display = 'none';
         // Remove active class from inbox button
         const inboxBtn = document.getElementById('inboxBtn');

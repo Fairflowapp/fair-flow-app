@@ -2,6 +2,44 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ===== GLOBAL HELPER FUNCTIONS =====
+    // Available to ALL match rules below
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDocData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userExists() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function belongsToSalon(salonId) {
+      return userExists()
+        && userDocData().salonId == salonId;
+    }
+
+    function isManager(salonId) {
+      return belongsToSalon(salonId)
+        && userDocData().role in ['manager', 'admin', 'owner', 'Manager', 'Admin', 'Owner'];
+    }
+
+    function isTechnician(salonId) {
+      return belongsToSalon(salonId)
+        && userDocData().role == 'technician';
+    }
+
+    function isAdminOrOwner(salonId) {
+      return belongsToSalon(salonId)
+        && userDocData().role in ['admin', 'owner'];
+    }
+
+    // ===== COLLECTIONS =====
+
     // Public GET for invite token docs (hashed doc id), only if unused + not expired
     match /staffInviteTokens/{inviteId} {
       allow get: if resource.data.usedAt == null
@@ -16,8 +54,19 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 
+    // Salon members directory: minimal public profile (name, role, staffId) for "Send to" lookup
+    // Each user writes their own; any salon member can read the whole list
+    match /salons/{salonId}/members/{uid} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && belongsToSalon(salonId)
+        && request.resource.data.name is string
+        && request.resource.data.role is string;
+      allow delete: if false;
+    }
+
     // Staff invite request: client writes here, Cloud Function triggers on create.
-    // Creator can read their request (to see status: done/error). No client update/delete.
     match /staffInviteRequests/{requestId} {
       allow create: if request.auth != null
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
@@ -25,13 +74,13 @@ service cloud.firestore {
         && request.resource.data.salonId is string
         && request.resource.data.email is string
         && request.resource.data.role is string
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['owner','admin','manager']
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.salonId == request.resource.data.salonId;
+        && userDocData().role in ['owner', 'admin', 'manager']
+        && userDocData().salonId == request.resource.data.salonId;
       allow read: if request.auth != null && resource.data.createdByUid == request.auth.uid;
       allow update, delete: if false;
     }
 
-    // OPTIONAL: signed-in reads for basic app collections (adjust later if needed)
+    // Basic salon doc: any signed-in user can read
     match /salons/{salonId} {
       allow read: if request.auth != null;
       allow write: if false;
@@ -42,26 +91,26 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Trampoline: triggers immediate invite processing when staffInviteRequests triggers don't fire.
+    // Trampoline: triggers immediate invite processing
     match /processInviteNow/{docId} {
       allow create: if request.auth != null
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['owner','admin','manager']
+        && userDocData().role in ['owner', 'admin', 'manager']
         && request.resource.data.requestId is string;
       allow read, update, delete: if false;
     }
 
-    // Test email: owner/admin/manager can write to trigger test. Extension sends.
+    // Test email
     match /mail/{docId} {
       allow create: if request.auth != null
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['owner','admin','manager']
+        && userDocData().role in ['owner', 'admin', 'manager']
         && request.resource.data.to is string
         && request.resource.data.message is map;
       allow read, update, delete: if false;
     }
 
-    // Finalize invite request: authenticated user can create, read their own request.
+    // Finalize invite request
     match /finalizeInviteRequests/{requestId} {
       allow create: if request.auth != null
         && request.resource.data.uid == request.auth.uid
@@ -70,55 +119,51 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Inbox/Requests system - per-salon requests with role-based access
+    // Custom Request Types - per-salon (Admin/Owner only)
+    match /salons/{salonId}/requestTypes/{typeId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isAdminOrOwner(salonId);
+    }
+
+    // Inbox visibility settings (which request types are hidden from staff)
+    match /salons/{salonId}/inboxSettings/{docId} {
+      allow read: if belongsToSalon(salonId);
+      allow write: if isAdminOrOwner(salonId);
+    }
+
+    // Drafts for "Send to" flow: client writes, trigger resolves recipient and creates inboxItems (no CORS)
+    match /salons/{salonId}/inboxRequestDrafts/{draftId} {
+      allow create: if belongsToSalon(salonId)
+        && isManager(salonId)
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.recipientStaffId is string
+        && request.resource.data.requestDoc is map;
+      allow read, update, delete: if false;
+    }
+
+    // ===== INBOX / REQUESTS SYSTEM =====
     match /salons/{salonId}/inboxItems/{itemId} {
-      
-      // Helpers
-      function userDoc() {
-        return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      }
-
-      function belongsToSalon() {
-        return request.auth != null
-          && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-          && userDoc().salonId == salonId;
-      }
-
-      function isManager() {
-        return belongsToSalon() && userDoc().role in ['manager','admin','owner'];
-      }
-
-      function isTechnician() {
-        return belongsToSalon() && userDoc().role == 'technician';
-      }
-
-      function isAdminOrOwner() {
-        return belongsToSalon() && userDoc().role in ['admin','owner'];
-      }
 
       function changedKeys() {
         return request.resource.data.diff(resource.data).changedKeys();
       }
 
       // CREATE
-      allow create: if belongsToSalon()
+      allow create: if belongsToSalon(salonId)
         // Required fields
         && request.resource.data.tenantId == salonId
         && request.resource.data.type is string
         && request.resource.data.status == 'open'
         && request.resource.data.priority is string
-        
-        // Identity (use UID as source of truth!)
+        // Identity
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.forUid is string
         && request.resource.data.createdByStaffId is string
         && request.resource.data.forStaffId is string
-        
-        // Snapshots (read-only after create)
+        // Snapshots
         && request.resource.data.createdByName is string
         && request.resource.data.createdByRole is string
         && request.resource.data.forStaffName is string
-        
         // Lock decision fields at creation
         && request.resource.data.decidedBy == null
         && request.resource.data.decidedAt == null
@@ -129,33 +174,25 @@ service cloud.firestore {
         && request.resource.data.staffReply == null
         && request.resource.data.visibility == 'managers_only'
         && request.resource.data.unreadForManagers == true
-        
         // Permission check
         && (
-          // Technician: can only create for themselves
-          (isTechnician() && request.resource.data.forUid == request.auth.uid)
-          ||
-          // Manager: can create for anyone (on-behalf-of)
-          isManager()
+          (isTechnician(salonId) && request.resource.data.forUid == request.auth.uid)
+          || isManager(salonId)
         );
 
       // READ
-      allow read: if belongsToSalon()
+      allow read: if belongsToSalon(salonId)
         && (
-          // Manager: can read all requests in salon
-          isManager()
-          ||
-          // Technician: can only read their own requests (by UID!)
-          (isTechnician() && resource.data.forUid == request.auth.uid)
+          isManager(salonId)
+          || (isTechnician(salonId) && resource.data.forUid == request.auth.uid)
         );
 
       // UPDATE
-      allow update: if belongsToSalon()
+      allow update: if belongsToSalon(salonId)
         && (
-          // Managers: can update management fields
+          // Managers: update management fields
           (
-            isManager()
-            // Lock immutable fields
+            isManager(salonId)
             && request.resource.data.tenantId == resource.data.tenantId
             && request.resource.data.type == resource.data.type
             && request.resource.data.createdByUid == resource.data.createdByUid
@@ -167,7 +204,6 @@ service cloud.firestore {
             && request.resource.data.forStaffName == resource.data.forStaffName
             && request.resource.data.createdAt == resource.data.createdAt
             && request.resource.data.data == resource.data.data
-            // Allow-list: management fields only
             && changedKeys().hasOnly([
               'status',
               'assignedTo',
@@ -186,17 +222,15 @@ service cloud.firestore {
           ||
           // Technician: can reply when needs_info AND it's their request
           (
-            isTechnician()
+            isTechnician(salonId)
             && resource.data.forUid == request.auth.uid
             && resource.data.status == 'needs_info'
-            // Lock all immutable fields
             && request.resource.data.tenantId == resource.data.tenantId
             && request.resource.data.type == resource.data.type
             && request.resource.data.createdByUid == resource.data.createdByUid
             && request.resource.data.forUid == resource.data.forUid
             && request.resource.data.createdAt == resource.data.createdAt
             && request.resource.data.data == resource.data.data
-            // Allow only reply fields
             && changedKeys().hasOnly([
               'staffReply',
               'status',
@@ -207,14 +241,16 @@ service cloud.firestore {
           )
         );
 
-      // DELETE
-      allow delete: if false;  // no deletion, only archive via status='archived'
-      
+      // DELETE — only when already archived (manager can permanently delete)
+      allow delete: if belongsToSalon(salonId)
+        && isManager(salonId)
+        && resource.data.status == 'archived';
+
       // Events subcollection (audit trail)
       match /events/{eventId} {
-        allow read: if belongsToSalon()
-          && (isManager() || resource.data.forUid == request.auth.uid);
-        allow write: if false;  // only Cloud Functions write events
+        allow read: if belongsToSalon(salonId)
+          && (isManager(salonId) || resource.data.forUid == request.auth.uid);
+        allow write: if false;
       }
     }
 

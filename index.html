@@ -1064,8 +1064,12 @@ dialog footer button, .code-dialog footer button {
         console.warn("compat initializeApp skipped:", e);
       }
       window.__firebaseApp = app;
-      const functions = getFunctions(app, "us-central1");
-      window.__sendStaffInviteFn = httpsCallable(functions, "sendStaffInvite");
+      // sendStaffInvite: route through callSendStaffInvite (fetch /api/sendStaffInvite) - never cloudfunctions.net
+      window.__sendStaffInviteFn = async (payload) => {
+        if (typeof window.callSendStaffInvite !== "function") throw new Error("callSendStaffInvite not loaded");
+        const data = await window.callSendStaffInvite(payload);
+        return { data };
+      };
       if (!window.__appCheckInitialized) {
         console.warn("[AppCheck] disabled temporarily for debugging");
         // Optional for local/dev testing:
@@ -13833,19 +13837,16 @@ function initializeAppsPanel() {
           return;
         }
 
-        if (!window.__sendStaffInviteFn) {
-          if (!window.getFunctions || !window.httpsCallable) {
-            throw new Error("Firebase functions SDK not available");
-          }
-          const functions = window.getFunctions(app, "us-central1");
-          window.__sendStaffInviteFn = window.httpsCallable(functions, "sendStaffInvite");
+        if (typeof window.callSendStaffInvite !== "function") {
+          console.error("callSendStaffInvite not loaded (app.js?)");
+          alert("App not ready. Please refresh and try again.");
+          return;
         }
-        const sendInviteFn = window.__sendStaffInviteFn;
-        const payload = { salonId, email: staff.email, role: staff.role };
+        const payload = { salonId, email: staff.email, role: staff.role, staffId: staffId || null };
 
         console.log("[UI] Sending payload:", payload);
-        const res = await sendInviteFn(payload);
-        console.log("[UI] sendStaffInvite RESULT", res?.data);
+        const data = await window.callSendStaffInvite(payload);
+        console.log("[UI] sendStaffInvite RESULT", data);
       } catch (e) {
         console.error('[ffStaffSendInvite] Invite email failed:', e);
         alert('Invite email failed to send. Status remains Invited. Please try again.');

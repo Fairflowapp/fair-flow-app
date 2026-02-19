@@ -1,0 +1,47 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "inboxItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "createdByUid", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "lastActivityAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "inboxItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "createdByUid", "order": "ASCENDING"},
+        {"fieldPath": "lastActivityAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "inboxItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "forUid", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "lastActivityAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "inboxItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "forUid", "order": "ASCENDING"},
+        {"fieldPath": "lastActivityAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "salonId", "order": "ASCENDING"},
+        {"fieldPath": "staffId", "order": "ASCENDING"}
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
