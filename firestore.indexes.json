@@ -21,6 +21,14 @@
       "collectionGroup": "inboxItems",
       "queryScope": "COLLECTION",
       "fields": [
+        {"fieldPath": "createdByUid", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "inboxItems",
+      "queryScope": "COLLECTION",
+      "fields": [
         {"fieldPath": "forUid", "order": "ASCENDING"},
         {"fieldPath": "status", "order": "ASCENDING"},
         {"fieldPath": "lastActivityAt", "order": "DESCENDING"}
@@ -32,6 +40,14 @@
       "fields": [
         {"fieldPath": "forUid", "order": "ASCENDING"},
         {"fieldPath": "lastActivityAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "inboxItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "forUid", "order": "ASCENDING"},
+        {"fieldPath": "unreadForManagers", "order": "ASCENDING"}
       ]
     },
     {

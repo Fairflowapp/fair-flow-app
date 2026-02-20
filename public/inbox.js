@@ -25,6 +25,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-storage.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 import { db, auth, storage } from "./app.js";
 
 // Category order for display (Schedule → Payments → Operations → Documents → Other at end)
@@ -459,11 +460,11 @@ async function loadInboxItems() {
         limit(50)
       );
     } else if (inboxViewMode === 'mine') {
-      // Admin/Manager "My Requests": all requests I created (no status tabs)
+      // Admin/Manager "My Requests": ordered by createdAt (stable — doesn't reorder when status changes)
       q = query(
         collection(db, `salons/${salonId}/inboxItems`),
         where('createdByUid', '==', uid),
-        orderBy('lastActivityAt', 'desc'),
+        orderBy('createdAt', 'desc'),
         limit(50)
       );
     } else {
@@ -522,20 +523,17 @@ async function loadInboxItems() {
     // Listen for changes
     inboxUnsubscribe = onSnapshot(q, (snapshot) => {
       if (loadingEl) loadingEl.style.display = 'none';
-      
+
       currentRequests = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      
+
       console.log('[Inbox] Loaded', currentRequests.length, 'requests');
       updateInboxStaffFilterOptions();
-      if (currentRequests.length === 0) {
-        if (emptyEl) emptyEl.style.display = 'block';
-      } else {
-        if (emptyEl) emptyEl.style.display = 'none';
-        renderInboxList();
-      }
+      updateInboxBadges();
+      // Always call renderInboxList — it cleans up old DOM elements even when empty
+      renderInboxList();
     }, (error) => {
       console.error('[Inbox] Query error', error);
       if (loadingEl) loadingEl.style.display = 'none';
@@ -556,6 +554,40 @@ async function loadInboxItems() {
     console.error('[Inbox] Load error', error);
     if (loadingEl) loadingEl.style.display = 'none';
   }
+}
+
+/** Update red badges: Open tab + INBOX nav button */
+/** Update unread badges on tabs and nav INBOX button. */
+function updateInboxBadges() {
+  const role = (currentUserProfile && currentUserProfile.role) || '';
+  const isManager = ['manager', 'admin', 'owner'].includes(role);
+  if (!isManager) return;
+
+  const uid = currentUserProfile.uid;
+
+  // Open: new requests not yet seen by recipient
+  const openCount = currentRequests.filter(
+    r => r.forUid === uid && r.status === 'open' && r.unreadForManagers === true
+  ).length;
+
+  // Needs Info: requests where staff replied but recipient hasn't seen it yet
+  const needsInfoCount = currentRequests.filter(
+    r => r.forUid === uid && r.status === 'needs_info' && r.unreadForManagers === true
+  ).length;
+
+  const totalCount = openCount + needsInfoCount;
+
+  // Badge on Open tab
+  const openBadge = document.getElementById('inboxOpenBadge');
+  if (openBadge) openBadge.textContent = openCount > 0 ? openCount : '';
+
+  // Badge on Needs Info tab
+  const needsInfoBadge = document.getElementById('inboxNeedsInfoBadge');
+  if (needsInfoBadge) needsInfoBadge.textContent = needsInfoCount > 0 ? needsInfoCount : '';
+
+  // Nav INBOX badge = total unread (Open + Needs Info)
+  const navBadge = document.querySelector('#inboxBtn .ff-inbox-badge');
+  if (navBadge) navBadge.textContent = totalCount > 0 ? totalCount : '';
 }
 
 function updateInboxStaffFilterOptions() {
@@ -619,7 +651,6 @@ function renderInboxList() {
   let requestsToShow = currentRequests;
 
   // Client-side status filter to prevent flicker when Firestore sends intermediate snapshots
-  // (item reorders on lastActivityAt change before status change removes it from query)
   if (inboxViewMode === 'to_handle' || role === 'technician') {
     if (currentInboxTab === 'open') {
       requestsToShow = requestsToShow.filter(r => r.status === 'open');
@@ -2038,13 +2069,17 @@ function showRequestDetails(requestId) {
   
   console.log('[Inbox] Showing request details', requestId);
 
-  // When manager/admin opens a request, mark it as read so red badge updates
+  // Mark as read only if the current user IS the recipient (forUid), not the sender
   const isManagerRole = currentUserProfile && ['manager', 'admin', 'owner'].includes(currentUserProfile.role);
-  if (isManagerRole && request.unreadForManagers === true && currentUserProfile.salonId) {
+  const isRecipientViewing = isManagerRole && request.forUid === currentUserProfile.uid;
+  if (isRecipientViewing && request.unreadForManagers === true && currentUserProfile.salonId) {
+    // Optimistic: update local state immediately
+    const idx = currentRequests.findIndex(r => r.id === requestId);
+    if (idx !== -1) currentRequests[idx] = { ...currentRequests[idx], unreadForManagers: false };
+    updateInboxBadges();
+    // Persist to Firestore in background (no lastActivityAt change to avoid reorder)
     updateDoc(doc(db, `salons/${currentUserProfile.salonId}/inboxItems`, requestId), {
-      unreadForManagers: false,
-      lastActivityAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
+      unreadForManagers: false
     }).catch(err => console.warn('[Inbox] Mark read failed', err));
   }
   
@@ -2134,12 +2169,13 @@ function showRequestDetails(requestId) {
     ` : ''}
   `;
   
-  // Technician reply (if needs_info and it's their request)
-  if (isTechnician && isMyRequest && request.status === 'needs_info' && !request.staffReply) {
+  // Reply box: shown to the REQUEST CREATOR when status is needs_info (any role)
+  const isCreator = currentUserProfile && request.createdByUid === currentUserProfile.uid;
+  if (isCreator && request.status === 'needs_info' && !request.staffReply) {
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Your Reply</h3>
-        <textarea id="staffReplyInput" rows="3" placeholder="Answer the manager's question..." style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;margin-bottom:12px;"></textarea>
+        <textarea id="staffReplyInput" rows="3" placeholder="Answer the question..." style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;margin-bottom:12px;box-sizing:border-box;"></textarea>
         <button onclick="submitStaffReply('${requestId}')" style="width:100%;padding:10px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
           Submit Reply
         </button>
@@ -2418,27 +2454,26 @@ function renderRequestData(request) {
 window.submitStaffReply = async function(requestId) {
   const replyInput = document.getElementById('staffReplyInput');
   const reply = replyInput?.value?.trim();
-  
-  if (!reply) {
-    showToast('Please enter a reply', 'error');
-    return;
-  }
-  
+  if (!reply) { showToast('Please enter a reply', 'error'); return; }
+
+  closeRequestDetailsModal();
+  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  renderInboxList();
+
   try {
     const salonId = currentUserProfile.salonId;
     await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
       staffReply: reply,
-      status: 'open',  // Back to open after reply
+      status: 'open',
       lastActivityAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       unreadForManagers: true
     });
-    
-    closeRequestDetailsModal();
     showToast('Reply submitted! Request is back to Open status.', 'success');
   } catch (error) {
     console.error('[Inbox] submitStaffReply error', error);
     showToast(`Error: ${error.message}`, 'error');
+    loadInboxItems();
   }
 };
 
@@ -2452,7 +2487,11 @@ window.needsMoreInfo = async function(requestId) {
     required: true
   });
   if (!question) return;
-  
+
+  closeRequestDetailsModal();
+  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  renderInboxList();
+
   try {
     const salonId = currentUserProfile.salonId;
     await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
@@ -2462,12 +2501,11 @@ window.needsMoreInfo = async function(requestId) {
       updatedAt: serverTimestamp(),
       unreadForManagers: false
     });
-    
-    closeRequestDetailsModal();
     showToast('Request updated - waiting for staff response', 'success');
   } catch (error) {
     console.error('[Inbox] needsMoreInfo error', error);
     showToast(`Error: ${error.message}`, 'error');
+    loadInboxItems();
   }
 };
 
@@ -2600,7 +2638,11 @@ window.archiveRequest = async function(requestId) {
     danger: false
   });
   if (!confirmed) return;
-  
+
+  closeRequestDetailsModal();
+  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  renderInboxList();
+
   try {
     const salonId = currentUserProfile.salonId;
     await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
@@ -2608,12 +2650,11 @@ window.archiveRequest = async function(requestId) {
       lastActivityAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
-    
-    closeRequestDetailsModal();
     showToast('Request archived', 'success');
   } catch (error) {
     console.error('[Inbox] archive error', error);
     showToast(`Error: ${error.message}`, 'error');
+    loadInboxItems();
   }
 };
 
@@ -2681,3 +2722,49 @@ if (document.readyState === 'loading') {
 } else {
   initInbox();
 }
+
+// =====================
+// Background badge listener — runs regardless of which screen is visible
+// =====================
+let _bgBadgeUnsubscribe = null;
+
+function startBgBadgeListener(uid, salonId) {
+  if (_bgBadgeUnsubscribe) { _bgBadgeUnsubscribe(); _bgBadgeUnsubscribe = null; }
+  const q = query(
+    collection(db, `salons/${salonId}/inboxItems`),
+    where('forUid', '==', uid),
+    where('unreadForManagers', '==', true)
+  );
+  _bgBadgeUnsubscribe = onSnapshot(q, (snap) => {
+    const openCount = snap.docs.filter(d => d.data().status === 'open').length;
+    const needsInfoCount = snap.docs.filter(d => d.data().status === 'needs_info').length;
+    const total = openCount + needsInfoCount;
+
+    const navBadge = document.querySelector('#inboxBtn .ff-inbox-badge');
+    if (navBadge) navBadge.textContent = total > 0 ? total : '';
+
+    const openBadge = document.getElementById('inboxOpenBadge');
+    if (openBadge) openBadge.textContent = openCount > 0 ? openCount : '';
+
+    const needsInfoBadge = document.getElementById('inboxNeedsInfoBadge');
+    if (needsInfoBadge) needsInfoBadge.textContent = needsInfoCount > 0 ? needsInfoCount : '';
+  }, () => {});
+}
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
+    if (_bgBadgeUnsubscribe) { _bgBadgeUnsubscribe(); _bgBadgeUnsubscribe = null; }
+    return;
+  }
+  try {
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    if (!userDoc.exists()) return;
+    const data = userDoc.data() || {};
+    const role = (data.role || '').toLowerCase();
+    if (['manager', 'admin', 'owner'].includes(role) && data.salonId) {
+      startBgBadgeListener(user.uid, data.salonId);
+    }
+  } catch (e) {
+    console.warn('[Inbox] bg badge listener error', e.message);
+  }
+});

@@ -1307,7 +1307,7 @@ dialog footer button, .code-dialog footer button {
 
         <button id="tasksBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>TASKS<span class="ff-home-tasks-badge"></span></button>
 
-        <button id="inboxBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg></span>INBOX<span class="ff-inbox-badge" style="display:none;margin-left:4px;background:#ef4444;color:#fff;border-radius:10px;padding:2px 6px;font-size:10px;font-weight:600;"></span></button>
+        <button id="inboxBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg></span>INBOX<span class="ff-inbox-badge ff-home-tasks-badge"></span></button>
 
         <button class="btn-pill" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>INVENTORY</button>
 
@@ -1327,7 +1327,7 @@ dialog footer button, .code-dialog footer button {
           </button>
           <div id="userAvatarDropdown" class="user-avatar-dropdown" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:160px;z-index:100005;padding:4px 0;pointer-events:auto;">
             <button id="userDropdownProfileBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">User Profile</button>
-            <button id="userDropdownTestPingBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#6366f1;display:block;">Test Ping (debug)</button>
+            <button id="userDropdownTestPingBtn" class="user-dropdown-item" style="display:none;">Test Ping (debug)</button>
             <div style="height:1px;background:var(--border);margin:4px 0;"></div>
             <button id="userDropdownLogoutBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:block;">Log out</button>
           </div>
@@ -4746,7 +4746,10 @@ function goToUserProfile() {
   if (ownerView) {
     ownerView.style.display = 'none';
   }
-  
+  // Hide Inbox screen if open
+  const inboxScreen = document.getElementById('inboxScreen');
+  if (inboxScreen) inboxScreen.style.display = 'none';
+
   // Explicitly hide all Queue-related UI elements when User Profile is active
   const joinBar = document.getElementById('joinBar');
   if (joinBar) joinBar.style.display = 'none';
@@ -24643,7 +24646,7 @@ function hookSettingsGuard_DISABLED(){
   <div id="staff-view" style="display:none;">
     <h2>Staff view</h2>
     <button id="logout-button-staff">Log out</button>
-    <button id="test-ping-btn" type="button" style="margin-left:8px;padding:6px 12px;font-size:12px;background:#6366f1;color:#fff;border:none;border-radius:6px;cursor:pointer;">Test Ping</button>
+    <button id="test-ping-btn" type="button" style="display:none;">Test Ping</button>
   </div>
 
   </div> <!-- End main-app-content -->
@@ -24798,8 +24801,8 @@ function hookSettingsGuard_DISABLED(){
   </div>
   <!-- Tabs (only for managers/admins) — hidden by default, shown in setupInboxUI for manager/admin -->
   <div id="inboxTabs" class="inbox-tabbar hidden" style="border-bottom:1px solid #e5e7eb;background:#f9fafb;padding:0 20px;">
-    <button class="inbox-tab active" data-inbox-tab="open" onclick="setInboxTab('open')">Open</button>
-    <button class="inbox-tab" data-inbox-tab="needs_info" onclick="setInboxTab('needs_info')">Needs Info</button>
+    <button class="inbox-tab active" data-inbox-tab="open" onclick="setInboxTab('open')">Open<span id="inboxOpenBadge" class="ff-home-tasks-badge"></span></button>
+    <button class="inbox-tab" data-inbox-tab="needs_info" onclick="setInboxTab('needs_info')">Needs Info<span id="inboxNeedsInfoBadge" class="ff-home-tasks-badge"></span></button>
     <button class="inbox-tab" data-inbox-tab="approved" onclick="setInboxTab('approved')">Approved</button>
     <button class="inbox-tab" data-inbox-tab="denied" onclick="setInboxTab('denied')">Denied</button>
     <button class="inbox-tab" data-inbox-tab="archived" onclick="setInboxTab('archived')">Archived</button>

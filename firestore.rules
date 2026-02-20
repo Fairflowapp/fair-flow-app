@@ -220,10 +220,10 @@ service cloud.firestore {
             ])
           )
           ||
-          // Technician: can reply when needs_info AND it's their request
+          // Any role: creator can reply when needs_info
           (
-            isTechnician(salonId)
-            && resource.data.forUid == request.auth.uid
+            belongsToSalon(salonId)
+            && resource.data.createdByUid == request.auth.uid
             && resource.data.status == 'needs_info'
             && request.resource.data.tenantId == resource.data.tenantId
             && request.resource.data.type == resource.data.type
