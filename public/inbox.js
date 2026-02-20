@@ -452,11 +452,11 @@ async function loadInboxItems() {
     let q;
     
     if (role === 'technician') {
-      // Technicians see only their own requests
+      // Technicians see requests they created (sent to a manager)
       q = query(
         collection(db, `salons/${salonId}/inboxItems`),
-        where('forUid', '==', uid),
-        orderBy('lastActivityAt', 'desc'),
+        where('createdByUid', '==', uid),
+        orderBy('createdAt', 'desc'),
         limit(50)
       );
     } else if (inboxViewMode === 'mine') {

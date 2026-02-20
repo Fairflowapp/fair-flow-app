@@ -174,17 +174,20 @@ service cloud.firestore {
         && request.resource.data.staffReply == null
         && request.resource.data.visibility == 'managers_only'
         && request.resource.data.unreadForManagers == true
-        // Permission check
+        // Permission check: technician can create for self or directed to a manager; manager can create for anyone
         && (
-          (isTechnician(salonId) && request.resource.data.forUid == request.auth.uid)
+          (isTechnician(salonId) && request.resource.data.createdByUid == request.auth.uid)
           || isManager(salonId)
         );
 
-      // READ
+      // READ: manager sees all; technician sees requests they created OR are recipient of
       allow read: if belongsToSalon(salonId)
         && (
           isManager(salonId)
-          || (isTechnician(salonId) && resource.data.forUid == request.auth.uid)
+          || (isTechnician(salonId) && (
+            resource.data.createdByUid == request.auth.uid ||
+            resource.data.forUid == request.auth.uid
+          ))
         );
 
       // UPDATE
