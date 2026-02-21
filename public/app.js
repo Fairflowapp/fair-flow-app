@@ -123,6 +123,21 @@ export const auth = getAuth(app);
 window.__ffAuth = auth;
 window.__ffGetUid = () => auth.currentUser?.uid || null;
 export const db = getFirestore(app);
+window.ffDb = db;   // expose for non-module scripts (staff cloud sync)
+
+// Set currentSalonId globally when user logs in (used by staff invite + staff cloud sync)
+onAuthStateChanged(auth, async user => {
+  if (!user) { window.currentSalonId = null; return; }
+  try {
+    const { getDoc, doc } = await import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js");
+    const snap = await getDoc(doc(db, 'users', user.uid));
+    if (snap.exists()) {
+      window.currentSalonId = snap.data().salonId || null;
+      console.log('[app.js] currentSalonId set:', window.currentSalonId);
+    }
+  } catch(e) { console.warn('[app.js] Failed to set currentSalonId', e); }
+});
+
 console.log("[CLIENT] Firebase functions SDK available:", typeof firebase !== "undefined");
 const functions = getFunctions(app, "us-central1");
 const storage = getStorage(app);

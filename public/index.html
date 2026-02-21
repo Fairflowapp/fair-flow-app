@@ -253,6 +253,360 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   filter:none !important;
 }
 
+/* Chat button active state */
+#chatBtn.active {
+  color:#7c3aed !important;
+  border-color:#a78bfa !important;
+  font-weight:800 !important;
+  background:#ede9fe !important;
+  opacity:1 !important;
+  filter:none !important;
+}
+
+/* ===== CHAT SCREEN STYLES ===== */
+#chatScreen {
+  display: none;
+  flex-direction: column;
+  height: calc(100vh - 56px);
+  overflow: hidden;
+  background: #f9fafb;
+}
+.chat-event-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  transition: box-shadow 0.15s;
+}
+.chat-event-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.chat-event-unread {
+  border-left: 3px solid #7c3aed;
+  background: #faf5ff;
+}
+.chat-event-mine {
+  border-left: 3px solid #10b981;
+}
+.chat-event-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.chat-event-sender {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.chat-event-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #ede9fe;
+  color: #7c3aed;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.chat-event-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+.chat-event-role {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-left: 6px;
+}
+.chat-event-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #7c3aed;
+  flex-shrink: 0;
+}
+.chat-event-time {
+  font-size: 12px;
+  color: #9ca3af;
+}
+.chat-event-body {
+  margin-bottom: 8px;
+}
+.chat-event-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 3px;
+}
+.chat-event-message {
+  font-size: 14px;
+  color: #4b5563;
+  line-height: 1.45;
+}
+.chat-event-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #f3f4f6;
+}
+.chat-event-to {
+  font-size: 12px;
+  color: #9ca3af;
+}
+.chat-event-timestamp {
+  font-size: 11px;
+  color: #d1d5db;
+}
+.chat-rcpt-avatar-sm {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #ede9fe;
+  color: #7c3aed;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.chat-template-option:hover {
+  background: #faf5ff !important;
+}
+.chat-tmpl-row:hover {
+  background: #f9fafb !important;
+}
+/* Chat modal overlay */
+.chat-modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 200000;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.chat-modal-box {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  width: 92vw;
+  max-width: 520px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chat-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+.chat-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+}
+.chat-modal-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+}
+.chat-modal-close:hover { background: #f3f4f6; }
+.chat-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+.chat-modal-footer {
+  padding: 14px 20px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+.chat-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #9ca3af;
+  margin-bottom: 10px;
+  margin-top: 16px;
+}
+.chat-section-label:first-child { margin-top: 0; }
+/* Nav badge (same class as tasks/inbox badges) */
+#chatNavBadge {
+  display: none;
+}
+
+/* ===== CHAT THREAD LIST CARDS ===== */
+.chat-thread-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s;
+  position: relative;
+}
+.chat-thread-card:hover {
+  box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+  border-color: #d1d5db;
+}
+.chat-thread-card-unread {
+  border-left: 3px solid #7c3aed;
+  background: #faf5ff;
+}
+.ctc-avatars {
+  position: relative;
+  width: 44px;
+  height: 38px;
+  flex-shrink: 0;
+}
+.ctc-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  border: 2px solid #fff;
+  position: absolute;
+}
+.ctc-avatar-me {
+  background: #ede9fe;
+  color: #7c3aed;
+  top: 0;
+  left: 0;
+}
+.ctc-avatar-other {
+  background: #dbeafe;
+  color: #1d4ed8;
+  bottom: 0;
+  right: 0;
+}
+.ctc-body { flex: 1; min-width: 0; }
+.ctc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+.ctc-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ctc-time { font-size: 11px; color: #9ca3af; flex-shrink: 0; margin-left: 8px; }
+.ctc-preview {
+  font-size: 13px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ctc-you { color: #9ca3af; }
+.ctc-badge {
+  min-width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: #7c3aed;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  flex-shrink: 0;
+}
+
+/* ===== CHAT CONVERSATION BUBBLES ===== */
+.cb-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+  max-width: 82%;
+}
+.cb-row-other { align-self: flex-start; }
+.cb-row-mine  { align-self: flex-end; flex-direction: row-reverse; margin-left: auto; }
+.cb-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cb-col { display: flex; flex-direction: column; gap: 2px; }
+.cb-sender-name { font-size: 11px; color: #9ca3af; margin-bottom: 2px; }
+.cb-bubble {
+  padding: 10px 14px;
+  border-radius: 18px;
+  max-width: 100%;
+  word-break: break-word;
+}
+.cb-bubble-other {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-bottom-left-radius: 4px;
+}
+.cb-bubble-mine {
+  background: #7c3aed;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.cb-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.cb-bubble-other .cb-title { color: #111827; }
+.cb-bubble-mine  .cb-title { color: #fff; }
+.cb-body { font-size: 13px; margin-top: 2px; line-height: 1.4; }
+.cb-bubble-other .cb-body { color: #4b5563; }
+.cb-bubble-mine  .cb-body { color: rgba(255,255,255,0.85); }
+.cb-time { font-size: 10px; color: #d1d5db; }
+.cb-row-mine .cb-time { text-align: right; }
+
 .btn-danger{border-color:#fca5a5;color:#b91c1c}
 
 /* Join row under header */
@@ -1307,6 +1661,8 @@ dialog footer button, .code-dialog footer button {
 
         <button id="tasksBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>TASKS<span class="ff-home-tasks-badge"></span></button>
 
+        <button id="chatBtn" class="btn-pill" onclick="window.goToChat && window.goToChat()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>CHAT<span id="chatNavBadge" class="ff-home-tasks-badge"></span></button>
+
         <button id="inboxBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg></span>INBOX<span class="ff-inbox-badge ff-home-tasks-badge"></span></button>
 
         <button class="btn-pill" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>INVENTORY</button>
@@ -1389,6 +1745,16 @@ dialog footer button, .code-dialog footer button {
         <div class="apps-col">
           <div class="apps-section-title">COMMUNICATIONS</div>
           <div class="apps-section-grid">
+            <div class="apps-panel-item" data-app="chat" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                </div>
+                <div>
+                  <div>Chat</div>
+                </div>
+              </div>
+            </div>
             <div class="apps-panel-item" data-app="inbox" style="cursor:not-allowed;">
               <div class="apps-panel-item__content">
                 <div>
@@ -1633,6 +1999,21 @@ dialog footer button, .code-dialog footer button {
       </div>
     </div>
   </div>
+
+  <!-- Delete Staff Confirmation Modal (permanent) -->
+  <div id="staffDeleteConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100003;align-items:center;justify-content:center;pointer-events:auto;">
+    <div class="history-modal-backdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.25);z-index:0;"></div>
+    <div style="position:relative;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.15);padding:24px;max-width:520px;width:90%;z-index:1;pointer-events:auto;">
+      <h3 style="margin:0 0 12px 0;font-size:18px;font-weight:700;color:#111827;">Delete Staff Member Permanently?</h3>
+      <p id="staffDeleteConfirmBody" style="margin:0 0 14px 0;font-size:14px;color:#6b7280;line-height:1.5;">
+        This will permanently delete this staff entry from the system and cloud. This cannot be undone.
+      </p>
+      <div style="display:flex;gap:12px;justify-content:flex-end;">
+        <button id="staffDeleteConfirmCancel" style="padding:10px 20px;border:1px solid var(--border);background:#fff;border-radius:8px;font-size:14px;font-weight:600;color:#374151;cursor:pointer;transition:background 0.2s;">Cancel</button>
+        <button id="staffDeleteConfirmDelete" style="padding:10px 20px;border:none;background:#b91c1c;border-radius:8px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;transition:background 0.2s;">Delete</button>
+      </div>
+    </div>
+  </div>
   
   <!-- Archived User Block Screen -->
   <div id="archivedUserBlockScreen" style="display:none;position:fixed;inset:0;background:#fff;z-index:999999;align-items:center;justify-content:center;flex-direction:column;padding:40px;">
@@ -1856,6 +2237,16 @@ dialog footer button, .code-dialog footer button {
         </div>
 
 
+
+        <!-- Chat Templates Section (Admin/Owner only) -->
+        <div id="chatSettingsSection" style="display:none;margin-top:24px;">
+          <h4 style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Chat Messages</h4>
+          <div class="row small" style="margin-bottom:12px;">Manage the message templates staff can send in Chat.</div>
+          <button type="button" onclick="window.openChatTemplatesSettings && window.openChatTemplatesSettings()"
+            style="padding:8px 16px;border:1px solid #a78bfa;border-radius:8px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:13px;font-weight:600;">
+            Manage Chat Messages
+          </button>
+        </div>
 
         <div id="legacySettingsTechniciansBlock" style="display:none;">
           <!-- NEW STAFF MEMBER Form Container -->
@@ -4278,6 +4669,15 @@ async function guardFinish(workerName, fn){
 async function openSettingsSecure(){
 
   renderSettings();
+
+  // Show Chat Templates section for Admin/Owner
+  if (typeof window.initChatSettingsSection === 'function') {
+    window.initChatSettingsSection();
+  } else {
+    // Fallback: check role directly from localStorage/DOM
+    const chatSection = document.getElementById('chatSettingsSection');
+    if (chatSection) chatSection.style.display = 'block';
+  }
   
   settingsDlg.showModal();
 
@@ -4291,6 +4691,10 @@ function goToQueue() {
   // Close inbox screen if open
   const inboxScreen = document.getElementById('inboxScreen');
   if (inboxScreen) inboxScreen.style.display = 'none';
+
+  // Close chat screen if open
+  const chatScreen = document.getElementById('chatScreen');
+  if (chatScreen) chatScreen.style.display = 'none';
   
   // Exit reorder mode when navigating to Queue (ensures clean state)
   if (typeof exitReorderMode === 'function' && reorderMode) {
@@ -8071,6 +8475,10 @@ function openTasks() {
     // Close inbox screen if open
     const inboxScreen = document.getElementById('inboxScreen');
     if (inboxScreen) inboxScreen.style.display = 'none';
+
+    // Close chat screen if open
+    const chatScreen = document.getElementById('chatScreen');
+    if (chatScreen) chatScreen.style.display = 'none';
     
     // Exit reorder mode when navigating to Tasks (switching tabs)
     if (typeof exitReorderMode === 'function' && reorderMode) {
@@ -13311,6 +13719,25 @@ function initializeNavigationButtons() {
       console.warn('[Navigation] Missing element: tasksBtn');
     }
 
+    // Chat button
+    const chatBtnEl = document.getElementById("chatBtn");
+    if (chatBtnEl) {
+      chatBtnEl.onclick = function() {
+        if (typeof window.goToChat === 'function') {
+          window.goToChat();
+        } else {
+          console.error('[Navigation] goToChat function not found');
+        }
+      };
+      chatBtnEl.style.cursor = 'pointer';
+      chatBtnEl.style.pointerEvents = 'auto';
+      chatBtnEl.disabled = false;
+      chatBtnEl.removeAttribute('disabled');
+      console.log('[Navigation] Chat button initialized');
+    } else {
+      console.warn('[Navigation] Missing element: chatBtn');
+    }
+
     // User avatar dropdown
     const userAvatarBtn = document.getElementById("userAvatarBtn");
     const userAvatarDropdown = document.getElementById("userAvatarDropdown");
@@ -13613,6 +14040,11 @@ function initializeAppsPanel() {
               window.openTasks();
             }
             break;
+          case 'chat':
+            if (typeof window.goToChat === 'function') {
+              window.goToChat();
+            }
+            break;
           case 'history':
             // History is a passive audit log - open directly with no PIN checks
             if (typeof openLog === 'function') {
@@ -13784,6 +14216,10 @@ function initializeAppsPanel() {
   function ffSaveStaffStore(data) {
     try {
       localStorage.setItem('ff_staff_v1', JSON.stringify(data));
+      // Sync to Firestore (non-blocking)
+      if (typeof window.ffStaffSyncToCloud === 'function') {
+        window.ffStaffSyncToCloud(data);
+      }
     } catch (e) {
       console.error('[ffSaveStaffStore] Error saving staff store:', e);
     }
@@ -13896,11 +14332,9 @@ function initializeAppsPanel() {
       const data = await window.callSendStaffInvite(payload);
       console.log("[Invite] success", data);
     } catch (err) {
-      console.error("[Invite] sendStaffInvite error", err?.code, err?.message, err);
-      console.error('[ffStaffSendInvite] Invite email failed:', err);
-      const msg = err?.message || 'Unknown error';
-      alert('Invite email failed: ' + msg);
-      throw err;
+      console.warn("[Invite] sendStaffInvite error (non-blocking):", err?.code, err?.message);
+      // Do NOT alert() here — it blocks JavaScript and prevents cloud sync from completing
+      // Do NOT throw — staff member was saved successfully, only the invite failed
     }
   }
   
@@ -13974,6 +14408,89 @@ function initializeAppsPanel() {
   // Close archive confirmation modal
   function ffStaffArchiveModalClose() {
     const modal = document.getElementById('staffArchiveConfirmModal');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.dataset.pendingStaffId = '';
+    }
+  }
+
+  // Delete staff member (permanent) — available only from Archived
+  function ffStaffDelete(staffId) {
+    try {
+      const staffStore = ffGetStaffStore();
+      const staff = staffStore.staff.find(s => s.id === staffId);
+      if (!staff) {
+        console.error('[ffStaffDelete] Staff member not found:', staffId);
+        return;
+      }
+
+      // Safety: only allow delete after Archive
+      if (staff.isArchived !== true) {
+        if (typeof showToast === 'function') showToast('First Archive this staff member. Delete is available only from Archived.');
+        else alert('First Archive this staff member. Delete is available only from Archived.');
+        return;
+      }
+
+      const modal = document.getElementById('staffDeleteConfirmModal');
+      const bodyText = document.getElementById('staffDeleteConfirmBody');
+      const staffName = staff.name || 'this staff member';
+
+      if (!modal) {
+        console.error('[ffStaffDelete] Delete confirmation modal not found');
+        return;
+      }
+
+      if (bodyText) {
+        bodyText.textContent = `${staffName} will be permanently deleted from the system and cloud. This cannot be undone.`;
+      }
+
+      modal.dataset.pendingStaffId = staffId;
+      modal.style.display = 'flex';
+    } catch (e) {
+      console.error('[ffStaffDelete] Error:', e);
+    }
+  }
+
+  async function ffStaffDeleteConfirm(staffId) {
+    try {
+      const staffStore = ffGetStaffStore();
+      const staff = staffStore.staff.find(s => s.id === staffId);
+      if (!staff) {
+        console.error('[ffStaffDeleteConfirm] Staff member not found:', staffId);
+        return;
+      }
+
+      // Safety: only allow delete after Archive
+      if (staff.isArchived !== true) {
+        if (typeof showToast === 'function') showToast('First Archive this staff member. Delete is available only from Archived.');
+        else alert('First Archive this staff member. Delete is available only from Archived.');
+        return;
+      }
+
+      if (typeof window.ffStaffDeleteFromCloud !== 'function') {
+        throw new Error('Delete from cloud is not available. Please refresh.');
+      }
+
+      await window.ffStaffDeleteFromCloud(staffId);
+
+      // Update local cache immediately (Firestore listener will also confirm)
+      const next = { staff: (staffStore.staff || []).filter(s => s.id !== staffId) };
+      localStorage.setItem('ff_staff_v1', JSON.stringify(next));
+
+      if (selectedStaffId === staffId) selectedStaffId = null;
+      renderStaffList();
+      renderStaffDetails();
+
+      document.dispatchEvent(new CustomEvent('ff-staff-cloud-updated'));
+    } catch (e) {
+      console.error('[ffStaffDeleteConfirm] Error:', e);
+      if (typeof showToast === 'function') showToast('Delete failed. Please try again.');
+      else alert('Delete failed. Please try again.');
+    }
+  }
+
+  function ffStaffDeleteModalClose() {
+    const modal = document.getElementById('staffDeleteConfirmModal');
     if (modal) {
       modal.style.display = 'none';
       modal.dataset.pendingStaffId = '';
@@ -14358,6 +14875,7 @@ function initializeAppsPanel() {
                 <div id="ffStaffDetailsKebabMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:150px;z-index:1001;padding:4px 0;">
                   ${!isArchived ? '<button id="ffStaffDetailsArchiveBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Archive</button>' : '<button id="ffStaffDetailsReactivateBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#16a34a;display:block;font-weight:500;">Re-Activate</button>'}
                   ${invited && !isArchived ? '<button id="ffStaffDetailsChangePasswordBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Change password</button>' : ''}
+                  ${isArchived ? '<div style="height:1px;background:var(--border);margin:4px 0;"></div><button id="ffStaffDetailsDeleteBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#dc2626;display:block;font-weight:700;">Delete permanently</button>' : ''}
                 </div>
               </div>
             </div>
@@ -14401,6 +14919,16 @@ function initializeAppsPanel() {
           changePasswordBtn.onclick = function(e) {
             e.stopPropagation();
             alert('Password change will be available after account activation.');
+            if (kebabMenu) kebabMenu.style.display = 'none';
+          };
+        }
+
+        // Wire up Delete button (permanent, only shown for Archived)
+        const deleteBtn = document.getElementById('ffStaffDetailsDeleteBtn');
+        if (deleteBtn) {
+          deleteBtn.onclick = function(e) {
+            e.stopPropagation();
+            ffStaffDelete(staff.id);
             if (kebabMenu) kebabMenu.style.display = 'none';
           };
         }
@@ -14999,8 +15527,15 @@ function initializeAppsPanel() {
         isManager: newIsManager // Set based on role selection
       };
       
-      // Save to storage
+      // Save to storage (also triggers Firestore sync via ffSaveStaffStore)
       ffSaveStaffStore(staffStore);
+
+      // Sync name change to users/{uid} + members/{uid} in Firestore
+      if (nameChanged && newEmail && typeof window.ffStaffSyncNameToFirestore === 'function') {
+        window.ffStaffSyncNameToFirestore(newEmail, newName);
+      } else if (nameChanged && oldStaff.email && typeof window.ffStaffSyncNameToFirestore === 'function') {
+        window.ffStaffSyncNameToFirestore(oldStaff.email, newName);
+      }
       
       // Exit edit mode
       isEditingStaffDetails = false;
@@ -15149,6 +15684,13 @@ function initializeAppsPanel() {
     }
   }
   
+  // Refresh Staff Members UI when cloud sync completes (on login)
+  document.addEventListener('ff-staff-cloud-updated', function() {
+    if (staffMembersModal && staffMembersModal.style.display !== 'none') {
+      renderStaffList();
+    }
+  });
+
   function openStaffMembersModal() {
     if (staffMembersModal) {
       // Get the global header element to calculate its height
@@ -15167,9 +15709,19 @@ function initializeAppsPanel() {
       showArchivedStaff = false;
       updateArchiveToggleUI();
       
-      // Render staff list when modal opens
-      updateArchiveToggleUI();
-      renderStaffList();
+      // Trigger fresh Firestore load, then render
+      if (typeof window.ffStaffForceLoad === 'function') {
+        window.ffStaffForceLoad().then(() => {
+          updateArchiveToggleUI();
+          renderStaffList();
+        }).catch(() => {
+          updateArchiveToggleUI();
+          renderStaffList();
+        });
+      } else {
+        updateArchiveToggleUI();
+        renderStaffList();
+      }
       
       // Reset selection and edit mode when modal opens
       selectedStaffId = null;
@@ -15230,6 +15782,40 @@ function initializeAppsPanel() {
           backdrop.onclick = function(e) {
             e.stopPropagation();
             ffStaffArchiveModalClose();
+          };
+        }
+      }
+
+      // Bind delete confirmation modal buttons (only once)
+      const deleteConfirmModal = document.getElementById('staffDeleteConfirmModal');
+      const deleteConfirmCancel = document.getElementById('staffDeleteConfirmCancel');
+      const deleteConfirmDelete = document.getElementById('staffDeleteConfirmDelete');
+
+      if (deleteConfirmModal && !deleteConfirmModal.__ffBound) {
+        deleteConfirmModal.__ffBound = true;
+
+        if (deleteConfirmCancel) {
+          deleteConfirmCancel.onclick = function(e) {
+            e.stopPropagation();
+            ffStaffDeleteModalClose();
+          };
+        }
+
+        if (deleteConfirmDelete) {
+          deleteConfirmDelete.onclick = function(e) {
+            e.stopPropagation();
+            const pendingStaffId = deleteConfirmModal.dataset.pendingStaffId;
+            if (!pendingStaffId) return;
+            ffStaffDeleteConfirm(pendingStaffId);
+            ffStaffDeleteModalClose();
+          };
+        }
+
+        const backdrop2 = deleteConfirmModal.querySelector('.history-modal-backdrop');
+        if (backdrop2) {
+          backdrop2.onclick = function(e) {
+            e.stopPropagation();
+            ffStaffDeleteModalClose();
           };
         }
       }
@@ -24653,6 +25239,8 @@ function hookSettingsGuard_DISABLED(){
 
   <script type="module" src="/app.js?v=20260216_force"></script>
   <script type="module" src="/inbox.js?v=20260219_draft"></script>
+  <script type="module" src="/chat.js?v=20260220h"></script>
+  <script type="module" src="/staff-cloud.js?v=20260221a"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -24791,6 +25379,166 @@ function hookSettingsGuard_DISABLED(){
     .inbox-status-denied { background: #fee2e2; color: #991b1b; }
     .inbox-status-archived { background: #e5e7eb; color: #374151; }
 </style>
+
+<!-- Chat Screen -->
+<div id="chatScreen">
+
+  <!-- ── Top Bar (Thread List header) ─────────────────────────── -->
+  <div id="chatTopBar" style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:#fff;border-bottom:1px solid #e5e7eb;flex-shrink:0;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+      <h3 style="margin:0;font-size:16px;font-weight:700;color:#111827;">Chat</h3>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button id="chatSettingsGearBtn" onclick="window.openChatTemplatesSettings && window.openChatTemplatesSettings()"
+        title="Manage Chat Messages"
+        style="display:none;align-items:center;justify-content:center;width:36px;height:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;"
+        onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      </button>
+      <button id="chatSendBtn" onclick="window.openSendMessageModal && window.openSendMessageModal()"
+        style="display:flex;align-items:center;gap:7px;padding:8px 18px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        New Message
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Thread List ────────────────────────────────────────────── -->
+  <div id="chatThreadListWrap" style="display:flex;flex-direction:column;flex:1;overflow-y:auto;background:#f9fafb;">
+    <div style="max-width:680px;margin:0 auto;width:100%;padding:16px;">
+      <div id="chatFeedLoading" style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Loading…</div>
+      <div id="chatFeedEmpty" style="display:none;text-align:center;padding:60px 20px;color:#9ca3af;">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25" style="margin:0 auto 16px;display:block;opacity:0.35;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+        <div style="font-size:15px;font-weight:600;color:#6b7280;margin-bottom:6px;">No conversations yet</div>
+        <div style="font-size:13px;color:#9ca3af;">Start one with the New Message button above.</div>
+      </div>
+      <div id="chatFeedList"></div>
+    </div>
+  </div>
+
+  <!-- ── Conversation View (opens when thread clicked) ─────────── -->
+  <div id="chatConvView" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:#f9fafb;">
+    <!-- Conv header (name only) -->
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 20px;background:#fff;border-bottom:1px solid #e5e7eb;flex-shrink:0;">
+      <div style="width:32px;height:32px;border-radius:50%;background:#ede9fe;color:#7c3aed;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">💬</div>
+      <span id="chatConvTitle" style="font-size:15px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+    </div>
+    <!-- Messages area -->
+    <div id="chatConvMessages" style="flex:1;overflow-y:auto;padding:16px 16px 8px;display:flex;flex-direction:column;gap:4px;"></div>
+    <!-- Reply bar -->
+    <div style="padding:12px 16px;background:#fff;border-top:1px solid #e5e7eb;flex-shrink:0;">
+      <button id="chatConvReplyBtn" onclick="window.openThreadReply && window.openThreadReply()"
+        style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;background:#7c3aed;color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
+        Reply with Template
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<!-- Chat: Send Message Modal -->
+<div id="chatSendModal" class="chat-modal-overlay">
+  <div class="chat-modal-box">
+    <div class="chat-modal-header">
+      <span class="chat-modal-title">Send a Message</span>
+      <button type="button" class="chat-modal-close" onclick="window.closeSendMessageModal && window.closeSendMessageModal()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+    <div class="chat-modal-body">
+      <div class="chat-section-label">Select a Message</div>
+      <div id="chatSendTemplateList"></div>
+      <div id="chatSendToSection">
+        <div class="chat-section-label">Send To</div>
+        <div id="chatSendRecipientList"></div>
+      </div>
+    </div>
+    <div class="chat-modal-footer">
+      <button type="button" onclick="window.closeSendMessageModal && window.closeSendMessageModal()"
+        style="padding:9px 18px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;color:#374151;">Cancel</button>
+      <button type="button" id="chatSendConfirmBtn" onclick="window.confirmSendChatMessage && window.confirmSendChatMessage()" disabled
+        style="padding:9px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;opacity:0.45;transition:opacity 0.15s;">Send</button>
+      <script>
+        (function() {
+          const btn = document.getElementById('chatSendConfirmBtn');
+          if (!btn) return;
+          const obs = new MutationObserver(() => {
+            btn.style.opacity = btn.disabled ? '0.45' : '1';
+            btn.style.cursor = btn.disabled ? 'not-allowed' : 'pointer';
+          });
+          obs.observe(btn, { attributes: true, attributeFilter: ['disabled'] });
+        })();
+      </script>
+    </div>
+  </div>
+</div>
+
+<!-- Chat: Templates Settings Modal (Admin only) -->
+<div id="chatTemplatesModal" class="chat-modal-overlay">
+  <div class="chat-modal-box" style="max-width:600px;">
+    <div class="chat-modal-header">
+      <span class="chat-modal-title">Manage Chat Messages</span>
+      <button type="button" class="chat-modal-close" onclick="window.closeChatTemplatesModal && window.closeChatTemplatesModal()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+    <div class="chat-modal-body">
+      <!-- Existing templates list -->
+      <div class="chat-section-label" style="margin-top:0;">Existing Messages</div>
+      <div id="chatTemplatesAdminList"></div>
+
+      <!-- Add / Edit form -->
+      <div id="chatTmplForm" style="margin-top:20px;padding:18px 20px;background:#fff;border:2px solid #ede9fe;border-radius:12px;">
+        <div style="font-size:13px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;" id="chatTmplFormLabel">Create Structured Message Template</div>
+
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">
+            Title <span style="color:#ef4444;">*</span>
+          </label>
+          <input id="chatTmplTitle" type="text" placeholder="e.g. Need 15 more minutes" maxlength="80"
+            style="width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:7px;font-size:14px;color:#111827;box-sizing:border-box;">
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">
+            Message Text <span style="color:#9ca3af;font-weight:400;">(optional)</span>
+          </label>
+          <textarea id="chatTmplMessage" placeholder="e.g. I need 15 more minutes with my client." rows="3" maxlength="300"
+            style="width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:7px;font-size:14px;color:#111827;resize:vertical;box-sizing:border-box;"></textarea>
+        </div>
+
+        <div style="margin-bottom:18px;">
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:8px;">Who Can Send This</label>
+          <div style="display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#374151;">
+              <input type="checkbox" id="chatTmplSenderTech" value="technician"
+                style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;">
+              <span style="font-weight:500;">Technician</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#374151;">
+              <input type="checkbox" id="chatTmplSenderMgr" value="manager"
+                style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;">
+              <span style="font-weight:500;">Manager</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#374151;">
+              <input type="checkbox" id="chatTmplSenderAdmin" value="admin"
+                style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;">
+              <span style="font-weight:500;">Admin</span>
+            </label>
+          </div>
+          <div style="font-size:11px;color:#9ca3af;margin-top:5px;">Leave all unchecked = everyone can send.</div>
+        </div>
+
+        <div style="display:flex;gap:8px;">
+          <button type="button" id="chatTmplSaveBtn" onclick="window.saveChatTemplate && window.saveChatTemplate()"
+            style="padding:9px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">Create Template</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Inbox Screen (below main Top Bar: QUEUE, TASKS, INBOX, etc.) -->
 <div id="inboxScreen" class="inbox-screen">

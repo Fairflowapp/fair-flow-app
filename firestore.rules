@@ -257,6 +257,39 @@ service cloud.firestore {
       }
     }
 
+    // ===== STAFF MEMBERS (cloud sync) =====
+    // Manager/Admin/Owner: full CRUD. All salon members: read (needed for queue/join flow)
+    match /salons/{salonId}/staff/{staffId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if belongsToSalon(salonId)
+        && isManager(salonId);
+    }
+
+    // ===== CHAT / STRUCTURED MESSAGES SYSTEM =====
+
+    // Chat Templates — Admin/Owner can CRUD; all salon members can read
+    match /salons/{salonId}/chatTemplates/{templateId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isAdminOrOwner(salonId);
+    }
+
+    // Chat Events — any salon member can create (their own) and read (filtered client-side)
+    match /salons/{salonId}/chatEvents/{eventId} {
+      allow create: if belongsToSalon(salonId)
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.recipientUids is list;
+
+      // All salon members can read — client-side JS filters by role/uid
+      allow read: if belongsToSalon(salonId);
+
+      // Allow updating only readBy field (mark as read)
+      allow update: if belongsToSalon(salonId)
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['readBy']);
+
+      allow delete: if false;
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;

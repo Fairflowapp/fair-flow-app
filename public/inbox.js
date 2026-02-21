@@ -164,6 +164,10 @@ export function goToInbox() {
   if (queueControls) queueControls.style.display = 'none';
   if (userProfileScreen) userProfileScreen.style.display = 'none';
   if (wrap) wrap.style.display = 'none';
+
+  // Hide chat screen if open
+  const chatScreen = document.getElementById('chatScreen');
+  if (chatScreen) chatScreen.style.display = 'none';
   
   // Show inbox shell but hide content until ready (avoids flash of empty "My Requests")
   if (inboxScreen) inboxScreen.style.display = 'flex';
