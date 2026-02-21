@@ -502,7 +502,7 @@ function ffShowInviteFlow(inviteToken) {
           const timeout = setTimeout(() => {
             unsub();
             reject(new Error("Finalize timeout - please refresh and try signing in"));
-          }, 30000); // 30 second timeout
+          }, 90000); // 90 second timeout (cold starts can be slow)
           
           const unsub = onSnapshot(
             doc(db, "finalizeInviteRequests", requestRef.id),

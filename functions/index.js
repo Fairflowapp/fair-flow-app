@@ -168,6 +168,176 @@ exports.onProcessInviteNow = functions
     await handleInviteRequest(reqSnap);
   });
 
+// ============================================================================
+// Finalize invite flow (Create password -> attach user to salon)
+// Client writes: finalizeInviteRequests/{id} with { inviteToken, uid, email }
+// Server updates status to done/error so the client can continue.
+// ============================================================================
+
+async function _markFinalizeError(snap, msg) {
+  try {
+    await snap.ref.set(
+      {
+        status: "error",
+        error: String(msg || "Unknown error"),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (e) {
+    console.error("[finalizeInvite] failed to update error status", e);
+  }
+}
+
+async function handleFinalizeInviteRequest(snap) {
+  const data = snap.data() || {};
+  if (data.status === "done") return;
+
+  const inviteToken = String(data.inviteToken || "").trim();
+  const uid = String(data.uid || "").trim();
+  const email = String(data.email || "").trim().toLowerCase();
+
+  if (!inviteToken || !uid) {
+    await _markFinalizeError(snap, "missing inviteToken/uid");
+    return;
+  }
+
+  const tokenHash = crypto.createHash("sha256").update(inviteToken).digest("hex");
+  const tokenRef = admin.firestore().collection("staffInviteTokens").doc(tokenHash);
+  const userRef = admin.firestore().doc(`users/${uid}`);
+
+  try {
+    await admin.firestore().runTransaction(async (tx) => {
+      // IMPORTANT: Firestore transactions require ALL reads before ANY writes.
+      // Read everything we might need up front.
+      const tokSnap = await tx.get(tokenRef);
+      if (!tokSnap.exists) throw new Error("Invite invalid or expired.");
+
+      const tok = tokSnap.data() || {};
+      const expiresAt = tok.expiresAt;
+      const usedAt = tok.usedAt;
+
+      if (usedAt) throw new Error("Invite already used.");
+      if (expiresAt && typeof expiresAt.toMillis === "function" && expiresAt.toMillis() < Date.now()) {
+        throw new Error("Invite expired.");
+      }
+
+      const salonId = String(tok.salonId || "").trim();
+      if (!salonId) throw new Error("Invite missing salon.");
+
+      const role = String(tok.role || "technician").trim();
+      const staffId = tok.staffId ? String(tok.staffId) : null;
+      const tokEmailLower = String(tok.emailLower || tok.email || "").trim().toLowerCase();
+
+      if (email && tokEmailLower && email !== tokEmailLower) {
+        throw new Error("Invite email mismatch.");
+      }
+
+      const memberRef = admin.firestore().collection("salons").doc(salonId).collection("members").doc(uid);
+      const staffRef = staffId
+        ? admin.firestore().collection("salons").doc(salonId).collection("staff").doc(staffId)
+        : null;
+
+      const userSnap = await tx.get(userRef);
+      const memberSnap = await tx.get(memberRef);
+      const staffSnap = staffRef ? await tx.get(staffRef) : null;
+
+      // Guard: if user already belongs to a different salon, block.
+      if (userSnap.exists) {
+        const ud = userSnap.data() || {};
+        if (ud.salonId && String(ud.salonId) !== salonId) {
+          throw new Error("Account already belongs to another salon.");
+        }
+      }
+
+      // Resolve name from staff doc if available
+      let staffName = "";
+      if (staffSnap && staffSnap.exists) {
+        const sd = staffSnap.data() || {};
+        staffName = String(sd.name || "").trim();
+      }
+
+      // ---- Writes (after all reads) ----
+
+      // Update staff doc (if linked)
+      if (staffRef) {
+        tx.set(
+          staffRef,
+          {
+            uid,
+            invited: true,
+            invitedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      // Write user profile (server-authoritative)
+      const userPayload = {
+        salonId,
+        role,
+        email: tokEmailLower || email || null,
+        staffId: staffId || null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (!userSnap.exists) userPayload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+      if (staffName) userPayload.name = staffName;
+      tx.set(userRef, userPayload, { merge: true });
+
+      // Write salon member directory
+      const memberPayload = {
+        email: (tokEmailLower || email || "").trim(),
+        name: staffName || (tokEmailLower || email || "").trim(),
+        role,
+        staffId: staffId || null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (!memberSnap.exists) memberPayload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+      tx.set(memberRef, memberPayload, { merge: true });
+
+      // Mark token used
+      tx.set(
+        tokenRef,
+        {
+          usedAt: admin.firestore.FieldValue.serverTimestamp(),
+          usedByUid: uid,
+          usedEmail: tokEmailLower || email || null,
+        },
+        { merge: true }
+      );
+
+      // Mark finalize request done (client waits for this)
+      tx.set(
+        snap.ref,
+        {
+          status: "done",
+          doneAt: admin.firestore.FieldValue.serverTimestamp(),
+          salonId,
+          staffId: staffId || null,
+        },
+        { merge: true }
+      );
+    });
+  } catch (err) {
+    console.error("[finalizeInvite] error", err);
+    await _markFinalizeError(snap, err?.message || String(err));
+  }
+}
+
+exports.onFinalizeInviteCreatedV2 = onDocumentCreated(
+  { document: "finalizeInviteRequests/{requestId}", region: "us-central1" },
+  (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    return handleFinalizeInviteRequest(snap);
+  }
+);
+
+exports.onFinalizeInviteCreatedV1 = functions
+  .region("us-central1")
+  .firestore.document("finalizeInviteRequests/{requestId}")
+  .onCreate((snap) => handleFinalizeInviteRequest(snap));
+
 /**
  * Processes pending staffInviteRequests every 1 min (instant for SaaS).
  * Scheduled runs don't need HTTP Invoker.
@@ -301,15 +471,18 @@ async function _sendStaffInviteInternal({ data, auth }) {
   const expiresAt = admin.firestore.Timestamp.fromMillis(now.toMillis() + (24 * 60 * 60 * 1000));
 
   console.log('[sendStaffInvite] storing invite token');
-  await admin.firestore().collection('staffInviteTokens').add({
+  // IMPORTANT: client loads by docId = sha256(token). Store under tokenHash id.
+  await admin.firestore().collection('staffInviteTokens').doc(tokenHash).set({
     staffId: staffId || null,
     salonId: salonId,
     email: staffEmail,
+    emailLower: String(staffEmail || emailValue || '').trim().toLowerCase(),
+    role: roleValue,
     tokenHash: tokenHash,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     expiresAt: expiresAt,
     usedAt: null
-  });
+  }, { merge: true });
   console.log("[sendStaffInvite] STEP 4: generate token + store token - done");
 
   const emailLower = String(staffEmail || emailValue || '').trim().toLowerCase();

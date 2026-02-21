@@ -5,12 +5,16 @@
  *
  * Firestore:
  *   salons/{salonId}/chatTemplates/{templateId}
- *   salons/{salonId}/chatEvents/{eventId}  (+ conversationId field)
+ *   salons/{salonId}/conversations/{conversationId}
+ *     - participants: [uidA, uidB]
+ *     - unreadFor: { [uid]: number }
+ *     - lastMessageAt / lastTitle / lastMessage
+ *   salons/{salonId}/conversations/{conversationId}/messages/{messageId}
  */
 
 import {
-  collection, query, orderBy, limit,
-  addDoc, updateDoc, doc, getDoc, getDocs, deleteDoc,
+  collection, query, where, orderBy, limit,
+  addDoc, setDoc, updateDoc, doc, getDoc, getDocs, deleteDoc, writeBatch, increment,
   onSnapshot, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
@@ -20,11 +24,13 @@ import { db, auth } from "./app.js";
 let chatUserProfile    = null;
 let chatTemplates      = [];
 let chatSalonUsers     = [];
-let chatEventsUnsub    = null;
+let chatConvsUnsub     = null;
+let chatMsgsUnsub      = null;
 let chatBadgeUnsub     = null;
 let chatEditingTmplId  = null;
 let chatReplyContext   = null;   // { uid, name, conversationId }
-let allChatEvents      = [];     // kept in sync by onSnapshot
+let allConversations   = [];     // kept in sync by onSnapshot
+let currentMessages    = [];     // kept in sync by onSnapshot for open conversation
 let currentConvId      = null;   // currently open thread
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -32,13 +38,18 @@ const isAdmin   = r => ['admin','owner'].includes((r||'').toLowerCase());
 const isMgrPlus = r => ['manager','admin','owner'].includes((r||'').toLowerCase());
 const escHtml   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const roleLabel = r => ({technician:'Technician',manager:'Manager',admin:'Admin',owner:'Owner'}[(r||'').toLowerCase()] || r || '');
-const convIdOf  = ev => {
-  if (ev.conversationId) return ev.conversationId;
-  if (Array.isArray(ev.recipientUids) && ev.recipientUids.length === 1)
-    return [ev.senderUid, ev.recipientUids[0]].sort().join('_');
-  return `bc_${ev.id}`;
-};
-const buildConvId = (a, b) => [a, b].sort().join('_');
+const buildConvId = (a, b) => [a, b].sort().join('__');
+
+function _nameForUid(uid) {
+  if (!uid) return '';
+  if (uid === chatUserProfile?.uid) return chatUserProfile?.name || chatUserProfile?.displayName || '';
+  const u = chatSalonUsers.find(x => x.uid === uid);
+  return (u && (u.name || u.email || u.uid)) || uid;
+}
+function _otherUidFromParticipants(parts, myUid) {
+  if (!Array.isArray(parts)) return '';
+  return parts.find(u => u && u !== myUid) || '';
+}
 
 function timeAgo(ts) {
   if (!ts) return '';
@@ -76,12 +87,14 @@ export function goToChat() {
 
   const chatScreen = document.getElementById('chatScreen');
   if (chatScreen) chatScreen.style.display = 'flex';
+  chatScreen?.classList.remove('chat-mobile-open');
 
   document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
   document.getElementById('chatBtn')?.classList.add('active');
 
+  // Split view: thread list stays visible (desktop). On mobile, we start on list.
   currentConvId = null;
-  showThreadList();
+  _renderEmptyConversation();
   initChatScreen();
 }
 
@@ -90,7 +103,7 @@ async function initChatScreen() {
   if (!chatUserProfile) return;
   await Promise.all([loadChatSalonUsers(), loadChatTemplates()]);
   setupChatUI();
-  subscribeToChatFeed();
+  subscribeToConversationList();
 }
 
 // ─── Profile / Users / Templates ──────────────────────────────────────────────
@@ -128,33 +141,43 @@ function setupChatUI() {
   if (gear) gear.style.display = isAdmin(chatUserProfile?.role) ? 'flex' : 'none';
 }
 
-// ─── Live Feed Subscription ────────────────────────────────────────────────────
-function subscribeToChatFeed() {
+// ─── Conversation List Subscription (PRIVATE) ──────────────────────────────────
+function subscribeToConversationList() {
   if (!chatUserProfile?.salonId) return;
-  if (chatEventsUnsub) { chatEventsUnsub(); chatEventsUnsub = null; }
+  if (chatConvsUnsub) { chatConvsUnsub(); chatConvsUnsub = null; }
+  if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
 
   const uid  = chatUserProfile.uid;
-  const role = chatUserProfile.role || '';
 
-  chatEventsUnsub = onSnapshot(
-    query(collection(db, `salons/${chatUserProfile.salonId}/chatEvents`),
-          orderBy('sentAt','asc'), limit(300)),
+  chatConvsUnsub = onSnapshot(
+    query(
+      collection(db, `salons/${chatUserProfile.salonId}/conversations`),
+      where('participants', 'array-contains', uid)
+    ),
     snap => {
-      let evs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (!isMgrPlus(role)) {
-        evs = evs.filter(ev =>
-          ev.senderUid === uid ||
-          (Array.isArray(ev.recipientUids) && ev.recipientUids.includes(uid))
-        );
-      }
-      allChatEvents = evs;
-      if (currentConvId) {
-        renderConversation(currentConvId);
-      } else {
-        renderThreadList();
-      }
+      allConversations = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Sort client-side (avoid composite index requirements)
+      allConversations.sort((a, b) => {
+        const aMs = a.lastMessageAt?.toMillis?.()
+          || (typeof a.lastMessageAtMs === 'number' ? a.lastMessageAtMs : 0)
+          || a.updatedAt?.toMillis?.()
+          || (typeof a.updatedAtMs === 'number' ? a.updatedAtMs : 0)
+          || a.createdAt?.toMillis?.()
+          || 0;
+        const bMs = b.lastMessageAt?.toMillis?.()
+          || (typeof b.lastMessageAtMs === 'number' ? b.lastMessageAtMs : 0)
+          || b.updatedAt?.toMillis?.()
+          || (typeof b.updatedAtMs === 'number' ? b.updatedAtMs : 0)
+          || b.createdAt?.toMillis?.()
+          || 0;
+        return bMs - aMs;
+      });
+
+      renderThreadList();
+      if (currentConvId) renderConversation(currentConvId);
+      else _renderEmptyConversation();
     },
-    err => console.error('[Chat] snapshot error', err)
+    err => console.error('[Chat] conversations snapshot error', err)
   );
 }
 
@@ -168,52 +191,24 @@ function renderThreadList() {
 
   const uid = chatUserProfile?.uid || '';
 
-  // Group events by convId
-  const threadMap = new Map();
-  allChatEvents.forEach(ev => {
-    const cid = convIdOf(ev);
-    if (!threadMap.has(cid)) threadMap.set(cid, []);
-    threadMap.get(cid).push(ev);
-  });
-
-  if (threadMap.size === 0) {
+  if (!Array.isArray(allConversations) || allConversations.length === 0) {
     if (empty) empty.style.display = 'block';
     list.innerHTML = '';
     return;
   }
   if (empty) empty.style.display = 'none';
 
-  // Sort threads by latest message descending
-  const threads = Array.from(threadMap.entries()).sort(([,a],[,b]) => {
-    const aMs = a[a.length-1]?.sentAt?.toMillis?.() || 0;
-    const bMs = b[b.length-1]?.sentAt?.toMillis?.() || 0;
-    return bMs - aMs;
-  });
-
-  list.innerHTML = threads.map(([convId, msgs]) => {
-    const last    = msgs[msgs.length - 1];
-    const unread  = msgs.filter(ev =>
-      ev.senderUid !== uid &&
-      Array.isArray(ev.recipientUids) && ev.recipientUids.includes(uid) &&
-      (!Array.isArray(ev.readBy) || !ev.readBy.includes(uid))
-    ).length;
-
-    // Participants: unique senders/recipients names (excluding me)
-    const names = new Set();
-    msgs.forEach(ev => {
-      if (ev.senderUid !== uid) names.add(ev.senderName || 'Unknown');
-      if (Array.isArray(ev.recipientNames)) {
-        ev.recipientNames.forEach((n, i) => {
-          if (ev.recipientUids?.[i] !== uid) names.add(n);
-        });
-      }
-    });
-    const otherNames = [...names].filter(Boolean).slice(0, 2).join(', ') || 'Unknown';
+  list.innerHTML = allConversations.map(conv => {
+    const convId = conv.id;
+    const otherUid = _otherUidFromParticipants(conv.participants, uid);
+    const otherName = _nameForUid(otherUid) || 'Unknown';
+    const unread = (conv.unreadFor && conv.unreadFor[uid]) ? Number(conv.unreadFor[uid]) : 0;
     const myInitial  = (chatUserProfile?.name || '?').charAt(0).toUpperCase();
-    const otherInitial = otherNames.charAt(0).toUpperCase();
+    const otherInitial = otherName.charAt(0).toUpperCase();
 
+    const selected = (currentConvId === convId) ? 'is-selected' : '';
     return `
-      <div class="chat-thread-card ${unread > 0 ? 'chat-thread-card-unread' : ''}"
+      <div class="chat-thread-card ${selected} ${unread > 0 ? 'chat-thread-card-unread' : ''}"
            onclick="window._openThread('${escHtml(convId)}')">
         <div class="ctc-avatars">
           <span class="ctc-avatar ctc-avatar-me">${escHtml(myInitial)}</span>
@@ -221,12 +216,12 @@ function renderThreadList() {
         </div>
         <div class="ctc-body">
           <div class="ctc-top">
-            <span class="ctc-name">${escHtml(otherNames)}</span>
-            <span class="ctc-time">${timeAgo(last?.sentAt)}</span>
+            <span class="ctc-name">${escHtml(otherName)}</span>
+            <span class="ctc-time">${timeAgo(conv?.lastMessageAt)}</span>
           </div>
           <div class="ctc-preview">
-            ${last?.senderUid === uid ? '<span class="ctc-you">You: </span>' : ''}
-            ${escHtml(last?.title || last?.message || '')}
+            ${conv?.lastSenderUid === uid ? '<span class="ctc-you">You: </span>' : ''}
+            ${escHtml(conv?.lastTitle || conv?.lastMessage || '')}
           </div>
         </div>
         ${unread > 0 ? `<span class="ctc-badge">${unread}</span>` : ''}
@@ -238,54 +233,38 @@ function renderThreadList() {
 // ─── Open / Close Thread ───────────────────────────────────────────────────────
 window._openThread = async function(convId) {
   currentConvId = convId;
-  showConversationView(convId);
+  // Mobile: open conversation view (hide list)
+  document.getElementById('chatScreen')?.classList.add('chat-mobile-open');
+  // Update header title
+  _setConversationHeader(convId);
+  _subscribeToMessages(convId);
   renderConversation(convId);
   await markThreadRead(convId);
+  renderThreadList();
 };
 
-function showThreadList() {
-  currentConvId = null;
-  const threadList = document.getElementById('chatThreadListWrap');
-  const convView   = document.getElementById('chatConvView');
-  const topBar     = document.getElementById('chatTopBar');
-  if (threadList) threadList.style.display = 'flex';
-  if (convView)   convView.style.display   = 'none';
-  if (topBar)     topBar.style.display     = 'flex';
-}
-
-function showConversationView(convId) {
-  const threadList = document.getElementById('chatThreadListWrap');
-  const convView   = document.getElementById('chatConvView');
-  const topBar     = document.getElementById('chatTopBar');
-  if (threadList) threadList.style.display = 'none';
-  if (convView)   convView.style.display   = 'flex';
-  if (topBar)     topBar.style.display     = 'none';
-
-  // Set header title
-  const msgs = allChatEvents.filter(ev => convIdOf(ev) === convId);
-  const uid  = chatUserProfile?.uid || '';
-  const names = new Set();
-  msgs.forEach(ev => {
-    if (ev.senderUid !== uid) names.add(ev.senderName || 'Unknown');
-  });
-  const title = document.getElementById('chatConvTitle');
-  if (title) title.textContent = [...names].join(' & ') || 'Conversation';
-}
-
 window.closeConversation = function() {
-  showThreadList();
+  if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
+  currentMessages = [];
+  currentConvId = null;
+  document.getElementById('chatScreen')?.classList.remove('chat-mobile-open');
   renderThreadList();
+  _renderEmptyConversation();
 };
 
 // ─── Conversation View (bubbles) ───────────────────────────────────────────────
 function renderConversation(convId) {
-  const msgs = allChatEvents
-    .filter(ev => convIdOf(ev) === convId)
-    .slice(); // already asc by sentAt from Firestore
+  _setConversationHeader(convId);
+  const msgs = Array.isArray(currentMessages) ? currentMessages.slice() : [];
 
   const uid      = chatUserProfile?.uid || '';
   const container= document.getElementById('chatConvMessages');
   if (!container) return;
+
+  if (!convId) {
+    _renderEmptyConversation();
+    return;
+  }
 
   if (msgs.length === 0) {
     container.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">No messages yet.</div>';
@@ -313,15 +292,40 @@ function renderConversation(convId) {
   setTimeout(() => { container.scrollTop = container.scrollHeight; }, 50);
 
   // Store other participant for reply
-  const otherMsg = msgs.find(ev => ev.senderUid !== uid);
-  const otherUid  = otherMsg ? otherMsg.senderUid  : (msgs[0]?.recipientUids?.[0] || '');
-  const otherName = otherMsg ? (otherMsg.senderName || '') : (msgs[0]?.recipientNames?.[0] || '');
+  const conv = allConversations.find(c => c.id === convId);
+  const otherUid  = _otherUidFromParticipants(conv?.participants, uid);
+  const otherName = _nameForUid(otherUid);
   const replyBtn  = document.getElementById('chatConvReplyBtn');
   if (replyBtn) {
     replyBtn.setAttribute('data-other-uid',  otherUid);
     replyBtn.setAttribute('data-other-name', otherName);
     replyBtn.setAttribute('data-conv-id',    convId);
   }
+}
+
+function _setConversationHeader(convId) {
+  const title = document.getElementById('chatConvTitle');
+  if (!title) return;
+  if (!convId) {
+    title.textContent = 'Select a conversation';
+    return;
+  }
+  const uid  = chatUserProfile?.uid || '';
+  const conv = allConversations.find(c => c.id === convId);
+  const otherUid = _otherUidFromParticipants(conv?.participants, uid);
+  title.textContent = _nameForUid(otherUid) || 'Conversation';
+}
+
+function _renderEmptyConversation() {
+  _setConversationHeader(null);
+  const container = document.getElementById('chatConvMessages');
+  if (!container) return;
+  container.innerHTML = `
+    <div style="text-align:center;padding:60px 20px;color:#9ca3af;">
+      <div style="font-size:15px;font-weight:700;color:#6b7280;margin-bottom:6px;">Select a chat</div>
+      <div style="font-size:13px;color:#9ca3af;">Choose a name from the left to view messages.</div>
+    </div>
+  `;
 }
 
 // ─── Reply from inside thread ──────────────────────────────────────────────────
@@ -339,17 +343,31 @@ window.openThreadReply = async function() {
 async function markThreadRead(convId) {
   if (!chatUserProfile?.salonId || !chatUserProfile?.uid) return;
   const uid = chatUserProfile.uid;
-  const toUpdate = allChatEvents.filter(ev =>
-    convIdOf(ev) === convId &&
-    Array.isArray(ev.recipientUids) && ev.recipientUids.includes(uid) &&
-    (!Array.isArray(ev.readBy) || !ev.readBy.includes(uid))
-  );
-  await Promise.all(
-    toUpdate.map(ev => updateDoc(
-      doc(db, `salons/${chatUserProfile.salonId}/chatEvents`, ev.id),
-      { readBy: arrayUnion(uid) }
-    ).catch(() => {}))
-  );
+  try {
+    // Reset unread counter on conversation doc
+    await updateDoc(
+      doc(db, `salons/${chatUserProfile.salonId}/conversations`, convId),
+      { [`unreadFor.${uid}`]: 0 }
+    );
+  } catch(e) {}
+
+  // Best-effort: mark recent messages as read (last 60)
+  try {
+    const snap = await getDocs(query(
+      collection(db, `salons/${chatUserProfile.salonId}/conversations/${convId}/messages`),
+      orderBy('sentAt', 'desc'),
+      limit(60)
+    ));
+    const batch = writeBatch(db);
+    snap.docs.forEach(d => {
+      const data = d.data() || {};
+      const rb = Array.isArray(data.readBy) ? data.readBy : [];
+      if (!rb.includes(uid)) {
+        batch.update(d.ref, { readBy: arrayUnion(uid) });
+      }
+    });
+    await batch.commit();
+  } catch(e) {}
 }
 
 // ─── Send Modal (new message from main screen) ────────────────────────────────
@@ -375,10 +393,15 @@ async function _openChatModal({ title, showSendTo }) {
   const templateList  = document.getElementById('chatSendTemplateList');
   const recipientList = document.getElementById('chatSendRecipientList');
   const sendToSection = document.getElementById('chatSendToSection');
+  const pickerBtn     = document.getElementById('chatRecipientPickerBtn');
+  const pickerLabel   = document.getElementById('chatRecipientPickerLabel');
+  const panel         = document.getElementById('chatRecipientPanel');
+  const searchInput   = document.getElementById('chatRecipientSearch');
   if (!modal || !templateList || !recipientList) return;
 
   modal.querySelector('.chat-modal-title').textContent = title;
   if (sendToSection) sendToSection.style.display = showSendTo ? 'block' : 'none';
+  if (!showSendTo && panel) panel.style.display = 'none';
 
   // Templates
   templateList.innerHTML = sendableTemplates.length === 0
@@ -397,22 +420,61 @@ async function _openChatModal({ title, showSendTo }) {
   // Recipients
   if (showSendTo) {
     const pool = isMgrPlus(role) ? chatSalonUsers : chatSalonUsers.filter(u => isMgrPlus(u.role));
+    // Reset UI
+    if (searchInput) searchInput.value = '';
+    if (panel) panel.style.display = 'none';
+    const allCb = document.getElementById('chatRecipientAll');
+    if (allCb) allCb.checked = false;
+
     recipientList.innerHTML = pool.length === 0
-      ? '<div style="padding:12px;color:#6b7280;font-size:13px;">No recipients available.</div>'
-      : `
-        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#374151;border-bottom:1px solid #f3f4f6;margin-bottom:4px;">
-          <input type="checkbox" id="chatRecipientAll" style="accent-color:#7c3aed;" onchange="window._chatToggleAllRecipients(this.checked)">
-          Everyone
-        </label>
-        ${pool.map(u => `
-          <label class="chat-recipient-row" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:#374151;">
-            <input type="checkbox" name="chatRecipient" value="${escHtml(u.uid)}" data-name="${escHtml(u.name||'')}" style="accent-color:#7c3aed;">
-            <span class="chat-rcpt-avatar-sm">${escHtml((u.name||'?').charAt(0).toUpperCase())}</span>
-            <span style="font-weight:500;">${escHtml(u.name||u.uid)}</span>
-            <span style="color:#9ca3af;font-size:12px;">${roleLabel(u.role)}</span>
-          </label>
-        `).join('')}
-      `;
+      ? '<div style="padding:10px;color:#6b7280;font-size:13px;">No recipients available.</div>'
+      : pool.map(u => {
+          const displayName = (u.name || u.email || u.uid || '').trim();
+          const search = `${displayName} ${u.email || ''} ${roleLabel(u.role)}`.toLowerCase();
+          return `
+            <label class="chat-recipient-row" data-search="${escHtml(search)}"
+              style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:13px;color:#374151;">
+              <input type="checkbox" name="chatRecipient" value="${escHtml(u.uid)}" data-name="${escHtml(displayName)}" style="accent-color:#7c3aed;">
+              <span class="chat-rcpt-avatar-sm">${escHtml((displayName||'?').charAt(0).toUpperCase())}</span>
+              <span style="font-weight:600;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(displayName)}</span>
+              <span style="color:#9ca3af;font-size:12px;flex-shrink:0;">${roleLabel(u.role)}</span>
+            </label>
+          `;
+        }).join('');
+
+    // Bind picker behavior (once)
+    if (pickerBtn && panel && !pickerBtn.__ffBound) {
+      pickerBtn.__ffBound = true;
+      pickerBtn.onclick = function(e) {
+        e.preventDefault();
+        const open = panel.style.display !== 'block';
+        panel.style.display = open ? 'block' : 'none';
+        if (open) setTimeout(() => searchInput?.focus(), 0);
+      };
+      // Close when clicking outside the picker
+      document.addEventListener('click', function(ev) {
+        const isOpen = panel.style.display === 'block';
+        if (!isOpen) return;
+        if (panel.contains(ev.target) || pickerBtn.contains(ev.target)) return;
+        panel.style.display = 'none';
+      });
+    }
+
+    // Search filter
+    if (searchInput && !searchInput.__ffBound) {
+      searchInput.__ffBound = true;
+      searchInput.addEventListener('input', function() {
+        const q = (searchInput.value || '').trim().toLowerCase();
+        document.querySelectorAll('#chatSendRecipientList .chat-recipient-row').forEach(row => {
+          const s = (row.getAttribute('data-search') || '').toLowerCase();
+          row.style.display = (!q || s.includes(q)) ? 'flex' : 'none';
+        });
+      });
+    }
+
+    // Summary label
+    _updateRecipientSummary();
+    if (pickerLabel) pickerLabel.textContent = pickerLabel.textContent || 'Select recipients…';
   }
 
   modal.style.display = 'flex';
@@ -444,13 +506,36 @@ function _updateChatSendBtn() {
   }
   const btn = document.getElementById('chatSendConfirmBtn');
   if (btn) btn.disabled = !(tmpl && rcpt);
+  _updateRecipientSummary();
 }
 
 window.closeSendMessageModal = function() {
   const modal = document.getElementById('chatSendModal');
   if (modal) modal.style.display = 'none';
+  const panel = document.getElementById('chatRecipientPanel');
+  if (panel) panel.style.display = 'none';
   chatReplyContext = null;
 };
+
+function _updateRecipientSummary() {
+  const label = document.getElementById('chatRecipientPickerLabel');
+  if (!label) return;
+  // Reply flow has no send-to
+  if (chatReplyContext) return;
+
+  const all = document.getElementById('chatRecipientAll')?.checked;
+  if (all) {
+    label.textContent = 'Everyone';
+    return;
+  }
+  const checked = Array.from(document.querySelectorAll('input[name="chatRecipient"]:checked'));
+  if (checked.length === 0) {
+    label.textContent = 'Select recipients…';
+    return;
+  }
+  const firstName = checked[0].getAttribute('data-name') || checked[0].value;
+  label.textContent = checked.length === 1 ? firstName : `${firstName} +${checked.length - 1}`;
+}
 
 // ─── Confirm Send ──────────────────────────────────────────────────────────────
 window.confirmSendChatMessage = async function() {
@@ -460,13 +545,11 @@ window.confirmSendChatMessage = async function() {
   const template = chatTemplates.find(t => t.id === radio.value);
   if (!template) return;
 
-  let recipientUids = [], recipientNames = [], conversationId;
+  let recipientUids = [], recipientNames = [];
 
   if (chatReplyContext) {
     recipientUids  = [chatReplyContext.uid];
     recipientNames = [chatReplyContext.name];
-    conversationId = chatReplyContext.conversationId
-                  || buildConvId(chatUserProfile.uid, chatReplyContext.uid);
   } else {
     const allChecked = document.getElementById('chatRecipientAll')?.checked;
     if (allChecked) {
@@ -482,36 +565,73 @@ window.confirmSendChatMessage = async function() {
       });
     }
     if (!recipientUids.length) { alert('Please select at least one recipient.'); return; }
-    conversationId = recipientUids.length === 1
-      ? buildConvId(chatUserProfile.uid, recipientUids[0])
-      : `bc_${chatUserProfile.uid}_${Date.now()}`;
   }
 
   const btn = document.getElementById('chatSendConfirmBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
 
   try {
-    await addDoc(collection(db, `salons/${chatUserProfile.salonId}/chatEvents`), {
-      templateId:     template.id,
-      title:          template.title,
-      message:        template.message || '',
-      senderUid:      chatUserProfile.uid,
-      senderName:     chatUserProfile.name || chatUserProfile.displayName || '',
-      senderRole:     chatUserProfile.role || '',
-      recipientUids,
-      recipientNames,
-      conversationId,
-      sentAt:         serverTimestamp(),
-      readBy:         [chatUserProfile.uid]
-    });
+    const salonId = chatUserProfile.salonId;
+    const senderUid  = chatUserProfile.uid;
+    const senderName = chatUserProfile.name || chatUserProfile.displayName || '';
+    const senderRole = chatUserProfile.role || '';
+    const title      = template.title;
+    const message    = template.message || '';
+
+    for (let i = 0; i < recipientUids.length; i++) {
+      const rUid  = recipientUids[i];
+      const rName = recipientNames[i] || _nameForUid(rUid) || rUid;
+      const convId = chatReplyContext?.conversationId || buildConvId(senderUid, rUid);
+
+      const convRef = doc(db, `salons/${salonId}/conversations`, convId);
+      // IMPORTANT: security rules for messages verify participants by reading the
+      // conversation doc. So we must ensure the conversation exists BEFORE writing messages.
+      await setDoc(
+        convRef,
+        { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp() },
+        { merge: true }
+      );
+
+      const msgRef  = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
+      const batch   = writeBatch(db);
+
+      batch.set(msgRef, {
+        templateId: template.id,
+        title,
+        message,
+        senderUid,
+        senderName,
+        senderRole,
+        recipientUid: rUid,
+        recipientName: rName,
+        sentAt: serverTimestamp(),
+        readBy: [senderUid]
+      });
+
+      // Update conversation summary + unread count for recipient (merge-safe)
+      batch.set(convRef, {
+        lastMessageAt: serverTimestamp(),
+        lastMessageAtMs: Date.now(),
+        lastTitle: title,
+        lastMessage: message,
+        lastSenderUid: senderUid,
+        lastSenderName: senderName,
+        lastSenderRole: senderRole,
+        updatedAt: serverTimestamp(),
+        updatedAtMs: Date.now(),
+        unreadFor: { [rUid]: increment(1) }
+      }, { merge: true });
+
+      await batch.commit();
+    }
+
     window.closeSendMessageModal();
-    // If we're inside a thread, re-open it so bubble appears immediately
-    if (conversationId && currentConvId === conversationId) {
-      renderConversation(conversationId);
+    if (chatReplyContext?.conversationId && currentConvId === chatReplyContext.conversationId) {
+      renderConversation(chatReplyContext.conversationId);
     }
   } catch(e) {
     console.error('[Chat] send error', e);
-    alert('Failed to send. Please try again.');
+    alert('Failed to send: ' + (e?.code || e?.message || 'unknown'));
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
   }
@@ -522,20 +642,39 @@ export function subscribeToChatBadge(uid, salonId) {
   if (!uid || !salonId) return;
   if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
   chatBadgeUnsub = onSnapshot(
-    query(collection(db, `salons/${salonId}/chatEvents`),
-          orderBy('sentAt','desc'), limit(100)),
+    query(
+      collection(db, `salons/${salonId}/conversations`),
+      where('participants', 'array-contains', uid)
+    ),
     snap => {
-      const unread = snap.docs.filter(d => {
-        const data = d.data();
-        return Array.isArray(data.recipientUids)
-          && data.recipientUids.includes(uid)
-          && (!Array.isArray(data.readBy) || !data.readBy.includes(uid));
-      }).length;
+      const unread = snap.docs.reduce((sum, d) => {
+        const data = d.data() || {};
+        const n = (data.unreadFor && data.unreadFor[uid]) ? Number(data.unreadFor[uid]) : 0;
+        return sum + (isNaN(n) ? 0 : n);
+      }, 0);
       const badge = document.getElementById('chatNavBadge');
       if (!badge) return;
       badge.textContent = unread > 99 ? '99+' : String(unread);
       badge.style.display = unread > 0 ? 'inline-flex' : 'none';
     }
+  );
+}
+
+function _subscribeToMessages(convId) {
+  if (!chatUserProfile?.salonId) return;
+  if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
+
+  chatMsgsUnsub = onSnapshot(
+    query(
+      collection(db, `salons/${chatUserProfile.salonId}/conversations/${convId}/messages`),
+      orderBy('sentAt','asc'),
+      limit(300)
+    ),
+    snap => {
+      currentMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (currentConvId === convId) renderConversation(convId);
+    },
+    err => console.error('[Chat] messages snapshot error', err)
   );
 }
 
@@ -620,7 +759,10 @@ window.saveChatTemplate = async function() {
     window.cancelEditChatTemplate();
     await loadChatTemplates();
     _renderTmplList();
-  } catch(e) { alert('Failed to save.'); }
+  } catch(e) {
+    console.error('[Chat] save template error', e?.code, e?.message, e);
+    alert('Failed to save: ' + (e?.code || e?.message || 'unknown'));
+  }
   finally {
     if (btn) { btn.disabled = false; btn.textContent = chatEditingTmplId ? 'Update Template' : 'Create Template'; }
   }
@@ -631,7 +773,10 @@ window.deleteChatTemplate = async function(id) {
     await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, id));
     await loadChatTemplates();
     _renderTmplList();
-  } catch(e) { alert('Failed to delete.'); }
+  } catch(e) {
+    console.error('[Chat] delete template error', e?.code, e?.message, e);
+    alert('Failed to delete: ' + (e?.code || e?.message || 'unknown'));
+  }
 };
 
 // ─── Settings Section ──────────────────────────────────────────────────────────
