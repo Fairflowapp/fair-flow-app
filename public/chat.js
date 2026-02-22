@@ -28,6 +28,7 @@ let chatSalonUsers     = [];
 let chatConvsUnsub     = null;
 let chatMsgsUnsub      = null;
 let chatBadgeUnsub     = null;
+let chatToastUnsub     = null;
 let chatEditingTmplId  = null;
 let chatEditingFlowId  = null;
 let chatFlowDraft      = null;   // { title, allowedSenders, steps } for builder
@@ -445,8 +446,7 @@ async function _openChatModal({ title, showSendTo }) {
   });
 
   const modal         = document.getElementById('chatSendModal');
-  const templateList  = document.getElementById('chatSendTemplateList');
-  const flowPicker    = document.getElementById('chatSendFlowPicker');
+  const messageList   = document.getElementById('chatSendMessageList');
   const flowWizard    = document.getElementById('chatSendFlowWizard');
   const recipientList = document.getElementById('chatSendRecipientList');
   const sendToSection = document.getElementById('chatSendToSection');
@@ -454,41 +454,54 @@ async function _openChatModal({ title, showSendTo }) {
   const pickerLabel   = document.getElementById('chatRecipientPickerLabel');
   const panel         = document.getElementById('chatRecipientPanel');
   const searchInput   = document.getElementById('chatRecipientSearch');
-  if (!modal || !templateList || !recipientList) return;
+  if (!modal || !messageList || !recipientList) return;
 
   modal.querySelector('.chat-modal-title').textContent = title;
   if (sendToSection) sendToSection.style.display = showSendTo ? 'block' : 'none';
   if (!showSendTo && panel) panel.style.display = 'none';
 
-  // Mode buttons
-  document.querySelectorAll('.chat-send-mode-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('chatSendModeFlow').style.display = sendableFlows.length ? 'inline-block' : 'none';
-  document.getElementById('chatSendModeTemplate').classList.add('active');
-  _chatSendMode('template');
+  const items = [];
+  sendableTemplates.forEach(t => items.push({ type: 'template', id: t.id, title: t.title, preview: t.message }));
+  sendableFlows.forEach(f => items.push({
+    type: 'flow',
+    id: f.id,
+    title: f.title,
+    preview: f.steps?.[0]?.prompt || ''
+  }));
 
-  // Flow picker
-  if (flowPicker) flowPicker.innerHTML = sendableFlows.length === 0 ? '' : sendableFlows.map(f => `
-    <label class="chat-flow-option" style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;margin-bottom:8px;background:#fff;">
-      <input type="radio" name="chatFlowRadio" value="${escHtml(f.id)}" style="margin-top:3px;accent-color:#7c3aed;">
-      <div style="font-size:14px;font-weight:600;color:#111827;">${escHtml(f.title)}</div>
-    </label>
-  `).join('');
-  if (flowPicker) flowPicker.querySelectorAll('input[name="chatFlowRadio"]').forEach(r =>
-    r.addEventListener('change', () => { chatSelectedFlow = chatFlows.find(x => x.id === r.value); _chatRenderFlowWizard(); _updateChatSendBtn(); }));
+  if (items.length === 0) {
+    messageList.innerHTML = '<div style="padding:16px;color:#6b7280;text-align:center;font-size:14px;">No messages available.<br>Ask an Admin to add messages.</div>';
+  } else {
+    messageList.innerHTML = items.map(it => `
+      <label class="chat-message-option" data-type="${it.type}" data-id="${escHtml(it.id)}"
+        style="display:flex;align-items:flex-start;gap:8px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;cursor:pointer;margin-bottom:4px;background:#fff;">
+        <input type="radio" name="chatMessageRadio" value="${it.type}:${escHtml(it.id)}" style="margin-top:1px;accent-color:#7c3aed;">
+        <div style="min-width:0;">
+          <div style="font-size:12px;font-weight:600;color:#111827;">${escHtml(it.title)}</div>
+          ${it.preview ? `<div style="font-size:11px;color:#6b7280;margin-top:0;">${escHtml(it.preview)}</div>` : ''}
+        </div>
+      </label>
+    `).join('');
 
-  // Templates
-  templateList.innerHTML = sendableTemplates.length === 0
-    ? '<div style="padding:16px;color:#6b7280;text-align:center;font-size:14px;">No messages available.<br>Ask an Admin to add templates.</div>'
-    : sendableTemplates.map(t => `
-        <label class="chat-template-option"
-          style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;margin-bottom:8px;background:#fff;">
-          <input type="radio" name="chatTemplateRadio" value="${escHtml(t.id)}" style="margin-top:3px;accent-color:#7c3aed;">
-          <div>
-            <div style="font-size:14px;font-weight:600;color:#111827;">${escHtml(t.title)}</div>
-            ${t.message ? `<div style="font-size:13px;color:#6b7280;margin-top:2px;">${escHtml(t.message)}</div>` : ''}
-          </div>
-        </label>
-      `).join('');
+    messageList.querySelectorAll('input[name="chatMessageRadio"]').forEach(r => {
+      r.addEventListener('change', () => {
+        const v = r.value;
+        const [type, id] = v.includes(':') ? v.split(/:(.+)/).slice(0, 2) : ['template', v];
+        if (type === 'flow') {
+          chatSendMode = 'flow';
+          chatSelectedFlow = chatFlows.find(x => x.id === id) || null;
+          chatFlowAnswers = [];
+          _chatRenderFlowWizard();
+        } else {
+          chatSendMode = 'template';
+          chatSelectedFlow = null;
+          chatFlowAnswers = [];
+          if (flowWizard) flowWizard.style.display = 'none';
+        }
+        _updateChatSendBtn();
+      });
+    });
+  }
 
   // Recipients
   if (showSendTo) {
@@ -556,9 +569,6 @@ async function _openChatModal({ title, showSendTo }) {
 
   if (flowWizard) flowWizard.style.display = 'none';
 
-  modal.querySelectorAll('input[name="chatTemplateRadio"]').forEach(r =>
-    r.addEventListener('change', _updateChatSendBtn)
-  );
   if (showSendTo) {
     modal.querySelectorAll('input[name="chatRecipient"]').forEach(r =>
       r.addEventListener('change', _updateChatSendBtn)
@@ -567,15 +577,13 @@ async function _openChatModal({ title, showSendTo }) {
   }
 }
 
+// Legacy: mode buttons removed; selection is via unified chatMessageRadio list
 window._chatSendMode = function(mode) {
   chatSendMode = mode;
   chatSelectedFlow = null;
   chatFlowAnswers = [];
-  document.querySelectorAll('.chat-send-mode-btn').forEach(b => b.classList.toggle('active', b.id === 'chatSendMode' + (mode === 'flow' ? 'Flow' : 'Template')));
-  document.getElementById('chatSendTemplateList').style.display = mode === 'template' ? 'block' : 'none';
-  document.getElementById('chatSendFlowPicker').style.display = mode === 'flow' ? 'block' : 'none';
-  document.getElementById('chatSendFlowWizard').style.display = 'none';
-  if (mode === 'flow') document.querySelectorAll('input[name="chatFlowRadio"]').forEach(r => r.checked = false);
+  const wizard = document.getElementById('chatSendFlowWizard');
+  if (wizard) wizard.style.display = 'none';
   _updateChatSendBtn();
 };
 
@@ -668,6 +676,7 @@ window._chatToggleAllRecipients = function(checked) {
 
 function _updateChatSendBtn() {
   let ready = false;
+  const radio = document.querySelector('input[name="chatMessageRadio"]:checked');
   if (chatSendMode === 'flow') {
     if (chatSelectedFlow && chatFlowAnswers.length) {
       const flow = chatSelectedFlow;
@@ -684,7 +693,7 @@ function _updateChatSendBtn() {
       ready = !stepId;
     }
   } else {
-    ready = !!document.querySelector('input[name="chatTemplateRadio"]:checked');
+    ready = !!(radio && String(radio.value || '').startsWith('template:'));
   }
   let rcpt = true;
   if (!chatReplyContext) {
@@ -752,9 +761,11 @@ window.confirmSendChatMessage = async function() {
     flowAnswers = chatFlowAnswers;
     message = renderedText;
   } else {
-    const radio = document.querySelector('input[name="chatTemplateRadio"]:checked');
+    const radio = document.querySelector('input[name="chatMessageRadio"]:checked');
     if (!radio) { alert('Please select a message.'); return; }
-    const template = chatTemplates.find(t => t.id === radio.value);
+    const val = String(radio.value || '');
+    const templateIdRaw = val.startsWith('template:') ? val.slice(9) : val;
+    const template = chatTemplates.find(t => t.id === templateIdRaw);
     if (!template) return;
     title = template.title; message = template.message || ''; templateId = template.id;
   }
@@ -868,6 +879,77 @@ export function subscribeToChatBadge(uid, salonId) {
       badge.textContent = unread > 99 ? '99+' : String(unread);
       badge.style.display = unread > 0 ? 'inline-flex' : 'none';
     }
+  );
+}
+
+// ─── Toast Notifications ───────────────────────────────────────────────────────
+const CHAT_TOAST_DURATION_MS = 5000;
+
+function isChatScreenVisible() {
+  const cs = document.getElementById('chatScreen');
+  return !!(cs && (cs.style.display === 'flex' || (cs.style.display === '' && getComputedStyle(cs).display === 'flex')));
+}
+
+function showChatToast({ senderName, role, preview, convId }) {
+  const container = document.getElementById('chatToastContainer');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = 'chat-toast';
+  toast.setAttribute('data-conv-id', convId);
+  const roleText = roleLabel(role) || role || '';
+  const previewText = (preview || '').trim().slice(0, 80) || 'New message';
+  const senderLine = roleText ? `${escHtml(senderName || 'Someone')} · ${escHtml(roleText)}` : escHtml(senderName || 'Someone');
+  toast.innerHTML = `
+    <div class="chat-toast-header">
+      <div class="chat-toast-sender">${senderLine}</div>
+      <button type="button" class="chat-toast-close" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+    <div class="chat-toast-preview">${escHtml(previewText)}</div>
+  `;
+  let timeoutId = null;
+  const dismiss = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    toast.classList.add('chat-toast-dismissing');
+    setTimeout(() => toast.remove(), 220);
+  };
+  const openThread = async () => {
+    dismiss();
+    await goToChat();
+    if (typeof window._openThread === 'function') window._openThread(convId);
+  };
+  toast.querySelector('.chat-toast-close').onclick = e => { e.stopPropagation(); dismiss(); };
+  toast.onclick = () => openThread();
+  container.appendChild(toast);
+  timeoutId = setTimeout(dismiss, CHAT_TOAST_DURATION_MS);
+}
+
+export function subscribeToChatToastNotifications(myUid, salonId) {
+  if (!myUid || !salonId) return;
+  if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
+  chatToastUnsub = onSnapshot(
+    query(
+      collection(db, `salons/${salonId}/conversations`),
+      where('participants', 'array-contains', myUid)
+    ),
+    snap => {
+      snap.docChanges().forEach(change => {
+        if (change.type !== 'modified') return;
+        const data = change.doc.data() || {};
+        const convId = change.doc.id;
+        const lastSenderUid = data.lastSenderUid;
+        if (!lastSenderUid || lastSenderUid === myUid) return;
+        if (currentConvId === convId && isChatScreenVisible()) return;
+        showChatToast({
+          senderName: data.lastSenderName || 'Someone',
+          role: data.lastSenderRole || '',
+          preview: data.lastTitle || data.lastMessage || '',
+          convId
+        });
+      });
+    },
+    err => console.error('[Chat] toast snapshot error', err)
   );
 }
 
@@ -1417,11 +1499,15 @@ onAuthStateChanged(auth, async user => {
       const snap = await getDoc(doc(db, 'users', user.uid));
       if (snap.exists()) {
         const p = { uid: user.uid, ...snap.data() };
-        if (p.salonId) subscribeToChatBadge(user.uid, p.salonId);
+        if (p.salonId) {
+          subscribeToChatBadge(user.uid, p.salonId);
+          subscribeToChatToastNotifications(user.uid, p.salonId);
+        }
       }
     } catch(e) {}
   } else {
     if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
+    if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
     const badge = document.getElementById('chatNavBadge');
     if (badge) badge.style.display = 'none';
   }

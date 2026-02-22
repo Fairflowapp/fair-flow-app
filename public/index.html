@@ -2076,16 +2076,13 @@ dialog footer button, .code-dialog footer button {
       <span style="flex:1"></span>
 
       <div id="queueControls" style="display:flex;gap:8px;align-items:center;">
-        <button id="reorderBtn" class="queue-action-btn queue-action-btn--black">Reorder</button>
+        <button id="reorderBtn" class="queue-action-btn queue-action-btn--black" style="display:inline-flex;align-items:center;height:36px;padding:0 14px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">Reorder</button>
 
-        <button id="resetBtn" class="queue-action-btn queue-action-btn--red">RESET</button>
-
-        <button id="manageQueueBtn" class="queue-action-btn queue-action-btn--black ff-gear-icon" style="display:none;padding:6px 10px;min-width:auto;" title="Manage Queue">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
-            <circle cx="12" cy="12" r="3"></circle>
-          </svg>
+        <button id="manageQueueBtn" style="display:none;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;" title="Manage Queue" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         </button>
+
+        <button id="resetBtn" title="Reset Queue" style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;border:1px solid rgba(180,0,0,0.45);border-radius:50%;background:#fff;cursor:pointer;padding:0;" onmouseover="this.style.background='#fff5f5'" onmouseout="this.style.background='#fff'"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(140,0,0,1)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>
       </div>
 
     </div>
@@ -24212,27 +24209,19 @@ function hookSettingsGuard_DISABLED(){
       font-weight: 600;
     }
     
-    #tasksScreen .tasks-gear-btn {
-      border-radius: 999px;
-      border: 1px solid #e5e7eb;
-      background: #fff;
-      padding: 6px 12px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 500;
-      color: #6b7280;
-      line-height: 1;
-      white-space: nowrap;
+    
+    /* Tasks gear icon - round button matching CHAT/INBOX (same component) */
+    #btnTasksSettings {
+      width: 36px;
+      height: 36px;
+      min-width: 36px;
+      min-height: 36px;
+      padding: 0;
+      border-radius: 50%;
     }
     
-    #tasksScreen .tasks-gear-btn:hover {
-      transform: translateY(-1px);
-      background: #f9fafb;
-      border-color: #d1d5db;
+    #btnTasksSettings:hover {
+      transform: none;
     }
     
     /* Tasks tab row layout */
@@ -24288,76 +24277,28 @@ function hookSettingsGuard_DISABLED(){
     /* Unified Queue action buttons - RESET button as single source of truth */
     /* Unified toolbar pill button style - QUEUE and TASKS */
     .queue-action-btn,
-    #tasksScreen .tasks-gear-btn {
-      background-color: transparent;
-      padding: 0 12px;
-      height: 32px;
-      border-width: 1px;
-      border-style: solid;
-      border-radius: 999px;
-      font-size: 13px;
-      font-weight: 400;
-      line-height: 32px;
-      box-sizing: border-box;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      pointer-events: auto;
-      z-index: 301;
-      box-shadow: none;
-    }
-    
     /* Color variants - Normal (non-danger) */
-    .queue-action-btn--black,
-    #tasksScreen .tasks-gear-btn {
+    .queue-action-btn--black {
       background-color: transparent;
       color: #111;
       border-color: rgba(0, 0, 0, 0.18);
       font-weight: 400;
     }
     
-    .queue-action-btn--black:hover,
-    #tasksScreen .tasks-gear-btn:hover {
+    .queue-action-btn--black:hover {
       background-color: rgba(0, 0, 0, 0.03);
       transform: none;
     }
     
-    /* Danger (reset buttons) */
-    .queue-action-btn--red,
-    .tasks-reset-btn {
-      background-color: transparent;
-      color: rgba(140, 0, 0, 1);
-      border-color: rgba(180, 0, 0, 0.55);
-      font-weight: 500;
-      padding: 0 12px;
-      height: 32px;
-      border-width: 1px;
-      border-style: solid;
-      border-radius: 999px;
-      font-size: 13px;
-      line-height: 32px;
-      box-sizing: border-box;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      pointer-events: auto;
-      z-index: 301;
-      box-shadow: none;
+    /* Reset icon buttons — QUEUE + TASKS */
+    #resetBtn:hover,
+    #reset-btn:hover {
+      background: #fff5f5 !important;
     }
     
-    .queue-action-btn--red:hover,
-    .tasks-reset-btn:hover {
-      background-color: rgba(180, 0, 0, 0.05);
-      transform: none;
-    }
-    
-    /* Gear icon - thinner stroke for lighter appearance */
-    /* Targeted rule: only applies to SVG inside .ff-gear-icon button, won't affect other SVGs */
-    #manageQueueBtn.ff-gear-icon svg {
-      stroke: currentColor;
-      stroke-width: 1.5;
+    /* Queue gear icon hover - matches CHAT/INBOX/TASKS pattern */
+    #manageQueueBtn:hover {
+      background: #f3f4f6 !important;
     }
     
     /* Queue action buttons - exact RESET dimensions with neutral styling */
@@ -24818,8 +24759,10 @@ function hookSettingsGuard_DISABLED(){
         <button class="tasks-tab" data-tab="yearly" onclick="console.log('TAB CLICKED:', 'yearly'); setTasksTab('yearly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Yearly<span class="ff-tab-badge" data-ff-badge="yearly"></span></button>
       </div>
       <div class="tasks-tabs-right" style="display:flex;gap:10px;margin-left:16px;flex-shrink:0;">
-        <button id="btnTasksSettings" class="tasks-gear-btn" aria-label="Task settings" style="pointer-events:auto;z-index:301;">⚙ Manage Tasks</button>
-        <button id="reset-btn" class="tasks-reset-btn" onclick="resetTasksForCurrentTab()" style="pointer-events:auto;z-index:301;">RESET</button>
+        <button id="btnTasksSettings" aria-label="Manage Tasks" title="Manage Tasks" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;pointer-events:auto;z-index:301;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        </button>
+        <button id="reset-btn" onclick="resetTasksForCurrentTab()" title="Reset Tasks" style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;border:1px solid rgba(180,0,0,0.45);border-radius:50%;background:#fff;cursor:pointer;padding:0;pointer-events:auto;z-index:301;" onmouseover="this.style.background='#fff5f5'" onmouseout="this.style.background='#fff'"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(140,0,0,1)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>
       </div>
     </div>
     
@@ -25528,13 +25471,8 @@ function hookSettingsGuard_DISABLED(){
           <div id="chatSendRecipientList" style="max-height:260px;overflow-y:auto;padding:4px 8px 10px;"></div>
         </div>
       </div>
-      <div class="chat-section-label" style="margin-top:12px;">Choose Flow or Message</div>
-      <div style="display:flex;gap:8px;margin-bottom:10px;">
-        <button type="button" id="chatSendModeFlow" onclick="window._chatSendMode && window._chatSendMode('flow')" class="chat-send-mode-btn" style="padding:8px 14px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#6b7280;">Flows</button>
-        <button type="button" id="chatSendModeTemplate" onclick="window._chatSendMode && window._chatSendMode('template')" class="chat-send-mode-btn active" style="padding:8px 14px;border:1px solid #7c3aed;border-radius:8px;background:#ede9fe;cursor:pointer;font-size:12px;font-weight:600;color:#7c3aed;">Templates</button>
-      </div>
-      <div id="chatSendFlowPicker" style="display:none;"></div>
-      <div id="chatSendTemplateList"></div>
+      <div class="chat-section-label" style="margin-top:12px;">Choose message to send</div>
+      <div id="chatSendMessageList" style="max-height:220px;overflow-y:auto;"></div>
       <div id="chatSendFlowWizard" style="display:none;padding:16px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;"></div>
     </div>
     <div class="chat-modal-footer">
@@ -25735,6 +25673,36 @@ function hookSettingsGuard_DISABLED(){
       </div>
     </div>
   </div>
+</div>
+
+<!-- Chat Toast Notifications (bottom-right, WhatsApp-style) -->
+<div id="chatToastContainer" style="position:fixed;bottom:20px;right:20px;z-index:99999;display:flex;flex-direction:column-reverse;gap:10px;pointer-events:none;">
+  <style>
+    #chatToastContainer { pointer-events: none; }
+    #chatToastContainer .chat-toast { pointer-events: auto; }
+    .chat-toast {
+      min-width: 280px; max-width: 360px; padding: 14px 16px; background: #fff; border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08); border: 1px solid rgba(124,58,237,0.15);
+      display: flex; flex-direction: column; gap: 6px; cursor: pointer; transition: opacity 0.2s, transform 0.25s ease-out;
+      opacity: 0.95; animation: chatToastSlideIn 0.3s ease-out forwards;
+    }
+    .chat-toast:hover { opacity: 1; }
+    .chat-toast.chat-toast-dismissing { animation: chatToastSlideOut 0.2s ease-in forwards; }
+    @keyframes chatToastSlideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 0.95; }
+    }
+    @keyframes chatToastSlideOut {
+      from { transform: translateX(0); opacity: 0.95; }
+      to { transform: translateX(100%); opacity: 0; }
+    }
+    .chat-toast-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .chat-toast-sender { font-size: 14px; font-weight: 700; color: #111827; }
+    .chat-toast-role { font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 600; }
+    .chat-toast-preview { font-size: 13px; color: #4b5563; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
+    .chat-toast-close { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border: none; background: transparent; cursor: pointer; color: #9ca3af; border-radius: 6px; flex-shrink: 0; padding: 0; }
+    .chat-toast-close:hover { background: #f3f4f6; color: #374151; }
+  </style>
 </div>
 
 </body>
