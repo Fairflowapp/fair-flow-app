@@ -1007,6 +1007,11 @@ async function loadUserRoleAndShowView(user) {
     const data = snap.data();
     const role = data.role || "owner";
     console.log("[Auth] Loaded user role:", role, "for uid:", user.uid);
+
+    // Set admin cache immediately so Chat gear & Tasks Settings work without delay
+    if (typeof window !== 'undefined') {
+      window.ff_is_admin_cached = ['owner','admin'].includes((role||'').toLowerCase());
+    }
     
     try {
       localStorage.removeItem("ff_user_avatar_v1");
@@ -1109,6 +1114,7 @@ onAuthStateChanged(auth, async (user) => {
   }
   if (!user) {
     console.log("[Auth] No user, showing login screen");
+    if (typeof window !== 'undefined') window.ff_is_admin_cached = null;
     try {
       if (window.__ff_avatarUnsub) {
         window.__ff_avatarUnsub();

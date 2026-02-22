@@ -6,6 +6,27 @@
 
 <script>
   console.log('[BUILD MARKER] index.html loaded at', new Date().toISOString());
+  window.goToChat = window.goToChat || function() {
+    ['tasksScreen','inboxScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    ['.joinBar','.wrap'].forEach(function(sel){var el=document.querySelector(sel);if(el)el.style.display='none';});
+    var cs=document.getElementById('chatScreen');if(cs){cs.style.display='flex';cs.classList.remove('chat-mobile-open');}
+    document.querySelectorAll('.btn-pill').forEach(function(b){b.classList.remove('active');});
+    var cb=document.getElementById('chatBtn');if(cb)cb.classList.add('active');
+    var g=document.getElementById('chatSettingsGearBtn');if(g&&typeof ffHasAdminAccess==='function')g.style.display=ffHasAdminAccess()?'flex':'none';
+  };
+  window.openChatTemplatesSettings = window.openChatTemplatesSettings || function() {
+    if(typeof ffHasAdminAccess==='function'&&!ffHasAdminAccess())return;
+    var m=document.getElementById('chatTemplatesModal');if(m)m.style.display='flex';
+  };
+  window.closeChatTemplatesModal = window.closeChatTemplatesModal || function() {
+    var m=document.getElementById('chatTemplatesModal');if(m)m.style.display='none';
+  };
+  window._chatSettingsTab = window._chatSettingsTab || function(tab) {
+    document.querySelectorAll('.chat-settings-tab').forEach(function(b){b.classList.remove('active');});
+    var t=document.getElementById('chatSettingsTab'+(tab==='templates'?'Templates':'Flows'));if(t)t.classList.add('active');
+    var tp=document.getElementById('chatSettingsTemplatesPane');if(tp)tp.style.display=tab==='templates'?'flex':'none';
+    var fp=document.getElementById('chatSettingsFlowsPane');if(fp)fp.style.display=tab==='flows'?'flex':'none';
+  };
 </script>
 
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
@@ -601,7 +622,7 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
 }
 .cb-bubble-other .cb-title { color: #111827; }
 .cb-bubble-mine  .cb-title { color: #fff; }
-.cb-body { font-size: 13px; margin-top: 2px; line-height: 1.4; }
+.cb-body { font-size: 13px; margin-top: 2px; line-height: 1.4; white-space: pre-wrap; }
 .cb-bubble-other .cb-body { color: #4b5563; }
 .cb-bubble-mine  .cb-body { color: rgba(255,255,255,0.85); }
 .cb-time { font-size: 10px; color: #d1d5db; }
@@ -13723,11 +13744,17 @@ function initializeNavigationButtons() {
     // Chat button
     const chatBtnEl = document.getElementById("chatBtn");
     if (chatBtnEl) {
-      chatBtnEl.onclick = function() {
+      chatBtnEl.onclick = async function() {
         if (typeof window.goToChat === 'function') {
           window.goToChat();
         } else {
-          console.error('[Navigation] goToChat function not found');
+          try {
+            const m = await import('/chat.js?v=20260222_flows2');
+            if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
+            else console.error('[Navigation] goToChat not exported');
+          } catch (e) {
+            console.error('[Navigation] Chat module failed to load:', e);
+          }
         }
       };
       chatBtnEl.style.cursor = 'pointer';
@@ -25240,7 +25267,7 @@ function hookSettingsGuard_DISABLED(){
 
   <script type="module" src="/app.js?v=20260216_force"></script>
   <script type="module" src="/inbox.js?v=20260219_draft"></script>
-  <script type="module" src="/chat.js?v=20260221_chat_split_3"></script>
+  <script type="module" src="/chat.js?v=20260222_flows3"></script>
   <script type="module" src="/staff-cloud.js?v=20260221a"></script>
 
   <!-- PIN Modal -->
@@ -25411,7 +25438,7 @@ function hookSettingsGuard_DISABLED(){
     </div>
     <div style="display:flex;align-items:center;gap:10px;">
       <button id="chatSettingsGearBtn" onclick="window.openChatTemplatesSettings && window.openChatTemplatesSettings()"
-        title="Manage Chat Messages"
+        title="Manage Chat Messages (Admin only)"
         style="display:none;align-items:center;justify-content:center;width:36px;height:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;"
         onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -25501,8 +25528,14 @@ function hookSettingsGuard_DISABLED(){
           <div id="chatSendRecipientList" style="max-height:260px;overflow-y:auto;padding:4px 8px 10px;"></div>
         </div>
       </div>
-      <div class="chat-section-label" style="margin-top:12px;">Select a Message</div>
+      <div class="chat-section-label" style="margin-top:12px;">Choose Flow or Message</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <button type="button" id="chatSendModeFlow" onclick="window._chatSendMode && window._chatSendMode('flow')" class="chat-send-mode-btn" style="padding:8px 14px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#6b7280;">Flows</button>
+        <button type="button" id="chatSendModeTemplate" onclick="window._chatSendMode && window._chatSendMode('template')" class="chat-send-mode-btn active" style="padding:8px 14px;border:1px solid #7c3aed;border-radius:8px;background:#ede9fe;cursor:pointer;font-size:12px;font-weight:600;color:#7c3aed;">Templates</button>
+      </div>
+      <div id="chatSendFlowPicker" style="display:none;"></div>
       <div id="chatSendTemplateList"></div>
+      <div id="chatSendFlowWizard" style="display:none;padding:16px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;"></div>
     </div>
     <div class="chat-modal-footer">
       <button type="button" onclick="window.closeSendMessageModal && window.closeSendMessageModal()"
@@ -25524,16 +25557,23 @@ function hookSettingsGuard_DISABLED(){
   </div>
 </div>
 
-<!-- Chat: Templates Settings Modal (Admin only) -->
+<!-- Chat: Templates + Flows Settings Modal (Admin only) -->
 <div id="chatTemplatesModal" class="chat-modal-overlay">
-  <div class="chat-modal-box" style="max-width:600px;">
+  <div class="chat-modal-box" style="max-width:680px;">
     <div class="chat-modal-header">
       <span class="chat-modal-title">Manage Chat Messages</span>
       <button type="button" class="chat-modal-close" onclick="window.closeChatTemplatesModal && window.closeChatTemplatesModal()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
       </button>
     </div>
-    <div class="chat-modal-body" style="display:flex;flex-direction:column;gap:14px;max-height:70vh;overflow:hidden;">
+    <!-- Tabs: Templates | Flows -->
+    <div style="display:flex;gap:0;border-bottom:1px solid #e5e7eb;padding:0 20px;background:#f9fafb;">
+      <button type="button" id="chatSettingsTabTemplates" onclick="window._chatSettingsTab('templates')" class="chat-settings-tab active" style="padding:12px 20px;font-size:13px;font-weight:600;color:#6b7280;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;margin-bottom:-1px;">Templates</button>
+      <button type="button" id="chatSettingsTabFlows" onclick="window._chatSettingsTab('flows')" class="chat-settings-tab" style="padding:12px 20px;font-size:13px;font-weight:600;color:#6b7280;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;margin-bottom:-1px;">Flows</button>
+    </div>
+    <div class="chat-modal-body" style="display:flex;flex-direction:column;gap:14px;max-height:65vh;overflow-y:auto;min-height:0;">
+      <!-- TAB: Templates -->
+      <div id="chatSettingsTemplatesPane" style="display:flex;flex-direction:column;gap:14px;flex:1;min-height:0;overflow-y:auto;">
       <!-- Add / Edit form (keep at top) -->
       <div id="chatTmplForm" style="margin-top:0;padding:18px 20px;background:#fff;border:2px solid #ede9fe;border-radius:12px;">
         <div style="font-size:13px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;" id="chatTmplFormLabel">Create Structured Message Template</div>
@@ -25587,9 +25627,49 @@ function hookSettingsGuard_DISABLED(){
         <div class="chat-section-label" style="margin-top:0;">Existing Messages</div>
         <div id="chatTemplatesAdminList"></div>
       </div>
+      </div>
+
+      <!-- TAB: Flows -->
+      <div id="chatSettingsFlowsPane" style="display:none;flex-direction:column;gap:14px;flex:1;min-height:0;overflow-y:auto;">
+        <div id="chatFlowsSavedSection" style="padding:18px 20px;background:#f0fdf4;border:1px solid #86efac;border-radius:12px;">
+          <div style="font-size:14px;font-weight:700;color:#166534;margin-bottom:10px;">Your saved flows</div>
+          <div id="chatFlowsAdminList"></div>
+        </div>
+        <div id="chatFlowForm" style="padding:18px 20px;background:#fff;border:2px solid #ede9fe;border-radius:12px;">
+          <div style="font-size:13px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;" id="chatFlowFormLabel">Create Flow</div>
+          <div style="margin-bottom:14px;">
+            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">Flow Title <span style="color:#ef4444;">*</span></label>
+            <input id="chatFlowTitle" type="text" placeholder="e.g. Coffee Order (flow name)" maxlength="80"
+              style="width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:7px;font-size:14px;color:#111827;box-sizing:border-box;">
+          </div>
+          <div style="margin-bottom:14px;">
+            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:8px;">Who Can Use</label>
+            <div style="display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;"><input type="checkbox" id="chatFlowSenderTech" style="accent-color:#7c3aed;"> Technician</label>
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;"><input type="checkbox" id="chatFlowSenderMgr" style="accent-color:#7c3aed;"> Manager</label>
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;"><input type="checkbox" id="chatFlowSenderAdmin" style="accent-color:#7c3aed;"> Admin</label>
+            </div>
+          </div>
+          <div style="margin-bottom:14px;">
+            <div class="chat-section-label" style="font-size:12px;color:#6b7280;margin-bottom:6px;">Decision tree: Question → Answer → ↳ Add next question (optional). No continuation = end.</div>
+            <div id="chatFlowStepsList" class="chat-flow-tree"></div>
+            <button type="button" id="chatFlowAddStepBtn" onclick="window._chatFlowAddStep && window._chatFlowAddStep()"
+              style="margin-top:6px;padding:6px 12px;border:1px dashed #a78bfa;border-radius:6px;background:#f5f3ff;cursor:pointer;font-size:12px;color:#7c3aed;">+ Add first question</button>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button type="button" id="chatFlowSaveBtn" onclick="window.saveChatFlow && window.saveChatFlow()"
+              style="padding:9px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">Create Flow</button>
+            <button type="button" id="chatFlowCancelBtn" onclick="window.cancelEditChatFlow && window.cancelEditChatFlow()" style="display:none;padding:9px 18px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;">Cancel</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
+<style>
+.chat-settings-tab.active{color:#7c3aed!important;border-bottom-color:#7c3aed!important;}
+.chat-send-mode-btn.active{border-color:#7c3aed!important;background:#ede9fe!important;color:#7c3aed!important;}
+</style>
 
 <!-- Inbox Screen (below main Top Bar: QUEUE, TASKS, INBOX, etc.) -->
 <div id="inboxScreen" class="inbox-screen">

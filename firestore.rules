@@ -278,6 +278,20 @@ service cloud.firestore {
       allow create, update, delete: if isAdminOrOwner(salonId);
     }
 
+    // Chat Flows — Admin/Owner can CRUD; all salon members can read
+    match /salons/{salonId}/chatFlows/{flowId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isAdminOrOwner(salonId);
+      match /steps/{stepId} {
+        allow read: if belongsToSalon(salonId);
+        allow create, update, delete: if isAdminOrOwner(salonId);
+        match /options/{optionId} {
+          allow read: if belongsToSalon(salonId);
+          allow create, update, delete: if isAdminOrOwner(salonId);
+        }
+      }
+    }
+
     // Conversations (PRIVATE) — only participants can read
     match /salons/{salonId}/conversations/{conversationId} {
       allow read: if belongsToSalon(salonId)
@@ -318,10 +332,17 @@ service cloud.firestore {
         allow read: if isParticipant();
         allow create: if isParticipant()
           && request.resource.data.senderUid == request.auth.uid
-          && request.resource.data.title is string
-          && request.resource.data.templateId is string
           && request.resource.data.recipientUid is string
-          && request.resource.data.readBy is list;
+          && request.resource.data.readBy is list
+          && (
+            (request.resource.data.keys().hasAll(['templateId', 'title'])
+             && request.resource.data.templateId is string
+             && request.resource.data.title is string)
+            || (request.resource.data.keys().hasAll(['flowId', 'flowTitle', 'renderedText'])
+                && request.resource.data.flowId is string
+                && request.resource.data.flowTitle is string
+                && request.resource.data.renderedText is string)
+          );
 
         // Allow updating only readBy field (mark as read)
         allow update: if isParticipant()
