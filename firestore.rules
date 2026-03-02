@@ -401,6 +401,12 @@ service cloud.firestore {
       allow create, update, delete: if isManager(salonId);
     }
 
+    // ===== UI SETTINGS (historyRange, etc.) =====
+    match /salons/{salonId}/settings/{docId} {
+      allow read: if belongsToSalon(salonId);
+      allow write: if belongsToSalon(salonId);
+    }
+
     // ===== QUEUE / TASKS STATE =====
     match /salons/{salonId}/queueState/{docId} {
       allow read: if belongsToSalon(salonId);

@@ -54,8 +54,14 @@ function subscribe(salonId) {
       return;
     }
     const data = snap.data();
-    _applyState(data);
-    if (typeof _onRefresh === "function") _onRefresh();
+    // Guard against infinite loop: prevent localStorage hook from triggering a write-back
+    if (typeof window !== "undefined") window.__ffTasksApplyingRemote = true;
+    try {
+      _applyState(data);
+      if (typeof _onRefresh === "function") _onRefresh();
+    } finally {
+      if (typeof window !== "undefined") window.__ffTasksApplyingRemote = false;
+    }
   }, (err) => console.error("[TasksCloud] subscribe error", err));
 }
 

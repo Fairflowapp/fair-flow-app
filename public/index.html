@@ -74,6 +74,8 @@ body.ff-invite-mode #reset-admin-pin-section {
 .header{position:sticky;top:0;z-index:100003;background:#FFFFFF;
 
   border-bottom:1px solid #E6E9EF;pointer-events:auto}
+#tasksScreen{top:var(--header-h,60px)}
+
   
 /* Ensure toolbar buttons are always clickable */
 .toolbar button{position:relative;z-index:100004;pointer-events:auto;cursor:pointer}
@@ -1735,6 +1737,21 @@ dialog footer button, .code-dialog footer button {
     </div>
 
   </div>
+  <script>
+  (function(){
+    function setHeaderH(){
+      var h=document.querySelector('.header');
+      if(h) document.documentElement.style.setProperty('--header-h', h.offsetHeight+'px');
+    }
+    setHeaderH();
+    window.addEventListener('load', setHeaderH);
+    window.addEventListener('resize', setHeaderH);
+    if(typeof ResizeObserver!=='undefined'){
+      var h=document.querySelector('.header');
+      if(h) new ResizeObserver(setHeaderH).observe(h);
+    }
+  })();
+  </script>
 
   <!-- Apps Launcher Panel -->
   <!-- Apps Overlay Backdrop -->
@@ -4856,8 +4873,12 @@ function getQueuesData() {
   return data ? JSON.parse(data) : {};
 }
 
-function setQueuesData(data) {
+function setQueuesData(data, skipCloudWrite) {
   localStorage.setItem('ff_queues_v1', JSON.stringify(data));
+  if (!skipCloudWrite) {
+    window.__ff_lastSaveTime = Date.now();
+    if (typeof window.queueCloudWrite === 'function') window.queueCloudWrite();
+  }
 }
 
 function getQueueAutoResetSettings() {
@@ -5032,15 +5053,30 @@ function initManageQueueButtons() {
   
   if (timeEl && !timeEl.hasAttribute('data-handler-attached')) {
     timeEl.setAttribute('data-handler-attached', 'true');
+    // Only save on 'change' (user finished editing), NOT on 'input' (every keystroke)
     timeEl.addEventListener('change', function() {
       const autoReset = getQueueAutoResetSettings();
       autoReset.time = timeEl.value || '04:00';
       saveQueueAutoResetSettings(autoReset);
-    });
-    timeEl.addEventListener('input', function() {
-      const autoReset = getQueueAutoResetSettings();
-      autoReset.time = timeEl.value || '04:00';
-      saveQueueAutoResetSettings(autoReset);
+      // If the configured time has already passed today, mark today as "already reset"
+      // so we don't trigger an immediate unintended reset
+      const now = new Date();
+      const todayKey = now.getFullYear() + '-' +
+        String(now.getMonth() + 1).padStart(2, '0') + '-' +
+        String(now.getDate()).padStart(2, '0');
+      const minutesNow = now.getHours() * 60 + now.getMinutes();
+      const minutesReset = (function() {
+        const t = autoReset.time || '04:00';
+        const parts = t.split(':');
+        return parseInt(parts[0] || 0) * 60 + parseInt(parts[1] || 0);
+      })();
+      if (minutesNow >= minutesReset) {
+        const runtime = getQueueRuntime();
+        if (runtime.lastAutoResetDate !== todayKey) {
+          runtime.lastAutoResetDate = todayKey;
+          setQueueRuntime(runtime);
+        }
+      }
     });
   }
   
@@ -6323,7 +6359,11 @@ async function saveSettings(e){
 
   if(!settings.brandPalette) settings.brandPalette = DEFAULTS.brandPalette.slice();
 
-  save(); 
+  save();
+  // Sync brand name, palette, managers to Firestore
+  if (typeof window.ffSaveAppSettings === 'function') {
+    window.ffSaveAppSettings(settings.brand?.name, settings.brandPalette, settings.managers);
+  }
   renderBrand(); 
   if (brandLogoFile && window.ffUploadSalonBrandLogo && window.ffSaveSalonLogoMeta) {
     try {
@@ -21565,11 +21605,42 @@ function save(){
   if(typeof window.queueCloudWrite==='function') window.queueCloudWrite();
 }
 
+// Tasks Cloud init callback — called automatically by tasks-cloud.js when it loads
+// Phase A: getState only (writes to Firestore). applyState is NO-OP — zero risk.
+window.__ffTasksCloudInit = function() {
+  if (typeof window.initTasksCloud !== 'function') return;
+  window.initTasksCloud({
+    getState: function() {
+      var TABS = ['opening','closing','weekly','monthly','yearly'];
+      var catalog = JSON.parse(localStorage.getItem('ff_tasks_catalog_v1') || '{}');
+      var tombstone = JSON.parse(localStorage.getItem('ff_tasks_active_deleted_v1') || '{}');
+      var alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+      var enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+      var state = { catalog: catalog, tombstone: tombstone, alertWindows: alertWindows, enforceSelectSettings: enforceSelectSettings };
+      TABS.forEach(function(tab) {
+        state[tab] = {
+          active:  JSON.parse(localStorage.getItem('ffv24_tasks_' + tab + '_active')  || '[]'),
+          pending: JSON.parse(localStorage.getItem('ffv24_tasks_' + tab + '_pending') || '[]'),
+          done:    JSON.parse(localStorage.getItem('ffv24_tasks_' + tab + '_done')    || '[]')
+        };
+      });
+      return state;
+    },
+    // Phase A: applyState does NOTHING — Firestore data is stored but never overwrites local data
+    applyState: function(data) {
+      // intentionally empty — Phase B will enable this
+    },
+    onRefresh: function() {
+      // intentionally empty — Phase B will enable this
+    }
+  });
+};
+
 // Queue Cloud init callback — called automatically by queue-cloud.js when it loads
 window.__ffQueueCloudInit = function() {
   if (typeof window.initQueueCloud !== 'function') return;
   window.initQueueCloud({
-    applyState: function(q, s, l) {
+    applyState: function(q, s, l, qd) {
       // After a local save, ignore Firestore updates for 5s to avoid race condition
       if (Date.now() - window.__ff_lastSaveTime < 5000) return;
       queue = q;
@@ -21579,11 +21650,15 @@ window.__ffQueueCloudInit = function() {
       ls("ffv24_queue", q);
       ls("ffv24_service", s);
       ls("ffv24_log", l);
+      // Sync queue settings (auto-reset config) — skipCloudWrite=true to avoid loop
+      if (qd && typeof qd === 'object' && Object.keys(qd).length > 0) {
+        setQueuesData(qd, true);
+      }
       renderQueue();
       renderService();
     },
     getState: function() {
-      return { queue: queue, service: service, log: log };
+      return { queue: queue, service: service, log: log, queuesData: getQueuesData() };
     },
     onLogChange: function() {
       if (Date.now() - window.__ff_lastSaveTime < 5000) return;
@@ -24795,15 +24870,10 @@ function hookSettingsGuard_DISABLED(){
       font-weight: 400 !important;
     }
   </style>
-  <div id="tasksScreen" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#fff;z-index:300;flex-direction:column;pointer-events:auto;">
-    <!-- Top bar with BACK button, TASKS title, and HISTORY button -->
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 20px;border-bottom:1px solid #e5e7eb;background:#fff;">
+  <div id="tasksScreen" style="display:none;position:fixed;left:0;right:0;bottom:0;background:#fff;z-index:300;flex-direction:column;pointer-events:auto;">
+    <!-- Top bar hidden — main nav header is used instead -->
+    <div style="display:none;">
       <button id="btnTasksBack" class="btn-pill" style="pointer-events:auto;z-index:301;">BACK</button>
-      <div style="flex:1;display:flex;justify-content:center;">
-        <div class="tasks-title-wrapper">
-          <h2>TASKS</h2>
-        </div>
-      </div>
     </div>
     
     <!-- Tab row -->
@@ -25271,6 +25341,8 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/staff-cloud.js?v=20260221a"></script>
   <script type="module" src="/settings-cloud.js?v=20260302a"></script>
   <script type="module" src="/queue-cloud.js?v=20260302a"></script>
+  <!-- tasks-cloud.js temporarily disabled — needs investigation -->
+  <!-- <script type="module" src="/tasks-cloud.js?v=20260302a"></script> -->
   <script type="module" src="/tickets.js?v=20260301i"></script>
 
   <!-- PIN Modal -->
