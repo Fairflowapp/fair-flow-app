@@ -373,6 +373,45 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ===== TICKETS =====
+    // Technicians: create + read their own
+    // Manager/Admin/Owner: full read + update (close/archive) + delete
+    match /salons/{salonId}/tickets/{ticketId} {
+      allow read: if belongsToSalon(salonId);
+      allow create: if belongsToSalon(salonId)
+        && request.resource.data.createdByUid == request.auth.uid;
+      allow update: if belongsToSalon(salonId)
+        && (
+          isManager(salonId)
+          || resource.data.createdByUid == request.auth.uid
+        );
+      allow delete: if belongsToSalon(salonId)
+        && isAdminOrOwner(salonId);
+    }
+
+    // ===== SERVICE CATALOG =====
+    // All salon members can read; Manager/Admin/Owner can CRUD
+    match /salons/{salonId}/services/{serviceId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isManager(salonId);
+    }
+
+    match /salons/{salonId}/serviceCategories/{catId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isManager(salonId);
+    }
+
+    // ===== QUEUE / TASKS STATE =====
+    match /salons/{salonId}/queueState/{docId} {
+      allow read: if belongsToSalon(salonId);
+      allow write: if isManager(salonId);
+    }
+
+    match /salons/{salonId}/tasksState/{docId} {
+      allow read: if belongsToSalon(salonId);
+      allow write: if belongsToSalon(salonId);
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;

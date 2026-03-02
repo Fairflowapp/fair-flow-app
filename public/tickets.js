@@ -307,12 +307,18 @@ function getTicketVisibility() {
   return { isPrimaryAdmin, hasReceivesTickets };
 }
 
-/** Returns true if current user can see this ticket */
+/** Returns true if current user can see this ticket.
+ *  Uses FIRESTORE profile role for admin/manager check — not PIN actor.
+ *  This ensures admin always sees all tickets regardless of PIN state. */
 function canSeeTicket(ticket) {
   if (!currentUserProfile) return false;
-  const { isPrimaryAdmin, hasReceivesTickets } = getTicketVisibility();
-  if (isPrimaryAdmin) return true;
+  // Firestore role: admin/owner/manager always see all tickets
+  const profileRole = (currentUserProfile.role || '').toLowerCase();
+  if (['owner', 'admin', 'manager'].includes(profileRole)) return true;
+  // Technician: can see their own tickets
   if (ticket.createdByUid === currentUserProfile.uid) return true;
+  // Staff with receives-tickets permission
+  const { hasReceivesTickets } = getTicketVisibility();
   if (hasReceivesTickets) return true;
   return false;
 }
@@ -321,9 +327,12 @@ function canSeeTicket(ticket) {
 // Tickets CRUD
 // =====================
 function subscribeTickets() {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = currentUserProfile?.salonId
+    || (typeof window !== 'undefined' && window.currentSalonId)
+    || null;
   if (!salonId) {
-    console.warn('[Tickets] No salonId - cannot subscribe. Check users doc has salonId or window.currentSalonId.');
+    console.warn('[Tickets] No salonId. Retrying in 1s...');
+    setTimeout(subscribeTickets, 1000);
     return;
   }
   if (ticketsUnsubscribe) ticketsUnsubscribe();
@@ -354,9 +363,10 @@ function subscribeTickets() {
 function updateTicketsNavBadge() {
   const badge = document.getElementById('ticketsNavBadge');
   if (!badge) return;
-  const { isPrimaryAdmin } = getTicketVisibility();
-  // Badge only for admin/owner/manager — technicians don't see it at all
-  if (!isPrimaryAdmin) {
+  // Badge only for admin/owner/manager by FIRESTORE role
+  const profileRole = (currentUserProfile?.role || '').toLowerCase();
+  const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
+  if (!isFirebaseAdmin) {
     badge.textContent = '';
     badge.style.display = 'none';
     return;
@@ -443,7 +453,13 @@ async function finalizeTicket(ticketId, forUids, forNames) {
 }
 
 async function closeTicket(ticketId) {
-  await updateTicket(ticketId, { status: 'CLOSED', closedByUid: currentUserProfile.uid, _action: 'closed' });
+  const closedByName = currentUserProfile?.name || currentUserProfile?.email || 'Manager';
+  await updateTicket(ticketId, {
+    status: 'CLOSED',
+    closedByUid: currentUserProfile.uid,
+    closedByName,
+    _action: 'closed'
+  });
 }
 
 async function voidTicket(ticketId) {
@@ -480,9 +496,69 @@ function formatDate(ts) {
   return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Align the gear icon precisely under the user avatar circle — works on any screen/DPI */
+function _alignGearToAvatar() {
+  const gear = document.getElementById('ticketsManageServicesBtn');
+  // Target the circle itself, not the full button (which includes the ▼ arrow)
+  const avatarCircle = document.querySelector('.user-avatar-circle') || document.getElementById('userAvatarBtn');
+  if (!gear || !avatarCircle || gear.style.display === 'none') return;
+  const circleRect = avatarCircle.getBoundingClientRect();
+  const tabsRow = gear.parentElement;
+  if (!tabsRow) return;
+  const tabsRect = tabsRow.getBoundingClientRect();
+  // Center gear under the circle center
+  const circleCenterX = circleRect.left + circleRect.width / 2;
+  const gearHalfWidth = 18; // 36px / 2
+  const rightFromRow = tabsRect.right - (circleCenterX + gearHalfWidth);
+  gear.style.marginRight = Math.max(4, Math.round(rightFromRow - 20)) + 'px';
+}
+
+// Re-align on resize
+if (typeof window !== 'undefined') {
+  window.addEventListener('resize', () => {
+    const gear = document.getElementById('ticketsManageServicesBtn');
+    if (gear && gear.style.display !== 'none') _alignGearToAvatar();
+    _fitTicketsScreenToHeader();
+  });
+}
+
 function showToast(msg, type = 'info') {
-  if (typeof window.showToast === 'function') window.showToast(msg, type);
-  else alert(msg);
+  // Remove existing toast
+  const existing = document.getElementById('ff-tickets-toast');
+  if (existing) existing.remove();
+
+  const colors = { success: '#059669', error: '#dc2626', info: '#2563eb', warning: '#d97706' };
+  const icons  = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
+  const bg = colors[type] || colors.info;
+  const icon = icons[type] || icons.info;
+
+  const toast = document.createElement('div');
+  toast.id = 'ff-tickets-toast';
+  toast.style.cssText = [
+    'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
+    `background:${bg}`, 'color:#fff', 'padding:12px 22px',
+    'border-radius:999px', 'font-size:14px', 'font-weight:600',
+    'z-index:999999', 'box-shadow:0 4px 20px rgba(0,0,0,0.25)',
+    'display:flex', 'align-items:center', 'gap:8px',
+    'white-space:nowrap', 'pointer-events:none',
+    'animation:ffToastIn .2s ease'
+  ].join(';');
+  toast.innerHTML = `<span style="font-size:16px;">${icon}</span><span>${String(msg).replace(/</g,'&lt;')}</span>`;
+
+  // Add animation
+  if (!document.getElementById('ff-toast-style')) {
+    const s = document.createElement('style');
+    s.id = 'ff-toast-style';
+    s.textContent = '@keyframes ffToastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}';
+    document.head.appendChild(s);
+  }
+
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity .3s';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
 }
 
 /** Custom confirm for tickets: always use in-app modal, never browser confirm. */
@@ -629,6 +705,10 @@ function renderTicketsList() {
       ? `<div style="margin-top:10px;"><button type="button" class="ticket-delete-btn" data-ticket-id="${t.id}" style="padding:5px 12px;background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;">Delete permanently</button></div>`
       : '';
 
+    const closedByHtml = (sk === 'closed' && t.closedByName)
+      ? `<div style="font-size:11px;color:#059669;margin-top:2px;">✓ Closed by ${escapeHtml(t.closedByName)}</div>`
+      : '';
+
     return `
     <div class="ticket-card" data-ticket-id="${t.id}">
       <!-- Header row -->
@@ -639,6 +719,7 @@ function renderTicketsList() {
           <div style="font-weight:700;font-size:14px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${techName}</div>
           ${customerName ? `<div style="font-size:11px;color:#6b7280;margin-top:1px;">👤 ${escapeHtml(customerName)}</div>` : ''}
           <div style="font-size:11px;color:#9ca3af;margin-top:1px;">${submittedAt}</div>
+          ${closedByHtml}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
           <span class="ticket-status-badge ${sk}">${statusLabel}</span>
@@ -733,8 +814,9 @@ function openTicketModal(ticketId, appointmentData = null) {
       return;
     }
 
-    // Admin/manager viewing a READY ticket → simplified view with Close Ticket only
-    const { isPrimaryAdmin: isAdminOrManager } = getTicketVisibility();
+    // Admin/manager/owner viewing a READY ticket → simplified view with Close Ticket only
+    const profileRole = (currentUserProfile?.role || '').toLowerCase();
+    const isAdminOrManager = ['owner', 'admin', 'manager'].includes(profileRole);
     if (isAdminOrManager && s === 'READY_FOR_CHECKOUT') {
       if (!t.seenByFrontDeskAt) {
         _ticketsOpenedThisSession.add(t.id);
@@ -1625,6 +1707,17 @@ async function saveServiceFromForm() {
 // =====================
 // Navigation
 // =====================
+/** Set ticketsScreen top = actual header height (works on Mac Retina + Windows) */
+function _fitTicketsScreenToHeader() {
+  const screen = document.getElementById('ticketsScreen');
+  if (!screen || screen.dataset.dynamicTop !== 'true') return;
+  const header = document.querySelector('.header');
+  if (header) {
+    const h = Math.ceil(header.getBoundingClientRect().height);
+    screen.style.top = h + 'px';
+  }
+}
+
 export function goToTickets() {
   const tasksScreen = document.getElementById('tasksScreen');
   const ownerView = document.getElementById('owner-view');
@@ -1641,7 +1734,10 @@ export function goToTickets() {
   });
   if (wrap) wrap.style.display = 'none';
 
-  if (ticketsScreen) ticketsScreen.style.display = 'flex';
+  if (ticketsScreen) {
+    ticketsScreen.style.display = 'flex';
+    _fitTicketsScreenToHeader(); // adjust top to actual header height on any screen
+  }
 
   // When any other nav button is clicked:
   // 1. Hide tickets screen
@@ -1752,9 +1848,14 @@ async function setupTicketsUI() {
   });
   const manageServicesBtn = document.getElementById('ticketsManageServicesBtn');
   if (manageServicesBtn) {
-    const isAdmin = currentUserProfile && ['admin', 'owner'].includes((currentUserProfile.role || '').toLowerCase());
-    manageServicesBtn.style.display = isAdmin ? 'flex' : 'none';
+    const profileRole = (currentUserProfile?.role || '').toLowerCase();
+    const canManage = ['admin', 'owner', 'manager'].includes(profileRole);
+    manageServicesBtn.style.display = canManage ? 'flex' : 'none';
     manageServicesBtn.onclick = openServicesModal;
+    if (canManage) {
+      // Align gear precisely under user avatar on any screen/DPI
+      requestAnimationFrame(() => _alignGearToAvatar());
+    }
   }
   const archivedTab = document.getElementById('ticketsArchivedTab');
   if (archivedTab) {
@@ -1764,9 +1865,11 @@ async function setupTicketsUI() {
   }
   const newTicketBtn = document.getElementById('ticketsNewBtn');
   if (newTicketBtn) {
-    // Show "New Ticket" only for Techs — use Actor role (PIN system)
-    const { isPrimaryAdmin } = getTicketVisibility();
-    newTicketBtn.style.display = isPrimaryAdmin ? 'none' : 'inline-block';
+    // Hide for admin/manager/owner based on FIRESTORE profile role
+    // (not PIN actor — the logged-in Firebase user determines this)
+    const profileRole = (currentUserProfile?.role || '').toLowerCase();
+    const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
+    newTicketBtn.style.display = isFirebaseAdmin ? 'none' : 'inline-block';
   }
 }
 
@@ -1789,8 +1892,22 @@ export function initTickets() {
   window.saveServiceFromForm = saveServiceFromForm;
   window.addServiceCategory = addServiceCategory;
   window.updateTicketsNavBadge = updateTicketsNavBadge;
-  // NO background subscription on init — badge updates only when Tickets screen is active.
-  // This prevents the badge from showing for technicians based on Firebase Auth owner role.
+
+  // Background subscription for badge — ONLY for admin/manager/owner (Firestore role)
+  // This shows the badge in real-time even when not on the Tickets screen
+  onAuthStateChanged(auth, (user) => {
+    if (!user) return;
+    setTimeout(() => {
+      loadCurrentUserProfile().then(() => {
+        const profileRole = (currentUserProfile?.role || '').toLowerCase();
+        const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
+        if (isFirebaseAdmin) {
+          subscribeTickets(); // real-time badge for admin/manager
+        }
+      }).catch(() => {});
+    }, 1000);
+  });
+
   console.log('[Tickets] Initialized');
 }
 
