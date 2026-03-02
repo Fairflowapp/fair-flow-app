@@ -4040,7 +4040,8 @@ function ffUpdateTasksTabBadges() {
 
 function ffUpdateHomeTasksBadge() {
   try {
-    const badge = document.querySelector('.ff-home-tasks-badge');
+    // Target TASKS nav badge specifically — NOT #ticketsNavBadge (first in DOM)
+    const badge = document.querySelector('#tasksBtn .ff-home-tasks-badge');
     if (!badge) return;
     
     // Load alert window settings

@@ -53,6 +53,15 @@ function _nameForUid(uid) {
   const u = chatSalonUsers.find(x => x.uid === uid);
   return (u && (u.name || u.email || u.uid)) || uid;
 }
+function _avatarUrlForUid(uid) {
+  if (!uid) return null;
+  if (uid === chatUserProfile?.uid) return (typeof window.ffGetCurrentUserAvatarUrl === 'function') ? window.ffGetCurrentUserAvatarUrl() : null;
+  const u = chatSalonUsers.find(x => x.uid === uid);
+  if (!u || !u.avatarUrl) return null;
+  const v = u.avatarUpdatedAtMs != null ? String(u.avatarUpdatedAtMs) : '';
+  const sep = u.avatarUrl.includes('?') ? '&' : '?';
+  return `${u.avatarUrl}${sep}v=${encodeURIComponent(v)}`;
+}
 function _otherUidFromParticipants(parts, myUid) {
   if (!Array.isArray(parts)) return '';
   return parts.find(u => u && u !== myUid) || '';
@@ -251,14 +260,22 @@ function renderThreadList() {
     const unread = (conv.unreadFor && conv.unreadFor[uid]) ? Number(conv.unreadFor[uid]) : 0;
     const myInitial  = (chatUserProfile?.name || '?').charAt(0).toUpperCase();
     const otherInitial = otherName.charAt(0).toUpperCase();
+    const myAvatarUrl = _avatarUrlForUid(uid);
+    const otherAvatarUrl = _avatarUrlForUid(otherUid);
+    const myAvatarHtml = myAvatarUrl
+      ? `<span class="ctc-avatar ctc-avatar-me" style="overflow:hidden;"><img src="${String(myAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
+      : `<span class="ctc-avatar ctc-avatar-me">${escHtml(myInitial)}</span>`;
+    const otherAvatarHtml = otherAvatarUrl
+      ? `<span class="ctc-avatar ctc-avatar-other" style="overflow:hidden;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
+      : `<span class="ctc-avatar ctc-avatar-other">${escHtml(otherInitial)}</span>`;
 
     const selected = (currentConvId === convId) ? 'is-selected' : '';
     return `
       <div class="chat-thread-card ${selected} ${unread > 0 ? 'chat-thread-card-unread' : ''}"
            onclick="window._openThread('${escHtml(convId)}')">
         <div class="ctc-avatars">
-          <span class="ctc-avatar ctc-avatar-me">${escHtml(myInitial)}</span>
-          <span class="ctc-avatar ctc-avatar-other">${escHtml(otherInitial)}</span>
+          ${myAvatarHtml}
+          ${otherAvatarHtml}
         </div>
         <div class="ctc-body">
           <div class="ctc-top">
@@ -317,11 +334,19 @@ function renderConversation(convId) {
     return;
   }
 
+  const conv = allConversations.find(c => c.id === convId);
+  const otherUid = _otherUidFromParticipants(conv?.participants, uid);
+  const otherAvatarUrl = _avatarUrlForUid(otherUid);
+
   container.innerHTML = msgs.map(ev => {
     const mine = ev.senderUid === uid;
+    const senderInitial = (ev.senderName || '?').charAt(0).toUpperCase();
+    const otherAvatarHtml = !mine && otherAvatarUrl
+      ? `<span class="cb-avatar" style="overflow:hidden;padding:0;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
+      : (!mine ? `<span class="cb-avatar">${escHtml(senderInitial)}</span>` : '');
     return `
       <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}">
-        ${!mine ? `<span class="cb-avatar">${escHtml((ev.senderName||'?').charAt(0).toUpperCase())}</span>` : ''}
+        ${otherAvatarHtml}
         <div class="cb-col">
           ${!mine ? `<span class="cb-sender-name">${escHtml(ev.senderName||'Unknown')} · ${roleLabel(ev.senderRole)}</span>` : ''}
           <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}">
@@ -337,9 +362,7 @@ function renderConversation(convId) {
   // Scroll to bottom
   setTimeout(() => { container.scrollTop = container.scrollHeight; }, 50);
 
-  // Store other participant for reply
-  const conv = allConversations.find(c => c.id === convId);
-  const otherUid  = _otherUidFromParticipants(conv?.participants, uid);
+  // Store other participant for reply (conv, otherUid already declared above)
   const otherName = _nameForUid(otherUid);
   const replyBtn  = document.getElementById('chatConvReplyBtn');
   if (replyBtn) {
@@ -447,7 +470,6 @@ async function _openChatModal({ title, showSendTo }) {
 
   const modal         = document.getElementById('chatSendModal');
   const messageList   = document.getElementById('chatSendMessageList');
-  const flowWizard    = document.getElementById('chatSendFlowWizard');
   const recipientList = document.getElementById('chatSendRecipientList');
   const sendToSection = document.getElementById('chatSendToSection');
   const pickerBtn     = document.getElementById('chatRecipientPickerBtn');
@@ -472,31 +494,56 @@ async function _openChatModal({ title, showSendTo }) {
   if (items.length === 0) {
     messageList.innerHTML = '<div style="padding:16px;color:#6b7280;text-align:center;font-size:14px;">No messages available.<br>Ask an Admin to add messages.</div>';
   } else {
-    messageList.innerHTML = items.map(it => `
-      <label class="chat-message-option" data-type="${it.type}" data-id="${escHtml(it.id)}"
-        style="display:flex;align-items:flex-start;gap:8px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;cursor:pointer;margin-bottom:4px;background:#fff;">
-        <input type="radio" name="chatMessageRadio" value="${it.type}:${escHtml(it.id)}" style="margin-top:1px;accent-color:#7c3aed;">
-        <div style="min-width:0;">
-          <div style="font-size:12px;font-weight:600;color:#111827;">${escHtml(it.title)}</div>
-          ${it.preview ? `<div style="font-size:11px;color:#6b7280;margin-top:0;">${escHtml(it.preview)}</div>` : ''}
+    messageList.innerHTML = items.map(it => {
+      const isFlow = it.type === 'flow';
+      const caretHtml = isFlow
+        ? `<span class="chat-option-caret" aria-hidden="true" style="flex-shrink:0;font-size:10px;color:#9ca3af;transition:transform 0.2s;">▼</span>`
+        : '';
+      return `
+        <div class="chat-message-option-block" data-type="${it.type}" data-id="${escHtml(it.id)}" style="margin-bottom:4px;">
+          <label class="chat-message-option" style="display:flex;align-items:flex-start;gap:8px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;cursor:pointer;background:#fff;">
+            <input type="radio" name="chatMessageRadio" value="${it.type}:${escHtml(it.id)}" style="margin-top:1px;accent-color:#7c3aed;">
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;font-weight:600;color:#111827;">${escHtml(it.title)}</div>
+              ${it.preview ? `<div style="font-size:11px;color:#6b7280;margin-top:0;">${escHtml(it.preview)}</div>` : ''}
+            </div>
+            ${caretHtml}
+          </label>
+          ${isFlow ? `<div class="chat-flow-accordion" data-flow-id="${escHtml(it.id)}" style="display:none;margin-top:4px;margin-left:0;padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"></div>` : ''}
         </div>
-      </label>
-    `).join('');
+      `;
+    }).join('');
 
     messageList.querySelectorAll('input[name="chatMessageRadio"]').forEach(r => {
       r.addEventListener('change', () => {
         const v = r.value;
         const [type, id] = v.includes(':') ? v.split(/:(.+)/).slice(0, 2) : ['template', v];
+        const block = r.closest('.chat-message-option-block');
+        document.querySelectorAll('.chat-message-option-block').forEach(b => {
+          const acc = b.querySelector('.chat-flow-accordion');
+          const caret = b.querySelector('.chat-option-caret');
+          if (acc) {
+            acc.style.display = 'none';
+            acc.innerHTML = '';
+            if (caret) caret.textContent = '▼';
+          }
+        });
         if (type === 'flow') {
           chatSendMode = 'flow';
           chatSelectedFlow = chatFlows.find(x => x.id === id) || null;
           chatFlowAnswers = [];
-          _chatRenderFlowWizard();
+          const acc = block?.querySelector('.chat-flow-accordion');
+          const caret = block?.querySelector('.chat-option-caret');
+          if (acc) {
+            acc.style.display = 'block';
+            if (caret) caret.textContent = '▲';
+            _chatRenderFlowWizard(acc);
+            setTimeout(() => acc.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+          }
         } else {
           chatSendMode = 'template';
           chatSelectedFlow = null;
           chatFlowAnswers = [];
-          if (flowWizard) flowWizard.style.display = 'none';
         }
         _updateChatSendBtn();
       });
@@ -517,11 +564,15 @@ async function _openChatModal({ title, showSendTo }) {
       : pool.map(u => {
           const displayName = (u.name || u.email || u.uid || '').trim();
           const search = `${displayName} ${u.email || ''} ${roleLabel(u.role)}`.toLowerCase();
+          const avatarUrl = _avatarUrlForUid(u.uid);
+          const avatarHtml = avatarUrl
+            ? `<span class="chat-rcpt-avatar-sm" style="overflow:hidden;padding:0;"><img src="${String(avatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
+            : `<span class="chat-rcpt-avatar-sm">${escHtml((displayName||'?').charAt(0).toUpperCase())}</span>`;
           return `
             <label class="chat-recipient-row" data-search="${escHtml(search)}"
               style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:13px;color:#374151;">
               <input type="checkbox" name="chatRecipient" value="${escHtml(u.uid)}" data-name="${escHtml(displayName)}" style="accent-color:#7c3aed;">
-              <span class="chat-rcpt-avatar-sm">${escHtml((displayName||'?').charAt(0).toUpperCase())}</span>
+              ${avatarHtml}
               <span style="font-weight:600;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(displayName)}</span>
               <span style="color:#9ca3af;font-size:12px;flex-shrink:0;">${roleLabel(u.role)}</span>
             </label>
@@ -567,8 +618,6 @@ async function _openChatModal({ title, showSendTo }) {
   const sendBtn = document.getElementById('chatSendConfirmBtn');
   if (sendBtn) sendBtn.disabled = true;
 
-  if (flowWizard) flowWizard.style.display = 'none';
-
   if (showSendTo) {
     modal.querySelectorAll('input[name="chatRecipient"]').forEach(r =>
       r.addEventListener('change', _updateChatSendBtn)
@@ -582,20 +631,25 @@ window._chatSendMode = function(mode) {
   chatSendMode = mode;
   chatSelectedFlow = null;
   chatFlowAnswers = [];
-  const wizard = document.getElementById('chatSendFlowWizard');
-  if (wizard) wizard.style.display = 'none';
+  document.querySelectorAll('.chat-flow-accordion').forEach(acc => { acc.style.display = 'none'; acc.innerHTML = ''; });
+  document.querySelectorAll('.chat-option-caret').forEach(c => { c.textContent = '▼'; });
   _updateChatSendBtn();
 };
 
-function _chatRenderFlowWizard() {
-  const wizard = document.getElementById('chatSendFlowWizard');
-  if (!wizard || !chatSelectedFlow) { if (wizard) wizard.style.display = 'none'; return; }
+function _chatGetFlowAccordion() {
+  if (!chatSelectedFlow?.id) return null;
+  const block = document.querySelector(`.chat-message-option-block[data-type="flow"][data-id="${chatSelectedFlow.id}"]`);
+  return block?.querySelector('.chat-flow-accordion') || null;
+}
+
+function _chatRenderFlowWizard(container) {
+  const wizard = container || _chatGetFlowAccordion();
+  if (!wizard || !chatSelectedFlow) return;
   const flow = chatSelectedFlow;
   const steps = flow.steps || [];
   const startId = flow.startStepId || steps[0]?.id;
   if (!startId || !steps.length) {
     wizard.innerHTML = '<div style="padding:12px;color:#6b7280;font-size:13px;">This flow has no questions yet.</div>';
-    wizard.style.display = 'block';
     return;
   }
   let stepId = startId;
@@ -613,7 +667,6 @@ function _chatRenderFlowWizard() {
       <div style="font-size:14px;color:#6b7280;white-space:pre-wrap;">${escHtml(rendered)}</div>
       <button type="button" onclick="window._chatFlowResetWizard && window._chatFlowResetWizard()" style="margin-top:10px;padding:6px 12px;font-size:12px;color:#7c3aed;background:none;border:none;cursor:pointer;">Change answers</button>
     `;
-    wizard.style.display = 'block';
     _updateChatSendBtn();
     return;
   }
@@ -621,7 +674,6 @@ function _chatRenderFlowWizard() {
   if (!step || !step.options?.length) {
     wizard.innerHTML = `<div style="padding:12px;color:#6b7280;font-size:13px;">No options for this step.</div>
       <button type="button" onclick="window._chatFlowResetWizard && window._chatFlowResetWizard()" style="margin-top:8px;padding:6px 12px;font-size:12px;color:#7c3aed;background:none;border:none;cursor:pointer;">Start over</button>`;
-    wizard.style.display = 'block';
     return;
   }
   wizard.innerHTML = `
@@ -634,7 +686,6 @@ function _chatRenderFlowWizard() {
     </div>
     ${chatFlowAnswers.length ? '<button type="button" class="chat-flow-back-btn" style="margin-top:10px;padding:6px 12px;font-size:12px;color:#6b7280;background:none;border:none;cursor:pointer;">← Back</button>' : ''}
   `;
-  wizard.style.display = 'block';
   wizard.querySelectorAll('.chat-flow-opt-btn').forEach(btn => {
     btn.onclick = () => {
       chatFlowAnswers.push({
@@ -645,6 +696,7 @@ function _chatRenderFlowWizard() {
       });
       _chatRenderFlowWizard();
       _updateChatSendBtn();
+      setTimeout(() => wizard.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 80);
     };
   });
   const backBtn = wizard.querySelector('.chat-flow-back-btn');

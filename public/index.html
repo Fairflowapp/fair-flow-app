@@ -275,6 +275,14 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
 }
 
 /* Chat button active state */
+#ticketsBtn.active {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+#ticketsBtn.active .nav-icon svg {
+  stroke: #fff;
+}
 #chatBtn.active {
   color:#7c3aed !important;
   border-color:#a78bfa !important;
@@ -1679,6 +1687,8 @@ dialog footer button, .code-dialog footer button {
       <div class="toolbar">
 
         <button id="queueBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span>QUEUE</button>
+
+        <button id="ticketsBtn" class="btn-pill" onclick="window.goToTickets && window.goToTickets()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></span>TICKETS<span id="ticketsNavBadge" class="ff-home-tasks-badge" style="display:none;"></span></button>
 
         <button id="tasksBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>TASKS<span class="ff-home-tasks-badge"></span></button>
 
@@ -25212,6 +25222,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/inbox.js?v=20260219_draft"></script>
   <script type="module" src="/chat.js?v=20260222_flows3"></script>
   <script type="module" src="/staff-cloud.js?v=20260221a"></script>
+  <script type="module" src="/tickets.js?v=20260228v"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -25350,6 +25361,249 @@ function hookSettingsGuard_DISABLED(){
     .inbox-status-denied { background: #fee2e2; color: #991b1b; }
     .inbox-status-archived { background: #e5e7eb; color: #374151; }
 </style>
+
+<!-- Tickets Screen -->
+<div id="ticketsScreen" style="display:none;position:fixed;top:50px;left:0;right:0;bottom:0;background:#f5f5f5;z-index:300;flex-direction:column;overflow:hidden;">
+  <style>
+    /* ── Tickets Screen Layout ─────────────────────────────── */
+    #ticketsScreen .tickets-tabs {
+      display:flex; background:#fff; flex-shrink:0;
+      border-bottom:2px solid #e5e7eb; padding:0 16px;
+    }
+    #ticketsScreen .tickets-tab {
+      padding:10px 16px; border:none; background:none; cursor:pointer;
+      font-size:13px; font-weight:500; color:#9ca3af;
+      border-bottom:2px solid transparent; margin-bottom:-2px;
+    }
+    #ticketsScreen .tickets-tab.active { color:#111; border-bottom-color:#111; font-weight:700; }
+    #ticketsScreen .tickets-body {
+      flex:1; overflow-y:auto; padding:16px 12px;
+      display:flex; flex-direction:column; align-items:center;
+    }
+    #ticketsScreen #ticketsList { width:100%; max-width:500px; }
+
+    /* ── Ticket Card — grid layout ─────────────────────────── */
+    #ticketsScreen .tickets-body {
+      flex:1; overflow-y:auto; padding:16px;
+    }
+    #ticketsScreen #ticketsList {
+      display:grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap:12px;
+      max-width:1100px;
+      margin:0 auto;
+      align-items:start;
+    }
+    @media (max-width: 900px) {
+      #ticketsScreen #ticketsList { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 650px) {
+      #ticketsScreen #ticketsList { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 420px) {
+      #ticketsScreen #ticketsList { grid-template-columns: 1fr; }
+    }
+    #ticketsScreen .ticket-card {
+      background:#fff;
+      border-radius:12px;
+      box-shadow:0 2px 8px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+      padding:11px;
+      cursor:pointer;
+      transition:box-shadow 0.15s, transform 0.12s;
+    }
+    #ticketsScreen .ticket-card:hover {
+      box-shadow:0 6px 18px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
+      transform:translateY(-2px);
+    }
+    /* Status badge */
+    #ticketsScreen .ticket-status-badge {
+      display:inline-block; padding:3px 10px; border-radius:20px;
+      font-size:10px; font-weight:700; letter-spacing:0.4px;
+      text-transform:uppercase; flex-shrink:0; white-space:nowrap;
+    }
+    #ticketsScreen .ticket-status-badge.ready    { background:#dbeafe; color:#1e40af; }
+    #ticketsScreen .ticket-status-badge.closed   { background:#d1fae5; color:#065f46; }
+    #ticketsScreen .ticket-status-badge.open     { background:#fef3c7; color:#92400e; }
+    #ticketsScreen .ticket-status-badge.void,
+    #ticketsScreen .ticket-status-badge.archived { background:#e5e7eb; color:#4b5563; }
+    /* Edited badge */
+    #ticketsScreen .ticket-edited-badge {
+      display:inline-block; padding:2px 9px; border-radius:20px;
+      font-size:10px; font-weight:700; background:#d97706; color:#fff;
+      letter-spacing:0.3px; text-transform:uppercase;
+    }
+
+    /* Status pills */
+    #ticketsScreen .ticket-status-pill {
+      padding:3px 10px; border-radius:20px;
+      font-size:10px; font-weight:700; letter-spacing:0.5px;
+      text-transform:uppercase; flex-shrink:0; white-space:nowrap;
+    }
+    #ticketsScreen .ticket-status-pill.ready    { background:#dbeafe; color:#1e40af; }
+    #ticketsScreen .ticket-status-pill.closed   { background:#d1fae5; color:#065f46; }
+    #ticketsScreen .ticket-status-pill.open     { background:#fef3c7; color:#92400e; }
+    #ticketsScreen .ticket-status-pill.void,
+    #ticketsScreen .ticket-status-pill.archived { background:#e5e7eb; color:#4b5563; }
+
+    /* Edited badge */
+    #ticketsScreen .ticket-edited-badge {
+      display:inline-block; padding:2px 5px; border-radius:3px;
+      font-size:9px; font-weight:700; background:#d97706; color:#fff;
+      margin-left:5px; vertical-align:middle;
+    }
+
+    /* Empty / loading */
+    #ticketsScreen #ticketsEmpty, #ticketsScreen #ticketsLoading {
+      text-align:center; padding:60px 20px; color:#9ca3af; font-size:15px; width:100%;
+    }
+
+    /* ── Modals ──────────────────────────────────────────────── */
+    #ticketModal {
+      display:none; position:fixed; inset:0;
+      background:rgba(0,0,0,0.5); z-index:200000;
+      align-items:flex-end; justify-content:center;
+    }
+    @media(min-width:600px){ #ticketModal { align-items:center; } }
+    #ticketModalInner {
+      background:#fff; border-radius:20px 20px 0 0;
+      padding:20px 20px 32px; width:100%; max-width:560px;
+      max-height:calc(100vh - 60px); overflow-y:auto; box-sizing:border-box;
+    }
+    @media(min-width:600px){ #ticketModalInner { border-radius:16px; padding-bottom:20px; max-height:85vh; } }
+    #ticketDetailsModal {
+      display:none; position:fixed; inset:0;
+      background:rgba(0,0,0,0.5); z-index:200001;
+      align-items:center; justify-content:center; padding:20px; box-sizing:border-box;
+    }
+    #ticketDetailsModalInner {
+      background:#fff; border-radius:14px; width:100%; max-width:520px;
+      max-height:85vh; overflow-y:auto; padding:20px; box-sizing:border-box;
+      box-shadow:0 20px 60px rgba(0,0,0,0.2);
+    }
+    #servicesModal {
+      display:none; position:fixed; inset:0;
+      background:rgba(0,0,0,0.5); z-index:200002;
+      align-items:center; justify-content:center; padding:16px; box-sizing:border-box;
+    }
+    #servicesModalInner {
+      background:#fff; border-radius:14px; width:100%; max-width:480px;
+      max-height:85vh; overflow-y:auto; box-sizing:border-box;
+      box-shadow:0 20px 60px rgba(0,0,0,0.2);
+    }
+  </style>
+
+  <!-- Tabs + actions row -->
+  <div class="tickets-tabs" style="gap:12px;">
+    <button class="tickets-tab active" data-tab="ready">Ready</button>
+    <button class="tickets-tab" data-tab="closed">Closed</button>
+    <button id="ticketsArchivedTab" class="tickets-tab" data-tab="archived" style="display:none;">Archived</button>
+
+    <button id="ticketsNewBtn" onclick="window.openTicketModal && window.openTicketModal()" style="padding:6px 16px;background:#7c3aed;color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(124,58,237,0.35);white-space:nowrap;margin-left:auto;margin-right:125px;">+ New Ticket</button>
+
+    <button id="ticketsManageServicesBtn" style="display:none;align-items:center;gap:4px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:500;color:#374151;margin-left:auto;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l-.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Services
+    </button>
+  </div>
+
+  <!-- Body -->
+  <div class="tickets-body">
+    <div id="ticketsLoading" style="text-align:center;padding:40px;color:#9ca3af;">Loading…</div>
+    <div id="ticketsEmpty" style="display:none;text-align:center;padding:40px;color:#9ca3af;font-size:15px;">No tickets here yet.</div>
+    <div id="ticketsList"></div>
+  </div>
+</div>
+
+<!-- Ticket Create/Edit Modal -->
+<div id="ticketModal">
+  <div id="ticketModalInner">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h2 id="ticketModalTitle" style="margin:0;font-size:18px;font-weight:700;">New Ticket</h2>
+      <button onclick="window.closeTicketModal && window.closeTicketModal()" style="background:none;border:none;cursor:pointer;font-size:22px;color:#6b7280;line-height:1;">×</button>
+    </div>
+    <!-- Customer (optional) -->
+    <button id="ticketCustomerToggle" style="background:none;border:none;cursor:pointer;font-size:13px;color:#6366f1;padding:0;margin-bottom:8px;font-weight:500;">+ Optional: Customer / Client</button>
+    <div id="ticketCustomerWrap" style="display:none;margin-bottom:12px;">
+      <input id="ticketCustomerName" type="text" placeholder="Customer / Client name" style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;">
+    </div>
+    <!-- As Booked reference -->
+    <div id="ticketAsBookedBlock" style="display:none;margin-bottom:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+      <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Appointment reference</div>
+      <button id="ticketAsBookedToggle" style="background:none;border:none;cursor:pointer;font-size:12px;color:#6366f1;padding:0;">Show As Booked</button>
+      <div id="ticketAsBookedContent" style="display:none;margin-top:8px;"></div>
+    </div>
+    <div id="ticketAsBookedNone" style="display:block;"></div>
+    <!-- AS IS message -->
+    <div id="ticketAsIsMessageBlock" style="display:none;margin-bottom:12px;background:#d1fae5;border-radius:8px;padding:10px;font-size:13px;color:#065f46;">
+      <strong>AS IS:</strong> <span id="ticketAsIsMessageText"></span>
+      <button id="ticketAsIsClearBtn" style="display:none;margin-left:8px;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;">Clear</button>
+    </div>
+    <!-- Service picker -->
+    <div style="margin-bottom:8px;font-size:13px;font-weight:600;color:#374151;">Add Services Performed</div>
+    <div id="ticketServicePickerContainer" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;max-height:220px;overflow-y:auto;"></div>
+    <!-- Performed lines -->
+    <div id="ticketPerformedList" style="margin-bottom:8px;"></div>
+    <input type="hidden" id="ticketLinesData" value="[]">
+    <!-- Diff -->
+    <div id="ticketDiff" style="margin-bottom:12px;"></div>
+    <!-- Total -->
+    <div id="ticketTotalBlock" style="display:none;margin-bottom:16px;padding:12px 16px;background:#166534;color:#fff;border-radius:8px;font-size:16px;font-weight:700;text-align:center;">
+      Total: <span id="ticketTotalAmount">$0.00</span>
+    </div>
+    <!-- Actions -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+      <button id="ticketAsIsBtn" style="display:none;padding:10px 16px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;" onclick="window.doSendAsIsFromModal && window.doSendAsIsFromModal()">AS IS</button>
+      <button id="ticketSendNewBtn" style="padding:10px 20px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Send to Front Desk</button>
+      <button id="ticketSaveBtn" style="display:none;padding:10px 20px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;" onclick="window.saveTicket && window.saveTicket()">Save</button>
+      <button id="ticketFinalizeBtn" style="display:none;padding:10px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Send to Front Desk</button>
+      <button id="ticketCloseBtn" style="display:none;padding:10px 16px;background:#059669;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Close Ticket</button>
+      <button id="ticketArchiveBtn" style="display:none;padding:10px 16px;border:1px solid #9ca3af;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;">Archive</button>
+      <button id="ticketDeleteBtn" style="display:none;padding:10px 16px;border:1px solid #ef4444;border-radius:8px;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:14px;">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Ticket Details Modal (closed/archived) -->
+<div id="ticketDetailsModal">
+  <div id="ticketDetailsModalInner">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h2 id="ticketDetailsTitle" style="margin:0;font-size:18px;font-weight:700;">Ticket Details</h2>
+      <button onclick="window.closeTicketDetailsModal && window.closeTicketDetailsModal()" style="background:none;border:none;cursor:pointer;font-size:22px;color:#6b7280;line-height:1;">×</button>
+    </div>
+    <div id="ticketDetailsContent"></div>
+    <div id="ticketDetailsActions" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:16px;"></div>
+  </div>
+</div>
+
+<!-- Services Catalog Modal -->
+<div id="servicesModal">
+  <div id="servicesModalInner">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #e5e7eb;">
+      <h2 style="margin:0;font-size:17px;font-weight:700;">Service Catalog</h2>
+      <button onclick="window.closeServicesModal && window.closeServicesModal()" style="background:none;border:none;cursor:pointer;font-size:22px;color:#6b7280;line-height:1;">×</button>
+    </div>
+    <div style="display:flex;border-bottom:1px solid #e5e7eb;">
+      <button id="servicesCatalogTab" style="flex:1;padding:12px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid #111;">Services</button>
+      <button id="servicesCategoriesTab" style="flex:1;padding:12px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:500;color:#6b7280;border-bottom:2px solid transparent;">Categories</button>
+    </div>
+    <div id="servicesCatalogPanel" style="padding:16px;display:block;">
+      <div id="servicesList" style="margin-bottom:16px;max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;"></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <input id="serviceFormName" type="text" placeholder="Service name" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
+        <select id="serviceFormCategory" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;"></select>
+        <input id="serviceFormPrice" type="number" min="0" step="0.01" placeholder="Default price ($)" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
+        <button onclick="window.saveServiceFromForm && window.saveServiceFromForm()" style="padding:10px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Save Service</button>
+      </div>
+    </div>
+    <div id="servicesCategoriesPanel" style="padding:16px;display:none;">
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <input id="newCategoryName" type="text" placeholder="Category name" style="flex:1;padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
+        <button onclick="window.addServiceCategory && window.addServiceCategory()" style="padding:10px 16px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Add</button>
+      </div>
+      <div id="categoriesList" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;"></div>
+    </div>
+  </div>
+</div>
 
 <!-- Chat Screen -->
 <div id="chatScreen">

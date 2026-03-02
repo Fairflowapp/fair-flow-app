@@ -1,0 +1,177 @@
+/**
+ * Queue Cloud – sync QUEUE (Available + In service + History log) to Firestore.
+ * Replaces localStorage for queue/service/log when user is signed in and has salonId.
+ * Firestore: salons/{salonId}/queueState/default  →  { queue, service, log, updatedAt }
+ */
+
+import { doc, getDoc, getDocFromServer, setDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+import { db, auth } from "./app.js";
+
+const QUEUE_STATE_DOC = "default";
+let _salonId = null;
+let _unsubscribe = null;
+let _applyState = null;
+let _getState = null;
+let _onLogChange = null;
+
+async function getSalonId() {
+  const user = auth.currentUser;
+  if (!user) return null;
+  try {
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    if (userDoc.exists()) {
+      const data = userDoc.data();
+      return data.salonId || (typeof window !== "undefined" ? window.currentSalonId : null) || null;
+    }
+  } catch (e) {
+    console.warn("[QueueCloud] getSalonId failed", e);
+  }
+  return typeof window !== "undefined" ? window.currentSalonId : null;
+}
+
+function queueStateRef(salonId) {
+  return doc(db, `salons/${salonId}/queueState`, QUEUE_STATE_DOC);
+}
+
+function subscribe(salonId) {
+  if (_unsubscribe) {
+    _unsubscribe();
+    _unsubscribe = null;
+  }
+  const ref = queueStateRef(salonId);
+  _unsubscribe = onSnapshot(ref, (snap) => {
+    if (!_applyState) return;
+    if (!snap.exists()) {
+      const state = _getState ? _getState() : null;
+      if (state && (state.queue?.length || state.service?.length || state.log?.length)) {
+        setDoc(ref, {
+          queue: state.queue || [],
+          service: state.service || [],
+          log: state.log || [],
+          updatedAt: serverTimestamp()
+        }).catch((e) => console.warn("[QueueCloud] Initial write failed", e));
+      }
+      return;
+    }
+    const data = snap.data();
+    const queue = Array.isArray(data.queue) ? data.queue : [];
+    const service = Array.isArray(data.service) ? data.service : [];
+    const log = Array.isArray(data.log) ? data.log : [];
+    _applyState(queue, service, log);
+    if (typeof _onLogChange === "function") _onLogChange();
+  }, (err) => console.error("[QueueCloud] subscribe error", err));
+}
+
+function writeState() {
+  if (!_salonId || !_getState) return Promise.resolve();
+  const state = _getState();
+  if (!state) return Promise.resolve();
+  const ref = queueStateRef(_salonId);
+  return setDoc(ref, {
+    queue: state.queue || [],
+    service: state.service || [],
+    log: state.log || [],
+    updatedAt: serverTimestamp()
+  }).catch((e) => {
+    console.warn("[QueueCloud] write failed", e);
+  });
+}
+
+/**
+ * Call from index.html after queue, service, log and renderQueue, renderService exist.
+ * @param {Object} opts
+ * @param {function(number[], number[], any[])} opts.applyState - (queue, service, log) => mutate app state and re-render
+ * @param {function(): { queue: any[], service: any[], log: any[] }} opts.getState - return current queue, service, log
+ * @param {function()} [opts.onLogChange] - optional; called after applying state to refresh log UI
+ */
+export function initQueueCloud(opts) {
+  if (!opts || typeof opts.applyState !== "function" || typeof opts.getState !== "function") {
+    console.warn("[QueueCloud] initQueueCloud: applyState and getState required");
+    return;
+  }
+  _applyState = opts.applyState;
+  _getState = opts.getState;
+  _onLogChange = opts.onLogChange || null;
+  function tryConnect() {
+    getSalonId().then((sid) => {
+      if (sid && sid !== _salonId) {
+        _salonId = sid;
+        subscribe(sid);
+        console.log("[QueueCloud] Subscribed to salon", sid);
+      } else if (!sid) {
+        _salonId = null;
+        if (_unsubscribe) {
+          _unsubscribe();
+          _unsubscribe = null;
+        }
+      }
+    });
+  }
+  tryConnect();
+  onAuthStateChanged(auth, () => { tryConnect(); });
+}
+
+/**
+ * Write current queue state to Firestore. Call from save() in index.html.
+ */
+export function queueCloudWrite() {
+  return writeState();
+}
+
+/**
+ * Reconnect after salonId might have changed (e.g. after login or profile load).
+ */
+export function queueCloudReconnect() {
+  getSalonId().then((sid) => {
+    if (sid === _salonId) return;
+    _salonId = sid;
+    if (sid) subscribe(sid);
+  });
+}
+
+/** Fetch current state from server (bypass cache) and apply so other computer sees updates. */
+export function queueCloudRefresh() {
+  if (!_salonId || !_applyState) return Promise.resolve();
+  const ref = queueStateRef(_salonId);
+  return getDocFromServer(ref).then((snap) => {
+    if (snap.exists()) {
+      const data = snap.data();
+      const queue = Array.isArray(data.queue) ? data.queue : [];
+      const service = Array.isArray(data.service) ? data.service : [];
+      const log = Array.isArray(data.log) ? data.log : [];
+      _applyState(queue, service, log);
+      if (typeof _onLogChange === "function") _onLogChange();
+    }
+  }).catch((e) => console.warn("[QueueCloud] refresh failed", e));
+}
+
+if (typeof window !== "undefined") {
+  window.initQueueCloud = initQueueCloud;
+  window.queueCloudWrite = queueCloudWrite;
+  window.queueCloudReconnect = queueCloudReconnect;
+  window.queueCloudRefresh = queueCloudRefresh;
+  if (typeof window.__ffQueueCloudInit === "function") {
+    window.__ffQueueCloudInit();
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (typeof window.queueCloudReconnect === "function") window.queueCloudReconnect();
+    if (typeof window.tasksCloudReconnect === "function") window.tasksCloudReconnect();
+    setTimeout(() => {
+      if (typeof window.queueCloudRefresh === "function") window.queueCloudRefresh();
+      if (typeof window.tasksCloudRefresh === "function") window.tasksCloudRefresh();
+    }, 300);
+  });
+
+  // Poll every 2s: reconnect then fetch from server so both computers stay in sync
+  setInterval(() => {
+    if (document.visibilityState !== "visible") return;
+    if (typeof window.queueCloudReconnect === "function") window.queueCloudReconnect();
+    if (typeof window.tasksCloudReconnect === "function") window.tasksCloudReconnect();
+    setTimeout(() => {
+      if (typeof window.queueCloudRefresh === "function") window.queueCloudRefresh();
+      if (typeof window.tasksCloudRefresh === "function") window.tasksCloudRefresh();
+    }, 100);
+  }, 2000);
+}
