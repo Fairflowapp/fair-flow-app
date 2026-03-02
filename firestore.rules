@@ -404,7 +404,7 @@ service cloud.firestore {
     // ===== QUEUE / TASKS STATE =====
     match /salons/{salonId}/queueState/{docId} {
       allow read: if belongsToSalon(salonId);
-      allow write: if isManager(salonId);
+      allow write: if belongsToSalon(salonId);
     }
 
     match /salons/{salonId}/tasksState/{docId} {

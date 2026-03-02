@@ -3419,7 +3419,7 @@ function renderHistory() {
   }
   
   // Apply range filter BEFORE sorting
-  const rangeValue = localStorage.getItem('ff_history_range_v1') || '30d';
+  const rangeValue = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
   rows = applyHistoryRangeFilter(rows, rangeValue);
   
   // Apply order filter (newest first = reverse array, oldest first = as-is)
@@ -6824,7 +6824,7 @@ function openHistoryModal() {
   }
   const rangeSelect = document.getElementById('historyRangeFilter');
   if (rangeSelect) {
-    rangeSelect.value = localStorage.getItem('ff_history_range_v1') || '30d';
+    rangeSelect.value = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
   }
   renderHistory();
 }
@@ -6909,7 +6909,7 @@ function exportHistory() {
   }
   
   // Apply range filter BEFORE sorting
-  const rangeValue = localStorage.getItem('ff_history_range_v1') || '30d';
+  const rangeValue = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
   entries = applyHistoryRangeFilter(entries, rangeValue);
   
   // Apply order filter (respect the selected order)
@@ -6990,11 +6990,15 @@ if (historyOrderFilterSelect) {
 // Wire up history range filter dropdown
 const historyRangeFilterSelect = document.getElementById('historyRangeFilter');
 if (historyRangeFilterSelect) {
-  const savedRange = localStorage.getItem('ff_history_range_v1') || '30d';
+  const savedRange = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
   historyRangeFilterSelect.value = savedRange;
   historyRangeFilterSelect.addEventListener('change', function(e) {
     const rangeValue = e.target.value || '30d';
-    localStorage.setItem('ff_history_range_v1', rangeValue);
+    if (typeof window.ffSaveHistoryRange === 'function') {
+      window.ffSaveHistoryRange(rangeValue);
+    } else {
+      localStorage.setItem('ff_history_range_v1', rangeValue);
+    }
     renderHistory();
   });
 }
@@ -21553,7 +21557,40 @@ eye.addEventListener("mouseup",hide); eye.addEventListener("mouseleave",hide); e
 
 // Save
 
-function save(){ ls("ffv24_settings",settings); ls("ffv24_queue",queue); ls("ffv24_service",service); ls("ffv24_log",log); syncWorkersToUsers(); }
+window.__ff_lastSaveTime = 0;
+
+function save(){
+  window.__ff_lastSaveTime = Date.now();
+  ls("ffv24_settings",settings); ls("ffv24_queue",queue); ls("ffv24_service",service); ls("ffv24_log",log); syncWorkersToUsers();
+  if(typeof window.queueCloudWrite==='function') window.queueCloudWrite();
+}
+
+// Queue Cloud init callback — called automatically by queue-cloud.js when it loads
+window.__ffQueueCloudInit = function() {
+  if (typeof window.initQueueCloud !== 'function') return;
+  window.initQueueCloud({
+    applyState: function(q, s, l) {
+      // After a local save, ignore Firestore updates for 5s to avoid race condition
+      if (Date.now() - window.__ff_lastSaveTime < 5000) return;
+      queue = q;
+      service = s;
+      log = l;
+      // Keep localStorage in sync as cache
+      ls("ffv24_queue", q);
+      ls("ffv24_service", s);
+      ls("ffv24_log", l);
+      renderQueue();
+      renderService();
+    },
+    getState: function() {
+      return { queue: queue, service: service, log: log };
+    },
+    onLogChange: function() {
+      if (Date.now() - window.__ff_lastSaveTime < 5000) return;
+      if (typeof renderHistory === 'function') renderHistory();
+    }
+  });
+};
 
 // ===== AUTH FOUNDATION ONLY =====
 // Helper functions for staff profile and invite management
@@ -25232,6 +25269,8 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/inbox.js?v=20260219_draft"></script>
   <script type="module" src="/chat.js?v=20260222_flows3"></script>
   <script type="module" src="/staff-cloud.js?v=20260221a"></script>
+  <script type="module" src="/settings-cloud.js?v=20260302a"></script>
+  <script type="module" src="/queue-cloud.js?v=20260302a"></script>
   <script type="module" src="/tickets.js?v=20260301i"></script>
 
   <!-- PIN Modal -->
