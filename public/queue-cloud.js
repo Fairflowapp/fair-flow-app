@@ -34,30 +34,54 @@ function queueStateRef(salonId) {
   return doc(db, `salons/${salonId}/queueState`, QUEUE_STATE_DOC);
 }
 
+let _firstSnapshot = true;
+
 function subscribe(salonId) {
   if (_unsubscribe) {
     _unsubscribe();
     _unsubscribe = null;
   }
+  _firstSnapshot = true;
   const ref = queueStateRef(salonId);
   _unsubscribe = onSnapshot(ref, (snap) => {
     if (!_applyState) return;
+    const localState = _getState ? _getState() : null;
+    const localHasData = localState &&
+      ((localState.queue?.length || 0) + (localState.service?.length || 0) + (localState.log?.length || 0)) > 0;
+
     if (!snap.exists()) {
-      const state = _getState ? _getState() : null;
-      if (state && (state.queue?.length || state.service?.length || state.log?.length)) {
+      if (localHasData) {
+        console.log("[QueueCloud] No cloud doc, pushing local state");
         setDoc(ref, {
-          queue: state.queue || [],
-          service: state.service || [],
-          log: state.log || [],
+          queue: localState.queue || [],
+          service: localState.service || [],
+          log: localState.log || [],
           updatedAt: serverTimestamp()
         }).catch((e) => console.warn("[QueueCloud] Initial write failed", e));
       }
+      _firstSnapshot = false;
       return;
     }
     const data = snap.data();
     const queue = Array.isArray(data.queue) ? data.queue : [];
     const service = Array.isArray(data.service) ? data.service : [];
     const log = Array.isArray(data.log) ? data.log : [];
+    const cloudHasData = (queue.length + service.length + log.length) > 0;
+
+    // On first snapshot: if cloud is empty but local has data, push local to cloud
+    if (_firstSnapshot && !cloudHasData && localHasData) {
+      console.log("[QueueCloud] Cloud empty but local has data, pushing local");
+      setDoc(ref, {
+        queue: localState.queue || [],
+        service: localState.service || [],
+        log: localState.log || [],
+        updatedAt: serverTimestamp()
+      }).catch((e) => console.warn("[QueueCloud] Push local failed", e));
+      _firstSnapshot = false;
+      return;
+    }
+
+    _firstSnapshot = false;
     _applyState(queue, service, log);
     if (typeof _onLogChange === "function") _onLogChange();
   }, (err) => console.error("[QueueCloud] subscribe error", err));
@@ -133,6 +157,8 @@ export function queueCloudReconnect() {
 /** Fetch current state from server (bypass cache) and apply so other computer sees updates. */
 export function queueCloudRefresh() {
   if (!_salonId || !_applyState) return Promise.resolve();
+  // Respect cooldown from local writes
+  if (typeof window !== "undefined" && (Date.now() - (window.__ff_lastSaveTime || 0)) < 5000) return Promise.resolve();
   const ref = queueStateRef(_salonId);
   return getDocFromServer(ref).then((snap) => {
     if (snap.exists()) {

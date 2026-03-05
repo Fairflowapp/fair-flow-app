@@ -38,23 +38,53 @@ function tasksStateRef(salonId) {
   return doc(db, `salons/${salonId}/tasksState`, TASKS_STATE_DOC);
 }
 
+let _firstSnapshot = true;
+
+function stateHasData(state) {
+  if (!state) return false;
+  if (Object.keys(state.catalog || {}).length > 0) return true;
+  return TABS.some((tab) => {
+    const t = state[tab];
+    if (!t) return false;
+    return (t.active?.length || 0) + (t.pending?.length || 0) + (t.done?.length || 0) > 0;
+  });
+}
+
 function subscribe(salonId) {
   if (_unsubscribe) {
     _unsubscribe();
     _unsubscribe = null;
   }
+  _firstSnapshot = true;
   const ref = tasksStateRef(salonId);
   _unsubscribe = onSnapshot(ref, (snap) => {
     if (!_applyState) return;
+    const localState = _getState ? _getState() : null;
+    const localHasData = stateHasData(localState);
+
     if (!snap.exists()) {
-      const state = _getState ? _getState() : null;
-      if (state) {
-        setDoc(ref, buildFirestoreState(state)).catch((e) => console.warn("[TasksCloud] Initial write failed", e));
+      if (localHasData) {
+        console.log("[TasksCloud] No cloud doc, pushing local state");
+        setDoc(ref, buildFirestoreState(localState)).catch((e) => console.warn("[TasksCloud] Initial write failed", e));
       }
+      _firstSnapshot = false;
       return;
     }
     const data = snap.data();
-    // Guard against infinite loop: prevent localStorage hook from triggering a write-back
+
+    // On first snapshot: if cloud is empty but local has data, push local to cloud
+    if (_firstSnapshot) {
+      const cloudState = { catalog: data.catalog || {} };
+      TABS.forEach((tab) => { cloudState[tab] = data[tab] || {}; });
+      if (!stateHasData(cloudState) && localHasData) {
+        console.log("[TasksCloud] Cloud empty but local has data, pushing local");
+        setDoc(ref, buildFirestoreState(localState)).catch((e) => console.warn("[TasksCloud] Push local failed", e));
+        _firstSnapshot = false;
+        return;
+      }
+    }
+    _firstSnapshot = false;
+
     if (typeof window !== "undefined") window.__ffTasksApplyingRemote = true;
     try {
       _applyState(data);
@@ -71,6 +101,7 @@ function buildFirestoreState(state) {
     tombstone: state.tombstone || {},
     alertWindows: state.alertWindows || {},
     enforceSelectSettings: state.enforceSelectSettings || {},
+    autoResetState: state.autoResetState || {},
     updatedAt: serverTimestamp()
   };
   TABS.forEach((tab) => {

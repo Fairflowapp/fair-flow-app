@@ -8722,12 +8722,20 @@ function openTasks() {
       }
     }, 50);
     
+    // Pull latest state from Firestore server before rendering (ensures other-device changes are visible)
+    if (typeof window.tasksCloudRefresh === 'function') {
+      window.tasksCloudRefresh();
+    }
+
     // Set default tab to Opening (this will render tasks)
     setTasksTab('opening');
     
     // Update tab badges after opening Tasks screen
     if (typeof window.ffUpdateTasksTabBadges === 'function') {
       setTimeout(() => window.ffUpdateTasksTabBadges(), 200);
+    }
+    if (typeof window.ffUpdateHomeTasksBadge === 'function') {
+      setTimeout(() => window.ffUpdateHomeTasksBadge(), 200);
     }
     
     // After DOM rendering is completed and renderTasksList() has run, check reset button visibility
@@ -8762,19 +8770,66 @@ function openTasks() {
       // Silently ignore errors
     }
     
-    // Start periodic auto-check for Opening auto-reset at time (only when Tasks screen is visible)
-    if (typeof window.__ffOpeningAutoResetInterval === 'undefined' || window.__ffOpeningAutoResetInterval === null) {
-      window.__ffOpeningAutoResetInterval = setInterval(() => {
+    // Periodic auto-reset check for ALL tabs (every 60 seconds when Tasks screen is visible)
+    if (!window.__ffAutoResetInterval) {
+      window.__ffAutoResetInterval = setInterval(() => {
         try {
           const tasksScreen = document.getElementById('tasksScreen');
-          if (tasksScreen && tasksScreen.style.display !== 'none') {
-            if (typeof window.ffMaybeAutoResetOpeningAtTime === 'function') {
-              window.ffMaybeAutoResetOpeningAtTime(new Date());
-            }
-          }
-        } catch (e) {
-          // Silently ignore errors
-        }
+          if (!tasksScreen || tasksScreen.style.display === 'none') return;
+
+          const _now = new Date();
+          const _TABS = ['opening','closing','weekly','monthly','yearly'];
+          const _aw = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+
+          _TABS.forEach(function(_tab) {
+            try {
+              const _cfg = _aw[_tab] || {};
+              if (_cfg.autoResetEnabled !== true || !_cfg.autoResetTime) return;
+
+              // Check time
+              const _parts = _cfg.autoResetTime.split(':').map(Number);
+              if (isNaN(_parts[0]) || isNaN(_parts[1])) return;
+              const _sched = new Date(_now);
+              _sched.setHours(_parts[0], _parts[1], 0, 0);
+              if (_now < _sched) return;
+
+              // Check all tasks done
+              const _active  = JSON.parse(localStorage.getItem('ff_tasks_' + _tab + '_active_v1')  || '[]');
+              const _pending = JSON.parse(localStorage.getItem('ff_tasks_' + _tab + '_pending_v1') || '[]');
+              if (_active.length === 0) return;
+
+              const _isDone = t => {
+                const s = String(t && t.status || '').toLowerCase();
+                return s === 'done' || t.completed === true || t.isCompleted === true || Boolean(t.completedAt);
+              };
+              if (!_active.every(_isDone)) return;
+              if (_pending.length > 0 && !_pending.every(_isDone)) return;
+
+              // For weekly/monthly/yearly: only reset if there are tasks scheduled for today
+              // (ffGetUncompletedCountForTab returns 0 even when no tasks scheduled, so guard here too)
+              if (_tab === 'weekly' || _tab === 'monthly' || _tab === 'yearly') {
+                if (typeof window.ffHasTodayTasksForTab === 'function' && !window.ffHasTodayTasksForTab(_tab, _now)) return;
+              }
+
+              // All conditions met — fire reset
+              // Guard: only once per day per tab (save lastRunDate)
+              const _stateKey = 'ff_tasks_auto_reset_state_v1';
+              const _stateAll = JSON.parse(localStorage.getItem(_stateKey) || '{}');
+              if (!_stateAll[_tab]) _stateAll[_tab] = {};
+              const _todayStr = _now.getFullYear() + '-' +
+                String(_now.getMonth() + 1).padStart(2, '0') + '-' +
+                String(_now.getDate()).padStart(2, '0');
+              if (_stateAll[_tab].lastRunDate === _todayStr) return;
+
+              console.log('[AUTO RESET][INTERVAL] Firing for tab:', _tab);
+              if (typeof window.resetTasksForTab === 'function') {
+                window.resetTasksForTab(_tab);
+                _stateAll[_tab].lastRunDate = _todayStr;
+                localStorage.setItem(_stateKey, JSON.stringify(_stateAll));
+              }
+            } catch(e) {}
+          });
+        } catch (e) {}
       }, 60000); // Check every 60 seconds
     }
     
@@ -8896,6 +8951,9 @@ function setTasksTab(tabName) {
     // Update tab badges after switching tabs
     if (typeof window.ffUpdateTasksTabBadges === 'function') {
       setTimeout(() => window.ffUpdateTasksTabBadges(), 50);
+    }
+    if (typeof window.ffUpdateHomeTasksBadge === 'function') {
+      setTimeout(() => window.ffUpdateHomeTasksBadge(), 50);
     }
     
     console.log('[Tasks] Tab switched to:', tabName);
@@ -9860,6 +9918,12 @@ function setSettingsModalTab(tabName, options) {
     // Render Settings modal list from catalog
     renderSettingsTaskList(tabName);
     
+    // Update schedule fields in Add form for current tab
+    if (typeof updateAddFormScheduleFields === 'function') {
+      updateAddFormScheduleFields();
+      resetAddFormScheduleFields();
+    }
+    
     console.log('[Tasks] Settings modal tab switched to:', tabName);
   } catch (e) {
     console.error('[Tasks] Error setting Settings modal tab:', e);
@@ -10351,51 +10415,31 @@ function saveTasksToStorage() {
     if (typeof window.ffUpdateTasksTabBadges === 'function') {
       setTimeout(() => window.ffUpdateTasksTabBadges(), 50);
     }
-    
-    // Check for auto-reset after saving (if opening/closing/weekly tab, no setTimeout)
-    if (tab === 'opening') {
-      try {
-        if (typeof window.ffMaybeAutoResetOpening === 'function') {
-          window.ffMaybeAutoResetOpening(new Date());
-        }
-      } catch (e) {
-        // Silently ignore errors
-      }
-    } else if (tab === 'closing') {
-      try {
-        if (typeof window.ffMaybeAutoResetClosing === 'function') {
-          window.ffMaybeAutoResetClosing(new Date());
-        }
-      } catch (e) {
-        // Silently ignore errors
-      }
-    } else if (tab === 'weekly') {
-      try {
-        if (typeof window.ffMaybeAutoResetWeekly === 'function') {
-          window.ffMaybeAutoResetWeekly(new Date());
-        }
-      } catch (e) {
-        // Silently ignore errors
-      }
-    } else if (tab === 'monthly') {
-      try {
-        if (typeof window.ffMaybeAutoResetMonthly === 'function') {
-          window.ffMaybeAutoResetMonthly(new Date());
-        }
-      } catch (e) {
-        // Silently ignore errors
-      }
-    } else if (tab === 'yearly') {
-      try {
-        if (typeof window.ffMaybeAutoResetYearly === 'function') {
-          window.ffMaybeAutoResetYearly(new Date());
-        }
-      } catch (e) {
-        // Silently ignore errors
-      }
+    if (typeof window.ffUpdateHomeTasksBadge === 'function') {
+      setTimeout(() => window.ffUpdateHomeTasksBadge(), 50);
     }
     
-    return true;
+    // Check for auto-reset after saving
+    try {
+      const _now = new Date();
+      if (tab === 'opening') {
+        if (typeof window.ffMaybeAutoResetOpening === 'function') window.ffMaybeAutoResetOpening(_now);
+        if (typeof window.ffMaybeAutoResetOpeningAtTime === 'function') window.ffMaybeAutoResetOpeningAtTime(_now);
+      } else if (tab === 'closing') {
+        if (typeof window.ffMaybeAutoResetClosing === 'function') window.ffMaybeAutoResetClosing(_now);
+        if (typeof window.ffMaybeAutoResetClosingAtTime === 'function') window.ffMaybeAutoResetClosingAtTime(_now);
+      } else if (tab === 'weekly') {
+        if (typeof window.ffMaybeAutoResetWeekly === 'function') window.ffMaybeAutoResetWeekly(_now);
+      } else if (tab === 'monthly') {
+        if (typeof window.ffMaybeAutoResetMonthly === 'function') window.ffMaybeAutoResetMonthly(_now);
+      } else if (tab === 'yearly') {
+        if (typeof window.ffMaybeAutoResetYearly === 'function') window.ffMaybeAutoResetYearly(_now);
+      }
+    } catch (e) {
+      // Silently ignore errors
+    }
+    
+    window.__ffTasksLastLocalWrite = Date.now(); if (typeof window.tasksCloudWrite === 'function') window.tasksCloudWrite(); return true;
   } catch (e) {
     console.error('[Tasks] Error saving to storage:', e);
     return false;
@@ -10451,21 +10495,30 @@ function migrateLegacyActiveToV1(tab) {
       console.warn('[Tasks] Error parsing current v1 active for migration:', e);
     }
     
-    // 2) Merge in all legacy keys (if present)
+    // 2) Merge in all legacy keys (if present) — ADD only, never overwrite v1 data
     let migratedCount = 0;
     const hadLegacy = legacyKeys.some(k => localStorage.getItem(k));
-    
+
     legacyKeys.forEach(k => {
       const raw = localStorage.getItem(k);
       if (!raw) return;
       try {
         const arr = JSON.parse(raw) || [];
-        const beforeCount = mergedById.size;
-        mergeTasks(arr);
-        const afterCount = mergedById.size;
-        if (afterCount > beforeCount) {
-          migratedCount += (afterCount - beforeCount);
-        }
+        arr.forEach(t => {
+          if (!t || typeof t !== 'object') return;
+          const keyId = t.taskId || t.id;
+          if (!keyId) return;
+          // Only add if NOT already in v1 — never overwrite existing task (preserves done/pending status)
+          if (!mergedById.has(String(keyId))) {
+            mergedById.set(String(keyId), {
+              ...t, id: keyId, taskId: keyId,
+              active: t.active == null ? true : t.active
+            });
+            migratedCount++;
+          }
+        });
+        // Delete legacy key after migrating so it never interferes again
+        localStorage.removeItem(k);
       } catch (e) {
         console.warn('[Tasks] Error parsing legacy active key', k, e);
       }
@@ -10478,8 +10531,17 @@ function migrateLegacyActiveToV1(tab) {
     if (tab === 'monthly' && !hadDataBefore && hadLegacy && migratedCount > 0) {
       console.log('[MIGRATE][MONTHLY] moved', migratedCount);
     }
-    
-    localStorage.setItem(newKey, JSON.stringify(mergedArray));
+
+    // Suppress cloud-sync hook during this write — migration is a local normalization,
+    // NOT a user change. Without this suppression, every render would set
+    // __ffTasksLastLocalWrite=Date.now() and permanently block incoming remote updates.
+    var _wasApplying = window.__ffTasksApplyingRemote;
+    window.__ffTasksApplyingRemote = true;
+    try {
+      localStorage.setItem(newKey, JSON.stringify(mergedArray));
+    } finally {
+      window.__ffTasksApplyingRemote = _wasApplying;
+    }
     
     // TEMP debug log for active v1 count after migration
     try {
@@ -10555,44 +10617,12 @@ function renderTasksList(tab, opts) {
       migrateLegacyActiveToV1(currentTab);
     }
     
-    // Render modal list (Settings modal)
-    const modalListContainer = document.getElementById('tasksModalDraftList');
-    if (modalListContainer && isTasksSettingsOpen) {
+    // Render modal list (Settings modal) - use the full renderer with date/day selectors
+    if (isTasksSettingsOpen) {
       const settingsTab = window.currentTasksTab || 'opening';
-      const tasks = tasksModalDraft[settingsTab] || [];
-      
-      if (tasks.length === 0) {
-        modalListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;">No tasks yet</div>';
-      } else {
-        // Show newest first (reverse array)
-        const tasksReversed = [...tasks].reverse();
-        
-        modalListContainer.innerHTML = tasksReversed.map((task, displayIndex) => {
-          const actualIndex = tasks.length - 1 - displayIndex;
-          return `
-            <div class="tasks-modal-draft-item" style="display:flex;align-items:flex-start;justify-content:space-between;padding:12px;margin-bottom:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;">
-              <div style="flex:1;">
-                <div style="font-weight:600;font-size:14px;color:#111;margin-bottom:4px;">${escapeHtmlDraft(task.title)}</div>
-                ${task.instructions ? `<div style="font-size:13px;color:#666;margin-top:4px;white-space:pre-wrap;">${escapeHtmlDraft(task.instructions)}</div>` : ''}
-              </div>
-              <button class="tasks-modal-draft-remove" data-index="${actualIndex}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;padding:0;width:24px;height:24px;display:flex;align-items:center;justify-content:center;margin-left:12px;border-radius:4px;flex-shrink:0;">×</button>
-            </div>
-          `;
-        }).join('');
-        
-        // Attach remove handlers for modal
-        modalListContainer.querySelectorAll('.tasks-modal-draft-remove').forEach(btn => {
-          btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const index = parseInt(btn.dataset.index);
-            removeTaskFromDraft(index);
-          });
-        });
-      }
+      renderSettingsTaskList(settingsTab);
     }
-    
-    // If force option is set, clear any caches for this tab before rendering
+        // If force option is set, clear any caches for this tab before rendering
     if (force) {
       if (typeof window.tasksCache !== 'undefined' && window.tasksCache && window.tasksCache[currentTab]) {
         delete window.tasksCache[currentTab];
@@ -10992,8 +11022,7 @@ function renderTasksList(tab, opts) {
             if (!code) return;
             const confirmed = await showReturnConfirmation();
             if (!confirmed) return;
-            const tab = typeof window.currentTasksTab === 'function'
-            TasksTab === 'function'
+            const tab = typeof window.getCurrentTasksTab === 'function'
               ? window.getCurrentTasksTab()
               : (window.currentTasksTab || 'opening');
             const pendingList = getTabTasks(tab, 'pending');
@@ -11255,17 +11284,42 @@ function addTaskToDraft() {
     // Generate stable ID
     const id = Date.now().toString(36);
     
+    // Build task object
+    const taskObj = { id, taskId: id, title: name, instructions: info };
+
+    // Capture schedule fields based on tab
+    if (tab === 'weekly') {
+      const allWeek = document.getElementById('taskAddWeeklyAllWeek');
+      if (allWeek && allWeek.checked) {
+        taskObj.scheduleWeekdays = 'any';
+      } else {
+        const checked = [];
+        document.querySelectorAll('.task-add-weekly-day:checked').forEach(cb => {
+          checked.push(parseInt(cb.dataset.day, 10));
+        });
+        taskObj.scheduleWeekdays = checked.length > 0 ? checked : 'any';
+      }
+    } else if (tab === 'monthly') {
+      const sel = document.getElementById('taskAddMonthlyDaySelect');
+      if (sel && sel.value !== 'any') {
+        taskObj.scheduleDayOfMonth = parseInt(sel.value, 10);
+      } else {
+        taskObj.scheduleDayOfMonth = 'any';
+      }
+    } else if (tab === 'yearly') {
+      const mSel = document.getElementById('taskAddYearlyMonth');
+      const dInp = document.getElementById('taskAddYearlyDay');
+      if (mSel && mSel.value) taskObj.scheduleMonth = parseInt(mSel.value, 10);
+      if (dInp && dInp.value) taskObj.scheduleDay = parseInt(dInp.value, 10);
+    }
+
     // Add to current tab's array - ALWAYS append to END (preserves catalog order)
-    tasksModalDraft[tab].push({
-      id,
-      taskId: id,
-      title: name,
-      instructions: info
-    });
+    tasksModalDraft[tab].push(taskObj);
     
     // Clear form
     if (nameEl) nameEl.value = '';
     if (infoEl) infoEl.value = '';
+    resetAddFormScheduleFields();
     
     // Re-render Settings modal list to show new task
     renderSettingsTaskList(tab);
@@ -11740,6 +11794,30 @@ function cancelEditTask() {
   }
 }
 
+function updateAddFormScheduleFields() {
+  const tab = getCurrentTasksTab();
+  const weeklyDiv = document.getElementById('taskAddWeeklyDays');
+  const monthlyDiv = document.getElementById('taskAddMonthlyDay');
+  const yearlyDiv = document.getElementById('taskAddYearlyDate');
+  if (weeklyDiv) weeklyDiv.style.display = (tab === 'weekly') ? 'block' : 'none';
+  if (monthlyDiv) monthlyDiv.style.display = (tab === 'monthly') ? 'block' : 'none';
+  if (yearlyDiv) yearlyDiv.style.display = (tab === 'yearly') ? 'block' : 'none';
+}
+
+function resetAddFormScheduleFields() {
+  const allWeek = document.getElementById('taskAddWeeklyAllWeek');
+  if (allWeek) { allWeek.checked = true; }
+  const daysWrap = document.getElementById('taskAddWeeklyDaysCheckboxes');
+  if (daysWrap) { daysWrap.style.opacity = '0.5'; daysWrap.style.pointerEvents = 'none'; }
+  document.querySelectorAll('.task-add-weekly-day').forEach(cb => { cb.checked = false; });
+  const monthlySel = document.getElementById('taskAddMonthlyDaySelect');
+  if (monthlySel) monthlySel.value = 'any';
+  const yearlyMonth = document.getElementById('taskAddYearlyMonth');
+  if (yearlyMonth) yearlyMonth.value = '';
+  const yearlyDay = document.getElementById('taskAddYearlyDay');
+  if (yearlyDay) yearlyDay.value = '';
+}
+
 function toggleTasksModalForm() {
   try {
     const formWrap = document.getElementById('tasksAddFormWrap');
@@ -11757,6 +11835,8 @@ function toggleTasksModalForm() {
       }
       // Show form
       formWrap.style.display = 'block';
+      updateAddFormScheduleFields();
+      resetAddFormScheduleFields();
       const toggleBtn = document.getElementById('tasksModalToggleForm');
       if (toggleBtn) {
         toggleBtn.textContent = 'Cancel';
@@ -11938,7 +12018,16 @@ function openTasksSettings(options) {
         alertWindows.yearly.showOnHome = false;
       }
     }
-    localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+    // Suppress cloud-sync hook — this is a defaults-init write, not a user change.
+    // Without suppression, opening the settings modal would reset __ffTasksLastLocalWrite
+    // and block incoming remote updates for 8 seconds.
+    var _wasApplyingSettings = window.__ffTasksApplyingRemote;
+    window.__ffTasksApplyingRemote = true;
+    try {
+      localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+    } finally {
+      window.__ffTasksApplyingRemote = _wasApplyingSettings;
+    }
     
     // Now set up the tab bar visual state (after listeners are set up)
     setSettingsModalTab(mainScreenTab, { skipAuth: skipAuth });
@@ -11954,6 +12043,18 @@ function openTasksSettings(options) {
     const toggleBtn = document.getElementById('tasksModalToggleForm');
     if (toggleBtn) {
       toggleBtn.textContent = 'Add Task';
+    }
+    
+    // Setup "All week" checkbox toggle for weekly days
+    const allWeekCb = document.getElementById('taskAddWeeklyAllWeek');
+    if (allWeekCb) {
+      allWeekCb.addEventListener('change', function() {
+        const daysWrap = document.getElementById('taskAddWeeklyDaysCheckboxes');
+        if (daysWrap) {
+          daysWrap.style.opacity = this.checked ? '0.5' : '1';
+          daysWrap.style.pointerEvents = this.checked ? 'none' : 'auto';
+        }
+      });
     }
     
     // Clear editing state when opening modal
@@ -12293,7 +12394,16 @@ function resetTasksForCurrentTab() {
       const actor = getHistoryActor ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
       addHistoryEntry(`Tasks Reset: ${currentTab}`, actor.role, actor.name, actor.name || '-', 'tasks');
     }
-    
+
+    // Explicit cloud write so the reset syncs immediately to other devices
+    if (typeof window.tasksCloudWrite === 'function') {
+      window.tasksCloudWrite();
+    }
+
+    // Update badges after reset
+    if (typeof window.ffUpdateTasksTabBadges === 'function') window.ffUpdateTasksTabBadges();
+    if (typeof window.ffUpdateHomeTasksBadge === 'function') window.ffUpdateHomeTasksBadge();
+
     console.log("[RESET] Completed");
 }
 
@@ -12941,108 +13051,78 @@ window.ffMaybeAutoResetQueue = ffMaybeAutoResetQueue;
 console.log('[EXPOSE] ffMaybeAutoResetQueue', typeof window.ffMaybeAutoResetQueue);
 
 // Opening tasks auto-reset function
-function ffMaybeAutoResetOpening(now = new Date()) {
+// skipSigCheck=true when called from markTaskDone (fresh completion by user — always allow)
+// skipSigCheck=false (default) when called from openTasks/interval (passive check — block if same cycle)
+function ffMaybeAutoResetOpening(now = new Date(), skipSigCheck = false) {
   try {
-    // Load auto-reset state
-    const stateRaw = localStorage.getItem('ff_tasks_auto_reset_state_v1');
-    let state = stateRaw ? JSON.parse(stateRaw) : {};
-    if (!state.opening) {
-      state.opening = {};
-    }
-    
-    // Check if auto-reset is enabled for Opening
-    // (Assuming there's a settings check - if not, we'll proceed if state exists)
-    const settingsRaw = localStorage.getItem('ff_tasks_settings_v1');
-    let settings = settingsRaw ? JSON.parse(settingsRaw) : {};
-    if (settings.taskReminders && settings.taskReminders.opening && settings.taskReminders.opening.enabled === false) {
-      return; // Auto-reset disabled
-    }
-    
-    // Get Opening active list
-    const keyActive = typeof getTabStorageKey === 'function' 
-      ? getTabStorageKey('opening', 'active')
-      : 'ff_tasks_opening_active_v1';
-    
-    let active = [];
-    try {
-      const activeRaw = localStorage.getItem(keyActive);
-      if (activeRaw) {
-        active = JSON.parse(activeRaw) || [];
+    if (window.__ffOpeningResetRunning) return;
+
+    // Must be enabled
+    const alertWindowsData = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const openingCfg = alertWindowsData.opening || {};
+    if (openingCfg.autoResetEnabled !== true) return;
+
+    // If autoResetTime is set, only allow reset when current time >= configured time
+    if (openingCfg.autoResetTime) {
+      const [h, m] = openingCfg.autoResetTime.split(':').map(Number);
+      if (!isNaN(h) && !isNaN(m)) {
+        const scheduled = new Date(now instanceof Date ? now : new Date(now));
+        scheduled.setHours(h, m, 0, 0);
+        if ((now instanceof Date ? now : new Date(now)) < scheduled) return;
       }
-    } catch (e) {
-      console.warn('[AUTO RESET][OPENING] Error reading active list:', e);
-      return;
     }
-    
-    // Check if all tasks are completed
-    const allCompleted = active.length > 0 && active.every(t => {
-      const status = String(t.status || '').toLowerCase();
-      return status === 'done' || !!t.completedAt;
-    });
-    
-    if (!allCompleted) {
-      return; // Not all completed, no reset needed
-    }
-    
-    // Build signature: taskIds + maxCompletedAt
-    const taskIds = active
-      .map(t => String(t.taskId || t.id || ''))
-      .filter(id => id)
-      .sort();
-    
-    const completedAts = active
-      .map(t => t.completedAt)
-      .filter(ca => ca)
-      .map(ca => String(ca));
-    
-    const maxCompletedAt = completedAts.length > 0 
-      ? completedAts.reduce((max, ca) => ca > max ? ca : max, completedAts[0])
-      : '';
-    
-    const sig = taskIds.join(',') + '|' + String(maxCompletedAt || '');
-    
-    // Check if signature changed - normalize to null if missing/empty
-    const lastSig = (state.opening.lastAllCompletedSig && String(state.opening.lastAllCompletedSig).trim()) || null;
-    
-    // Only block if lastSig exists AND equals current sig (ignore lastRunDate for blocking)
-    if (lastSig && lastSig === sig) {
-      // Same completion cycle, already reset
-      if (window.DEBUG_MODE === true) {
-        console.log('[AUTO RESET][OPENING] allCompleted=true, sig=' + sig + ', lastSig=' + lastSig + ', lastRunDate=' + (state.opening.lastRunDate || 'none') + ' → SKIP (same cycle)');
-      }
-      return;
-    }
-    
-    // Signature changed - new completion cycle, run reset
-    if (window.DEBUG_MODE === true) {
-      console.log('[AUTO RESET][OPENING] allCompleted=true, sig=' + sig + ', lastSig=' + lastSig + ', lastRunDate=' + (state.opening.lastRunDate || 'none') + ' → RUNNING RESET');
-    }
-    
-    // Run the existing Opening reset routine (same as manual RESET)
-    if (typeof resetTasksForTabInternal === 'function') {
-      resetTasksForTabInternal('opening');
-    } else if (typeof window.resetTasksForTab === 'function') {
-      window.resetTasksForTab('opening');
-    } else {
-      console.warn('[AUTO RESET][OPENING] Reset function not available');
-      return;
-    }
-    
-    // Update state
+
+    // Get today string
     const today = now instanceof Date ? now : new Date(now);
     const todayKey = today.getFullYear() + '-' +
                      String(today.getMonth() + 1).padStart(2, '0') + '-' +
                      String(today.getDate()).padStart(2, '0');
-    
-    state.opening.lastRunDate = todayKey;
+
+    // Read active + pending lists
+    const keyActive = typeof getTabStorageKey === 'function'
+      ? getTabStorageKey('opening', 'active') : 'ff_tasks_opening_active_v1';
+    const keyPending = typeof getTabStorageKey === 'function'
+      ? getTabStorageKey('opening', 'pending') : 'ff_tasks_opening_pending_v1';
+    let active = [], pending = [];
+    try { active  = JSON.parse(localStorage.getItem(keyActive)  || '[]'); } catch(e) { return; }
+    try { pending = JSON.parse(localStorage.getItem(keyPending) || '[]'); } catch(e) {}
+
+    if (active.length === 0) return;
+
+    const isDone = t => {
+      const s = String(t.status || '').toLowerCase();
+      return s === 'done' || t.completed === true || t.isCompleted === true || Boolean(t.completedAt);
+    };
+    if (!active.every(isDone)) return;
+    if (pending.length > 0 && !pending.every(isDone)) return;
+
+    // Sig = date + sorted task IDs
+    const sig = todayKey + '|' + active.map(t => String(t.taskId || t.id || '')).filter(Boolean).sort().join(',');
+
+    // Only block on duplicate sig for passive checks (openTasks / interval).
+    // When called from markTaskDone (skipSigCheck=true), always allow — user just completed tasks now.
+    const state = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+    if (!state.opening) state.opening = {};
+    if (!skipSigCheck && state.opening.lastAllCompletedSig === sig) return;
+
+    // Run reset
+    window.__ffOpeningResetRunning = true;
+    try {
+      if (typeof resetTasksForTabInternal === 'function') resetTasksForTabInternal('opening');
+      else if (typeof window.resetTasksForTab === 'function') window.resetTasksForTab('opening');
+      else { console.warn('[AUTO RESET][OPENING] Reset function not available'); return; }
+    } finally {
+      window.__ffOpeningResetRunning = false;
+    }
+
+    // Save sig + date (blocks passive re-checks until a new cycle begins)
     state.opening.lastAllCompletedSig = sig;
-    
-    // Save state back to localStorage
+    state.opening.lastRunDate = todayKey;
     localStorage.setItem('ff_tasks_auto_reset_state_v1', JSON.stringify(state));
-    
-    console.log('[AUTO RESET][OPENING] Reset completed', { todayKey, sig });
-    
+    console.log('[AUTO RESET][OPENING] Reset completed', { todayKey, skipSigCheck });
+
   } catch (e) {
+    window.__ffOpeningResetRunning = false;
     console.error('[AUTO RESET][OPENING] Error:', e);
   }
 }
@@ -13052,155 +13132,67 @@ window.ffMaybeAutoResetOpening = ffMaybeAutoResetOpening;
 console.log('[EXPOSE] ffMaybeAutoResetOpening', typeof window.ffMaybeAutoResetOpening);
 
 // Opening tasks auto-reset at configured time function
-function ffMaybeAutoResetOpeningAtTime(now = new Date()) {
+function ffMaybeAutoResetOpeningAtTime(now = new Date(), skipSigCheck = false) {
   try {
-    // Read Opening auto-reset settings from existing storage
-    const alertWindowsRaw = localStorage.getItem('ff_tasks_alert_windows_v1');
-    if (!alertWindowsRaw) {
-      if (window.DEBUG_MODE === true) {
-        console.log('[AUTO RESET][OPENING AT TIME] Settings not found → return');
-      }
-      return;
-    }
-    
-    const alertWindows = JSON.parse(alertWindowsRaw);
+    if (window.__ffOpeningResetRunning) return;
+
+    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
     const openingConfig = alertWindows.opening || {};
-    const enabled = openingConfig.autoResetEnabled === true;
-    const timeStr = openingConfig.autoResetTime;
-    
-    // If disabled or missing time => return
-    if (!enabled || !timeStr) {
-      if (window.DEBUG_MODE === true) {
-        console.log('[AUTO RESET][OPENING AT TIME] Disabled or missing time (enabled=' + enabled + ', time=' + (timeStr || 'none') + ') → return');
-      }
-      return;
-    }
-    
-    // Load Opening active list
-    const keyActive = typeof getTabStorageKey === 'function' 
-      ? getTabStorageKey('opening', 'active')
-      : 'ff_tasks_opening_active_v1';
-    
-    let active = [];
-    try {
-      const activeRaw = localStorage.getItem(keyActive);
-      if (activeRaw) {
-        active = JSON.parse(activeRaw) || [];
-      }
-    } catch (e) {
-      console.warn('[AUTO RESET][OPENING AT TIME] Error reading active list:', e);
-      return;
-    }
-    
-    // If active list is empty => return
-    if (!active || active.length === 0) {
-      if (window.DEBUG_MODE === true) {
-        console.log('[AUTO RESET][OPENING AT TIME] Active list empty → return');
-      }
-      return;
-    }
-    
-    // Define "done" detection: ANY of these being true
-    const allDone = active.every(t => {
-      const status = String(t.status || '').toLowerCase();
-      return status === 'done' || 
-             t.completed === true || 
-             t.isCompleted === true || 
-             Boolean(t.completedAt);
-    });
-    
-    // If NOT all tasks are done => return (do NOT write state)
-    if (!allDone) {
-      if (window.DEBUG_MODE === true) {
-        console.log('[AUTO RESET][OPENING AT TIME] Not all tasks done → return');
-      }
-      return;
-    }
-    
-    // Compute todayStr = YYYY-MM-DD (local time)
+    if (openingConfig.autoResetEnabled !== true || !openingConfig.autoResetTime) return;
+
     const today = now instanceof Date ? now : new Date(now);
     const todayStr = today.getFullYear() + '-' +
                      String(today.getMonth() + 1).padStart(2, '0') + '-' +
                      String(today.getDate()).padStart(2, '0');
-    
-    // Parse the configured auto-reset time into a Date for "today at that time"
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    if (isNaN(hours) || isNaN(minutes)) {
-      if (window.DEBUG_MODE === true) {
-        console.log('[AUTO RESET][OPENING AT TIME] Invalid time format: ' + timeStr);
-      }
-      return;
+
+    // Check current time >= configured time
+    const [hours, minutes] = openingConfig.autoResetTime.split(':').map(Number);
+    if (isNaN(hours) || isNaN(minutes)) return;
+    const scheduledTime = new Date(today);
+    scheduledTime.setHours(hours, minutes, 0, 0);
+    if (now < scheduledTime) return;
+
+    // Load active + pending
+    const keyActive  = typeof getTabStorageKey === 'function' ? getTabStorageKey('opening', 'active')  : 'ff_tasks_opening_active_v1';
+    const keyPending = typeof getTabStorageKey === 'function' ? getTabStorageKey('opening', 'pending') : 'ff_tasks_opening_pending_v1';
+    let active = [], pending = [];
+    try { active  = JSON.parse(localStorage.getItem(keyActive)  || '[]'); } catch(e) { return; }
+    try { pending = JSON.parse(localStorage.getItem(keyPending) || '[]'); } catch(e) {}
+
+    if (!active || active.length === 0) return;
+
+    const isDone = t => {
+      const s = String(t.status || '').toLowerCase();
+      return s === 'done' || t.completed === true || t.isCompleted === true || Boolean(t.completedAt);
+    };
+    if (!active.every(isDone)) return;
+    if (pending.length > 0 && !pending.every(isDone)) return;
+
+    // Sig = date + sorted task IDs (consistent with ffMaybeAutoResetOpening)
+    const sig = todayStr + '|' + active.map(t => String(t.taskId || t.id || '')).filter(Boolean).sort().join(',');
+
+    // Block if same sig already reset today (unless skipSigCheck=true from markTaskDone)
+    const state = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+    if (!state.opening) state.opening = {};
+    if (!skipSigCheck && state.opening.lastAllCompletedSig === sig) return;
+
+    // Run reset
+    window.__ffOpeningResetRunning = true;
+    try {
+      if (typeof resetTasksForTabInternal === 'function') resetTasksForTabInternal('opening');
+      else if (typeof window.resetTasksForTab === 'function') window.resetTasksForTab('opening');
+      else { console.warn('[AUTO RESET][OPENING AT TIME] Reset function not available'); return; }
+    } finally {
+      window.__ffOpeningResetRunning = false;
     }
-    
-    const scheduledTimeToday = new Date(today);
-    scheduledTimeToday.setHours(hours, minutes, 0, 0);
-    
-    // If now < scheduledTimeToday => return
-    if (now < scheduledTimeToday) {
-      if (window.DEBUG_MODE === true) {
-        console.log('[AUTO RESET][OPENING AT TIME] Not yet time (now=' + now.toISOString() + ', scheduled=' + scheduledTimeToday.toISOString() + ') → return');
-      }
-      return;
-    }
-    
-    // Build completion signature
-    const ids = active
-      .map(t => String(t.taskId || t.id || ''))
-      .filter(id => id)
-      .sort();
-    
-    const doneTimestamps = active
-      .map(t => String(t.completedAt || t.doneAt || ''))
-      .filter(ts => ts);
-    
-    const maxDoneTs = doneTimestamps.length > 0
-      ? doneTimestamps.reduce((max, ts) => ts > max ? ts : max, doneTimestamps[0])
-      : '';
-    
-    const sig = ids.join(',') + '|' + String(maxDoneTs);
-    
-    // Load state
-    const stateRaw = localStorage.getItem('ff_tasks_auto_reset_state_v1');
-    let state = stateRaw ? JSON.parse(stateRaw) : {};
-    if (!state.opening) {
-      state.opening = {};
-    }
-    
-    // Blocking rule: If state.opening.lastRunDate === todayStr AND state.opening.lastAllCompletedSig === sig => return
-    if (state.opening.lastRunDate === todayStr && state.opening.lastAllCompletedSig === sig) {
-      if (window.DEBUG_MODE === true) {
-        console.log('[AUTO RESET][OPENING AT TIME] Blocked by same sig (today=' + todayStr + ', sig=' + sig + ') → return');
-      }
-      return;
-    }
-    
-    // Not blocked - call reset
-    if (window.DEBUG_MODE === true) {
-      console.log('[AUTO RESET][OPENING AT TIME] Running reset (today=' + todayStr + ', sig=' + sig + ', lastSig=' + (state.opening.lastAllCompletedSig || 'none') + ')');
-    }
-    
-    // Call the SAME internal reset used by manual RESET button for Opening
-    if (typeof resetTasksForTabInternal === 'function') {
-      resetTasksForTabInternal('opening');
-    } else if (typeof window.resetTasksForTab === 'function') {
-      window.resetTasksForTab('opening');
-    } else {
-      console.warn('[AUTO RESET][OPENING AT TIME] Reset function not available');
-      return;
-    }
-    
-    // Only after successful reset, write state
-    state.opening.lastRunDate = todayStr;
+
     state.opening.lastAllCompletedSig = sig;
-    
-    // Save back to localStorage
+    state.opening.lastRunDate = todayStr;
     localStorage.setItem('ff_tasks_auto_reset_state_v1', JSON.stringify(state));
-    
-    if (window.DEBUG_MODE === true) {
-      console.log('[AUTO RESET][OPENING AT TIME] Reset completed and state saved', { todayStr, sig });
-    }
-    
+    console.log('[AUTO RESET][OPENING AT TIME] Reset completed', { todayStr, time: openingConfig.autoResetTime, skipSigCheck });
+
   } catch (e) {
+    window.__ffOpeningResetRunning = false;
     console.error('[AUTO RESET][OPENING AT TIME] Error:', e);
   }
 }
@@ -18413,53 +18405,40 @@ let completedTasks = {};
 }
 */
 
-// Count incomplete tasks for a category
-// A task is incomplete if it is NOT in the "done" state
-// This includes tasks that are "not_started" (available) or "pending"
-// Only tasks marked as "done" (green in UI) are excluded from the count
+// Count incomplete tasks for a category using new storage system
 function countIncompleteTasks(category) {
-  const tasks = tasksData[category] || [];
-  if (tasks.length === 0) return 0;
-  
-  let incompleteCount = 0;
-  tasks.forEach(task => {
-    // Count task if it's NOT completed (not in done state)
-    // This includes both "not_started" and "pending" tasks
-    const taskName = getTaskName(task);
-    if (!isTaskCompletedToday(category, taskName)) {
-      incompleteCount++;
-    }
-  });
-  
-  return incompleteCount;
+  try {
+    var tab = category.toLowerCase();
+    var active = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_active_v1') || '[]');
+    var pending = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_pending_v1') || '[]');
+    return active.length + pending.length;
+  } catch (e) {
+    return 0;
+  }
 }
 
 // Update badge for a specific tab
 function updateTabBadge(category) {
-  const tab = document.querySelector(`.task-tab[data-category="${category}"]`);
-  if (!tab) return;
-  
-  // Remove existing badge if any
-  const existingBadge = tab.querySelector('.task-tab-badge');
-  if (existingBadge) {
-    existingBadge.remove();
-  }
-  
-  // Check if reminder is active for this category
-  if (!isReminderActive(category)) {
-    return; // Don't show badge if reminder is not active
-  }
-  
-  // Count incomplete tasks
-  const incompleteCount = countIncompleteTasks(category);
-  
-  // Only show badge if count > 0
-  if (incompleteCount > 0) {
-    const badge = document.createElement('span');
-    badge.className = 'task-tab-badge';
-    badge.textContent = incompleteCount.toString();
-    badge.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:var(--danger);color:#fff;border-radius:999px;font-size:11px;font-weight:700;margin-left:6px;line-height:1;';
-    tab.appendChild(badge);
+  var tabLower = category.toLowerCase();
+  // Target the existing <span data-ff-badge="opening|closing|..."> elements in the tab bar
+  var badgeEl = document.querySelector('[data-ff-badge="' + tabLower + '"]');
+  if (!badgeEl) return;
+
+  var incompleteCount = countIncompleteTasks(tabLower);
+  badgeEl.textContent = incompleteCount > 0 ? incompleteCount.toString() : '';
+}
+
+// Check if reminder/alert window is active for a category
+function isReminderActive(category) {
+  try {
+    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const tabName = category.toLowerCase();
+    const config = alertWindows[tabName];
+    if (!config) return true;
+    if (config.startTime) return true;
+    return true;
+  } catch (e) {
+    return true;
   }
 }
 
@@ -18473,6 +18452,26 @@ function updateAllTabBadges() {
 
 // Make updateAllTabBadges globally available
 window.updateAllTabBadges = updateAllTabBadges;
+window.ffUpdateTasksTabBadges = updateAllTabBadges;
+
+// Update the TASKS badge on the home screen nav button
+window.ffUpdateHomeTasksBadge = function() {
+  try {
+    var TABS = ['opening','closing','weekly','monthly','yearly'];
+    var totalIncomplete = 0;
+    var alertWindows = {};
+    try { alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}'); } catch(e) {}
+    TABS.forEach(function(tab) {
+      var cfg = alertWindows[tab];
+      var showOnHome = !cfg || cfg.showOnHome !== false;
+      if (showOnHome) {
+        totalIncomplete += countIncompleteTasks(tab);
+      }
+    });
+    var badge = document.querySelector('#tasksBtn .ff-home-tasks-badge');
+    if (badge) badge.textContent = totalIncomplete > 0 ? totalIncomplete.toString() : '';
+  } catch(e) {}
+};
 
 // Get current category
 function getCurrentTasksCategory() {
@@ -21616,25 +21615,94 @@ window.__ffTasksCloudInit = function() {
       var tombstone = JSON.parse(localStorage.getItem('ff_tasks_active_deleted_v1') || '{}');
       var alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
       var enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
-      var state = { catalog: catalog, tombstone: tombstone, alertWindows: alertWindows, enforceSelectSettings: enforceSelectSettings };
+      var autoResetState = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+      var state = { catalog: catalog, tombstone: tombstone, alertWindows: alertWindows, enforceSelectSettings: enforceSelectSettings, autoResetState: autoResetState };
       TABS.forEach(function(tab) {
         state[tab] = {
-          active:  JSON.parse(localStorage.getItem('ffv24_tasks_' + tab + '_active')  || '[]'),
-          pending: JSON.parse(localStorage.getItem('ffv24_tasks_' + tab + '_pending') || '[]'),
-          done:    JSON.parse(localStorage.getItem('ffv24_tasks_' + tab + '_done')    || '[]')
+          active:  JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_active_v1')  || '[]'),
+          pending: JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_pending_v1') || '[]'),
+          done:    JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_done_v1')    || '[]')
         };
       });
       return state;
     },
-    // Phase A: applyState does NOTHING — Firestore data is stored but never overwrites local data
     applyState: function(data) {
-      // intentionally empty — Phase B will enable this
+      if (window.__ffTasksLastLocalWrite && (Date.now() - window.__ffTasksLastLocalWrite) < 8000) return;
+      try {
+        var TABS = ['opening','closing','weekly','monthly','yearly'];
+        if (data.catalog && typeof data.catalog === 'object') {
+          localStorage.setItem('ff_tasks_catalog_v1', JSON.stringify(data.catalog));
+          window.ff_tasks_catalog_v1 = data.catalog;
+        }
+        if (data.tombstone) localStorage.setItem('ff_tasks_active_deleted_v1', JSON.stringify(data.tombstone));
+        if (data.alertWindows) localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(data.alertWindows));
+        if (data.enforceSelectSettings) localStorage.setItem('ff_tasks_enforce_select_v1', JSON.stringify(data.enforceSelectSettings));
+        // Merge auto-reset state: keep the LATER lastRunDate per tab to avoid re-running a reset
+        if (data.autoResetState && typeof data.autoResetState === 'object') {
+          try {
+            var localResetState = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+            var mergedResetState = Object.assign({}, data.autoResetState);
+            Object.keys(localResetState).forEach(function(tab) {
+              var local = localResetState[tab] || {};
+              var remote = mergedResetState[tab] || {};
+              // Keep whichever lastRunDate is more recent (prevents double-reset)
+              if (local.lastRunDate && (!remote.lastRunDate || local.lastRunDate > remote.lastRunDate)) {
+                if (!mergedResetState[tab]) mergedResetState[tab] = {};
+                mergedResetState[tab].lastRunDate = local.lastRunDate;
+                mergedResetState[tab].lastAllCompletedSig = local.lastAllCompletedSig;
+              }
+            });
+            // Suppress hook — this is a sync write, not a user change
+            var _wasApplyingReset = window.__ffTasksApplyingRemote;
+            window.__ffTasksApplyingRemote = true;
+            try {
+              localStorage.setItem('ff_tasks_auto_reset_state_v1', JSON.stringify(mergedResetState));
+            } finally {
+              window.__ffTasksApplyingRemote = _wasApplyingReset;
+            }
+          } catch(e) { console.warn('[TasksCloud] autoResetState merge error', e); }
+        }
+        TABS.forEach(function(tab) {
+          var tabData = data[tab];
+          if (!tabData) return;
+          ['active','pending','done'].forEach(function(kind) {
+            if (Array.isArray(tabData[kind])) {
+              localStorage.setItem('ff_tasks_' + tab + '_' + kind + '_v1', JSON.stringify(tabData[kind]));
+            }
+          });
+        });
+        console.log('[TasksCloud] Applied remote state');
+      } catch(e) { console.warn('[TasksCloud] applyState error', e); }
     },
     onRefresh: function() {
-      // intentionally empty — Phase B will enable this
+      try {
+        // Only re-render tasks list if tasks screen is visible AND settings modal is closed
+        var tasksScreen = document.getElementById('tasksScreen');
+        var settingsModal = document.getElementById('tasksSettingsModal');
+        var settingsOpen = settingsModal && settingsModal.style.display !== 'none' && settingsModal.style.display !== '';
+        var tasksVisible = tasksScreen && tasksScreen.style.display !== 'none' && tasksScreen.style.display !== '';
+        if (tasksVisible && !settingsOpen && typeof window.setTasksTab === 'function') {
+          window.setTasksTab(window.currentTasksTab || 'opening');
+        }
+        if (typeof window.ffUpdateTasksTabBadges === 'function') {
+          setTimeout(function() { window.ffUpdateTasksTabBadges(); }, 100);
+        }
+        if (typeof window.ffUpdateHomeTasksBadge === 'function') {
+          setTimeout(function() { window.ffUpdateHomeTasksBadge(); }, 100);
+        }
+      } catch(e) {}
     }
   });
 };
+
+// Refresh tasks from server when the browser tab becomes visible again (handles background/sleep)
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible') {
+    if (typeof window.tasksCloudRefresh === 'function') {
+      window.tasksCloudRefresh();
+    }
+  }
+});
 
 // Queue Cloud init callback — called automatically by queue-cloud.js when it loads
 window.__ffQueueCloudInit = function() {
@@ -25099,6 +25167,50 @@ function hookSettingsGuard_DISABLED(){
               
               <label style="display:block;font-size:12px;font-weight:500;color:#111;margin-bottom:4px;">Info / Instructions</label>
               <textarea id="taskInfoInput" class="taskInfoInput" placeholder="Write the instructions..." rows="3" style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;"></textarea>
+              
+              <div id="taskAddWeeklyDays" style="display:none;margin-bottom:8px;">
+                <label style="display:block;font-size:12px;font-weight:500;color:#111;margin-bottom:4px;">Days</label>
+                <label style="display:flex;align-items:center;gap:4px;font-size:11px;margin-bottom:6px;cursor:pointer;">
+                  <input type="checkbox" id="taskAddWeeklyAllWeek" checked> All week
+                </label>
+                <div id="taskAddWeeklyDaysCheckboxes" style="display:flex;gap:6px;flex-wrap:wrap;opacity:0.5;pointer-events:none;">
+                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="0"> Sun</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="1"> Mon</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="2"> Tue</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="3"> Wed</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="4"> Thu</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="5"> Fri</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="6"> Sat</label>
+                </div>
+              </div>
+              
+              <div id="taskAddMonthlyDay" style="display:none;margin-bottom:8px;">
+                <label style="display:block;font-size:12px;font-weight:500;color:#111;margin-bottom:4px;">Day of Month</label>
+                <select id="taskAddMonthlyDaySelect" style="width:100%;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;">
+                  <option value="any">Any day</option>
+                  <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+                  <option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option>
+                  <option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option>
+                  <option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option>
+                  <option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option>
+                  <option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option>
+                  <option value="31">31</option>
+                </select>
+              </div>
+              
+              <div id="taskAddYearlyDate" style="display:none;margin-bottom:8px;">
+                <label style="display:block;font-size:12px;font-weight:500;color:#111;margin-bottom:4px;">Date</label>
+                <div style="display:flex;gap:8px;">
+                  <select id="taskAddYearlyMonth" style="flex:1;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;">
+                    <option value="">Select month</option>
+                    <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+                    <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+                    <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+                    <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+                  </select>
+                  <input type="number" id="taskAddYearlyDay" min="1" max="31" placeholder="Day" style="width:70px;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;">
+                </div>
+              </div>
             
             <div style="display:flex;gap:8px;">
                 <button id="taskAddBtn" type="button" class="btn-primary" style="padding:6px 14px;font-size:12px;">Add</button>
@@ -25335,14 +25447,13 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260216_force"></script>
+  <script type="module" src="/app.js?v=20260305_autoreset"></script>
   <script type="module" src="/inbox.js?v=20260219_draft"></script>
   <script type="module" src="/chat.js?v=20260222_flows3"></script>
   <script type="module" src="/staff-cloud.js?v=20260221a"></script>
   <script type="module" src="/settings-cloud.js?v=20260302a"></script>
   <script type="module" src="/queue-cloud.js?v=20260302a"></script>
-  <!-- tasks-cloud.js temporarily disabled — needs investigation -->
-  <!-- <script type="module" src="/tasks-cloud.js?v=20260302a"></script> -->
+  <script type="module" src="/tasks-cloud.js?v=20260304b"></script>
   <script type="module" src="/tickets.js?v=20260301i"></script>
 
   <!-- PIN Modal -->

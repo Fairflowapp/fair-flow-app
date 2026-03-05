@@ -2450,6 +2450,9 @@ function markTaskDone(taskId, workerName) {
         taskCreatedInActive: idx < 0
     });
     
+    // Auto-reset is time-driven only — handled by the 60-second interval and openTasks().
+    // Do NOT reset here when a task is marked done; that causes immediate reset regardless of time.
+
     // 3) Re-render UI
     if (typeof window.loadTasks === 'function') {
         window.loadTasks();
@@ -2461,53 +2464,10 @@ function markTaskDone(taskId, workerName) {
             window.renderTasksList(tab);
         }
     }
-    
+
     // Update tab badges after marking task as done
     if (typeof window.ffUpdateTasksTabBadges === 'function') {
         setTimeout(() => window.ffUpdateTasksTabBadges(), 50);
-    }
-    
-    // Check for auto-reset after marking task as done (if opening/closing tab, no setTimeout)
-    if (tab === 'opening') {
-        try {
-            if (typeof window.ffMaybeAutoResetOpening === 'function') {
-                window.ffMaybeAutoResetOpening(new Date());
-            }
-        } catch (e) {
-            // Silently ignore errors
-        }
-    } else if (tab === 'closing') {
-        try {
-            if (typeof window.ffMaybeAutoResetClosing === 'function') {
-                window.ffMaybeAutoResetClosing(new Date());
-            }
-        } catch (e) {
-            // Silently ignore errors
-        }
-    } else if (tab === 'weekly') {
-        try {
-            if (typeof window.ffMaybeAutoResetWeekly === 'function') {
-                window.ffMaybeAutoResetWeekly(new Date());
-            }
-        } catch (e) {
-            // Silently ignore errors
-        }
-    } else if (tab === 'monthly') {
-        try {
-            if (typeof window.ffMaybeAutoResetMonthly === 'function') {
-                window.ffMaybeAutoResetMonthly(new Date());
-            }
-        } catch (e) {
-            // Silently ignore errors
-        }
-    } else if (tab === 'yearly') {
-        try {
-            if (typeof window.ffMaybeAutoResetYearly === 'function') {
-                window.ffMaybeAutoResetYearly(new Date());
-            }
-        } catch (e) {
-            // Silently ignore errors
-        }
     }
 }
 
@@ -4782,194 +4742,93 @@ function ffHasWeeklyTasksScheduledToday(nowDate) {
   }
 }
 
-// Main auto-reset function for Weekly tab (today-only reset)
-window.ffMaybeAutoResetWeekly = function(nowDate) {
+// Helper: does the active list for this tab have at least one task scheduled/visible for today?
+// Prevents auto-reset firing on days when no tasks appear (count=0 != "all done").
+window.ffHasTodayTasksForTab = function ffHasTodayTasksForTab(tab, now) {
   try {
-    const tab = 'weekly';
-    const now = nowDate || new Date();
-    
-    // Get config
-    const config = ffGetAutoResetConfig(tab);
-    if (!config || !config.autoResetEnabled) {
-      return; // Auto-reset not enabled
-    }
-    
-    // Check if current time >= reset time
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    const resetMinutes = ffParseHHMMToMinutes(config.autoResetTime);
-    if (resetMinutes === null) {
-      console.warn('[Auto-Reset] Invalid reset time:', config.autoResetTime);
-      return;
-    }
-    
-    if (nowMinutes < resetMinutes) {
-      return; // Not yet time for reset
-    }
-    
-    // Check if already run today
-    const todayISO = ffGetTodayLocalISO();
-    const state = ffGetAutoResetState(tab);
-    if (state.lastRunDate === todayISO) {
-      return; // Already run today
-    }
-    
-    // Check if ANY weekly task is scheduled for today (prevent useless resets)
-    if (!ffHasWeeklyTasksScheduledToday(now)) {
-      return; // No tasks scheduled for today, skip reset
-    }
-    
-    console.log('[AUTO_RESET][WEEKLY] running', now);
-    
-    // Perform rollover for unfinished tasks (regardless of completion status)
-    // This advances unfinished tasks scheduled for today to tomorrow
-    if (typeof window.resetWeeklyForToday === 'function') {
-      window.resetWeeklyForToday(now);
-    } else {
-      console.warn('[AUTO_RESET][WEEKLY] resetWeeklyForToday not exposed');
-      return;
-    }
-    
-    // Check if all Weekly tasks scheduled for TODAY are completed
-    if (typeof ffGetUncompletedCountForTab !== 'function') {
-      console.warn('[Auto-Reset] ffGetUncompletedCountForTab not available');
-      // Mark as run today even if we can't check completion (rollover happened)
-      ffSetAutoResetLastRun(tab, todayISO);
-      return;
-    }
-    
-    const uncompleted = ffGetUncompletedCountForTab(tab);
-    if (uncompleted !== 0) {
-      // Not all tasks completed - rollover already happened above
-      // Mark as run today to prevent multiple rollovers
-      ffSetAutoResetLastRun(tab, todayISO);
-      console.log('[Auto-Reset] Weekly rollover completed (some tasks still unfinished)');
-      return;
-    }
-    
-    // All conditions met - rollover already done above
-    console.log('[Auto-Reset] All Weekly tasks for today completed, rollover completed at', config.autoResetTime);
-    
-    // Mark as run today
-    ffSetAutoResetLastRun(tab, todayISO);
-    
-    console.log('[Auto-Reset] Today-only reset completed for Weekly tab');
-    
-  } catch (e) {
-    console.error('[Auto-Reset] Error in ffMaybeAutoResetWeekly:', e);
-  }
-};
-
-// Helper function to check if ANY monthly task is scheduled for today
-function ffHasMonthlyTasksScheduledToday(nowDate) {
-  try {
-    const now = nowDate || new Date();
-    const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
-    if (!catalogRaw) return false;
-    
-    const catalogObj = JSON.parse(catalogRaw);
-    const monthlyCatalog = catalogObj.monthly || [];
-    
-    // Check if at least one task is scheduled for today
-    for (let i = 0; i < monthlyCatalog.length; i++) {
-      const catalogTask = monthlyCatalog[i];
-      if (!catalogTask || typeof catalogTask !== 'object') continue;
-      
-      const taskId = catalogTask.taskId || catalogTask.id;
-      if (!taskId) continue;
-      
-      // Use existing helper to check if this task is scheduled today
-      if (typeof window.ffIsMonthlyTaskScheduledToday === 'function') {
-        if (window.ffIsMonthlyTaskScheduledToday(taskId, now)) {
-          return true; // Found at least one task scheduled for today
-        }
-      } else {
-        // Fallback: if helper not available, treat missing scheduleDayOfMonth as 'any' (scheduled)
-        const scheduleDayOfMonth = catalogTask.scheduleDayOfMonth;
-        if (scheduleDayOfMonth === 'any' || scheduleDayOfMonth === undefined) {
-          return true;
-        }
+    const active = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_active_v1') || '[]');
+    if (active.length === 0) return false;
+    return active.some(function(task) {
+      if (!task || typeof task !== 'object') return false;
+      const keyId = task.taskId || task.id;
+      if (tab === 'weekly' && typeof window.ffIsWeeklyTaskScheduledToday === 'function') {
+        return window.ffIsWeeklyTaskScheduledToday(keyId, now);
       }
-    }
-    
-    return false; // No tasks scheduled for today
+      if (tab === 'monthly' && typeof window.ffIsMonthlyTaskScheduledToday === 'function') {
+        return window.ffIsMonthlyTaskScheduledToday(keyId, now);
+      }
+      if (tab === 'yearly' && typeof window.ffIsYearlyTaskActive === 'function') {
+        // include already-done yearly tasks as "scheduled today"
+        return window.ffIsYearlyTaskActive(task, now) ||
+               task.status === 'done' || !!task.completedAt;
+      }
+      return true;
+    });
   } catch (e) {
-    console.warn('[Auto-Reset] Error checking monthly tasks scheduled today:', e);
-    return false; // Fail-closed: don't reset if we can't determine
+    return false;
   }
 }
 
-// Main auto-reset function for Monthly tab (today-only reset)
-window.ffMaybeAutoResetMonthly = function(nowDate) {
+// Shared auto-reset logic for weekly / monthly / yearly
+function _ffMaybeAutoResetTab(tab, nowDate) {
   try {
-    console.log('[AUTO_RESET][MONTHLY] running', new Date().toISOString());
-    const tab = 'monthly';
     const now = nowDate || new Date();
-    
-    // Get config
+    const tag = '[Auto-Reset][' + tab.toUpperCase() + ']';
+    const nowStr = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
+
     const config = ffGetAutoResetConfig(tab);
     if (!config || !config.autoResetEnabled) {
-      return; // Auto-reset not enabled
+      console.warn(tag, 'SKIP: autoResetEnabled not true. config=', JSON.stringify(config));
+      return;
     }
-    
-    // Check if current time >= reset time
+
     const nowMinutes = now.getHours() * 60 + now.getMinutes();
     const resetMinutes = ffParseHHMMToMinutes(config.autoResetTime);
     if (resetMinutes === null) {
-      console.warn('[Auto-Reset] Invalid reset time:', config.autoResetTime);
+      console.warn(tag, 'SKIP: invalid autoResetTime =', config.autoResetTime);
       return;
     }
-    
     if (nowMinutes < resetMinutes) {
-      return; // Not yet time for reset
+      console.warn(tag, 'SKIP: not yet time. now=' + nowStr + ' resetAt=' + config.autoResetTime);
+      return;
     }
-    
-    // Check if already run today
+
     const todayISO = ffGetTodayLocalISO();
     const state = ffGetAutoResetState(tab);
     if (state.lastRunDate === todayISO) {
-      return; // Already run today
-    }
-    
-    // Check if ANY monthly task is scheduled for today (prevent useless resets)
-    if (!ffHasMonthlyTasksScheduledToday(now)) {
-      return; // No tasks scheduled for today, skip reset
-    }
-    
-    // Perform rollover for unfinished tasks (regardless of completion status)
-    // This advances unfinished tasks scheduled for today to tomorrow
-    if (typeof window.resetMonthlyForToday === 'function') {
-      window.resetMonthlyForToday(now);
-    } else {
-      console.warn('[AUTO_RESET][MONTHLY] resetMonthlyForToday not exposed');
+      console.warn(tag, 'SKIP: already ran today =', todayISO);
       return;
     }
-    
-    // Check if all Monthly tasks scheduled for TODAY are completed
-    if (typeof ffGetUncompletedCountForTab !== 'function') {
-      console.warn('[Auto-Reset] ffGetUncompletedCountForTab not available');
-      // Mark as run today even if we can't check completion (rollover happened)
-      ffSetAutoResetLastRun(tab, todayISO);
+
+    const hasTasks = window.ffHasTodayTasksForTab(tab, now);
+    if (!hasTasks) {
+      console.warn(tag, 'SKIP: no tasks scheduled/active for today');
       return;
     }
-    
-    const uncompleted = ffGetUncompletedCountForTab(tab);
+
+    const uncompleted = typeof ffGetUncompletedCountForTab === 'function'
+      ? ffGetUncompletedCountForTab(tab) : -1;
     if (uncompleted !== 0) {
-      // Not all tasks completed - rollover already happened above
-      // Mark as run today to prevent multiple rollovers
-      ffSetAutoResetLastRun(tab, todayISO);
-      console.log('[Auto-Reset] Monthly rollover completed (some tasks still unfinished)');
+      console.warn(tag, 'SKIP: uncompleted tasks remaining =', uncompleted);
       return;
     }
-    
-    // All conditions met - rollover already done above
-    console.log('[Auto-Reset] All Monthly tasks for today completed, rollover completed at', config.autoResetTime);
-    
-    // Mark as run today
-    ffSetAutoResetLastRun(tab, todayISO);
-    
-    console.log('[Auto-Reset] Today-only reset completed for Monthly tab');
-    
+
+    console.warn(tag, 'FIRING reset — all conditions met. time=' + nowStr);
+    if (typeof window.resetTasksForTab === 'function') {
+      window.resetTasksForTab(tab);
+      ffSetAutoResetLastRun(tab, todayISO);
+      console.warn(tag, 'Reset completed at', config.autoResetTime);
+    }
   } catch (e) {
-    console.error('[Auto-Reset] Error in ffMaybeAutoResetMonthly:', e);
+    console.error('[Auto-Reset][' + tab + '] Error:', e);
   }
-};
+}
+
+// Main auto-reset function for Weekly tab
+window.ffMaybeAutoResetWeekly  = function(nowDate) { _ffMaybeAutoResetTab('weekly',  nowDate); };
+
+// Main auto-reset function for Monthly tab
+window.ffMaybeAutoResetMonthly = function(nowDate) { _ffMaybeAutoResetTab('monthly', nowDate); };
+
+// Main auto-reset function for Yearly tab
+window.ffMaybeAutoResetYearly  = function(nowDate) { _ffMaybeAutoResetTab('yearly',  nowDate); };
