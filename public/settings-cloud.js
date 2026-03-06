@@ -3,7 +3,9 @@
  *
  * Firestore docs:
  *   salons/{salonId}/settings/ui   → { historyRange, updatedAt }
- *   salons/{salonId}/settings/main → { adminPin (existing), brandName, brandPalette, managers, updatedAt }
+ *   salons/{salonId}/settings/main → { adminPin (existing), brandName, brandPalette, managers,
+ *                                      taskSettings: { taskReminders, taskNotes, showIncompleteTasksBadge },
+ *                                      updatedAt }
  */
 
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
@@ -82,6 +84,21 @@ function subscribeMain(salonId) {
       window.settings.managers = data.managers;
       changed = true;
     }
+    // Task settings
+    if (data.taskSettings && typeof data.taskSettings === 'object') {
+      if (data.taskSettings.taskReminders !== undefined) {
+        window.settings.taskReminders = data.taskSettings.taskReminders;
+        changed = true;
+      }
+      if (data.taskSettings.taskNotes !== undefined) {
+        window.settings.taskNotes = data.taskSettings.taskNotes;
+        changed = true;
+      }
+      if (data.taskSettings.showIncompleteTasksBadge !== undefined) {
+        window.settings.showIncompleteTasksBadge = data.taskSettings.showIncompleteTasksBadge;
+        changed = true;
+      }
+    }
     if (changed) {
       // Keep localStorage in sync as cache
       try {
@@ -89,6 +106,9 @@ function subscribeMain(salonId) {
         if (data.brandName) { if (!stored.brand) stored.brand = {}; stored.brand.name = data.brandName; }
         if (data.brandPalette?.length) stored.brandPalette = data.brandPalette;
         if (data.managers) stored.managers = data.managers;
+        if (data.taskSettings?.taskReminders !== undefined) stored.taskReminders = data.taskSettings.taskReminders;
+        if (data.taskSettings?.taskNotes !== undefined) stored.taskNotes = data.taskSettings.taskNotes;
+        if (data.taskSettings?.showIncompleteTasksBadge !== undefined) stored.showIncompleteTasksBadge = data.taskSettings.showIncompleteTasksBadge;
         localStorage.setItem('ffv24_settings', JSON.stringify(stored));
       } catch (_) {}
       // Re-render brand if available
@@ -109,6 +129,21 @@ function ffSaveAppSettings(brandName, brandPalette, managers) {
   if (Array.isArray(managers)) payload.managers = managers;
   setDoc(settingsMainRef(_salonId), payload, { merge: true })
     .catch((e) => console.warn("[SettingsCloud] save app settings failed", e));
+}
+
+/**
+ * Save task settings (reminders, notes, badge) to Firestore.
+ * Called from index.html saveSettings().
+ */
+function ffSaveTaskSettings(taskReminders, taskNotes, showIncompleteTasksBadge) {
+  if (!_salonId) return;
+  const taskSettings = {};
+  if (taskReminders !== undefined) taskSettings.taskReminders = taskReminders;
+  if (taskNotes !== undefined) taskSettings.taskNotes = taskNotes;
+  if (showIncompleteTasksBadge !== undefined) taskSettings.showIncompleteTasksBadge = showIncompleteTasksBadge;
+  if (Object.keys(taskSettings).length === 0) return;
+  setDoc(settingsMainRef(_salonId), { taskSettings, updatedAt: serverTimestamp() }, { merge: true })
+    .catch((e) => console.warn("[SettingsCloud] save task settings failed", e));
 }
 
 // ─── Connect ──────────────────────────────────────────────────────────────────
@@ -134,4 +169,5 @@ tryConnect();
 if (typeof window !== "undefined") {
   window.ffSaveHistoryRange = ffSaveHistoryRange;
   window.ffSaveAppSettings = ffSaveAppSettings;
+  window.ffSaveTaskSettings = ffSaveTaskSettings;
 }

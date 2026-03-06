@@ -84,6 +84,13 @@ function subscribe(salonId) {
     _firstSnapshot = false;
     _applyState(queue, service, log);
     if (typeof _onLogChange === "function") _onLogChange();
+    // Apply queue settings (ff_queues_v1) from cloud
+    if (data.queueSettings && typeof data.queueSettings === 'object') {
+      try {
+        localStorage.setItem('ff_queues_v1', JSON.stringify(data.queueSettings));
+        console.log("[QueueCloud] Applied queueSettings from cloud");
+      } catch (_) {}
+    }
   }, (err) => console.error("[QueueCloud] subscribe error", err));
 }
 
@@ -92,12 +99,18 @@ function writeState() {
   const state = _getState();
   if (!state) return Promise.resolve();
   const ref = queueStateRef(_salonId);
-  return setDoc(ref, {
+  const payload = {
     queue: state.queue || [],
     service: state.service || [],
     log: state.log || [],
     updatedAt: serverTimestamp()
-  }).catch((e) => {
+  };
+  // Also sync ff_queues_v1 (auto-reset settings + runtime)
+  try {
+    const raw = localStorage.getItem('ff_queues_v1');
+    if (raw) payload.queueSettings = JSON.parse(raw);
+  } catch (_) {}
+  return setDoc(ref, payload).catch((e) => {
     console.warn("[QueueCloud] write failed", e);
   });
 }
@@ -168,6 +181,10 @@ export function queueCloudRefresh() {
       const log = Array.isArray(data.log) ? data.log : [];
       _applyState(queue, service, log);
       if (typeof _onLogChange === "function") _onLogChange();
+      // Apply queue settings from cloud
+      if (data.queueSettings && typeof data.queueSettings === 'object') {
+        try { localStorage.setItem('ff_queues_v1', JSON.stringify(data.queueSettings)); } catch (_) {}
+      }
     }
   }).catch((e) => console.warn("[QueueCloud] refresh failed", e));
 }

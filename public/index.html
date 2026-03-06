@@ -5786,6 +5786,9 @@ function renderIncompleteTasksBadgeSetting() {
     checkbox.addEventListener('change', (e) => {
       settings.showIncompleteTasksBadge = e.target.checked;
       save();
+      if (typeof window.ffSaveTaskSettings === 'function') {
+        window.ffSaveTaskSettings(settings.taskReminders, settings.taskNotes, settings.showIncompleteTasksBadge);
+      }
     });
     
     label.addEventListener('click', () => {
@@ -6346,14 +6349,21 @@ async function saveSettings(e){
   
   settings.workers = validWorkers.slice(0, 48);
 
-  // Queue Auto Reset settings
-  const queueSettings = {
-    autoResetEnabled: document.getElementById('queueAutoResetEnabled')?.checked === true || false,
-    autoResetTime: document.getElementById('queueAutoResetTime')?.value || '02:00',
-    autoResetForce: document.getElementById('queueAutoResetForce')?.checked === true || false,
-    lastAutoResetDate: JSON.parse(localStorage.getItem('ff_queue_settings_v1') || '{}').lastAutoResetDate || null
-  };
-  localStorage.setItem('ff_queue_settings_v1', JSON.stringify(queueSettings));
+  // Queue Auto Reset settings — save into ff_queues_v1 (synced to cloud) and legacy ff_queue_settings_v1
+  const autoResetEnabled = document.getElementById('queueAutoResetEnabled')?.checked === true || false;
+  const autoResetTime = document.getElementById('queueAutoResetTime')?.value || '02:00';
+  const autoResetForce = document.getElementById('queueAutoResetForce')?.checked === true || false;
+  const lastAutoResetDate = (getQueueRuntime() || {}).lastAutoResetDate || null;
+  // Write to new structure (ff_queues_v1) — setQueuesData will also trigger cloud write
+  const queuesData = getQueuesData();
+  if (!queuesData.default) queuesData.default = {};
+  if (!queuesData.default.settings) queuesData.default.settings = {};
+  queuesData.default.settings.autoReset = { enabled: autoResetEnabled, time: autoResetTime, resetWhileInService: autoResetForce };
+  if (!queuesData.default.runtime) queuesData.default.runtime = {};
+  queuesData.default.runtime.lastAutoResetDate = lastAutoResetDate;
+  setQueuesData(queuesData); // writes to localStorage + triggers queueCloudWrite
+  // Also keep legacy key in sync
+  localStorage.setItem('ff_queue_settings_v1', JSON.stringify({ autoResetEnabled, autoResetTime, autoResetForce: autoResetForce, lastAutoResetDate }));
 
   // Save brandPalette (it's already updated in memory when edited)
 
@@ -6363,6 +6373,10 @@ async function saveSettings(e){
   // Sync brand name, palette, managers to Firestore
   if (typeof window.ffSaveAppSettings === 'function') {
     window.ffSaveAppSettings(settings.brand?.name, settings.brandPalette, settings.managers);
+  }
+  // Sync task settings (reminders, notes, badge) to Firestore
+  if (typeof window.ffSaveTaskSettings === 'function') {
+    window.ffSaveTaskSettings(settings.taskReminders, settings.taskNotes, settings.showIncompleteTasksBadge);
   }
   renderBrand(); 
   if (brandLogoFile && window.ffUploadSalonBrandLogo && window.ffSaveSalonLogoMeta) {
