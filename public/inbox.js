@@ -271,6 +271,13 @@ async function loadCurrentUserProfile() {
           staffId: currentUserProfile.staffId || '',
           email: user.email || ''
         };
+        // Include avatarUrl so Chat, Tickets, Staff Members show the correct photo
+        if (currentUserProfile.avatarUrl) {
+          memberData.avatarUrl = currentUserProfile.avatarUrl;
+          if (currentUserProfile.avatarUpdatedAtMs) {
+            memberData.avatarUpdatedAtMs = currentUserProfile.avatarUpdatedAtMs;
+          }
+        }
         setDoc(doc(db, `salons/${currentUserProfile.salonId}/members`, user.uid), memberData, { merge: true })
           .catch(e => console.warn('[Inbox] Could not write member doc', e.message));
       }

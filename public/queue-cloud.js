@@ -204,6 +204,7 @@ if (typeof window !== "undefined") {
     setTimeout(() => {
       if (typeof window.queueCloudRefresh === "function") window.queueCloudRefresh();
       if (typeof window.tasksCloudRefresh === "function") window.tasksCloudRefresh();
+      if (typeof window.ticketsRefreshAvatars === "function") window.ticketsRefreshAvatars();
     }, 300);
   });
 

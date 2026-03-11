@@ -107,10 +107,17 @@ function _startListener() {
         return; // migration will trigger another snapshot
       }
 
-      // Build staff from Firestore docs
+      // Build staff from Firestore docs (explicit technicianTypes to handle any naming)
       const staff = snap.docs.map(d => {
-        const x = { ...d.data(), id: d.id };
+        const data = d.data();
+        const x = { ...data, id: d.id };
         delete x._syncedAt;
+        // Ensure technicianTypes is preserved (Firestore may have it as technicianTypes or technicianType)
+        if (data.technicianTypes !== undefined) {
+          x.technicianTypes = Array.isArray(data.technicianTypes) ? data.technicianTypes : [];
+        } else if (data.technicianType !== undefined) {
+          x.technicianTypes = Array.isArray(data.technicianType) ? data.technicianType : [data.technicianType].filter(Boolean);
+        }
         return x;
       }).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
 
@@ -156,6 +163,11 @@ async function _batchWrite(staff) {
       if (!s.id) return;
       const { _syncedAt, ...cleanRaw } = { ...s };
       const clean = _sanitize(cleanRaw) || {};
+      // Ensure technicianTypes is always written for technicians (task filter needs it)
+      const isTechnician = s.role === 'technician' || (!s.isAdmin && !s.isManager);
+      if (isTechnician) {
+        clean.technicianTypes = Array.isArray(s.technicianTypes) ? s.technicianTypes : [];
+      }
       dlog('[StaffCloud] Writing staff doc:', s.id, s.name,
            'to salons/' + _salonId + '/staff/' + s.id);
       batch.set(

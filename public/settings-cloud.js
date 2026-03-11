@@ -8,13 +8,14 @@
  *                                      updatedAt }
  */
 
-import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, getDocs, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 import { db, auth } from "./app.js";
 
 let _salonId = null;
 let _unsubUi = null;
 let _unsubMain = null;
+let _unsubTechnicianTypes = null;
 
 async function getSalonId() {
   const user = auth.currentUser;
@@ -146,6 +147,172 @@ function ffSaveTaskSettings(taskReminders, taskNotes, showIncompleteTasksBadge) 
     .catch((e) => console.warn("[SettingsCloud] save task settings failed", e));
 }
 
+// ─── Technician Types ───────────────────────────────────────────────────────────
+
+/**
+ * Convert display name to stable ID (supports Hebrew and Unicode)
+ * Latin names: kebab-case. Hebrew/Unicode: keep letters, collapse spaces to hyphen
+ */
+function nameToId(name) {
+  if (!name || typeof name !== 'string') return '';
+  const s = name.trim().toLowerCase();
+  if (!s) return '';
+  // First try: Latin-only (original behavior)
+  const latin = s.replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  if (latin) return latin;
+  // Fallback: keep Unicode letters and digits (Hebrew, etc.)
+  const unicode = s.replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return unicode || '';
+}
+
+function technicianTypesCollectionRef(salonId) {
+  // Firestore requires even number of segments, so we use salons/{salonId}/technicianTypes instead of salons/{salonId}/settings/technicianTypes
+  return collection(db, `salons/${salonId}/technicianTypes`);
+}
+
+function technicianTypeDocRef(salonId, technicianTypeId) {
+  // Firestore requires even number of segments, so we use salons/{salonId}/technicianTypes instead of salons/{salonId}/settings/technicianTypes
+  return doc(db, `salons/${salonId}/technicianTypes`, technicianTypeId);
+}
+
+/**
+ * Subscribe to technician types changes
+ */
+function subscribeTechnicianTypes(salonId) {
+  if (_unsubTechnicianTypes) { _unsubTechnicianTypes(); _unsubTechnicianTypes = null; }
+  _unsubTechnicianTypes = onSnapshot(
+    technicianTypesCollectionRef(salonId),
+    (snap) => {
+      const types = snap.docs.map(d => {
+        const data = d.data();
+        return { ...data, id: d.id };
+      }).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+      
+      // Trigger UI update event
+      document.dispatchEvent(new CustomEvent('ff-technician-types-updated', { detail: types }));
+    },
+    (err) => console.warn("[SettingsCloud] technician types subscribe error", err)
+  );
+}
+
+/**
+ * Get all technician types
+ */
+async function ffGetTechnicianTypes() {
+  if (!_salonId) return [];
+  try {
+    const snap = await getDocs(technicianTypesCollectionRef(_salonId));
+    return snap.docs.map(d => {
+      const data = d.data();
+      return { ...data, id: d.id };
+    }).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  } catch (e) {
+    console.warn("[SettingsCloud] get technician types failed", e);
+    return [];
+  }
+}
+
+/**
+ * Check if technician type name/id already exists
+ */
+async function ffCheckTechnicianTypeExists(name, excludeId = null) {
+  if (!_salonId) return false;
+  try {
+    const snap = await getDocs(technicianTypesCollectionRef(_salonId));
+    const id = nameToId(name);
+    return snap.docs.some(d => {
+      if (excludeId && d.id === excludeId) return false;
+      const data = d.data();
+      return d.id === id || 
+             (data.name && data.name.toLowerCase().trim() === name.toLowerCase().trim());
+    });
+  } catch (e) {
+    console.warn("[SettingsCloud] check technician type exists failed", e);
+    return false;
+  }
+}
+
+/**
+ * Create new technician type
+ */
+async function ffCreateTechnicianType(name) {
+  if (!_salonId || !name || !name.trim()) {
+    throw new Error("Name is required");
+  }
+  
+  const trimmedName = name.trim();
+  const id = nameToId(trimmedName);
+  
+  if (!id) {
+    throw new Error("Invalid name - must contain at least one letter or number");
+  }
+  
+  // Check for duplicates
+  const exists = await ffCheckTechnicianTypeExists(trimmedName);
+  if (exists) {
+    throw new Error("A technician type with this name already exists");
+  }
+  
+  // Get current max sortOrder
+  const existing = await ffGetTechnicianTypes();
+  const maxSortOrder = existing.length > 0 
+    ? Math.max(...existing.map(t => t.sortOrder || 0))
+    : -1;
+  
+  const newType = {
+    id: id,
+    name: trimmedName,
+    active: true,
+    sortOrder: maxSortOrder + 1,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  };
+  
+  await setDoc(technicianTypeDocRef(_salonId, id), newType);
+  return { ...newType, id };
+}
+
+/**
+ * Update technician type (name or active status)
+ */
+async function ffUpdateTechnicianType(technicianTypeId, updates) {
+  if (!_salonId || !technicianTypeId) {
+    throw new Error("Technician type ID is required");
+  }
+  
+  const docRef = technicianTypeDocRef(_salonId, technicianTypeId);
+  const currentDoc = await getDoc(docRef);
+  
+  if (!currentDoc.exists()) {
+    throw new Error("Technician type not found");
+  }
+  
+  const updateData = { updatedAt: serverTimestamp() };
+  
+  // If updating name, check for duplicates
+  if (updates.name !== undefined) {
+    const trimmedName = updates.name.trim();
+    if (!trimmedName) {
+      throw new Error("Name cannot be empty");
+    }
+    
+    const exists = await ffCheckTechnicianTypeExists(trimmedName, technicianTypeId);
+    if (exists) {
+      throw new Error("A technician type with this name already exists");
+    }
+    
+    updateData.name = trimmedName;
+    // Note: ID stays stable - we don't change it even if name changes
+  }
+  
+  if (updates.active !== undefined) {
+    updateData.active = updates.active === true;
+  }
+  
+  await updateDoc(docRef, updateData);
+  return { id: technicianTypeId, ...updateData };
+}
+
 // ─── Connect ──────────────────────────────────────────────────────────────────
 
 function tryConnect() {
@@ -170,4 +337,8 @@ if (typeof window !== "undefined") {
   window.ffSaveHistoryRange = ffSaveHistoryRange;
   window.ffSaveAppSettings = ffSaveAppSettings;
   window.ffSaveTaskSettings = ffSaveTaskSettings;
+  window.ffGetTechnicianTypes = ffGetTechnicianTypes;
+  window.ffCreateTechnicianType = ffCreateTechnicianType;
+  window.ffUpdateTechnicianType = ffUpdateTechnicianType;
+  window.ffCheckTechnicianTypeExists = ffCheckTechnicianTypeExists;
 }

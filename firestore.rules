@@ -130,6 +130,12 @@ service cloud.firestore {
       allow create, update, delete: if isAdminOrOwner(salonId);
     }
 
+    // Technician Types - per-salon (Admin/Owner only)
+    match /salons/{salonId}/technicianTypes/{technicianTypeId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isAdminOrOwner(salonId);
+    }
+
     // Inbox visibility settings (which request types are hidden from staff)
     match /salons/{salonId}/inboxSettings/{docId} {
       allow read: if belongsToSalon(salonId);

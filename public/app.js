@@ -649,11 +649,40 @@ async function ffSaveStaffAvatarMeta({ url, path }) {
   const userId = (auth?.currentUser?.uid) || null;
   if (!userId) throw new Error("Missing userId");
   const avatarUpdatedAtMs = Date.now();
+
+  // 1. Save to users/{uid} (own profile)
   await updateDoc(doc(db, "users", userId), {
     avatarUrl: url,
     avatarPath: path,
     avatarUpdatedAtMs
   });
+
+  // 2. Also update salons/{salonId}/members/{uid} so Chat, Tickets, Staff Members all see the new avatar
+  // Firestore rules require name+role; use setDoc+merge to create if missing
+  let salonId = (typeof window !== "undefined" && window.currentSalonId) || null;
+  let name = auth?.currentUser?.displayName || auth?.currentUser?.email || "";
+  let role = "";
+  try {
+    const userSnap = await getDoc(doc(db, "users", userId));
+    if (userSnap.exists()) {
+      const d = userSnap.data();
+      if (!salonId) salonId = d.salonId || null;
+      name = name || d.name || d.displayName || "";
+      role = d.role || "";
+    }
+  } catch (e) { console.warn("[Avatar] Could not fetch user doc for members:", e.message); }
+  if (salonId) {
+    const memberPayload = {
+      name: String(name || ""),
+      role: String(role || ""),
+      avatarUrl: url,
+      avatarUpdatedAtMs
+    };
+    setDoc(doc(db, `salons/${salonId}/members`, userId), memberPayload, { merge: true })
+      .catch(e => console.warn("[Avatar] Could not update member avatar:", e.message));
+  }
+
+  // 3. Apply immediately to this device's UI
   try {
     if (typeof window !== "undefined" && typeof window.ffApplyAvatarFromFirestore === "function") {
       window.ffApplyAvatarFromFirestore({ avatarUrl: url, avatarUpdatedAtMs, avatarPath: path });
@@ -1011,6 +1040,7 @@ async function loadUserRoleAndShowView(user) {
     // Set admin cache immediately so Chat gear & Tasks Settings work without delay
     if (typeof window !== 'undefined') {
       window.ff_is_admin_cached = ['owner','admin'].includes((role||'').toLowerCase());
+      window.__ff_user_role = (role || '').toLowerCase();
     }
     
     try {
@@ -1026,6 +1056,13 @@ async function loadUserRoleAndShowView(user) {
     // Update global reference
     if (typeof window !== 'undefined') {
       window.currentSalonId = currentSalonId;
+    }
+
+    // Set ff_authedStaffId from user doc so avatar upload works for managers/technicians (not just PIN flow)
+    const staffIdFromUser = data.staffId || null;
+    if (staffIdFromUser && typeof window !== 'undefined') {
+      window.__ff_authedStaffId = staffIdFromUser;
+      try { localStorage.setItem("ff_authedStaffId_v1", staffIdFromUser); } catch (e) {}
     }
 
     // If owner, load salon document and update admin PIN
@@ -2480,6 +2517,22 @@ let pinModalDoneTaskId = null;
 function openPinModal(taskId) {
     __pendingTaskId = taskId;
     pinModalDoneTaskId = null;
+    window.__ff_pin_identify_only = false;
+    const pinModal = document.getElementById("pinModal");
+    const pinError = document.getElementById("pinError");
+    const pinInput = document.getElementById("pinModalTaskInput");
+    const pinTitle = pinModal && pinModal.querySelector("h3");
+    if (pinModal) pinModal.style.display = "flex";
+    if (pinError) pinError.style.display = "none";
+    if (pinInput) pinInput.value = "";
+    if (pinInput) pinInput.focus();
+    if (pinTitle) pinTitle.textContent = "Enter PIN to take this task";
+}
+
+function openPinModalForDone(taskId) {
+    pinModalDoneTaskId = taskId;
+    __pendingTaskId = null;
+    window.__ff_pin_identify_only = false;
     const pinModal = document.getElementById("pinModal");
     const pinError = document.getElementById("pinError");
     const pinInput = document.getElementById("pinModalTaskInput");
@@ -2489,16 +2542,19 @@ function openPinModal(taskId) {
     if (pinInput) pinInput.focus();
 }
 
-function openPinModalForDone(taskId) {
-    pinModalDoneTaskId = taskId;
+function openTasksIdentifyModal() {
     __pendingTaskId = null;
+    pinModalDoneTaskId = null;
+    window.__ff_pin_identify_only = true;
     const pinModal = document.getElementById("pinModal");
     const pinError = document.getElementById("pinError");
     const pinInput = document.getElementById("pinModalTaskInput");
+    const pinTitle = pinModal && pinModal.querySelector("h3");
     if (pinModal) pinModal.style.display = "flex";
     if (pinError) pinError.style.display = "none";
     if (pinInput) pinInput.value = "";
     if (pinInput) pinInput.focus();
+    if (pinTitle) pinTitle.textContent = "Enter PIN to see your tasks";
 }
 
 function closePinModal() {
@@ -2506,6 +2562,7 @@ function closePinModal() {
     if (pinModal) pinModal.style.display = "none";
     __pendingTaskId = null;
     pinModalDoneTaskId = null;
+    window.__ff_pin_identify_only = false;
 }
 
 async function validatePinAndMove() {
@@ -2550,8 +2607,24 @@ async function validatePinAndMove() {
     });
     
     window.__ff_authedStaffName = auth.name || undefined;
+    // Cache technician types for task filtering (technician sees only their-type tasks)
+    const technicianTypes = Array.isArray(auth?.staff?.technicianTypes) ? auth.staff.technicianTypes : [];
+    window.__ff_authedTechnicianTypes = technicianTypes;
+    try { sessionStorage.setItem("ff_authed_technician_types", JSON.stringify(technicianTypes)); } catch (e) {}
+    window.__ff_actorRole = "Tech";
+    try { sessionStorage.setItem("ff_actor_role", "Tech"); } catch (e) {}
+    try { sessionStorage.setItem("ff_actor_name", auth.name || ""); } catch (e) {}
     
     const matchedName = auth.name || '';
+    
+    if (window.__ff_pin_identify_only) {
+        window.__ff_pin_identify_only = false;
+        closePinModal();
+        if (typeof window.renderTasksList === 'function') {
+            window.renderTasksList(window.currentTasksTab || 'opening', { force: true });
+        }
+        return;
+    }
     
     if (__pendingTaskId) {
         moveTaskToPending(__pendingTaskId, matchedName);
@@ -2602,6 +2675,12 @@ function validatePinAndMarkDone() {
     });
     
     window.__ff_authedStaffName = auth.name || undefined;
+    const technicianTypes = Array.isArray(auth?.staff?.technicianTypes) ? auth.staff.technicianTypes : [];
+    window.__ff_authedTechnicianTypes = technicianTypes;
+    try { sessionStorage.setItem("ff_authed_technician_types", JSON.stringify(technicianTypes)); } catch (e) {}
+    window.__ff_actorRole = "Tech";
+    try { sessionStorage.setItem("ff_actor_role", "Tech"); } catch (e) {}
+    try { sessionStorage.setItem("ff_actor_name", auth.name || ""); } catch (e) {}
     
     const matchedName = auth.name || '';
 
@@ -2615,6 +2694,7 @@ function validatePinAndMarkDone() {
 // Expose PIN modal functions to window
 window.openPinModal = openPinModal;
 window.openPinModalForDone = openPinModalForDone;
+window.openTasksIdentifyModal = openTasksIdentifyModal;
 window.closePinModal = closePinModal;
 window.validatePinAndMove = validatePinAndMove;
 window.validatePinAndMarkDone = validatePinAndMarkDone;
@@ -2631,7 +2711,9 @@ if (document.readyState === 'loading') {
         // Submit button logic is handled dynamically based on which modal was opened
         if (pinSubmitBtn) {
             pinSubmitBtn.onclick = () => {
-                if (pinModalDoneTaskId) {
+                if (window.__ff_pin_identify_only) {
+                    validatePinAndMove();
+                } else if (pinModalDoneTaskId) {
                     validatePinAndMarkDone();
                 } else if (__pendingTaskId) {
                     validatePinAndMove();
@@ -2649,10 +2731,10 @@ if (document.readyState === 'loading') {
         if (pinInput) {
             pinInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
-                    if (pinModalDoneTaskId) {
-                        validatePinAndMarkDone();
-                    } else if (__pendingTaskId) {
+                    if (window.__ff_pin_identify_only || __pendingTaskId) {
                         validatePinAndMove();
+                    } else if (pinModalDoneTaskId) {
+                        validatePinAndMarkDone();
                     }
                 }
             });
@@ -2669,7 +2751,9 @@ if (document.readyState === 'loading') {
     // Submit button logic is handled dynamically based on which modal was opened
     if (pinSubmitBtn) {
         pinSubmitBtn.onclick = () => {
-            if (pinModalDoneTaskId) {
+            if (window.__ff_pin_identify_only) {
+                validatePinAndMove();
+            } else if (pinModalDoneTaskId) {
                 validatePinAndMarkDone();
             } else if (__pendingTaskId) {
                 validatePinAndMove();
@@ -2687,10 +2771,10 @@ if (document.readyState === 'loading') {
     if (pinInput) {
         pinInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                if (pinModalDoneTaskId) {
-                    validatePinAndMarkDone();
-                } else if (__pendingTaskId) {
+                if (window.__ff_pin_identify_only || __pendingTaskId) {
                     validatePinAndMove();
+                } else if (pinModalDoneTaskId) {
+                    validatePinAndMarkDone();
                 }
             }
         });

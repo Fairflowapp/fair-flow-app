@@ -82,6 +82,12 @@ async function loadTicketsMembersForAvatars() {
   }
 }
 
+/** Refresh avatar cache and re-render — call when returning to Tickets or when avatars may have changed. */
+window.ticketsRefreshAvatars = async function() {
+  await loadTicketsMembersForAvatars();
+  if (typeof renderTicketsList === 'function') renderTicketsList();
+};
+
 /** Return avatar URL for the technician of ticket t (current user or from members cache). */
 function getTicketTechnicianAvatarUrl(t) {
   if (!currentUserProfile) return null;

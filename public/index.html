@@ -152,6 +152,11 @@ header .brand{display:flex;align-items:center;gap:1rem}
 .user-avatar-dropdown * {
   pointer-events: auto !important;
 }
+.user-avatar-dropdown #settingsBtn {
+  pointer-events: auto !important;
+  z-index: 100002 !important;
+  position: relative !important;
+}
 
 /* Fallback: disable pointer-events on header overlay when dropdown is open */
 body.ff-avatar-dropdown-open .header-inner {
@@ -1719,7 +1724,7 @@ dialog footer button, .code-dialog footer button {
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
               User Profile
             </button>
-            <button id="settingsBtn" class="user-dropdown-item" onclick="typeof openSettingsSecureWithNav==='function'&&openSettingsSecureWithNav()" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:flex;align-items:center;gap:8px;">
+            <button id="settingsBtn" class="user-dropdown-item" data-action="settings" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:flex;align-items:center;gap:8px;position:relative;z-index:100002;pointer-events:auto !important;">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l-.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
               Settings
             </button>
@@ -1917,6 +1922,7 @@ dialog footer button, .code-dialog footer button {
       <div style="flex-shrink:0;width:200px;">
         <nav style="display:flex;flex-direction:column;gap:4px;">
           <button class="user-profile-menu-item" data-section="password" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Password</button>
+          <button class="user-profile-menu-item" data-section="technician-types" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Staff Setup</button>
           <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Notifications</button>
           <button class="user-profile-menu-item" data-section="preferences" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Preferences</button>
           <button class="user-profile-menu-item" data-section="billing" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Billing</button>
@@ -1930,6 +1936,30 @@ dialog footer button, .code-dialog footer button {
           <h3 style="margin:0 0 8px 0;font-size:18px;font-weight:600;color:#111827;">Password</h3>
           <p style="margin:0 0 20px 0;font-size:14px;color:#6b7280;">Update your password to keep your account secure.</p>
           <button id="userProfileChangePasswordBtn" class="btn-primary" style="font-size:14px;">Change</button>
+        </div>
+        
+        <!-- Staff Setup / Technician Types Card -->
+        <div id="userProfileCardTechnicianTypes" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 8px 0;font-size:18px;font-weight:600;color:#111827;">Staff Setup</h3>
+          <p style="margin:0 0 20px 0;font-size:14px;color:#6b7280;">Define the types of technicians in your salon. You can add, edit, and activate/deactivate types.</p>
+          
+          <!-- Technician Types Subsection -->
+          <div style="margin-top:20px;">
+            <h4 style="margin:0 0 16px 0;font-size:16px;font-weight:600;color:#374151;">Technician Types</h4>
+            
+            <!-- Technician Types List -->
+            <div id="userProfileTechnicianTypesList" style="margin-bottom:16px;">
+              <!-- Empty state - will be shown if no types exist -->
+              <div id="userProfileTechnicianTypesEmptyState" style="display:none;text-align:center;padding:32px;color:#9ca3af;font-size:14px;background:#f9fafb;border-radius:8px;border:1px dashed var(--border);">
+                <div style="margin-bottom:8px;font-weight:500;">No technician types yet</div>
+                <div style="font-size:13px;">Add your first technician type to get started</div>
+              </div>
+              <!-- List items - populated dynamically -->
+            </div>
+            
+            <!-- Add Technician Type Button -->
+            <button id="userProfileAddTechnicianTypeBtn" type="button" class="btn-mini" style="font-size:13px;padding:8px 16px;">+ Add Technician Type</button>
+          </div>
         </div>
         
         <!-- Notifications Card -->
@@ -2332,6 +2362,39 @@ dialog footer button, .code-dialog footer button {
     </form>
 
   </dialog>
+
+
+
+  <!-- Add Technician Type Modal -->
+  <div id="addTechnicianTypeModal" class="technician-type-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200001;align-items:center;justify-content:center;backdrop-filter:blur(2px);">
+    <div class="technician-type-modal-box" style="background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,0.25);width:92vw;max-width:480px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;">
+      <div class="technician-type-modal-header" style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #e5e7eb;flex-shrink:0;">
+        <h3 style="margin:0;font-size:18px;font-weight:700;color:#111827;">Add Technician Type</h3>
+        <button id="addTechnicianTypeModalClose" style="background:none;border:none;cursor:pointer;padding:6px;border-radius:6px;color:#6b7280;display:flex;align-items:center;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="technician-type-modal-body" style="flex:1;overflow-y:auto;padding:24px;">
+        <div style="margin-bottom:20px;">
+          <label style="display:block;font-size:14px;font-weight:600;color:#374151;margin-bottom:8px;">Technician Type Name</label>
+          <input id="addTechnicianTypeInput" type="text" placeholder="e.g., Nail Technician, Massage Technician" style="width:100%;padding:12px 16px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box;transition:border-color 0.2s;" onfocus="this.style.borderColor='#7c3aed';this.style.outline='none'" onblur="this.style.borderColor='#d1d5db'">
+          <div style="margin-top:8px;font-size:13px;color:#6b7280;line-height:1.5;">
+            <div style="margin-bottom:4px;">Examples:</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              <span style="padding:4px 10px;background:#f3f4f6;border-radius:6px;font-size:12px;">Nail Technician</span>
+              <span style="padding:4px 10px;background:#f3f4f6;border-radius:6px;font-size:12px;">Massage Technician</span>
+              <span style="padding:4px 10px;background:#f3f4f6;border-radius:6px;font-size:12px;">Facial Technician</span>
+              <span style="padding:4px 10px;background:#f3f4f6;border-radius:6px;font-size:12px;">Wax Technician</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="technician-type-modal-footer" style="padding:16px 24px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end;flex-shrink:0;">
+        <button id="addTechnicianTypeModalCancel" style="padding:10px 20px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.background='#f9fafb';this.style.borderColor='#9ca3af'" onmouseout="this.style.background='#fff';this.style.borderColor='#d1d5db'">Cancel</button>
+        <button id="addTechnicianTypeModalSave" style="padding:10px 20px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;box-shadow:0 2px 8px rgba(124,58,237,0.25);" onmouseover="this.style.background='#6d28d9';this.style.boxShadow='0 4px 12px rgba(124,58,237,0.35)'" onmouseout="this.style.background='#7c3aed';this.style.boxShadow='0 2px 8px rgba(124,58,237,0.25)'">Add</button>
+      </div>
+    </div>
+  </div>
 
 
 
@@ -3965,6 +4028,25 @@ function handleJoin(){
   save();
   renderQueue();
   
+  // Set technician identity for Tasks (so MY LIST shows correct filtered tasks)
+  if (staffId) {
+    window.__ff_authedStaffId = staffId;
+    try { localStorage.setItem('ff_authedStaffId_v1', staffId); } catch (e) {}
+  }
+  window.__ff_authedStaffName = selectedTechnicianName;
+  window.__ff_actorRole = 'Tech';
+  try { sessionStorage.setItem('ff_actor_role', 'Tech'); } catch (e) {}
+  try { sessionStorage.setItem('ff_actor_name', selectedTechnicianName); } catch (e) {}
+  const technicianTypesFromRecord = Array.isArray(technician?.technicianTypes) ? technician.technicianTypes : [];
+  window.__ff_authedTechnicianTypes = technicianTypesFromRecord;
+  try { sessionStorage.setItem('ff_authed_technician_types', JSON.stringify(technicianTypesFromRecord)); } catch (e) {}
+  console.log('[handleJoin] Technician identity set:', { name: selectedTechnicianName, staffId: staffId || null, technicianTypes: technicianTypesFromRecord });
+  
+  // Refresh Tasks MY LIST if visible (technician may have Tasks screen open)
+  if (typeof renderTasksList === 'function' && window.currentTasksTab) {
+    try { renderTasksList(window.currentTasksTab, { force: true }); } catch (e) {}
+  }
+  
   // Clear PIN field and error message on success
   pinInputEl.value = '';
   if (joinErrorEl) {
@@ -4734,6 +4816,7 @@ async function openSettingsSecure(){
     if (chatSection) chatSection.style.display = 'block';
   }
   
+  
   settingsDlg.showModal();
 
 }
@@ -5115,7 +5198,7 @@ function ensureQueueUIHiddenForUserProfile() {
   }
 }
 
-function goToUserProfile() {
+function goToUserProfile(section) {
   // Minimal instrumentation: START log with current view flags and screen existence
   const tasksScreen = document.getElementById('tasksScreen');
   const ownerView = document.getElementById('owner-view');
@@ -5126,7 +5209,11 @@ function goToUserProfile() {
   const chatScreenVisible = chatScreen ? chatScreen.style.display !== 'none' : false;
   const userProfileScreenExists = !!userProfileScreen;
   
+  // Handle section parameter
+  const targetSection = section || 'password';
+  
   console.log('goToUserProfile START', {
+    section: targetSection,
     tasksScreenVisible: tasksScreenVisible,
     ownerViewVisible: ownerViewVisible,
     chatScreenVisible: chatScreenVisible,
@@ -5256,9 +5343,27 @@ function goToUserProfile() {
     document.body.classList.remove('ff-avatar-dropdown-open');
   }
   
+  // If section parameter provided, open that section
+  if (targetSection && targetSection !== 'password') {
+    // Wait a bit for DOM to be ready, then switch to the requested section
+    setTimeout(() => {
+      const handleMenuClick = window.__ff_handleMenuClick;
+      if (handleMenuClick) {
+        handleMenuClick(targetSection);
+      } else {
+        // Fallback: try to find and click the menu item
+        const menuItem = document.querySelector(`.user-profile-menu-item[data-section="${targetSection}"]`);
+        if (menuItem) {
+          menuItem.click();
+        }
+      }
+    }, 150);
+  }
+  
   // Minimal instrumentation: END log with computed styles
   const computedStyle = window.getComputedStyle(userProfileScreen);
   console.log('goToUserProfile END (attempted show)', {
+    section: targetSection,
     display: computedStyle.display,
     visibility: computedStyle.visibility,
     opacity: computedStyle.opacity
@@ -6403,6 +6508,428 @@ async function saveSettings(e){
 
 $("#saveSettings").addEventListener("click", e=>{e.preventDefault(); saveSettings(); settingsDlg.close();});
 
+// ─── Technician Types Management ──────────────────────────────────────────────────
+
+let _technicianTypes = [];
+let _editingTechnicianTypeId = null;
+
+/**
+ * Render technician types list
+ */
+async function renderTechnicianTypes() {
+  console.log('[TechnicianTypes] renderTechnicianTypes called');
+  const listContainer = document.getElementById('technicianTypesList');
+  const emptyState = document.getElementById('technicianTypesEmptyState');
+  if (!listContainer) {
+    console.warn('[TechnicianTypes] listContainer not found');
+    return;
+  }
+  console.log('[TechnicianTypes] listContainer found, loading types...');
+  
+  // Clear existing list items (but keep empty state)
+  const existingItems = listContainer.querySelectorAll('.technician-type-item');
+  existingItems.forEach(item => item.remove());
+  
+  // Load types from cloud
+  if (typeof window.ffGetTechnicianTypes === 'function') {
+    _technicianTypes = await window.ffGetTechnicianTypes();
+    console.log('[TechnicianTypes] Loaded', _technicianTypes.length, 'types from cloud');
+  } else {
+    console.warn('[TechnicianTypes] ffGetTechnicianTypes not available');
+    _technicianTypes = [];
+  }
+  
+  if (_technicianTypes.length === 0) {
+    console.log('[TechnicianTypes] No types found, showing empty state');
+    if (emptyState) emptyState.style.display = 'block';
+    return;
+  }
+  
+  if (emptyState) emptyState.style.display = 'none';
+  console.log('[TechnicianTypes] Rendering', _technicianTypes.length, 'types');
+  
+  // Sort by sortOrder, then by name
+  _technicianTypes.sort((a, b) => {
+    const orderA = a.sortOrder !== undefined ? a.sortOrder : 999;
+    const orderB = b.sortOrder !== undefined ? b.sortOrder : 999;
+    if (orderA !== orderB) return orderA - orderB;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  
+  // Render each type
+  _technicianTypes.forEach(type => {
+    const item = document.createElement('div');
+    item.className = 'technician-type-item';
+    item.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 12px;margin-bottom:8px;background:#fff;border:1px solid var(--border);border-radius:6px;';
+    item.dataset.typeId = type.id;
+    
+    // Status indicator
+    const statusIndicator = document.createElement('div');
+    statusIndicator.style.cssText = `width:8px;height:8px;border-radius:50%;background:${type.active !== false ? '#10b981' : '#9ca3af'};flex-shrink:0;`;
+    statusIndicator.title = type.active !== false ? 'Active' : 'Inactive';
+    
+    // Name display/edit
+    const nameContainer = document.createElement('div');
+    nameContainer.style.cssText = 'flex:1;min-width:0;';
+    
+    if (_editingTechnicianTypeId === type.id) {
+      // Edit mode
+      const editInput = document.createElement('input');
+      editInput.type = 'text';
+      editInput.value = type.name || '';
+      editInput.style.cssText = 'width:100%;padding:4px 8px;border:1px solid #a78bfa;border-radius:4px;font-size:13px;';
+      editInput.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          await saveTechnicianTypeEdit(type.id, editInput.value.trim());
+        } else if (e.key === 'Escape') {
+          _editingTechnicianTypeId = null;
+          renderTechnicianTypes();
+        }
+      });
+      editInput.addEventListener('blur', async () => {
+        await saveTechnicianTypeEdit(type.id, editInput.value.trim());
+      });
+      nameContainer.appendChild(editInput);
+      setTimeout(() => editInput.focus(), 0);
+    } else {
+      // Display mode
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = type.name || '';
+      nameSpan.style.cssText = `font-size:13px;color:${type.active !== false ? '#111827' : '#9ca3af'};`;
+      if (type.active === false) {
+        nameSpan.style.textDecoration = 'line-through';
+      }
+      nameContainer.appendChild(nameSpan);
+    }
+    
+    // Active/Inactive toggle
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.textContent = type.active !== false ? 'Active' : 'Inactive';
+    toggleBtn.style.cssText = `padding:4px 10px;border:1px solid ${type.active !== false ? '#10b981' : '#9ca3af'};border-radius:4px;background:${type.active !== false ? '#d1fae5' : '#f3f4f6'};color:${type.active !== false ? '#065f46' : '#6b7280'};cursor:pointer;font-size:11px;font-weight:600;`;
+    toggleBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await toggleTechnicianType(type.id, !type.active);
+    });
+    
+    // Edit button
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit';
+    editBtn.style.cssText = 'padding:4px 10px;border:1px solid #a78bfa;border-radius:4px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:11px;font-weight:600;';
+    editBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      _editingTechnicianTypeId = type.id;
+      renderTechnicianTypes();
+    });
+    
+    item.appendChild(statusIndicator);
+    item.appendChild(nameContainer);
+    item.appendChild(toggleBtn);
+    item.appendChild(editBtn);
+    
+    listContainer.appendChild(item);
+  });
+}
+
+/**
+ * Save technician type edit
+ */
+async function saveTechnicianTypeEdit(typeId, newName) {
+  if (!newName || !newName.trim()) {
+    _editingTechnicianTypeId = null;
+    if (typeof renderTechnicianTypes === 'function') await renderTechnicianTypes();
+    if (typeof renderUserProfileTechnicianTypes === 'function') await renderUserProfileTechnicianTypes();
+    return;
+  }
+  
+  if (typeof window.ffUpdateTechnicianType !== 'function') {
+    console.warn('[TechnicianTypes] ffUpdateTechnicianType not available');
+    _editingTechnicianTypeId = null;
+    if (typeof renderTechnicianTypes === 'function') await renderTechnicianTypes();
+    if (typeof renderUserProfileTechnicianTypes === 'function') await renderUserProfileTechnicianTypes();
+    return;
+  }
+  
+  try {
+    await window.ffUpdateTechnicianType(typeId, { name: newName });
+    _editingTechnicianTypeId = null;
+    if (typeof renderTechnicianTypes === 'function') await renderTechnicianTypes();
+    if (typeof renderUserProfileTechnicianTypes === 'function') await renderUserProfileTechnicianTypes();
+  } catch (e) {
+    alert('Error updating technician type: ' + (e.message || e));
+    console.error('[TechnicianTypes] Update error:', e);
+  }
+}
+
+/**
+ * Toggle technician type active/inactive
+ */
+async function toggleTechnicianType(typeId, newActive) {
+  if (typeof window.ffUpdateTechnicianType !== 'function') {
+    console.warn('[TechnicianTypes] ffUpdateTechnicianType not available');
+    return;
+  }
+  
+  try {
+    await window.ffUpdateTechnicianType(typeId, { active: newActive });
+    await renderTechnicianTypes();
+    await renderUserProfileTechnicianTypes();
+  } catch (e) {
+    alert('Error updating technician type: ' + (e.message || e));
+    console.error('[TechnicianTypes] Toggle error:', e);
+  }
+}
+
+/**
+ * Show add technician type modal
+ */
+function showAddTechnicianTypeDialog() {
+  const modal = document.getElementById('addTechnicianTypeModal');
+  const input = document.getElementById('addTechnicianTypeInput');
+  const closeBtn = document.getElementById('addTechnicianTypeModalClose');
+  const cancelBtn = document.getElementById('addTechnicianTypeModalCancel');
+  const saveBtn = document.getElementById('addTechnicianTypeModalSave');
+  
+  if (!modal || !input) {
+    // Fallback to prompt if modal not found
+    const name = prompt('Enter technician type name:\n\nExample: Nail Technician, Massage Technician, etc.');
+    if (!name || !name.trim()) return;
+    addTechnicianType(name.trim());
+    return;
+  }
+  
+  // Reset input
+  input.value = '';
+  input.focus();
+  
+  // Show modal
+  modal.style.display = 'flex';
+  
+  // Close handlers
+  const closeModal = () => {
+    modal.style.display = 'none';
+    input.value = '';
+  };
+  
+  if (closeBtn) {
+    closeBtn.onclick = closeModal;
+  }
+  
+  if (cancelBtn) {
+    cancelBtn.onclick = closeModal;
+  }
+  
+  // Save handler
+  if (saveBtn) {
+    const handleSave = () => {
+      const name = input.value.trim();
+      if (!name) {
+        input.style.borderColor = '#ef4444';
+        setTimeout(() => {
+          input.style.borderColor = '#d1d5db';
+        }, 2000);
+        return;
+      }
+      
+      closeModal();
+      addTechnicianType(name);
+    };
+    
+    saveBtn.onclick = handleSave;
+    
+    // Also handle Enter key
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleSave();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeModal();
+      }
+    };
+  }
+  
+  // Close on backdrop click
+  modal.onclick = (e) => {
+    if (e.target === modal) {
+      closeModal();
+    }
+  };
+}
+
+/**
+ * Add new technician type
+ */
+async function addTechnicianType(name) {
+  if (!name || !name.trim()) {
+    alert('Please enter a name');
+    return;
+  }
+  
+  if (typeof window.ffCreateTechnicianType !== 'function') {
+    alert('Technician types feature is not available. Please refresh the page.');
+    console.warn('[TechnicianTypes] ffCreateTechnicianType not available');
+    return;
+  }
+  
+  try {
+    await window.ffCreateTechnicianType(name);
+    await renderTechnicianTypes();
+    await renderUserProfileTechnicianTypes();
+  } catch (e) {
+    alert('Error creating technician type: ' + (e.message || e));
+    console.error('[TechnicianTypes] Create error:', e);
+  }
+}
+
+// Bind add button and setup event listeners
+function initializeTechnicianTypes() {
+  const addBtn = document.getElementById('addTechnicianTypeBtn');
+  if (addBtn && !addBtn.__ffBound) {
+    addBtn.__ffBound = true;
+    addBtn.addEventListener('click', showAddTechnicianTypeDialog);
+  }
+  
+  // User Profile add button
+  const userProfileAddBtn = document.getElementById('userProfileAddTechnicianTypeBtn');
+  if (userProfileAddBtn && !userProfileAddBtn.__ffBound) {
+    userProfileAddBtn.__ffBound = true;
+    userProfileAddBtn.addEventListener('click', showAddTechnicianTypeDialog);
+  }
+  
+  // Listen for technician types updates from cloud
+  if (!document.__ffTechnicianTypesListenerBound) {
+    document.__ffTechnicianTypesListenerBound = true;
+    document.addEventListener('ff-technician-types-updated', async (e) => {
+      _technicianTypes = e.detail || [];
+      await renderTechnicianTypes();
+      await renderUserProfileTechnicianTypes();
+    });
+  }
+}
+
+/**
+ * Render technician types in User Profile card
+ */
+async function renderUserProfileTechnicianTypes() {
+  const listContainer = document.getElementById('userProfileTechnicianTypesList');
+  const emptyState = document.getElementById('userProfileTechnicianTypesEmptyState');
+  if (!listContainer) return;
+  
+  // Clear existing list items
+  const existingItems = listContainer.querySelectorAll('.technician-type-item');
+  existingItems.forEach(item => item.remove());
+  
+  // Load types from cloud
+  if (typeof window.ffGetTechnicianTypes === 'function') {
+    _technicianTypes = await window.ffGetTechnicianTypes();
+  } else {
+    _technicianTypes = [];
+  }
+  
+  if (_technicianTypes.length === 0) {
+    if (emptyState) emptyState.style.display = 'block';
+    return;
+  }
+  
+  if (emptyState) emptyState.style.display = 'none';
+  
+  // Sort by sortOrder, then by name
+  _technicianTypes.sort((a, b) => {
+    const orderA = a.sortOrder !== undefined ? a.sortOrder : 999;
+    const orderB = b.sortOrder !== undefined ? b.sortOrder : 999;
+    if (orderA !== orderB) return orderA - orderB;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  
+  // Render each type
+  _technicianTypes.forEach(type => {
+    const item = document.createElement('div');
+    item.className = 'technician-type-item';
+    item.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 16px;margin-bottom:8px;background:#f9fafb;border:1px solid var(--border);border-radius:8px;';
+    item.dataset.typeId = type.id;
+    
+    // Status indicator
+    const statusIndicator = document.createElement('div');
+    statusIndicator.style.cssText = `width:10px;height:10px;border-radius:50%;background:${type.active !== false ? '#10b981' : '#9ca3af'};flex-shrink:0;`;
+    statusIndicator.title = type.active !== false ? 'Active' : 'Inactive';
+    
+    // Name display/edit
+    const nameContainer = document.createElement('div');
+    nameContainer.style.cssText = 'flex:1;min-width:0;';
+    
+    if (_editingTechnicianTypeId === type.id) {
+      // Edit mode
+      const editInput = document.createElement('input');
+      editInput.type = 'text';
+      editInput.value = type.name || '';
+      editInput.style.cssText = 'width:100%;padding:6px 10px;border:1px solid #a78bfa;border-radius:6px;font-size:14px;';
+      editInput.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          await saveTechnicianTypeEdit(type.id, editInput.value.trim());
+        } else if (e.key === 'Escape') {
+          _editingTechnicianTypeId = null;
+          renderUserProfileTechnicianTypes();
+        }
+      });
+      editInput.addEventListener('blur', async () => {
+        await saveTechnicianTypeEdit(type.id, editInput.value.trim());
+      });
+      nameContainer.appendChild(editInput);
+      setTimeout(() => editInput.focus(), 0);
+    } else {
+      // Display mode
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = type.name || '';
+      nameSpan.style.cssText = `font-size:14px;color:${type.active !== false ? '#111827' : '#9ca3af'};font-weight:500;`;
+      if (type.active === false) {
+        nameSpan.style.textDecoration = 'line-through';
+      }
+      nameContainer.appendChild(nameSpan);
+    }
+    
+    // Active/Inactive toggle
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.textContent = type.active !== false ? 'Active' : 'Inactive';
+    toggleBtn.style.cssText = `padding:6px 12px;border:1px solid ${type.active !== false ? '#10b981' : '#9ca3af'};border-radius:6px;background:${type.active !== false ? '#d1fae5' : '#f3f4f6'};color:${type.active !== false ? '#065f46' : '#6b7280'};cursor:pointer;font-size:12px;font-weight:600;`;
+    toggleBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await toggleTechnicianType(type.id, !type.active);
+    });
+    
+    // Edit button
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit';
+    editBtn.style.cssText = 'padding:6px 12px;border:1px solid #a78bfa;border-radius:6px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:12px;font-weight:600;';
+    editBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      _editingTechnicianTypeId = type.id;
+      renderUserProfileTechnicianTypes();
+    });
+    
+    item.appendChild(statusIndicator);
+    item.appendChild(nameContainer);
+    item.appendChild(toggleBtn);
+    item.appendChild(editBtn);
+    
+    listContainer.appendChild(item);
+  });
+}
+
+// Initialize on DOM ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeTechnicianTypes);
+} else {
+  initializeTechnicianTypes();
+}
+
+// Note: renderTechnicianTypes is called from openSettingsSecure() directly
+
 
 
 function openLog(){ 
@@ -7161,7 +7688,9 @@ function loadTasksForSettingsTab(tab) {
         id: keyId,
         taskId: keyId,
         title: task.title || '',
-        instructions: task.instructions || task.info || task.details || ''
+        instructions: task.instructions || task.info || task.details || '',
+        assignTo: task.assignTo !== undefined ? task.assignTo : 'all',
+        technicianTypes: task.technicianTypes
       };
       // For weekly tasks: convert old scheduleWeekday to scheduleWeekdays, preserve scheduleWeekdays
       if (tab === 'weekly') {
@@ -7370,25 +7899,72 @@ function renderSettingsTaskList(tabKey) {
             }
           }
           
+        // Get assignTo info for display
+        const assignTo = task.assignTo || 'all';
+        const technicianTypes = Array.isArray(task.technicianTypes) ? task.technicianTypes : [];
+        let assignToDisplay = 'Everyone';
+        if (assignTo === 'manager') {
+          assignToDisplay = 'Managers Only';
+        } else if (assignTo === 'technicians') {
+          if (technicianTypes.length > 0) {
+            // We'll show the types in the edit UI
+            assignToDisplay = 'Technicians (Selected Types)';
+          } else {
+            assignToDisplay = 'All Technicians';
+          }
+        }
+        
         return `
             <div class="tasks-modal-draft-item" style="display:flex;flex-direction:column;padding:10px;margin-bottom:6px;background:#f9fafb;border:1px solid #7b3fe4;border-radius:6px;">
               <div style="flex:1;margin-bottom:6px;">
-                <input type="text" class="tasks-edit-title" data-task-id="${resolvedTaskId}" value="${escapeHtmlDraft(task.title || '')}" placeholder="Task title" style="width:100%;padding:6px;margin-bottom:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-weight:600;font-family:inherit;" />
-                <textarea class="tasks-edit-instructions" data-task-id="${resolvedTaskId}" placeholder="Instructions..." rows="3" style="width:100%;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;resize:vertical;font-family:inherit;">${escapeHtmlDraft(task.instructions || '')}</textarea>
+                <input type="text" class="tasks-edit-title" data-task-id="${resolvedTaskId}" value="${escapeHtmlDraft(task.title || '')}" placeholder="Task title" style="width:100%;padding:6px;margin-bottom:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-weight:600;font-family:inherit;color:#111827;" />
+                <textarea class="tasks-edit-instructions" data-task-id="${resolvedTaskId}" placeholder="Instructions..." rows="3" style="width:100%;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;resize:vertical;font-family:inherit;color:#111827;">${escapeHtmlDraft(task.instructions || '')}</textarea>
+                <div style="margin-top:6px;padding:6px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;">
+                  <div style="font-size:10px;color:#6b7280;margin-bottom:4px;">Assign To:</div>
+                  <div style="font-size:10px;color:#111827;font-weight:500;">${escapeHtmlDraft(assignToDisplay)}</div>
+                </div>
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;">
                 <div style="display:flex;gap:6px;justify-content:flex-end;">
-                  <button class="tasks-modal-draft-save" data-task-id="${resolvedTaskId}" style="background:#7b3fe4;border:none;color:#fff;cursor:pointer;font-size:12px;padding:5px 10px;border-radius:4px;flex-shrink:0;">Save</button>
-                  <button class="tasks-modal-draft-cancel-edit" data-task-id="${resolvedTaskId}" style="background:none;border:1px solid #e5e7eb;color:#666;cursor:pointer;font-size:12px;padding:5px 10px;border-radius:4px;flex-shrink:0;">Cancel</button>
+                  <button class="tasks-modal-draft-save" data-task-id="${resolvedTaskId}" style="background:#7c3aed;border:none;color:#fff;cursor:pointer;font-size:10px;font-weight:600;padding:6px 12px;border-radius:8px;flex-shrink:0;">Save</button>
+                  <button class="tasks-modal-draft-cancel-edit" data-task-id="${resolvedTaskId}" style="background:none;border:1px solid #e5e7eb;color:#374151;cursor:pointer;font-size:10px;font-weight:500;padding:6px 12px;border-radius:8px;flex-shrink:0;">Cancel</button>
                 </div>
                 <div style="display:flex;gap:6px;justify-content:flex-end;">
-                  <button class="tasks-modal-draft-force-delete" data-task-id="${resolvedTaskId}" data-task-id-value="${escapeHtmlDraft(displayId)}" data-task-taskid-value="${escapeHtmlDraft(displayTaskId)}" data-settings-tab="${tab}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:11px;padding:3px 6px;text-decoration:underline;">Force Delete</button>
+                  <button class="tasks-modal-draft-force-delete" data-task-id="${resolvedTaskId}" data-task-id-value="${escapeHtmlDraft(displayId)}" data-task-taskid-value="${escapeHtmlDraft(displayTaskId)}" data-settings-tab="${tab}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:10px;padding:3px 6px;text-decoration:underline;">Force Delete</button>
                 </div>
               </div>
             </div>
           `;
         } else {
           // View mode: show title and instructions with Edit and Delete buttons (draggable)
+          // Get assignTo info for display
+          const assignTo = task.assignTo || 'all';
+          const technicianTypes = Array.isArray(task.technicianTypes) ? task.technicianTypes : [];
+          let assignToDisplay = 'Everyone';
+          if (assignTo === 'manager') {
+            assignToDisplay = 'Managers Only';
+          } else if (assignTo === 'technicians') {
+            if (technicianTypes.length > 0) {
+              // Load technician type names for display
+              let typeNames = [];
+              if (typeof window.ffGetTechnicianTypes === 'function') {
+                try {
+                  const allTypes = window.ffGetTechnicianTypes();
+                  const activeTypes = allTypes.filter(t => t.active !== false);
+                  typeNames = technicianTypes.map(id => {
+                    const type = activeTypes.find(t => t.id === id);
+                    return type ? type.name : id;
+                  });
+                } catch (e) {
+                  typeNames = technicianTypes;
+                }
+              }
+              assignToDisplay = 'Technicians: ' + (typeNames.length > 0 ? typeNames.join(', ') : 'Selected Types');
+            } else {
+              assignToDisplay = 'All Technicians';
+            }
+          }
+          
           // For weekly tasks, add multi-day selector
           let daysSelectorHtml = '';
           if (tab === 'weekly') {
@@ -7413,7 +7989,7 @@ function renderSettingsTaskList(tabKey) {
             
             daysSelectorHtml = `
               <div class="tasks-weekly-days-selector-wrapper" data-task-id="${resolvedTaskId}" style="position:relative;margin-right:8px;">
-                <button class="tasks-weekly-days-summary" data-task-id="${resolvedTaskId}" type="button" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:#666;cursor:pointer;white-space:nowrap;">
+                <button class="tasks-weekly-days-summary" data-task-id="${resolvedTaskId}" type="button" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;font-size:10px;color:#374151;cursor:pointer;white-space:nowrap;">
                   <span>Days: ${daysSummary}</span>
                   <span style="font-size:10px;">▾</span>
                 </button>
@@ -7447,7 +8023,7 @@ function renderSettingsTaskList(tabKey) {
             
             yearlyDateSelectorHtml = `
               <div class="tasks-yearly-date-selector-wrapper" data-task-id="${resolvedTaskId}" style="position:relative;margin-right:8px;">
-                <button class="tasks-yearly-date-summary" data-task-id="${resolvedTaskId}" type="button" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:${isRequired ? '#dc2626' : '#666'};cursor:pointer;white-space:nowrap;">
+                <button class="tasks-yearly-date-summary" data-task-id="${resolvedTaskId}" type="button" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;font-size:10px;color:${isRequired ? '#dc2626' : '#374151'};cursor:pointer;white-space:nowrap;">
                   <span>Date: ${dateSummary}</span>
                   <span style="font-size:10px;">▾</span>
                 </button>
@@ -7455,7 +8031,7 @@ function renderSettingsTaskList(tabKey) {
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     <div>
                       <label style="display:block;font-size:11px;color:#666;margin-bottom:4px;">Month:</label>
-                      <select class="tasks-yearly-month-select" data-ff="yearly-month" data-task-id="${resolvedTaskId}" style="width:100%;padding:4px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;font-family:inherit;cursor:pointer;">
+                      <select class="tasks-yearly-month-select" data-ff="yearly-month" data-task-id="${resolvedTaskId}" style="width:100%;padding:4px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:10px;font-family:inherit;cursor:pointer;">
                         <option value="">Select month</option>
                         <option value="1" ${selectedMonth === '1' ? 'selected' : ''}>January</option>
                         <option value="2" ${selectedMonth === '2' ? 'selected' : ''}>February</option>
@@ -7473,7 +8049,7 @@ function renderSettingsTaskList(tabKey) {
                     </div>
                     <div>
                       <label style="display:block;font-size:11px;color:#666;margin-bottom:4px;">Day:</label>
-                      <input type="number" class="tasks-yearly-day-input" data-ff="yearly-day" data-task-id="${resolvedTaskId}" min="1" max="31" value="${selectedDay}" placeholder="1-31" style="width:100%;padding:4px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;font-family:inherit;">
+                      <input type="number" class="tasks-yearly-day-input" data-ff="yearly-day" data-task-id="${resolvedTaskId}" min="1" max="31" value="${selectedDay}" placeholder="1-31" style="width:100%;padding:4px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:10px;font-family:inherit;">
                     </div>
                   </div>
                 </div>
@@ -7490,7 +8066,7 @@ function renderSettingsTaskList(tabKey) {
             
             monthlyDaySelectorHtml = `
               <div class="tasks-monthly-day-selector-wrapper" data-task-id="${resolvedTaskId}" style="position:relative;margin-right:8px;">
-                <button class="tasks-monthly-day-summary" data-task-id="${resolvedTaskId}" type="button" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:#666;cursor:pointer;white-space:nowrap;">
+                <button class="tasks-monthly-day-summary" data-task-id="${resolvedTaskId}" type="button" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;font-size:10px;color:#374151;cursor:pointer;white-space:nowrap;">
                   <span>Day: ${daySummary}</span>
                   <span style="font-size:10px;">▾</span>
                 </button>
@@ -7516,17 +8092,21 @@ function renderSettingsTaskList(tabKey) {
             <div class="tasks-modal-draft-item" draggable="true" data-task-key="${String(resolvedTaskId || '').trim()}" data-is-orphan="${isOrphan ? 'true' : 'false'}" style="display:flex;align-items:flex-start;justify-content:space-between;padding:8px 10px;margin-bottom:6px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;cursor:move;">
             <div style="flex:1;">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
-                  <div style="font-weight:600;font-size:13px;color:#111;">${escapeHtmlDraft(task.title || '')}</div>
+                  <div style="font-weight:600;font-size:10px;color:#111827;">${escapeHtmlDraft(task.title || '')}</div>
             </div>
-                ${task.instructions ? `<div style="font-size:12px;color:#666;margin-top:2px;white-space:pre-wrap;">${escapeHtmlDraft(task.instructions)}</div>` : ''}
+                ${task.instructions ? `<div style="font-size:10px;color:#374151;margin-top:2px;white-space:pre-wrap;">${escapeHtmlDraft(task.instructions)}</div>` : ''}
+                <div style="margin-top:4px;padding:4px 6px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;display:inline-block;">
+                  <span style="font-size:10px;color:#6b7280;">Assign To: </span>
+                  <span style="font-size:10px;color:#111827;font-weight:500;">${escapeHtmlDraft(assignToDisplay)}</span>
+                </div>
               </div>
               <div style="display:flex;gap:6px;align-items:flex-start;margin-left:10px;flex-shrink:0;">
                 ${daysSelectorHtml}
                 ${monthlyDaySelectorHtml}
                 ${yearlyDateSelectorHtml}
                 <div style="display:flex;flex-direction:column;gap:4px;">
-                  <button class="tasks-modal-draft-edit" data-task-id="${resolvedTaskId}" style="background:none;border:none;color:#7b3fe4;cursor:pointer;font-size:12px;padding:3px 6px;border-radius:4px;text-decoration:underline;">Edit</button>
-                  <button class="tasks-modal-draft-remove" data-task-id="${resolvedTaskId}" data-is-orphan="${isOrphan ? 'true' : 'false'}" data-settings-tab="${tab}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:12px;padding:3px 8px;border-radius:4px;text-decoration:underline;">DELETE</button>
+                  <button class="tasks-modal-draft-edit" data-task-id="${resolvedTaskId}" style="background:none;border:none;color:#7c3aed;cursor:pointer;font-size:10px;font-weight:500;padding:3px 6px;border-radius:4px;text-decoration:underline;">Edit</button>
+                  <button class="tasks-modal-draft-remove" data-task-id="${resolvedTaskId}" data-is-orphan="${isOrphan ? 'true' : 'false'}" data-settings-tab="${tab}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:10px;font-weight:500;padding:3px 8px;border-radius:4px;text-decoration:underline;">DELETE</button>
                 </div>
               </div>
           </div>
@@ -8981,6 +9561,29 @@ let isTasksSettingsOpen = false;
 let tasksSettingsModalContainer = null; // Reference to modal container element
 window.ff_is_admin_cached = null; // Cached admin status for Tasks Settings access
 
+// Debug: run in console to get full task filter state (unfolded)
+window.ffDebugTaskFilterFull = function() {
+  const sid = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1');
+  const actorRole = window.__ff_actorRole || sessionStorage.getItem('ff_actor_role');
+  const authEmail = (window.__ffAuth && window.__ffAuth.currentUser && window.__ffAuth.currentUser.email) || (window.auth && window.auth.currentUser && window.auth.currentUser.email) || null;
+  console.log('=== A. Connected user ===');
+  console.log(JSON.stringify({ sid, actorRole, authEmail }, null, 2));
+  const staff = (JSON.parse(localStorage.getItem('ff_staff_v1') || '{}').staff) || [];
+  const currentStaff = staff.find(s =>
+    ((s.id || s.staffId) && sid && String(s.id || s.staffId) === String(sid)) ||
+    (s.email && authEmail && String(s.email).toLowerCase() === String(authEmail).toLowerCase())
+  );
+  console.log('=== B. Current staff record ===');
+  console.log(JSON.stringify(currentStaff || null, null, 2));
+  const activeTasks = (JSON.parse(localStorage.getItem('ff_tasks_opening_active_v1') || '[]') || []);
+  console.log('=== C. Opening active tasks ===');
+  activeTasks.forEach((t, i) => console.log('Task ' + i + ':', JSON.stringify({ title: t.title, taskId: t.taskId || t.id, assignTo: t.assignTo, technicianTypes: t.technicianTypes }, null, 2)));
+  const technicians = (staff || []).filter(s => s.role === 'technician' || (!s.isAdmin && !s.isManager));
+  console.log('=== D. Technicians with types ===');
+  technicians.forEach((s, i) => console.log('Staff ' + i + ':', JSON.stringify({ id: s.id || s.staffId, name: s.name, email: s.email, role: s.role, isAdmin: s.isAdmin, isManager: s.isManager, technicianTypes: s.technicianTypes }, null, 2)));
+  return { sid, currentStaff, activeTasks, technicians };
+};
+
 // Check if user has admin access (owner role OR valid admin code override)
 function ffHasAdminAccess() {
   // Check owner role cache
@@ -9069,7 +9672,7 @@ function showAdminCodeModal(onSuccess) {
     modal.className = 'tasks-modal-overlay';
     modal.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;align-items:center;justify-content:center;';
     modal.innerHTML = `
-      <div class="tasks-modal-container" onclick="event.stopPropagation()" style="background:#fff;border-radius:12px;padding:24px;max-width:400px;width:90%;box-shadow:0 10px 30px rgba(0,0,0,0.2);">
+      <div class="tasks-modal-container" onclick="event.stopPropagation()" style="background:#fff;border-radius:12px;padding:24px;max-width:900px;width:95%;max-height:90vh;box-shadow:0 10px 30px rgba(0,0,0,0.2);display:flex;flex-direction:column;">
         <h3 style="margin:0 0 16px;font-size:18px;font-weight:600;color:#111;">Admin access required</h3>
         <div style="margin-bottom:16px;">
           <input type="password" id="ffAdminCodeInput" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" placeholder="Enter admin code" style="width:100%;padding:10px 14px;border:1px solid #e5e7eb;border-radius:8px;font-size:16px;text-align:center;font-family:inherit;">
@@ -9402,9 +10005,9 @@ function setSettingsModalTab(tabName, options) {
           
           // Show ENFORCE SELECT checkbox for opening tab
           const enforceSelectSection = document.getElementById('tasksEnforceSelectSection');
-          const enforceSelectCheckbox = document.getElementById('tasksEnforceSelectCheckbox');
+          const enforceSelectCheckbox = document.getElementById('tasksEnforceSelectCheckboxOpening');
           if (enforceSelectSection && enforceSelectCheckbox) {
-            enforceSelectSection.style.display = 'block';
+            enforceSelectSection.style.display = 'flex';
             // Load setting
             const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
             enforceSelectCheckbox.checked = enforceSelectSettings.opening === true;
@@ -9508,10 +10111,10 @@ function setSettingsModalTab(tabName, options) {
           }
           
           // Show ENFORCE SELECT checkbox for closing tab
-          const enforceSelectSection = document.getElementById('tasksEnforceSelectSection');
-          const enforceSelectCheckbox = document.getElementById('tasksEnforceSelectCheckbox');
+          const enforceSelectSection = document.getElementById('tasksEnforceSelectSectionClosing');
+          const enforceSelectCheckbox = document.getElementById('tasksEnforceSelectCheckboxClosing');
           if (enforceSelectSection && enforceSelectCheckbox) {
-            enforceSelectSection.style.display = 'block';
+            enforceSelectSection.style.display = 'flex';
             // Load setting
             const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
             enforceSelectCheckbox.checked = enforceSelectSettings.closing === true;
@@ -9595,8 +10198,12 @@ function setSettingsModalTab(tabName, options) {
         }
         // Hide ENFORCE SELECT checkbox for weekly tab
         const enforceSelectSection = document.getElementById('tasksEnforceSelectSection');
+        const enforceSelectSectionClosing = document.getElementById('tasksEnforceSelectSectionClosing');
         if (enforceSelectSection) {
           enforceSelectSection.style.display = 'none';
+        }
+        if (enforceSelectSectionClosing) {
+          enforceSelectSectionClosing.style.display = 'none';
         }
         
         // Show weekly auto-reset section
@@ -9818,8 +10425,12 @@ function setSettingsModalTab(tabName, options) {
       }
       // Hide ENFORCE SELECT checkbox for yearly tab
       const enforceSelectSection = document.getElementById('tasksEnforceSelectSection');
+      const enforceSelectSectionClosing = document.getElementById('tasksEnforceSelectSectionClosing');
       if (enforceSelectSection) {
         enforceSelectSection.style.display = 'none';
+      }
+      if (enforceSelectSectionClosing) {
+        enforceSelectSectionClosing.style.display = 'none';
       }
       
       // Wire Yearly Auto-Reset UI (use cached elements from top of function)
@@ -9989,7 +10600,10 @@ function saveTasksToStorage() {
         instructions: (task.instructions !== undefined && task.instructions !== null) ? task.instructions : 
                       (task.info !== undefined && task.info !== null) ? task.info :
                       (task.details !== undefined && task.details !== null) ? task.details :
-                      (existingTask?.instructions || existingTask?.info || existingTask?.details || '')
+                      (existingTask?.instructions || existingTask?.info || existingTask?.details || ''),
+        // Preserve assignTo and technicianTypes
+        assignTo: task.assignTo !== undefined ? task.assignTo : (existingTask?.assignTo || 'all'),
+        technicianTypes: task.technicianTypes !== undefined ? task.technicianTypes : (existingTask?.technicianTypes || undefined)
       };
       
       // For weekly tasks: always include scheduleWeekdays
@@ -10018,6 +10632,21 @@ function saveTasksToStorage() {
           // Default to 'any' if neither draft nor existing has it
           catalogTask.scheduleDayOfMonth = 'any';
         }
+      }
+      
+      // Preserve assignTo and technicianTypes for all tabs
+      if (task.assignTo !== undefined) {
+        catalogTask.assignTo = task.assignTo;
+      } else if (existingTask && existingTask.assignTo !== undefined) {
+        catalogTask.assignTo = existingTask.assignTo;
+      } else {
+        catalogTask.assignTo = 'all';
+      }
+      
+      if (task.technicianTypes !== undefined) {
+        catalogTask.technicianTypes = task.technicianTypes;
+      } else if (existingTask && existingTask.technicianTypes !== undefined) {
+        catalogTask.technicianTypes = existingTask.technicianTypes;
       }
       
       // For yearly tasks: use updateCatalogItem to preserve catalog shape (array vs object)
@@ -10194,7 +10823,9 @@ function saveTasksToStorage() {
           status: null,
           assignedTo: null,
           completedBy: null,
-          completedAt: null
+          completedAt: null,
+          assignTo: task.assignTo !== undefined ? task.assignTo : 'all',
+          technicianTypes: task.technicianTypes !== undefined ? task.technicianTypes : undefined
         };
         activeTasks.push(newActiveTask);
         activeIds.add(keyId); // Prevent duplicates
@@ -10207,6 +10838,23 @@ function saveTasksToStorage() {
         });
       } else if (keyId && activeIds.has(keyId)) {
         console.log(`[SYNC/SAVE] Task ${keyId} already exists in ACTIVE, skipping (preserving existing status/state)`);
+      }
+    });
+    
+    // Sync assignTo and technicianTypes from catalog to existing active tasks
+    activeTasks.forEach(activeTask => {
+      if (!activeTask) return;
+      const keyId = activeTask.taskId || activeTask.id;
+      if (!keyId) return;
+      const catalogTask = catalogList.find(t => (t.taskId || t.id) === keyId);
+      if (!catalogTask) return;
+      // Sync assignTo if missing
+      if (activeTask.assignTo === undefined) {
+        activeTask.assignTo = catalogTask.assignTo !== undefined ? catalogTask.assignTo : 'all';
+      }
+      // Sync technicianTypes if missing (catalog has it)
+      if (activeTask.technicianTypes === undefined && catalogTask.technicianTypes !== undefined) {
+        activeTask.technicianTypes = catalogTask.technicianTypes;
       }
     });
     
@@ -10646,16 +11294,74 @@ function renderTasksList(tab, opts) {
       }
     }
     
+    // Preload technician types cache for assignTo filtering (always load when Tasks screen shows)
+    if ((!window.__ff_technician_types_cache || window.__ff_technician_types_cache.length === 0) && typeof window.ffGetTechnicianTypes === 'function') {
+      window.ffGetTechnicianTypes().then(types => {
+        if (types && types.length > 0) {
+          window.__ff_technician_types_cache = types.filter(t => t.active !== false);
+          if (typeof window.renderTasksList === 'function') window.renderTasksList(currentTab || 'opening', { force: true });
+        }
+      }).catch(() => {});
+    }
+    
     // Render main screen MY LIST (active tasks) - only if main screen is visible and Settings modal is NOT open
     const mainListContainer = document.querySelector('#tasksContentContainer .tasks-col:first-child .tasks-list');
     if (mainListContainer && !isTasksSettingsOpen) {
+      // Ensure admin filter visibility when rendering (handles timing when admin status resolves late)
+      const filterEl = document.getElementById('tasksAdminFilter');
+      if (filterEl) {
+        if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) {
+          filterEl.style.display = 'inline-block';
+          if (!filterEl.__adminFilterPopulated && typeof populateTasksAdminFilter === 'function') {
+            filterEl.__adminFilterPopulated = true;
+            populateTasksAdminFilter(filterEl);
+          }
+        } else {
+          filterEl.style.display = 'none';
+          filterEl.__adminFilterPopulated = false;
+        }
+      }
       // Get current tab for main Tasks screen (not Settings modal)
       const mainTab = currentTab;
       
       // Get tasks from tab-specific storage for main screen (getTabTasks reads directly from localStorage, no cache)
-      const activeTasks = getTabTasks(mainTab, 'active');
+      let activeTasks = getTabTasks(mainTab, 'active');
       const doneTasks = getTabTasks(mainTab, 'done');
       const pendingTasks = getTabTasks(mainTab, 'pending');
+      
+      // Catalog-fallback: include tasks from catalog not yet in active (Firestore sync may be delayed)
+      const catalog = window.ff_tasks_catalog_v1 || {};
+      const catalogTabTasks = catalog[mainTab] || [];
+      const activeIds = new Set((activeTasks || []).map(t => String(t.taskId || t.id || '').trim()).filter(Boolean));
+      const pendingIds = new Set((pendingTasks || []).map(t => String(t.taskId || t.id || '').trim()).filter(Boolean));
+      const doneIds = new Set((doneTasks || []).map(t => String(t.taskId || t.id || '').trim()).filter(Boolean));
+      let tombstone = new Set();
+      try {
+        const tRaw = localStorage.getItem('ff_tasks_active_deleted_v1');
+        if (tRaw) {
+          const tObj = JSON.parse(tRaw);
+          if (tObj && tObj[mainTab]) tombstone = new Set((tObj[mainTab] || []).map(String));
+        }
+      } catch (e) {}
+      catalogTabTasks.forEach(ct => {
+        const keyId = String(ct.taskId || ct.id || '').trim();
+        if (!keyId || activeIds.has(keyId) || pendingIds.has(keyId) || doneIds.has(keyId) || tombstone.has(keyId)) return;
+        activeTasks = activeTasks || [];
+        activeTasks.push({
+          taskId: keyId,
+          id: keyId,
+          title: ct.title || '',
+          instructions: ct.instructions || ct.info || '',
+          active: true,
+          status: null,
+          assignedTo: null,
+          completedBy: null,
+          completedAt: null,
+          assignTo: ct.assignTo ?? 'all',
+          technicianTypes: Array.isArray(ct.technicianTypes) ? ct.technicianTypes : []
+        });
+        activeIds.add(keyId);
+      });
       
       // Helper to check if two timestamps are on the same local day
       function isSameLocalDay(tsA, tsB) {
@@ -10691,6 +11397,162 @@ function renderTasksList(tab, opts) {
         }
       }
       
+      // Helper function to check if task is relevant to current user
+      function isTaskRelevantToUser(task) {
+        // Always read assignTo/technicianTypes from catalog (source of truth from Firestore)
+        const taskId = String(task.taskId || task.id || '').trim();
+        const catalog = window.ff_tasks_catalog_v1 || {};
+        const catalogTabTasks = catalog[mainTab] || [];
+        const catalogTask = taskId ? catalogTabTasks.find(t => String(t.taskId || t.id || '').trim() === taskId) : null;
+        const assignTo = catalogTask?.assignTo ?? task.assignTo ?? 'all';
+        const taskTechnicianTypesFromCatalog = Array.isArray(catalogTask?.technicianTypes) ? catalogTask.technicianTypes : (Array.isArray(task.technicianTypes) ? task.technicianTypes : []);
+        
+        // If assignTo is 'all', show to everyone
+        if (assignTo === 'all') return true;
+        
+        const debugTasks = localStorage.getItem('DEBUG_TASKS') === 'true';
+        
+        // Get current user's role and technician types
+        let currentUserRole = null;
+        let currentUserTechnicianTypes = [];
+        let currentStaff = null;
+        
+        // Try to get from staff store (by staffId first, then email, then name)
+        if (typeof window.ffGetStaffStore === 'function') {
+          try {
+            const staffStore = window.ffGetStaffStore();
+            const staffId = (window.__ff_authedStaffId || (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null) || '').toString().trim();
+            const currentUserEmail = window.currentUserEmail || (window.currentUser && window.currentUser.email);
+            const authedName = window.__ff_authedStaffName || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_name') : null) || '';
+            if (staffId) {
+              currentStaff = staffStore.staff.find(s => {
+                const sid = String(s.id || s.staffId || '').trim();
+                return sid && (sid === staffId || sid.toLowerCase() === staffId.toLowerCase());
+              });
+            }
+            if (!currentStaff && currentUserEmail) {
+              const emailLower = String(currentUserEmail).toLowerCase().trim();
+              currentStaff = staffStore.staff.find(s => s.email && String(s.email).toLowerCase().trim() === emailLower);
+            }
+            if (!currentStaff && authedName) {
+              const nameNorm = String(authedName).trim().toLowerCase();
+              currentStaff = staffStore.staff.find(s => {
+                const n = String(s.name || s.fullName || '').trim().toLowerCase();
+                return n && n === nameNorm;
+              });
+            }
+            if (currentStaff) {
+              if (currentStaff.isAdmin === true) {
+                currentUserRole = 'admin';
+              } else if (currentStaff.isManager === true || (currentStaff.role && String(currentStaff.role).toLowerCase() === 'manager')) {
+                currentUserRole = 'manager';
+              } else {
+                currentUserRole = 'technician';
+              }
+              currentUserTechnicianTypes = Array.isArray(currentStaff.technicianTypes) ? currentStaff.technicianTypes : [];
+            }
+          } catch (e) {
+            console.warn('[isTaskRelevantToUser] Error getting staff info:', e);
+          }
+        }
+        // Fallback: use cached technician types from PIN auth (set by validatePinAndMove / handleJoin)
+        if (currentUserTechnicianTypes.length === 0 && Array.isArray(window.__ff_authedTechnicianTypes) && window.__ff_authedTechnicianTypes.length > 0) {
+          currentUserTechnicianTypes = window.__ff_authedTechnicianTypes;
+        }
+        try {
+          const fromSession = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_authed_technician_types') : null;
+          if (currentUserTechnicianTypes.length === 0 && fromSession) {
+            const parsed = JSON.parse(fromSession);
+            if (Array.isArray(parsed) && parsed.length > 0) currentUserTechnicianTypes = parsed;
+          }
+        } catch (e) {}
+        
+        // Fallback: role from users doc (set on login), actor role, or PIN-identified technician
+        if (!currentUserRole) {
+          const roleFromUser = (typeof window !== 'undefined' && window.__ff_user_role) ? window.__ff_user_role : '';
+          const roleFromActor = window.__ff_actorRole || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_role') : null) || '';
+          const roleLower = String(roleFromUser || roleFromActor).toLowerCase();
+          if (roleLower === 'admin' || roleLower === 'owner') {
+            currentUserRole = 'admin';
+          } else if (roleLower === 'manager') {
+            currentUserRole = 'manager';
+          } else if (window.__ff_authedStaffId || window.__ff_authedStaffName || localStorage.getItem('ff_authedStaffId_v1')) {
+            // PIN-identified technician (no Firebase login)
+            currentUserRole = 'technician';
+          } else {
+            currentUserRole = 'technician';
+          }
+        }
+        
+        // Admin sees everything (admin filter is applied separately in renderTasksList)
+        if (currentUserRole === 'admin') return true;
+        
+        // Check assignTo
+        if (assignTo === 'manager') {
+          // Only managers and admins see this
+          return currentUserRole === 'manager' || currentUserRole === 'admin';
+        } else if (assignTo === 'technicians') {
+          // Only technicians see this
+          if (currentUserRole !== 'technician') {
+            if (debugTasks) console.log('[Tasks/assignTo] Task hidden: user role', currentUserRole, '!= technician. task:', task.title);
+            return false;
+          }
+          
+          // No specific types = all technicians
+          const taskTechnicianTypes = taskTechnicianTypesFromCatalog;
+          if (!taskTechnicianTypes.length) {
+            return true;
+          }
+          if (taskTechnicianTypes.length > 0) {
+            const norm = (s) => (String(s||'').trim().toLowerCase() || '').replace(/\s+/g, ' ');
+            const userTypeSet = new Set();
+            (currentUserTechnicianTypes || []).forEach(t => {
+              const v = typeof t === 'object' && t !== null ? (t.id || t.name) : t;
+              if (v != null && v !== '') {
+                userTypeSet.add(norm(v));
+                userTypeSet.add(String(v).trim());
+              }
+            });
+            const typeCache = (typeof window !== 'undefined' && window.__ff_technician_types_cache) || [];
+            typeCache.forEach(tt => {
+              const id = norm(tt.id);
+              const name = norm(tt.name);
+              if (userTypeSet.has(id) || userTypeSet.has(name) || userTypeSet.has(String(tt.id||'').trim()) || userTypeSet.has(String(tt.name||'').trim())) {
+                if (id) userTypeSet.add(id);
+                if (name) userTypeSet.add(name);
+                if (tt.id) userTypeSet.add(String(tt.id).trim());
+                if (tt.name) userTypeSet.add(String(tt.name).trim());
+              }
+            });
+            if (userTypeSet.size === 0) {
+              if (localStorage.getItem('DEBUG_TASKS') === 'true') {
+                console.warn('[Tasks/assignTo] Technician task hidden: staff has no technicianTypes. staffId:', window.__ff_authedStaffId, 'task:', task.title, 'taskTypes:', taskTechnicianTypes);
+              }
+              return false;
+            }
+            const matched = taskTechnicianTypes.some(taskType => {
+              const raw = typeof taskType === 'object' && taskType !== null ? (taskType.id || taskType.name) : taskType;
+              const tid = norm(raw);
+              const tidRaw = String(raw || '').trim();
+              if (!tid && !tidRaw) return false;
+              if (userTypeSet.has(tid) || userTypeSet.has(tidRaw)) return true;
+              const typeObj = typeCache.find(t => norm(t.id) === tid || norm(t.name) === tid || String(t.id||'').trim() === tidRaw || String(t.name||'').trim() === tidRaw);
+              if (!typeObj) return false;
+              const oid = norm(typeObj.id);
+              const oname = norm(typeObj.name);
+              return userTypeSet.has(oid) || userTypeSet.has(oname) || userTypeSet.has(String(typeObj.id||'').trim()) || userTypeSet.has(String(typeObj.name||'').trim());
+            });
+            if (!matched && localStorage.getItem('DEBUG_TASKS') === 'true') {
+              console.warn('[Tasks/assignTo] Technician task hidden: no type match. task:', task.title, 'taskTypes:', taskTechnicianTypes, 'userTypes:', Array.from(userTypeSet));
+            }
+            return matched;
+          }
+        }
+        
+        // Default: show task
+        return true;
+      }
+      
       // Build MY LIST directly from ACTIVE list only
       const myListTasks = activeTasks
         .filter(task => {
@@ -10702,6 +11564,9 @@ function renderTasksList(tab, opts) {
           if (!isActiveFlag) return false;
           // Hide tasks that are pending (status='pending' or assignedTo exists)
           if (task.status === 'pending' || !!task.assignedTo) return false;
+          
+          // Filter by assignTo (only show tasks relevant to current user)
+          if (!isTaskRelevantToUser(task)) return false;
           
           // For weekly tab, filter by scheduleWeekdays (only show tasks scheduled for today)
           if (mainTab === 'weekly' && typeof window.ffIsWeeklyTaskScheduledToday === 'function') {
@@ -10727,16 +11592,47 @@ function renderTasksList(tab, opts) {
           return true;
         });
       
-      // Show "No tasks yet" only if ACTIVE list has no displayable tasks AND (for yearly) no done-today items
+      // Admin filter: when admin selects a filter, further narrow the list
+      let filteredForAdmin = myListTasks;
+      const isAdmin = window.ff_is_admin_cached === true;
+      const adminFilterVal = (document.getElementById('tasksAdminFilter') || {}).value || 'all';
+      if (isAdmin && adminFilterVal !== 'all') {
+        const catalog = window.ff_tasks_catalog_v1 || {};
+        const catalogTabTasks = catalog[mainTab] || [];
+        filteredForAdmin = myListTasks.filter(task => {
+          const taskId = String(task.taskId || task.id || '').trim();
+          const catalogTask = taskId ? catalogTabTasks.find(t => String(t.taskId || t.id || '').trim() === taskId) : null;
+          const assignTo = catalogTask?.assignTo ?? task.assignTo ?? 'all';
+          const taskTypes = Array.isArray(catalogTask?.technicianTypes) ? catalogTask.technicianTypes : (Array.isArray(task.technicianTypes) ? task.technicianTypes : []);
+          if (adminFilterVal === 'manager') return assignTo === 'manager';
+          if (adminFilterVal === 'technicians') return assignTo === 'technicians';
+          if (adminFilterVal.startsWith('technicians:')) {
+            const typeId = adminFilterVal.replace(/^technicians:/, '').trim();
+            if (assignTo !== 'technicians') return false;
+            return taskTypes.some(t => (typeof t === 'object' ? (t.id || t.name) : t) === typeId);
+          }
+          return true;
+        });
+      }
+      const displayTasks = filteredForAdmin;
+      
+      // Show "No tasks yet" or "Enter PIN" prompt
       const hasYearlyDoneToday = (mainTab === 'yearly' && yearlyDoneToday.length > 0);
-      if (myListTasks.length === 0 && !hasYearlyDoneToday) {
-        mainListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">No tasks yet</div>';
+      const needsIdentify = displayTasks.length === 0 && !hasYearlyDoneToday;
+      if (needsIdentify) {
+        const hasStaffId = !!(window.__ff_authedStaffId || (typeof localStorage !== 'undefined' && localStorage.getItem('ff_authedStaffId_v1')));
+        const isAdmin = window.ff_is_admin_cached === true;
+        if (!hasStaffId && !isAdmin && typeof window.openTasksIdentifyModal === 'function') {
+          mainListContainer.innerHTML = '<div style="padding:24px;text-align:center;"><p style="margin:0 0 16px;color:#6b7280;font-size:14px;">Enter your PIN to see your tasks</p><button type="button" onclick="window.openTasksIdentifyModal()" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">Enter PIN</button></div>';
+        } else {
+          mainListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">No tasks yet</div>';
+        }
       } else {
         // Split tasks into incomplete and completed groups
         const incomplete = [];
         const completed = [];
         
-        myListTasks.forEach(task => {
+        displayTasks.forEach(task => {
           const isCompleted = task.status === 'done' || !!task.completedAt;
           if (isCompleted) {
             completed.push(task);
@@ -10805,7 +11701,13 @@ function renderTasksList(tab, opts) {
         
         const tasksReversed = [...sortedIncomplete, ...sortedCompleted];
         
-        mainListContainer.innerHTML = tasksReversed.map((task, displayIndex) => {
+        const hasStaffId = !!(window.__ff_authedStaffId || (typeof localStorage !== 'undefined' && localStorage.getItem('ff_authedStaffId_v1')));
+        const isAdmin = window.ff_is_admin_cached === true;
+        const identifyBanner = (!hasStaffId && !isAdmin && typeof window.openTasksIdentifyModal === 'function') 
+          ? '<div style="padding:12px 16px;margin-bottom:12px;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;text-align:center;"><p style="margin:0 0 10px;color:#92400e;font-size:13px;">Enter your PIN to see your tasks</p><button type="button" onclick="window.openTasksIdentifyModal()" style="padding:8px 16px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Enter PIN</button></div>' 
+          : '';
+        
+        mainListContainer.innerHTML = identifyBanner + tasksReversed.map((task, displayIndex) => {
           // Check for instructions in any of the possible fields
           const instructions = task.instructions || task.info || task.details || '';
           const hasInstructions = instructions.trim().length > 0;
@@ -11300,6 +12202,25 @@ function addTaskToDraft() {
     
     // Build task object
     const taskObj = { id, taskId: id, title: name, instructions: info };
+    
+    // Capture assignTo field
+    const assignToRadio = modal.querySelector('input[name="taskAssignTo"]:checked');
+    const assignToValue = assignToRadio ? assignToRadio.value : 'all';
+    
+    if (assignToValue === 'all') {
+      taskObj.assignTo = 'all';
+    } else if (assignToValue === 'manager') {
+      taskObj.assignTo = 'manager';
+    } else if (assignToValue === 'technicians') {
+      // Get selected technician types (use document - container may be outside modal scope)
+      const container = document.getElementById('taskAssignToTechnicianTypesCheckboxes');
+      const technicianTypesCheckboxes = container ? container.querySelectorAll('input[type="checkbox"]:checked') : [];
+      const selectedTypes = Array.from(technicianTypesCheckboxes).map(cb => cb.value);
+      taskObj.assignTo = 'technicians';
+      if (selectedTypes.length > 0) {
+        taskObj.technicianTypes = selectedTypes;
+      }
+    }
 
     // Capture schedule fields based on tab
     if (tab === 'weekly') {
@@ -11335,13 +12256,24 @@ function addTaskToDraft() {
     if (infoEl) infoEl.value = '';
     resetAddFormScheduleFields();
     
+    // Reset assignTo to default
+    const assignToAll = document.getElementById('taskAssignToAll');
+    if (assignToAll) assignToAll.checked = true;
+    const assignToTechnicianTypes = document.getElementById('taskAssignToTechnicianTypes');
+    if (assignToTechnicianTypes) assignToTechnicianTypes.style.display = 'none';
+    
     // Re-render Settings modal list to show new task
     renderSettingsTaskList(tab);
+    
+    // Save immediately so task appears in MY LIST (main screen reads from localStorage)
+    if (typeof saveTasksToStorage === 'function') {
+      saveTasksToStorage();
+    }
     
     // Re-render main screen list
     renderTasksList(window.currentTasksTab);
     
-    console.log('[Tasks] Task added to draft for tab:', tab);
+    console.log('[Tasks] Task added and saved for tab:', tab, 'assignTo:', taskObj.assignTo, 'technicianTypes:', taskObj.technicianTypes);
     
     // Debug log for yearly
     if (tab === 'yearly') {
@@ -11350,6 +12282,65 @@ function addTaskToDraft() {
     }
   } catch (e) {
     console.error('[Tasks] Error in addTaskToDraft:', e);
+  }
+}
+
+// Load technician types for task assignment
+async function loadTaskTechnicianTypes() {
+  const container = document.getElementById('taskAssignToTechnicianTypesCheckboxes');
+  if (!container) return;
+  
+  // Load technician types from cloud
+  let technicianTypes = [];
+  if (typeof window.ffGetTechnicianTypes === 'function') {
+    try {
+      technicianTypes = await window.ffGetTechnicianTypes();
+    } catch (e) {
+      console.error('[loadTaskTechnicianTypes] Error loading technician types:', e);
+      container.innerHTML = '<div style="text-align:center;padding:8px;color:#dc2626;font-size:11px;">Error loading technician types</div>';
+      return;
+    }
+  }
+  
+  // Filter only active types
+  technicianTypes = technicianTypes.filter(t => t.active !== false);
+  
+  // Cache for isTaskRelevantToUser (id/name resolution)
+  if (typeof window !== 'undefined') {
+    window.__ff_technician_types_cache = technicianTypes;
+  }
+  
+  if (technicianTypes.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:8px;color:#9ca3af;font-size:11px;">No technician types available</div>';
+    return;
+  }
+  
+  // Sort by name
+  technicianTypes.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  
+  // Render checkboxes
+  container.innerHTML = technicianTypes.map(type => {
+    return `
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 6px;border-radius:4px;transition:background 0.2s;" onmouseover="this.style.background='#fff'" onmouseout="this.style.background='transparent'">
+        <input type="checkbox" value="${escapeHtml(type.id)}" style="width:14px;height:14px;cursor:pointer;accent-color:#7c3aed;">
+        <span style="font-size:12px;color:#111827;">${escapeHtml(type.name || '')}</span>
+      </label>
+    `;
+  }).join('');
+}
+
+// Handle assignTo radio button changes
+function handleTaskAssignToChange() {
+  const assignToTechnicians = document.getElementById('taskAssignToTechnicians');
+  const assignToTechnicianTypes = document.getElementById('taskAssignToTechnicianTypes');
+  
+  if (assignToTechnicians && assignToTechnicianTypes) {
+    if (assignToTechnicians.checked) {
+      assignToTechnicianTypes.style.display = 'block';
+      loadTaskTechnicianTypes();
+    } else {
+      assignToTechnicianTypes.style.display = 'none';
+    }
   }
 }
 
@@ -11830,6 +12821,12 @@ function resetAddFormScheduleFields() {
   if (yearlyMonth) yearlyMonth.value = '';
   const yearlyDay = document.getElementById('taskAddYearlyDay');
   if (yearlyDay) yearlyDay.value = '';
+  
+  // Reset assignTo to default
+  const assignToAll = document.getElementById('taskAssignToAll');
+  if (assignToAll) assignToAll.checked = true;
+  const assignToTechnicianTypes = document.getElementById('taskAssignToTechnicianTypes');
+  if (assignToTechnicianTypes) assignToTechnicianTypes.style.display = 'none';
 }
 
 function toggleTasksModalForm() {
@@ -11853,10 +12850,39 @@ function toggleTasksModalForm() {
       resetAddFormScheduleFields();
       const toggleBtn = document.getElementById('tasksModalToggleForm');
       if (toggleBtn) {
-        toggleBtn.textContent = 'Cancel';
+        toggleBtn.textContent = 'Add Task';
       }
       // Focus on task name input
       const nameEl = document.getElementById('taskNameInput');
+      
+      // Setup assignTo radio buttons if not already bound
+      const assignToRadios = document.querySelectorAll('input[name="taskAssignTo"]');
+      assignToRadios.forEach(radio => {
+        if (!radio.__assignToBound) {
+          radio.__assignToBound = true;
+          radio.addEventListener('change', handleTaskAssignToChange);
+        }
+      });
+      
+      // Setup taskAddBtn and taskCancelBtn if not already bound
+      const taskAddBtn = document.getElementById('taskAddBtn');
+      const taskCancelBtn = document.getElementById('taskCancelBtn');
+      if (taskAddBtn && !taskAddBtn.__bound) {
+        taskAddBtn.__bound = true;
+        taskAddBtn.onclick = function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          addTaskToDraft();
+        };
+      }
+      if (taskCancelBtn && !taskCancelBtn.__bound) {
+        taskCancelBtn.__bound = true;
+        taskCancelBtn.onclick = function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          cancelTasksModalForm();
+        };
+      }
       if (nameEl) {
         setTimeout(() => nameEl.focus(), 100);
       }
@@ -12070,6 +13096,15 @@ function openTasksSettings(options) {
         }
       });
     }
+    
+    // Setup assignTo radio buttons
+    const assignToRadios = document.querySelectorAll('input[name="taskAssignTo"]');
+    assignToRadios.forEach(radio => {
+      if (!radio.__assignToBound) {
+        radio.__assignToBound = true;
+        radio.addEventListener('change', handleTaskAssignToChange);
+      }
+    });
     
     // Clear editing state when opening modal
     editingTaskId = null;
@@ -13349,6 +14384,31 @@ function initializeResetButton() {
   console.log("[RESET] Button initialization complete");
 }
 
+// Populate admin filter dropdown with technician types (async)
+function populateTasksAdminFilter(filterEl) {
+  if (!filterEl) return;
+  const currentVal = filterEl.value || 'all';
+  filterEl.innerHTML = '<option value="all">All tasks</option><option value="manager">Managers only</option><option value="technicians">All technicians</option>';
+  if (typeof window.ffGetTechnicianTypes === 'function') {
+    window.ffGetTechnicianTypes().then(types => {
+      if (!types || !Array.isArray(types)) return;
+      const active = (types || []).filter(t => t.active !== false);
+      active.forEach(t => {
+        const id = (t.id || t.name || '').toString().trim();
+        const name = (t.name || t.id || id).toString().trim();
+        if (!id) return;
+        const opt = document.createElement('option');
+        opt.value = 'technicians:' + id;
+        opt.textContent = name;
+        filterEl.appendChild(opt);
+      });
+      filterEl.value = currentVal;
+    }).catch(() => {});
+  } else {
+    filterEl.value = currentVal;
+  }
+}
+
 // Initialize Tasks screen buttons (including reset button)
 function initializeTasksScreenButtons() {
   try {
@@ -13370,7 +14430,24 @@ function initializeTasksScreenButtons() {
         if (settingsBtn) {
           settingsBtn.style.display = ffHasAdminAccess() ? '' : 'none';
         }
+        // Show/hide admin filter (only for admin)
+        const filterEl = document.getElementById('tasksAdminFilter');
+        if (filterEl) {
+          filterEl.style.display = ffHasAdminAccess() ? '' : 'none';
+          if (ffHasAdminAccess()) populateTasksAdminFilter(filterEl);
+        }
       };
+      
+      // Admin filter change handler
+      const filterEl = document.getElementById('tasksAdminFilter');
+      if (filterEl && !filterEl.__filterBound) {
+        filterEl.__filterBound = true;
+        filterEl.addEventListener('change', () => {
+          if (typeof renderTasksList === 'function' && window.currentTasksTab) {
+            renderTasksList(window.currentTasksTab, { force: true });
+          }
+        });
+      }
       
       // Check admin status once and cache it
       if (window.ff_is_admin_cached === null && typeof window.isCurrentUserOwner === 'function') {
@@ -13746,18 +14823,8 @@ function initializeNavigationButtons() {
       console.warn('[Navigation] Missing element: logBtn');
     }
 
-    // Settings button
-    const settingsBtnEl = document.getElementById("settingsBtn") || settingsBtn;
-    if (settingsBtnEl) {
-      settingsBtnEl.onclick = openSettingsSecureWithNav;
-      settingsBtnEl.style.cursor = 'pointer';
-      settingsBtnEl.style.pointerEvents = 'auto';
-      settingsBtnEl.disabled = false;
-      settingsBtnEl.removeAttribute('disabled');
-      console.log('[Navigation] Settings button initialized');
-    } else {
-      console.warn('[Navigation] Missing element: settingsBtn');
-    }
+    // Settings button - handled in dropdown binding, no need to bind here
+    // The dropdown binding handles opening User Profile with Staff Setup section
 
     // Reset button
     const resetBtnEl = document.getElementById("resetBtn") || resetBtn;
@@ -13876,8 +14943,87 @@ function initializeNavigationButtons() {
           // Use setTimeout to ensure dropdown HTML is rendered before binding
           setTimeout(function() {
             const profileBtn = document.getElementById('userDropdownProfileBtn');
+            const settingsBtn = document.getElementById('settingsBtn');
             const testPingBtn = document.getElementById('userDropdownTestPingBtn');
             const logoutBtn = document.getElementById('userDropdownLogoutBtn');
+            
+            // Bind Settings handler FIRST - MUST be before Logout handler to prevent conflicts
+            if (settingsBtn && !settingsBtn.__ffBound) {
+              settingsBtn.__ffBound = true;
+              // Remove any existing onclick handlers first
+              settingsBtn.onclick = null;
+              settingsBtn.removeAttribute('onclick');
+              
+              // Use addEventListener with capture phase FIRST to catch it early
+              // This MUST be registered before any other handlers
+              const settingsClickHandler = function(e) {
+                // Get the actual button element that was clicked
+                let target = e.target;
+                while (target && target !== settingsBtn && target.parentElement) {
+                  target = target.parentElement;
+                }
+                
+                // Final check - must be Settings button
+                if (target !== settingsBtn && target.id !== 'settingsBtn') {
+                  console.warn('[Settings] Click target is NOT Settings button:', target.id || target.tagName, e.target);
+                  return; // Not the Settings button, ignore completely
+                }
+                
+                // Stop ALL event propagation immediately
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                
+                console.log("Settings clicked (capture) ✅", target.id, 'target:', target, 'original:', e.target);
+                
+                // Close dropdown and remove body class IMMEDIATELY
+                if (userAvatarDropdown) {
+                  userAvatarDropdown.style.display = 'none';
+                }
+                document.body.classList.remove('ff-avatar-dropdown-open');
+                
+                // Small delay to ensure dropdown is closed before navigation
+                setTimeout(() => {
+                  // Navigate to User Profile with Staff Setup section
+                  if (typeof goToUserProfile === 'function') {
+                    goToUserProfile('technician-types');
+                  } else if (typeof window.goToUserProfile === 'function') {
+                    window.goToUserProfile('technician-types');
+                  } else {
+                    console.error('[Settings] goToUserProfile function not found');
+                  }
+                }, 50);
+                
+                return false;
+              };
+              
+              // Register in capture phase FIRST (before bubbling)
+              settingsBtn.addEventListener('click', settingsClickHandler, { capture: true, passive: false });
+              
+              // Also set onclick as backup (but capture handler should catch it first)
+              settingsBtn.onclick = function(e) {
+                // Get the actual button element
+                let target = e.target;
+                while (target && target !== settingsBtn && target.parentElement) {
+                  target = target.parentElement;
+                }
+                
+                if (target !== settingsBtn && target.id !== 'settingsBtn') {
+                  console.warn('[Settings onclick] Not Settings button:', target.id);
+                  return false; // Not the Settings button, ignore
+                }
+                
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                console.log("Settings clicked (onclick) ✅", target.id);
+                return false;
+              };
+              
+              console.log('[Settings] Handler bound successfully');
+            } else {
+              console.warn('[Settings] Button not found or already bound');
+            }
             
             // Bind Test Ping handler (debug callable)
             if (testPingBtn && !testPingBtn.__ffBound) {
@@ -13923,10 +15069,28 @@ function initializeNavigationButtons() {
               };
             }
             
-            // Bind Logout handler with guard flag
+            // Bind Logout handler with guard flag - MUST be after Settings handler
             if (logoutBtn && !logoutBtn.__ffBound) {
               logoutBtn.__ffBound = true;
               logoutBtn.onclick = async function(e) {
+                // Get the actual button element that was clicked
+                let target = e.target;
+                while (target && target !== logoutBtn && target.id !== 'userDropdownLogoutBtn' && target.parentElement) {
+                  target = target.parentElement;
+                }
+                
+                // Final check - must be Logout button, NOT Settings button
+                if (target !== logoutBtn && target.id !== 'userDropdownLogoutBtn') {
+                  console.warn('[Logout] Click target is NOT Logout button:', target.id || target.tagName, e.target);
+                  return; // Not the Logout button, ignore completely
+                }
+                
+                // Extra safety: if somehow Settings button was clicked, ignore
+                if (target.id === 'settingsBtn' || target === settingsBtn) {
+                  console.warn('[Logout] Blocked - Settings button was clicked instead!');
+                  return;
+                }
+                
                 e.preventDefault();
                 e.stopPropagation();
                 if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
@@ -13967,8 +15131,18 @@ function initializeNavigationButtons() {
           }, 0);
         }
       };
-      // Close dropdown when clicking outside
+      // Close dropdown when clicking outside (but not on dropdown items)
       document.addEventListener('click', function(e) {
+        // Don't close if clicking on dropdown items (they handle their own clicks)
+        if (e.target.closest && (
+            e.target.closest('.user-dropdown-item') ||
+            e.target.closest('#settingsBtn') ||
+            e.target.closest('#userDropdownProfileBtn') ||
+            e.target.closest('#userDropdownLogoutBtn')
+          )) {
+          return; // Let the item's own handler deal with it
+        }
+        
         if (userAvatarBtn && userAvatarDropdown && 
             !userAvatarBtn.contains(e.target) && 
             !userAvatarDropdown.contains(e.target)) {
@@ -14149,8 +15323,11 @@ function initializeAppsPanel() {
             }
             break;
           case 'settings':
-            if (typeof openSettingsSecureWithNav === 'function') {
-              openSettingsSecureWithNav();
+            // Open User Profile with Staff Setup section
+            if (typeof goToUserProfile === 'function') {
+              goToUserProfile('technician-types');
+            } else if (typeof window.goToUserProfile === 'function') {
+              window.goToUserProfile('technician-types');
             }
             break;
           default:
@@ -15351,6 +16528,15 @@ function initializeAppsPanel() {
                 <option value="technician" ${staff.isAdmin !== true && staff.isManager !== true ? 'selected' : ''}>Technician</option>
               </select>
             </div>
+            <!-- Technician Types (only shown when role is technician) -->
+            <div id="staffEditTechnicianTypesSection" style="display:none;">
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Technician Types</label>
+              <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">Select one or more types</div>
+              <div id="staffEditTechnicianTypesCheckboxes" style="display:flex;flex-direction:column;gap:6px;padding:8px;background:#f9fafb;border:1px solid var(--border);border-radius:4px;max-height:150px;overflow-y:auto;">
+                <!-- Checkboxes will be populated dynamically -->
+                <div style="text-align:center;padding:8px;color:#9ca3af;font-size:11px;">Loading...</div>
+              </div>
+            </div>
             <div>
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Phone</label>
               <input type="tel" id="staffEditPhone" value="${escapeHtml(phone)}" placeholder="Phone number" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
@@ -15382,6 +16568,33 @@ function initializeAppsPanel() {
         cancelBtn.onclick = function() {
           cancelEditStaffDetails();
         };
+      }
+      
+      // Wire up role select to show/hide technician types section
+      const editRoleSelect = document.getElementById('staffEditRole');
+      if (editRoleSelect) {
+        // Determine current role
+        const currentRole = staff.isAdmin === true ? 'admin' : (staff.isManager === true ? 'manager' : 'technician');
+        toggleTechnicianTypesSection(currentRole);
+        
+        // Load existing technician types if role is technician
+        if (currentRole === 'technician') {
+          const existingTypes = Array.isArray(staff.technicianTypes) ? staff.technicianTypes : [];
+          renderTechnicianTypesCheckboxes('staffEditTechnicianTypesCheckboxes', existingTypes);
+        }
+        
+        // Add change listener
+        if (!editRoleSelect.__technicianTypesBound) {
+          editRoleSelect.__technicianTypesBound = true;
+          editRoleSelect.addEventListener('change', function() {
+            toggleTechnicianTypesSection(this.value);
+            if (this.value === 'technician') {
+              // Load existing types when switching to technician
+              const existingTypes = Array.isArray(staff.technicianTypes) ? staff.technicianTypes : [];
+              renderTechnicianTypesCheckboxes('staffEditTechnicianTypesCheckboxes', existingTypes);
+            }
+          });
+        }
       }
       
       // Wire up PIN toggle (eye button)
@@ -15609,8 +16822,14 @@ function initializeAppsPanel() {
       
       // Use the flags we already computed above
       
+      // Get technician types if role is technician
+      let technicianTypes = [];
+      if (newRole === 'technician') {
+        technicianTypes = getSelectedTechnicianTypes('staffEditTechnicianTypesCheckboxes');
+      }
+      
       // Update staff member
-      staffStore.staff[staffIndex] = {
+      const updatedStaff = {
         ...oldStaff,
         name: newName,
         role: newRole, // Keep role field for backward compatibility, but isAdmin/isManager are source of truth
@@ -15621,6 +16840,16 @@ function initializeAppsPanel() {
         isAdmin: newIsAdmin, // Set based on role selection
         isManager: newIsManager // Set based on role selection
       };
+      
+      // Update technician types
+      if (newRole === 'technician') {
+        updatedStaff.technicianTypes = technicianTypes.length > 0 ? technicianTypes : undefined;
+      } else {
+        // Remove technicianTypes if role changed from technician
+        delete updatedStaff.technicianTypes;
+      }
+      
+      staffStore.staff[staffIndex] = updatedStaff;
       
       // Save to storage (also triggers Firestore sync via ffSaveStaffStore)
       ffSaveStaffStore(staffStore);
@@ -15728,6 +16957,12 @@ function initializeAppsPanel() {
         isManager = false;
       }
       
+      // Get technician types if role is technician
+      let technicianTypes = [];
+      if (role === 'technician') {
+        technicianTypes = getSelectedTechnicianTypes('staffTechnicianTypesCheckboxes');
+      }
+      
       // Create new staff member object
       const newStaffMember = {
         id: 'staff_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
@@ -15746,7 +16981,8 @@ function initializeAppsPanel() {
         permissions: {}, // Initialize empty permissions object
         createdAt: Date.now(),
         isAdmin: isAdmin, // Set based on role selection
-        isManager: isManager // Set based on role selection
+        isManager: isManager, // Set based on role selection
+        technicianTypes: technicianTypes.length > 0 ? technicianTypes : undefined // Only include if not empty
       };
       
       // Add to staff store and save
@@ -16040,6 +17276,15 @@ function initializeAppsPanel() {
     if (addBtn) {
       // Optional: subtle active state (slightly darker gradient)
       addBtn.style.opacity = '0.9';
+    }
+    
+    // Wire up role select to show/hide technician types section
+    const roleSelect = document.getElementById('staffRole');
+    if (roleSelect && !roleSelect.__technicianTypesBound) {
+      roleSelect.__technicianTypesBound = true;
+      roleSelect.addEventListener('change', function() {
+        toggleTechnicianTypesSection(this.value);
+      });
     }
     
     // Initialize button color swatches
@@ -16546,6 +17791,78 @@ function initializeAppsPanel() {
     }
   }
   
+  // Load and render technician types checkboxes
+  async function renderTechnicianTypesCheckboxes(containerId, selectedTypes = []) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    // Load technician types from cloud
+    let technicianTypes = [];
+    if (typeof window.ffGetTechnicianTypes === 'function') {
+      try {
+        technicianTypes = await window.ffGetTechnicianTypes();
+      } catch (e) {
+        console.error('[renderTechnicianTypesCheckboxes] Error loading technician types:', e);
+        container.innerHTML = '<div style="text-align:center;padding:16px;color:#dc2626;font-size:13px;">Error loading technician types. Please try again.</div>';
+        return;
+      }
+    }
+    
+    // Filter only active types
+    technicianTypes = technicianTypes.filter(t => t.active !== false);
+    if (technicianTypes.length > 0 && typeof window !== 'undefined') {
+      window.__ff_technician_types_cache = technicianTypes;
+    }
+    
+    if (technicianTypes.length === 0) {
+      container.innerHTML = '<div style="text-align:center;padding:16px;color:#9ca3af;font-size:13px;">No technician types available. Add types in Settings → Staff Setup.</div>';
+      return;
+    }
+    
+    // Sort by name
+    technicianTypes.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    
+    // Render checkboxes
+    container.innerHTML = technicianTypes.map(type => {
+      const isChecked = Array.isArray(selectedTypes) && selectedTypes.includes(type.id);
+      return `
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 8px;border-radius:4px;transition:background 0.2s;" onmouseover="this.style.background='#fff'" onmouseout="this.style.background='transparent'">
+          <input type="checkbox" value="${escapeHtml(type.id)}" ${isChecked ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
+          <span style="font-size:13px;color:#111827;">${escapeHtml(type.name || '')}</span>
+        </label>
+      `;
+    }).join('');
+  }
+  
+  // Get selected technician types from checkboxes
+  function getSelectedTechnicianTypes(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+    
+    const checkboxes = container.querySelectorAll('input[type="checkbox"]:checked');
+    return Array.from(checkboxes).map(cb => cb.value);
+  }
+  
+  // Show/hide technician types section based on role
+  function toggleTechnicianTypesSection(role) {
+    const isTechnician = role === 'technician';
+    
+    // Add form
+    const addSection = document.getElementById('staffTechnicianTypesSection');
+    if (addSection) {
+      addSection.style.display = isTechnician ? 'block' : 'none';
+      if (isTechnician) {
+        renderTechnicianTypesCheckboxes('staffTechnicianTypesCheckboxes', []);
+      }
+    }
+    
+    // Edit form
+    const editSection = document.getElementById('staffEditTechnicianTypesSection');
+    if (editSection) {
+      editSection.style.display = isTechnician ? 'block' : 'none';
+    }
+  }
+  
   function hideStaffAddForm() {
     const placeholder = document.getElementById('staffPlaceholderMessage');
     const form = document.getElementById('staffAddForm');
@@ -16566,6 +17883,12 @@ function initializeAppsPanel() {
         }
         input.value = '';
       });
+      
+      // Reset technician types section
+      const technicianTypesSection = document.getElementById('staffTechnicianTypesSection');
+      if (technicianTypesSection) {
+        technicianTypesSection.style.display = 'none';
+      }
       
       // Reset button color selection
       const preview = document.getElementById('staffButtonColorPreview');
@@ -16951,16 +18274,17 @@ function initializeUserProfileAvatar() {
       if (ffSetAvatarDataUrl(dataURL)) {
         console.log('[User Profile] Avatar saved and synced');
         const staffId = window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || null;
-        if (staffId && window.ffUploadStaffAvatar && window.ffSaveStaffAvatarMeta) {
+        const isLoggedIn = (window.auth && window.auth.currentUser) || (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser);
+        if (isLoggedIn && window.ffUploadStaffAvatar && window.ffSaveStaffAvatarMeta) {
           try {
             const { url, path } = await window.ffUploadStaffAvatar({
               salonId: window.currentSalonId,
-              staffId,
+              staffId: staffId || undefined,
               file
             });
             await window.ffSaveStaffAvatarMeta({
               salonId: window.currentSalonId,
-              staffId,
+              staffId: staffId || undefined,
               url,
               path
             });
@@ -17063,6 +18387,8 @@ function initializeUserProfileMenu() {
   
   // Menu item click handler
   function handleMenuClick(section) {
+    // Expose for external use
+    window.__ff_handleMenuClick = handleMenuClick;
     // Update menu item active states
     menuItems.forEach(item => {
       if (item.dataset.section === section) {
@@ -17080,13 +18406,29 @@ function initializeUserProfileMenu() {
     cards.forEach(card => {
       card.style.display = 'none';
     });
-    const targetCard = document.getElementById(`userProfileCard${section.charAt(0).toUpperCase() + section.slice(1)}`);
+    
+    // Map section names to card IDs
+    const sectionToCardId = {
+      'password': 'userProfileCardPassword',
+      'technician-types': 'userProfileCardTechnicianTypes',
+      'notifications': 'userProfileCardNotifications',
+      'preferences': 'userProfileCardPreferences',
+      'billing': 'userProfileCardBilling'
+    };
+    
+    const cardId = sectionToCardId[section] || `userProfileCard${section.charAt(0).toUpperCase() + section.slice(1)}`;
+    const targetCard = document.getElementById(cardId);
     if (targetCard) {
       targetCard.style.display = 'block';
       
       // Update billing panel if it's the selected section
       if (section === 'billing' && typeof window.updateBillingPanel === 'function') {
         window.updateBillingPanel();
+      }
+      
+      // Render technician types if it's the selected section
+      if (section === 'technician-types' && typeof renderUserProfileTechnicianTypes === 'function') {
+        renderUserProfileTechnicianTypes();
       }
     }
   }
@@ -19248,11 +20590,11 @@ function ffAuthStaffByPinFromModal(modalElOrDocument) {
       return { ok: false, reason: "no_match_ff_staff_v1", enteredPin: enteredPinNorm };
     }
     
-    // Success - extract staffId and name
+    // Success - extract staffId, name, and full staff (for technicianTypes)
     const staffId = matched.id || matched.staffId || null;
     const name = matched.name || matched.fullName || null;
     
-    return { ok: true, staffId: staffId, name: name };
+    return { ok: true, staffId: staffId, name: name, staff: matched };
   } catch (e) {
     console.error('[ffAuthStaffByPinFromModal] Error:', e);
     return { ok: false, reason: "error", enteredPin: "" };
@@ -19751,17 +21093,17 @@ function confirmSelectTask() {
     const input = document.getElementById('tasksSelectPinInput');
     const error = document.getElementById('tasksSelectPinError');
     
-    if (!input || !currentSelectTask.category || !currentSelectTask.taskName) {
+    const isIdentifyOnly = currentSelectTask && currentSelectTask.category === '__identify__';
+    if (!input) {
+      console.warn('[Tasks] confirmSelectTask: Missing input');
+      return;
+    }
+    if (!isIdentifyOnly && (!currentSelectTask || !currentSelectTask.category || !currentSelectTask.taskName)) {
       console.warn('[Tasks] confirmSelectTask: Missing required elements or task info');
-      // Clear state
       taskStaffCode = '';
       currentSelectTask = { category: null, taskName: null };
-      // FORCE CLOSE MODAL - This is the very last line in critical error path
       const taskModal = document.getElementById('tasksSelectModal');
-      if (taskModal) {
-        taskModal.style.display = 'none';
-      }
-      console.log('[confirmSelectTask] returning', { ok: false, matchedName: null, taskName: currentSelectTask?.taskName });
+      if (taskModal) taskModal.style.display = 'none';
       return;
     }
     
@@ -19796,12 +21138,21 @@ function confirmSelectTask() {
       return false;
     }
     
-    // Success - set authenticated staff
-    window.__ff_authedStaffId = auth.staffId || undefined;
+    // Success - set authenticated staff (persist so MY LIST filter works on next render)
+    const matchedStaffId = auth.staffId || undefined;
+    window.__ff_authedStaffId = matchedStaffId;
     window.__ff_authedStaffName = auth.name || undefined;
+    if (matchedStaffId && typeof localStorage !== 'undefined') {
+      try { localStorage.setItem('ff_authedStaffId_v1', matchedStaffId); } catch (e) {}
+    }
+    const technicianTypesFromAuth = Array.isArray(auth?.staff?.technicianTypes) ? auth.staff.technicianTypes : [];
+    window.__ff_authedTechnicianTypes = technicianTypesFromAuth;
+    try { sessionStorage.setItem('ff_authed_technician_types', JSON.stringify(technicianTypesFromAuth)); } catch (e) {}
+    window.__ff_actorRole = 'Tech';
+    try { sessionStorage.setItem('ff_actor_role', 'Tech'); } catch (e) {}
+    try { sessionStorage.setItem('ff_actor_name', auth.name || ''); } catch (e) {}
     
     const matchedName = auth.name || '';
-    const matchedStaffId = auth.staffId || undefined;
     
     console.log('[Tasks] PIN validation SUCCESS:', {
       name: matchedName,
@@ -19817,15 +21168,18 @@ function confirmSelectTask() {
       window.__ff_lastValidatedCode = { role: computedActor.role, name: computedActor.name };
     }
     
-    const actor = getHistoryActor ? getHistoryActor() : { role: 'Tech', name: matchedName };
-    addHistoryEntry(`Task Selected: ${currentSelectTask?.taskName || ''}`, actor.role, actor.name, matchedName || '', 'tasks');
+    if (!isIdentifyOnly) {
+      const actor = getHistoryActor ? getHistoryActor() : { role: 'Tech', name: matchedName };
+      addHistoryEntry(`Task Selected: ${currentSelectTask?.taskName || ''}`, actor.role, actor.name, matchedName || '', 'tasks');
+    }
     
-    // PIN is valid - add task to pending with staff name and staffId
+    // PIN is valid - add task to pending (skip if identify-only mode)
     try {
-      if (typeof addTaskToPending === 'function') {
-        // Pass the matched staff name and staffId to addTaskToPending
+      if (!isIdentifyOnly && typeof addTaskToPending === 'function') {
         addTaskToPending(currentSelectTask.category, currentSelectTask.taskName, matchedName, matchedStaffId);
-      } else {
+      } else if (isIdentifyOnly) {
+        console.log('[Tasks] Identify-only: staffId set, re-rendering MY LIST');
+      } else if (!isIdentifyOnly) {
         console.warn('[Tasks] addTaskToPending function not found');
       }
       
@@ -19838,6 +21192,11 @@ function confirmSelectTask() {
       // Update Tasks button badge (for incomplete tasks count)
       if (typeof updateTasksButtonBadge === 'function') {
         updateTasksButtonBadge();
+      }
+      
+      // Re-render MY LIST so technician sees their filtered tasks (now that staffId is set)
+      if (typeof window.renderTasksList === 'function') {
+        window.renderTasksList(window.currentTasksTab || 'opening', { force: true });
       }
     } catch (taskErr) {
       console.error('[Tasks] Error processing task selection:', taskErr);
@@ -24559,12 +25918,13 @@ function hookSettingsGuard_DISABLED(){
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(0, 0, 0, 0.5);
+      background: rgba(0, 0, 0, 0.3);
       display: flex;
       align-items: center;
       justify-content: center;
       z-index: 1000;
-      overflow: hidden;
+      overflow: auto;
+      pointer-events: auto;
     }
     
     /* Raise Tasks Settings modal upward on desktop */
@@ -24748,19 +26108,63 @@ function hookSettingsGuard_DISABLED(){
       background: #fff;
       border-radius: 12px;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-      width: 90%;
-      max-width: 650px;
+      width: 95%;
+      max-width: 1000px;
       max-height: 90vh;
       display: flex;
       flex-direction: column;
-      margin-top: 28px; /* Add top offset to prevent modal from looking "stuck" under top nav */
+      margin: 28px auto;
+      position: relative;
+      z-index: 1001;
     }
     
     /* Fix Tasks Settings modal container height and margins */
     #tasksScreen #tasksSettingsModal .tasks-modal-container {
-      max-height: calc(100vh - 140px);
+      max-width: 1000px;
+      max-height: calc(100vh - 60px);
       margin-top: 24px;
       margin-bottom: 24px;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    /* Unified Typography for Tasks */
+    #tasksScreen {
+      font-family: 'Avenir Next', 'Open Sans', Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+    }
+    
+    #tasksScreen h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #111827;
+      margin: 0 0 16px 0;
+    }
+    
+    #tasksScreen h2 {
+      font-size: 20px;
+      font-weight: 600;
+      color: #111827;
+      margin: 0 0 12px 0;
+    }
+    
+    #tasksScreen h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #111827;
+      margin: 0 0 8px 0;
+    }
+    
+    #tasksScreen h4 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #111827;
+      margin: 0 0 8px 0;
+    }
+    
+    #tasksScreen p, #tasksScreen span, #tasksScreen div, #tasksScreen label {
+      font-size: 10px;
+      font-weight: 400;
+      color: #374151;
     }
     
     #tasksScreen .tasks-modal-header {
@@ -24774,8 +26178,8 @@ function hookSettingsGuard_DISABLED(){
     #tasksScreen .tasks-modal-title {
       margin: 0;
       font-size: 16px;
-      font-weight: 500;
-      color: #111;
+      font-weight: 600;
+      color: #111827;
       display: none; /* Hide Settings title text */
     }
     
@@ -24811,6 +26215,7 @@ function hookSettingsGuard_DISABLED(){
       min-height: 0;
       display: flex;
       flex-direction: column;
+      background: transparent;
     }
     
     /* Make tabs row fixed at top in Tasks Settings modal */
@@ -24829,6 +26234,7 @@ function hookSettingsGuard_DISABLED(){
       flex: 1 1 auto;
       min-height: 0;
       -webkit-overflow-scrolling: touch;
+      background: transparent;
     }
     
     /* Alert time row - horizontal layout for time picker and checkbox on same row */
@@ -24848,9 +26254,10 @@ function hookSettingsGuard_DISABLED(){
     }
     
     #tasksScreen .tasks-modal-footer {
-      position: sticky;
-      bottom: 0;
+      position: relative;
+      flex-shrink: 0;
       z-index: 10;
+      background: #fff;
     }
     
     #tasksScreen .tasks-grid {
@@ -24967,7 +26374,12 @@ function hookSettingsGuard_DISABLED(){
         <button class="tasks-tab" data-tab="monthly" onclick="console.log('TAB CLICKED:', 'monthly'); setTasksTab('monthly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Monthly<span class="ff-tab-badge" data-ff-badge="monthly"></span></button>
         <button class="tasks-tab" data-tab="yearly" onclick="console.log('TAB CLICKED:', 'yearly'); setTasksTab('yearly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Yearly<span class="ff-tab-badge" data-ff-badge="yearly"></span></button>
       </div>
-      <div class="tasks-tabs-right" style="display:flex;gap:10px;margin-left:16px;flex-shrink:0;">
+      <div class="tasks-tabs-right" style="display:flex;gap:10px;margin-left:16px;flex-shrink:0;align-items:center;">
+        <select id="tasksAdminFilter" title="Filter tasks by assignee" style="display:none;padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-size:10px;color:#374151;cursor:pointer;min-width:140px;pointer-events:auto;z-index:301;">
+          <option value="all">All tasks</option>
+          <option value="manager">Managers only</option>
+          <option value="technicians">All technicians</option>
+        </select>
         <button id="btnTasksSettings" aria-label="Manage Tasks" title="Manage Tasks" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;pointer-events:auto;z-index:301;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         </button>
@@ -25019,11 +26431,11 @@ function hookSettingsGuard_DISABLED(){
         <div class="tasks-modal-content">
           <!-- Tab bar inside Settings modal -->
           <div id="tasksSettingsTabs" style="display:flex;border-bottom:1px solid #e5e7eb;background:#f9fafb;margin:-16px -20px 12px -20px;padding:0 20px;">
-            <button class="tasks-settings-tab" data-tab="opening" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Opening</button>
-            <button class="tasks-settings-tab" data-tab="closing" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Closing</button>
-            <button class="tasks-settings-tab" data-tab="weekly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Weekly</button>
-            <button class="tasks-settings-tab" data-tab="monthly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Monthly</button>
-            <button class="tasks-settings-tab" data-tab="yearly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:#666;border-bottom:2px solid transparent;">Yearly</button>
+            <button class="tasks-settings-tab" data-tab="opening" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent;">Opening</button>
+            <button class="tasks-settings-tab" data-tab="closing" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent;">Closing</button>
+            <button class="tasks-settings-tab" data-tab="weekly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent;">Weekly</button>
+            <button class="tasks-settings-tab" data-tab="monthly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent;">Monthly</button>
+            <button class="tasks-settings-tab" data-tab="yearly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent;">Yearly</button>
           </div>
           
           <!-- Scrollable body content wrapper -->
@@ -25031,41 +26443,53 @@ function hookSettingsGuard_DISABLED(){
           <!-- Alert Start Time control (only for opening/closing) -->
           <div id="tasksAlertTimeControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
             <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
                 <span>Show alerts starting at:</span>
-                <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
               </label>
-              <label id="tasksAlertTimeShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                <input type="checkbox" id="tasksAlertTimeShowOnHomeCheckbox" style="cursor:pointer;">
+              <label id="tasksAlertTimeShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                <input type="checkbox" id="tasksAlertTimeShowOnHomeCheckbox" style="cursor:pointer;accent-color:#7c3aed;">
                 <span>Show this alert on Home screen</span>
               </label>
             </div>
             <!-- Auto-reset controls (only for opening tab) -->
             <div id="tasksOpeningAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
               <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                  <input type="checkbox" id="tasksOpeningAutoResetEnabled" style="cursor:pointer;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                  <input type="checkbox" id="tasksOpeningAutoResetEnabled" style="cursor:pointer;accent-color:#7c3aed;">
                   <span>Auto-reset when all Opening tasks are completed</span>
                 </label>
                 <div id="tasksOpeningAutoResetTimeRow" style="display:none;">
-                  <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
                   <span>Auto-reset time:</span>
-                  <input type="time" id="tasksOpeningAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                  <input type="time" id="tasksOpeningAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                 </label>
+                </div>
+                <div id="tasksEnforceSelectSection" style="display:none;flex-shrink:0;">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                    <input type="checkbox" id="tasksEnforceSelectCheckboxOpening" style="cursor:pointer;accent-color:#7c3aed;">
+                    <span>ENFORCE SELECT</span>
+                  </label>
                 </div>
               </div>
             </div>
             <!-- Auto-reset controls (only for closing tab) -->
             <div id="tasksClosingAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
               <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                  <input type="checkbox" id="tasksClosingAutoResetEnabled" style="cursor:pointer;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                  <input type="checkbox" id="tasksClosingAutoResetEnabled" style="cursor:pointer;accent-color:#7c3aed;">
                   <span>Auto-reset when all Closing tasks are completed</span>
                 </label>
                 <div id="tasksClosingAutoResetTimeRow" style="display:none;">
-                  <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
                     <span>Auto-reset time:</span>
-                    <input type="time" id="tasksClosingAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                    <input type="time" id="tasksClosingAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
+                  </label>
+                </div>
+                <div id="tasksEnforceSelectSectionClosing" style="display:none;flex-shrink:0;">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                    <input type="checkbox" id="tasksEnforceSelectCheckboxClosing" style="cursor:pointer;accent-color:#7c3aed;">
+                    <span>ENFORCE SELECT</span>
                   </label>
                 </div>
               </div>
@@ -25075,26 +26499,26 @@ function hookSettingsGuard_DISABLED(){
           <!-- Alert Start Weekday control (only for weekly) -->
           <div id="tasksAlertWeekdayControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
             <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
                 <span>Show alerts starting at:</span>
-                <input type="time" id="tasksAlertWeekdayTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                <input type="time" id="tasksAlertWeekdayTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
               </label>
-              <label id="tasksAlertWeekdayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                <input type="checkbox" id="tasksAlertWeekdayShowOnHomeCheckbox" style="cursor:pointer;">
+              <label id="tasksAlertWeekdayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                <input type="checkbox" id="tasksAlertWeekdayShowOnHomeCheckbox" style="cursor:pointer;accent-color:#7c3aed;">
                 <span>Show this alert on Home screen</span>
               </label>
             </div>
             <!-- Auto-reset controls (only for weekly tab) -->
             <div id="tasksWeeklyAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
               <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                  <input type="checkbox" id="tasksWeeklyAutoResetEnabled" style="cursor:pointer;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                  <input type="checkbox" id="tasksWeeklyAutoResetEnabled" style="cursor:pointer;accent-color:#7c3aed;">
                   <span>Auto-reset when all Weekly tasks for today are completed</span>
                 </label>
                 <div id="tasksWeeklyAutoResetTimeRow" style="display:none;">
-                  <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
                     <span>Auto-reset time:</span>
-                    <input type="time" id="tasksWeeklyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                    <input type="time" id="tasksWeeklyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                   </label>
                 </div>
               </div>
@@ -25104,12 +26528,12 @@ function hookSettingsGuard_DISABLED(){
           <!-- Alert Start Time control (for monthly, uses same time input as opening/closing) -->
           <div id="tasksAlertDayControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
             <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
                 <span>Show alerts starting at:</span>
-                <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
               </label>
-              <label id="tasksAlertDayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                <input type="checkbox" id="tasksAlertDayShowOnHomeCheckbox" style="cursor:pointer;">
+              <label id="tasksAlertDayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                <input type="checkbox" id="tasksAlertDayShowOnHomeCheckbox" style="cursor:pointer;accent-color:#7c3aed;">
                 <span>Show this alert on Home screen</span>
               </label>
             </div>
@@ -25118,14 +26542,14 @@ function hookSettingsGuard_DISABLED(){
           <!-- Auto-reset controls (only for monthly tab) -->
           <div id="tasksMonthlyAutoResetSection" style="display:none;">
             <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                <input type="checkbox" id="tasksMonthlyAutoResetEnabled" style="cursor:pointer;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                <input type="checkbox" id="tasksMonthlyAutoResetEnabled" style="cursor:pointer;accent-color:#7c3aed;">
                 <span>Auto-reset when all Monthly tasks for today are completed</span>
               </label>
               <div id="tasksMonthlyAutoResetTimeRow" style="display:none;">
-                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
                   <span>Auto-reset time:</span>
-                  <input type="time" id="tasksMonthlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                  <input type="time" id="tasksMonthlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                 </label>
               </div>
             </div>
@@ -25134,12 +26558,12 @@ function hookSettingsGuard_DISABLED(){
           <!-- Alert Start Time control (only for yearly) -->
           <div id="tasksAlertYearlyControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
             <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
                 <span>Show alerts starting at:</span>
-                <input type="time" id="tasksAlertYearlyTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                <input type="time" id="tasksAlertYearlyTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
               </label>
-              <label id="tasksAlertYearlyShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                <input type="checkbox" id="tasksAlertYearlyShowOnHomeCheckbox" style="cursor:pointer;">
+              <label id="tasksAlertYearlyShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                <input type="checkbox" id="tasksAlertYearlyShowOnHomeCheckbox" style="cursor:pointer;accent-color:#7c3aed;">
                 <span>Show this alert on Home screen</span>
               </label>
             </div>
@@ -25148,59 +26572,82 @@ function hookSettingsGuard_DISABLED(){
           <!-- Auto-reset controls (only for yearly tab) -->
           <div id="tasksYearlyAutoResetSection" style="display:none;">
             <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-                <input type="checkbox" id="tasksYearlyAutoResetEnabled" style="cursor:pointer;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                <input type="checkbox" id="tasksYearlyAutoResetEnabled" style="cursor:pointer;accent-color:#7c3aed;">
                 <span>Auto-reset when all Yearly tasks for today are completed</span>
               </label>
               <div id="tasksYearlyAutoResetTimeRow" style="display:none;">
-                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
                   <span>Auto-reset time:</span>
-                  <input type="time" id="tasksYearlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;font-family:inherit;">
+                  <input type="time" id="tasksYearlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                 </label>
               </div>
             </div>
           </div>
           
-          <!-- ENFORCE SELECT checkbox (only for Opening and Closing tabs) -->
-          <div id="tasksEnforceSelectSection" style="flex-shrink:0;margin-bottom:12px;display:none;">
-            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#666;">
-              <input type="checkbox" id="tasksEnforceSelectCheckbox" style="cursor:pointer;">
-              <span>ENFORCE SELECT</span>
-            </label>
-          </div>
-          
           <!-- Add Task section (always visible, fixed position above catalog) -->
           <div style="flex-shrink:0;margin-bottom:12px;">
-            <button id="tasksModalToggleForm" type="button" class="btn-pill" style="margin-bottom:8px;font-size:13px;">Add Task</button>
+            <button id="tasksModalToggleForm" type="button" class="btn-pill" style="margin-bottom:8px;font-size:10px;font-weight:500;border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:8px;cursor:pointer;">Add Task</button>
           
           <!-- Collapsible form section -->
             <div id="tasksAddFormWrap" style="display:none;padding:12px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;margin-bottom:0;">
-              <label style="display:block;font-size:12px;font-weight:500;color:#111;margin-bottom:4px;">Task Name</label>
-              <input type="text" id="taskNameInput" class="taskNameInput" placeholder="e.g., Turn on lights" style="width:100%;padding:8px;margin-bottom:4px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;">
-              <div id="taskNameError" style="color:#dc2626;font-size:11px;margin-bottom:8px;min-height:14px;display:none;"></div>
-              
-              <label style="display:block;font-size:12px;font-weight:500;color:#111;margin-bottom:4px;">Info / Instructions</label>
-              <textarea id="taskInfoInput" class="taskInfoInput" placeholder="Write the instructions..." rows="3" style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;"></textarea>
+              <div style="display:flex;gap:16px;align-items:flex-start;">
+                <!-- Left side: Task Name and Info -->
+                <div style="flex:1;">
+                  <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Task Name</label>
+                  <input type="text" id="taskNameInput" class="taskNameInput" placeholder="e.g., Turn on lights" style="width:100%;padding:8px;margin-bottom:4px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;color:#111827;">
+                  <div id="taskNameError" style="color:#dc2626;font-size:10px;margin-bottom:8px;min-height:14px;display:none;"></div>
+                  
+                  <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Info / Instructions</label>
+                  <input type="text" id="taskInfoInput" class="taskInfoInput" placeholder="Write the instructions..." style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;color:#111827;">
+                </div>
+                
+                <!-- Right side: Assign To -->
+                <div id="taskAssignToSection" style="flex:0 0 220px;margin-bottom:8px;">
+                  <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Assign To</label>
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer;padding:6px 8px;border-radius:4px;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='transparent'">
+                      <input type="radio" name="taskAssignTo" value="all" id="taskAssignToAll" checked style="cursor:pointer;accent-color:#7c3aed;">
+                      <span>Everyone</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer;padding:6px 8px;border-radius:4px;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='transparent'">
+                      <input type="radio" name="taskAssignTo" value="manager" id="taskAssignToManager" style="cursor:pointer;accent-color:#7c3aed;">
+                      <span>Managers Only</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer;padding:6px 8px;border-radius:4px;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='transparent'">
+                      <input type="radio" name="taskAssignTo" value="technicians" id="taskAssignToTechnicians" style="cursor:pointer;accent-color:#7c3aed;">
+                      <span>Technicians</span>
+                    </label>
+                  </div>
+                  <!-- Technician Types checkboxes (shown only when "Technicians" is selected) -->
+                  <div id="taskAssignToTechnicianTypes" style="display:none;margin-top:8px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;">
+                    <div style="font-size:10px;color:#6b7280;margin-bottom:6px;">Select technician types:</div>
+                    <div id="taskAssignToTechnicianTypesCheckboxes" style="display:flex;flex-direction:column;gap:4px;max-height:150px;overflow-y:auto;">
+                      <div style="text-align:center;padding:8px;color:#9ca3af;font-size:10px;">Loading...</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
               
               <div id="taskAddWeeklyDays" style="display:none;margin-bottom:8px;">
-                <label style="display:block;font-size:12px;font-weight:500;color:#111;margin-bottom:4px;">Days</label>
-                <label style="display:flex;align-items:center;gap:4px;font-size:11px;margin-bottom:6px;cursor:pointer;">
-                  <input type="checkbox" id="taskAddWeeklyAllWeek" checked> All week
+                <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Days</label>
+                <label style="display:flex;align-items:center;gap:4px;font-size:10px;margin-bottom:6px;cursor:pointer;color:#374151;">
+                  <input type="checkbox" id="taskAddWeeklyAllWeek" checked style="accent-color:#7c3aed;"> All week
                 </label>
                 <div id="taskAddWeeklyDaysCheckboxes" style="display:flex;gap:6px;flex-wrap:wrap;opacity:0.5;pointer-events:none;">
-                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="0"> Sun</label>
-                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="1"> Mon</label>
-                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="2"> Tue</label>
-                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="3"> Wed</label>
-                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="4"> Thu</label>
-                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="5"> Fri</label>
-                  <label style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;"><input type="checkbox" class="task-add-weekly-day" data-day="6"> Sat</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:10px;cursor:pointer;color:#374151;"><input type="checkbox" class="task-add-weekly-day" data-day="0" style="accent-color:#7c3aed;"> Sun</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:10px;cursor:pointer;color:#374151;"><input type="checkbox" class="task-add-weekly-day" data-day="1" style="accent-color:#7c3aed;"> Mon</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:10px;cursor:pointer;color:#374151;"><input type="checkbox" class="task-add-weekly-day" data-day="2" style="accent-color:#7c3aed;"> Tue</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:10px;cursor:pointer;color:#374151;"><input type="checkbox" class="task-add-weekly-day" data-day="3" style="accent-color:#7c3aed;"> Wed</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:10px;cursor:pointer;color:#374151;"><input type="checkbox" class="task-add-weekly-day" data-day="4" style="accent-color:#7c3aed;"> Thu</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:10px;cursor:pointer;color:#374151;"><input type="checkbox" class="task-add-weekly-day" data-day="5" style="accent-color:#7c3aed;"> Fri</label>
+                  <label style="display:flex;align-items:center;gap:2px;font-size:10px;cursor:pointer;color:#374151;"><input type="checkbox" class="task-add-weekly-day" data-day="6" style="accent-color:#7c3aed;"> Sat</label>
                 </div>
               </div>
               
               <div id="taskAddMonthlyDay" style="display:none;margin-bottom:8px;">
-                <label style="display:block;font-size:12px;font-weight:500;color:#111;margin-bottom:4px;">Day of Month</label>
-                <select id="taskAddMonthlyDaySelect" style="width:100%;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;">
+                <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Day of Month</label>
+                <select id="taskAddMonthlyDaySelect" style="width:100%;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                   <option value="any">Any day</option>
                   <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
                   <option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option>
@@ -25213,30 +26660,30 @@ function hookSettingsGuard_DISABLED(){
               </div>
               
               <div id="taskAddYearlyDate" style="display:none;margin-bottom:8px;">
-                <label style="display:block;font-size:12px;font-weight:500;color:#111;margin-bottom:4px;">Date</label>
+                <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Date</label>
                 <div style="display:flex;gap:8px;">
-                  <select id="taskAddYearlyMonth" style="flex:1;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;">
+                  <select id="taskAddYearlyMonth" style="flex:1;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                     <option value="">Select month</option>
                     <option value="1">January</option><option value="2">February</option><option value="3">March</option>
                     <option value="4">April</option><option value="5">May</option><option value="6">June</option>
                     <option value="7">July</option><option value="8">August</option><option value="9">September</option>
                     <option value="10">October</option><option value="11">November</option><option value="12">December</option>
                   </select>
-                  <input type="number" id="taskAddYearlyDay" min="1" max="31" placeholder="Day" style="width:70px;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;">
+                  <input type="number" id="taskAddYearlyDay" min="1" max="31" placeholder="Day" style="width:70px;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                 </div>
               </div>
             
-            <div style="display:flex;gap:8px;">
-                <button id="taskAddBtn" type="button" class="btn-primary" style="padding:6px 14px;font-size:12px;">Add</button>
-                <button id="taskCancelBtn" type="button" class="btn-pill" style="padding:6px 14px;font-size:12px;">Cancel</button>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button id="taskAddBtn" type="button" class="btn-primary" style="padding:8px 16px;font-size:10px;font-weight:600;background:#7c3aed;border:none;color:#fff;border-radius:8px;cursor:pointer;">Add</button>
+                <button id="taskCancelBtn" type="button" class="btn-pill" style="padding:8px 16px;font-size:10px;font-weight:500;border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:8px;cursor:pointer;">Cancel</button>
               </div>
             </div>
           </div>
           
           <!-- Task Catalog section (no internal scroll, flows naturally) -->
-          <div style="flex:1;display:flex;flex-direction:column;min-height:0;border-top:1px solid #e5e7eb;padding-top:12px;">
-            <h4 style="margin:0 0 8px;font-size:13px;font-weight:600;color:#111;">Task Catalog</h4>
-            <div id="tasksModalDraftList" style="height:auto;max-height:none;overflow:visible;"></div>
+          <div style="flex:1;display:flex;flex-direction:column;min-height:0;border-top:1px solid #e5e7eb;padding-top:12px;background:transparent;">
+            <div style="margin:0 0 8px;font-size:10px;font-weight:500;color:#6b7280;">Task Catalog</div>
+            <div id="tasksModalDraftList" style="height:auto;max-height:none;overflow:visible;background:transparent;"></div>
           </div>
           </div>
           <!-- End scrollable body content wrapper -->
@@ -25244,8 +26691,8 @@ function hookSettingsGuard_DISABLED(){
         
         <!-- Sticky Save button -->
         <div class="tasks-modal-footer" style="padding:10px 20px;border-top:1px solid #e5e7eb;background:#fff;border-radius:0 0 12px 12px;display:flex;justify-content:flex-end;gap:8px;">
-          <button id="tasksModalCancelBtn" class="btn-pill" style="padding:8px 16px;font-size:13px;">Cancel</button>
-          <button id="tasksModalSaveBtn" class="btn-primary" style="padding:8px 16px;font-size:13px;">Save</button>
+          <button id="tasksModalCancelBtn" class="btn-pill" style="padding:8px 16px;font-size:10px;font-weight:500;border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:8px;cursor:pointer;">Cancel</button>
+          <button id="tasksModalSaveBtn" class="btn-primary" style="padding:8px 16px;font-size:10px;font-weight:600;background:#7c3aed;border:none;color:#fff;border-radius:8px;cursor:pointer;">Save</button>
         </div>
       </div>
     </div>
@@ -25366,6 +26813,16 @@ function hookSettingsGuard_DISABLED(){
                 <option value="manager">Manager</option>
                 <option value="technician">Technician</option>
               </select>
+            </div>
+            
+            <!-- Technician Types (only shown when role is technician) -->
+            <div id="staffTechnicianTypesSection" style="display:none;">
+              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Technician Types</label>
+              <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">Select one or more types for this technician</div>
+              <div id="staffTechnicianTypesCheckboxes" style="display:flex;flex-direction:column;gap:8px;padding:12px;background:#f9fafb;border:1px solid var(--border);border-radius:8px;max-height:200px;overflow-y:auto;">
+                <!-- Checkboxes will be populated dynamically -->
+                <div style="text-align:center;padding:16px;color:#9ca3af;font-size:13px;">Loading technician types...</div>
+              </div>
             </div>
             
             <!-- Button Color -->
