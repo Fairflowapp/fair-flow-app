@@ -857,14 +857,36 @@ window.ffSetPresenceStaffContext = function(staffIdOrName, staffName) {
 window.ffSyncPresenceFromQueueState = function(queue = [], service = []) {
   if (!_salonId) return;
   if (_queuedQueuePresenceSync) clearTimeout(_queuedQueuePresenceSync);
+  const staffList = readStaffStore();
+  if (!staffList.length) return;
+  const previousCache = { ..._presenceCache };
+
+  // Optimistically update local presence cache so Queue/Service UI reacts immediately.
+  const nextCache = { ...previousCache };
+  staffList.forEach((staff) => {
+    if (!staff?.id) return;
+    const current = previousCache[staff.id] || {};
+    const nextQueueStatus = queueStatusFromState(queue, service, { staffId: staff.id, name: staff.name || "" });
+    nextCache[staff.id] = {
+      ...current,
+      staffId: staff.id,
+      name: staff.name || current.name || "",
+      inShift: nextQueueStatus !== "none",
+      queueStatus: nextQueueStatus
+    };
+    if (String(current.queueStatus || "none") !== String(nextQueueStatus || "none") || nextQueueStatus === "none") {
+      nextCache[staff.id].currentCall = null;
+    }
+  });
+  _presenceCache = nextCache;
+  dispatchPresenceUpdate();
+
   _queuedQueuePresenceSync = setTimeout(async () => {
-    const staffList = readStaffStore();
-    if (!staffList.length) return;
     try {
       const batch = writeBatch(db);
       staffList.forEach((staff) => {
         if (!staff?.id) return;
-        const current = _presenceCache[staff.id] || {};
+        const current = previousCache[staff.id] || {};
         const nextQueueStatus = queueStatusFromState(queue, service, { staffId: staff.id, name: staff.name || "" });
         const queueStatusChanged = String(current.queueStatus || "none") !== String(nextQueueStatus || "none");
         const payload = {

@@ -3932,6 +3932,7 @@ document.addEventListener('ff-staff-presence-updated', () => {
   ffQueuePresenceRenderTimer = setTimeout(() => {
     ffQueuePresenceRenderTimer = null;
     if (typeof renderQueue === 'function') renderQueue();
+    if (typeof renderService === 'function') renderService();
   }, 60);
 });
 
@@ -3947,16 +3948,22 @@ function renderQueue(){
 
     const nm=document.createElement("div");
     nm.style.display = "flex";
-    nm.style.flexDirection = "column";
-    nm.style.gap = "4px";
-    nm.appendChild(namePill(q.name));
+    nm.style.alignItems = "center";
+    nm.style.gap = "10px";
+    nm.style.minWidth = "0";
+    const queuePill = namePill(q.name);
+    queuePill.style.fontSize = "15px";
+    queuePill.style.padding = "6px 12px";
+    queuePill.style.minWidth = "0";
+    queuePill.style.maxWidth = "100%";
+    nm.appendChild(queuePill);
 
     const presenceMeta = queuePresenceMeta(q);
     const canManageCalls = ffHasQueueCallAccess();
     const presenceStatusInfo = ffDiagExplainPresenceStatus(presenceMeta.presence);
     if (canManageCalls) {
       const presenceRow = document.createElement("div");
-      presenceRow.style.cssText = "display:flex;align-items:center;gap:6px;font-size:11px;color:#6b7280;";
+      presenceRow.style.cssText = "display:flex;align-items:center;gap:6px;font-size:11px;color:#6b7280;white-space:nowrap;flex-shrink:0;";
       const presenceDot = document.createElement("span");
       presenceDot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${queuePresenceDotColor(presenceMeta.status)};display:inline-block;flex-shrink:0;`;
       const presenceLabel = document.createElement("span");
@@ -3970,6 +3977,7 @@ function renderQueue(){
     }
 
     const ctrls=document.createElement("div"); ctrls.className="controls";
+    ctrls.style.gap = "10px";
 
     const start=btn("START","start-btn");
 
@@ -4000,7 +4008,7 @@ function renderQueue(){
     console.log('[StaffCallDiag] queue row presence', diagEligibility);
     if (canCall && canManageCalls) {
       const callWrap = document.createElement("div");
-      callWrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:2px;min-width:64px;";
+      callWrap.style.cssText = "display:flex;align-items:center;gap:4px;white-space:nowrap;";
 
       const callBtn = document.createElement("button");
       callBtn.type = "button";
@@ -4048,8 +4056,9 @@ function renderQueue(){
       }
 
       const callStatus = document.createElement("span");
-      callStatus.textContent = callStatusLabel || "\u00A0";
-      callStatus.style.cssText = "font-size:10px;color:#6b7280;min-height:12px;white-space:nowrap;";
+      callStatus.textContent = callStatusLabel || "";
+      callStatus.style.cssText = "font-size:10px;color:#6b7280;white-space:nowrap;";
+      if (!callStatusLabel) callStatus.style.display = "none";
       callWrap.append(callBtn, callStatus);
       ctrls.prepend(callWrap);
     } else {
@@ -4149,10 +4158,13 @@ function renderService(){
 
     const fin=btn("FINISH","finish-btn"); fin.onclick=() =>guardFinish(s.name, ()=>finish(i));
     const ctrls=document.createElement("div"); ctrls.className="controls";
+    ctrls.style.gap = "10px";
 
-    if (canManageCalls && presenceMeta.presence && presenceMeta.presence.inShift === true && presenceMeta.presence.queueStatus === "in_service") {
+    // A row that is already in the local IN SERVICE list should show the phone immediately,
+    // even before the async presence write round-trips through Firestore.
+    if (canManageCalls && presenceMeta.staffId) {
       const callWrap = document.createElement("div");
-      callWrap.style.cssText = "display:flex;align-items:center;gap:6px;min-width:64px;white-space:nowrap;";
+      callWrap.style.cssText = "display:flex;align-items:center;gap:4px;white-space:nowrap;";
 
       const callBtn = document.createElement("button");
       callBtn.type = "button";
@@ -4197,8 +4209,10 @@ function renderService(){
       }
 
       const callStatus = document.createElement("span");
-      callStatus.textContent = queueCallStatusLabel(presenceMeta.presence, presenceMeta.status) || "";
-      callStatus.style.cssText = "font-size:10px;color:#6b7280;white-space:nowrap;min-width:52px;";
+      const serviceCallStatusLabel = queueCallStatusLabel(presenceMeta.presence, presenceMeta.status) || "";
+      callStatus.textContent = serviceCallStatusLabel;
+      callStatus.style.cssText = "font-size:10px;color:#6b7280;white-space:nowrap;";
+      if (!serviceCallStatusLabel) callStatus.style.display = "none";
       callWrap.append(callBtn, callStatus);
       ctrls.append(callWrap, fin);
       li.append(badge,nm,ctrls); serviceList.appendChild(li);
