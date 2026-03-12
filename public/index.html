@@ -16501,6 +16501,20 @@ function initializeAppsPanel() {
     
     const phone = staff.phone || '';
     const email = staff.email || '';
+    const palette = settings.brandPalette || DEFAULTS.brandPalette || [];
+    const currentButtonColor =
+      staff.buttonColor ||
+      staff.color ||
+      ((staff.buttonColorIndex !== undefined && staff.buttonColorIndex >= 0 && staff.buttonColorIndex < palette.length)
+        ? palette[staff.buttonColorIndex]
+        : null) ||
+      palette[0] ||
+      '#111827';
+    const currentFontColor =
+      staff.fontColor ||
+      staff.fcolor ||
+      fontColorOf(staff.name) ||
+      '#111111';
     // Compute role label from isAdmin/isManager flags (source of truth)
     const roleLabel = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Technician');
     
@@ -16550,6 +16564,24 @@ function initializeAppsPanel() {
               <div style="position:relative;">
                 <input type="password" id="staffEditPin" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" value="${escapeHtml(staff.pin || '')}" placeholder="4-6 digits" style="width:100%;height:30px;padding:0 32px 0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
                 <button type="button" id="staffEditPinToggle" aria-label="Toggle PIN visibility" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:2px 4px;color:#6b7280;font-size:14px;line-height:1;z-index:1;">👁️</button>
+              </div>
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:11px;font-weight:500;color:#374151;">Button Color</label>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <div id="staffEditButtonColorPreview" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--border);flex-shrink:0;background:${escapeHtml(currentButtonColor)};"></div>
+                <div id="staffEditButtonColorSwatches" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"></div>
+                <button type="button" id="staffEditColorMoreBtn" style="width:28px;height:28px;border-radius:50%;border:1px solid #d1d5db;background:#f3f4f6;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:16px;line-height:1;font-weight:300;">+</button>
+                <input type="color" id="staffEditButtonColor" value="${escapeHtml(currentButtonColor)}" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+              </div>
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;font-size:11px;font-weight:500;color:#374151;">Font Color</label>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <div id="staffEditFontColorPreview" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--border);flex-shrink:0;background:${escapeHtml(currentFontColor)};"></div>
+                <div id="staffEditFontColorSwatches" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"></div>
+                <button type="button" id="staffEditFontColorMoreBtn" style="width:28px;height:28px;border-radius:50%;border:1px solid #d1d5db;background:#f3f4f6;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:16px;line-height:1;font-weight:300;">+</button>
+                <input type="color" id="staffEditFontColor" value="${escapeHtml(currentFontColor)}" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
               </div>
             </div>
           </div>
@@ -16611,6 +16643,72 @@ function initializeAppsPanel() {
             pinInput.type = 'password';
             pinToggle.textContent = '👁️';
           }
+        };
+      }
+
+      const buttonColorInput = document.getElementById('staffEditButtonColor');
+      const buttonColorPreview = document.getElementById('staffEditButtonColorPreview');
+      const buttonColorSwatches = document.getElementById('staffEditButtonColorSwatches');
+      const buttonColorMoreBtn = document.getElementById('staffEditColorMoreBtn');
+      const fontColorInput = document.getElementById('staffEditFontColor');
+      const fontColorPreview = document.getElementById('staffEditFontColorPreview');
+      const fontColorSwatches = document.getElementById('staffEditFontColorSwatches');
+      const fontColorMoreBtn = document.getElementById('staffEditFontColorMoreBtn');
+
+      function renderEditColorSwatches(container, colors, selectedColor, onSelect) {
+        if (!container) return;
+        container.innerHTML = '';
+        colors.forEach((color) => {
+          const swatch = document.createElement('div');
+          const normalizedColor = String(color || '').toUpperCase();
+          swatch.style.width = '28px';
+          swatch.style.height = '28px';
+          swatch.style.borderRadius = '50%';
+          swatch.style.background = normalizedColor;
+          swatch.style.border = normalizedColor === selectedColor.toUpperCase() ? '2px solid #111827' : '1px solid #d1d5db';
+          swatch.style.cursor = 'pointer';
+          swatch.style.flexShrink = '0';
+          swatch.onclick = function() {
+            onSelect(normalizedColor);
+          };
+          container.appendChild(swatch);
+        });
+      }
+
+      function updateEditButtonColor(color) {
+        const normalizedColor = String(color || currentButtonColor).toUpperCase();
+        if (buttonColorInput) buttonColorInput.value = normalizedColor;
+        if (buttonColorPreview) buttonColorPreview.style.background = normalizedColor;
+        renderEditColorSwatches(buttonColorSwatches, palette, normalizedColor, updateEditButtonColor);
+      }
+
+      function updateEditFontColor(color) {
+        const normalizedColor = String(color || currentFontColor).toUpperCase();
+        if (fontColorInput) fontColorInput.value = normalizedColor;
+        if (fontColorPreview) fontColorPreview.style.background = normalizedColor;
+        renderEditColorSwatches(fontColorSwatches, ['#111111', '#FFFFFF'], normalizedColor, updateEditFontColor);
+      }
+
+      updateEditButtonColor(currentButtonColor);
+      updateEditFontColor(currentFontColor);
+
+      if (buttonColorMoreBtn && buttonColorInput) {
+        buttonColorMoreBtn.onclick = function(e) {
+          e.preventDefault();
+          buttonColorInput.click();
+        };
+        buttonColorInput.oninput = function(e) {
+          updateEditButtonColor(e.target.value);
+        };
+      }
+
+      if (fontColorMoreBtn && fontColorInput) {
+        fontColorMoreBtn.onclick = function(e) {
+          e.preventDefault();
+          fontColorInput.click();
+        };
+        fontColorInput.oninput = function(e) {
+          updateEditFontColor(e.target.value);
         };
       }
     } else {
@@ -16733,6 +16831,8 @@ function initializeAppsPanel() {
       const phoneInput = document.getElementById('staffEditPhone');
       const emailInput = document.getElementById('staffEditEmail');
       const pinInput = document.getElementById('staffEditPin');
+      const buttonColorInput = document.getElementById('staffEditButtonColor');
+      const fontColorInput = document.getElementById('staffEditFontColor');
       
       if (!nameInput || !roleInput) {
         console.error('[saveStaffDetails] Edit inputs not found');
@@ -16761,6 +16861,8 @@ function initializeAppsPanel() {
       }
       
       const oldStaff = staffStore.staff[staffIndex];
+      const newButtonColor = buttonColorInput?.value || oldStaff.buttonColor || oldStaff.color || '#111827';
+      const newFontColor = fontColorInput?.value || oldStaff.fontColor || oldStaff.fcolor || '#111111';
       const nameChanged = oldStaff.name !== newName;
       
       // Map role selection to flags to check if role actually changed
@@ -16836,10 +16938,15 @@ function initializeAppsPanel() {
         phone: newPhone ? String(newPhone) : undefined,
         email: newEmail ? String(newEmail) : undefined,
         pin: newPin,
+        buttonColor: newButtonColor,
+        color: newButtonColor,
+        fontColor: newFontColor,
+        fcolor: newFontColor,
         permissions: currentPermissions, // Preserve permissions
         isAdmin: newIsAdmin, // Set based on role selection
         isManager: newIsManager // Set based on role selection
       };
+      delete updatedStaff.buttonColorIndex;
       
       // Update technician types
       if (newRole === 'technician') {
