@@ -4,6 +4,7 @@
  * Firestore docs:
  *   salons/{salonId}/settings/ui   → { historyRange, updatedAt }
  *   salons/{salonId}/settings/main → { adminPin (existing), brandName, brandPalette, managers,
+ *                                      staffCallTemplates,
  *                                      taskSettings: { taskReminders, taskNotes, showIncompleteTasksBadge },
  *                                      updatedAt }
  */
@@ -64,6 +65,34 @@ function settingsMainRef(salonId) {
   return doc(db, `salons/${salonId}/settings`, "main");
 }
 
+function normalizeStaffCallTemplates(value) {
+  if (typeof window !== "undefined" && typeof window.ffNormalizeStaffCallTemplates === "function") {
+    return window.ffNormalizeStaffCallTemplates(value);
+  }
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    available: {
+      presetId: String(raw?.available?.presetId || "available_default"),
+      message: String(raw?.available?.message || "Your client is waiting"),
+      detail: String(raw?.available?.detail || "Please return to the queue.")
+    },
+    inService: {
+      presetId: String(raw?.inService?.presetId || "inservice_default"),
+      message: String(raw?.inService?.message || "Reception is calling you"),
+      detail: String(raw?.inService?.detail || "Please come to reception.")
+    }
+  };
+}
+
+function normalizeStaffCallTimeoutSeconds(value) {
+  if (typeof window !== "undefined" && typeof window.ffGetStaffCallTimeoutSeconds === "function" && value === undefined) {
+    return window.ffGetStaffCallTimeoutSeconds();
+  }
+  const numericValue = Math.round(Number(value || 0));
+  if (!Number.isFinite(numericValue)) return 30;
+  return Math.min(3600, Math.max(10, numericValue));
+}
+
 function subscribeMain(salonId) {
   if (_unsubMain) { _unsubMain(); _unsubMain = null; }
   _unsubMain = onSnapshot(settingsMainRef(salonId), (snap) => {
@@ -83,6 +112,14 @@ function subscribeMain(salonId) {
     }
     if (Array.isArray(data.managers)) {
       window.settings.managers = data.managers;
+      changed = true;
+    }
+    if (data.staffCallTemplates && typeof data.staffCallTemplates === 'object') {
+      window.settings.staffCallTemplates = normalizeStaffCallTemplates(data.staffCallTemplates);
+      changed = true;
+    }
+    if (data.staffCallTimeoutSeconds !== undefined) {
+      window.settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(data.staffCallTimeoutSeconds);
       changed = true;
     }
     // Task settings
@@ -107,6 +144,8 @@ function subscribeMain(salonId) {
         if (data.brandName) { if (!stored.brand) stored.brand = {}; stored.brand.name = data.brandName; }
         if (data.brandPalette?.length) stored.brandPalette = data.brandPalette;
         if (data.managers) stored.managers = data.managers;
+        if (data.staffCallTemplates && typeof data.staffCallTemplates === 'object') stored.staffCallTemplates = normalizeStaffCallTemplates(data.staffCallTemplates);
+        if (data.staffCallTimeoutSeconds !== undefined) stored.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(data.staffCallTimeoutSeconds);
         if (data.taskSettings?.taskReminders !== undefined) stored.taskReminders = data.taskSettings.taskReminders;
         if (data.taskSettings?.taskNotes !== undefined) stored.taskNotes = data.taskSettings.taskNotes;
         if (data.taskSettings?.showIncompleteTasksBadge !== undefined) stored.showIncompleteTasksBadge = data.taskSettings.showIncompleteTasksBadge;
@@ -119,15 +158,17 @@ function subscribeMain(salonId) {
 }
 
 /**
- * Save app settings (brand name, palette, managers) to Firestore.
+ * Save app settings (brand name, palette, managers, staff call templates) to Firestore.
  * Called from index.html settings panel save.
  */
-function ffSaveAppSettings(brandName, brandPalette, managers) {
+function ffSaveAppSettings(brandName, brandPalette, managers, staffCallTemplates, staffCallTimeoutSeconds) {
   if (!_salonId) return;
   const payload = { updatedAt: serverTimestamp() };
   if (brandName !== undefined) payload.brandName = brandName || '';
   if (Array.isArray(brandPalette)) payload.brandPalette = brandPalette;
   if (Array.isArray(managers)) payload.managers = managers;
+  if (staffCallTemplates && typeof staffCallTemplates === 'object') payload.staffCallTemplates = normalizeStaffCallTemplates(staffCallTemplates);
+  if (staffCallTimeoutSeconds !== undefined) payload.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(staffCallTimeoutSeconds);
   setDoc(settingsMainRef(_salonId), payload, { merge: true })
     .catch((e) => console.warn("[SettingsCloud] save app settings failed", e));
 }

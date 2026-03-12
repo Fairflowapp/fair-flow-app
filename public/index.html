@@ -2014,6 +2014,16 @@ dialog footer button, .code-dialog footer button {
                 <option value="tasks">Tasks</option>
               </select>
             </div>
+            <div id="userProfileStaffCallTemplatesSection" style="display:none;border-top:1px solid var(--border);padding-top:24px;">
+              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+                <h4 style="margin:0;font-size:16px;font-weight:600;color:#111827;">Staff Call Messages</h4>
+                <div style="font-size:13px;color:#6b7280;line-height:1.5;">Salon-wide messages for calls sent to technicians from Available and In Service.</div>
+              </div>
+              <div id="userProfileStaffCallTemplatesBox" style="display:flex;flex-direction:column;gap:14px;"></div>
+              <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+                <button id="userProfileSaveStaffCallTemplates" type="button" style="padding:10px 16px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">Save Staff Call Messages</button>
+              </div>
+            </div>
           </div>
         </div>
         
@@ -2331,6 +2341,12 @@ dialog footer button, .code-dialog footer button {
             style="padding:8px 16px;border:1px solid #a78bfa;border-radius:8px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:13px;font-weight:600;">
             Manage Chat Messages
           </button>
+        </div>
+
+        <div id="staffCallMessagesSection" style="margin-top:24px;">
+          <h4 style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Staff Call Messages</h4>
+          <div class="row small" style="margin-bottom:12px;">Choose preset text or customize what technicians see when they are called from Available or In Service.</div>
+          <div id="staffCallMessageTemplatesBox" style="display:flex;flex-direction:column;gap:14px;"></div>
         </div>
 
         <div id="legacySettingsTechniciansBlock" style="display:none;">
@@ -2754,6 +2770,110 @@ if (settings.showIncompleteTasksBadge === undefined) {
   settings.showIncompleteTasksBadge = false; // Default to disabled
 }
 
+const STAFF_CALL_TEMPLATE_PRESETS = {
+  available: [
+    { id: "available_default", label: "Default", message: "Your client is waiting", detail: "Please return to the queue." },
+    { id: "available_next_client", label: "Next client ready", message: "Your next client is ready", detail: "Please come back to the queue." },
+    { id: "available_client_waiting", label: "Client waiting", message: "Client waiting for you", detail: "Please return now." },
+    { id: "available_reception_ready", label: "Front desk needs you", message: "Front desk needs you", detail: "Please come back to the queue." },
+    { id: "available_front_desk_waiting", label: "Front desk waiting", message: "Front desk is waiting for you", detail: "Please return to the queue now." }
+  ],
+  inService: [
+    { id: "inservice_default", label: "Default", message: "Reception is calling you", detail: "Please come to reception." },
+    { id: "inservice_front_desk", label: "Front desk needs you", message: "Front desk needs you", detail: "Please come to the front desk." },
+    { id: "inservice_client_waiting", label: "Reception waiting", message: "Please come to reception", detail: "A client is waiting for you there." }
+  ]
+};
+
+const STAFF_CALL_TIMEOUT_OPTIONS = [
+  { value: 30, label: "30 seconds" },
+  { value: 60, label: "60 seconds" },
+  { value: 120, label: "2 minutes" },
+  { value: 300, label: "5 minutes" }
+];
+
+function ffGetDefaultStaffCallTemplates() {
+  return {
+    available: { ...STAFF_CALL_TEMPLATE_PRESETS.available[0] },
+    inService: { ...STAFF_CALL_TEMPLATE_PRESETS.inService[0] }
+  };
+}
+
+function normalizeStaffCallTimeoutSeconds(value) {
+  const numericValue = Math.round(Number(value || 0));
+  if (!Number.isFinite(numericValue)) return 30;
+  return Math.min(3600, Math.max(10, numericValue));
+}
+
+function getStaffCallTimeoutUiValue(seconds) {
+  const normalized = normalizeStaffCallTimeoutSeconds(seconds);
+  const preset = STAFF_CALL_TIMEOUT_OPTIONS.find((option) => option.value === normalized);
+  if (preset) {
+    return { mode: String(preset.value), customValue: "", customUnit: "seconds" };
+  }
+  if (normalized % 60 === 0) {
+    return { mode: "custom", customValue: String(normalized / 60), customUnit: "minutes" };
+  }
+  return { mode: "custom", customValue: String(normalized), customUnit: "seconds" };
+}
+
+function resolveStaffCallTimeoutSecondsFromInputs(selectValue, customValue, customUnit) {
+  if (String(selectValue) !== "custom") {
+    return normalizeStaffCallTimeoutSeconds(Number(selectValue || 30));
+  }
+  const rawNumber = Math.round(Number(customValue || 0));
+  const unit = String(customUnit || "seconds");
+  const seconds = unit === "minutes" ? rawNumber * 60 : rawNumber;
+  return normalizeStaffCallTimeoutSeconds(seconds);
+}
+
+function normalizeStaffCallTemplateEntry(kind, value) {
+  const defaults = ffGetDefaultStaffCallTemplates();
+  const presetList = STAFF_CALL_TEMPLATE_PRESETS[kind] || [];
+  const fallback = defaults[kind];
+  const raw = value && typeof value === "object" ? value : {};
+  const message = String(raw.message || "").trim() || fallback.message;
+  const detail = String(raw.detail || "").trim() || fallback.detail;
+  const presetId = String(raw.presetId || "").trim();
+  const matchingPreset = presetList.find((preset) => preset.id === presetId && preset.message === message && preset.detail === detail)
+    || presetList.find((preset) => preset.message === message && preset.detail === detail);
+  return {
+    presetId: matchingPreset ? matchingPreset.id : "custom",
+    message,
+    detail
+  };
+}
+
+function normalizeStaffCallTemplates(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    available: normalizeStaffCallTemplateEntry("available", raw.available),
+    inService: normalizeStaffCallTemplateEntry("inService", raw.inService)
+  };
+}
+
+function getStaffCallTemplate(kind) {
+  if (!settings.staffCallTemplates || typeof settings.staffCallTemplates !== "object") {
+    settings.staffCallTemplates = ffGetDefaultStaffCallTemplates();
+  }
+  settings.staffCallTemplates = normalizeStaffCallTemplates(settings.staffCallTemplates);
+  return settings.staffCallTemplates[kind] || ffGetDefaultStaffCallTemplates()[kind];
+}
+
+function getStaffCallTimeoutSeconds() {
+  settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(settings.staffCallTimeoutSeconds);
+  return settings.staffCallTimeoutSeconds;
+}
+
+window.ffGetDefaultStaffCallTemplates = ffGetDefaultStaffCallTemplates;
+window.ffNormalizeStaffCallTemplates = normalizeStaffCallTemplates;
+window.ffGetStaffCallTemplate = getStaffCallTemplate;
+window.ffGetStaffCallTimeoutSeconds = getStaffCallTimeoutSeconds;
+window.ffGetStaffCallTimeoutUiValue = getStaffCallTimeoutUiValue;
+
+settings.staffCallTemplates = normalizeStaffCallTemplates(settings.staffCallTemplates);
+settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(settings.staffCallTimeoutSeconds);
+
 // Initialize brandPalette if missing (backward compatibility)
 
 if(!settings.brandPalette){
@@ -2780,9 +2900,9 @@ if(!settings.brandPalette){
 
 }
 
-let queue=ls("ffv24_queue")||[];      // {name, held:false}
+let queue=ls("ffv24_queue")||[];      // {name, staffId?, held:false}
 
-let service=ls("ffv24_service")||[];  // {name}
+let service=ls("ffv24_service")||[];  // {name, staffId?}
 
 let log=ls("ffv24_log")||[];
 
@@ -3570,6 +3690,32 @@ function loadTechniciansFromSettings() {
   return technicians;
 }
 
+function ffJoinTechnicianScore(technician) {
+  let score = 0;
+  if (String(technician?.role || '').trim().toLowerCase() === 'technician') score += 100;
+  if (technician?.isArchived !== true) score += 40;
+  if (technician?.uid) score += 30;
+  if (technician?.firebaseUid) score += 20;
+  if (technician?.email) score += 10;
+  if (technician?.invited === true) score += 5;
+  if (technician?.updatedAtMs) score += Number(technician.updatedAtMs) / 1000000000000;
+  if (technician?.createdAt) score += Number(technician.createdAt) / 1000000000000;
+  return score;
+}
+
+function ffDeduplicateTechniciansByName(technicians) {
+  const byName = new Map();
+  (technicians || []).forEach((technician) => {
+    const normalizedName = String(technician?.name || '').trim().toLowerCase();
+    if (!normalizedName) return;
+    const current = byName.get(normalizedName);
+    if (!current || ffJoinTechnicianScore(technician) > ffJoinTechnicianScore(current)) {
+      byName.set(normalizedName, technician);
+    }
+  });
+  return Array.from(byName.values());
+}
+
 function renderSelect(){
   // Try to get element if not already available
   const selectEl = document.getElementById("nameSelect");
@@ -3616,7 +3762,8 @@ function renderSelect(){
     console.error('[renderSelect] Error loading from ff_staff_v1:', e);
   }
 
-  console.log('[renderSelect] Rendering dropdown with', technicians.length, 'technicians');
+  const techniciansDeduped = ffDeduplicateTechniciansByName(technicians);
+  console.log('[renderSelect] Rendering dropdown with', techniciansDeduped.length, 'deduped technicians from', technicians.length, 'records');
   
   selectEl.innerHTML="";
 
@@ -3628,7 +3775,7 @@ function renderSelect(){
   selectEl.removeAttribute('readonly');
   selectEl.removeAttribute('disabled');
 
-  if (technicians.length === 0) {
+  if (techniciansDeduped.length === 0) {
     console.warn('[renderSelect] No technicians found in ff_staff_v1');
     // Add a placeholder option
     const placeholder = document.createElement("option");
@@ -3651,7 +3798,7 @@ function renderSelect(){
 
   // Populate dropdown with technicians from staff store (sorted A→Z)
   // Create sorted copy for JOIN rendering only (do not mutate original)
-  const techniciansSorted = [...technicians].sort((a, b) => {
+  const techniciansSorted = [...techniciansDeduped].sort((a, b) => {
     const aName = ((a?.name ?? a?.label ?? a?.displayName ?? a) + "").trim().toLowerCase();
     const bName = ((b?.name ?? b?.label ?? b?.displayName ?? b) + "").trim().toLowerCase();
     return aName.localeCompare(bName);
@@ -3661,9 +3808,10 @@ function renderSelect(){
   techniciansSorted.forEach(technician => { 
     if (technician && technician.name && technician.name.trim()) {
       const option = document.createElement("option"); 
-      option.value = technician.name.trim(); // Use name as the ID/value
+      option.value = (technician.id || technician.name).trim();
       option.textContent = technician.name.trim(); 
-      option.dataset.technicianId = technician.name.trim(); // Store ID for reference
+      option.dataset.technicianId = (technician.id || '').trim();
+      option.dataset.technicianName = technician.name.trim();
       selectEl.appendChild(option);
       addedCount++;
     }
@@ -3733,6 +3881,60 @@ function namePill(name){
 
 }
 
+function queuePresenceMeta(name){
+  const staffId = (name && typeof name === 'object' ? name.staffId : null) || resolveStaffNameToId(name && typeof name === 'object' ? name.name : name) || (name && typeof name === 'object' ? name.name : name);
+  const presence = (typeof window.ffGetStaffPresenceFor === 'function')
+    ? window.ffGetStaffPresenceFor(staffId)
+    : null;
+  const status = (typeof window.ffGetStaffPresenceStatus === 'function')
+    ? window.ffGetStaffPresenceStatus(staffId)
+    : 'offline';
+  return { staffId, presence, status };
+}
+
+function queuePresenceDotColor(status){
+  if (status === 'online') return '#10b981';
+  if (status === 'idle') return '#f59e0b';
+  return '#111827';
+}
+
+function ffHasQueueCallAccess(){
+  const roleFromUser = String(window.__ff_user_role || '').toLowerCase();
+  const roleFromActor = String(window.__ff_actorRole || sessionStorage.getItem('ff_actor_role') || '').toLowerCase();
+  if (roleFromUser === 'owner' || roleFromUser === 'admin' || roleFromUser === 'manager') return true;
+  if (roleFromActor === 'admin' || roleFromActor === 'manager') return true;
+  return typeof ffHasAdminAccess === 'function' ? ffHasAdminAccess() : false;
+}
+
+function ffDiagExplainPresenceStatus(presence){
+  if (!presence) return { status: 'offline', reason: 'missing presence doc', ageMs: null };
+  if (!presence.lastHeartbeatMs) return { status: 'offline', reason: 'missing lastHeartbeatMs', ageMs: null };
+  const ageMs = Date.now() - Number(presence.lastHeartbeatMs || 0);
+  if (ageMs > 45000) return { status: 'offline', reason: 'heartbeat older than 45000ms', ageMs };
+  if (presence.onlineStatus === 'idle') return { status: 'idle', reason: 'onlineStatus is idle', ageMs };
+  if (presence.lastActivityMs && (Date.now() - Number(presence.lastActivityMs)) > 120000) {
+    return { status: 'idle', reason: 'lastActivity older than 120000ms', ageMs };
+  }
+  return { status: 'online', reason: 'fresh heartbeat', ageMs };
+}
+
+function queueCallStatusLabel(presence, status){
+  const callStatus = presence?.currentCall?.status;
+  if (callStatus === 'sent') return 'Sent';
+  if (callStatus === 'accepted') return 'Accepted';
+  if (callStatus === 'no_response') return 'No response';
+  return '';
+}
+
+let ffQueuePresenceRenderTimer = null;
+document.addEventListener('ff-staff-presence-updated', () => {
+  if (ffQueuePresenceRenderTimer) clearTimeout(ffQueuePresenceRenderTimer);
+  ffQueuePresenceRenderTimer = setTimeout(() => {
+    ffQueuePresenceRenderTimer = null;
+    if (typeof renderQueue === 'function') renderQueue();
+  }, 60);
+});
+
 function renderQueue(){
 
   queueList.innerHTML="";
@@ -3743,7 +3945,29 @@ function renderQueue(){
 
     const badge=document.createElement("div"); badge.className="badge"; badge.textContent=i+1;
 
-    const nm=document.createElement("div"); nm.appendChild(namePill(q.name));
+    const nm=document.createElement("div");
+    nm.style.display = "flex";
+    nm.style.flexDirection = "column";
+    nm.style.gap = "4px";
+    nm.appendChild(namePill(q.name));
+
+    const presenceMeta = queuePresenceMeta(q);
+    const canManageCalls = ffHasQueueCallAccess();
+    const presenceStatusInfo = ffDiagExplainPresenceStatus(presenceMeta.presence);
+    if (canManageCalls) {
+      const presenceRow = document.createElement("div");
+      presenceRow.style.cssText = "display:flex;align-items:center;gap:6px;font-size:11px;color:#6b7280;";
+      const presenceDot = document.createElement("span");
+      presenceDot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${queuePresenceDotColor(presenceMeta.status)};display:inline-block;flex-shrink:0;`;
+      const presenceLabel = document.createElement("span");
+      presenceLabel.textContent = presenceMeta.status === 'online'
+        ? 'Connected'
+        : presenceMeta.status === 'idle'
+          ? 'Away'
+          : 'Offline';
+      presenceRow.append(presenceDot, presenceLabel);
+      nm.appendChild(presenceRow);
+    }
 
     const ctrls=document.createElement("div"); ctrls.className="controls";
 
@@ -3754,6 +3978,93 @@ function renderQueue(){
     start.onclick=() =>guardStart(q.name, i, ()=>startSpecific(i));
 
     hold.onclick=() =>{ window.__ff_holdTargetName = q.name; window.__ff_holdWasHeld = !!q.held; guardHold(()=>toggleHold(i)); };
+
+    const canCall = !q.held && presenceMeta.presence && presenceMeta.presence.inShift === true && presenceMeta.presence.queueStatus === "available";
+    const callStatusLabel = queueCallStatusLabel(presenceMeta.presence, presenceMeta.status);
+    const diagEligibility = {
+      rowName: q.name,
+      rowIndex: i,
+      rowHeld: !!q.held,
+      rowStaffId: presenceMeta.staffId,
+      canManageCalls,
+      presenceData: presenceMeta.presence,
+      presenceStatus: presenceStatusInfo,
+      eligibility: {
+        hasPresence: !!presenceMeta.presence,
+        inShift: presenceMeta.presence?.inShift === true,
+        queueStatusAvailable: presenceMeta.presence?.queueStatus === 'available',
+        onlineStatusNotOffline: presenceMeta.status !== 'offline',
+        missingStaffId: !presenceMeta.staffId
+      }
+    };
+    console.log('[StaffCallDiag] queue row presence', diagEligibility);
+    if (canCall && canManageCalls) {
+      const callWrap = document.createElement("div");
+      callWrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:2px;min-width:64px;";
+
+      const callBtn = document.createElement("button");
+      callBtn.type = "button";
+      callBtn.textContent = "📞";
+      callBtn.title = presenceMeta.status === 'offline' ? "Offline" : "Call staff member";
+      callBtn.style.cssText = [
+        "border:1px solid var(--border)",
+        "background:#fff",
+        "border-radius:999px",
+        "width:34px",
+        "height:34px",
+        "cursor:pointer",
+        "font-size:17px",
+        "line-height:1"
+      ].join(";");
+
+      if (presenceMeta.status === 'offline') {
+        callBtn.disabled = true;
+        callBtn.style.cursor = "not-allowed";
+        callBtn.style.opacity = "0.45";
+        console.warn('[StaffCallDiag] call icon disabled', {
+          ...diagEligibility,
+          disabledReason: 'online status is offline'
+        });
+      } else {
+        callBtn.onclick = async () => {
+          try {
+            const callTemplate = getStaffCallTemplate('available');
+            const result = await window.ffSendStaffCall?.(presenceMeta.staffId, {
+              message: callTemplate.message,
+              detail: callTemplate.detail
+            });
+            if (!result || result.ok !== true) {
+              if (result?.reason === 'offline') {
+                alert('This staff member is offline.');
+              } else {
+                alert('Call could not be sent.');
+              }
+            }
+          } catch (e) {
+            console.error('[Queue] Failed to send staff call', e);
+            alert('Call could not be sent.');
+          }
+        };
+      }
+
+      const callStatus = document.createElement("span");
+      callStatus.textContent = callStatusLabel || "\u00A0";
+      callStatus.style.cssText = "font-size:10px;color:#6b7280;min-height:12px;white-space:nowrap;";
+      callWrap.append(callBtn, callStatus);
+      ctrls.prepend(callWrap);
+    } else {
+      const disabledReasons = [];
+      if (!canManageCalls) disabledReasons.push('role has no call access');
+      if (q.held) disabledReasons.push('queue row is held');
+      if (!presenceMeta.presence) disabledReasons.push('missing presence');
+      if (presenceMeta.presence?.inShift !== true) disabledReasons.push('inShift failed');
+      if (presenceMeta.presence?.queueStatus !== 'available') disabledReasons.push('queueStatus failed');
+      if (!presenceMeta.staffId) disabledReasons.push('missing staffId');
+      console.warn('[StaffCallDiag] call icon not rendered', {
+        ...diagEligibility,
+        disabledReasons
+      });
+    }
 
     ctrls.append(hold,start);
 
@@ -3807,11 +4118,95 @@ function renderService(){
 
     const badge=document.createElement("div"); badge.className="badge"; badge.textContent="•";
 
-    const nm=document.createElement("div"); const pill=namePill(s.name); pill.textContent=s.name; nm.appendChild(pill);
+    const nm=document.createElement("div");
+    nm.style.display = "flex";
+    nm.style.alignItems = "center";
+    nm.style.gap = "10px";
+    nm.style.minWidth = "0";
+    const pill=namePill(s.name); pill.textContent=s.name;
+    pill.style.fontSize = "15px";
+    pill.style.padding = "6px 12px";
+    pill.style.minWidth = "0";
+    pill.style.maxWidth = "100%";
+    nm.appendChild(pill);
+
+    const presenceMeta = queuePresenceMeta(s);
+    const canManageCalls = ffHasQueueCallAccess();
+    if (canManageCalls) {
+      const presenceRow = document.createElement("div");
+      presenceRow.style.cssText = "display:flex;align-items:center;gap:6px;font-size:11px;color:#6b7280;white-space:nowrap;flex-shrink:0;";
+      const presenceDot = document.createElement("span");
+      presenceDot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${queuePresenceDotColor(presenceMeta.status)};display:inline-block;flex-shrink:0;`;
+      const presenceLabel = document.createElement("span");
+      presenceLabel.textContent = presenceMeta.status === 'online'
+        ? 'Connected'
+        : presenceMeta.status === 'idle'
+          ? 'Away'
+          : 'Offline';
+      presenceRow.append(presenceDot, presenceLabel);
+      nm.appendChild(presenceRow);
+    }
 
     const fin=btn("FINISH","finish-btn"); fin.onclick=() =>guardFinish(s.name, ()=>finish(i));
+    const ctrls=document.createElement("div"); ctrls.className="controls";
 
-    li.append(badge,nm,fin); serviceList.appendChild(li);
+    if (canManageCalls && presenceMeta.presence && presenceMeta.presence.inShift === true && presenceMeta.presence.queueStatus === "in_service") {
+      const callWrap = document.createElement("div");
+      callWrap.style.cssText = "display:flex;align-items:center;gap:6px;min-width:64px;white-space:nowrap;";
+
+      const callBtn = document.createElement("button");
+      callBtn.type = "button";
+      callBtn.textContent = "📞";
+      callBtn.title = presenceMeta.status === 'offline' ? "Offline" : "Call to reception";
+      callBtn.style.cssText = [
+        "border:1px solid var(--border)",
+        "background:#fff",
+        "border-radius:999px",
+        "width:34px",
+        "height:34px",
+        "cursor:pointer",
+        "font-size:17px",
+        "line-height:1"
+      ].join(";");
+
+      if (presenceMeta.status === 'offline') {
+        callBtn.disabled = true;
+        callBtn.style.cursor = "not-allowed";
+        callBtn.style.opacity = "0.45";
+      } else {
+        callBtn.onclick = async () => {
+          try {
+            const callTemplate = getStaffCallTemplate('inService');
+            const result = await window.ffSendStaffCall?.(presenceMeta.staffId, {
+              allowedQueueStatuses: ["in_service"],
+              message: callTemplate.message,
+              detail: callTemplate.detail
+            });
+            if (!result || result.ok !== true) {
+              if (result?.reason === 'offline') {
+                alert('This staff member is offline.');
+              } else {
+                alert('Call could not be sent.');
+              }
+            }
+          } catch (e) {
+            console.error('[Service] Failed to send reception call', e);
+            alert('Call could not be sent.');
+          }
+        };
+      }
+
+      const callStatus = document.createElement("span");
+      callStatus.textContent = queueCallStatusLabel(presenceMeta.presence, presenceMeta.status) || "";
+      callStatus.style.cssText = "font-size:10px;color:#6b7280;white-space:nowrap;min-width:52px;";
+      callWrap.append(callBtn, callStatus);
+      ctrls.append(callWrap, fin);
+      li.append(badge,nm,ctrls); serviceList.appendChild(li);
+      return;
+    }
+
+    ctrls.append(fin);
+    li.append(badge,nm,ctrls); serviceList.appendChild(li);
 
   });
 
@@ -3829,7 +4224,25 @@ function resolveStaffNameToId(name) {
   try {
     const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
     const staffList = Array.isArray(store.staff) ? store.staff : [];
-    const staff = staffList.find(s => s.name === name);
+    const normalizedName = String(name || '').trim().toLowerCase();
+    const candidates = staffList.filter(s => String(s?.name || '').trim().toLowerCase() === normalizedName);
+    if (!candidates.length) return undefined;
+    candidates.sort((a, b) => {
+      const score = (staff) => {
+        let total = 0;
+        if (String(staff?.role || '').trim().toLowerCase() === 'technician') total += 100;
+        if (staff?.isArchived !== true) total += 40;
+        if (staff?.uid) total += 30;
+        if (staff?.firebaseUid) total += 20;
+        if (staff?.email) total += 10;
+        if (staff?.invited === true) total += 5;
+        if (staff?.updatedAtMs) total += Number(staff.updatedAtMs) / 1000000000000;
+        if (staff?.createdAt) total += Number(staff.createdAt) / 1000000000000;
+        return total;
+      };
+      return score(b) - score(a);
+    });
+    const staff = candidates[0];
     return staff ? staff.id : undefined;
   } catch (e) {
     console.error('[resolveStaffNameToId] Error resolving staff name to ID:', e);
@@ -3922,15 +4335,29 @@ function handleJoin(){
     return;
   }
 
-  // Get selected technician name (this is the technician ID in this app)
-  const selectedTechnicianName = nameSelectEl.value;
+  const selectedOption = nameSelectEl.selectedOptions && nameSelectEl.selectedOptions[0] ? nameSelectEl.selectedOptions[0] : null;
+  let selectedTechnicianId = (nameSelectEl.value || '').toString().trim();
+  let selectedTechnicianName = (selectedOption?.dataset?.technicianName || selectedOption?.textContent || '').toString().trim();
+  const liveDiag = (typeof window.ffStaffCallDiagSnapshot === 'function') ? window.ffStaffCallDiagSnapshot() : null;
+  const sessionRole = String(window.__ff_user_role || window.__ff_actorRole || sessionStorage.getItem('ff_actor_role') || '').toLowerCase();
+  const isTechnicianSession = sessionRole === 'technician' || sessionRole === 'tech' || sessionRole === 'staff';
+  const ownCloudStaffId = String(liveDiag?.ownStaffId || '').trim();
+  const ownCloudPresenceName = String(liveDiag?.presence?.name || '').trim();
+  if (isTechnicianSession && ownCloudStaffId) {
+    selectedTechnicianId = ownCloudStaffId;
+    if (ownCloudPresenceName) selectedTechnicianName = ownCloudPresenceName;
+    console.log('[handleJoin] Overriding JOIN selection with logged-in technician identity', {
+      ownCloudStaffId,
+      ownCloudPresenceName
+    });
+  }
   const pin = (pinInputEl.value || "").toString().trim();
   
   console.log('[handleJoin] Join clicked', selectedTechnicianName, pin);
   console.log('[handleJoin] Available workers:', settings.workers?.length || 0);
   
   // Validate that both name and PIN are provided
-  if (!selectedTechnicianName || selectedTechnicianName === '' || selectedTechnicianName === 'Select technician...') {
+  if (!selectedTechnicianId || !selectedTechnicianName || selectedTechnicianName === 'Select technician...') {
     if (joinErrorEl) {
       joinErrorEl.textContent = 'Please select a technician';
       joinErrorEl.style.display = 'block';
@@ -3957,7 +4384,7 @@ function handleJoin(){
   try {
     const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
     const staffList = Array.isArray(store.staff) ? store.staff : [];
-    technician = staffList.find(s => s.name === selectedTechnicianName);
+    technician = staffList.find(s => s.id === selectedTechnicianId) || staffList.find(s => s.name === selectedTechnicianName);
     if (technician) {
       foundInStaffStore = true;
       console.log('[handleJoin] Found technician in ff_staff_v1:', technician.name);
@@ -3990,7 +4417,7 @@ function handleJoin(){
 
   // Resolve name to staffId for stable identifier-based lookup
   // If found in ff_staff_v1, use the staffId; otherwise use name
-  const staffId = foundInStaffStore && technician.id ? technician.id : resolveStaffNameToId(selectedTechnicianName);
+  const staffId = selectedTechnicianId || (foundInStaffStore && technician.id ? technician.id : resolveStaffNameToId(selectedTechnicianName));
   const currentStaffId = staffId || selectedTechnicianName; // Fallback to name if ID not found
 
   // Verify that the entered PIN matches the technician's stored PIN
@@ -4012,7 +4439,7 @@ function handleJoin(){
   }
 
   // Check if technician is already in queue or service
-  if (queue.some(x => x.name === selectedTechnicianName) || service.some(x => x.name === selectedTechnicianName)) {
+  if (queue.some(x => (x.staffId && x.staffId === staffId) || x.name === selectedTechnicianName) || service.some(x => (x.staffId && x.staffId === staffId) || x.name === selectedTechnicianName)) {
     if (joinErrorEl) {
       joinErrorEl.textContent = 'This technician is already active';
       joinErrorEl.style.display = 'block';
@@ -4024,7 +4451,10 @@ function handleJoin(){
 
   // All validations passed - add to queue
   console.log('[handleJoin] Adding technician to queue:', selectedTechnicianName);
-  queue.push({name: selectedTechnicianName, held: false});
+  queue.push({name: selectedTechnicianName, staffId: staffId || undefined, held: false});
+  if (typeof window.ffMarkStaffJoinedShift === 'function') {
+    window.ffMarkStaffJoinedShift(currentStaffId, selectedTechnicianName);
+  }
   save();
   renderQueue();
   
@@ -4032,6 +4462,9 @@ function handleJoin(){
   if (staffId) {
     window.__ff_authedStaffId = staffId;
     try { localStorage.setItem('ff_authedStaffId_v1', staffId); } catch (e) {}
+    if (typeof window.ffSetPresenceStaffContext === 'function') {
+      window.ffSetPresenceStaffContext(staffId, selectedTechnicianName);
+    }
   }
   window.__ff_authedStaffName = selectedTechnicianName;
   window.__ff_actorRole = 'Tech';
@@ -4078,7 +4511,7 @@ function join() {
 
 function startSpecific(idx){
 
-  const [it]=queue.splice(idx,1); service.push({name:it.name});
+  const [it]=queue.splice(idx,1); service.push({name:it.name, staffId: it.staffId || resolveStaffNameToId(it.name)});
 
   save(); renderQueue(); renderService();
 
@@ -4128,7 +4561,7 @@ function finish(i){
 
   const [it]=service.splice(i,1);
 
-  queue.push({name:it.name, held:false}); // back to end
+  queue.push({name:it.name, staffId: it.staffId || resolveStaffNameToId(it.name), held:false}); // back to end
 
   save(); renderQueue(); renderService();
 
@@ -5612,7 +6045,431 @@ function renderSettings(){
   // Tasks-related UI removed (Task Reminders, Task Notes sections)
   // These will be rebuilt from scratch in the future
 
+  renderStaffCallMessageSettings();
 
+
+}
+
+function renderStaffCallMessageSettings() {
+  const box = document.getElementById("staffCallMessageTemplatesBox");
+  if (!box) return;
+  settings.staffCallTemplates = normalizeStaffCallTemplates(settings.staffCallTemplates);
+  settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(settings.staffCallTimeoutSeconds);
+  box.innerHTML = "";
+  const timeoutUi = getStaffCallTimeoutUiValue(settings.staffCallTimeoutSeconds);
+
+  const timeoutCard = document.createElement("div");
+  timeoutCard.style.cssText = "padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;display:flex;flex-direction:column;gap:10px;";
+
+  const timeoutTitle = document.createElement("div");
+  timeoutTitle.style.cssText = "font-size:13px;font-weight:700;color:#111827;";
+  timeoutTitle.textContent = "Call timeout";
+
+  const timeoutDescription = document.createElement("div");
+  timeoutDescription.style.cssText = "font-size:12px;color:#6b7280;line-height:1.5;";
+  timeoutDescription.textContent = "Controls how long the call stays on the technician screen and when admin sees No response.";
+
+  const timeoutLabel = document.createElement("label");
+  timeoutLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
+  timeoutLabel.textContent = "How long should the call stay active?";
+
+  const timeoutSelect = document.createElement("select");
+  timeoutSelect.id = "staffCallTimeoutSeconds";
+  timeoutSelect.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+  STAFF_CALL_TIMEOUT_OPTIONS.forEach((option) => {
+    const optionEl = document.createElement("option");
+    optionEl.value = String(option.value);
+    optionEl.textContent = option.label;
+    if (String(option.value) === timeoutUi.mode) optionEl.selected = true;
+    timeoutSelect.appendChild(optionEl);
+  });
+  const customTimeoutOption = document.createElement("option");
+  customTimeoutOption.value = "custom";
+  customTimeoutOption.textContent = "Custom time";
+  if (timeoutUi.mode === "custom") customTimeoutOption.selected = true;
+  timeoutSelect.appendChild(customTimeoutOption);
+  timeoutLabel.appendChild(timeoutSelect);
+
+  const customTimeoutRow = document.createElement("div");
+  customTimeoutRow.id = "staffCallTimeoutCustomRow";
+  customTimeoutRow.style.cssText = `display:${timeoutUi.mode === "custom" ? "flex" : "none"};align-items:center;gap:8px;flex-wrap:wrap;`;
+
+  const customTimeoutInput = document.createElement("input");
+  customTimeoutInput.type = "number";
+  customTimeoutInput.id = "staffCallTimeoutCustomValue";
+  customTimeoutInput.min = "1";
+  customTimeoutInput.step = "1";
+  customTimeoutInput.value = timeoutUi.customValue || "1";
+  customTimeoutInput.style.cssText = "width:110px;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+
+  const customTimeoutUnit = document.createElement("select");
+  customTimeoutUnit.id = "staffCallTimeoutCustomUnit";
+  customTimeoutUnit.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+  [
+    { value: "seconds", label: "Seconds" },
+    { value: "minutes", label: "Minutes" }
+  ].forEach((unit) => {
+    const unitOption = document.createElement("option");
+    unitOption.value = unit.value;
+    unitOption.textContent = unit.label;
+    if (timeoutUi.customUnit === unit.value) unitOption.selected = true;
+    customTimeoutUnit.appendChild(unitOption);
+  });
+
+  const customTimeoutHint = document.createElement("div");
+  customTimeoutHint.style.cssText = "font-size:12px;color:#6b7280;";
+  customTimeoutHint.textContent = "Custom range: 10 seconds to 60 minutes.";
+
+  timeoutSelect.addEventListener("change", () => {
+    customTimeoutRow.style.display = timeoutSelect.value === "custom" ? "flex" : "none";
+  });
+
+  customTimeoutRow.append(customTimeoutInput, customTimeoutUnit, customTimeoutHint);
+  timeoutCard.append(timeoutTitle, timeoutDescription, timeoutLabel, customTimeoutRow);
+  box.appendChild(timeoutCard);
+
+  const sections = [
+    {
+      key: "available",
+      label: "Available Worker Message",
+      description: "Sent when calling a technician from the Available queue."
+    },
+    {
+      key: "inService",
+      label: "In Service Worker Message",
+      description: "Sent when calling a technician who is already In Service."
+    }
+  ];
+
+  sections.forEach((section) => {
+    const template = settings.staffCallTemplates[section.key];
+    const presets = STAFF_CALL_TEMPLATE_PRESETS[section.key] || [];
+
+    const card = document.createElement("div");
+    card.style.cssText = "padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;display:flex;flex-direction:column;gap:10px;";
+
+    const title = document.createElement("div");
+    title.style.cssText = "font-size:13px;font-weight:700;color:#111827;";
+    title.textContent = section.label;
+
+    const description = document.createElement("div");
+    description.style.cssText = "font-size:12px;color:#6b7280;line-height:1.5;";
+    description.textContent = section.description;
+
+    const selectLabel = document.createElement("label");
+    selectLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
+    selectLabel.textContent = "Preset";
+
+    const presetSelect = document.createElement("select");
+    presetSelect.id = `staffCallPreset_${section.key}`;
+    presetSelect.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+    presets.forEach((preset) => {
+      const option = document.createElement("option");
+      option.value = preset.id;
+      option.textContent = preset.label;
+      if (template.presetId === preset.id) option.selected = true;
+      presetSelect.appendChild(option);
+    });
+    const customOption = document.createElement("option");
+    customOption.value = "custom";
+    customOption.textContent = "Custom";
+    if (template.presetId === "custom") customOption.selected = true;
+    presetSelect.appendChild(customOption);
+    selectLabel.appendChild(presetSelect);
+
+    const messageLabel = document.createElement("label");
+    messageLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
+    messageLabel.textContent = "Message";
+
+    const messageInput = document.createElement("input");
+    messageInput.type = "text";
+    messageInput.id = `staffCallMessage_${section.key}`;
+    messageInput.value = template.message;
+    messageInput.maxLength = 90;
+    messageInput.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+    messageLabel.appendChild(messageInput);
+
+    const detailLabel = document.createElement("label");
+    detailLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
+    detailLabel.textContent = "Subtext";
+
+    const detailInput = document.createElement("input");
+    detailInput.type = "text";
+    detailInput.id = `staffCallDetail_${section.key}`;
+    detailInput.value = template.detail;
+    detailInput.maxLength = 140;
+    detailInput.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+    detailLabel.appendChild(detailInput);
+
+    const actions = document.createElement("div");
+    actions.style.cssText = "display:flex;justify-content:flex-end;";
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.textContent = "Reset to default";
+    resetBtn.style.cssText = "padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;";
+
+    function applyTemplate(nextTemplate) {
+      const normalized = normalizeStaffCallTemplateEntry(section.key, nextTemplate);
+      settings.staffCallTemplates[section.key] = normalized;
+      presetSelect.value = normalized.presetId;
+      messageInput.value = normalized.message;
+      detailInput.value = normalized.detail;
+    }
+
+    function markCustomFromInputs() {
+      settings.staffCallTemplates[section.key] = normalizeStaffCallTemplateEntry(section.key, {
+        presetId: "custom",
+        message: messageInput.value,
+        detail: detailInput.value
+      });
+      presetSelect.value = settings.staffCallTemplates[section.key].presetId;
+    }
+
+    presetSelect.addEventListener("change", () => {
+      if (presetSelect.value === "custom") {
+        markCustomFromInputs();
+        return;
+      }
+      const preset = presets.find((item) => item.id === presetSelect.value) || presets[0];
+      applyTemplate(preset);
+    });
+
+    messageInput.addEventListener("input", markCustomFromInputs);
+    detailInput.addEventListener("input", markCustomFromInputs);
+    resetBtn.addEventListener("click", () => applyTemplate(presets[0]));
+
+    actions.appendChild(resetBtn);
+    card.append(title, description, selectLabel, messageLabel, detailLabel, actions);
+    box.appendChild(card);
+  });
+}
+
+function renderUserProfileStaffCallMessageSettings() {
+  const section = document.getElementById("userProfileStaffCallTemplatesSection");
+  const box = document.getElementById("userProfileStaffCallTemplatesBox");
+  const saveBtn = document.getElementById("userProfileSaveStaffCallTemplates");
+  if (!section || !box || !saveBtn) return;
+
+  const canEdit = typeof ffHasQueueCallAccess === "function" ? ffHasQueueCallAccess() : false;
+  section.style.display = canEdit ? "block" : "none";
+  if (!canEdit) return;
+
+  settings.staffCallTemplates = normalizeStaffCallTemplates(settings.staffCallTemplates);
+  settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(settings.staffCallTimeoutSeconds);
+  box.innerHTML = "";
+  const timeoutUi = getStaffCallTimeoutUiValue(settings.staffCallTimeoutSeconds);
+
+  const timeoutCard = document.createElement("div");
+  timeoutCard.style.cssText = "padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;display:flex;flex-direction:column;gap:10px;";
+
+  const timeoutTitle = document.createElement("div");
+  timeoutTitle.style.cssText = "font-size:13px;font-weight:700;color:#111827;";
+  timeoutTitle.textContent = "Call timeout";
+
+  const timeoutDescription = document.createElement("div");
+  timeoutDescription.style.cssText = "font-size:12px;color:#6b7280;line-height:1.5;";
+  timeoutDescription.textContent = "Controls how long the call stays on the technician screen and when admin sees No response.";
+
+  const timeoutLabel = document.createElement("label");
+  timeoutLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
+  timeoutLabel.textContent = "How long should the call stay active?";
+
+  const timeoutSelect = document.createElement("select");
+  timeoutSelect.id = "userProfileStaffCallTimeoutSeconds";
+  timeoutSelect.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+  STAFF_CALL_TIMEOUT_OPTIONS.forEach((option) => {
+    const optionEl = document.createElement("option");
+    optionEl.value = String(option.value);
+    optionEl.textContent = option.label;
+    if (String(option.value) === timeoutUi.mode) optionEl.selected = true;
+    timeoutSelect.appendChild(optionEl);
+  });
+  const customTimeoutOption = document.createElement("option");
+  customTimeoutOption.value = "custom";
+  customTimeoutOption.textContent = "Custom time";
+  if (timeoutUi.mode === "custom") customTimeoutOption.selected = true;
+  timeoutSelect.appendChild(customTimeoutOption);
+  timeoutLabel.appendChild(timeoutSelect);
+
+  const customTimeoutRow = document.createElement("div");
+  customTimeoutRow.id = "userProfileStaffCallTimeoutCustomRow";
+  customTimeoutRow.style.cssText = `display:${timeoutUi.mode === "custom" ? "flex" : "none"};align-items:center;gap:8px;flex-wrap:wrap;`;
+
+  const customTimeoutInput = document.createElement("input");
+  customTimeoutInput.type = "number";
+  customTimeoutInput.id = "userProfileStaffCallTimeoutCustomValue";
+  customTimeoutInput.min = "1";
+  customTimeoutInput.step = "1";
+  customTimeoutInput.value = timeoutUi.customValue || "1";
+  customTimeoutInput.style.cssText = "width:110px;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+
+  const customTimeoutUnit = document.createElement("select");
+  customTimeoutUnit.id = "userProfileStaffCallTimeoutCustomUnit";
+  customTimeoutUnit.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+  [
+    { value: "seconds", label: "Seconds" },
+    { value: "minutes", label: "Minutes" }
+  ].forEach((unit) => {
+    const unitOption = document.createElement("option");
+    unitOption.value = unit.value;
+    unitOption.textContent = unit.label;
+    if (timeoutUi.customUnit === unit.value) unitOption.selected = true;
+    customTimeoutUnit.appendChild(unitOption);
+  });
+
+  const customTimeoutHint = document.createElement("div");
+  customTimeoutHint.style.cssText = "font-size:12px;color:#6b7280;";
+  customTimeoutHint.textContent = "Custom range: 10 seconds to 60 minutes.";
+
+  timeoutSelect.addEventListener("change", () => {
+    customTimeoutRow.style.display = timeoutSelect.value === "custom" ? "flex" : "none";
+  });
+
+  customTimeoutRow.append(customTimeoutInput, customTimeoutUnit, customTimeoutHint);
+  timeoutCard.append(timeoutTitle, timeoutDescription, timeoutLabel, customTimeoutRow);
+  box.appendChild(timeoutCard);
+
+  const sections = [
+    {
+      key: "available",
+      label: "Available Worker Message",
+      description: "Sent when calling a technician from the Available queue."
+    },
+    {
+      key: "inService",
+      label: "In Service Worker Message",
+      description: "Sent when calling a technician who is already In Service."
+    }
+  ];
+
+  sections.forEach((sectionConfig) => {
+    const template = settings.staffCallTemplates[sectionConfig.key];
+    const presets = STAFF_CALL_TEMPLATE_PRESETS[sectionConfig.key] || [];
+    const card = document.createElement("div");
+    card.style.cssText = "padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;display:flex;flex-direction:column;gap:10px;";
+
+    const title = document.createElement("div");
+    title.style.cssText = "font-size:13px;font-weight:700;color:#111827;";
+    title.textContent = sectionConfig.label;
+
+    const description = document.createElement("div");
+    description.style.cssText = "font-size:12px;color:#6b7280;line-height:1.5;";
+    description.textContent = sectionConfig.description;
+
+    const presetSelect = document.createElement("select");
+    presetSelect.id = `userProfileStaffCallPreset_${sectionConfig.key}`;
+    presetSelect.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+    presets.forEach((preset) => {
+      const option = document.createElement("option");
+      option.value = preset.id;
+      option.textContent = preset.label;
+      if (template.presetId === preset.id) option.selected = true;
+      presetSelect.appendChild(option);
+    });
+    const customOption = document.createElement("option");
+    customOption.value = "custom";
+    customOption.textContent = "Custom";
+    if (template.presetId === "custom") customOption.selected = true;
+    presetSelect.appendChild(customOption);
+
+    const messageInput = document.createElement("input");
+    messageInput.type = "text";
+    messageInput.id = `userProfileStaffCallMessage_${sectionConfig.key}`;
+    messageInput.value = template.message;
+    messageInput.maxLength = 90;
+    messageInput.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+
+    const detailInput = document.createElement("input");
+    detailInput.type = "text";
+    detailInput.id = `userProfileStaffCallDetail_${sectionConfig.key}`;
+    detailInput.value = template.detail;
+    detailInput.maxLength = 140;
+    detailInput.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+
+    function applyTemplate(nextTemplate) {
+      const normalized = normalizeStaffCallTemplateEntry(sectionConfig.key, nextTemplate);
+      settings.staffCallTemplates[sectionConfig.key] = normalized;
+      presetSelect.value = normalized.presetId;
+      messageInput.value = normalized.message;
+      detailInput.value = normalized.detail;
+    }
+
+    function markCustomFromInputs() {
+      settings.staffCallTemplates[sectionConfig.key] = normalizeStaffCallTemplateEntry(sectionConfig.key, {
+        presetId: "custom",
+        message: messageInput.value,
+        detail: detailInput.value
+      });
+      presetSelect.value = settings.staffCallTemplates[sectionConfig.key].presetId;
+    }
+
+    presetSelect.addEventListener("change", () => {
+      if (presetSelect.value === "custom") {
+        markCustomFromInputs();
+        return;
+      }
+      const preset = presets.find((item) => item.id === presetSelect.value) || presets[0];
+      applyTemplate(preset);
+    });
+    messageInput.addEventListener("input", markCustomFromInputs);
+    detailInput.addEventListener("input", markCustomFromInputs);
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.textContent = "Reset to default";
+    resetBtn.style.cssText = "padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;align-self:flex-end;";
+    resetBtn.addEventListener("click", () => applyTemplate(presets[0]));
+
+    const presetLabel = document.createElement("label");
+    presetLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
+    presetLabel.textContent = "Preset";
+    presetLabel.appendChild(presetSelect);
+
+    const messageLabel = document.createElement("label");
+    messageLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
+    messageLabel.textContent = "Message";
+    messageLabel.appendChild(messageInput);
+
+    const detailLabel = document.createElement("label");
+    detailLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
+    detailLabel.textContent = "Subtext";
+    detailLabel.appendChild(detailInput);
+
+    card.append(title, description, presetLabel, messageLabel, detailLabel, resetBtn);
+    box.appendChild(card);
+  });
+
+  if (!saveBtn.__ffBound) {
+    saveBtn.__ffBound = true;
+    saveBtn.addEventListener("click", async () => {
+      settings.staffCallTemplates = normalizeStaffCallTemplates({
+        available: {
+          presetId: document.getElementById("userProfileStaffCallPreset_available")?.value || "custom",
+          message: document.getElementById("userProfileStaffCallMessage_available")?.value || "",
+          detail: document.getElementById("userProfileStaffCallDetail_available")?.value || ""
+        },
+        inService: {
+          presetId: document.getElementById("userProfileStaffCallPreset_inService")?.value || "custom",
+          message: document.getElementById("userProfileStaffCallMessage_inService")?.value || "",
+          detail: document.getElementById("userProfileStaffCallDetail_inService")?.value || ""
+        }
+      });
+      settings.staffCallTimeoutSeconds = resolveStaffCallTimeoutSecondsFromInputs(
+        document.getElementById("userProfileStaffCallTimeoutSeconds")?.value,
+        document.getElementById("userProfileStaffCallTimeoutCustomValue")?.value,
+        document.getElementById("userProfileStaffCallTimeoutCustomUnit")?.value
+      );
+      save();
+      if (typeof window.ffSaveAppSettings === "function") {
+        window.ffSaveAppSettings(undefined, undefined, undefined, settings.staffCallTemplates, settings.staffCallTimeoutSeconds);
+      }
+      saveBtn.textContent = "Saved";
+      setTimeout(() => {
+        saveBtn.textContent = "Save Staff Call Messages";
+      }, 1400);
+    });
+  }
 }
 
 // Guard against infinite loop in renderTaskReminders
@@ -6474,10 +7331,28 @@ async function saveSettings(e){
 
   if(!settings.brandPalette) settings.brandPalette = DEFAULTS.brandPalette.slice();
 
+  settings.staffCallTemplates = normalizeStaffCallTemplates({
+    available: {
+      presetId: document.getElementById("staffCallPreset_available")?.value || "custom",
+      message: document.getElementById("staffCallMessage_available")?.value || "",
+      detail: document.getElementById("staffCallDetail_available")?.value || ""
+    },
+    inService: {
+      presetId: document.getElementById("staffCallPreset_inService")?.value || "custom",
+      message: document.getElementById("staffCallMessage_inService")?.value || "",
+      detail: document.getElementById("staffCallDetail_inService")?.value || ""
+    }
+  });
+  settings.staffCallTimeoutSeconds = resolveStaffCallTimeoutSecondsFromInputs(
+    document.getElementById("staffCallTimeoutSeconds")?.value,
+    document.getElementById("staffCallTimeoutCustomValue")?.value,
+    document.getElementById("staffCallTimeoutCustomUnit")?.value
+  );
+
   save();
   // Sync brand name, palette, managers to Firestore
   if (typeof window.ffSaveAppSettings === 'function') {
-    window.ffSaveAppSettings(settings.brand?.name, settings.brandPalette, settings.managers);
+    window.ffSaveAppSettings(settings.brand?.name, settings.brandPalette, settings.managers, settings.staffCallTemplates, settings.staffCallTimeoutSeconds);
   }
   // Sync task settings (reminders, notes, badge) to Firestore
   if (typeof window.ffSaveTaskSettings === 'function') {
@@ -18709,6 +19584,7 @@ function initializeUserProfileMenu() {
     if (defaultScreenSelect) {
       defaultScreenSelect.value = prefs.preferences.defaultScreen || 'queue';
     }
+    renderUserProfileStaffCallMessageSettings();
   }
   
   function savePreferences() {
@@ -23081,6 +23957,7 @@ window.__ff_lastSaveTime = 0;
 function save(){
   window.__ff_lastSaveTime = Date.now();
   ls("ffv24_settings",settings); ls("ffv24_queue",queue); ls("ffv24_service",service); ls("ffv24_log",log); syncWorkersToUsers();
+  if(typeof window.ffSyncPresenceFromQueueState==='function') window.ffSyncPresenceFromQueueState(queue, service);
   if(typeof window.queueCloudWrite==='function') window.queueCloudWrite();
 }
 
@@ -27029,7 +27906,8 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/inbox.js?v=20260312_fix2"></script>
   <script type="module" src="/chat.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/settings-cloud.js?v=20260312_fix2"></script>
+  <script type="module" src="/staff-call-cloud.js?v=20260312_staffcall11"></script>
+  <script type="module" src="/settings-cloud.js?v=20260312_fix4"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tickets.js?v=20260312_fix2"></script>
