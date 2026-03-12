@@ -26,7 +26,7 @@ import {
 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-storage.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-import { db, auth, storage } from "./app.js";
+import { db, auth, storage } from "./app.js?v=20260312_fix2";
 
 // Category order for display (Schedule → Payments → Operations → Documents → Other at end)
 const REQUEST_CATEGORY_ORDER = ['schedule', 'payments', 'operations', 'documents', 'other'];
