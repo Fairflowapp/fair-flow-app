@@ -3208,7 +3208,16 @@ function renderQueue(){
 
     const badge=document.createElement("div"); badge.className="badge"; badge.textContent=i+1;
 
-    const nm=document.createElement("div"); nm.appendChild(namePill(q.name));
+    const nm=document.createElement("div");
+    nm.appendChild(namePill(q.name));
+    const contact = getQueueItemContact(q);
+    if (contact.phone || contact.email) {
+      const sub = document.createElement("div");
+      sub.className = "queue-item-contact";
+      sub.style.cssText = "font-size:11px;color:#6b7280;margin-top:2px;";
+      sub.textContent = [contact.phone, contact.email].filter(Boolean).join(" · ");
+      nm.appendChild(sub);
+    }
 
     const ctrls=document.createElement("div"); ctrls.className="controls";
 
@@ -3272,7 +3281,16 @@ function renderService(){
 
     const badge=document.createElement("div"); badge.className="badge"; badge.textContent="•";
 
-    const nm=document.createElement("div"); const pill=namePill(s.name); pill.textContent=s.name; nm.appendChild(pill);
+    const nm=document.createElement("div");
+    const pill=namePill(s.name); pill.textContent=s.name; nm.appendChild(pill);
+    const contact = getQueueItemContact(s);
+    if (contact.phone || contact.email) {
+      const sub = document.createElement("div");
+      sub.className = "queue-item-contact";
+      sub.style.cssText = "font-size:11px;color:#6b7280;margin-top:2px;";
+      sub.textContent = [contact.phone, contact.email].filter(Boolean).join(" · ");
+      nm.appendChild(sub);
+    }
 
     const fin=btn("FINISH","finish-btn"); fin.onclick=() =>guardFinish(s.name, ()=>finish(i));
 
@@ -3300,6 +3318,20 @@ function resolveStaffNameToId(name) {
     console.error('[resolveStaffNameToId] Error resolving staff name to ID:', e);
     return undefined;
   }
+}
+
+// Get phone/email for queue display - from item or lookup by name
+function getQueueItemContact(item) {
+  if (item.phone || item.email) return { phone: item.phone, email: item.email };
+  if (!item.name) return {};
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const staff = (store.staff || []).find(s => s.name === item.name);
+    if (staff) return { phone: staff.phone, email: staff.email };
+    const w = (settings.workers || []).find(w => w.name === item.name);
+    return w ? { phone: w.phone, email: w.email } : {};
+  } catch (_) {}
+  return {};
 }
 
 // Minimal global helper for PIN lookup in Queue scope
@@ -3487,9 +3519,15 @@ function handleJoin(){
     return;
   }
 
-  // All validations passed - add to queue
+  // All validations passed - add to queue (include phone/email for immediate display)
   console.log('[handleJoin] Adding technician to queue:', selectedTechnicianName);
-  queue.push({name: selectedTechnicianName, held: false});
+  queue.push({
+    name: selectedTechnicianName,
+    held: false,
+    staffId: technician.id || staffId,
+    phone: technician.phone || undefined,
+    email: technician.email || undefined
+  });
   save();
   renderQueue();
   
@@ -3524,7 +3562,8 @@ function join() {
 
 function startSpecific(idx){
 
-  const [it]=queue.splice(idx,1); service.push({name:it.name});
+  const [it]=queue.splice(idx,1);
+  service.push({ name: it.name, phone: it.phone, email: it.email, staffId: it.staffId });
 
   save(); renderQueue(); renderService();
 
@@ -3574,7 +3613,7 @@ function finish(i){
 
   const [it]=service.splice(i,1);
 
-  queue.push({name:it.name, held:false}); // back to end
+  queue.push({ name: it.name, held: false, phone: it.phone, email: it.email, staffId: it.staffId }); // back to end
 
   save(); renderQueue(); renderService();
 
@@ -3618,19 +3657,8 @@ function move(i,d){ const j=i+d; if(j<0||j>=queue.length) return; const t=queue[
 }
 
 async function resetDay(){
-  // Check if user is owner/admin - block if not
-  if (typeof window.isCurrentUserOwner === 'function') {
-    try {
-      const isOwner = await window.isCurrentUserOwner();
-      if (!isOwner) {
-        alert("Not authorized - Only admin/owner can reset the day");
-        return;
-      }
-    } catch (e) {
-      console.warn('[Reset] Could not verify user role, proceeding with admin code check:', e);
-      // Continue to admin code check if role verification fails
-    }
-  }
+  // Authorization is done via admin/manager PIN in showResetPinPrompt - no need to block owners-only here.
+  // Staff admins (isAdmin) authenticate via PIN, not via isCurrentUserOwner (which only checks salon owner).
   
   // Step 1: Show confirmation modal
   const confirmed = await showResetConfirmation();
@@ -20732,9 +20760,21 @@ function addTechnicianToQueue(){
 
   
 
-  // Add to end of queue
-
-  queue.push({name, held: false});
+  // Add to end of queue (include phone/email from staff if available)
+  let staffDetails = {};
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    const staff = staffList.find(s => s.name === name);
+    if (staff) {
+      staffDetails = { staffId: staff.id, phone: staff.phone, email: staff.email };
+    }
+  } catch (_) {}
+  const fallback = ffGetStaffList().find(w => w.name === name);
+  if (fallback && !staffDetails.staffId) {
+    staffDetails = { staffId: fallback.id, phone: fallback.phone, email: fallback.email };
+  }
+  queue.push({ name, held: false, ...staffDetails });
 
   save();
 

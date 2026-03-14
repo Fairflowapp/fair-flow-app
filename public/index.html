@@ -3743,7 +3743,16 @@ function renderQueue(){
 
     const badge=document.createElement("div"); badge.className="badge"; badge.textContent=i+1;
 
-    const nm=document.createElement("div"); nm.appendChild(namePill(q.name));
+    const nm=document.createElement("div");
+    nm.appendChild(namePill(q.name));
+    const contact = getQueueItemContact(q);
+    if (contact.phone || contact.email) {
+      const sub = document.createElement("div");
+      sub.className = "queue-item-contact";
+      sub.style.cssText = "font-size:11px;color:#6b7280;margin-top:2px;";
+      sub.textContent = [contact.phone, contact.email].filter(Boolean).join(" · ");
+      nm.appendChild(sub);
+    }
 
     const ctrls=document.createElement("div"); ctrls.className="controls";
 
@@ -3807,7 +3816,16 @@ function renderService(){
 
     const badge=document.createElement("div"); badge.className="badge"; badge.textContent="•";
 
-    const nm=document.createElement("div"); const pill=namePill(s.name); pill.textContent=s.name; nm.appendChild(pill);
+    const nm=document.createElement("div");
+    const pill=namePill(s.name); pill.textContent=s.name; nm.appendChild(pill);
+    const contact = getQueueItemContact(s);
+    if (contact.phone || contact.email) {
+      const sub = document.createElement("div");
+      sub.className = "queue-item-contact";
+      sub.style.cssText = "font-size:11px;color:#6b7280;margin-top:2px;";
+      sub.textContent = [contact.phone, contact.email].filter(Boolean).join(" · ");
+      nm.appendChild(sub);
+    }
 
     const fin=btn("FINISH","finish-btn"); fin.onclick=() =>guardFinish(s.name, ()=>finish(i));
 
@@ -3835,6 +3853,20 @@ function resolveStaffNameToId(name) {
     console.error('[resolveStaffNameToId] Error resolving staff name to ID:', e);
     return undefined;
   }
+}
+
+// Get phone/email for queue display - from item or lookup by name
+function getQueueItemContact(item) {
+  if (item.phone || item.email) return { phone: item.phone, email: item.email };
+  if (!item.name) return {};
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const staff = (store.staff || []).find(s => s.name === item.name);
+    if (staff) return { phone: staff.phone, email: staff.email };
+    const w = (settings.workers || []).find(w => w.name === item.name);
+    return w ? { phone: w.phone, email: w.email } : {};
+  } catch (_) {}
+  return {};
 }
 
 // Minimal global helper for PIN lookup in Queue scope
@@ -4022,9 +4054,15 @@ function handleJoin(){
     return;
   }
 
-  // All validations passed - add to queue
+  // All validations passed - add to queue (include phone/email for immediate display)
   console.log('[handleJoin] Adding technician to queue:', selectedTechnicianName);
-  queue.push({name: selectedTechnicianName, held: false});
+  queue.push({
+    name: selectedTechnicianName,
+    held: false,
+    staffId: technician.id || staffId,
+    phone: technician.phone || undefined,
+    email: technician.email || undefined
+  });
   save();
   renderQueue();
   
@@ -4078,7 +4116,8 @@ function join() {
 
 function startSpecific(idx){
 
-  const [it]=queue.splice(idx,1); service.push({name:it.name});
+  const [it]=queue.splice(idx,1);
+  service.push({ name: it.name, phone: it.phone, email: it.email, staffId: it.staffId });
 
   save(); renderQueue(); renderService();
 
@@ -4128,7 +4167,7 @@ function finish(i){
 
   const [it]=service.splice(i,1);
 
-  queue.push({name:it.name, held:false}); // back to end
+  queue.push({ name: it.name, held: false, phone: it.phone, email: it.email, staffId: it.staffId }); // back to end
 
   save(); renderQueue(); renderService();
 
@@ -4172,19 +4211,8 @@ function move(i,d){ const j=i+d; if(j<0||j>=queue.length) return; const t=queue[
 }
 
 async function resetDay(){
-  // Check if user is owner/admin - block if not
-  if (typeof window.isCurrentUserOwner === 'function') {
-    try {
-      const isOwner = await window.isCurrentUserOwner();
-      if (!isOwner) {
-        alert("Not authorized - Only admin/owner can reset the day");
-        return;
-      }
-    } catch (e) {
-      console.warn('[Reset] Could not verify user role, proceeding with admin code check:', e);
-      // Continue to admin code check if role verification fails
-    }
-  }
+  // Authorization is done via admin/manager PIN in showResetPinPrompt - no need to block owners-only here.
+  // Staff admins (isAdmin) authenticate via PIN, not via isCurrentUserOwner (which only checks salon owner).
   
   // Step 1: Show confirmation modal
   const confirmed = await showResetConfirmation();
@@ -11397,161 +11425,10 @@ function renderTasksList(tab, opts) {
         }
       }
       
-      // Helper function to check if task is relevant to current user
-      function isTaskRelevantToUser(task) {
-        // Always read assignTo/technicianTypes from catalog (source of truth from Firestore)
-        const taskId = String(task.taskId || task.id || '').trim();
-        const catalog = window.ff_tasks_catalog_v1 || {};
-        const catalogTabTasks = catalog[mainTab] || [];
-        const catalogTask = taskId ? catalogTabTasks.find(t => String(t.taskId || t.id || '').trim() === taskId) : null;
-        const assignTo = catalogTask?.assignTo ?? task.assignTo ?? 'all';
-        const taskTechnicianTypesFromCatalog = Array.isArray(catalogTask?.technicianTypes) ? catalogTask.technicianTypes : (Array.isArray(task.technicianTypes) ? task.technicianTypes : []);
-        
-        // If assignTo is 'all', show to everyone
-        if (assignTo === 'all') return true;
-        
-        const debugTasks = localStorage.getItem('DEBUG_TASKS') === 'true';
-        
-        // Get current user's role and technician types
-        let currentUserRole = null;
-        let currentUserTechnicianTypes = [];
-        let currentStaff = null;
-        
-        // Try to get from staff store (by staffId first, then email, then name)
-        if (typeof window.ffGetStaffStore === 'function') {
-          try {
-            const staffStore = window.ffGetStaffStore();
-            const staffId = (window.__ff_authedStaffId || (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null) || '').toString().trim();
-            const currentUserEmail = window.currentUserEmail || (window.currentUser && window.currentUser.email);
-            const authedName = window.__ff_authedStaffName || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_name') : null) || '';
-            if (staffId) {
-              currentStaff = staffStore.staff.find(s => {
-                const sid = String(s.id || s.staffId || '').trim();
-                return sid && (sid === staffId || sid.toLowerCase() === staffId.toLowerCase());
-              });
-            }
-            if (!currentStaff && currentUserEmail) {
-              const emailLower = String(currentUserEmail).toLowerCase().trim();
-              currentStaff = staffStore.staff.find(s => s.email && String(s.email).toLowerCase().trim() === emailLower);
-            }
-            if (!currentStaff && authedName) {
-              const nameNorm = String(authedName).trim().toLowerCase();
-              currentStaff = staffStore.staff.find(s => {
-                const n = String(s.name || s.fullName || '').trim().toLowerCase();
-                return n && n === nameNorm;
-              });
-            }
-            if (currentStaff) {
-              if (currentStaff.isAdmin === true) {
-                currentUserRole = 'admin';
-              } else if (currentStaff.isManager === true || (currentStaff.role && String(currentStaff.role).toLowerCase() === 'manager')) {
-                currentUserRole = 'manager';
-              } else {
-                currentUserRole = 'technician';
-              }
-              currentUserTechnicianTypes = Array.isArray(currentStaff.technicianTypes) ? currentStaff.technicianTypes : [];
-            }
-          } catch (e) {
-            console.warn('[isTaskRelevantToUser] Error getting staff info:', e);
-          }
-        }
-        // Fallback: use cached technician types from PIN auth (set by validatePinAndMove / handleJoin)
-        if (currentUserTechnicianTypes.length === 0 && Array.isArray(window.__ff_authedTechnicianTypes) && window.__ff_authedTechnicianTypes.length > 0) {
-          currentUserTechnicianTypes = window.__ff_authedTechnicianTypes;
-        }
-        try {
-          const fromSession = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_authed_technician_types') : null;
-          if (currentUserTechnicianTypes.length === 0 && fromSession) {
-            const parsed = JSON.parse(fromSession);
-            if (Array.isArray(parsed) && parsed.length > 0) currentUserTechnicianTypes = parsed;
-          }
-        } catch (e) {}
-        
-        // Fallback: role from users doc (set on login), actor role, or PIN-identified technician
-        if (!currentUserRole) {
-          const roleFromUser = (typeof window !== 'undefined' && window.__ff_user_role) ? window.__ff_user_role : '';
-          const roleFromActor = window.__ff_actorRole || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_role') : null) || '';
-          const roleLower = String(roleFromUser || roleFromActor).toLowerCase();
-          if (roleLower === 'admin' || roleLower === 'owner') {
-            currentUserRole = 'admin';
-          } else if (roleLower === 'manager') {
-            currentUserRole = 'manager';
-          } else if (window.__ff_authedStaffId || window.__ff_authedStaffName || localStorage.getItem('ff_authedStaffId_v1')) {
-            // PIN-identified technician (no Firebase login)
-            currentUserRole = 'technician';
-          } else {
-            currentUserRole = 'technician';
-          }
-        }
-        
-        // Admin sees everything (admin filter is applied separately in renderTasksList)
-        if (currentUserRole === 'admin') return true;
-        
-        // Check assignTo
-        if (assignTo === 'manager') {
-          // Only managers and admins see this
-          return currentUserRole === 'manager' || currentUserRole === 'admin';
-        } else if (assignTo === 'technicians') {
-          // Only technicians see this
-          if (currentUserRole !== 'technician') {
-            if (debugTasks) console.log('[Tasks/assignTo] Task hidden: user role', currentUserRole, '!= technician. task:', task.title);
-            return false;
-          }
-          
-          // No specific types = all technicians
-          const taskTechnicianTypes = taskTechnicianTypesFromCatalog;
-          if (!taskTechnicianTypes.length) {
-            return true;
-          }
-          if (taskTechnicianTypes.length > 0) {
-            const norm = (s) => (String(s||'').trim().toLowerCase() || '').replace(/\s+/g, ' ');
-            const userTypeSet = new Set();
-            (currentUserTechnicianTypes || []).forEach(t => {
-              const v = typeof t === 'object' && t !== null ? (t.id || t.name) : t;
-              if (v != null && v !== '') {
-                userTypeSet.add(norm(v));
-                userTypeSet.add(String(v).trim());
-              }
-            });
-            const typeCache = (typeof window !== 'undefined' && window.__ff_technician_types_cache) || [];
-            typeCache.forEach(tt => {
-              const id = norm(tt.id);
-              const name = norm(tt.name);
-              if (userTypeSet.has(id) || userTypeSet.has(name) || userTypeSet.has(String(tt.id||'').trim()) || userTypeSet.has(String(tt.name||'').trim())) {
-                if (id) userTypeSet.add(id);
-                if (name) userTypeSet.add(name);
-                if (tt.id) userTypeSet.add(String(tt.id).trim());
-                if (tt.name) userTypeSet.add(String(tt.name).trim());
-              }
-            });
-            if (userTypeSet.size === 0) {
-              if (localStorage.getItem('DEBUG_TASKS') === 'true') {
-                console.warn('[Tasks/assignTo] Technician task hidden: staff has no technicianTypes. staffId:', window.__ff_authedStaffId, 'task:', task.title, 'taskTypes:', taskTechnicianTypes);
-              }
-              return false;
-            }
-            const matched = taskTechnicianTypes.some(taskType => {
-              const raw = typeof taskType === 'object' && taskType !== null ? (taskType.id || taskType.name) : taskType;
-              const tid = norm(raw);
-              const tidRaw = String(raw || '').trim();
-              if (!tid && !tidRaw) return false;
-              if (userTypeSet.has(tid) || userTypeSet.has(tidRaw)) return true;
-              const typeObj = typeCache.find(t => norm(t.id) === tid || norm(t.name) === tid || String(t.id||'').trim() === tidRaw || String(t.name||'').trim() === tidRaw);
-              if (!typeObj) return false;
-              const oid = norm(typeObj.id);
-              const oname = norm(typeObj.name);
-              return userTypeSet.has(oid) || userTypeSet.has(oname) || userTypeSet.has(String(typeObj.id||'').trim()) || userTypeSet.has(String(typeObj.name||'').trim());
-            });
-            if (!matched && localStorage.getItem('DEBUG_TASKS') === 'true') {
-              console.warn('[Tasks/assignTo] Technician task hidden: no type match. task:', task.title, 'taskTypes:', taskTechnicianTypes, 'userTypes:', Array.from(userTypeSet));
-            }
-            return matched;
-          }
-        }
-        
-        // Default: show task
-        return true;
-      }
+      // Use global helper for user relevance (assignTo, technicianTypes)
+      var isTaskRelevantToUser = typeof window.ffIsTaskRelevantToUser === 'function'
+        ? function(task) { return window.ffIsTaskRelevantToUser(task, mainTab); }
+        : function() { return true; };
       
       // Build MY LIST directly from ACTIVE list only
       const myListTasks = activeTasks
@@ -11847,25 +11724,65 @@ function renderTasksList(tab, opts) {
       const mainTab = currentTasksTab || 'opening';
       const allPendingTasks = getTabTasks(mainTab, 'pending');
       
+      // Filter PENDING by user and task assignTo:
+      // - Admin: sees all
+      // - Everyone tasks (assignTo='all'): visible to ALL users
+      // - Manager tasks (assignTo='manager'): visible to Admin and Manager
+      // - Technician tasks: visible to Admin and the assignee
+      var filteredPending = allPendingTasks;
+      var showAllPending = false;
+      var authedStaffId = (window.__ff_authedStaffId || (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null) || '').toString().trim();
+      var authedStaff = null;
+      if (authedStaffId && typeof ffGetStaffStore === 'function') {
+        try {
+          var store = ffGetStaffStore();
+          authedStaff = (store.staff || []).find(function(s) { return (s.id || s.staffId) && String(s.id || s.staffId) === String(authedStaffId); });
+        } catch (e) {}
+      }
+      if (window.ff_is_admin_cached === true || (authedStaff && authedStaff.isAdmin === true)) {
+        showAllPending = true;
+      }
+      if (!showAllPending) {
+        var myName = (window.__ff_authedStaffName || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_name') : null) || '').trim().toLowerCase();
+        var isManager = !!(authedStaff && authedStaff.isManager === true && authedStaff.isAdmin !== true);
+        var catalogTab = (window.ff_tasks_catalog_v1 || {})[mainTab] || [];
+        filteredPending = allPendingTasks.filter(function(t) {
+          if (!t || typeof t !== 'object') return false;
+          var keyId = t.taskId || t.id;
+          var assignTo = t.assignTo;
+          if (assignTo === undefined || assignTo === null) {
+            var ct = catalogTab.find(function(c) { return c && (String(c.taskId || c.id || '') === String(keyId || '')); });
+            assignTo = (ct && ct.assignTo !== undefined) ? ct.assignTo : 'all';
+          }
+          if (assignTo === 'all') return true;
+          if (assignTo === 'manager' && isManager) return true;
+          if (myName) {
+            var assignee = (t.assignedTo || t.assignedToName || '').trim().toLowerCase();
+            if (assignee && assignee === myName) return true;
+          }
+          return false;
+        });
+      }
+      
       // For weekly tab, filter by scheduleWeekdays (only show tasks scheduled for today)
       // For monthly tab, filter by scheduleDayOfMonth (only show tasks scheduled for today)
-      let pendingTasks = allPendingTasks;
+      let pendingTasks = filteredPending;
       if (mainTab === 'weekly' && typeof window.ffIsWeeklyTaskScheduledToday === 'function') {
-        pendingTasks = allPendingTasks.filter(task => {
+        pendingTasks = filteredPending.filter(task => {
           if (!task || typeof task !== 'object') return false;
           const keyId = task.taskId || task.id;
           if (!keyId) return false;
           return window.ffIsWeeklyTaskScheduledToday(keyId, new Date());
         });
       } else if (mainTab === 'monthly' && typeof window.ffIsMonthlyTaskScheduledToday === 'function') {
-        pendingTasks = allPendingTasks.filter(task => {
+        pendingTasks = filteredPending.filter(task => {
           if (!task || typeof task !== 'object') return false;
           const keyId = task.taskId || task.id;
           if (!keyId) return false;
           return window.ffIsMonthlyTaskScheduledToday(keyId, new Date());
         });
       } else if (mainTab === 'yearly' && typeof window.ffIsYearlyTaskActive === 'function') {
-        pendingTasks = allPendingTasks.filter(task => {
+        pendingTasks = filteredPending.filter(task => {
           if (!task || typeof task !== 'object') return false;
           return window.ffIsYearlyTaskActive(task, new Date());
         });
@@ -11936,8 +11853,6 @@ function renderTasksList(tab, opts) {
             const taskId = btn.getAttribute("data-task-id");
             const code = await showReturnPinPrompt();
             if (!code) return;
-            const confirmed = await showReturnConfirmation();
-            if (!confirmed) return;
             const tab = typeof window.getCurrentTasksTab === 'function'
               ? window.getCurrentTasksTab()
               : (window.currentTasksTab || 'opening');
@@ -11947,11 +11862,31 @@ function renderTasksList(tab, opts) {
               const id = task.taskId || task.id;
               return id != null && String(id) === String(taskId);
             });
-            const taskTitle = pendingTask
-              ? (pendingTask.title || pendingTask.name || pendingTask.taskName || '')
-              : '';
             const workerName = pendingTask
               ? (pendingTask.assignedTo || pendingTask.assignedToName || '')
+              : '';
+            // Manager (non-admin) cannot RETURN a task assigned to someone else - only assignee or Admin can
+            if (window.ffAuthByPin && workerName) {
+              const authResult = window.ffAuthByPin(code);
+              if (authResult && authResult.ok && authResult.staff) {
+                const staff = authResult.staff;
+                const isAdmin = staff.isAdmin === true;
+                const isManager = staff.isManager === true && !isAdmin;
+                const myName = (staff.name || '').trim().toLowerCase();
+                const assigneeName = (workerName || '').trim().toLowerCase();
+                if (isManager && myName !== assigneeName) {
+                  if (window.alert) {
+                    window.alert('מנהל יכול להחזיר רק משימות שמוקצות אליו. משימה זו מוקצית ל-' + (workerName || 'מישהו') + '.');
+                  }
+                  btn.style.color = '#d0d0d0';
+                  return;
+                }
+              }
+            }
+            const confirmed = await showReturnConfirmation();
+            if (!confirmed) return;
+            const taskTitle = pendingTask
+              ? (pendingTask.title || pendingTask.name || pendingTask.taskName || '')
               : '';
             const ok = returnPendingTaskToMyList(tab, taskId);
             if (!ok) {
@@ -17796,6 +17731,13 @@ function initializeAppsPanel() {
     const container = document.getElementById(containerId);
     if (!container) return;
     
+    // Normalize selectedTypes to IDs (handles both string IDs and objects {id, name})
+    var selectedIds = [];
+    (Array.isArray(selectedTypes) ? selectedTypes : []).forEach(function(t) {
+      var id = typeof t === 'object' && t !== null ? (t.id || t.name) : t;
+      if (id != null && String(id).trim() !== '') selectedIds.push(String(id).trim());
+    });
+    
     // Load technician types from cloud
     let technicianTypes = [];
     if (typeof window.ffGetTechnicianTypes === 'function') {
@@ -17824,7 +17766,7 @@ function initializeAppsPanel() {
     
     // Render checkboxes
     container.innerHTML = technicianTypes.map(type => {
-      const isChecked = Array.isArray(selectedTypes) && selectedTypes.includes(type.id);
+      const isChecked = selectedIds.indexOf(type.id) >= 0 || selectedIds.indexOf(String(type.id || '').trim()) >= 0;
       return `
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 8px;border-radius:4px;transition:background 0.2s;" onmouseover="this.style.background='#fff'" onmouseout="this.style.background='transparent'">
           <input type="checkbox" value="${escapeHtml(type.id)}" ${isChecked ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
@@ -19761,7 +19703,109 @@ let completedTasks = {};
 }
 */
 
-// Count incomplete tasks for a category using new storage system
+// Global helper: check if task is relevant to current user (assignTo, technicianTypes)
+// Used by both renderTasksList and badge counting (getFilteredMyListTasksForTab in app.js)
+window.ffIsTaskRelevantToUser = function(task, mainTab) {
+  if (!task || typeof task !== 'object') return false;
+  var catalog = window.ff_tasks_catalog_v1 || {};
+  var catalogTabTasks = catalog[mainTab] || [];
+  var taskId = String(task.taskId || task.id || '').trim();
+  var catalogTask = taskId ? catalogTabTasks.find(function(t) { return String(t.taskId || t.id || '').trim() === taskId; }) : null;
+  var assignTo = (catalogTask && catalogTask.assignTo != null) ? catalogTask.assignTo : (task.assignTo || 'all');
+  var taskTechnicianTypesFromCatalog = Array.isArray(catalogTask && catalogTask.technicianTypes) ? catalogTask.technicianTypes : (Array.isArray(task.technicianTypes) ? task.technicianTypes : []);
+  if (assignTo === 'all') return true;
+  var debugTasks = localStorage.getItem('DEBUG_TASKS') === 'true';
+  var currentUserRole = null;
+  var currentUserTechnicianTypes = [];
+  var currentStaff = null;
+  if (typeof window.ffGetStaffStore === 'function') {
+    try {
+      var staffStore = window.ffGetStaffStore();
+      var staffId = (window.__ff_authedStaffId || (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null) || '').toString().trim();
+      var currentUserEmail = window.currentUserEmail || (window.currentUser && window.currentUser.email);
+      var authedName = window.__ff_authedStaffName || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_name') : null) || '';
+      if (staffId) {
+        currentStaff = staffStore.staff.find(function(s) {
+          var sid = String(s.id || s.staffId || '').trim();
+          return sid && (sid === staffId || sid.toLowerCase() === staffId.toLowerCase());
+        });
+      }
+      if (!currentStaff && currentUserEmail) {
+        var emailLower = String(currentUserEmail).toLowerCase().trim();
+        currentStaff = staffStore.staff.find(function(s) { return s.email && String(s.email).toLowerCase().trim() === emailLower; });
+      }
+      if (!currentStaff && authedName) {
+        var nameNorm = String(authedName).trim().toLowerCase();
+        currentStaff = staffStore.staff.find(function(s) {
+          var n = String(s.name || s.fullName || '').trim().toLowerCase();
+          return n && n === nameNorm;
+        });
+      }
+      if (currentStaff) {
+        currentUserRole = currentStaff.isAdmin === true ? 'admin' : (currentStaff.isManager === true || (currentStaff.role && String(currentStaff.role).toLowerCase() === 'manager') ? 'manager' : 'technician');
+        currentUserTechnicianTypes = Array.isArray(currentStaff.technicianTypes) ? currentStaff.technicianTypes : [];
+      }
+    } catch (e) { console.warn('[ffIsTaskRelevantToUser] Error:', e); }
+  }
+  if (currentUserTechnicianTypes.length === 0 && Array.isArray(window.__ff_authedTechnicianTypes) && window.__ff_authedTechnicianTypes.length > 0) {
+    currentUserTechnicianTypes = window.__ff_authedTechnicianTypes;
+  }
+  try {
+    var fromSession = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_authed_technician_types') : null;
+    if (currentUserTechnicianTypes.length === 0 && fromSession) {
+      var parsed = JSON.parse(fromSession);
+      if (Array.isArray(parsed) && parsed.length > 0) currentUserTechnicianTypes = parsed;
+    }
+  } catch (e) {}
+  if (!currentUserRole) {
+    var roleFromUser = (typeof window !== 'undefined' && window.__ff_user_role) ? window.__ff_user_role : '';
+    var roleFromActor = window.__ff_actorRole || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_role') : null) || '';
+    var roleLower = String(roleFromUser || roleFromActor).toLowerCase();
+    currentUserRole = (roleLower === 'admin' || roleLower === 'owner') ? 'admin' : (roleLower === 'manager' ? 'manager' : (window.__ff_authedStaffId || window.__ff_authedStaffName || localStorage.getItem('ff_authedStaffId_v1') ? 'technician' : 'technician'));
+  }
+  if (currentUserRole === 'admin') return true;
+  if (assignTo === 'manager') return currentUserRole === 'manager' || currentUserRole === 'admin';
+  if (assignTo === 'technicians') {
+    if (currentUserRole !== 'technician') return false;
+    var taskTechnicianTypes = taskTechnicianTypesFromCatalog;
+    if (!taskTechnicianTypes.length) return true;
+    var norm = function(s) { return (String(s||'').trim().toLowerCase() || '').replace(/\s+/g, ' '); };
+    var userTypeSet = new Set();
+    (currentUserTechnicianTypes || []).forEach(function(t) {
+      if (typeof t === 'object' && t !== null) {
+        var id = t.id, name = t.name;
+        if (id != null && id !== '') { userTypeSet.add(norm(id)); userTypeSet.add(String(id).trim()); }
+        if (name != null && name !== '') { userTypeSet.add(norm(name)); userTypeSet.add(String(name).trim()); }
+      } else if (t != null && t !== '') {
+        userTypeSet.add(norm(t)); userTypeSet.add(String(t).trim());
+      }
+    });
+    var typeCache = (typeof window !== 'undefined' && window.__ff_technician_types_cache) || [];
+    typeCache.forEach(function(tt) {
+      var id = norm(tt.id);
+      var name = norm(tt.name);
+      if (userTypeSet.has(id) || userTypeSet.has(name) || userTypeSet.has(String(tt.id||'').trim()) || userTypeSet.has(String(tt.name||'').trim())) {
+        if (id) userTypeSet.add(id); if (name) userTypeSet.add(name);
+      }
+    });
+    var hasStaffId = !!(window.__ff_authedStaffId || (typeof localStorage !== 'undefined' && localStorage.getItem('ff_authedStaffId_v1')));
+    if (userTypeSet.size === 0 && hasStaffId) return true;
+    if (userTypeSet.size === 0) return false;
+    return taskTechnicianTypes.some(function(taskType) {
+      var raw = typeof taskType === 'object' && taskType !== null ? (taskType.id || taskType.name) : taskType;
+      var tid = norm(raw);
+      var tidRaw = String(raw || '').trim();
+      if (!tid && !tidRaw) return false;
+      if (userTypeSet.has(tid) || userTypeSet.has(tidRaw)) return true;
+      var typeObj = typeCache.find(function(t) { return norm(t.id) === tid || norm(t.name) === tid || String(t.id||'').trim() === tidRaw || String(t.name||'').trim() === tidRaw; });
+      if (!typeObj) return false;
+      return userTypeSet.has(norm(typeObj.id)) || userTypeSet.has(norm(typeObj.name));
+    });
+  }
+  return true;
+};
+
+// Count incomplete tasks for a category (legacy - all users; use ffGetUncompletedCountForTab for user-specific)
 function countIncompleteTasks(category) {
   try {
     var tab = category.toLowerCase();
@@ -19773,14 +19817,14 @@ function countIncompleteTasks(category) {
   }
 }
 
-// Update badge for a specific tab
+// Update badge for a specific tab (user-specific count)
 function updateTabBadge(category) {
   var tabLower = category.toLowerCase();
-  // Target the existing <span data-ff-badge="opening|closing|..."> elements in the tab bar
   var badgeEl = document.querySelector('[data-ff-badge="' + tabLower + '"]');
   if (!badgeEl) return;
-
-  var incompleteCount = countIncompleteTasks(tabLower);
+  var incompleteCount = (typeof window.ffGetUncompletedCountForTab === 'function')
+    ? window.ffGetUncompletedCountForTab(tabLower)
+    : countIncompleteTasks(tabLower);
   badgeEl.textContent = incompleteCount > 0 ? incompleteCount.toString() : '';
 }
 
@@ -19810,18 +19854,19 @@ function updateAllTabBadges() {
 window.updateAllTabBadges = updateAllTabBadges;
 window.ffUpdateTasksTabBadges = updateAllTabBadges;
 
-// Update the TASKS badge on the home screen nav button
+// Update the TASKS badge on the home screen nav button (user-specific total)
 window.ffUpdateHomeTasksBadge = function() {
   try {
     var TABS = ['opening','closing','weekly','monthly','yearly'];
     var totalIncomplete = 0;
     var alertWindows = {};
     try { alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}'); } catch(e) {}
+    var countFn = typeof window.ffGetUncompletedCountForTab === 'function' ? window.ffGetUncompletedCountForTab : countIncompleteTasks;
     TABS.forEach(function(tab) {
       var cfg = alertWindows[tab];
       var showOnHome = !cfg || cfg.showOnHome !== false;
       if (showOnHome) {
-        totalIncomplete += countIncompleteTasks(tab);
+        totalIncomplete += countFn(tab);
       }
     });
     var badge = document.querySelector('#tasksBtn .ff-home-tasks-badge');
@@ -22881,9 +22926,21 @@ function addTechnicianToQueue(){
 
   
 
-  // Add to end of queue
-
-  queue.push({name, held: false});
+  // Add to end of queue (include phone/email from staff if available)
+  let staffDetails = {};
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    const staff = staffList.find(s => s.name === name);
+    if (staff) {
+      staffDetails = { staffId: staff.id, phone: staff.phone, email: staff.email };
+    }
+  } catch (_) {}
+  const fallback = ffGetStaffList().find(w => w.name === name);
+  if (fallback && !staffDetails.staffId) {
+    staffDetails = { staffId: fallback.id, phone: fallback.phone, email: fallback.email };
+  }
+  queue.push({ name, held: false, ...staffDetails });
 
   save();
 

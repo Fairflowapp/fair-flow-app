@@ -2067,6 +2067,18 @@ function moveTaskToPending(taskId, workerName) {
         if (taskIndex >= 0) {
             // Found the task in active list
             const task = activeTasks[taskIndex];
+            const pendingTasks = JSON.parse(localStorage.getItem(pendingKey) || '[]');
+            const existingPending = pendingTasks.find(t => {
+                const tId = t.taskId || t.id;
+                return tId && String(tId) === String(taskId);
+            });
+            if (existingPending && existingPending.assignedTo && String(existingPending.assignedTo).trim() !== '' && String(existingPending.assignedTo).trim().toLowerCase() !== String(workerName || '').trim().toLowerCase()) {
+                console.warn(`[MOVE TO PENDING] Task ${taskId} already assigned to ${existingPending.assignedTo}, cannot reassign to ${workerName}`);
+                if (typeof window !== 'undefined' && window.alert) {
+                    window.alert('משימה זו כבר מוקצית ל-' + (existingPending.assignedTo || 'מישהו') + '. לא ניתן להקצות מחדש.');
+                }
+                return;
+            }
             console.log(`[MOVE TO PENDING] Found task in ACTIVE at index ${taskIndex}:`, {
                 tab,
                 taskId,
@@ -2093,8 +2105,7 @@ function moveTaskToPending(taskId, workerName) {
             localStorage.setItem(activeKey, JSON.stringify(activeTasks));
             console.log(`[MOVE TO PENDING] Saved ACTIVE list: ${activeKey}, length: ${activeTasks.length}`);
             
-            // Add to pending list (create a copy for pending)
-            const pendingTasks = JSON.parse(localStorage.getItem(pendingKey) || '[]');
+            // Add to pending list (create a copy for pending) - pendingTasks already loaded above
             console.log(`[MOVE TO PENDING] Pending tasks count before: ${pendingTasks.length}`);
             
             // Check if already in pending to avoid duplicates
@@ -2104,14 +2115,16 @@ function moveTaskToPending(taskId, workerName) {
             });
             
             if (pendingIndex < 0) {
-                // Create a copy for pending list
+                // Create a copy for pending list (include assignTo for PENDING visibility filtering)
                 const pendingCopy = {
                     id: task.id || task.taskId,
                     taskId: task.taskId || task.id,
                     title: task.title || '',
                     instructions: task.instructions || task.info || task.details || '',
                     status: 'pending',
-                    assignedTo: workerName
+                    assignedTo: workerName,
+                    assignTo: task.assignTo !== undefined ? task.assignTo : 'all',
+                    technicianTypes: task.technicianTypes
                 };
                 pendingTasks.push(pendingCopy);
                 localStorage.setItem(pendingKey, JSON.stringify(pendingTasks));
@@ -2156,6 +2169,14 @@ function moveTaskToPending(taskId, workerName) {
             // Update tab badges after moving task to pending
             if (typeof window.ffUpdateTasksTabBadges === 'function') {
                 setTimeout(() => window.ffUpdateTasksTabBadges(), 50);
+            }
+            
+            // Push to cloud immediately so remote sync does not overwrite with stale data (fixes manager bounce-back)
+            if (typeof window !== 'undefined') {
+                window.__ffTasksLastLocalWrite = Date.now();
+                if (typeof window.tasksCloudWrite === 'function') {
+                    window.tasksCloudWrite();
+                }
             }
             
             return;
@@ -2506,6 +2527,14 @@ function markTaskDone(taskId, workerName) {
     if (typeof window.ffUpdateTasksTabBadges === 'function') {
         setTimeout(() => window.ffUpdateTasksTabBadges(), 50);
     }
+
+    // Push to cloud immediately so remote sync does not overwrite with stale data (fixes manager bounce-back)
+    if (typeof window !== 'undefined') {
+        window.__ffTasksLastLocalWrite = Date.now();
+        if (typeof window.tasksCloudWrite === 'function') {
+            window.tasksCloudWrite();
+        }
+    }
 }
 
 window.markTaskDone = markTaskDone;
@@ -2623,6 +2652,7 @@ async function validatePinAndMove() {
         if (typeof window.renderTasksList === 'function') {
             window.renderTasksList(window.currentTasksTab || 'opening', { force: true });
         }
+        if (typeof window.tasksCloudReconnect === 'function') window.tasksCloudReconnect();
         return;
     }
     
@@ -2631,6 +2661,10 @@ async function validatePinAndMove() {
     }
 
     closePinModal();
+    // Delay reconnect so cloud push from moveTaskToPending completes first (prevents manager bounce-back)
+    if (typeof window.tasksCloudReconnect === 'function') {
+        setTimeout(() => window.tasksCloudReconnect(), 1500);
+    }
 }
 
 function validatePinAndMarkDone() {
@@ -2689,6 +2723,10 @@ function validatePinAndMarkDone() {
     }
     
     closePinModal();
+    // Delay reconnect so cloud push from markTaskDone completes first (prevents manager bounce-back)
+    if (typeof window.tasksCloudReconnect === 'function') {
+        setTimeout(() => window.tasksCloudReconnect(), 1500);
+    }
 }
 
 // Expose PIN modal functions to window
@@ -3892,6 +3930,11 @@ function getFilteredMyListTasksForTab(tab) {
         }
       }
       
+      // Filter by assignTo/technicianTypes - only count tasks relevant to current user
+      if (typeof window.ffIsTaskRelevantToUser === 'function' && !window.ffIsTaskRelevantToUser(task, tab)) {
+        return false;
+      }
+      
       return true;
     });
     
@@ -4121,7 +4164,8 @@ function ffUpdateHomeTasksBadge() {
   }
 }
 
-// Expose badge update functions
+// Expose badge update functions and count helper (for index.html updateTabBadge / ffUpdateHomeTasksBadge)
+window.ffGetUncompletedCountForTab = ffGetUncompletedCountForTab;
 window.ffUpdateTasksTabBadges = ffUpdateTasksTabBadges;
 window.ffUpdateHomeTasksBadge = ffUpdateHomeTasksBadge;
 

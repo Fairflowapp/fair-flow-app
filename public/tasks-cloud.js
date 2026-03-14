@@ -19,19 +19,46 @@ let _getState = null;
 let _onRefresh = null;
 let _writeTimeout = null;
 
+const SALON_ID_CACHE_KEY = "ff_salonId_v1";
+
 async function getSalonId() {
   const user = auth.currentUser;
-  if (!user) return null;
-  try {
-    const userDoc = await getDoc(doc(db, "users", user.uid));
-    if (userDoc.exists()) {
-      const data = userDoc.data();
-      return data.salonId || (typeof window !== "undefined" ? window.currentSalonId : null) || null;
+  let salonId = null;
+
+  // 1) From Firebase auth user doc (primary for logged-in users)
+  if (user) {
+    try {
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        salonId = data.salonId || null;
+      }
+    } catch (e) {
+      console.warn("[TasksCloud] getSalonId from user doc failed", e);
     }
-  } catch (e) {
-    console.warn("[TasksCloud] getSalonId failed", e);
   }
-  return typeof window !== "undefined" ? window.currentSalonId : null;
+
+  // 2) Fallback: window.currentSalonId (set by app.js auth listener – helps shared device / PIN flow)
+  if (!salonId && typeof window !== "undefined" && window.currentSalonId) {
+    salonId = window.currentSalonId;
+  }
+
+  // 3) Fallback: cached from previous session (helps when auth loads slowly)
+  if (!salonId && typeof localStorage !== "undefined") {
+    try {
+      const cached = localStorage.getItem(SALON_ID_CACHE_KEY);
+      if (cached && cached.trim()) salonId = cached.trim();
+    } catch (e) {}
+  }
+
+  // Persist for next load (when auth may be slow)
+  if (salonId && typeof localStorage !== "undefined") {
+    try {
+      localStorage.setItem(SALON_ID_CACHE_KEY, salonId);
+    } catch (e) {}
+  }
+
+  return salonId || null;
 }
 
 function tasksStateRef(salonId) {
