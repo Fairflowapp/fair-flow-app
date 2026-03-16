@@ -90,6 +90,88 @@ exports.getMediaDownloadBase64 = functions.region("us-central1").https.onCall(as
 });
 
 /**
+ * HTTP download endpoint for media files.
+ * Client sends { storagePath, fileName } + Authorization: Bearer <idToken>.
+ * Server downloads from Storage and streams bytes back as attachment.
+ */
+exports.downloadMediaFile = functions.region("us-central1").https.onRequest(async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  if (req.method !== "POST" && req.method !== "GET") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  try {
+    const authHeader = req.get("Authorization") || req.get("authorization") || "";
+    let idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    // Hosting rewrites and browser constraints may drop Authorization; allow token in body as fallback.
+    if (!idToken && typeof req.body?.__idToken === "string") {
+      idToken = String(req.body.__idToken || "").trim();
+    }
+    // GET fallback to avoid CORS preflight entirely.
+    if (!idToken && typeof req.query?.__idToken === "string") {
+      idToken = String(req.query.__idToken || "").trim();
+    }
+    if (!idToken) {
+      res.status(401).json({ error: "Missing Authorization token" });
+      return;
+    }
+    await admin.auth().verifyIdToken(idToken);
+
+    const storagePath = String(req.body?.storagePath || req.query?.storagePath || "").trim();
+    const requestedName = String(req.body?.fileName || req.query?.fileName || "").trim();
+    if (!storagePath || !storagePath.startsWith("salons/")) {
+      res.status(400).json({ error: "storagePath required (salons/...)" });
+      return;
+    }
+
+    const bucketNames = ["fairflowapp-db841.firebasestorage.app", "fairflowapp-db841.appspot.com"];
+    let file = null;
+    let fileName = requestedName || storagePath.split("/").pop() || "work-file";
+    let metadata = null;
+    for (const bucketName of bucketNames) {
+      const candidate = admin.storage().bucket(bucketName).file(storagePath);
+      const [exists] = await candidate.exists();
+      if (!exists) continue;
+      file = candidate;
+      try {
+        const [m] = await candidate.getMetadata();
+        metadata = m || null;
+      } catch (_) {
+        metadata = null;
+      }
+      break;
+    }
+
+    if (!file) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+
+    const [buf] = await file.download();
+    if (!buf || buf.length === 0) {
+      res.status(500).json({ error: "Downloaded file is empty" });
+      return;
+    }
+
+    const safeName = fileName.replace(/["\r\n]/g, "_");
+    const contentType = metadata?.contentType || "application/octet-stream";
+    res.set("Content-Type", contentType);
+    res.set("Content-Disposition", `attachment; filename="${safeName}"`);
+    res.status(200).send(buf);
+  } catch (err) {
+    console.error("[downloadMediaFile]", err);
+    res.status(500).json({ error: err?.message || "Download failed" });
+  }
+});
+
+/**
  * Diagnostic: writes a test email to mail collection.
  * Call from console (signed in): httpsCallable(getFunctions(app,"us-central1"),"testSendEmail")({to:"your@email.com"})
  * If you get the email, Trigger Email extension works. If not, check Extensions + SMTP config.

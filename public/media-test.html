@@ -18,33 +18,33 @@
   </style>
 </head>
 <body>
-  <h1>Media Module – בדיקות בסיסיות</h1>
-  <p id="authMsg">טוען...</p>
+  <h1>Media Module - Basic Tests</h1>
+  <p id="authMsg">Loading...</p>
   <div id="tests" style="display:none;">
     <div class="test">
-      <h3>Test 1: יצירת Work עם תמונה אחת</h3>
+      <h3>Test 1: Create Work with one image</h3>
       <input type="file" id="t1file" accept="image/*"/>
-      <button id="t1btn">הרץ</button>
+      <button id="t1btn">Run</button>
       <div class="log" id="t1log"></div>
     </div>
     <div class="test">
-      <h3>Test 2: יצירת Work עם וידאו</h3>
+      <h3>Test 2: Create Work with video</h3>
       <input type="file" id="t2file" accept="video/*"/>
-      <button id="t2btn">הרץ</button>
+      <button id="t2btn">Run</button>
       <div class="log" id="t2log"></div>
     </div>
     <div class="test">
-      <h3>Test 3: יצירת Work עם Before / After</h3>
-      <p>תמונה 1 (Before): <input type="file" id="t3before" accept="image/*"/></p>
-      <p>תמונה 2 (After): <input type="file" id="t3after" accept="image/*"/></p>
-      <button id="t3btn">הרץ</button>
+      <h3>Test 3: Create Work with Before / After</h3>
+      <p>Image 1 (Before): <input type="file" id="t3before" accept="image/*"/></p>
+      <p>Image 2 (After): <input type="file" id="t3after" accept="image/*"/></p>
+      <button id="t3btn">Run</button>
       <div class="log" id="t3log"></div>
     </div>
     <div class="test">
-      <h3>Test 4: הוספת תמונה ל-Work קיים</h3>
-      <p>Work ID: <input type="text" id="t4workId" placeholder="הדבק workId מבדיקה קודמת" style="width:200px"/></p>
+      <h3>Test 4: Add image to existing Work</h3>
+      <p>Work ID: <input type="text" id="t4workId" placeholder="Paste a workId from a previous test" style="width:200px"/></p>
       <input type="file" id="t4file" accept="image/*"/>
-      <button id="t4btn">הרץ</button>
+      <button id="t4btn">Run</button>
       <div class="log" id="t4log"></div>
     </div>
   </div>
@@ -87,15 +87,15 @@
       const msg = document.getElementById("authMsg");
       const tests = document.getElementById("tests");
       if (!user) {
-        msg.textContent = "יש להתחבר קודם (דף ראשי) ואז לפתוח דף זה.";
+        msg.textContent = "Please sign in first (main page), then open this page.";
         return;
       }
       const profile = await getUserProfile();
       if (!profile) {
-        msg.textContent = "לא נמצא פרופיל משתמש.";
+        msg.textContent = "User profile not found.";
         return;
       }
-      msg.textContent = `מחובר: ${profile.staffName} (${profile.staffId})`;
+      msg.textContent = `Connected: ${profile.staffName} (${profile.staffId})`;
       tests.style.display = "block";
 
       const workData = {
@@ -103,24 +103,24 @@
         staffName: profile.staffName,
         createdByRole: profile.createdByRole,
         serviceType: "test",
-        caption: "בדיקה",
+        caption: "Test",
       };
 
       // Test 1: Work + 1 image
       document.getElementById("t1btn").onclick = async () => {
         const file = document.getElementById("t1file").files[0];
         const logEl = "t1log";
-        log(logEl, "מתחיל...", false);
+        log(logEl, "Starting...", false);
         if (!file) {
-          log(logEl, "בחר קובץ תמונה", true);
+          log(logEl, "Choose an image file", true);
           return;
         }
         try {
           const { workId, mediaIds } = await createWorkWithMedia(workData, file, "photo");
-          log(logEl, `הצלחה! workId=${workId} mediaIds=${mediaIds.join(",")}`, false);
+          log(logEl, `Success! workId=${workId} mediaIds=${mediaIds.join(",")}`, false);
           document.getElementById("t4workId").value = workId;
         } catch (e) {
-          log(logEl, `שגיאה: ${e.message}`, true);
+          log(logEl, `Error: ${e.message}`, true);
         }
       };
 
@@ -128,17 +128,17 @@
       document.getElementById("t2btn").onclick = async () => {
         const file = document.getElementById("t2file").files[0];
         const logEl = "t2log";
-        log(logEl, "מתחיל...", false);
+        log(logEl, "Starting...", false);
         if (!file) {
-          log(logEl, "בחר קובץ וידאו", true);
+          log(logEl, "Choose a video file", true);
           return;
         }
         try {
           const { workId, mediaIds } = await createWorkWithMedia(workData, file, "video");
-          log(logEl, `הצלחה! workId=${workId} mediaIds=${mediaIds.join(",")}`, false);
+          log(logEl, `Success! workId=${workId} mediaIds=${mediaIds.join(",")}`, false);
           document.getElementById("t4workId").value = workId;
         } catch (e) {
-          log(logEl, `שגיאה: ${e.message}`, true);
+          log(logEl, `Error: ${e.message}`, true);
         }
       };
 
@@ -147,17 +147,17 @@
         const before = document.getElementById("t3before").files[0];
         const after = document.getElementById("t3after").files[0];
         const logEl = "t3log";
-        log(logEl, "מתחיל...", false);
+        log(logEl, "Starting...", false);
         if (!before || !after) {
-          log(logEl, "בחר שתי תמונות (Before + After)", true);
+          log(logEl, "Choose two images (Before + After)", true);
           return;
         }
         try {
           const { workId, mediaIds } = await createWorkWithMedia(workData, [before, after], "before_after");
-          log(logEl, `הצלחה! workId=${workId} mediaIds=${mediaIds.join(",")}`, false);
+          log(logEl, `Success! workId=${workId} mediaIds=${mediaIds.join(",")}`, false);
           document.getElementById("t4workId").value = workId;
         } catch (e) {
-          log(logEl, `שגיאה: ${e.message}`, true);
+          log(logEl, `Error: ${e.message}`, true);
         }
       };
 
@@ -166,26 +166,26 @@
         const workId = document.getElementById("t4workId").value.trim();
         const file = document.getElementById("t4file").files[0];
         const logEl = "t4log";
-        log(logEl, "מתחיל...", false);
+        log(logEl, "Starting...", false);
         if (!workId) {
-          log(logEl, "הדבק workId מבדיקה קודמת", true);
+          log(logEl, "Paste a workId from a previous test", true);
           return;
         }
         if (!file) {
-          log(logEl, "בחר קובץ תמונה", true);
+          log(logEl, "Choose an image file", true);
           return;
         }
         try {
           const work = await getContentWork(workId);
           if (!work) {
-            log(logEl, `Work ${workId} לא נמצא`, true);
+            log(logEl, `Work ${workId} was not found`, true);
             return;
           }
           const mediaIds = await addMediaToExistingWork(workId, file, "photo");
           const items = await getMediaItems(workId);
-          log(logEl, `הצלחה! נוספו mediaIds=${mediaIds.join(",")}. סה"כ ${items.length} פריטים.`, false);
+          log(logEl, `Success! Added mediaIds=${mediaIds.join(",")}. Total ${items.length} items.`, false);
         } catch (e) {
-          log(logEl, `שגיאה: ${e.message}`, true);
+          log(logEl, `Error: ${e.message}`, true);
         }
       };
     });

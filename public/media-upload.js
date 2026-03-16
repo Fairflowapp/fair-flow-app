@@ -467,6 +467,37 @@ function showMediaConfirm(text, onConfirm, confirmLabel = "Delete My Work") {
   document.body.appendChild(overlay);
 }
 
+function showOpenInNewTabLink(mediaUrl) {
+  if (!mediaUrl) return;
+  const existing = document.getElementById("mediaOpenTabOverlay");
+  if (existing) existing.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "mediaOpenTabOverlay";
+  overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:100030;display:flex;align-items:center;justify-content:center;padding:20px;";
+  const box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.2);font-size:11px;color:#374151;line-height:1.6;";
+  box.innerHTML = `
+    <div style="margin-bottom:14px;font-weight:600;color:#111827;">Automatic download failed</div>
+    <div style="margin-bottom:14px;">Click the link below to open the media in a new tab and save manually.</div>
+  `;
+  const openLink = document.createElement("a");
+  openLink.href = mediaUrl;
+  openLink.target = "_blank";
+  openLink.rel = "noopener noreferrer";
+  openLink.textContent = "Open in new tab";
+  openLink.style.cssText = "display:inline-block;margin-bottom:14px;color:#7c3aed;text-decoration:underline;font-weight:600;";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.textContent = "Close";
+  closeBtn.style.cssText = "width:100%;padding:10px 16px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:11px;cursor:pointer;font-weight:500;";
+  closeBtn.onclick = () => overlay.remove();
+  box.appendChild(openLink);
+  box.appendChild(closeBtn);
+  overlay.appendChild(box);
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
 /** Self Delete eligibility: own work, <24h, postedCount===0, !featured, status==="active" */
 function isSelfDeleteEligible(work) {
   const uid = auth.currentUser?.uid;
@@ -926,6 +957,7 @@ async function openWorkDetails(workId) {
     let lastErr = "";
     try {
       let blob;
+      // Path 0: Firebase Storage SDK direct blob
       if (storagePath && storage) {
         try {
           const ref = storageRef(storage, storagePath);
@@ -1002,18 +1034,18 @@ async function openWorkDetails(workId) {
               } else throw new Error("No URL");
             } catch (err2) {
               lastErr = err2?.details || err2?.message || lastErr;
-              window.open(firstMedia.mediaUrl, "_blank");
-              if (lastErr) alert("Automatic download failed. Opened in new tab.\n\n" + lastErr);
+              showOpenInNewTabLink(firstMedia.mediaUrl);
+              if (lastErr) alert("Automatic download failed.\n\n" + lastErr);
             }
           }
         }
       } else {
-        window.open(firstMedia.mediaUrl, "_blank");
-        if (lastErr) alert("Automatic download failed. Opened in new tab.\n\n" + lastErr);
+        showOpenInNewTabLink(firstMedia.mediaUrl);
+        if (lastErr) alert("Automatic download failed.\n\n" + lastErr);
       }
     } catch (err) {
-      window.open(firstMedia?.mediaUrl || "#", "_blank");
-      alert("Download failed: " + (err?.message || "Unknown") + "\n\nOpened in new tab – right-click image → Save image as");
+      showOpenInNewTabLink(firstMedia?.mediaUrl || "");
+      alert("Download failed: " + (err?.message || "Unknown"));
     }
     downloadBtn.disabled = false;
     downloadBtn.textContent = "Download";
@@ -1654,7 +1686,7 @@ async function renderMediaCategoriesSettings() {
     const dragHandle = document.createElement("div");
     dragHandle.innerHTML = "⋮⋮";
     dragHandle.style.cssText = "cursor:grab;color:#9ca3af;font-size:14px;padding:4px;user-select:none;flex-shrink:0;";
-    dragHandle.title = "גרור למיקום";
+    dragHandle.title = "Drag to reorder";
     dragHandle.draggable = true;
     dragHandle.dataset.categoryId = cat.id;
     dragHandle.addEventListener("dragstart", (e) => {

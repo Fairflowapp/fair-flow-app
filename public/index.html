@@ -302,6 +302,11 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
 }
 #mediaBtn.active {
   color:#7c3aed !important;
+  border-color:#a78bfa !important;
+  font-weight:800 !important;
+  background:#ede9fe !important;
+  opacity:1 !important;
+  filter:none !important;
 }
 #chatBtn.active {
   color:#7c3aed !important;
@@ -675,12 +680,12 @@ select,input[type="password"],input[type="text"]{height:42px;padding:0 16px;bord
 
 .eye{position:absolute;right:12px;top:10px;cursor:pointer;color:#6b7280}
 
-/* 1. ברירת מחדל – להסתיר את כפתור העין-הרובוט בכל מקום */
+/* 1. Default: hide the eye-robot button everywhere */
 .ai-eye-button {
   display: none;
 }
 
-/* 2. להציג את כפתור העין-הרובוט רק בשורת ה-JOIN העליונה */
+/* 2. Show the eye-robot button only in the top JOIN row */
 .joinbar .ai-eye-button {
   display: inline-flex;
   align-items: center;
@@ -1006,13 +1011,13 @@ dialog footer button, .code-dialog footer button {
 
 .history-table-wrapper {
 
-  max-height: 320px;    /* מתאים לכ ~10 שורות */
+  max-height: 320px;    /* fits about 10 rows */
 
   overflow-y: auto;
 
 }
 
-/* מונע קפיצה / עיוות */
+/* prevents jump/distortion */
 
 .history-table-wrapper table {
 
@@ -3264,7 +3269,7 @@ function getActorForAction(options) {
     }
   }
 
-  // Tech (default – worker acts על עצמו)
+  // Tech (default - worker acts on self)
   if (options && options.workerName) {
     return {
       role: "Tech",
@@ -4045,7 +4050,8 @@ function renderQueue(){
 
     hold.onclick=() =>{ window.__ff_holdTargetName = q.name; window.__ff_holdWasHeld = !!q.held; guardHold(()=>toggleHold(i)); };
 
-    const canCall = !q.held && presenceMeta.presence && presenceMeta.presence.inShift === true && presenceMeta.presence.queueStatus === "available";
+    // Keep call icon visible for in-shift staff even when queueStatus varies.
+    const canCall = !q.held && !!presenceMeta.staffId && presenceMeta.presence && presenceMeta.presence.inShift === true;
     const callStatusLabel = queueCallStatusLabel(presenceMeta.presence, presenceMeta.status);
     const diagEligibility = {
       rowName: q.name,
@@ -4125,7 +4131,6 @@ function renderQueue(){
       if (q.held) disabledReasons.push('queue row is held');
       if (!presenceMeta.presence) disabledReasons.push('missing presence');
       if (presenceMeta.presence?.inShift !== true) disabledReasons.push('inShift failed');
-      if (presenceMeta.presence?.queueStatus !== 'available') disabledReasons.push('queueStatus failed');
       if (!presenceMeta.staffId) disabledReasons.push('missing staffId');
       console.warn('[StaffCallDiag] call icon not rendered', {
         ...diagEligibility,
@@ -7824,7 +7829,7 @@ async function renderUserProfileTechnicianTypes() {
     const dragHandle = document.createElement('div');
     dragHandle.innerHTML = '⋮⋮';
     dragHandle.style.cssText = 'cursor:grab;color:#9ca3af;font-size:14px;padding:4px;user-select:none;flex-shrink:0;';
-    dragHandle.title = 'גרור למיקום';
+    dragHandle.title = 'Drag to reorder';
     dragHandle.draggable = true;
     dragHandle.dataset.typeId = type.id;
     dragHandle.addEventListener('dragstart', function(e) {
@@ -28117,7 +28122,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tickets.js?v=20260312_fix2"></script>
-  <script type="module" src="/media-upload.js?v=22"></script>
+  <script type="module" src="/media-upload.js?v=24"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -28193,8 +28198,9 @@ function hookSettingsGuard_DISABLED(){
       transition: background 0.2s, color 0.2s;
     }
     .inbox-view-btn.active {
-      background: #111 !important;
+      background: #7c3aed !important;
       color: #fff !important;
+      border-color: #7c3aed !important;
     }
     .inbox-view-btn:not(.active) {
       background: #f9fafb !important;
@@ -28219,8 +28225,8 @@ function hookSettingsGuard_DISABLED(){
     }
     
     .inbox-tab.active {
-      color: #111;
-      border-bottom-color: #111;
+      color: #7c3aed;
+      border-bottom-color: #7c3aed;
     }
     
     .inbox-tab:hover:not(.active) {
@@ -28769,8 +28775,8 @@ function hookSettingsGuard_DISABLED(){
 #workDetailsModal .btn-danger:hover{background:#fef2f2!important;border-color:#dc2626!important;}
 #workDetailsModal #workDetailsActions{display:grid!important;grid-template-columns:repeat(4,auto)!important;gap:6px!important;}
 #workDetailsModal #workDetailsActions .action-hint{grid-column:1/-1!important;font-size:10px!important;}
-/* Ensure MEDIA button in top bar is always visible */
-.header #mediaBtn,.toolbar #mediaBtn{display:inline-flex!important;visibility:visible!important;opacity:1!important;}
+/* Ensure MEDIA button exists, but keep normal nav visual weight */
+.header #mediaBtn,.toolbar #mediaBtn{display:inline-flex!important;visibility:visible!important;}
 </style>
 <!-- Media Module Screen (like Inbox) -->
 <div id="mediaScreen" class="media-screen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f9fafb;z-index:300;flex-direction:column;overflow:hidden;">
@@ -28921,7 +28927,7 @@ function hookSettingsGuard_DISABLED(){
   <!-- View switcher: My Requests | To handle (only for admin/manager) -->
   <div id="inboxViewSwitcher" class="inbox-view-switcher" style="display:none;align-items:center;gap:0;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;pointer-events:auto;">
     <button type="button" id="inboxViewMine" class="inbox-view-btn" data-inbox-view="mine" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('mine')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;pointer-events:auto;">My Requests</button>
-    <button type="button" id="inboxViewToHandle" class="inbox-view-btn active" data-inbox-view="to_handle" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('to_handle')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#111;color:#fff;cursor:pointer;pointer-events:auto;">To handle</button>
+    <button type="button" id="inboxViewToHandle" class="inbox-view-btn active" data-inbox-view="to_handle" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('to_handle')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;pointer-events:auto;">To handle</button>
   </div>
   <!-- Tabs (only for managers/admins) — hidden by default, shown in setupInboxUI for manager/admin -->
   <div id="inboxTabs" class="inbox-tabbar hidden" style="border-bottom:1px solid #e5e7eb;background:#f9fafb;padding:0 20px;">
@@ -28957,7 +28963,7 @@ function hookSettingsGuard_DISABLED(){
         </div>
         <div style="display:flex;gap:10px;align-items:center;">
           <button id="btnManageRequestTypes" onclick="openManageRequestTypesModal()" style="display:none;padding:10px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;color:#6b7280;">Manage request types</button>
-          <button onclick="openCreateRequestModal()" class="btn-pill" style="background:#111;color:#fff;padding:10px 20px;font-size:14px;">+ New Request</button>
+          <button onclick="openCreateRequestModal()" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;">+ New Request</button>
         </div>
       </div>
       <!-- Will be populated with request cards -->
@@ -28975,7 +28981,7 @@ function hookSettingsGuard_DISABLED(){
           </svg>
           <div style="font-size:16px;font-weight:500;color:#6b7280;margin-bottom:8px;">No requests</div>
           <div id="emptyStateMessage" style="font-size:14px;margin-bottom:20px;">Create a new request to get started</div>
-          <button id="emptyStateNewRequestBtn" onclick="openCreateRequestModal()" class="btn-pill" style="background:#111;color:#fff;padding:12px 24px;">+ New Request</button>
+          <button id="emptyStateNewRequestBtn" onclick="openCreateRequestModal()" class="btn-pill" style="background:#7c3aed;color:#fff;padding:12px 24px;border-color:#7c3aed;">+ New Request</button>
         </div>
       </div>
     </div>
