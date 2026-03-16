@@ -67,6 +67,14 @@ service cloud.firestore {
       );
     }
 
+    // User is staff in salon (has staff doc) - for technicians who may lack users.salonId/members
+    function isStaffInSalon(salonId) {
+      return isSignedIn()
+        && userExists()
+        && userDocData().staffId is string
+        && exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId));
+    }
+
     // ===== COLLECTIONS =====
 
     // Public GET for invite token docs (hashed doc id), only if unused + not expired
@@ -517,6 +525,49 @@ service cloud.firestore {
     match /salons/{salonId}/tasksState/{docId} {
       allow read: if belongsToSalon(salonId);
       allow write: if belongsToSalon(salonId);
+    }
+
+    // Media Categories — per-salon (Admin/Manager can CRUD; all salon members can read)
+    match /salons/{salonId}/mediaCategories/{categoryId} {
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
+      allow create, update, delete: if isManager(salonId);
+    }
+
+    // ===== MEDIA MODULE (content works, media items, posted history) =====
+    // belongsToSalon OR isStaffInSalon - technicians may have staff doc but lack users.salonId/members
+    function canAccessMedia(salonId) {
+      return belongsToSalon(salonId) || isStaffInSalon(salonId);
+    }
+    match /salons/{salonId}/contentWorks/{workId} {
+      allow read: if canAccessMedia(salonId);
+      allow create: if canAccessMedia(salonId)
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.salonId == salonId
+        && request.resource.data.staffId is string
+        && request.resource.data.staffName is string
+        && request.resource.data.createdByRole is string
+        && request.resource.data.status in ['active', 'archived', 'deleted'];
+      allow update, delete: if canAccessMedia(salonId);
+
+      match /mediaItems/{mediaId} {
+        allow read: if canAccessMedia(salonId);
+        allow create: if canAccessMedia(salonId)
+          && request.resource.data.mediaType is string
+          && request.resource.data.mediaUrl is string
+          && request.resource.data.storagePath is string;
+        allow update, delete: if canAccessMedia(salonId);
+      }
+
+      match /postedHistory/{historyId} {
+        allow read: if canAccessMedia(salonId);
+        allow create: if canAccessMedia(salonId)
+          && request.resource.data.platform is string
+          && request.resource.data.format is string
+          && request.resource.data.postedDate is string
+          && request.resource.data.markedByStaffId is string
+          && request.resource.data.markedByName is string;
+        allow update, delete: if canAccessMedia(salonId);
+      }
     }
 
     // Default deny

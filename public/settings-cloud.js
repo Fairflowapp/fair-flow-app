@@ -350,6 +350,10 @@ async function ffUpdateTechnicianType(technicianTypeId, updates) {
     updateData.active = updates.active === true;
   }
   
+  if (updates.sortOrder !== undefined) {
+    updateData.sortOrder = updates.sortOrder;
+  }
+  
   await updateDoc(docRef, updateData);
   return { id: technicianTypeId, ...updateData };
 }

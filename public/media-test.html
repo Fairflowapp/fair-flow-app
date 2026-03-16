@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Media Module – Basic Tests</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
+    h1 { font-size: 1.2rem; }
+    .test { margin: 16px 0; padding: 12px; border: 1px solid #ddd; border-radius: 8px; }
+    .test h3 { margin: 0 0 8px 0; font-size: 1rem; }
+    input[type="file"] { margin: 4px 0; }
+    button { padding: 8px 16px; margin: 4px 4px 4px 0; cursor: pointer; }
+    .log { background: #f5f5f5; padding: 8px; font-family: monospace; font-size: 12px; margin-top: 8px; max-height: 200px; overflow-y: auto; }
+    .ok { color: green; }
+    .err { color: red; }
+    #authMsg { color: #666; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <h1>Media Module – בדיקות בסיסיות</h1>
+  <p id="authMsg">טוען...</p>
+  <div id="tests" style="display:none;">
+    <div class="test">
+      <h3>Test 1: יצירת Work עם תמונה אחת</h3>
+      <input type="file" id="t1file" accept="image/*"/>
+      <button id="t1btn">הרץ</button>
+      <div class="log" id="t1log"></div>
+    </div>
+    <div class="test">
+      <h3>Test 2: יצירת Work עם וידאו</h3>
+      <input type="file" id="t2file" accept="video/*"/>
+      <button id="t2btn">הרץ</button>
+      <div class="log" id="t2log"></div>
+    </div>
+    <div class="test">
+      <h3>Test 3: יצירת Work עם Before / After</h3>
+      <p>תמונה 1 (Before): <input type="file" id="t3before" accept="image/*"/></p>
+      <p>תמונה 2 (After): <input type="file" id="t3after" accept="image/*"/></p>
+      <button id="t3btn">הרץ</button>
+      <div class="log" id="t3log"></div>
+    </div>
+    <div class="test">
+      <h3>Test 4: הוספת תמונה ל-Work קיים</h3>
+      <p>Work ID: <input type="text" id="t4workId" placeholder="הדבק workId מבדיקה קודמת" style="width:200px"/></p>
+      <input type="file" id="t4file" accept="image/*"/>
+      <button id="t4btn">הרץ</button>
+      <div class="log" id="t4log"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { auth } from "./app.js?v=20260312_fix2";
+    import { getDoc, doc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+    import { db } from "./app.js?v=20260312_fix2";
+    import {
+      createWorkWithMedia,
+      addMediaToExistingWork,
+      getContentWork,
+      getMediaItems,
+    } from "./media-cloud.js?v=1";
+
+    function log(elId, msg, isErr) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      const span = document.createElement("span");
+      span.className = isErr ? "err" : "ok";
+      span.textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+      el.appendChild(span);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    async function getUserProfile() {
+      const user = auth.currentUser;
+      if (!user) return null;
+      const snap = await getDoc(doc(db, "users", user.uid));
+      if (!snap.exists()) return null;
+      const d = snap.data();
+      return {
+        staffId: d.staffId || user.uid,
+        staffName: d.name || d.displayName || user.email || "Test User",
+        createdByRole: (d.role || "technician").toLowerCase(),
+      };
+    }
+
+    auth.onAuthStateChanged(async (user) => {
+      const msg = document.getElementById("authMsg");
+      const tests = document.getElementById("tests");
+      if (!user) {
+        msg.textContent = "יש להתחבר קודם (דף ראשי) ואז לפתוח דף זה.";
+        return;
+      }
+      const profile = await getUserProfile();
+      if (!profile) {
+        msg.textContent = "לא נמצא פרופיל משתמש.";
+        return;
+      }
+      msg.textContent = `מחובר: ${profile.staffName} (${profile.staffId})`;
+      tests.style.display = "block";
+
+      const workData = {
+        staffId: profile.staffId,
+        staffName: profile.staffName,
+        createdByRole: profile.createdByRole,
+        serviceType: "test",
+        caption: "בדיקה",
+      };
+
+      // Test 1: Work + 1 image
+      document.getElementById("t1btn").onclick = async () => {
+        const file = document.getElementById("t1file").files[0];
+        const logEl = "t1log";
+        log(logEl, "מתחיל...", false);
+        if (!file) {
+          log(logEl, "בחר קובץ תמונה", true);
+          return;
+        }
+        try {
+          const { workId, mediaIds } = await createWorkWithMedia(workData, file, "photo");
+          log(logEl, `הצלחה! workId=${workId} mediaIds=${mediaIds.join(",")}`, false);
+          document.getElementById("t4workId").value = workId;
+        } catch (e) {
+          log(logEl, `שגיאה: ${e.message}`, true);
+        }
+      };
+
+      // Test 2: Work + video
+      document.getElementById("t2btn").onclick = async () => {
+        const file = document.getElementById("t2file").files[0];
+        const logEl = "t2log";
+        log(logEl, "מתחיל...", false);
+        if (!file) {
+          log(logEl, "בחר קובץ וידאו", true);
+          return;
+        }
+        try {
+          const { workId, mediaIds } = await createWorkWithMedia(workData, file, "video");
+          log(logEl, `הצלחה! workId=${workId} mediaIds=${mediaIds.join(",")}`, false);
+          document.getElementById("t4workId").value = workId;
+        } catch (e) {
+          log(logEl, `שגיאה: ${e.message}`, true);
+        }
+      };
+
+      // Test 3: Work + before/after
+      document.getElementById("t3btn").onclick = async () => {
+        const before = document.getElementById("t3before").files[0];
+        const after = document.getElementById("t3after").files[0];
+        const logEl = "t3log";
+        log(logEl, "מתחיל...", false);
+        if (!before || !after) {
+          log(logEl, "בחר שתי תמונות (Before + After)", true);
+          return;
+        }
+        try {
+          const { workId, mediaIds } = await createWorkWithMedia(workData, [before, after], "before_after");
+          log(logEl, `הצלחה! workId=${workId} mediaIds=${mediaIds.join(",")}`, false);
+          document.getElementById("t4workId").value = workId;
+        } catch (e) {
+          log(logEl, `שגיאה: ${e.message}`, true);
+        }
+      };
+
+      // Test 4: Add image to existing work
+      document.getElementById("t4btn").onclick = async () => {
+        const workId = document.getElementById("t4workId").value.trim();
+        const file = document.getElementById("t4file").files[0];
+        const logEl = "t4log";
+        log(logEl, "מתחיל...", false);
+        if (!workId) {
+          log(logEl, "הדבק workId מבדיקה קודמת", true);
+          return;
+        }
+        if (!file) {
+          log(logEl, "בחר קובץ תמונה", true);
+          return;
+        }
+        try {
+          const work = await getContentWork(workId);
+          if (!work) {
+            log(logEl, `Work ${workId} לא נמצא`, true);
+            return;
+          }
+          const mediaIds = await addMediaToExistingWork(workId, file, "photo");
+          const items = await getMediaItems(workId);
+          log(logEl, `הצלחה! נוספו mediaIds=${mediaIds.join(",")}. סה"כ ${items.length} פריטים.`, false);
+        } catch (e) {
+          log(logEl, `שגיאה: ${e.message}`, true);
+        }
+      };
+    });
+  </script>
+</body>
+</html>

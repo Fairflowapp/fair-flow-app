@@ -57,6 +57,30 @@
         {"fieldPath": "salonId", "order": "ASCENDING"},
         {"fieldPath": "staffId", "order": "ASCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "contentWorks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "contentWorks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "staffId", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "contentWorks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "featured", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"}
+      ]
     }
   ],
   "fieldOverrides": []

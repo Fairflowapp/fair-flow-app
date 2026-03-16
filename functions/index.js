@@ -27,6 +27,69 @@ exports.testCallablePing = functions.region("us-central1").https.onCall((data, c
 });
 
 /**
+ * Returns a signed download URL for media. Use when client getBlob/XHR fails (CORS/network).
+ * May fail with "Cannot sign" if service account lacks iam.serviceAccounts.signBlob.
+ */
+exports.getMediaDownloadUrl = functions.region("us-central1").https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Sign in first");
+  const storagePath = (data && data.storagePath) ? String(data.storagePath).trim() : "";
+  if (!storagePath || !storagePath.startsWith("salons/")) {
+    throw new functions.https.HttpsError("invalid-argument", "storagePath required (salons/...)");
+  }
+  const fileName = (data && data.fileName) ? String(data.fileName).trim() : "work.jpg";
+  try {
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(storagePath);
+    const [url] = await file.getSignedUrl({
+      version: "v4",
+      action: "read",
+      expires: Date.now() + 15 * 60 * 1000,
+      responseDisposition: `attachment; filename="${fileName.replace(/"/g, "%22")}"`,
+    });
+    return { url, fileName };
+  } catch (err) {
+    console.error("[getMediaDownloadUrl]", err);
+    throw new functions.https.HttpsError("internal", err?.message || "Failed to create download URL");
+  }
+});
+
+/**
+ * Callable: fetches file from Storage and returns base64. No signBlob or HTTP invoker needed.
+ * For files up to ~6MB (response limit 10MB).
+ */
+exports.getMediaDownloadBase64 = functions.region("us-central1").https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Sign in first");
+  const storagePath = (data && data.storagePath) ? String(data.storagePath).trim() : "";
+  if (!storagePath || !storagePath.startsWith("salons/")) {
+    throw new functions.https.HttpsError("invalid-argument", "storagePath required (salons/...)");
+  }
+  const maxSize = 6 * 1024 * 1024;
+  const bucketNames = ["fairflowapp-db841.firebasestorage.app", "fairflowapp-db841.appspot.com"];
+  let lastErr = null;
+  for (const bucketName of bucketNames) {
+    try {
+      const bucket = admin.storage().bucket(bucketName);
+      const file = bucket.file(storagePath);
+      const [exists] = await file.exists();
+      if (!exists) { lastErr = new Error("File not found"); continue; }
+      const [buf] = await file.download();
+      if (buf.length > maxSize) {
+        throw new functions.https.HttpsError("resource-exhausted", "File too large for direct download");
+      }
+      const fileName = storagePath.split("/").pop().replace(/^[^-]+-/, "") || "work.jpg";
+      return { base64: buf.toString("base64"), fileName };
+    } catch (err) {
+      if (err instanceof functions.https.HttpsError) throw err;
+      lastErr = err;
+      console.error("[getMediaDownloadBase64]", bucketName, storagePath, err?.message);
+    }
+  }
+  const msg = lastErr?.message || "Download failed";
+  console.error("[getMediaDownloadBase64] all buckets failed", storagePath);
+  throw new functions.https.HttpsError("internal", msg);
+});
+
+/**
  * Diagnostic: writes a test email to mail collection.
  * Call from console (signed in): httpsCallable(getFunctions(app,"us-central1"),"testSendEmail")({to:"your@email.com"})
  * If you get the email, Trigger Email extension works. If not, check Extensions + SMTP config.

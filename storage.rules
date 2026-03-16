@@ -15,6 +15,14 @@ service firebase.storage {
       return doc == null ? null : doc.data;
     }
 
+    // User belongs to salon: users.salonId or salons/{salonId}/members/{uid}
+    function belongsToSalon(salonId) {
+      return signedIn() && (
+        (userDoc() != null && userDoc().salonId == salonId)
+        || firestore.exists(/databases/(default)/documents/salons/$(salonId)/members/$(uid()))
+      );
+    }
+
     // User private files
     match /users/{userId}/{allFiles=**} {
       allow read, write: if signedIn() && uid() == userId;
@@ -34,6 +42,11 @@ service firebase.storage {
     // Inbox response documents (manager uploads response file for document requests)
     match /salons/{salonId}/inboxDocuments/{allPaths=**} {
       allow read, write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+    }
+
+    // Media module: content work photos/videos (any signed-in user; app enforces salon)
+    match /salons/{salonId}/media/{allPaths=**} {
+      allow read, write: if signedIn();
     }
 
     // deny everything else

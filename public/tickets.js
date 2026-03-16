@@ -1733,9 +1733,10 @@ export function goToTickets() {
   const wrap = document.querySelector('.wrap');
   const inboxScreen = document.getElementById('inboxScreen');
   const chatScreen = document.getElementById('chatScreen');
+  const mediaScreen = document.getElementById('mediaScreen');
   const ticketsScreen = document.getElementById('ticketsScreen');
 
-  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen].forEach(el => {
+  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen].forEach(el => {
     if (el) el.style.display = 'none';
   });
   if (wrap) wrap.style.display = 'none';
@@ -1748,7 +1749,7 @@ export function goToTickets() {
   // When any other nav button is clicked:
   // 1. Hide tickets screen
   // 2. Unsubscribe from tickets if NOT admin (badge not needed)
-  const NAV_IDS = ['queueBtn','tasksBtn','chatBtn','inboxBtn','logBtn','appsBtn'];
+  const NAV_IDS = ['queueBtn','tasksBtn','chatBtn','inboxBtn','mediaBtn','logBtn','appsBtn'];
   NAV_IDS.forEach(id => {
     const btn = document.getElementById(id);
     if (btn && !btn._ffTicketsHideHandler) {

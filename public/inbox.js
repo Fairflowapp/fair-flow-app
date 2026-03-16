@@ -165,6 +165,9 @@ export function goToInbox() {
   if (userProfileScreen) userProfileScreen.style.display = 'none';
   if (wrap) wrap.style.display = 'none';
 
+  const mediaScreen = document.getElementById('mediaScreen');
+  if (mediaScreen) mediaScreen.style.display = 'none';
+
   // Hide chat screen if open
   const chatScreen = document.getElementById('chatScreen');
   if (chatScreen) chatScreen.style.display = 'none';
