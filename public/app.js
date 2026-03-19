@@ -636,6 +636,26 @@ async function ffUploadStaffAvatar({ salonId, staffId, file }) {
   return { url, path };
 }
 
+/**
+ * Upload a training image to Storage.
+ * Path: salons/{salonId}/training/images/{trainingIdOrTempId}/{fileName}
+ * @param {{ salonId: string, trainingIdOrTempId: string, file: File }} opts
+ * @returns {Promise<{ url: string, path: string }>}
+ */
+async function ffUploadTrainingImage({ salonId, trainingIdOrTempId, file }) {
+  if (!salonId) throw new Error("Missing salonId");
+  if (!trainingIdOrTempId) throw new Error("Missing trainingIdOrTempId");
+  ffAssertImageFile(file);
+  const ext = ffInferImageExtension(file);
+  const safeId = String(trainingIdOrTempId).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${ext}`;
+  const path = `salons/${salonId}/training/images/${safeId}/${fileName}`;
+  const fileRef = storageRef(storage, path);
+  await uploadBytes(fileRef, file);
+  const url = await getDownloadURL(fileRef);
+  return { url, path };
+}
+
 async function ffSaveSalonLogoMeta({ salonId, url, path }) {
   if (!salonId) throw new Error("Missing salonId");
   await updateDoc(doc(db, "salons", salonId), {
@@ -804,8 +824,8 @@ function showMainAppForRole(role) {
   if (receptionView) receptionView.style.display = "none";
   if (staffView) staffView.style.display = "none";
 
-  // show the right view
-  if (role === "owner" && ownerView) {
+  // show the right view (owner + admin + manager get owner view)
+  if ((role === "owner" || role === "admin" || role === "manager") && ownerView) {
     ownerView.style.display = "block";
     // Initialize dropdown when owner view becomes visible
     setTimeout(() => {
@@ -3476,6 +3496,7 @@ window.ffInferImageExtension = ffInferImageExtension;
 window.ffAssertImageFile = ffAssertImageFile;
 window.ffUploadSalonBrandLogo = ffUploadSalonBrandLogo;
 window.ffUploadStaffAvatar = ffUploadStaffAvatar;
+window.ffUploadTrainingImage = ffUploadTrainingImage;
 window.ffSaveSalonLogoMeta = ffSaveSalonLogoMeta;
 window.ffSaveStaffAvatarMeta = ffSaveStaffAvatarMeta;
 window.resetTasksForCurrentTab = resetTasksForCurrentTab;

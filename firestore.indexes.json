@@ -81,6 +81,23 @@
         {"fieldPath": "featured", "order": "ASCENDING"},
         {"fieldPath": "createdAt", "order": "DESCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "trainingProgress",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "salonId", "order": "ASCENDING"},
+        {"fieldPath": "staffId", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "trainingProgress",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "salonId", "order": "ASCENDING"},
+        {"fieldPath": "staffId", "order": "ASCENDING"},
+        {"fieldPath": "trainingId", "order": "ASCENDING"}
+      ]
     }
   ],
   "fieldOverrides": []

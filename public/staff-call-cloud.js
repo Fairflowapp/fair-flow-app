@@ -909,6 +909,7 @@ window.ffSyncPresenceFromQueueState = function(queue = [], service = []) {
 };
 
 window.ffSendStaffCall = async function(staffIdOrName, options = {}) {
+  const effectiveSalonId = _salonId || (typeof window !== "undefined" ? window.currentSalonId : null) || null;
   const targetStaff = resolveStaffByIdOrName(staffIdOrName);
   const targetStaffId = targetStaff?.id || staffIdOrName;
   const allowedQueueStatuses = Array.isArray(options.allowedQueueStatuses) && options.allowedQueueStatuses.length
@@ -916,9 +917,9 @@ window.ffSendStaffCall = async function(staffIdOrName, options = {}) {
     : ["available"];
   const callMessage = String(options.message || "Your client is waiting");
   const callDetail = String(options.detail || "Please return to the queue.");
-  if (!_salonId || !targetStaffId) {
+  if (!effectiveSalonId || !targetStaffId) {
     diagWarn("ffSendStaffCall blocked", {
-      salonId: _salonId,
+      salonId: effectiveSalonId,
       targetStaffId,
       reason: "missing-target"
     });
@@ -928,10 +929,14 @@ window.ffSendStaffCall = async function(staffIdOrName, options = {}) {
   const presence = getPresenceFor(targetStaffId);
   const presenceStatusInfo = explainPresenceStatus(presence);
   const presenceStatus = presenceStatusInfo.status;
-  const eligible = presence && presence.inShift === true && allowedQueueStatuses.includes(presence.queueStatus);
+  const strictMatch = presence && presence.inShift === true && allowedQueueStatuses.includes(presence.queueStatus);
+  const relaxedMatch = presence && presence.inShift === true && presenceStatus !== "offline";
+  const fromQueueRow = !!targetStaffId && !!effectiveSalonId;
+  const allowWhenNoPresence = fromQueueRow && !presence;
+  const eligible = strictMatch || relaxedMatch || (fromQueueRow && presenceStatus !== "offline") || allowWhenNoPresence;
   if (!eligible) {
     diagWarn("ffSendStaffCall blocked", {
-      salonId: _salonId,
+      salonId: effectiveSalonId,
       targetStaffId,
       reason: "not-eligible",
       presence,
@@ -945,7 +950,7 @@ window.ffSendStaffCall = async function(staffIdOrName, options = {}) {
   }
   if (presenceStatus === "offline") {
     diagWarn("ffSendStaffCall blocked", {
-      salonId: _salonId,
+      salonId: effectiveSalonId,
       targetStaffId,
       reason: "offline",
       presence,
@@ -970,7 +975,7 @@ window.ffSendStaffCall = async function(staffIdOrName, options = {}) {
   };
 
   await setDoc(
-    presenceRef(_salonId, targetStaffId),
+    presenceRef(effectiveSalonId, targetStaffId),
     {
       staffId: targetStaffId,
       name: targetStaff?.name || presence?.name || "",
@@ -981,9 +986,9 @@ window.ffSendStaffCall = async function(staffIdOrName, options = {}) {
   );
 
   diagLog("ffSendStaffCall success", {
-    salonId: _salonId,
+    salonId: effectiveSalonId,
     targetStaffId,
-    path: `salons/${_salonId}/staffPresence/${targetStaffId}`,
+    path: `salons/${effectiveSalonId}/staffPresence/${targetStaffId}`,
     currentCall,
     callTimeoutMs
   });

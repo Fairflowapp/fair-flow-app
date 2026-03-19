@@ -7,7 +7,7 @@
 <script>
   console.log('[BUILD MARKER] index.html loaded at', new Date().toISOString());
   window.goToChat = window.goToChat || function() {
-    ['tasksScreen','inboxScreen','mediaScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    ['tasksScreen','inboxScreen','mediaScreen','trainingScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     ['.joinBar','.wrap'].forEach(function(sel){var el=document.querySelector(sel);if(el)el.style.display='none';});
     var cs=document.getElementById('chatScreen');if(cs){cs.style.display='flex';cs.classList.remove('chat-mobile-open');}
     document.querySelectorAll('.btn-pill').forEach(function(b){b.classList.remove('active');});
@@ -28,7 +28,7 @@
     var fp=document.getElementById('chatSettingsFlowsPane');if(fp)fp.style.display=tab==='flows'?'flex':'none';
   };
   window.goToMedia = window.goToMedia || function() {
-    ['tasksScreen','inboxScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    ['tasksScreen','inboxScreen','trainingScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     var chatScreen=document.getElementById('chatScreen');if(chatScreen)chatScreen.style.display='none';
     var joinBar=document.querySelector('.joinBar');if(joinBar)joinBar.style.display='none';
     var queueControls=document.getElementById('queueControls');if(queueControls)queueControls.style.display='none';
@@ -1870,6 +1870,16 @@ dialog footer button, .code-dialog footer button {
                 </div>
                 <div>
                   <div>Media</div>
+                </div>
+              </div>
+            </div>
+            <div class="apps-panel-item" data-app="training" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5 12 3l9 3.5v11L12 21l-9-3.5v-11Z"></path><path d="M12 3v18"></path><path d="M3 6.5 12 10l9-3.5"></path></svg>
+                </div>
+                <div>
+                  <div>Training</div>
                 </div>
               </div>
             </div>
@@ -3889,9 +3899,25 @@ function renderSelect(){
 }
 
 function colorOf(name){ 
-  const f=ffGetStaffList().find(w=>w.name===name); 
+  const n = String(name || '').trim();
+  if (!n) {
+    const palette = settings.brandPalette || DEFAULTS.brandPalette;
+    return palette[0] || "#111827";
+  }
+  // Prefer ff_staff_v1 (Staff Setup) - primary source for buttonColor
+  try {
+    if (typeof ffGetStaffStore === 'function') {
+      const store = ffGetStaffStore();
+      const staff = (store.staff || []).find(s => String(s?.name || '').trim() === n && s.isArchived !== true);
+      if (staff) {
+        if (staff.buttonColor) return staff.buttonColor;
+        if (staff.color) return staff.color;
+      }
+    }
+  } catch (_) {}
+  // Fallback to settings.workers (legacy)
+  const f = ffGetStaffList().find(w => String(w?.name || '').trim() === n);
   if (f) {
-    // Prefer buttonColor, fallback to color, then first palette color
     if (f.buttonColor) return f.buttonColor;
     if (f.color) return f.color;
   }
@@ -3910,19 +3936,22 @@ function getLuminance(hex) {
 }
 
 function fontColorOf(name){
-  const w = ffGetStaffList().find(x=>x.name===name);
-  
-  // If worker has explicit fontColor, use it
+  const n = String(name || '').trim();
+  let w = null;
+  // Prefer ff_staff_v1 (Staff Setup)
+  try {
+    if (typeof ffGetStaffStore === 'function') {
+      const store = ffGetStaffStore();
+      w = (store.staff || []).find(s => String(s?.name || '').trim() === n && s.isArchived !== true) || null;
+    }
+  } catch (_) {}
+  if (!w) w = ffGetStaffList().find(x => String(x?.name || '').trim() === n);
   if (w && w.fontColor) return w.fontColor;
-  
-  // Otherwise calculate based on buttonColor/color luminance
   const bgColor = w ? (w.buttonColor || w.color) : null;
   if (bgColor) {
     const luminance = getLuminance(bgColor);
     return luminance > 0.5 ? '#000000' : '#ffffff';
   }
-  
-  // Default fallback
   return '#ffffff';
 }
 
@@ -3965,7 +3994,8 @@ function ffHasQueueCallAccess(){
   const roleFromUser = String(window.__ff_user_role || '').toLowerCase();
   const roleFromActor = String(window.__ff_actorRole || sessionStorage.getItem('ff_actor_role') || '').toLowerCase();
   if (roleFromUser === 'owner' || roleFromUser === 'admin' || roleFromUser === 'manager') return true;
-  if (roleFromActor === 'admin' || roleFromActor === 'manager') return true;
+  if (roleFromActor === 'owner' || roleFromActor === 'admin' || roleFromActor === 'manager') return true;
+  if (window.ff_is_admin_cached === true) return true;
   return typeof ffHasAdminAccess === 'function' ? ffHasAdminAccess() : false;
 }
 
@@ -4050,8 +4080,8 @@ function renderQueue(){
 
     hold.onclick=() =>{ window.__ff_holdTargetName = q.name; window.__ff_holdWasHeld = !!q.held; guardHold(()=>toggleHold(i)); };
 
-    // Keep call icon visible for in-shift staff even when queueStatus varies.
-    const canCall = !q.held && !!presenceMeta.staffId && presenceMeta.presence && presenceMeta.presence.inShift === true;
+    // Show call icon when we have staffId and row not held (match In Service behavior).
+    const canCall = !q.held && !!presenceMeta.staffId;
     const callStatusLabel = queueCallStatusLabel(presenceMeta.presence, presenceMeta.status);
     const diagEligibility = {
       rowName: q.name,
@@ -4129,8 +4159,6 @@ function renderQueue(){
       const disabledReasons = [];
       if (!canManageCalls) disabledReasons.push('role has no call access');
       if (q.held) disabledReasons.push('queue row is held');
-      if (!presenceMeta.presence) disabledReasons.push('missing presence');
-      if (presenceMeta.presence?.inShift !== true) disabledReasons.push('inShift failed');
       if (!presenceMeta.staffId) disabledReasons.push('missing staffId');
       console.warn('[StaffCallDiag] call icon not rendered', {
         ...diagEligibility,
@@ -5340,6 +5368,10 @@ function goToQueue() {
   const inboxScreen = document.getElementById('inboxScreen');
   if (inboxScreen) inboxScreen.style.display = 'none';
 
+  // Close training screen if open
+  const trainingScreen = document.getElementById('trainingScreen');
+  if (trainingScreen) trainingScreen.style.display = 'none';
+
   // Close chat screen if open
   const chatScreen = document.getElementById('chatScreen');
   if (chatScreen) chatScreen.style.display = 'none';
@@ -5456,6 +5488,1446 @@ function goToQueue() {
   document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
   if (queueBtn) queueBtn.classList.add('active');
 }
+
+// Training Library (MVP): local state only, no Firestore yet.
+const trainingItems = [];
+let selectedTrainingItemId = null;
+let editingTrainingItemId = null;
+let trainingDraftBlocks = [];
+let trainingLoading = false;
+let trainingError = '';
+let trainingSearchQuery = '';
+let trainingCategoryFilter = 'all';
+let trainingRoleFilter = 'all';
+let trainingRequiredFilter = 'all';
+let trainingViewMode = 'all';
+let trainingProgressMap = {};
+let trainingReportsMode = 'library';
+let trainingReportsSubMode = 'byTraining';
+let trainingAllProgressList = [];
+
+function getCurrentTrainingStaffId() {
+  return String(
+    window.__ff_authedStaffId ||
+    (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null) ||
+    ''
+  ).trim();
+}
+
+function toLabel(value) {
+  return String(value || '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+async function getTrainingFirestoreApi() {
+  if (window.__trainingFirestoreApi) return window.__trainingFirestoreApi;
+  const m = await import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js");
+  window.__trainingFirestoreApi = m;
+  return m;
+}
+
+function getTrainingDb() {
+  if (window.db) return window.db;
+  if (window.ffDb) return window.ffDb;
+  throw new Error('Firestore is not initialized yet.');
+}
+
+function getCurrentTrainingSalonId() {
+  const salonId = (typeof window !== 'undefined' && window.currentSalonId)
+    ? String(window.currentSalonId).trim()
+    : '';
+  if (!salonId) throw new Error('Missing salonId');
+  return salonId;
+}
+
+async function ensureTechnicianTypesForTraining() {
+  let role = String(
+    window.__ff_user_role ||
+    window.__ff_actorRole ||
+    sessionStorage.getItem('ff_actor_role') ||
+    ''
+  ).toLowerCase().trim();
+  const staffId = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '';
+  const isTechnicianRole = role === 'tech' || role === 'staff' || role === 'technician';
+  const needsStaffFetch = (isTechnicianRole || !role) && staffId;
+  if (!needsStaffFetch) return;
+  try {
+    const salonId = getCurrentTrainingSalonId();
+    const db = getTrainingDb();
+    const { doc, getDoc } = await getTrainingFirestoreApi();
+    if (staffId) {
+      const staffRef = doc(db, 'salons', salonId, 'staff', staffId);
+      const snap = await getDoc(staffRef);
+      if (snap.exists()) {
+        const data = snap.data() || {};
+        const types = Array.isArray(data.technicianTypes) ? data.technicianTypes : [];
+        window.__ff_authedTechnicianTypes = types;
+        try { sessionStorage.setItem('ff_authed_technician_types', JSON.stringify(types)); } catch (_) {}
+        if (!role && String(data.role || '').toLowerCase() === 'technician') {
+          role = 'technician';
+          window.__ff_actorRole = 'Tech';
+          try { sessionStorage.setItem('ff_actor_role', 'Tech'); } catch (_) {}
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+function getSortTime(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  const ts = new Date(value).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+async function fetchTrainingItems() {
+  const salonId = getCurrentTrainingSalonId();
+  const db = getTrainingDb();
+  const { collection, query, where, getDocs } = await getTrainingFirestoreApi();
+  const snap = await getDocs(query(collection(db, 'trainingItems'), where('salonId', '==', salonId)));
+  const rows = snap.docs.map((d) => {
+    const data = d.data() || {};
+    return {
+      id: d.id,
+      salonId: data.salonId || '',
+      title: data.title || '',
+      category: data.category || '',
+      description: data.description || '',
+      visibleToRoles: Array.isArray(data.visibleToRoles) ? data.visibleToRoles : [],
+      technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
+      required: data.required === true,
+      contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
+      createdAt: data.createdAt || null,
+      updatedAt: data.updatedAt || null,
+    };
+  });
+  rows.sort((a, b) => getSortTime(b.updatedAt) - getSortTime(a.updatedAt));
+  return rows;
+}
+
+async function createTrainingItem(data) {
+  const salonId = getCurrentTrainingSalonId();
+  const db = getTrainingDb();
+  const { collection, addDoc, serverTimestamp } = await getTrainingFirestoreApi();
+  await addDoc(collection(db, 'trainingItems'), {
+    salonId,
+    title: data.title,
+    category: data.category,
+    description: data.description || '',
+    visibleToRoles: Array.isArray(data.visibleToRoles) ? data.visibleToRoles : [],
+    technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
+    required: data.required === true,
+    contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+async function updateTrainingItem(id, data) {
+  const salonId = getCurrentTrainingSalonId();
+  const db = getTrainingDb();
+  const { doc, getDoc, updateDoc, serverTimestamp } = await getTrainingFirestoreApi();
+  const ref = doc(db, 'trainingItems', id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Training item not found.');
+  if (String(snap.data()?.salonId || '') !== salonId) throw new Error('Item does not belong to current salon.');
+  await updateDoc(ref, {
+    title: data.title,
+    category: data.category,
+    description: data.description || '',
+    visibleToRoles: Array.isArray(data.visibleToRoles) ? data.visibleToRoles : [],
+    technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
+    required: data.required === true,
+    contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
+    updatedAt: serverTimestamp(),
+  });
+}
+
+async function deleteTrainingItem(id) {
+  const salonId = getCurrentTrainingSalonId();
+  const db = getTrainingDb();
+  const { doc, getDoc, deleteDoc } = await getTrainingFirestoreApi();
+  const ref = doc(db, 'trainingItems', id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Training item not found.');
+  if (String(snap.data()?.salonId || '') !== salonId) throw new Error('Item does not belong to current salon.');
+  await deleteDoc(ref);
+}
+
+async function fetchTrainingProgressForUser() {
+  const salonId = getCurrentTrainingSalonId();
+  const staffId = getCurrentTrainingStaffId();
+  if (!staffId) return {};
+  const db = getTrainingDb();
+  const { collection, query, where, getDocs } = await getTrainingFirestoreApi();
+  const snap = await getDocs(
+    query(
+      collection(db, 'trainingProgress'),
+      where('salonId', '==', salonId),
+      where('staffId', '==', staffId)
+    )
+  );
+  const map = {};
+  snap.docs.forEach((d) => {
+    const data = d.data() || {};
+    const tid = data.trainingId || '';
+    if (tid) map[tid] = { id: d.id, ...data };
+  });
+  return map;
+}
+
+async function fetchAllTrainingProgressForSalon() {
+  if (!canViewTrainingReports()) return [];
+  const salonId = getCurrentTrainingSalonId();
+  const db = getTrainingDb();
+  const { collection, query, where, getDocs } = await getTrainingFirestoreApi();
+  const snap = await getDocs(
+    query(collection(db, 'trainingProgress'), where('salonId', '==', salonId))
+  );
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+function canViewTrainingReports() {
+  const role = String(
+    window.__ff_actorRole ||
+    sessionStorage.getItem('ff_actor_role') ||
+    window.__ff_user_role ||
+    ''
+  ).toLowerCase().trim();
+  if (['tech', 'technician', 'staff', 'manager'].includes(role)) return false;
+  if (role === 'owner' || role === 'admin') return true;
+  return typeof ffHasAdminAccess === 'function' && ffHasAdminAccess();
+}
+
+function getTrainingReportsStaffList() {
+  try {
+    const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+    const list = Array.isArray(store.staff) ? store.staff : [];
+    return list.filter((s) => s.isArchived !== true);
+  } catch (_) {
+    return [];
+  }
+}
+
+function getStaffRoleForTraining(staff) {
+  const r = String(staff?.role || 'technician').toLowerCase().trim();
+  if (r === 'tech' || r === 'staff') return 'technician';
+  return r || 'technician';
+}
+
+async function markTrainingCompleted(trainingId) {
+  const salonId = getCurrentTrainingSalonId();
+  const staffId = getCurrentTrainingStaffId();
+  if (!staffId) throw new Error('Staff ID required to track progress.');
+  const db = getTrainingDb();
+  const { collection, query, where, getDocs, doc, setDoc, updateDoc, addDoc, serverTimestamp } = await getTrainingFirestoreApi();
+  const existing = await getDocs(
+    query(
+      collection(db, 'trainingProgress'),
+      where('salonId', '==', salonId),
+      where('staffId', '==', staffId),
+      where('trainingId', '==', trainingId)
+    )
+  );
+  const now = new Date();
+  const payload = {
+    trainingId,
+    salonId,
+    staffId,
+    status: 'completed',
+    completedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  if (existing.docs.length > 0) {
+    await updateDoc(doc(db, 'trainingProgress', existing.docs[0].id), {
+      status: 'completed',
+      completedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    await addDoc(collection(db, 'trainingProgress'), payload);
+  }
+  trainingProgressMap[trainingId] = { status: 'completed', completedAt: now };
+}
+
+async function loadTrainingItems() {
+  trainingLoading = true;
+  trainingError = '';
+  renderTrainingLibrary();
+  try {
+    const rows = await fetchTrainingItems();
+    trainingItems.splice(0, trainingItems.length, ...rows);
+  } catch (err) {
+    console.error('[Training] Failed loading items', err);
+    trainingError = err?.message || 'Failed to load training items.';
+  } finally {
+    trainingLoading = false;
+  }
+}
+
+function createTrainingBlock(type) {
+  const base = { id: `blk_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, type, title: '' };
+  if (type === 'text') return { ...base, body: '' };
+  if (type === 'steps') return { ...base, steps: [''] };
+  if (type === 'video') return { ...base, url: '' };
+  if (type === 'image') return { ...base, imageUrls: [] };
+  return base;
+}
+
+function addTrainingBlock(type) {
+  trainingDraftBlocks.push(createTrainingBlock(type));
+  renderTrainingBlocksEditor();
+}
+
+function removeTrainingBlock(index) {
+  if (index < 0 || index >= trainingDraftBlocks.length) return;
+  trainingDraftBlocks.splice(index, 1);
+  renderTrainingBlocksEditor();
+}
+
+function updateTrainingBlockField(index, field, value) {
+  const block = trainingDraftBlocks[index];
+  if (!block) return;
+  block[field] = value;
+  if (field === 'imageUrls' || field === 'imageUrl') renderTrainingBlocksEditor();
+}
+
+function addTrainingImageToBlock(index, url) {
+  const block = trainingDraftBlocks[index];
+  if (!block || block.type !== 'image') return;
+  if (!Array.isArray(block.imageUrls)) block.imageUrls = (block.imageUrl ? [block.imageUrl] : []);
+  block.imageUrls.push(url);
+  if (block.imageUrl) delete block.imageUrl;
+  renderTrainingBlocksEditor();
+}
+
+function removeTrainingImageFromBlock(index, imgIndex) {
+  const block = trainingDraftBlocks[index];
+  if (!block || block.type !== 'image' || !Array.isArray(block.imageUrls)) return;
+  block.imageUrls.splice(imgIndex, 1);
+  renderTrainingBlocksEditor();
+}
+
+function addStepToBlock(index) {
+  const block = trainingDraftBlocks[index];
+  if (!block || block.type !== 'steps') return;
+  block.steps = Array.isArray(block.steps) ? block.steps : [];
+  block.steps.push('');
+  renderTrainingBlocksEditor();
+}
+
+function removeStepFromBlock(index, stepIdx) {
+  const block = trainingDraftBlocks[index];
+  if (!block || block.type !== 'steps' || !Array.isArray(block.steps)) return;
+  block.steps.splice(stepIdx, 1);
+  if (!block.steps.length) block.steps.push('');
+  renderTrainingBlocksEditor();
+}
+
+function updateStepInBlock(index, stepIdx, value) {
+  const block = trainingDraftBlocks[index];
+  if (!block || block.type !== 'steps') return;
+  block.steps = Array.isArray(block.steps) ? block.steps : [];
+  if (stepIdx < 0 || stepIdx >= block.steps.length) return;
+  block.steps[stepIdx] = value;
+}
+
+function renderTrainingBlocksEditor() {
+  const wrap = document.getElementById('trainingBlocksEditor');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!trainingDraftBlocks.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'font-size:12px;color:#9ca3af;padding:10px 0;';
+    empty.textContent = 'No content blocks added yet.';
+    wrap.appendChild(empty);
+    return;
+  }
+
+  trainingDraftBlocks.forEach((block, index) => {
+    const card = document.createElement('div');
+    card.style.cssText = 'border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#fff;display:grid;gap:10px;';
+    const typeLabel = toLabel(block.type);
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;';
+    header.innerHTML = `<span style="font-size:12px;font-weight:600;color:#7c3aed;">${typeLabel} Block</span>`;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn-pill';
+    removeBtn.textContent = 'Remove Block';
+    removeBtn.style.cssText = 'font-size:11px;padding:4px 10px;color:#dc2626;border-color:#fecaca;background:#fff;';
+    removeBtn.onclick = () => removeTrainingBlock(index);
+    header.appendChild(removeBtn);
+    card.appendChild(header);
+
+    const titleInput = document.createElement('input');
+    titleInput.type = 'text';
+    titleInput.placeholder = 'Block Title';
+    titleInput.value = block.title || '';
+    titleInput.style.cssText = 'width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;';
+    titleInput.oninput = (e) => updateTrainingBlockField(index, 'title', e.target.value);
+    card.appendChild(titleInput);
+
+    if (block.type === 'text') {
+      const body = document.createElement('textarea');
+      body.rows = 3;
+      body.placeholder = 'Body';
+      body.value = block.body || '';
+      body.style.cssText = 'width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;resize:vertical;';
+      body.oninput = (e) => updateTrainingBlockField(index, 'body', e.target.value);
+      card.appendChild(body);
+    } else if (block.type === 'steps') {
+      const stepsWrap = document.createElement('div');
+      stepsWrap.style.cssText = 'display:grid;gap:8px;';
+      const steps = Array.isArray(block.steps) ? block.steps : [];
+      steps.forEach((step, stepIdx) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:8px;align-items:center;';
+        const stepInput = document.createElement('input');
+        stepInput.type = 'text';
+        stepInput.placeholder = `Step ${stepIdx + 1}`;
+        stepInput.value = step || '';
+        stepInput.style.cssText = 'flex:1;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;';
+        stepInput.oninput = (e) => updateStepInBlock(index, stepIdx, e.target.value);
+        const removeStepBtn = document.createElement('button');
+        removeStepBtn.type = 'button';
+        removeStepBtn.className = 'btn-pill';
+        removeStepBtn.textContent = 'Remove';
+        removeStepBtn.style.cssText = 'font-size:11px;padding:4px 10px;';
+        removeStepBtn.onclick = () => removeStepFromBlock(index, stepIdx);
+        row.append(stepInput, removeStepBtn);
+        stepsWrap.appendChild(row);
+      });
+      const addStepBtn = document.createElement('button');
+      addStepBtn.type = 'button';
+      addStepBtn.className = 'btn-pill';
+      addStepBtn.textContent = 'Add Step';
+      addStepBtn.style.cssText = 'font-size:11px;padding:5px 10px;justify-self:start;';
+      addStepBtn.onclick = () => addStepToBlock(index);
+      card.append(stepsWrap, addStepBtn);
+    } else if (block.type === 'video') {
+      const urlInput = document.createElement('input');
+      urlInput.type = 'text';
+      urlInput.placeholder = 'Video URL';
+      urlInput.value = block.url || '';
+      urlInput.style.cssText = 'width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;';
+      urlInput.oninput = (e) => updateTrainingBlockField(index, 'url', e.target.value);
+      card.appendChild(urlInput);
+    } else if (block.type === 'image') {
+      const urls = Array.isArray(block.imageUrls) ? block.imageUrls : (block.imageUrl ? [block.imageUrl] : []);
+      const uploadWrap = document.createElement('div');
+      uploadWrap.style.cssText = 'display:grid;gap:10px;';
+      const uploadLabel = document.createElement('label');
+      uploadLabel.style.cssText = 'display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px;';
+      uploadLabel.textContent = 'Upload Images';
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.multiple = true;
+      fileInput.style.cssText = 'width:100%;padding:8px;border:1px dashed #d1d5db;border-radius:8px;font-size:12px;cursor:pointer;';
+      fileInput.onchange = async (e) => {
+        const files = Array.from(e.target?.files || []).filter((f) => f.type?.startsWith('image/'));
+        if (!files.length) return;
+        if (!window.ffUploadTrainingImage) { console.warn('[Training] ffUploadTrainingImage not available'); return; }
+        fileInput.disabled = true;
+        try {
+          const salonId = getCurrentTrainingSalonId();
+          const trainingIdOrTempId = editingTrainingItemId || ('draft_' + (trainingDraftBlocks[0]?.id || Date.now()));
+          for (const file of files) {
+            const { url } = await window.ffUploadTrainingImage({ salonId, trainingIdOrTempId, file });
+            addTrainingImageToBlock(index, url);
+          }
+        } catch (err) {
+          console.error('[Training] Image upload failed:', err);
+          alert('Upload failed. Please try again.');
+        } finally {
+          fileInput.disabled = false;
+        }
+        e.target.value = '';
+      };
+      uploadWrap.append(uploadLabel, fileInput);
+      card.appendChild(uploadWrap);
+      if (urls.length) {
+        const prevWrap = document.createElement('div');
+        prevWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
+        urls.forEach((url, imgIdx) => {
+          const box = document.createElement('div');
+          box.style.cssText = 'position:relative;flex-shrink:0;';
+          const prevImg = document.createElement('img');
+          prevImg.src = url;
+          prevImg.alt = 'Preview';
+          prevImg.style.cssText = 'max-width:100%;max-height:100px;width:auto;height:100px;border-radius:8px;border:1px solid #e5e7eb;object-fit:cover;';
+          prevImg.onerror = () => { prevImg.style.display = 'none'; };
+          const rmBtn = document.createElement('button');
+          rmBtn.type = 'button';
+          rmBtn.textContent = '×';
+          rmBtn.style.cssText = 'position:absolute;top:4px;right:4px;width:22px;height:22px;border:none;background:rgba(0,0,0,0.6);color:#fff;border-radius:50%;cursor:pointer;font-size:16px;line-height:1;padding:0;';
+          rmBtn.onclick = () => removeTrainingImageFromBlock(index, imgIdx);
+          box.append(prevImg, rmBtn);
+          prevWrap.appendChild(box);
+        });
+        card.appendChild(prevWrap);
+      }
+    }
+
+    wrap.appendChild(card);
+  });
+}
+
+function normalizeTrainingBlocks(blocks) {
+  return (blocks || [])
+    .map((block) => {
+      if (!block || !block.type) return null;
+      const base = { id: block.id || `blk_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, type: block.type, title: (block.title || '').trim() };
+      if (block.type === 'text') return { ...base, body: (block.body || '').trim() };
+      if (block.type === 'steps') {
+        const steps = (Array.isArray(block.steps) ? block.steps : []).map((s) => String(s || '').trim()).filter(Boolean);
+        return { ...base, steps };
+      }
+      if (block.type === 'video') return { ...base, url: (block.url || '').trim() };
+      if (block.type === 'image') {
+        const urls = Array.isArray(block.imageUrls) ? block.imageUrls : (block.imageUrl ? [block.imageUrl] : []);
+        return { ...base, imageUrls: urls.map((u) => String(u || '').trim()).filter(Boolean) };
+      }
+      return null;
+    })
+    .filter(Boolean)
+    .filter((block) => {
+      if (block.type === 'text') return !!(block.title || block.body);
+      if (block.type === 'steps') return !!(block.steps && block.steps.length);
+      if (block.type === 'video') return !!(block.title || block.url);
+      if (block.type === 'image') return !!(block.title || (block.imageUrls && block.imageUrls.length));
+      return false;
+    });
+}
+
+function getFilteredTrainingItems() {
+  const userCtx = getCurrentTrainingUserContext();
+  const isAdminOrOwner = ['owner', 'admin'].includes(String(window.__ff_user_role || '').toLowerCase().trim());
+  let scopedItems = trainingItems;
+  if (trainingViewMode === 'my') {
+    scopedItems = isAdminOrOwner ? trainingItems : trainingItems.filter((item) => isTrainingRelevantToCurrentUser(item, userCtx));
+  } else if (trainingViewMode === 'required') {
+    scopedItems = isAdminOrOwner
+      ? trainingItems.filter((item) => item.required === true)
+      : trainingItems.filter((item) => isTrainingRequiredForUser(item, userCtx));
+  }
+  const q = trainingSearchQuery.trim().toLowerCase();
+  return scopedItems.filter((item) => {
+    if (trainingCategoryFilter !== 'all' && item.category !== trainingCategoryFilter) return false;
+    if (trainingRoleFilter !== 'all' && !(Array.isArray(item.visibleToRoles) && item.visibleToRoles.includes(trainingRoleFilter))) return false;
+    if (trainingRequiredFilter === 'required' && item.required !== true) return false;
+    if (trainingRequiredFilter === 'optional' && item.required !== false) return false;
+    if (!q) return true;
+    const haystack = [
+      item.title || '',
+      item.category || '',
+      item.description || '',
+    ].join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
+}
+
+function canManageTraining() {
+  const role = String(
+    window.__ff_user_role ||
+    window.__ff_actorRole ||
+    sessionStorage.getItem('ff_actor_role') ||
+    ''
+  ).toLowerCase().trim();
+  return role === 'owner' || role === 'admin';
+}
+
+function canSeeTrainingTabs() {
+  const accountRole = String(window.__ff_user_role || '').toLowerCase().trim();
+  if (accountRole === 'owner' || accountRole === 'admin') return true;
+  const role = String(
+    window.__ff_actorRole ||
+    sessionStorage.getItem('ff_actor_role') ||
+    window.__ff_user_role ||
+    ''
+  ).toLowerCase().trim();
+  return role === 'owner' || role === 'admin';
+}
+
+function getCurrentTrainingUserContext() {
+  let currentRole = String(
+    window.__ff_user_role ||
+    window.__ff_actorRole ||
+    sessionStorage.getItem('ff_actor_role') ||
+    ''
+  ).toLowerCase().trim();
+  if (currentRole === 'tech' || currentRole === 'staff') currentRole = 'technician';
+  if (!currentRole && getCurrentTrainingStaffId()) currentRole = 'technician';
+
+  let currentTechnicianTypes = [];
+  if (Array.isArray(window.__ff_authedTechnicianTypes)) {
+    currentTechnicianTypes = window.__ff_authedTechnicianTypes.map((t) => String(t || '').toLowerCase().trim()).filter(Boolean);
+  } else {
+    try {
+      const raw = sessionStorage.getItem('ff_authed_technician_types');
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) currentTechnicianTypes = parsed.map((t) => String(t || '').toLowerCase().trim()).filter(Boolean);
+    } catch (_) {}
+  }
+
+  return { currentRole, currentTechnicianTypes };
+}
+
+function isTrainingRelevantToCurrentUser(item, ctx) {
+  const role = String(ctx?.currentRole || '').toLowerCase();
+  if (!role) return false;
+  const visibleToRoles = Array.isArray(item?.visibleToRoles) ? item.visibleToRoles.map((r) => String(r || '').toLowerCase()) : [];
+  if (!visibleToRoles.includes(role)) return false;
+  if (role !== 'technician') return true;
+
+  const techTypes = Array.isArray(item?.technicianTypes) ? item.technicianTypes.map((t) => String(t || '').toLowerCase()) : [];
+  if (!techTypes.length) return true;
+  if (techTypes.includes('all_technicians')) return true;
+  const myTypes = Array.isArray(ctx?.currentTechnicianTypes) ? ctx.currentTechnicianTypes : [];
+  return techTypes.some((t) => myTypes.includes(t));
+}
+
+function isTrainingRequiredForUser(item, ctx) {
+  return item.required === true && isTrainingRelevantToCurrentUser(item, ctx);
+}
+
+function syncTechnicianTypesUI() {
+  const roleTechnician = document.querySelector('input[name="trainingVisibleRole"][value="technician"]');
+  const typesWrap = document.getElementById('trainingTechnicianTypesWrap');
+  const allTechCb = document.querySelector('input[name="trainingTechnicianType"][value="all_technicians"]');
+  const typeCheckboxes = Array.from(document.querySelectorAll('input[name="trainingTechnicianType"]')).filter((cb) => cb.value !== 'all_technicians');
+  const technicianSelected = !!roleTechnician?.checked;
+
+  if (typesWrap) typesWrap.style.display = technicianSelected ? 'block' : 'none';
+  if (!technicianSelected) {
+    document.querySelectorAll('input[name="trainingTechnicianType"]').forEach((cb) => { cb.checked = false; cb.disabled = false; });
+    return;
+  }
+
+  const allSelected = !!allTechCb?.checked;
+  typeCheckboxes.forEach((cb) => {
+    cb.disabled = allSelected;
+    if (allSelected) cb.checked = false;
+  });
+}
+
+function resetTrainingForm() {
+  const titleInput = document.getElementById('trainingTitleInput');
+  const categorySelect = document.getElementById('trainingCategoryInput');
+  const requiredInput = document.getElementById('trainingRequiredInput');
+  const descriptionInput = document.getElementById('trainingDescriptionInput');
+  const validation = document.getElementById('trainingValidationMsg');
+  if (titleInput) titleInput.value = '';
+  if (categorySelect) categorySelect.value = '';
+  if (requiredInput) requiredInput.checked = false;
+  if (descriptionInput) descriptionInput.value = '';
+  document.querySelectorAll('input[name="trainingVisibleRole"]').forEach((cb) => { cb.checked = false; });
+  document.querySelectorAll('input[name="trainingTechnicianType"]').forEach((cb) => { cb.checked = false; cb.disabled = false; });
+  trainingDraftBlocks = [];
+  if (validation) validation.style.display = 'none';
+  syncTechnicianTypesUI();
+  renderTrainingBlocksEditor();
+}
+
+function bindTrainingFormEvents() {
+  document.querySelectorAll('input[name="trainingVisibleRole"]').forEach((cb) => {
+    cb.onchange = () => syncTechnicianTypesUI();
+  });
+  const allTechCb = document.querySelector('input[name="trainingTechnicianType"][value="all_technicians"]');
+  if (allTechCb) allTechCb.onchange = () => syncTechnicianTypesUI();
+}
+
+function openCreateTrainingModal() {
+  const modal = document.getElementById('createTrainingModal');
+  const modalTitle = document.getElementById('trainingModalTitle');
+  const saveBtn = document.getElementById('trainingSaveBtn');
+  if (!modal) return;
+  editingTrainingItemId = null;
+  resetTrainingForm();
+  if (modalTitle) modalTitle.textContent = 'Create Training';
+  if (saveBtn) saveBtn.textContent = 'Save';
+  bindTrainingFormEvents();
+  modal.style.display = 'flex';
+}
+
+function openEditTrainingModal(itemId) {
+  const item = trainingItems.find((x) => x.id === itemId);
+  const modal = document.getElementById('createTrainingModal');
+  const modalTitle = document.getElementById('trainingModalTitle');
+  const saveBtn = document.getElementById('trainingSaveBtn');
+  const titleInput = document.getElementById('trainingTitleInput');
+  const categorySelect = document.getElementById('trainingCategoryInput');
+  const requiredInput = document.getElementById('trainingRequiredInput');
+  const descriptionInput = document.getElementById('trainingDescriptionInput');
+  if (!item || !modal) return;
+
+  editingTrainingItemId = itemId;
+  resetTrainingForm();
+  if (titleInput) titleInput.value = item.title || '';
+  if (categorySelect) categorySelect.value = item.category || '';
+  if (requiredInput) requiredInput.checked = !!item.required;
+  if (descriptionInput) descriptionInput.value = item.description || '';
+  (item.visibleToRoles || []).forEach((r) => {
+    const cb = document.querySelector(`input[name="trainingVisibleRole"][value="${r}"]`);
+    if (cb) cb.checked = true;
+  });
+  (item.technicianTypes || []).forEach((t) => {
+    const cb = document.querySelector(`input[name="trainingTechnicianType"][value="${t}"]`);
+    if (cb) cb.checked = true;
+  });
+  trainingDraftBlocks = (item.contentBlocks || []).map((b) => JSON.parse(JSON.stringify(b)));
+  syncTechnicianTypesUI();
+  renderTrainingBlocksEditor();
+  if (modalTitle) modalTitle.textContent = 'Edit Training';
+  if (saveBtn) saveBtn.textContent = 'Save Changes';
+  bindTrainingFormEvents();
+  modal.style.display = 'flex';
+}
+
+function closeCreateTrainingModal() {
+  const modal = document.getElementById('createTrainingModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function collectTrainingFormData() {
+  const titleInput = document.getElementById('trainingTitleInput');
+  const categorySelect = document.getElementById('trainingCategoryInput');
+  const requiredInput = document.getElementById('trainingRequiredInput');
+  const descriptionInput = document.getElementById('trainingDescriptionInput');
+  return {
+    title: titleInput?.value?.trim() || '',
+    category: categorySelect?.value?.trim() || '',
+    visibleToRoles: Array.from(document.querySelectorAll('input[name="trainingVisibleRole"]:checked')).map((el) => el.value),
+    technicianTypes: Array.from(document.querySelectorAll('input[name="trainingTechnicianType"]:checked')).map((el) => el.value),
+    required: !!requiredInput?.checked,
+    description: descriptionInput?.value?.trim() || '',
+    contentBlocks: normalizeTrainingBlocks(trainingDraftBlocks),
+  };
+}
+
+function validateTrainingForm(data) {
+  if (!data.title || !data.category) return 'Title and Category are required.';
+  if (data.visibleToRoles.includes('technician')) {
+    const hasAll = data.technicianTypes.includes('all_technicians');
+    const hasSpecific = data.technicianTypes.some((t) => t !== 'all_technicians');
+    if (!hasAll && !hasSpecific) return 'Select all_technicians or at least one technician type.';
+  }
+  return '';
+}
+
+async function saveTrainingItemLocal() {
+  const validation = document.getElementById('trainingValidationMsg');
+  const data = collectTrainingFormData();
+  const validationMsg = validateTrainingForm(data);
+  if (validation) validation.style.display = 'none';
+  if (validationMsg) {
+    if (validation) {
+      validation.textContent = validationMsg;
+      validation.style.display = 'block';
+    }
+    return;
+  }
+
+  try {
+    if (editingTrainingItemId) {
+      await updateTrainingItem(editingTrainingItemId, data);
+    } else {
+      await createTrainingItem(data);
+    }
+  } catch (err) {
+    console.error('[Training] Save failed', err);
+    if (validation) {
+      validation.textContent = err?.message || 'Failed to save training item.';
+      validation.style.display = 'block';
+    }
+    return;
+  }
+
+  closeCreateTrainingModal();
+  editingTrainingItemId = null;
+  selectedTrainingItemId = null;
+  await loadTrainingItems();
+  renderTrainingLibrary();
+}
+
+async function deleteTrainingItemLocal(itemId) {
+  if (!confirm('Are you sure you want to delete this training item?')) return;
+  try {
+    await deleteTrainingItem(itemId);
+  } catch (err) {
+    console.error('[Training] Delete failed', err);
+    alert(err?.message || 'Failed to delete training item.');
+    return;
+  }
+  selectedTrainingItemId = null;
+  await loadTrainingItems();
+  renderTrainingLibrary();
+}
+
+function renderTrainingLibrary() {
+  const listView = document.getElementById('trainingLibraryView');
+  const detailsView = document.getElementById('trainingDetailsView');
+  const listEl = document.getElementById('trainingList');
+  const emptyEl = document.getElementById('trainingEmptyState');
+  const noMatchEl = document.getElementById('trainingNoMatchState');
+  const noRelevantEl = document.getElementById('trainingNoRelevantState');
+  const noRequiredEl = document.getElementById('trainingNoRequiredState');
+  const loadingEl = document.getElementById('trainingLoadingState');
+  const errorEl = document.getElementById('trainingErrorState');
+  if (!listEl || !emptyEl || !noMatchEl || !noRelevantEl || !listView || !detailsView || !loadingEl || !errorEl) return;
+
+  listView.style.display = 'block';
+  detailsView.style.display = 'none';
+  listEl.innerHTML = '';
+  loadingEl.style.display = trainingLoading ? 'block' : 'none';
+  errorEl.style.display = trainingError ? 'block' : 'none';
+  errorEl.textContent = trainingError || '';
+  noMatchEl.style.display = 'none';
+  noRelevantEl.style.display = 'none';
+  if (noRequiredEl) noRequiredEl.style.display = 'none';
+
+  if (trainingLoading) {
+    emptyEl.style.display = 'none';
+    noMatchEl.style.display = 'none';
+    noRelevantEl.style.display = 'none';
+    if (noRequiredEl) noRequiredEl.style.display = 'none';
+    listEl.style.display = 'none';
+    return;
+  }
+
+  if (trainingError) {
+    emptyEl.style.display = 'none';
+    noMatchEl.style.display = 'none';
+    noRelevantEl.style.display = 'none';
+    if (noRequiredEl) noRequiredEl.style.display = 'none';
+    listEl.style.display = 'none';
+    return;
+  }
+
+  if (!trainingItems.length) {
+    emptyEl.style.display = 'block';
+    noMatchEl.style.display = 'none';
+    noRelevantEl.style.display = 'none';
+    if (noRequiredEl) noRequiredEl.style.display = 'none';
+    listEl.style.display = 'none';
+    return;
+  }
+
+  const userCtx = getCurrentTrainingUserContext();
+  const scopedItems = trainingViewMode === 'my'
+    ? trainingItems.filter((item) => isTrainingRelevantToCurrentUser(item, userCtx))
+    : trainingViewMode === 'required'
+      ? trainingItems.filter((item) => isTrainingRequiredForUser(item, userCtx))
+      : trainingItems;
+
+  const filteredItems = getFilteredTrainingItems();
+  emptyEl.style.display = 'none';
+  if (trainingViewMode === 'my' && !scopedItems.length) {
+    noRelevantEl.style.display = 'block';
+    noMatchEl.style.display = 'none';
+    if (noRequiredEl) noRequiredEl.style.display = 'none';
+    listEl.style.display = 'none';
+    return;
+  }
+
+  if (trainingViewMode === 'required' && !scopedItems.length) {
+    if (noRequiredEl) noRequiredEl.style.display = 'block';
+    noMatchEl.style.display = 'none';
+    noRelevantEl.style.display = 'none';
+    listEl.style.display = 'none';
+    return;
+  }
+
+  if (!filteredItems.length) {
+    noMatchEl.style.display = 'block';
+    noRelevantEl.style.display = 'none';
+    if (noRequiredEl) noRequiredEl.style.display = 'none';
+    listEl.style.display = 'none';
+    return;
+  }
+
+  noMatchEl.style.display = 'none';
+  noRelevantEl.style.display = 'none';
+  if (noRequiredEl) noRequiredEl.style.display = 'none';
+  listEl.style.display = 'flex';
+  let itemsToRender = filteredItems;
+  if (!canSeeTrainingTabs()) {
+    itemsToRender = [...filteredItems].sort((a, b) => {
+      const aCompleted = trainingProgressMap[a.id]?.status === 'completed';
+      const bCompleted = trainingProgressMap[b.id]?.status === 'completed';
+      const sa = a.required && !aCompleted ? 0 : !aCompleted ? 1 : 2;
+      const sb = b.required && !bCompleted ? 0 : !bCompleted ? 1 : 2;
+      return sa - sb;
+    });
+  }
+  itemsToRender.forEach((item) => {
+    const isCompleted = trainingProgressMap[item.id]?.status === 'completed';
+    const isRequired = item.required === true;
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border:1px solid #eee;box-shadow:0 1px 2px rgba(0,0,0,0.04);border-radius:8px;padding:10px 12px;display:grid;gap:4px;cursor:pointer;';
+
+    const title = document.createElement('div');
+    title.style.cssText = 'font-size:13px;font-weight:600;color:#111827;';
+    title.textContent = item.title;
+
+    const meta = document.createElement('div');
+    meta.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;';
+    const requiredBadge = isRequired
+      ? '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#fef3c7;border:1px solid #f59e0b;color:#b45309;font-weight:600;">Required</span>'
+      : '';
+    const completedBadge = isCompleted
+      ? '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#d1fae5;border:1px solid #10b981;color:#059669;font-weight:600;">Completed ✓</span>'
+      : '';
+    meta.innerHTML = `
+      <span style="font-size:10px;padding:2px 5px;border-radius:4px;border:1px solid #d1d5db;color:#6b7280;">${toLabel(item.category)}</span>
+      ${requiredBadge}
+      ${completedBadge}
+    `;
+
+    const roles = Array.isArray(item.visibleToRoles) ? item.visibleToRoles : [];
+    const techTypes = Array.isArray(item.technicianTypes) ? item.technicianTypes : [];
+    const roleStr = roles.length ? roles.map(toLabel).join(', ') : 'None';
+    const techStr = (roles.includes('technician') && techTypes.length) ? techTypes.map(toLabel).join(', ') : '';
+    const metaLine = techStr ? `${roleStr} • ${techStr}` : roleStr;
+
+    const metaLineEl = document.createElement('div');
+    metaLineEl.style.cssText = 'font-size:11px;color:#9ca3af;';
+    metaLineEl.textContent = metaLine;
+
+    card.onclick = () => openTrainingDetails(item.id);
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.appendChild(metaLineEl);
+    if (canManageTraining()) {
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:4px;justify-content:flex-end;margin-top:2px;';
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.textContent = 'Edit';
+      editBtn.style.cssText = 'font-size:10px;padding:2px 6px;border:none;background:transparent;color:#6b7280;cursor:pointer;border-radius:4px;';
+      editBtn.onmouseover = () => { editBtn.style.background = '#f3f4f6'; editBtn.style.color = '#374151'; };
+      editBtn.onmouseout = () => { editBtn.style.background = 'transparent'; editBtn.style.color = '#6b7280'; };
+      editBtn.onclick = (e) => {
+        e.stopPropagation();
+        openEditTrainingModal(item.id);
+      };
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.style.cssText = 'font-size:10px;padding:2px 6px;border:none;background:transparent;color:#9ca3af;cursor:pointer;border-radius:4px;';
+      deleteBtn.onmouseover = () => { deleteBtn.style.background = '#fef2f2'; deleteBtn.style.color = '#dc2626'; };
+      deleteBtn.onmouseout = () => { deleteBtn.style.background = 'transparent'; deleteBtn.style.color = '#9ca3af'; };
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        deleteTrainingItemLocal(item.id);
+      };
+      actions.append(editBtn, deleteBtn);
+      card.appendChild(actions);
+    }
+    listEl.appendChild(card);
+  });
+}
+
+async function handleMarkTrainingCompleted(trainingId) {
+  const btn = document.getElementById('trainingMarkCompletedBtn');
+  if (btn) btn.disabled = true;
+  try {
+    await markTrainingCompleted(trainingId);
+    const item = trainingItems.find((x) => x.id === trainingId);
+    if (item) renderTrainingDetails(item);
+  } catch (err) {
+    console.error('[Training] Mark completed failed', err);
+    alert(err?.message || 'Failed to mark as completed.');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function renderTrainingDetails(item) {
+  const detailsView = document.getElementById('trainingDetailsView');
+  if (!detailsView || !item) return;
+
+  const techRow = item.technicianTypes?.length
+    ? `<div style="font-size:13px;color:#374151;"><strong>Technician Types:</strong> ${item.technicianTypes.map(toLabel).join(', ')}</div>`
+    : '';
+  const contentBlocks = Array.isArray(item.contentBlocks) ? item.contentBlocks : [];
+
+  let contentHtml = '<div style="font-size:13px;color:#9ca3af;">No content blocks yet.</div>';
+  if (contentBlocks.length) {
+    contentHtml = contentBlocks.map((block) => {
+      if (block.type === 'text') {
+        return `
+          <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#fff;">
+            <div style="font-size:11px;color:#7c3aed;font-weight:600;margin-bottom:6px;">Text</div>
+            ${block.title ? `<div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:6px;">${block.title}</div>` : ''}
+            <div style="font-size:13px;color:#374151;line-height:1.6;">${block.body || '—'}</div>
+          </div>
+        `;
+      }
+      if (block.type === 'steps') {
+        const steps = Array.isArray(block.steps) ? block.steps : [];
+        return `
+          <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#fff;">
+            <div style="font-size:11px;color:#7c3aed;font-weight:600;margin-bottom:6px;">Steps</div>
+            ${block.title ? `<div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:6px;">${block.title}</div>` : ''}
+            <ol style="margin:0 0 0 18px;padding:0;color:#374151;font-size:13px;line-height:1.6;">${steps.map((s) => `<li>${s}</li>`).join('')}</ol>
+          </div>
+        `;
+      }
+      if (block.type === 'video') {
+        const link = block.url ? `<a href="${block.url}" target="_blank" rel="noopener noreferrer" style="color:#7c3aed;text-decoration:underline;word-break:break-all;">${block.url}</a>` : '—';
+        return `
+          <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#fff;">
+            <div style="font-size:11px;color:#7c3aed;font-weight:600;margin-bottom:6px;">Video</div>
+            ${block.title ? `<div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:6px;">${block.title}</div>` : ''}
+            <div style="font-size:13px;color:#374151;line-height:1.6;">${link}</div>
+          </div>
+        `;
+      }
+      if (block.type === 'image') {
+        const urls = Array.isArray(block.imageUrls) ? block.imageUrls : (block.imageUrl ? [block.imageUrl] : []);
+        const imgsHtml = urls.length ? urls.map((u) => `<img src="${u}" alt="" style="max-width:100%;max-height:200px;border-radius:8px;object-fit:contain;margin:4px 4px 4px 0;" onerror="this.style.display='none'">`).join('') : '—';
+        return `
+          <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#fff;">
+            <div style="font-size:11px;color:#7c3aed;font-weight:600;margin-bottom:6px;">Image</div>
+            ${block.title ? `<div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:6px;">${block.title}</div>` : ''}
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">${imgsHtml}</div>
+          </div>
+        `;
+      }
+      return '';
+    }).join('');
+  }
+
+  const requiredBadgeHtml = item.required === true
+    ? '<span style="font-size:12px;padding:4px 10px;border-radius:999px;background:#fee2e2;color:#dc2626;font-weight:600;">Required Training</span>'
+    : '';
+  detailsView.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+      <button type="button" onclick="backToTrainingLibrary()" class="btn-pill" style="font-size:13px;">Back</button>
+      <h3 style="margin:0;font-size:18px;font-weight:600;color:#111827;">${item.title}</h3>
+      ${requiredBadgeHtml}
+    </div>
+
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;display:grid;gap:10px;margin-bottom:14px;">
+      <div style="font-size:13px;color:#374151;"><strong>Category:</strong> ${toLabel(item.category)}</div>
+      <div style="font-size:13px;color:#374151;"><strong>Visible To Roles:</strong> ${item.visibleToRoles?.length ? item.visibleToRoles.map(toLabel).join(', ') : 'None'}</div>
+      ${techRow}
+      <div style="font-size:13px;color:#374151;"><strong>Type:</strong> ${item.required ? 'Required' : 'Optional'}</div>
+    </div>
+
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;">
+      <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:8px;">Description</div>
+      <div style="font-size:13px;color:#374151;line-height:1.6;">${item.description || 'No description yet.'}</div>
+    </div>
+
+    <div style="margin-top:14px;">
+      <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:8px;">Content</div>
+      <div style="display:grid;gap:10px;">${contentHtml}</div>
+    </div>
+    <div id="trainingProgressSection" style="margin-top:20px;padding-top:16px;border-top:1px solid #e5e7eb;"></div>
+  `;
+  const progressSection = detailsView.querySelector('#trainingProgressSection');
+  if (progressSection) {
+    const staffId = getCurrentTrainingStaffId();
+    const progress = trainingProgressMap[item.id];
+    const isCompleted = progress && progress.status === 'completed';
+    if (!staffId) {
+      progressSection.style.display = 'none';
+    } else {
+      if (isCompleted) {
+        const completedAt = progress.completedAt;
+        let dateStr = '';
+        if (completedAt) {
+          const ts = typeof completedAt.toMillis === 'function' ? completedAt.toMillis() : (completedAt && completedAt.getTime ? completedAt.getTime() : null);
+          if (ts) dateStr = new Date(ts).toLocaleDateString();
+        }
+        progressSection.innerHTML = `
+          <div style="display:flex;align-items:center;gap:8px;color:#059669;font-size:14px;font-weight:500;">
+            <span>Completed ✓</span>
+            ${dateStr ? `<span style="color:#6b7280;font-size:12px;">Completed on: ${dateStr}</span>` : ''}
+          </div>
+        `;
+      } else {
+        const requiredNote = item.required === true
+          ? '<div style="font-size:12px;color:#b45309;margin-bottom:8px;">Required training — not yet completed.</div>'
+          : '';
+        progressSection.innerHTML = `
+          ${requiredNote}
+          <button type="button" id="trainingMarkCompletedBtn" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:13px;border-color:#7c3aed;">Mark as Completed</button>
+        `;
+        const btn = progressSection.querySelector('#trainingMarkCompletedBtn');
+        if (btn) btn.onclick = () => handleMarkTrainingCompleted(item.id);
+      }
+    }
+  }
+}
+
+function openTrainingDetails(itemId) {
+  const listView = document.getElementById('trainingLibraryView');
+  const detailsView = document.getElementById('trainingDetailsView');
+  if (!listView || !detailsView) return;
+  const item = trainingItems.find((x) => x.id === itemId);
+  if (!item) return;
+  selectedTrainingItemId = itemId;
+  listView.style.display = 'none';
+  detailsView.style.display = 'block';
+  renderTrainingDetails(item);
+}
+
+function backToTrainingLibrary() {
+  selectedTrainingItemId = null;
+  renderTrainingLibrary();
+}
+
+function bindTrainingSearchAndFilters() {
+  const viewAllBtn = document.getElementById('trainingViewAllBtn');
+  const viewMyBtn = document.getElementById('trainingViewMyBtn');
+  const viewRequiredBtn = document.getElementById('trainingViewRequiredBtn');
+  const searchInput = document.getElementById('trainingSearchInput');
+  const categoryFilter = document.getElementById('trainingCategoryFilter');
+  const roleFilter = document.getElementById('trainingRoleFilter');
+  const requiredFilter = document.getElementById('trainingRequiredFilter');
+  const toggleWrap = document.getElementById('trainingViewToggleWrap');
+  const canManage = canManageTraining();
+  const canTabs = canSeeTrainingTabs();
+  if (toggleWrap) toggleWrap.style.display = canTabs ? 'flex' : 'none';
+  if (viewAllBtn) viewAllBtn.style.display = (canManage && canTabs) ? 'inline-block' : 'none';
+  const updateTabs = () => {
+    const activeStyle = 'border-bottom:2px solid #111827;color:#111827;';
+    const inactiveStyle = 'border-bottom:2px solid transparent;color:#6b7280;';
+    if (viewAllBtn) viewAllBtn.style.cssText = `padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;background:transparent;cursor:pointer;${trainingViewMode === 'all' ? activeStyle : inactiveStyle}`;
+    if (viewMyBtn) viewMyBtn.style.cssText = `padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;background:transparent;cursor:pointer;${trainingViewMode === 'my' ? activeStyle : inactiveStyle}`;
+    if (viewRequiredBtn) viewRequiredBtn.style.cssText = `padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;background:transparent;cursor:pointer;${trainingViewMode === 'required' ? activeStyle : inactiveStyle}`;
+  };
+  updateTabs();
+  if (viewAllBtn && !viewAllBtn.dataset.bound) { viewAllBtn.dataset.bound = '1'; viewAllBtn.onclick = () => { trainingViewMode = 'all'; updateTabs(); renderTrainingLibrary(); }; }
+  if (viewMyBtn && !viewMyBtn.dataset.bound) { viewMyBtn.dataset.bound = '1'; viewMyBtn.onclick = () => { trainingViewMode = 'my'; updateTabs(); renderTrainingLibrary(); }; }
+  if (viewRequiredBtn && !viewRequiredBtn.dataset.bound) { viewRequiredBtn.dataset.bound = '1'; viewRequiredBtn.onclick = () => { trainingViewMode = 'required'; updateTabs(); renderTrainingLibrary(); }; }
+
+  if (searchInput && !searchInput.dataset.bound) {
+    searchInput.dataset.bound = '1';
+    searchInput.addEventListener('input', (e) => {
+      trainingSearchQuery = String(e.target.value || '');
+      renderTrainingLibrary();
+    });
+  }
+  if (categoryFilter && !categoryFilter.dataset.bound) {
+    categoryFilter.dataset.bound = '1';
+    categoryFilter.addEventListener('change', (e) => {
+      trainingCategoryFilter = String(e.target.value || 'all');
+      renderTrainingLibrary();
+    });
+  }
+  if (roleFilter && !roleFilter.dataset.bound) {
+    roleFilter.dataset.bound = '1';
+    roleFilter.addEventListener('change', (e) => {
+      trainingRoleFilter = String(e.target.value || 'all');
+      renderTrainingLibrary();
+    });
+  }
+  if (requiredFilter && !requiredFilter.dataset.bound) {
+    requiredFilter.dataset.bound = '1';
+    requiredFilter.addEventListener('change', (e) => {
+      trainingRequiredFilter = String(e.target.value || 'all');
+      renderTrainingLibrary();
+    });
+  }
+}
+
+function bindTrainingTopTabs() {
+  const tabLibrary = document.getElementById('trainingTabLibrary');
+  const tabReports = document.getElementById('trainingTabReports');
+  const libraryView = document.getElementById('trainingLibraryView');
+  const reportsView = document.getElementById('trainingReportsView');
+  const detailsView = document.getElementById('trainingDetailsView');
+  const reportDetailsView = document.getElementById('trainingReportDetailsView');
+  const canReports = canViewTrainingReports();
+  const updateTabs = () => {
+    const activeStyle = 'border-bottom:2px solid #111827;color:#111827;background:transparent;';
+    const inactiveStyle = 'border-bottom:2px solid transparent;color:#6b7280;background:transparent;';
+    if (tabLibrary) tabLibrary.style.cssText = `padding:8px 16px;font-size:13px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;cursor:pointer;${trainingReportsMode === 'library' ? activeStyle : inactiveStyle}`;
+    if (tabReports) {
+      tabReports.style.display = canReports ? 'inline-block' : 'none';
+      if (canReports) tabReports.style.cssText = `padding:8px 16px;font-size:13px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;cursor:pointer;display:inline-block;${trainingReportsMode === 'reports' ? activeStyle : inactiveStyle}`;
+    }
+  };
+  const showLibrary = () => {
+    trainingReportsMode = 'library';
+    updateTabs();
+    if (libraryView) libraryView.style.display = 'block';
+    if (reportsView) reportsView.style.display = 'none';
+    if (detailsView) detailsView.style.display = 'none';
+    if (reportDetailsView) reportDetailsView.style.display = 'none';
+    renderTrainingLibrary();
+  };
+  const showReports = async () => {
+    trainingReportsMode = 'reports';
+    updateTabs();
+    if (libraryView) libraryView.style.display = 'none';
+    if (reportsView) reportsView.style.display = 'block';
+    if (detailsView) detailsView.style.display = 'none';
+    if (reportDetailsView) reportDetailsView.style.display = 'none';
+    if (canViewTrainingReports()) {
+      try {
+        trainingAllProgressList = await fetchAllTrainingProgressForSalon();
+      } catch (_) {
+        trainingAllProgressList = [];
+      }
+    }
+    renderTrainingReports();
+  };
+  if (tabLibrary && !tabLibrary.dataset.bound) {
+    tabLibrary.dataset.bound = '1';
+    tabLibrary.onclick = showLibrary;
+  }
+  if (tabReports && !tabReports.dataset.bound) {
+    tabReports.dataset.bound = '1';
+    tabReports.onclick = showReports;
+  }
+  updateTabs();
+}
+
+function bindTrainingReportsSubTabs() {
+  const byTrainingBtn = document.getElementById('trainingReportsByTrainingBtn');
+  const byEmployeeBtn = document.getElementById('trainingReportsByEmployeeBtn');
+  const byTrainingContent = document.getElementById('trainingReportsByTrainingContent');
+  const byEmployeeContent = document.getElementById('trainingReportsByEmployeeContent');
+  const updateSubTabs = () => {
+    const pillActive = 'background:#7c3aed;color:#fff;border-color:#7c3aed;';
+    const pillInactive = 'background:transparent;color:#6b7280;border-color:#d1d5db;';
+    if (byTrainingBtn) byTrainingBtn.style.cssText = `padding:6px 12px;font-size:12px;font-weight:500;border-radius:999px;border:1px solid;cursor:pointer;${trainingReportsSubMode === 'byTraining' ? pillActive : pillInactive}`;
+    if (byEmployeeBtn) byEmployeeBtn.style.cssText = `padding:6px 12px;font-size:12px;font-weight:500;border-radius:999px;border:1px solid;cursor:pointer;${trainingReportsSubMode === 'byEmployee' ? pillActive : pillInactive}`;
+    if (byTrainingContent) byTrainingContent.style.display = trainingReportsSubMode === 'byTraining' ? 'block' : 'none';
+    if (byEmployeeContent) byEmployeeContent.style.display = trainingReportsSubMode === 'byEmployee' ? 'block' : 'none';
+  };
+  if (byTrainingBtn && !byTrainingBtn.dataset.bound) {
+    byTrainingBtn.dataset.bound = '1';
+    byTrainingBtn.onclick = () => { trainingReportsSubMode = 'byTraining'; updateSubTabs(); renderTrainingReports(); };
+  }
+  if (byEmployeeBtn && !byEmployeeBtn.dataset.bound) {
+    byEmployeeBtn.dataset.bound = '1';
+    byEmployeeBtn.onclick = () => { trainingReportsSubMode = 'byEmployee'; updateSubTabs(); renderTrainingReports(); };
+  }
+  updateSubTabs();
+}
+
+function renderTrainingReports() {
+  bindTrainingReportsSubTabs();
+  if (trainingReportsSubMode === 'byTraining') {
+    renderReportsByTraining();
+  } else {
+    renderReportsByEmployee();
+  }
+}
+
+function renderReportsByTraining() {
+  const listEl = document.getElementById('trainingReportsByTrainingList');
+  const emptyEl = document.getElementById('trainingReportsByTrainingEmpty');
+  if (!listEl || !emptyEl) return;
+  listEl.innerHTML = '';
+  if (!trainingItems.length) {
+    listEl.style.display = 'none';
+    emptyEl.style.display = 'block';
+    return;
+  }
+  listEl.style.display = 'flex';
+  emptyEl.style.display = 'none';
+  trainingItems.forEach((item) => {
+    const relevantStaff = getTrainingReportsStaffList().filter((s) => {
+      const ctx = { currentRole: getStaffRoleForTraining(s), currentTechnicianTypes: (s.technicianTypes || []).map((t) => String(t).toLowerCase()) };
+      return isTrainingRelevantToCurrentUser(item, ctx);
+    });
+    const completed = trainingAllProgressList.filter((p) => p.trainingId === item.id && p.status === 'completed');
+    const completedIds = new Set(completed.map((p) => p.staffId));
+    const notCompleted = relevantStaff.filter((s) => !completedIds.has(s.id));
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.06);border-radius:10px;padding:12px 14px;display:grid;gap:8px;';
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div>
+          <div style="font-size:14px;font-weight:600;color:#111827;">${item.title}</div>
+          <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+            <span style="font-size:10px;padding:2px 6px;border-radius:999px;background:#ede9fe;color:#7c3aed;">${toLabel(item.category)}</span>
+            <span style="font-size:10px;padding:2px 6px;border-radius:999px;background:${item.required ? '#fee2e2' : '#f3f4f6'};color:${item.required ? '#dc2626' : '#6b7280'};">${item.required ? 'Required' : 'Optional'}</span>
+          </div>
+        </div>
+        <div style="text-align:right;font-size:12px;color:#6b7280;">
+          <div><span style="color:#059669;font-weight:500;">${completed.length}</span> completed</div>
+          <div><span style="color:#dc2626;font-weight:500;">${notCompleted.length}</span> not completed</div>
+        </div>
+      </div>
+      <button type="button" class="btn-pill" style="font-size:11px;padding:5px 10px;align-self:flex-start;" onclick="openReportTrainingDetails('${item.id}')">View Details</button>
+    `;
+    listEl.appendChild(card);
+  });
+}
+
+function renderReportsByEmployee() {
+  const listEl = document.getElementById('trainingReportsByEmployeeList');
+  const emptyEl = document.getElementById('trainingReportsByEmployeeEmpty');
+  if (!listEl || !emptyEl) return;
+  listEl.innerHTML = '';
+  const staffList = getTrainingReportsStaffList();
+  if (!staffList.length) {
+    listEl.style.display = 'none';
+    emptyEl.style.display = 'block';
+    return;
+  }
+  listEl.style.display = 'flex';
+  emptyEl.style.display = 'none';
+  staffList.forEach((staff) => {
+    const staffId = staff.id || staff.staffId || staff.name;
+    const completedForStaff = trainingAllProgressList.filter((p) => {
+      const pid = String(p.staffId || '');
+      return (pid === staffId || pid === (staff.id || '') || pid === (staff.staffId || '')) && p.status === 'completed';
+    });
+    const staffCtx = { currentRole: getStaffRoleForTraining(staff), currentTechnicianTypes: (staff.technicianTypes || []).map((t) => String(t).toLowerCase()) };
+    const requiredForStaff = trainingItems.filter((item) => isTrainingRequiredForUser(item, staffCtx));
+    const completedRequiredIds = new Set(completedForStaff.map((p) => p.trainingId));
+    const openRequired = requiredForStaff.filter((item) => !completedRequiredIds.has(item.id));
+    let lastCompletedDate = '';
+    if (completedForStaff.length) {
+      const withDate = completedForStaff.filter((p) => p.completedAt).map((p) => getSortTime(p.completedAt));
+      if (withDate.length) {
+        const maxTs = Math.max(...withDate);
+        lastCompletedDate = new Date(maxTs).toLocaleDateString();
+      }
+    }
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.06);border-radius:10px;padding:12px 14px;display:grid;gap:6px;';
+    card.innerHTML = `
+      <div style="font-size:14px;font-weight:600;color:#111827;">${staff.name || staffId || 'Unknown'}</div>
+      <div style="display:flex;gap:12px;font-size:12px;color:#6b7280;">
+        <span><span style="color:#059669;font-weight:500;">${completedForStaff.length}</span> completed</span>
+        <span><span style="color:#dc2626;font-weight:500;">${openRequired.length}</span> open required</span>
+        ${lastCompletedDate ? `<span>Last: ${lastCompletedDate}</span>` : ''}
+      </div>
+    `;
+    listEl.appendChild(card);
+  });
+}
+
+function openReportTrainingDetails(trainingId) {
+  const libraryView = document.getElementById('trainingLibraryView');
+  const reportsView = document.getElementById('trainingReportsView');
+  const reportDetailsView = document.getElementById('trainingReportDetailsView');
+  if (!reportDetailsView) return;
+  const item = trainingItems.find((x) => x.id === trainingId);
+  if (!item) return;
+  const relevantStaff = getTrainingReportsStaffList().filter((s) => {
+    const ctx = { currentRole: getStaffRoleForTraining(s), currentTechnicianTypes: (s.technicianTypes || []).map((t) => String(t).toLowerCase()) };
+    return isTrainingRelevantToCurrentUser(item, ctx);
+  });
+  const completed = trainingAllProgressList.filter((p) => p.trainingId === item.id && p.status === 'completed');
+  const completedIds = new Set(completed.map((p) => p.staffId));
+  const notCompleted = relevantStaff.filter((s) => !completedIds.has(s.id));
+  const staffName = (sid) => {
+    const s = getTrainingReportsStaffList().find((x) => (x.id || x.staffId || '') === sid);
+    return s ? (s.name || sid) : sid;
+  };
+  const completedRows = completed.map((p) => {
+    const ts = p.completedAt ? getSortTime(p.completedAt) : 0;
+    const dateStr = ts ? new Date(ts).toLocaleDateString() : '—';
+    return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6;"><span>${staffName(p.staffId)}</span><span style="color:#059669;font-size:12px;">${dateStr}</span></div>`;
+  }).join('');
+  const notCompletedRows = notCompleted.map((s) => `<div style="padding:6px 0;border-bottom:1px solid #f3f4f6;">${s.name || s.id || 'Unknown'}</div>`).join('');
+  reportDetailsView.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+      <button type="button" onclick="backFromReportTrainingDetails()" class="btn-pill" style="font-size:13px;">Back</button>
+      <h3 style="margin:0;font-size:16px;font-weight:600;color:#111827;">${item.title}</h3>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin-bottom:12px;">
+      <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:10px;">Completed (${completed.length})</div>
+      <div style="font-size:12px;color:#374151;">${completedRows || '<div style="color:#9ca3af;">None</div>'}</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;">
+      <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:10px;">Not Completed (${notCompleted.length})</div>
+      <div style="font-size:12px;color:#374151;">${notCompletedRows || '<div style="color:#9ca3af;">None</div>'}</div>
+    </div>
+  `;
+  if (reportsView) reportsView.style.display = 'none';
+  reportDetailsView.style.display = 'block';
+}
+
+function backFromReportTrainingDetails() {
+  const reportsView = document.getElementById('trainingReportsView');
+  const reportDetailsView = document.getElementById('trainingReportDetailsView');
+  if (reportsView) reportsView.style.display = 'block';
+  if (reportDetailsView) reportDetailsView.style.display = 'none';
+  renderTrainingReports();
+}
+
+window.openReportTrainingDetails = openReportTrainingDetails;
+window.backFromReportTrainingDetails = backFromReportTrainingDetails;
+
+async function goToTraining() {
+  const tasksScreen = document.getElementById('tasksScreen');
+  const inboxScreen = document.getElementById('inboxScreen');
+  const chatScreen = document.getElementById('chatScreen');
+  const mediaScreen = document.getElementById('mediaScreen');
+  const ownerView = document.getElementById('owner-view');
+  const joinBar = document.getElementById('joinBar');
+  const queueControls = document.getElementById('queueControls');
+  const wrap = document.querySelector('.wrap');
+  const trainingScreen = document.getElementById('trainingScreen');
+
+  if (tasksScreen) tasksScreen.style.display = 'none';
+  if (inboxScreen) inboxScreen.style.display = 'none';
+  if (chatScreen) chatScreen.style.display = 'none';
+  if (mediaScreen) mediaScreen.style.display = 'none';
+  if (ownerView) ownerView.style.display = 'none';
+  if (joinBar) joinBar.style.display = 'none';
+  if (queueControls) queueControls.style.display = 'none';
+  if (wrap) wrap.style.display = 'none';
+  if (trainingScreen) trainingScreen.style.display = 'flex';
+
+  document.querySelectorAll('.btn-pill').forEach((b) => b.classList.remove('active'));
+  const canManage = canManageTraining();
+  trainingViewMode = canManage ? 'all' : 'my';
+  if (!canSeeTrainingTabs()) trainingViewMode = 'my';
+  trainingReportsMode = 'library';
+  trainingReportsSubMode = 'byTraining';
+  const createWrap = document.getElementById('trainingCreateBtnWrap');
+  if (createWrap) createWrap.style.display = canManage ? 'inline' : 'none';
+  const toggleWrap = document.getElementById('trainingViewToggleWrap');
+  if (toggleWrap) toggleWrap.style.display = canSeeTrainingTabs() ? 'flex' : 'none';
+  bindTrainingTopTabs();
+  bindTrainingSearchAndFilters();
+  try { await ensureTechnicianTypesForTraining(); } catch (_) {}
+  await loadTrainingItems();
+  try {
+    trainingProgressMap = await fetchTrainingProgressForUser();
+  } catch (_) {
+    trainingProgressMap = {};
+  }
+  if (canViewTrainingReports()) {
+    try {
+      trainingAllProgressList = await fetchAllTrainingProgressForSalon();
+    } catch (_) {
+      trainingAllProgressList = [];
+    }
+  }
+  const libraryView = document.getElementById('trainingLibraryView');
+  const reportsView = document.getElementById('trainingReportsView');
+  const reportDetailsView = document.getElementById('trainingReportDetailsView');
+  if (libraryView) libraryView.style.display = 'block';
+  if (reportsView) reportsView.style.display = 'none';
+  if (reportDetailsView) reportDetailsView.style.display = 'none';
+  renderTrainingLibrary();
+}
+
+window.goToTraining = goToTraining;
+window.openCreateTrainingModal = openCreateTrainingModal;
+window.openEditTrainingModal = openEditTrainingModal;
+window.closeCreateTrainingModal = closeCreateTrainingModal;
+window.saveTrainingItemLocal = saveTrainingItemLocal;
+window.deleteTrainingItemLocal = deleteTrainingItemLocal;
+window.openTrainingDetails = openTrainingDetails;
+window.backToTrainingLibrary = backToTrainingLibrary;
+window.addTrainingBlock = addTrainingBlock;
 
 // Manage Queue Screen Functions
 // Placeholder permission check - to be connected to actual permission system
@@ -16360,6 +17832,11 @@ function initializeAppsPanel() {
           case 'media':
             if (typeof window.goToMedia === 'function') {
               window.goToMedia();
+            }
+            break;
+          case 'training':
+            if (typeof window.goToTraining === 'function') {
+              window.goToTraining();
             }
             break;
           case 'history':
@@ -28984,6 +30461,180 @@ function hookSettingsGuard_DISABLED(){
           <button id="emptyStateNewRequestBtn" onclick="openCreateRequestModal()" class="btn-pill" style="background:#7c3aed;color:#fff;padding:12px 24px;border-color:#7c3aed;">+ New Request</button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Training Screen (Apps > Training, MVP) -->
+<div id="trainingScreen" class="inbox-screen" style="display:none;">
+  <div style="flex:1;padding:12px 20px;overflow-y:auto;background:#fafafa;">
+    <div style="max-width:900px;margin:0 auto;">
+      <div id="trainingTopTabs" style="display:flex;align-items:center;gap:0;margin-bottom:12px;border-bottom:1px solid #e5e7eb;">
+        <button id="trainingTabLibrary" type="button" class="training-top-tab" style="padding:8px 16px;font-size:13px;font-weight:500;border:none;border-bottom:2px solid #111827;background:transparent;color:#111827;cursor:pointer;margin-bottom:-1px;">Library</button>
+        <button id="trainingTabReports" type="button" class="training-top-tab" style="display:none;padding:8px 16px;font-size:13px;font-weight:500;border:none;border-bottom:2px solid transparent;background:transparent;color:#6b7280;cursor:pointer;margin-bottom:-1px;">Reports</button>
+      </div>
+
+      <div id="trainingLibraryView" style="display:block;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:6px;">
+          <h3 style="margin:0;font-size:15px;font-weight:600;color:#111827;">Training Library</h3>
+          <span id="trainingCreateBtnWrap"><button type="button" onclick="openCreateTrainingModal()" style="padding:6px 12px;font-size:12px;font-weight:500;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#374151;cursor:pointer;">Create Training</button></span>
+        </div>
+
+        <div id="trainingViewToggleWrap" style="display:flex;align-items:center;gap:0;margin-bottom:4px;border-bottom:1px solid #e5e7eb;">
+          <button id="trainingViewAllBtn" type="button" style="padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid transparent;background:transparent;color:#6b7280;cursor:pointer;margin-bottom:-1px;">All</button>
+          <button id="trainingViewMyBtn" type="button" style="padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid transparent;background:transparent;color:#6b7280;cursor:pointer;margin-bottom:-1px;">My</button>
+          <button id="trainingViewRequiredBtn" type="button" style="padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid transparent;background:transparent;color:#6b7280;cursor:pointer;margin-bottom:-1px;">Required</button>
+        </div>
+
+        <div id="trainingToolbar" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;padding:4px 0;border-bottom:1px solid #eee;">
+          <input id="trainingSearchInput" type="text" placeholder="Search..." style="flex:1;min-width:120px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;">
+          <select id="trainingCategoryFilter" style="width:120px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:12px;color:#374151;">
+            <option value="all">All Categories</option>
+            <option value="onboarding">onboarding</option>
+            <option value="service">service</option>
+            <option value="procedure">procedure</option>
+            <option value="policy">policy</option>
+          </select>
+          <select id="trainingRoleFilter" style="width:100px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:12px;color:#374151;">
+            <option value="all">All Roles</option>
+            <option value="admin">admin</option>
+            <option value="manager">manager</option>
+            <option value="technician">technician</option>
+          </select>
+          <select id="trainingRequiredFilter" style="width:85px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:12px;color:#374151;">
+            <option value="all">All</option>
+            <option value="required">Required</option>
+            <option value="optional">Optional</option>
+          </select>
+        </div>
+
+        <div id="trainingLoadingState" style="display:none;text-align:center;padding:20px 12px;color:#9ca3af;font-size:12px;">
+          Loading training items...
+        </div>
+
+        <div id="trainingErrorState" style="display:none;text-align:center;padding:10px 12px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px;margin-bottom:8px;"></div>
+
+        <div id="trainingEmptyState" style="display:block;text-align:center;padding:32px 12px;color:#9ca3af;font-size:12px;">
+          No training items yet.
+        </div>
+
+        <div id="trainingNoMatchState" style="display:none;text-align:center;padding:24px 12px;color:#9ca3af;font-size:12px;">
+          No matching training items.
+        </div>
+
+        <div id="trainingNoRelevantState" style="display:none;text-align:center;padding:24px 12px;color:#9ca3af;font-size:12px;">
+          No training items relevant to you.
+        </div>
+
+        <div id="trainingNoRequiredState" style="display:none;text-align:center;padding:24px 12px;color:#9ca3af;font-size:12px;">
+          No required training.
+        </div>
+
+        <div id="trainingList" style="display:none;flex-direction:column;gap:6px;">
+          <!-- Training items list -->
+        </div>
+      </div>
+
+      <div id="trainingReportsView" style="display:none;">
+        <div id="trainingReportsSubTabs" style="display:flex;align-items:center;gap:6px;margin-bottom:12px;">
+          <button id="trainingReportsByTrainingBtn" type="button" class="training-reports-tab" style="padding:6px 12px;font-size:12px;font-weight:500;border-radius:999px;border:1px solid #7c3aed;background:#7c3aed;color:#fff;cursor:pointer;">By Training</button>
+          <button id="trainingReportsByEmployeeBtn" type="button" class="training-reports-tab" style="padding:6px 12px;font-size:12px;font-weight:500;border-radius:999px;border:1px solid #d1d5db;background:transparent;color:#6b7280;cursor:pointer;">By Employee</button>
+        </div>
+        <div id="trainingReportsByTrainingContent" style="display:block;">
+          <div id="trainingReportsByTrainingList" style="display:flex;flex-direction:column;gap:8px;"></div>
+          <div id="trainingReportsByTrainingEmpty" style="display:none;text-align:center;padding:32px 16px;color:#9ca3af;font-size:13px;">No training items yet.</div>
+        </div>
+        <div id="trainingReportsByEmployeeContent" style="display:none;">
+          <div id="trainingReportsByEmployeeList" style="display:flex;flex-direction:column;gap:8px;"></div>
+          <div id="trainingReportsByEmployeeEmpty" style="display:none;text-align:center;padding:32px 16px;color:#9ca3af;font-size:13px;">No staff found.</div>
+        </div>
+      </div>
+
+      <div id="trainingDetailsView" style="display:none;">
+        <!-- Training details content -->
+      </div>
+
+      <div id="trainingReportDetailsView" style="display:none;">
+        <!-- Report training details: Completed / Not Completed -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Create Training Modal (local-only MVP) -->
+<div id="createTrainingModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100030;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#fff;border-radius:12px;max-width:640px;width:100%;padding:20px 20px 16px;box-shadow:0 12px 36px rgba(0,0,0,0.22);max-height:86vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 id="trainingModalTitle" style="margin:0;font-size:16px;font-weight:600;color:#111827;">Create Training</h3>
+      <button type="button" onclick="closeCreateTrainingModal()" style="background:none;border:none;font-size:20px;line-height:1;cursor:pointer;color:#6b7280;">×</button>
+    </div>
+
+    <div style="display:grid;gap:12px;">
+      <div>
+        <label for="trainingTitleInput" style="display:block;font-size:12px;color:#374151;margin-bottom:6px;">Title</label>
+        <input id="trainingTitleInput" type="text" placeholder="Enter training title" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;">
+      </div>
+
+      <div>
+        <label for="trainingCategoryInput" style="display:block;font-size:12px;color:#374151;margin-bottom:6px;">Category</label>
+        <select id="trainingCategoryInput" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff;">
+          <option value="">Select category...</option>
+          <option value="onboarding">onboarding</option>
+          <option value="service">service</option>
+          <option value="procedure">procedure</option>
+          <option value="policy">policy</option>
+        </select>
+      </div>
+
+      <div>
+        <div style="font-size:12px;color:#374151;margin-bottom:6px;">Visible To Roles</div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;">
+          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingVisibleRole" value="admin">admin</label>
+          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingVisibleRole" value="manager">manager</label>
+          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingVisibleRole" value="technician">technician</label>
+        </div>
+      </div>
+
+      <div id="trainingTechnicianTypesWrap" style="display:none;">
+        <div style="font-size:12px;color:#374151;margin-bottom:6px;">Technician Types</div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;">
+          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="all_technicians">all_technicians</label>
+          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="nails">nails</label>
+          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="massage">massage</label>
+          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="esthetician">esthetician</label>
+          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="waxing">waxing</label>
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;">
+          <input id="trainingRequiredInput" type="checkbox">
+          Required
+        </label>
+      </div>
+
+      <div>
+        <label for="trainingDescriptionInput" style="display:block;font-size:12px;color:#374151;margin-bottom:6px;">Description</label>
+        <textarea id="trainingDescriptionInput" rows="4" placeholder="Optional description" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;resize:vertical;"></textarea>
+      </div>
+
+      <div style="border-top:1px solid #e5e7eb;padding-top:12px;">
+        <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:8px;">Content Blocks</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+          <button type="button" onclick="addTrainingBlock('text')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Text Block</button>
+          <button type="button" onclick="addTrainingBlock('steps')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Steps Block</button>
+          <button type="button" onclick="addTrainingBlock('video')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Video Block</button>
+          <button type="button" onclick="addTrainingBlock('image')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Image Block</button>
+        </div>
+        <div id="trainingBlocksEditor" style="display:grid;gap:10px;"></div>
+      </div>
+    </div>
+
+    <div id="trainingValidationMsg" style="display:none;margin-top:12px;font-size:12px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 10px;"></div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+      <button type="button" onclick="closeCreateTrainingModal()" class="btn-pill" style="font-size:13px;">Cancel</button>
+      <button id="trainingSaveBtn" type="button" onclick="saveTrainingItemLocal()" class="btn-pill" style="background:#7c3aed;color:#fff;border-color:#7c3aed;font-size:13px;">Save</button>
     </div>
   </div>
 </div>

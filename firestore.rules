@@ -570,6 +570,50 @@ service cloud.firestore {
       }
     }
 
+    // Training progress (per-staff completion status)
+    // Managers can read all progress for reports; staff can read/update own only
+    match /trainingProgress/{progressId} {
+      allow read: if request.auth != null
+        && resource.data.salonId is string
+        && belongsToSalon(resource.data.salonId)
+        && (
+          matchesOwnStaffId(resource.data.salonId, resource.data.staffId)
+          || isManager(resource.data.salonId)
+        );
+      allow update: if request.auth != null
+        && resource.data.salonId is string
+        && belongsToSalon(resource.data.salonId)
+        && matchesOwnStaffId(resource.data.salonId, resource.data.staffId);
+      allow create: if request.auth != null
+        && request.resource.data.salonId is string
+        && request.resource.data.staffId is string
+        && request.resource.data.trainingId is string
+        && belongsToSalon(request.resource.data.salonId)
+        && matchesOwnStaffId(request.resource.data.salonId, request.resource.data.staffId);
+      allow delete: if false;
+    }
+
+    // Training library (top-level collection, salon-scoped by field)
+    // belongsToSalon OR isStaffInSalon - technicians may have staff doc but lack users.salonId/members
+    match /trainingItems/{itemId} {
+      allow read: if request.auth != null
+        && (resource.data.salonId is string)
+        && (belongsToSalon(resource.data.salonId) || isStaffInSalon(resource.data.salonId));
+
+      allow create: if request.auth != null
+        && (request.resource.data.salonId is string)
+        && (belongsToSalon(request.resource.data.salonId) || isStaffInSalon(request.resource.data.salonId));
+
+      allow update: if request.auth != null
+        && (resource.data.salonId is string)
+        && (belongsToSalon(resource.data.salonId) || isStaffInSalon(resource.data.salonId))
+        && (request.resource.data.salonId == resource.data.salonId);
+
+      allow delete: if request.auth != null
+        && (resource.data.salonId is string)
+        && (belongsToSalon(resource.data.salonId) || isStaffInSalon(resource.data.salonId));
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;
