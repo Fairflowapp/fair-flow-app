@@ -3,12 +3,12 @@
  * Connects to media-cloud.js.
  */
 
-import { getDoc, getDocs, doc, collection, setDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-import { ref as storageRef, getBlob } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-storage.js";
-import { getApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-functions.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-import { db, auth, storage } from "./app.js?v=20260312_fix2";
+import { getDoc, getDocs, doc, collection, setDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { ref as storageRef, getBlob } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
+import { getApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+import { db, auth, storage } from "./app.js?v=20260329_training_fix1";
 import {
   createWorkWithMedia,
   addMediaToExistingWork,
@@ -27,7 +27,7 @@ import {
   subscribeMediaCategories,
   createMediaCategory,
   updateMediaCategory,
-} from "./media-cloud.js?v=3";
+} from "./media-cloud.js?v=20260329_training_fix1";
 
 let currentUserProfile = null;
 let userWorks = [];

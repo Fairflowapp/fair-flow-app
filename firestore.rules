@@ -40,9 +40,37 @@ service cloud.firestore {
       return (userDocData().role is string) ? userDocData().role.lower() : '';
     }
 
+    function memberRole(salonId) {
+      return (memberExists(salonId) && memberDocData(salonId).role is string)
+        ? memberDocData(salonId).role.lower()
+        : '';
+    }
+
+    function linkedStaffId(salonId) {
+      return (
+        userExists()
+        && userDocData().staffId is string
+        && userDocData().staffId != ''
+      )
+        ? userDocData().staffId
+        : (
+          (
+            memberExists(salonId)
+            && memberDocData(salonId).staffId is string
+            && memberDocData(salonId).staffId != ''
+          )
+            ? memberDocData(salonId).staffId
+            : ''
+        );
+    }
+
     function isManager(salonId) {
       return belongsToSalon(salonId)
-        && userRole() in ['manager', 'admin', 'owner'];
+        && (
+          userRole() in ['manager', 'admin', 'owner']
+          || memberRole(salonId) in ['manager', 'admin', 'owner']
+          || hasStaffAdminFlag(salonId)
+        );
     }
 
     function isTechnician(salonId) {
@@ -52,7 +80,11 @@ service cloud.firestore {
 
     function isAdminOrOwner(salonId) {
       return belongsToSalon(salonId)
-        && userRole() in ['admin', 'owner'];
+        && (
+          userRole() in ['admin', 'owner']
+          || memberRole(salonId) in ['admin', 'owner']
+          || hasStaffOwnerFlag(salonId)
+        );
     }
 
     function matchesOwnStaffId(salonId, staffId) {
@@ -70,9 +102,25 @@ service cloud.firestore {
     // User is staff in salon (has staff doc) - for technicians who may lack users.salonId/members
     function isStaffInSalon(salonId) {
       return isSignedIn()
-        && userExists()
-        && userDocData().staffId is string
-        && exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId));
+        && linkedStaffId(salonId) != ''
+        && exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(linkedStaffId(salonId)));
+    }
+
+    function currentStaffDocData(salonId) {
+      return get(/databases/$(database)/documents/salons/$(salonId)/staff/$(linkedStaffId(salonId))).data;
+    }
+
+    function hasStaffAdminFlag(salonId) {
+      return isStaffInSalon(salonId)
+        && (
+          currentStaffDocData(salonId).isAdmin == true
+          || currentStaffDocData(salonId).isManager == true
+        );
+    }
+
+    function hasStaffOwnerFlag(salonId) {
+      return isStaffInSalon(salonId)
+        && currentStaffDocData(salonId).isAdmin == true;
     }
 
     // ===== COLLECTIONS =====
@@ -310,11 +358,8 @@ service cloud.firestore {
 
     // ===== STAFF PRESENCE / CALLS =====
     match /salons/{salonId}/staffPresence/{staffId} {
-      allow read: if belongsToSalon(salonId)
-        && (
-          isManager(salonId)
-          || matchesOwnStaffId(salonId, staffId)
-        );
+      // Collection listeners read all presence docs, so all salon members need read access.
+      allow read: if belongsToSalon(salonId);
       allow create: if belongsToSalon(salonId)
         && (
           isManager(salonId)
@@ -583,13 +628,26 @@ service cloud.firestore {
       allow update: if request.auth != null
         && resource.data.salonId is string
         && belongsToSalon(resource.data.salonId)
-        && matchesOwnStaffId(resource.data.salonId, resource.data.staffId);
+        && (
+          matchesOwnStaffId(resource.data.salonId, resource.data.staffId)
+          || (
+            isManager(resource.data.salonId)
+            && resource.data.blockId == null
+            && request.resource.data.blockId == null
+          )
+        );
       allow create: if request.auth != null
         && request.resource.data.salonId is string
         && request.resource.data.staffId is string
         && request.resource.data.trainingId is string
         && belongsToSalon(request.resource.data.salonId)
-        && matchesOwnStaffId(request.resource.data.salonId, request.resource.data.staffId);
+        && (
+          matchesOwnStaffId(request.resource.data.salonId, request.resource.data.staffId)
+          || (
+            isManager(request.resource.data.salonId)
+            && request.resource.data.blockId == null
+          )
+        );
       allow delete: if false;
     }
 

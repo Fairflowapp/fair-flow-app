@@ -1471,16 +1471,16 @@ dialog footer button, .code-dialog footer button {
 
   <!-- Firebase SDK (modular) -->
   <script type="module">
-    import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
     import {
       getAuth,
       onAuthStateChanged,
       signInWithEmailAndPassword,
       signOut,
       sendPasswordResetEmail
-    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-    import { getFirestore } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-    import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app-check.js";
+    } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+    import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+    import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app-check.js";
     console.log("[CLIENT] Using modular firebase (callable via app.js)");
     window.initializeApp = initializeApp;
     window.getApps = getApps;
@@ -5505,6 +5505,8 @@ let trainingProgressMap = {};
 let trainingReportsMode = 'library';
 let trainingReportsSubMode = 'byTraining';
 let trainingAllProgressList = [];
+let trainingVideoProgressMap = {};
+let trainingVideoProgressCache = {};
 
 function getCurrentTrainingStaffId() {
   return String(
@@ -5522,7 +5524,7 @@ function toLabel(value) {
 
 async function getTrainingFirestoreApi() {
   if (window.__trainingFirestoreApi) return window.__trainingFirestoreApi;
-  const m = await import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js");
+  const m = await import("https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js");
   window.__trainingFirestoreApi = m;
   return m;
 }
@@ -5671,6 +5673,7 @@ async function fetchTrainingProgressForUser() {
   const map = {};
   snap.docs.forEach((d) => {
     const data = d.data() || {};
+    if (data.blockId) return;
     const tid = data.trainingId || '';
     if (tid) map[tid] = { id: d.id, ...data };
   });
@@ -5688,15 +5691,39 @@ async function fetchAllTrainingProgressForSalon() {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
+async function fetchTrainingVideoProgressForUser() {
+  const salonId = getCurrentTrainingSalonId();
+  const staffId = getCurrentTrainingStaffId();
+  if (!staffId) return {};
+  const db = getTrainingDb();
+  const { collection, query, where, getDocs } = await getTrainingFirestoreApi();
+  const snap = await getDocs(
+    query(
+      collection(db, 'trainingProgress'),
+      where('salonId', '==', salonId),
+      where('staffId', '==', staffId)
+    )
+  );
+  const map = {};
+  snap.docs.forEach((d) => {
+    const data = d.data() || {};
+    if (!data.blockId) return;
+    const key = getTrainingVideoProgressCacheKey(data.trainingId, data.blockId);
+    map[key] = { id: d.id, ...data };
+  });
+  return map;
+}
+
 function canViewTrainingReports() {
-  const role = String(
+  const accountRole = String(window.__ff_user_role || '').toLowerCase().trim();
+  if (accountRole === 'owner' || accountRole === 'admin') return true;
+  const actorRole = String(
     window.__ff_actorRole ||
     sessionStorage.getItem('ff_actor_role') ||
-    window.__ff_user_role ||
     ''
   ).toLowerCase().trim();
-  if (['tech', 'technician', 'staff', 'manager'].includes(role)) return false;
-  if (role === 'owner' || role === 'admin') return true;
+  if (actorRole === 'owner' || actorRole === 'admin') return true;
+  if (['tech', 'technician', 'staff', 'manager'].includes(actorRole)) return false;
   return typeof ffHasAdminAccess === 'function' && ffHasAdminAccess();
 }
 
@@ -5721,7 +5748,7 @@ async function markTrainingCompleted(trainingId) {
   const staffId = getCurrentTrainingStaffId();
   if (!staffId) throw new Error('Staff ID required to track progress.');
   const db = getTrainingDb();
-  const { collection, query, where, getDocs, doc, setDoc, updateDoc, addDoc, serverTimestamp } = await getTrainingFirestoreApi();
+  const { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp } = await getTrainingFirestoreApi();
   const existing = await getDocs(
     query(
       collection(db, 'trainingProgress'),
@@ -5730,6 +5757,7 @@ async function markTrainingCompleted(trainingId) {
       where('trainingId', '==', trainingId)
     )
   );
+  const completionDoc = existing.docs.find((d) => !(d.data()?.blockId));
   const now = new Date();
   const payload = {
     trainingId,
@@ -5739,8 +5767,8 @@ async function markTrainingCompleted(trainingId) {
     completedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
-  if (existing.docs.length > 0) {
-    await updateDoc(doc(db, 'trainingProgress', existing.docs[0].id), {
+  if (completionDoc) {
+    await updateDoc(doc(db, 'trainingProgress', completionDoc.id), {
       status: 'completed',
       completedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -5749,6 +5777,332 @@ async function markTrainingCompleted(trainingId) {
     await addDoc(collection(db, 'trainingProgress'), payload);
   }
   trainingProgressMap[trainingId] = { status: 'completed', completedAt: now };
+}
+
+async function markTrainingCompletedForStaff(trainingId, targetStaffId) {
+  const salonId = getCurrentTrainingSalonId();
+  const staffId = String(targetStaffId || '').trim();
+  if (!staffId) throw new Error('Target staff ID required.');
+  if (!canManageTraining()) throw new Error('Only admin can mark another employee as completed.');
+  const db = getTrainingDb();
+  const { doc, setDoc, serverTimestamp } = await getTrainingFirestoreApi();
+  const payload = {
+    trainingId,
+    salonId,
+    staffId,
+    blockId: null,
+    status: 'completed',
+    completedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    markedByAdmin: true,
+    markedByUid: (typeof window.__ffGetUid === 'function' ? window.__ffGetUid() : null) || null,
+  };
+  await setDoc(doc(db, 'trainingProgress', getTrainingCompletionProgressDocId(trainingId, staffId)), payload, { merge: true });
+}
+
+function showTrainingAdminConfirm({ title, message, confirmLabel }) {
+  return new Promise((resolve) => {
+    const existing = document.getElementById('trainingAdminConfirmModal');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'trainingAdminConfirmModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:100050;display:flex;align-items:center;justify-content:center;padding:20px;';
+    const dialog = document.createElement('div');
+    dialog.style.cssText = 'width:100%;max-width:420px;background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,0.22);border:1px solid #ede9fe;padding:20px;display:grid;gap:14px;';
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = 'font-size:16px;font-weight:600;color:#111827;';
+    titleEl.textContent = title || 'Confirm action';
+    const bodyEl = document.createElement('div');
+    bodyEl.style.cssText = 'font-size:13px;line-height:1.6;color:#4b5563;';
+    bodyEl.textContent = message || '';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;margin-top:4px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn-pill';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'font-size:12px;padding:8px 14px;background:#fff;color:#374151;border:1px solid #d1d5db;';
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'btn-pill';
+    okBtn.textContent = confirmLabel || 'Confirm';
+    okBtn.style.cssText = 'font-size:12px;padding:8px 14px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;';
+    const close = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close(false);
+    });
+    cancelBtn.onclick = () => close(false);
+    okBtn.onclick = () => close(true);
+    dialog.onclick = (e) => e.stopPropagation();
+    actions.append(cancelBtn, okBtn);
+    dialog.append(titleEl, bodyEl, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+  });
+}
+
+function showTrainingAdminNotice({ title, message, buttonLabel }) {
+  return new Promise((resolve) => {
+    const existing = document.getElementById('trainingAdminNoticeModal');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'trainingAdminNoticeModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:100051;display:flex;align-items:center;justify-content:center;padding:20px;';
+    const dialog = document.createElement('div');
+    dialog.style.cssText = 'width:100%;max-width:420px;background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,0.22);border:1px solid #ede9fe;padding:20px;display:grid;gap:14px;';
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = 'font-size:16px;font-weight:600;color:#111827;';
+    titleEl.textContent = title || 'Notice';
+    const bodyEl = document.createElement('div');
+    bodyEl.style.cssText = 'font-size:13px;line-height:1.6;color:#4b5563;';
+    bodyEl.textContent = message || '';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;margin-top:4px;';
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'btn-pill';
+    okBtn.textContent = buttonLabel || 'OK';
+    okBtn.style.cssText = 'font-size:12px;padding:8px 14px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;';
+    const close = () => {
+      overlay.remove();
+      resolve();
+    };
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close();
+    });
+    okBtn.onclick = close;
+    dialog.onclick = (e) => e.stopPropagation();
+    actions.append(okBtn);
+    dialog.append(titleEl, bodyEl, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+  });
+}
+
+function getTrainingVideoProgressDocId(trainingId, blockId, staffId) {
+  return ['video', trainingId, blockId, staffId]
+    .map((part) => String(part || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
+    .join('__');
+}
+
+function getTrainingCompletionProgressDocId(trainingId, staffId) {
+  return ['completion', trainingId, staffId]
+    .map((part) => String(part || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
+    .join('__');
+}
+
+function getTrainingVideoProgressCacheKey(trainingId, blockId) {
+  return `${String(trainingId || '')}::${String(blockId || '')}`;
+}
+
+function getTrainingBlockStableId(block, index) {
+  if (block?.id) return String(block.id);
+  return `legacy_${String(block?.type || 'block')}_${Number(index)}`;
+}
+
+async function saveTrainingVideoProgress(trainingId, blockId, metrics) {
+  const salonId = getCurrentTrainingSalonId();
+  const staffId = getCurrentTrainingStaffId();
+  if (!salonId || !staffId || !trainingId || !blockId) return;
+  const percentWatched = Math.max(0, Math.min(100, Math.round(Number(metrics?.percentWatched || 0))));
+  const lastTimeSec = Math.max(0, Math.round(Number(metrics?.lastTimeSec || 0)));
+  const durationSec = Math.max(0, Math.round(Number(metrics?.durationSec || 0)));
+  const completed = percentWatched >= 80;
+  const cacheKey = getTrainingVideoProgressCacheKey(trainingId, blockId);
+  const prev = trainingVideoProgressCache[cacheKey];
+  const nowMs = Date.now();
+  const percentDiff = Math.abs((prev?.percentWatched || 0) - percentWatched);
+  const timeDiff = Math.abs((prev?.lastTimeSec || 0) - lastTimeSec);
+  const completedChanged = !!prev && !!prev.completed !== completed;
+  const staleEnough = !prev || (nowMs - (prev.savedAtMs || 0) >= 5000);
+  const changedEnough = !prev || percentDiff >= 5 || timeDiff >= 5 || completedChanged || completed;
+  if (!changedEnough && !staleEnough) return;
+  trainingVideoProgressCache[cacheKey] = { percentWatched, lastTimeSec, durationSec, completed, savedAtMs: nowMs };
+  trainingVideoProgressMap[cacheKey] = {
+    ...(trainingVideoProgressMap[cacheKey] || {}),
+    trainingId,
+    blockId,
+    staffId,
+    percentWatched,
+    lastTimeSec,
+    durationSec,
+    completed,
+  };
+  updateTrainingVideoProgressUI(trainingId, blockId);
+  try {
+    const db = getTrainingDb();
+    const { doc, setDoc, serverTimestamp } = await getTrainingFirestoreApi();
+    const docId = getTrainingVideoProgressDocId(trainingId, blockId, staffId);
+    await setDoc(doc(db, 'trainingProgress', docId), {
+      progressType: 'video_progress',
+      salonId,
+      trainingId,
+      blockId,
+      staffId,
+      percentWatched,
+      lastTimeSec,
+      durationSec,
+      completed,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (err) {
+    console.error('[Training] Video progress save failed', err);
+  }
+}
+
+function formatTrainingVideoProgressText(progress) {
+  if (!progress) return 'Watch progress: 0%';
+  const percent = Math.max(0, Math.min(100, Math.round(Number(progress.percentWatched || 0))));
+  const lastSec = Math.max(0, Math.round(Number(progress.lastTimeSec || 0)));
+  const durationSec = Math.max(0, Math.round(Number(progress.durationSec || 0)));
+  const parts = [`Watch progress: ${percent}%`];
+  if (durationSec > 0) parts.push(`Last position: ${lastSec}s / ${durationSec}s`);
+  if (progress.completed) parts.push('Completed');
+  return parts.join(' • ');
+}
+
+function updateTrainingVideoProgressUI(trainingId, blockId) {
+  const detailsView = document.getElementById('trainingDetailsView');
+  if (!detailsView) return;
+  const key = getTrainingVideoProgressCacheKey(trainingId, blockId);
+  const progress = trainingVideoProgressMap[key];
+  const statusEl = detailsView.querySelector(`[data-video-progress-for="${blockId}"]`);
+  if (statusEl) {
+    statusEl.textContent = formatTrainingVideoProgressText(progress);
+    statusEl.style.color = progress?.completed ? '#059669' : '#6b7280';
+  }
+}
+
+function renderTrainingVideoProgressMeta(trainingId, blockId) {
+  const progress = trainingVideoProgressMap[getTrainingVideoProgressCacheKey(trainingId, blockId)];
+  const color = progress?.completed ? '#059669' : '#6b7280';
+  return `<div data-video-progress-for="${blockId}" style="margin-top:8px;font-size:12px;color:${color};">${formatTrainingVideoProgressText(progress)}</div>`;
+}
+
+function getTrainingReportStaffId(staff) {
+  return String(staff?.id || staff?.staffId || staff?.name || '').trim();
+}
+
+function getTrainingCompletedEntries(trainingId) {
+  return trainingAllProgressList.filter((p) => p.trainingId === trainingId && !p.blockId && p.status === 'completed');
+}
+
+function getTrainingVideoProgressEntries(trainingId, staffId) {
+  return trainingAllProgressList.filter((p) => {
+    if (p.trainingId !== trainingId || !p.blockId) return false;
+    return String(p.staffId || '').trim() === String(staffId || '').trim();
+  });
+}
+
+function renderTrainingReportEmployeeCard(item, staff) {
+  const staffId = getTrainingReportStaffId(staff);
+  const completedEntry = getTrainingCompletedEntries(item.id).find((p) => String(p.staffId || '').trim() === staffId);
+  const videoBlocks = (Array.isArray(item.contentBlocks) ? item.contentBlocks : []).filter((b) => b.type === 'video');
+  const videoProgressEntries = getTrainingVideoProgressEntries(item.id, staffId);
+  const videoRows = videoBlocks.length
+    ? videoBlocks.map((block, idx) => {
+        const stableBlockId = getTrainingBlockStableId(block, idx);
+        const progress = videoProgressEntries.find((p) => p.blockId === stableBlockId);
+        const percent = Math.max(0, Math.min(100, Math.round(Number(progress?.percentWatched || 0))));
+        const duration = Math.max(0, Math.round(Number(progress?.durationSec || 0)));
+        const lastTime = Math.max(0, Math.round(Number(progress?.lastTimeSec || 0)));
+        const watched = percent > 0;
+        const statusText = progress?.completed ? 'Completed' : (watched ? 'In Progress' : 'Not Started');
+        const statusColor = progress?.completed ? '#059669' : (watched ? '#b45309' : '#9ca3af');
+        return `
+          <div style="padding:8px 10px;border:1px solid #f3f4f6;border-radius:8px;background:#fafafa;display:grid;gap:4px;">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+              <div style="font-size:12px;font-weight:500;color:#111827;">${block.title || `Video ${idx + 1}`}</div>
+              <span style="font-size:11px;color:${statusColor};font-weight:600;">${statusText}</span>
+            </div>
+            <div style="font-size:12px;color:#6b7280;">Watch progress: ${percent}%</div>
+            <div style="font-size:12px;color:#6b7280;">Last position: ${lastTime}s / ${duration}s</div>
+          </div>
+        `;
+      }).join('')
+    : '<div style="font-size:12px;color:#9ca3af;">No video blocks in this training.</div>';
+  const completedDate = completedEntry?.completedAt ? getSortTime(completedEntry.completedAt) : 0;
+  const completionText = completedEntry
+    ? `Completed${completedDate ? ` on ${new Date(completedDate).toLocaleDateString()}` : ''}`
+    : 'Not Completed';
+  const completionColor = completedEntry ? '#059669' : '#dc2626';
+  const adminMarkBtn = (!completedEntry && canManageTraining())
+    ? `<div style="display:flex;justify-content:flex-end;margin-top:4px;"><button type="button" class="btn-pill" style="font-size:11px;padding:5px 10px;background:#7c3aed;color:#fff;border-color:#7c3aed;" onclick="markTrainingCompletedForStaffFromReport('${item.id}', '${staffId}')">Mark Completed</button></div>`
+    : '';
+  return `
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;display:grid;gap:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div style="font-size:14px;font-weight:600;color:#111827;">${staff.name || staffId || 'Unknown'}</div>
+        <div style="font-size:12px;color:${completionColor};font-weight:600;">${completionText}</div>
+      </div>
+      <div style="display:grid;gap:8px;">
+        <div style="font-size:12px;font-weight:600;color:#374151;">Video Activity</div>
+        ${videoRows}
+      </div>
+      ${adminMarkBtn}
+    </div>
+  `;
+}
+
+async function markTrainingCompletedForStaffFromReport(trainingId, staffId) {
+  if (!canManageTraining()) return;
+  const ok = await showTrainingAdminConfirm({
+    title: 'Mark Training Completed',
+    message: 'This will mark the employee as completed for this training, even if they have not finished all steps yet.',
+    confirmLabel: 'Mark Completed',
+  });
+  if (!ok) return;
+  try {
+    await markTrainingCompletedForStaff(trainingId, staffId);
+    trainingAllProgressList = await fetchAllTrainingProgressForSalon();
+    openReportTrainingDetails(trainingId);
+  } catch (err) {
+    console.error('[Training] Admin mark completed failed', err);
+    await showTrainingAdminNotice({
+      title: 'Could not mark completed',
+      message: err?.message || 'Failed to mark employee as completed.',
+      buttonLabel: 'OK',
+    });
+  }
+}
+
+function bindTrainingVideoTracking(trainingId) {
+  const detailsView = document.getElementById('trainingDetailsView');
+  if (!detailsView || !trainingId) return;
+  const videos = detailsView.querySelectorAll('video[data-training-video="1"]');
+  videos.forEach((videoEl) => {
+    if (videoEl.dataset.trackingBound === '1') return;
+    videoEl.dataset.trackingBound = '1';
+    const blockId = videoEl.dataset.blockId || '';
+    if (!blockId) return;
+    const key = getTrainingVideoProgressCacheKey(trainingId, blockId);
+    const savedProgress = trainingVideoProgressMap[key];
+    const restorePosition = () => {
+      const resumeSec = Number(savedProgress?.lastTimeSec || 0);
+      const durationSec = Number(videoEl.duration || 0);
+      if (!resumeSec || !durationSec || !Number.isFinite(durationSec)) return;
+      if (resumeSec >= durationSec) return;
+      try { videoEl.currentTime = resumeSec; } catch (_) {}
+    };
+    videoEl.addEventListener('loadedmetadata', restorePosition, { once: true });
+    const pushProgress = () => {
+      const durationSec = Number(videoEl.duration || 0);
+      const lastTimeSec = Number(videoEl.currentTime || 0);
+      if (!durationSec || !Number.isFinite(durationSec)) return;
+      const percentWatched = (lastTimeSec / durationSec) * 100;
+      saveTrainingVideoProgress(trainingId, blockId, {
+        percentWatched,
+        lastTimeSec,
+        durationSec,
+      });
+    };
+    videoEl.addEventListener('timeupdate', pushProgress);
+    videoEl.addEventListener('pause', pushProgress);
+    videoEl.addEventListener('ended', pushProgress);
+  });
 }
 
 async function loadTrainingItems() {
@@ -5791,6 +6145,20 @@ function updateTrainingBlockField(index, field, value) {
   if (!block) return;
   block[field] = value;
   if (field === 'imageUrls' || field === 'imageUrl') renderTrainingBlocksEditor();
+}
+
+function setTrainingVideoOnBlock(index, url) {
+  const block = trainingDraftBlocks[index];
+  if (!block || block.type !== 'video') return;
+  block.url = String(url || '').trim();
+  renderTrainingBlocksEditor();
+}
+
+function clearTrainingVideoFromBlock(index) {
+  const block = trainingDraftBlocks[index];
+  if (!block || block.type !== 'video') return;
+  block.url = '';
+  renderTrainingBlocksEditor();
 }
 
 function addTrainingImageToBlock(index, url) {
@@ -5907,13 +6275,56 @@ function renderTrainingBlocksEditor() {
       addStepBtn.onclick = () => addStepToBlock(index);
       card.append(stepsWrap, addStepBtn);
     } else if (block.type === 'video') {
-      const urlInput = document.createElement('input');
-      urlInput.type = 'text';
-      urlInput.placeholder = 'Video URL';
-      urlInput.value = block.url || '';
-      urlInput.style.cssText = 'width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;';
-      urlInput.oninput = (e) => updateTrainingBlockField(index, 'url', e.target.value);
-      card.appendChild(urlInput);
+      const uploadWrap = document.createElement('div');
+      uploadWrap.style.cssText = 'display:grid;gap:10px;';
+      const uploadLabel = document.createElement('label');
+      uploadLabel.style.cssText = 'display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px;';
+      uploadLabel.textContent = 'Upload Video';
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'video/mp4,video/webm,video/*';
+      fileInput.style.cssText = 'width:100%;padding:8px;border:1px dashed #d1d5db;border-radius:8px;font-size:12px;cursor:pointer;';
+      fileInput.onchange = async (e) => {
+        const file = e.target?.files?.[0];
+        if (!file) return;
+        if (!window.ffUploadTrainingVideo) { console.warn('[Training] ffUploadTrainingVideo not available'); return; }
+        fileInput.disabled = true;
+        try {
+          const salonId = getCurrentTrainingSalonId();
+          const trainingIdOrTempId = editingTrainingItemId || ('draft_' + (block.id || Date.now()));
+          const { url } = await window.ffUploadTrainingVideo({ salonId, trainingIdOrTempId, file });
+          setTrainingVideoOnBlock(index, url);
+        } catch (err) {
+          console.error('[Training] Video upload failed:', err);
+          alert('Video upload failed. Please try again.');
+        } finally {
+          fileInput.disabled = false;
+        }
+        e.target.value = '';
+      };
+      uploadWrap.append(uploadLabel, fileInput);
+      card.appendChild(uploadWrap);
+      if (block.url) {
+        const prevWrap = document.createElement('div');
+        prevWrap.style.cssText = 'display:grid;gap:8px;margin-top:8px;';
+        const video = document.createElement('video');
+        video.src = block.url;
+        video.controls = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+        video.style.cssText = 'width:100%;max-height:260px;border-radius:8px;border:1px solid #e5e7eb;background:#000;';
+        const actionsRow = document.createElement('div');
+        actionsRow.style.cssText = 'display:flex;justify-content:flex-end;';
+        const removeVideoBtn = document.createElement('button');
+        removeVideoBtn.type = 'button';
+        removeVideoBtn.className = 'btn-pill';
+        removeVideoBtn.textContent = 'Remove Video';
+        removeVideoBtn.style.cssText = 'font-size:11px;padding:4px 10px;color:#dc2626;border-color:#fecaca;background:#fff;';
+        removeVideoBtn.onclick = () => clearTrainingVideoFromBlock(index);
+        actionsRow.appendChild(removeVideoBtn);
+        prevWrap.append(video, actionsRow);
+        card.appendChild(prevWrap);
+      }
     } else if (block.type === 'image') {
       const urls = Array.isArray(block.imageUrls) ? block.imageUrls : (block.imageUrl ? [block.imageUrl] : []);
       const uploadWrap = document.createElement('div');
@@ -5996,7 +6407,7 @@ function normalizeTrainingBlocks(blocks) {
     .filter((block) => {
       if (block.type === 'text') return !!(block.title || block.body);
       if (block.type === 'steps') return !!(block.steps && block.steps.length);
-      if (block.type === 'video') return !!(block.title || block.url);
+      if (block.type === 'video') return !!block.url;
       if (block.type === 'image') return !!(block.title || (block.imageUrls && block.imageUrls.length));
       return false;
     });
@@ -6456,7 +6867,7 @@ function renderTrainingDetails(item) {
 
   let contentHtml = '<div style="font-size:13px;color:#9ca3af;">No content blocks yet.</div>';
   if (contentBlocks.length) {
-    contentHtml = contentBlocks.map((block) => {
+    contentHtml = contentBlocks.map((block, idx) => {
       if (block.type === 'text') {
         return `
           <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#fff;">
@@ -6477,12 +6888,12 @@ function renderTrainingDetails(item) {
         `;
       }
       if (block.type === 'video') {
-        const link = block.url ? `<a href="${block.url}" target="_blank" rel="noopener noreferrer" style="color:#7c3aed;text-decoration:underline;word-break:break-all;">${block.url}</a>` : '—';
+        const stableBlockId = getTrainingBlockStableId(block, idx);
         return `
           <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#fff;">
             <div style="font-size:11px;color:#7c3aed;font-weight:600;margin-bottom:6px;">Video</div>
             ${block.title ? `<div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:6px;">${block.title}</div>` : ''}
-            <div style="font-size:13px;color:#374151;line-height:1.6;">${link}</div>
+            ${block.url ? `<video src="${block.url}" controls playsinline preload="metadata" data-training-video="1" data-block-id="${stableBlockId}" style="width:100%;max-height:420px;border-radius:8px;background:#000;"></video>${renderTrainingVideoProgressMeta(item.id, stableBlockId)}` : '<div style="font-size:13px;color:#9ca3af;">No video uploaded.</div>'}
           </div>
         `;
       }
@@ -6563,6 +6974,7 @@ function renderTrainingDetails(item) {
       }
     }
   }
+  bindTrainingVideoTracking(item.id);
 }
 
 function openTrainingDetails(itemId) {
@@ -6740,9 +7152,9 @@ function renderReportsByTraining() {
       const ctx = { currentRole: getStaffRoleForTraining(s), currentTechnicianTypes: (s.technicianTypes || []).map((t) => String(t).toLowerCase()) };
       return isTrainingRelevantToCurrentUser(item, ctx);
     });
-    const completed = trainingAllProgressList.filter((p) => p.trainingId === item.id && p.status === 'completed');
-    const completedIds = new Set(completed.map((p) => p.staffId));
-    const notCompleted = relevantStaff.filter((s) => !completedIds.has(s.id));
+    const completed = getTrainingCompletedEntries(item.id);
+    const completedIds = new Set(completed.map((p) => String(p.staffId || '').trim()));
+    const notCompleted = relevantStaff.filter((s) => !completedIds.has(getTrainingReportStaffId(s)));
     const card = document.createElement('div');
     card.style.cssText = 'background:#fff;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.06);border-radius:10px;padding:12px 14px;display:grid;gap:8px;';
     card.innerHTML = `
@@ -6779,10 +7191,10 @@ function renderReportsByEmployee() {
   listEl.style.display = 'flex';
   emptyEl.style.display = 'none';
   staffList.forEach((staff) => {
-    const staffId = staff.id || staff.staffId || staff.name;
+    const staffId = getTrainingReportStaffId(staff);
     const completedForStaff = trainingAllProgressList.filter((p) => {
       const pid = String(p.staffId || '');
-      return (pid === staffId || pid === (staff.id || '') || pid === (staff.staffId || '')) && p.status === 'completed';
+      return !p.blockId && (pid === staffId || pid === (staff.id || '') || pid === (staff.staffId || '')) && p.status === 'completed';
     });
     const staffCtx = { currentRole: getStaffRoleForTraining(staff), currentTechnicianTypes: (staff.technicianTypes || []).map((t) => String(t).toLowerCase()) };
     const requiredForStaff = trainingItems.filter((item) => isTrainingRequiredForUser(item, staffCtx));
@@ -6821,31 +7233,21 @@ function openReportTrainingDetails(trainingId) {
     const ctx = { currentRole: getStaffRoleForTraining(s), currentTechnicianTypes: (s.technicianTypes || []).map((t) => String(t).toLowerCase()) };
     return isTrainingRelevantToCurrentUser(item, ctx);
   });
-  const completed = trainingAllProgressList.filter((p) => p.trainingId === item.id && p.status === 'completed');
-  const completedIds = new Set(completed.map((p) => p.staffId));
-  const notCompleted = relevantStaff.filter((s) => !completedIds.has(s.id));
-  const staffName = (sid) => {
-    const s = getTrainingReportsStaffList().find((x) => (x.id || x.staffId || '') === sid);
-    return s ? (s.name || sid) : sid;
-  };
-  const completedRows = completed.map((p) => {
-    const ts = p.completedAt ? getSortTime(p.completedAt) : 0;
-    const dateStr = ts ? new Date(ts).toLocaleDateString() : '—';
-    return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6;"><span>${staffName(p.staffId)}</span><span style="color:#059669;font-size:12px;">${dateStr}</span></div>`;
-  }).join('');
-  const notCompletedRows = notCompleted.map((s) => `<div style="padding:6px 0;border-bottom:1px solid #f3f4f6;">${s.name || s.id || 'Unknown'}</div>`).join('');
+  const completed = getTrainingCompletedEntries(item.id);
+  const employeeCards = relevantStaff.map((staff) => renderTrainingReportEmployeeCard(item, staff)).join('');
   reportDetailsView.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
       <button type="button" onclick="backFromReportTrainingDetails()" class="btn-pill" style="font-size:13px;">Back</button>
       <h3 style="margin:0;font-size:16px;font-weight:600;color:#111827;">${item.title}</h3>
     </div>
     <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin-bottom:12px;">
-      <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:10px;">Completed (${completed.length})</div>
-      <div style="font-size:12px;color:#374151;">${completedRows || '<div style="color:#9ca3af;">None</div>'}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div style="font-size:13px;font-weight:600;color:#111827;">Employee Actions</div>
+        <div style="font-size:12px;color:#6b7280;"><span style="color:#059669;font-weight:600;">${completed.length}</span> completed</div>
+      </div>
     </div>
-    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;">
-      <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:10px;">Not Completed (${notCompleted.length})</div>
-      <div style="font-size:12px;color:#374151;">${notCompletedRows || '<div style="color:#9ca3af;">None</div>'}</div>
+    <div style="display:grid;gap:12px;">
+      ${employeeCards || '<div style="font-size:12px;color:#9ca3af;">No employees assigned to this training.</div>'}
     </div>
   `;
   if (reportsView) reportsView.style.display = 'none';
@@ -6902,6 +7304,11 @@ async function goToTraining() {
     trainingProgressMap = await fetchTrainingProgressForUser();
   } catch (_) {
     trainingProgressMap = {};
+  }
+  try {
+    trainingVideoProgressMap = await fetchTrainingVideoProgressForUser();
+  } catch (_) {
+    trainingVideoProgressMap = {};
   }
   if (canViewTrainingReports()) {
     try {
@@ -17136,7 +17543,7 @@ if (document.readyState === 'loading') {
           tasksScreen.style.pointerEvents = 'none';
         }
         
-        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
         const auth = window.auth || window.ffAuth;
         if (auth) await signOut(auth);
         if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
@@ -17623,7 +18030,7 @@ function initializeNavigationButtons() {
                     tasksScreen.style.pointerEvents = 'none';
                   }
                   
-                  const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+                  const { signOut } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
                   const auth = window.auth || window.ffAuth;
                   if (auth) await signOut(auth);
                   if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
@@ -21158,7 +21565,7 @@ function initializeUserProfileMenu() {
       
       try {
         // Import sendPasswordResetEmail dynamically
-        const { sendPasswordResetEmail } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        const { sendPasswordResetEmail } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
         
         // Send password reset email
         await sendPasswordResetEmail(window.auth, email);
@@ -21445,7 +21852,7 @@ function installGlobalUserAvatarDropdownDelegates() {
           tasksScreen.style.pointerEvents = 'none';
         }
 
-        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
         const auth = window.auth || window.ffAuth;
         if (auth) await signOut(auth);
         if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
@@ -21497,7 +21904,7 @@ function installGlobalUserAvatarDropdownDelegates() {
           tasksScreen.style.pointerEvents = 'none';
         }
 
-        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
         const auth = window.auth || window.ffAuth;
         if (auth) await signOut(auth);
         if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
@@ -29590,7 +29997,7 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260312_fix2"></script>
+  <script type="module" src="/app.js?v=20260329_training_fix1"></script>
   <script type="module" src="/inbox.js?v=20260312_fix2"></script>
   <script type="module" src="/chat.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
@@ -30621,10 +31028,10 @@ function hookSettingsGuard_DISABLED(){
       <div style="border-top:1px solid #e5e7eb;padding-top:12px;">
         <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:8px;">Content Blocks</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-          <button type="button" onclick="addTrainingBlock('text')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Text Block</button>
-          <button type="button" onclick="addTrainingBlock('steps')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Steps Block</button>
-          <button type="button" onclick="addTrainingBlock('video')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Video Block</button>
-          <button type="button" onclick="addTrainingBlock('image')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Image Block</button>
+          <button type="button" onclick="addTrainingBlock('text')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Text</button>
+          <button type="button" onclick="addTrainingBlock('steps')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Steps</button>
+          <button type="button" onclick="addTrainingBlock('video')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Video</button>
+          <button type="button" onclick="addTrainingBlock('image')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Image</button>
         </div>
         <div id="trainingBlocksEditor" style="display:grid;gap:10px;"></div>
       </div>

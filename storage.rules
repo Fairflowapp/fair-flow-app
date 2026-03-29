@@ -54,6 +54,11 @@ service firebase.storage {
       allow read, write: if signedIn();
     }
 
+    // Training module: video block uploads (any signed-in user; app enforces salon)
+    match /salons/{salonId}/training/videos/{allPaths=**} {
+      allow read, write: if signedIn();
+    }
+
     // deny everything else
     match /{allPaths=**} {
       allow read, write: if false;

@@ -16,9 +16,9 @@ import {
   collection, query, where, orderBy, limit,
   addDoc, setDoc, updateDoc, doc, getDoc, getDocs, deleteDoc, writeBatch, increment,
   onSnapshot, serverTimestamp, arrayUnion
-} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260312_fix2";
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+import { db, auth } from "./app.js?v=20260329_training_fix1";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let chatUserProfile    = null;

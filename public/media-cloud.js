@@ -24,9 +24,9 @@ import {
   orderBy,
   onSnapshot,
   serverTimestamp,
-} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-storage.js";
-import { db, auth, storage } from "./app.js?v=20260312_fix2";
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
+import { db, auth, storage } from "./app.js?v=20260329_training_fix1";
 
 // =====================
 // Paths
@@ -77,7 +77,7 @@ async function getSalonId() {
   const user = auth.currentUser;
   if (!user) return null;
   try {
-    const { getDoc } = await import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js");
+    const { getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js");
     const snap = await getDoc(doc(db, "users", user.uid));
     if (snap.exists()) {
       const data = snap.data();

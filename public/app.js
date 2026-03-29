@@ -63,7 +63,7 @@ window.addEventListener("unhandledrejection", (e) => {
 // =====================
 // Firebase imports
 // =====================
-import { initializeApp, getApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
 import {
   getAuth,
   signInWithEmailAndPassword,
@@ -74,14 +74,14 @@ import {
   signOut,
   sendPasswordResetEmail,
   signInAnonymously
-} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import {
   getStorage,
   ref as storageRef,
   uploadBytes,
   getDownloadURL,
   deleteObject,
-} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-storage.js";
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import {
   getFirestore,
   doc,
@@ -96,11 +96,11 @@ import {
   query,
   where,
   serverTimestamp
-} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import {
   getFunctions,
   httpsCallable
-} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-functions.js";
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
 
 // =====================
 // Firebase config
@@ -118,7 +118,7 @@ const firebaseConfig = {
 // =====================
 // Init
 // =====================
-const app = initializeApp(firebaseConfig);
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 window.__ffAuth = auth;
 window.__ffGetUid = () => auth.currentUser?.uid || null;
@@ -129,7 +129,7 @@ window.ffDb = db;   // expose for non-module scripts (staff cloud sync)
 onAuthStateChanged(auth, async user => {
   if (!user) { window.currentSalonId = null; return; }
   try {
-    const { getDoc, doc } = await import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js");
+    const { getDoc, doc } = await import("https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js");
     const snap = await getDoc(doc(db, 'users', user.uid));
     if (snap.exists()) {
       window.currentSalonId = snap.data().salonId || null;
@@ -613,6 +613,19 @@ function ffAssertImageFile(file) {
   }
 }
 
+function ffInferVideoExtension(file) {
+  const type = (file?.type || "").toLowerCase();
+  const name = (file?.name || "").toLowerCase();
+  if (type.includes("webm") || name.endsWith(".webm")) return "webm";
+  return "mp4";
+}
+
+function ffAssertVideoFile(file) {
+  if (!file || !file.type || !file.type.startsWith("video/")) {
+    throw new Error("Invalid video file");
+  }
+}
+
 async function ffUploadSalonBrandLogo({ salonId, file }) {
   if (!salonId) throw new Error("Missing salonId");
   ffAssertImageFile(file);
@@ -650,6 +663,26 @@ async function ffUploadTrainingImage({ salonId, trainingIdOrTempId, file }) {
   const safeId = String(trainingIdOrTempId).replace(/[^a-zA-Z0-9_-]/g, "_");
   const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${ext}`;
   const path = `salons/${salonId}/training/images/${safeId}/${fileName}`;
+  const fileRef = storageRef(storage, path);
+  await uploadBytes(fileRef, file);
+  const url = await getDownloadURL(fileRef);
+  return { url, path };
+}
+
+/**
+ * Upload a training video to Storage.
+ * Path: salons/{salonId}/training/videos/{trainingIdOrTempId}/{fileName}
+ * @param {{ salonId: string, trainingIdOrTempId: string, file: File }} opts
+ * @returns {Promise<{ url: string, path: string }>}
+ */
+async function ffUploadTrainingVideo({ salonId, trainingIdOrTempId, file }) {
+  if (!salonId) throw new Error("Missing salonId");
+  if (!trainingIdOrTempId) throw new Error("Missing trainingIdOrTempId");
+  ffAssertVideoFile(file);
+  const ext = ffInferVideoExtension(file);
+  const safeId = String(trainingIdOrTempId).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${ext}`;
+  const path = `salons/${salonId}/training/videos/${safeId}/${fileName}`;
   const fileRef = storageRef(storage, path);
   await uploadBytes(fileRef, file);
   const url = await getDownloadURL(fileRef);
@@ -2811,7 +2844,7 @@ window.saveTaskCompletion = async function(completionData) {
       return;
     }
     
-    const { collection, addDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js");
+    const { collection, addDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js");
     
     const completionsRef = collection(db, "salons", currentSalonId, "taskCompletions");
     
@@ -3494,9 +3527,12 @@ window.confirmPinReset = confirmPinReset;
 window.ffSendStaffInviteEmail = ffSendStaffInviteEmail;
 window.ffInferImageExtension = ffInferImageExtension;
 window.ffAssertImageFile = ffAssertImageFile;
+window.ffInferVideoExtension = ffInferVideoExtension;
+window.ffAssertVideoFile = ffAssertVideoFile;
 window.ffUploadSalonBrandLogo = ffUploadSalonBrandLogo;
 window.ffUploadStaffAvatar = ffUploadStaffAvatar;
 window.ffUploadTrainingImage = ffUploadTrainingImage;
+window.ffUploadTrainingVideo = ffUploadTrainingVideo;
 window.ffSaveSalonLogoMeta = ffSaveSalonLogoMeta;
 window.ffSaveStaffAvatarMeta = ffSaveStaffAvatarMeta;
 window.resetTasksForCurrentTab = resetTasksForCurrentTab;
