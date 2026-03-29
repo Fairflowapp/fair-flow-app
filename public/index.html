@@ -5494,6 +5494,7 @@ const trainingItems = [];
 let selectedTrainingItemId = null;
 let editingTrainingItemId = null;
 let trainingDraftBlocks = [];
+let trainingDraftQuizQuestions = [];
 let trainingLoading = false;
 let trainingError = '';
 let trainingSearchQuery = '';
@@ -5507,6 +5508,7 @@ let trainingReportsSubMode = 'byTraining';
 let trainingAllProgressList = [];
 let trainingVideoProgressMap = {};
 let trainingVideoProgressCache = {};
+let trainingQuizDraftAnswers = {};
 
 function getCurrentTrainingStaffId() {
   return String(
@@ -5600,6 +5602,7 @@ async function fetchTrainingItems() {
       technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
       required: data.required === true,
       contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
+      quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
       createdAt: data.createdAt || null,
       updatedAt: data.updatedAt || null,
     };
@@ -5621,6 +5624,7 @@ async function createTrainingItem(data) {
     technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
     required: data.required === true,
     contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
+    quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -5642,6 +5646,7 @@ async function updateTrainingItem(id, data) {
     technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
     required: data.required === true,
     contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
+    quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
     updatedAt: serverTimestamp(),
   });
 }
@@ -5716,14 +5721,14 @@ async function fetchTrainingVideoProgressForUser() {
 
 function canViewTrainingReports() {
   const accountRole = String(window.__ff_user_role || '').toLowerCase().trim();
-  if (accountRole === 'owner' || accountRole === 'admin') return true;
+  if (accountRole === 'owner' || accountRole === 'admin' || accountRole === 'manager') return true;
   const actorRole = String(
     window.__ff_actorRole ||
     sessionStorage.getItem('ff_actor_role') ||
     ''
   ).toLowerCase().trim();
-  if (actorRole === 'owner' || actorRole === 'admin') return true;
-  if (['tech', 'technician', 'staff', 'manager'].includes(actorRole)) return false;
+  if (actorRole === 'owner' || actorRole === 'admin' || actorRole === 'manager') return true;
+  if (['tech', 'technician', 'staff'].includes(actorRole)) return false;
   return typeof ffHasAdminAccess === 'function' && ffHasAdminAccess();
 }
 
@@ -5783,7 +5788,7 @@ async function markTrainingCompletedForStaff(trainingId, targetStaffId) {
   const salonId = getCurrentTrainingSalonId();
   const staffId = String(targetStaffId || '').trim();
   if (!staffId) throw new Error('Target staff ID required.');
-  if (!canManageTraining()) throw new Error('Only admin can mark another employee as completed.');
+  if (!canOverrideTrainingCompletion()) throw new Error('Only admin or manager can mark another employee as completed.');
   const db = getTrainingDb();
   const { doc, setDoc, serverTimestamp } = await getTrainingFirestoreApi();
   const payload = {
@@ -5894,6 +5899,127 @@ function getTrainingCompletionProgressDocId(trainingId, staffId) {
     .join('__');
 }
 
+function getTrainingQuizQuestions(item) {
+  return Array.isArray(item?.quizQuestions) ? item.quizQuestions : [];
+}
+
+function hasTrainingQuiz(item) {
+  return getTrainingQuizQuestions(item).length > 0;
+}
+
+function hasSubmittedTrainingQuiz(progress) {
+  return !!(progress?.quizSubmittedAt || (Array.isArray(progress?.quizResponses) && progress.quizResponses.length));
+}
+
+function hasPassedTrainingQuiz(progress) {
+  return progress?.quizPassed === true;
+}
+
+function getTrainingQuizDraftAnswerMap(trainingId) {
+  const key = String(trainingId || '').trim();
+  if (!key) return {};
+  if (!trainingQuizDraftAnswers[key] || typeof trainingQuizDraftAnswers[key] !== 'object') {
+    trainingQuizDraftAnswers[key] = {};
+  }
+  return trainingQuizDraftAnswers[key];
+}
+
+function setTrainingQuizDraftAnswer(trainingId, questionId, optionId) {
+  const draft = getTrainingQuizDraftAnswerMap(trainingId);
+  draft[String(questionId || '').trim()] = String(optionId || '').trim();
+}
+
+function evaluateTrainingQuiz(questions, answersByQuestion) {
+  const responses = questions.map((question) => {
+    const selectedOptionId = String(answersByQuestion?.[question.id] || '').trim();
+    const selectedOption = (Array.isArray(question.options) ? question.options : []).find((option) => option.id === selectedOptionId);
+    const correctOption = (Array.isArray(question.options) ? question.options : []).find((option) => option.id === question.correctOptionId);
+    return {
+      questionId: question.id,
+      questionText: question.text || '',
+      selectedOptionId,
+      selectedOptionText: selectedOption?.text || '',
+      correctOptionId: question.correctOptionId || '',
+      correctOptionText: correctOption?.text || '',
+      isCorrect: !!selectedOptionId && selectedOptionId === question.correctOptionId,
+    };
+  });
+  const totalQuestions = questions.length;
+  const correctCount = responses.filter((response) => response.isCorrect).length;
+  const scorePercent = totalQuestions ? Math.round((correctCount / totalQuestions) * 100) : 0;
+  return { responses, totalQuestions, correctCount, scorePercent };
+}
+
+async function submitTrainingQuiz(trainingId) {
+  const item = trainingItems.find((entry) => entry.id === trainingId);
+  if (!item) throw new Error('Training item not found.');
+  const questions = getTrainingQuizQuestions(item);
+  if (!questions.length) throw new Error('No quiz found for this training.');
+  const answersByQuestion = getTrainingQuizDraftAnswerMap(trainingId);
+  const missingQuestion = questions.find((question) => !String(answersByQuestion?.[question.id] || '').trim());
+  if (missingQuestion) throw new Error('Please answer all quiz questions before submitting.');
+
+  const result = evaluateTrainingQuiz(questions, answersByQuestion);
+  const passed = result.totalQuestions > 0 && result.correctCount === result.totalQuestions;
+  const salonId = getCurrentTrainingSalonId();
+  const staffId = getCurrentTrainingStaffId();
+  if (!staffId) throw new Error('Staff ID required to save quiz results.');
+  const db = getTrainingDb();
+  const { doc, getDoc, setDoc, serverTimestamp } = await getTrainingFirestoreApi();
+  const progressRef = doc(db, 'trainingProgress', getTrainingCompletionProgressDocId(trainingId, staffId));
+  const existingSnap = await getDoc(progressRef);
+  const existing = existingSnap.exists() ? (existingSnap.data() || {}) : {};
+  const attemptsCount = Math.max(0, Number(existing.quizAttemptsCount || 0)) + 1;
+  const bestScorePercent = Math.max(
+    Math.max(0, Math.min(100, Math.round(Number(existing.quizBestScorePercent || 0)))),
+    result.scorePercent
+  );
+  await setDoc(progressRef, {
+    trainingId,
+    salonId,
+    staffId,
+    blockId: null,
+    status: passed ? 'completed' : 'in_progress',
+    completedAt: passed ? serverTimestamp() : null,
+    updatedAt: serverTimestamp(),
+    quizSubmittedAt: serverTimestamp(),
+    quizQuestionCount: result.totalQuestions,
+    quizCorrectCount: result.correctCount,
+    quizScorePercent: result.scorePercent,
+    quizPassed: passed,
+    quizAttemptsCount: attemptsCount,
+    quizLastResult: passed ? 'passed' : 'failed',
+    quizLastScorePercent: result.scorePercent,
+    quizBestScorePercent: bestScorePercent,
+    quizLastAttemptAt: serverTimestamp(),
+    quizResponses: result.responses,
+  }, { merge: true });
+  trainingProgressMap = await fetchTrainingProgressForUser();
+}
+
+async function handleSubmitTrainingQuiz(trainingId) {
+  const quizSection = document.getElementById('trainingQuizSection');
+  const submitBtn = quizSection?.querySelector('#trainingSubmitQuizBtn');
+  const msgEl = quizSection?.querySelector('#trainingQuizMessage');
+  if (submitBtn) submitBtn.disabled = true;
+  if (msgEl) msgEl.style.display = 'none';
+  try {
+    await submitTrainingQuiz(trainingId);
+    const item = trainingItems.find((entry) => entry.id === trainingId);
+    if (item) renderTrainingDetails(item);
+  } catch (err) {
+    console.error('[Training] Quiz submit failed', err);
+    if (msgEl) {
+      msgEl.textContent = err?.message || 'Failed to submit quiz.';
+      msgEl.style.display = 'block';
+    } else {
+      alert(err?.message || 'Failed to submit quiz.');
+    }
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
 function getTrainingVideoProgressCacheKey(trainingId, blockId) {
   return `${String(trainingId || '')}::${String(blockId || '')}`;
 }
@@ -5990,6 +6116,13 @@ function getTrainingCompletedEntries(trainingId) {
   return trainingAllProgressList.filter((p) => p.trainingId === trainingId && !p.blockId && p.status === 'completed');
 }
 
+function getTrainingLatestProgressEntry(trainingId, staffId) {
+  return trainingAllProgressList.find((p) => {
+    if (p.trainingId !== trainingId || p.blockId) return false;
+    return String(p.staffId || '').trim() === String(staffId || '').trim();
+  }) || null;
+}
+
 function getTrainingVideoProgressEntries(trainingId, staffId) {
   return trainingAllProgressList.filter((p) => {
     if (p.trainingId !== trainingId || !p.blockId) return false;
@@ -5999,8 +6132,10 @@ function getTrainingVideoProgressEntries(trainingId, staffId) {
 
 function renderTrainingReportEmployeeCard(item, staff) {
   const staffId = getTrainingReportStaffId(staff);
-  const completedEntry = getTrainingCompletedEntries(item.id).find((p) => String(p.staffId || '').trim() === staffId);
+  const progressEntry = getTrainingLatestProgressEntry(item.id, staffId);
+  const completedEntry = progressEntry?.status === 'completed' ? progressEntry : null;
   const videoBlocks = (Array.isArray(item.contentBlocks) ? item.contentBlocks : []).filter((b) => b.type === 'video');
+  const quizQuestions = getTrainingQuizQuestions(item);
   const videoProgressEntries = getTrainingVideoProgressEntries(item.id, staffId);
   const videoRows = videoBlocks.length
     ? videoBlocks.map((block, idx) => {
@@ -6029,7 +6164,22 @@ function renderTrainingReportEmployeeCard(item, staff) {
     ? `Completed${completedDate ? ` on ${new Date(completedDate).toLocaleDateString()}` : ''}`
     : 'Not Completed';
   const completionColor = completedEntry ? '#059669' : '#dc2626';
-  const adminMarkBtn = (!completedEntry && canManageTraining())
+  const attemptsCount = Math.max(0, Math.round(Number(progressEntry?.quizAttemptsCount || 0)));
+  const lastScorePercent = Math.max(0, Math.min(100, Math.round(Number(progressEntry?.quizLastScorePercent || progressEntry?.quizScorePercent || 0))));
+  const bestScorePercent = Math.max(0, Math.min(100, Math.round(Number(progressEntry?.quizBestScorePercent || progressEntry?.quizScorePercent || 0))));
+  const lastResultLabel = progressEntry?.quizLastResult === 'passed'
+    ? 'Passed'
+    : (progressEntry?.quizLastResult === 'failed' ? 'Failed' : 'Not Attempted');
+  const lastAttemptAt = progressEntry?.quizLastAttemptAt ? getSortTime(progressEntry.quizLastAttemptAt) : 0;
+  const lastAttemptText = lastAttemptAt ? new Date(lastAttemptAt).toLocaleDateString() : '';
+  const quizStatusHtml = !quizQuestions.length
+    ? '<div style="font-size:12px;color:#9ca3af;">No quiz in this training.</div>'
+    : (progressEntry?.quizSubmittedAt
+      ? `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span style="font-size:12px;color:#111827;">Last result</span><span style="font-size:12px;color:${progressEntry?.quizPassed ? '#059669' : '#b45309'};font-weight:600;">${lastResultLabel}</span></div><div style="font-size:12px;color:#6b7280;">Attempts: ${attemptsCount}</div><div style="font-size:12px;color:#6b7280;">Last score: ${lastScorePercent}%</div><div style="font-size:12px;color:#6b7280;">Best score: ${bestScorePercent}%</div>${lastAttemptText ? `<div style="font-size:12px;color:#6b7280;">Last attempt: ${lastAttemptText}</div>` : ''}${progressEntry?.quizPassed ? '' : '<div style="font-size:12px;color:#b45309;">Employee still needs to retry the quiz.</div>'}`
+      : (completedEntry?.markedByAdmin
+        ? '<div style="font-size:12px;color:#6b7280;">Completed manually by admin without quiz submission.</div>'
+        : '<div style="font-size:12px;color:#b45309;">Quiz not submitted yet.</div>'));
+  const adminMarkBtn = (!completedEntry && canOverrideTrainingCompletion())
     ? `<div style="display:flex;justify-content:flex-end;margin-top:4px;"><button type="button" class="btn-pill" style="font-size:11px;padding:5px 10px;background:#7c3aed;color:#fff;border-color:#7c3aed;" onclick="markTrainingCompletedForStaffFromReport('${item.id}', '${staffId}')">Mark Completed</button></div>`
     : '';
   return `
@@ -6042,13 +6192,19 @@ function renderTrainingReportEmployeeCard(item, staff) {
         <div style="font-size:12px;font-weight:600;color:#374151;">Video Activity</div>
         ${videoRows}
       </div>
+      <div style="display:grid;gap:8px;">
+        <div style="font-size:12px;font-weight:600;color:#374151;">Quiz</div>
+        <div style="padding:8px 10px;border:1px solid #f3f4f6;border-radius:8px;background:#fafafa;display:grid;gap:4px;">
+          ${quizStatusHtml}
+        </div>
+      </div>
       ${adminMarkBtn}
     </div>
   `;
 }
 
 async function markTrainingCompletedForStaffFromReport(trainingId, staffId) {
-  if (!canManageTraining()) return;
+  if (!canOverrideTrainingCompletion()) return;
   const ok = await showTrainingAdminConfirm({
     title: 'Mark Training Completed',
     message: 'This will mark the employee as completed for this training, even if they have not finished all steps yet.',
@@ -6127,6 +6283,69 @@ function createTrainingBlock(type) {
   if (type === 'video') return { ...base, url: '' };
   if (type === 'image') return { ...base, imageUrls: [] };
   return base;
+}
+
+function createTrainingQuizOption() {
+  return { id: `opt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, text: '' };
+}
+
+function createTrainingQuizQuestion() {
+  const options = [createTrainingQuizOption(), createTrainingQuizOption()];
+  return {
+    id: `quiz_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    text: '',
+    options,
+    correctOptionId: options[0].id,
+  };
+}
+
+function addTrainingQuizQuestion() {
+  trainingDraftQuizQuestions.push(createTrainingQuizQuestion());
+  renderTrainingQuizEditor();
+}
+
+function removeTrainingQuizQuestion(index) {
+  if (index < 0 || index >= trainingDraftQuizQuestions.length) return;
+  trainingDraftQuizQuestions.splice(index, 1);
+  renderTrainingQuizEditor();
+}
+
+function updateTrainingQuizQuestionText(index, value) {
+  const question = trainingDraftQuizQuestions[index];
+  if (!question) return;
+  question.text = value;
+}
+
+function addTrainingQuizOption(questionIndex) {
+  const question = trainingDraftQuizQuestions[questionIndex];
+  if (!question) return;
+  question.options = Array.isArray(question.options) ? question.options : [];
+  if (question.options.length >= 5) return;
+  question.options.push(createTrainingQuizOption());
+  renderTrainingQuizEditor();
+}
+
+function removeTrainingQuizOption(questionIndex, optionIndex) {
+  const question = trainingDraftQuizQuestions[questionIndex];
+  if (!question || !Array.isArray(question.options) || question.options.length <= 2) return;
+  const removed = question.options.splice(optionIndex, 1)[0];
+  if (removed && question.correctOptionId === removed.id) {
+    question.correctOptionId = question.options[0]?.id || '';
+  }
+  renderTrainingQuizEditor();
+}
+
+function updateTrainingQuizOptionText(questionIndex, optionIndex, value) {
+  const question = trainingDraftQuizQuestions[questionIndex];
+  const option = question?.options?.[optionIndex];
+  if (!option) return;
+  option.text = value;
+}
+
+function setTrainingQuizCorrectOption(questionIndex, optionId) {
+  const question = trainingDraftQuizQuestions[questionIndex];
+  if (!question) return;
+  question.correctOptionId = optionId;
 }
 
 function addTrainingBlock(type) {
@@ -6386,6 +6605,94 @@ function renderTrainingBlocksEditor() {
   });
 }
 
+function renderTrainingQuizEditor() {
+  const wrap = document.getElementById('trainingQuizEditor');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!trainingDraftQuizQuestions.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'font-size:12px;color:#9ca3af;padding:10px 0;';
+    empty.textContent = 'No quiz questions yet.';
+    wrap.appendChild(empty);
+    return;
+  }
+
+  trainingDraftQuizQuestions.forEach((question, questionIndex) => {
+    const card = document.createElement('div');
+    card.style.cssText = 'border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#fff;display:grid;gap:10px;';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;';
+    header.innerHTML = `<span style="font-size:12px;font-weight:600;color:#7c3aed;">Question ${questionIndex + 1}</span>`;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn-pill';
+    removeBtn.textContent = 'Remove Question';
+    removeBtn.style.cssText = 'font-size:11px;padding:4px 10px;color:#dc2626;border-color:#fecaca;background:#fff;';
+    removeBtn.onclick = () => removeTrainingQuizQuestion(questionIndex);
+    header.appendChild(removeBtn);
+    card.appendChild(header);
+
+    const textInput = document.createElement('textarea');
+    textInput.rows = 2;
+    textInput.placeholder = 'Question text';
+    textInput.value = question.text || '';
+    textInput.style.cssText = 'width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;resize:vertical;';
+    textInput.oninput = (e) => updateTrainingQuizQuestionText(questionIndex, e.target.value);
+    card.appendChild(textInput);
+
+    const optionsWrap = document.createElement('div');
+    optionsWrap.style.cssText = 'display:grid;gap:8px;';
+    const options = Array.isArray(question.options) ? question.options : [];
+    options.forEach((option, optionIndex) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;';
+
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = `trainingQuizCorrect_${question.id}`;
+      radio.checked = question.correctOptionId === option.id;
+      radio.onchange = () => setTrainingQuizCorrectOption(questionIndex, option.id);
+
+      const optionInput = document.createElement('input');
+      optionInput.type = 'text';
+      optionInput.placeholder = `Option ${optionIndex + 1}`;
+      optionInput.value = option.text || '';
+      optionInput.style.cssText = 'width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;';
+      optionInput.oninput = (e) => updateTrainingQuizOptionText(questionIndex, optionIndex, e.target.value);
+
+      const removeOptionBtn = document.createElement('button');
+      removeOptionBtn.type = 'button';
+      removeOptionBtn.className = 'btn-pill';
+      removeOptionBtn.textContent = 'Remove';
+      removeOptionBtn.style.cssText = 'font-size:11px;padding:4px 10px;';
+      removeOptionBtn.disabled = options.length <= 2;
+      removeOptionBtn.onclick = () => removeTrainingQuizOption(questionIndex, optionIndex);
+
+      row.append(radio, optionInput, removeOptionBtn);
+      optionsWrap.appendChild(row);
+    });
+
+    const footer = document.createElement('div');
+    footer.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;';
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:11px;color:#6b7280;';
+    hint.textContent = '2-5 options. Select one correct answer.';
+    const addOptionBtn = document.createElement('button');
+    addOptionBtn.type = 'button';
+    addOptionBtn.className = 'btn-pill';
+    addOptionBtn.textContent = 'Add Option';
+    addOptionBtn.style.cssText = 'font-size:11px;padding:5px 10px;';
+    addOptionBtn.disabled = options.length >= 5;
+    addOptionBtn.onclick = () => addTrainingQuizOption(questionIndex);
+
+    footer.append(hint, addOptionBtn);
+    card.append(optionsWrap, footer);
+    wrap.appendChild(card);
+  });
+}
+
 function normalizeTrainingBlocks(blocks) {
   return (blocks || [])
     .map((block) => {
@@ -6411,6 +6718,27 @@ function normalizeTrainingBlocks(blocks) {
       if (block.type === 'image') return !!(block.title || (block.imageUrls && block.imageUrls.length));
       return false;
     });
+}
+
+function normalizeTrainingQuizQuestions(questions) {
+  return (questions || [])
+    .map((question) => {
+      const options = (Array.isArray(question?.options) ? question.options : [])
+        .map((option) => ({
+          id: option?.id || `opt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          text: String(option?.text || '').trim(),
+        }))
+        .filter((option) => option.text);
+      const normalized = {
+        id: question?.id || `quiz_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        text: String(question?.text || '').trim(),
+        options,
+        correctOptionId: String(question?.correctOptionId || '').trim(),
+      };
+      const hasContent = normalized.text || normalized.options.length || normalized.correctOptionId;
+      return hasContent ? normalized : null;
+    })
+    .filter(Boolean);
 }
 
 function getFilteredTrainingItems() {
@@ -6448,6 +6776,18 @@ function canManageTraining() {
     ''
   ).toLowerCase().trim();
   return role === 'owner' || role === 'admin';
+}
+
+function canOverrideTrainingCompletion() {
+  const accountRole = String(window.__ff_user_role || '').toLowerCase().trim();
+  if (accountRole === 'owner' || accountRole === 'admin' || accountRole === 'manager') return true;
+  const actorRole = String(
+    window.__ff_actorRole ||
+    sessionStorage.getItem('ff_actor_role') ||
+    ''
+  ).toLowerCase().trim();
+  if (actorRole === 'owner' || actorRole === 'admin' || actorRole === 'manager') return true;
+  return typeof ffHasAdminAccess === 'function' && ffHasAdminAccess();
 }
 
 function canSeeTrainingTabs() {
@@ -6537,9 +6877,11 @@ function resetTrainingForm() {
   document.querySelectorAll('input[name="trainingVisibleRole"]').forEach((cb) => { cb.checked = false; });
   document.querySelectorAll('input[name="trainingTechnicianType"]').forEach((cb) => { cb.checked = false; cb.disabled = false; });
   trainingDraftBlocks = [];
+  trainingDraftQuizQuestions = [];
   if (validation) validation.style.display = 'none';
   syncTechnicianTypesUI();
   renderTrainingBlocksEditor();
+  renderTrainingQuizEditor();
 }
 
 function bindTrainingFormEvents() {
@@ -6589,8 +6931,10 @@ function openEditTrainingModal(itemId) {
     if (cb) cb.checked = true;
   });
   trainingDraftBlocks = (item.contentBlocks || []).map((b) => JSON.parse(JSON.stringify(b)));
+  trainingDraftQuizQuestions = (item.quizQuestions || []).map((q) => JSON.parse(JSON.stringify(q)));
   syncTechnicianTypesUI();
   renderTrainingBlocksEditor();
+  renderTrainingQuizEditor();
   if (modalTitle) modalTitle.textContent = 'Edit Training';
   if (saveBtn) saveBtn.textContent = 'Save Changes';
   bindTrainingFormEvents();
@@ -6615,6 +6959,7 @@ function collectTrainingFormData() {
     required: !!requiredInput?.checked,
     description: descriptionInput?.value?.trim() || '',
     contentBlocks: normalizeTrainingBlocks(trainingDraftBlocks),
+    quizQuestions: normalizeTrainingQuizQuestions(trainingDraftQuizQuestions),
   };
 }
 
@@ -6624,6 +6969,19 @@ function validateTrainingForm(data) {
     const hasAll = data.technicianTypes.includes('all_technicians');
     const hasSpecific = data.technicianTypes.some((t) => t !== 'all_technicians');
     if (!hasAll && !hasSpecific) return 'Select all_technicians or at least one technician type.';
+  }
+  for (let i = 0; i < data.quizQuestions.length; i += 1) {
+    const question = data.quizQuestions[i];
+    if (!question.text) return `Quiz question ${i + 1} needs question text.`;
+    if (!Array.isArray(question.options) || question.options.length < 2 || question.options.length > 5) {
+      return `Quiz question ${i + 1} must have 2-5 answers.`;
+    }
+    if (question.options.some((option) => !option.text)) {
+      return `Quiz question ${i + 1} has an empty answer option.`;
+    }
+    if (!question.correctOptionId || !question.options.some((option) => option.id === question.correctOptionId)) {
+      return `Quiz question ${i + 1} needs one correct answer.`;
+    }
   }
   return '';
 }
@@ -6842,11 +7200,16 @@ function renderTrainingLibrary() {
 }
 
 async function handleMarkTrainingCompleted(trainingId) {
+  const item = trainingItems.find((x) => x.id === trainingId);
+  if (item && hasTrainingQuiz(item)) {
+    const quizSection = document.getElementById('trainingQuizSection');
+    if (quizSection) quizSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
   const btn = document.getElementById('trainingMarkCompletedBtn');
   if (btn) btn.disabled = true;
   try {
     await markTrainingCompleted(trainingId);
-    const item = trainingItems.find((x) => x.id === trainingId);
     if (item) renderTrainingDetails(item);
   } catch (err) {
     console.error('[Training] Mark completed failed', err);
@@ -6938,40 +7301,143 @@ function renderTrainingDetails(item) {
       <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:8px;">Content</div>
       <div style="display:grid;gap:10px;">${contentHtml}</div>
     </div>
+    <div id="trainingQuizSection" style="margin-top:20px;"></div>
     <div id="trainingProgressSection" style="margin-top:20px;padding-top:16px;border-top:1px solid #e5e7eb;"></div>
   `;
+  const quizSection = detailsView.querySelector('#trainingQuizSection');
   const progressSection = detailsView.querySelector('#trainingProgressSection');
-  if (progressSection) {
-    const staffId = getCurrentTrainingStaffId();
-    const progress = trainingProgressMap[item.id];
-    const isCompleted = progress && progress.status === 'completed';
-    if (!staffId) {
-      progressSection.style.display = 'none';
-    } else {
-      if (isCompleted) {
-        const completedAt = progress.completedAt;
-        let dateStr = '';
-        if (completedAt) {
-          const ts = typeof completedAt.toMillis === 'function' ? completedAt.toMillis() : (completedAt && completedAt.getTime ? completedAt.getTime() : null);
-          if (ts) dateStr = new Date(ts).toLocaleDateString();
-        }
-        progressSection.innerHTML = `
-          <div style="display:flex;align-items:center;gap:8px;color:#059669;font-size:14px;font-weight:500;">
-            <span>Completed ✓</span>
-            ${dateStr ? `<span style="color:#6b7280;font-size:12px;">Completed on: ${dateStr}</span>` : ''}
+  const staffId = getCurrentTrainingStaffId();
+  const currentUserCtx = getCurrentTrainingUserContext();
+  const isRelevantToCurrentUser = isTrainingRelevantToCurrentUser(item, currentUserCtx);
+  const progress = trainingProgressMap[item.id];
+  const isCompleted = progress && progress.status === 'completed';
+  const quizQuestions = getTrainingQuizQuestions(item);
+  const quizSubmitted = hasSubmittedTrainingQuiz(progress);
+  const quizPassed = hasPassedTrainingQuiz(progress);
+
+  if (quizSection) {
+    if (!quizQuestions.length) {
+      quizSection.style.display = 'none';
+    } else if (!isRelevantToCurrentUser) {
+      if (canManageTraining()) {
+        quizSection.style.display = 'block';
+        quizSection.innerHTML = `
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;display:grid;gap:6px;">
+            <div style="font-size:13px;font-weight:600;color:#111827;">Quiz</div>
+            <div style="font-size:12px;color:#6b7280;">This training includes ${quizQuestions.length} quiz ${quizQuestions.length === 1 ? 'question' : 'questions'} for assigned staff.</div>
           </div>
         `;
       } else {
-        const requiredNote = item.required === true
-          ? '<div style="font-size:12px;color:#b45309;margin-bottom:8px;">Required training — not yet completed.</div>'
-          : '';
-        progressSection.innerHTML = `
-          ${requiredNote}
-          <button type="button" id="trainingMarkCompletedBtn" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:13px;border-color:#7c3aed;">Mark as Completed</button>
-        `;
-        const btn = progressSection.querySelector('#trainingMarkCompletedBtn');
-        if (btn) btn.onclick = () => handleMarkTrainingCompleted(item.id);
+        quizSection.style.display = 'none';
       }
+    } else if (progress?.markedByAdmin === true && !quizSubmitted) {
+      quizSection.style.display = 'block';
+      quizSection.innerHTML = `
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;display:grid;gap:6px;">
+          <div style="font-size:13px;font-weight:600;color:#111827;">Quiz</div>
+          <div style="font-size:12px;color:#6b7280;">This training was marked completed manually by admin, so the quiz was not submitted.</div>
+        </div>
+      `;
+    } else if (quizSubmitted && quizPassed) {
+      quizSection.style.display = 'block';
+      quizSection.innerHTML = `
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;display:grid;gap:12px;">
+          <div style="font-size:13px;font-weight:600;color:#111827;">Quiz</div>
+          <div style="padding:10px 12px;border:1px solid #bbf7d0;border-radius:10px;background:#f0fdf4;display:grid;gap:4px;">
+            <div style="font-size:12px;font-weight:600;color:#166534;">Quiz passed successfully</div>
+            <div style="font-size:12px;color:#6b7280;">Your training is now completed.</div>
+          </div>
+        </div>
+      `;
+    } else {
+      const draftAnswers = getTrainingQuizDraftAnswerMap(item.id);
+      const responses = Array.isArray(progress?.quizResponses) ? progress.quizResponses : [];
+      const responseMap = Object.fromEntries(responses.map((response) => [response.questionId, response]));
+      const retrySummary = quizSubmitted && !quizPassed
+        ? `
+          <div style="padding:10px 12px;border:1px solid #fde68a;border-radius:10px;background:#fffbeb;display:grid;gap:4px;">
+            <div style="font-size:12px;font-weight:600;color:#92400e;">Quiz not passed yet</div>
+            <div style="font-size:12px;color:#6b7280;">Please try again. The correct answers are not shown.</div>
+          </div>
+        `
+        : '';
+      const questionsHtml = quizQuestions.map((question, questionIndex) => {
+        const options = Array.isArray(question.options) ? question.options : [];
+        const response = responseMap[question.id] || {};
+        const selectedOptionId = draftAnswers[question.id] || response.selectedOptionId || '';
+        const optionRows = options.map((option) => {
+          const isSelected = selectedOptionId === option.id;
+          const bg = isSelected ? '#f5f3ff' : '#fff';
+          const border = isSelected ? '#c4b5fd' : '#e5e7eb';
+          const color = '#374151';
+          return `
+          <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid ${border};border-radius:8px;background:${bg};cursor:pointer;">
+            <input type="radio" name="trainingQuiz_${question.id}" value="${escapeHtml(option.id)}" ${isSelected ? 'checked' : ''} data-quiz-question-id="${escapeHtml(question.id)}" data-quiz-option-id="${escapeHtml(option.id)}" style="margin-top:2px;">
+            <span style="font-size:12px;color:${color};flex:1;">${escapeHtml(option.text || '')}</span>
+          </label>
+        `;
+        }).join('');
+        return `
+          <div style="border:1px solid #f3f4f6;border-radius:10px;padding:12px;background:#fafafa;display:grid;gap:8px;">
+            <div style="font-size:12px;font-weight:600;color:#111827;">${questionIndex + 1}. ${escapeHtml(question.text || '')}</div>
+            <div style="display:grid;gap:6px;">${optionRows}</div>
+          </div>
+        `;
+      }).join('');
+      quizSection.style.display = 'block';
+      quizSection.innerHTML = `
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;display:grid;gap:12px;">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#111827;">Quiz</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:4px;">Answer all questions to complete this training.</div>
+          </div>
+          ${retrySummary}
+          <div style="display:grid;gap:10px;">${questionsHtml}</div>
+          <div id="trainingQuizMessage" style="display:none;font-size:12px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 10px;"></div>
+          <div style="display:flex;justify-content:flex-end;">
+            <button type="button" id="trainingSubmitQuizBtn" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:13px;border-color:#7c3aed;">${quizSubmitted ? 'Try Again' : 'Submit Quiz'}</button>
+          </div>
+        </div>
+      `;
+      quizSection.querySelectorAll('input[data-quiz-question-id]').forEach((input) => {
+        input.onchange = (event) => {
+          const questionId = event.target?.dataset?.quizQuestionId;
+          const optionId = event.target?.dataset?.quizOptionId;
+          if (questionId && optionId) setTrainingQuizDraftAnswer(item.id, questionId, optionId);
+        };
+      });
+      const submitQuizBtn = quizSection.querySelector('#trainingSubmitQuizBtn');
+      if (submitQuizBtn) submitQuizBtn.onclick = () => handleSubmitTrainingQuiz(item.id);
+    }
+  }
+
+  if (progressSection) {
+    if (!staffId || !isRelevantToCurrentUser) {
+      progressSection.style.display = 'none';
+    } else if (isCompleted) {
+      const completedAt = progress.completedAt;
+      let dateStr = '';
+      if (completedAt) {
+        const ts = typeof completedAt.toMillis === 'function' ? completedAt.toMillis() : (completedAt && completedAt.getTime ? completedAt.getTime() : null);
+        if (ts) dateStr = new Date(ts).toLocaleDateString();
+      }
+      progressSection.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;color:#059669;font-size:14px;font-weight:500;flex-wrap:wrap;">
+          <span>Completed ✓</span>
+          ${dateStr ? `<span style="color:#6b7280;font-size:12px;">Completed on: ${dateStr}</span>` : ''}
+          ${progress?.markedByAdmin === true ? '<span style="color:#6b7280;font-size:12px;">Marked manually by admin</span>' : ''}
+        </div>
+      `;
+    } else {
+      const requiredNote = item.required === true
+        ? '<div style="font-size:12px;color:#b45309;margin-bottom:8px;">Required training — not yet completed.</div>'
+        : '';
+      const quizNote = quizQuestions.length
+        ? '<div style="font-size:12px;color:#6b7280;">Status: In Progress. Complete the quiz above to finish this training.</div>'
+        : '<button type="button" id="trainingMarkCompletedBtn" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:13px;border-color:#7c3aed;">Mark as Completed</button>';
+      progressSection.innerHTML = `${requiredNote}${quizNote}`;
+      const btn = progressSection.querySelector('#trainingMarkCompletedBtn');
+      if (btn) btn.onclick = () => handleMarkTrainingCompleted(item.id);
     }
   }
   bindTrainingVideoTracking(item.id);
@@ -7335,6 +7801,7 @@ window.deleteTrainingItemLocal = deleteTrainingItemLocal;
 window.openTrainingDetails = openTrainingDetails;
 window.backToTrainingLibrary = backToTrainingLibrary;
 window.addTrainingBlock = addTrainingBlock;
+window.addTrainingQuizQuestion = addTrainingQuizQuestion;
 
 // Manage Queue Screen Functions
 // Placeholder permission check - to be connected to actual permission system
@@ -31034,6 +31501,17 @@ function hookSettingsGuard_DISABLED(){
           <button type="button" onclick="addTrainingBlock('image')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Image</button>
         </div>
         <div id="trainingBlocksEditor" style="display:grid;gap:10px;"></div>
+      </div>
+
+      <div style="border-top:1px solid #e5e7eb;padding-top:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#111827;">Quiz</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:2px;">Optional. Employees must answer all questions before the training is completed.</div>
+          </div>
+          <button type="button" onclick="addTrainingQuizQuestion()" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Question</button>
+        </div>
+        <div id="trainingQuizEditor" style="display:grid;gap:10px;"></div>
       </div>
     </div>
 
