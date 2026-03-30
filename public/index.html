@@ -4223,6 +4223,14 @@ function renderBrand(){
 if (typeof document !== 'undefined') {
   document.addEventListener('ff-staff-cloud-updated', function() {
     if (typeof renderBrand === 'function') renderBrand();
+    if (typeof updateQueueManagementUiVisibility === 'function') {
+      updateQueueManagementUiVisibility();
+    }
+    if (typeof ffNormalizeQueuePersonReferences === 'function' && ffNormalizeQueuePersonReferences() && typeof save === 'function') {
+      save();
+    }
+    if (typeof renderQueue === 'function') renderQueue();
+    if (typeof renderService === 'function') renderService();
   });
 }
 
@@ -4267,6 +4275,133 @@ function ffJoinTechnicianScore(technician) {
   if (technician?.updatedAtMs) score += Number(technician.updatedAtMs) / 1000000000000;
   if (technician?.createdAt) score += Number(technician.createdAt) / 1000000000000;
   return score;
+}
+
+function ffStaffRecordScore(staff, target) {
+  let score = ffJoinTechnicianScore(staff);
+  if (staff?.buttonColor || staff?.color) score += 15;
+  if (staff?.fontColor || staff?.fcolor) score += 5;
+  if (staff?.updatedAtMs) score += 500 + (Number(staff.updatedAtMs) / 1000000000000);
+  const targetId = String(target && typeof target === 'object' ? (target.staffId || target.id || '') : '').trim();
+  const targetName = String(target && typeof target === 'object' ? (target.name || '') : (target || '')).trim().toLowerCase();
+  if (targetId && String(staff?.id || '').trim() === targetId) score += 50;
+  if (targetName && String(staff?.name || '').trim().toLowerCase() === targetName) score += 100;
+  return score;
+}
+
+function ffFindBestStaffRecord(staffList, target) {
+  const list = Array.isArray(staffList) ? staffList.filter(Boolean) : [];
+  const targetId = String(target && typeof target === 'object' ? (target.staffId || target.id || '') : '').trim();
+  const targetNameRaw = String(target && typeof target === 'object' ? (target.name || '') : (target || '')).trim();
+  const targetName = targetNameRaw.toLowerCase();
+  if (!list.length) return null;
+
+  const candidates = [];
+  list.forEach((staff) => {
+    const staffId = String(staff?.id || '').trim();
+    const staffName = String(staff?.name || '').trim().toLowerCase();
+    const matchesId = !!targetId && staffId === targetId;
+    const matchesName = !!targetName && staffName === targetName;
+    if (matchesId || matchesName) {
+      candidates.push(staff);
+    }
+  });
+
+  const activeCandidates = candidates.filter((staff) => staff?.isArchived !== true);
+  const pool = activeCandidates.length ? activeCandidates : candidates;
+  if (!pool.length) return null;
+
+  return [...pool].sort((a, b) => ffStaffRecordScore(b, target) - ffStaffRecordScore(a, target))[0] || null;
+}
+
+function ffNormalizeQueuePersonReferences() {
+  try {
+    if (typeof window.ffGetStaffStore !== 'function') return false;
+    const staffStore = window.ffGetStaffStore();
+    const staffList = Array.isArray(staffStore?.staff) ? staffStore.staff : [];
+    let changed = false;
+    [queue, service].forEach((list) => {
+      if (!Array.isArray(list)) return;
+      list.forEach((item) => {
+        if (!item || typeof item !== 'object') return;
+        const bestMatch = ffFindBestStaffRecord(staffList, item);
+        if (!bestMatch || !bestMatch.id) return;
+        if (String(item.staffId || '').trim() !== String(bestMatch.id || '').trim()) {
+          item.staffId = bestMatch.id;
+          changed = true;
+        }
+      });
+    });
+    return changed;
+  } catch (e) {
+    console.warn('[ffNormalizeQueuePersonReferences] Failed to normalize queue/service staffIds:', e);
+    return false;
+  }
+}
+
+function ffSyncLegacyWorkersFromStaffStore(staffData, persistToSettingsStore) {
+  try {
+    if (!settings || typeof settings !== 'object') return;
+    const staffList = Array.isArray(staffData?.staff) ? staffData.staff : [];
+    const palette = settings.brandPalette || DEFAULTS.brandPalette || [];
+    const nextWorkers = staffList.map((staff) => {
+      const paletteColor = (
+        staff?.buttonColorIndex !== undefined &&
+        staff?.buttonColorIndex >= 0 &&
+        staff?.buttonColorIndex < palette.length
+      ) ? palette[staff.buttonColorIndex] : undefined;
+      const buttonColor = staff?.buttonColor || staff?.color || paletteColor;
+      const fontColor = staff?.fontColor || staff?.fcolor || '#ffffff';
+      const workerShadow = {
+        id: staff?.id,
+        name: staff?.name || '',
+        pin: staff?.pin || '',
+        role: staff?.role || (staff?.isAdmin ? 'admin' : (staff?.isManager ? 'manager' : 'technician')),
+        email: staff?.email || undefined,
+        phone: staff?.phone || undefined,
+        firebaseUid: staff?.firebaseUid || undefined,
+        uid: staff?.uid || undefined,
+        invited: staff?.invited === true,
+        invitedAt: staff?.invitedAt || null,
+        lastActiveAt: staff?.lastActiveAt || null,
+        isArchived: staff?.isArchived === true,
+        archived: staff?.isArchived === true,
+        permissions: staff?.permissions || {},
+        isAdmin: staff?.isAdmin === true,
+        isManager: staff?.isManager === true,
+        technicianTypes: Array.isArray(staff?.technicianTypes) ? [...staff.technicianTypes] : undefined,
+        createdAt: staff?.createdAt || Date.now(),
+        updatedAtMs: staff?.updatedAtMs || undefined,
+        fontColor: fontColor,
+        fcolor: fontColor
+      };
+      if (buttonColor) {
+        workerShadow.buttonColor = buttonColor;
+        workerShadow.color = buttonColor;
+      }
+      return workerShadow;
+    });
+
+    const currentWorkersJson = JSON.stringify(Array.isArray(settings.workers) ? settings.workers : []);
+    const nextWorkersJson = JSON.stringify(nextWorkers);
+    if (currentWorkersJson === nextWorkersJson) return;
+
+    settings.workers = nextWorkers;
+    if (persistToSettingsStore) {
+      localStorage.setItem('ffv24_settings', JSON.stringify(settings));
+    }
+  } catch (e) {
+    console.warn('[ffSyncLegacyWorkersFromStaffStore] Failed to mirror ff_staff_v1 into settings.workers:', e);
+  }
+}
+
+function ffNormalizeHexColor(color, fallback) {
+  const raw = String(color || fallback || '').trim();
+  const match = raw.match(/^#([0-9a-fA-F]{6})$/);
+  if (match) return `#${match[1].toLowerCase()}`;
+  const fallbackRaw = String(fallback || '#111827').trim();
+  const fallbackMatch = fallbackRaw.match(/^#([0-9a-fA-F]{6})$/);
+  return fallbackMatch ? `#${fallbackMatch[1].toLowerCase()}` : '#111827';
 }
 
 function ffDeduplicateTechniciansByName(technicians) {
@@ -4391,31 +4526,40 @@ function renderSelect(){
   }
 }
 
-function colorOf(name){ 
-  const n = String(name || '').trim();
-  if (!n) {
-    const palette = settings.brandPalette || DEFAULTS.brandPalette;
-    return palette[0] || "#111827";
-  }
-  // Prefer ff_staff_v1 (Staff Setup) - primary source for buttonColor
+function ffResolveQueueStaffRecord(target) {
   try {
-    if (typeof ffGetStaffStore === 'function') {
-      const store = ffGetStaffStore();
-      const staff = (store.staff || []).find(s => String(s?.name || '').trim() === n && s.isArchived !== true);
-      if (staff) {
-        if (staff.buttonColor) return staff.buttonColor;
-        if (staff.color) return staff.color;
-      }
+    if (typeof window.ffGetStaffStore === 'function') {
+      const store = window.ffGetStaffStore();
+      const staffList = Array.isArray(store?.staff) ? store.staff : [];
+      const bestMatch = ffFindBestStaffRecord(staffList, target);
+      if (bestMatch) return bestMatch;
     }
   } catch (_) {}
-  // Fallback to settings.workers (legacy)
-  const f = ffGetStaffList().find(w => String(w?.name || '').trim() === n);
-  if (f) {
-    if (f.buttonColor) return f.buttonColor;
-    if (f.color) return f.color;
+  return null;
+}
+
+function ffResolveStaffButtonColor(staffRecord, target) {
+  const fallbackPalette = DEFAULTS.brandPalette || ['#111827'];
+  const palette = settings.brandPalette || DEFAULTS.brandPalette || fallbackPalette;
+  const targetName = String(target && typeof target === 'object' ? (target.name || '') : (target || '')).trim();
+  if (!staffRecord || typeof staffRecord !== 'object') {
+    if (targetName) {
+      const sum = targetName.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+      return fallbackPalette[sum % fallbackPalette.length] || "#111827";
+    }
+    return fallbackPalette[0] || "#111827";
   }
-  const palette = settings.brandPalette || DEFAULTS.brandPalette;
-  return palette[0] || "#111827";
+  if (staffRecord.buttonColor) return staffRecord.buttonColor;
+  if (staffRecord.color) return staffRecord.color;
+  if (staffRecord.buttonColorIndex !== undefined && staffRecord.buttonColorIndex >= 0 && staffRecord.buttonColorIndex < palette.length) {
+    return palette[staffRecord.buttonColorIndex] || fallbackPalette[0] || "#111827";
+  }
+  return fallbackPalette[0] || "#111827";
+}
+
+function colorOf(target){ 
+  const staffRecord = ffResolveQueueStaffRecord(target);
+  return ffResolveStaffButtonColor(staffRecord, target);
 }
 
 // Helper function to calculate luminance of a hex color
@@ -4428,37 +4572,24 @@ function getLuminance(hex) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-function fontColorOf(name){
-  const n = String(name || '').trim();
-  let w = null;
-  // Prefer ff_staff_v1 (Staff Setup)
-  try {
-    if (typeof ffGetStaffStore === 'function') {
-      const store = ffGetStaffStore();
-      w = (store.staff || []).find(s => String(s?.name || '').trim() === n && s.isArchived !== true) || null;
-    }
-  } catch (_) {}
-  if (!w) w = ffGetStaffList().find(x => String(x?.name || '').trim() === n);
-  if (w && w.fontColor) return w.fontColor;
-  const bgColor = w ? (w.buttonColor || w.color) : null;
-  if (bgColor) {
-    const luminance = getLuminance(bgColor);
-    return luminance > 0.5 ? '#000000' : '#ffffff';
-  }
+function fontColorOf(target){
+  const w = ffResolveQueueStaffRecord(target);
+  if (w && (w.fontColor || w.fcolor)) return w.fontColor || w.fcolor;
   return '#ffffff';
 }
 
 
 
-function namePill(name){
+function namePill(target){
+  const name = String(target && typeof target === 'object' ? (target.name || '') : (target || '')).trim();
 
   const span=document.createElement('span');
 
   span.className='name-pill';
 
-  span.style.background=colorOf(name);
+  span.style.background=colorOf(target);
 
-  span.style.color=fontColorOf(name);
+  span.style.color=fontColorOf(target);
 
   span.textContent=name;
 
@@ -4523,6 +4654,29 @@ function getCurrentQueueActorRole() {
   return role;
 }
 
+function updateQueueManagementUiVisibility() {
+  const role = getCurrentQueueActorRole();
+  const canViewReorder = role === 'admin' || role === 'manager';
+  const canViewReset = role === 'admin' || role === 'manager';
+  const canViewSettings = role === 'admin';
+  const queueControls = document.getElementById('queueControls');
+  const reorderBtn = document.getElementById('reorderBtn');
+  const manageQueueBtn = document.getElementById('manageQueueBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  if (reorderBtn) {
+    reorderBtn.style.display = canViewReorder ? 'inline-flex' : 'none';
+  }
+  if (manageQueueBtn) {
+    manageQueueBtn.style.display = canViewSettings && checkQueueManagePermission() ? 'flex' : 'none';
+  }
+  if (resetBtn) {
+    resetBtn.style.display = canViewReset ? 'inline-flex' : 'none';
+  }
+  if (queueControls) {
+    queueControls.style.display = (canViewReorder || (canViewSettings && checkQueueManagePermission()) || canViewReset) ? 'flex' : 'none';
+  }
+}
+
 function canTechnicianSelfCheckoutQueueRow(row) {
   if (!row) return false;
   if (getCurrentQueueActorRole() !== 'technician') return false;
@@ -4536,6 +4690,13 @@ function canTechnicianSelfCheckoutQueueRow(row) {
   const rowName = String(row.name || '').trim();
   if (currentStaffId && rowStaffId && currentStaffId === rowStaffId) return true;
   return !!currentStaffName && !!rowName && currentStaffName === rowName;
+}
+
+function canViewQueueRowActionControls(row) {
+  const role = getCurrentQueueActorRole();
+  if (role === 'admin' || role === 'manager') return true;
+  if (role === 'technician') return canTechnicianSelfCheckoutQueueRow(row);
+  return false;
 }
 
 function showQueueSelfCheckoutModal(validator) {
@@ -4641,7 +4802,7 @@ function renderQueue(){
     nm.style.alignItems = "center";
     nm.style.gap = "10px";
     nm.style.minWidth = "0";
-    const queuePill = namePill(q.name);
+    const queuePill = namePill(q);
     queuePill.style.fontSize = "15px";
     queuePill.style.padding = "6px 12px";
     queuePill.style.minWidth = "0";
@@ -4784,7 +4945,9 @@ function renderQueue(){
       ctrls.prepend(selfLeaveBtn);
     }
 
-    ctrls.append(hold,start);
+    if (canViewQueueRowActionControls(q)) {
+      ctrls.append(hold,start);
+    }
 
     if(reorderMode){ const up=btn("↑","start-btn"), down=btn("↓","start-btn"); up.onclick=() =>move(i,-1); down.onclick=() =>move(i,1); const del=btn("✖","finish-btn"); del.title="Remove from queue"; del.onclick=()=>guardHold(()=>removeFromQueue(i)); ctrls.prepend(up); ctrls.append(down); ctrls.append(del); }
 
@@ -4876,7 +5039,7 @@ function renderService(){
     nm.style.alignItems = "center";
     nm.style.gap = "10px";
     nm.style.minWidth = "0";
-    const pill=namePill(s.name); pill.textContent=s.name;
+    const pill=namePill(s); pill.textContent=s.name;
     pill.style.fontSize = "15px";
     pill.style.padding = "6px 12px";
     pill.style.minWidth = "0";
@@ -4901,6 +5064,7 @@ function renderService(){
     }
 
     const fin=btn("FINISH","finish-btn"); fin.onclick=() =>guardFinish(s.name, ()=>finish(i));
+    const canViewServiceRowControls = canViewQueueRowActionControls(s);
     const ctrls=document.createElement("div"); ctrls.className="controls";
     ctrls.style.gap = "10px";
 
@@ -4958,12 +5122,17 @@ function renderService(){
       callStatus.style.cssText = "font-size:10px;color:#6b7280;white-space:nowrap;";
       if (!serviceCallStatusLabel) callStatus.style.display = "none";
       callWrap.append(callBtn, callStatus);
-      ctrls.append(callWrap, fin);
+      ctrls.append(callWrap);
+      if (canViewServiceRowControls) {
+        ctrls.append(fin);
+      }
       li.append(badge,nm,ctrls); serviceList.appendChild(li);
       return;
     }
 
-    ctrls.append(fin);
+    if (canViewServiceRowControls) {
+      ctrls.append(fin);
+    }
     li.append(badge,nm,ctrls); serviceList.appendChild(li);
 
   });
@@ -6121,18 +6290,12 @@ function goToQueue() {
     wrapContent.style.display = 'block';
   }
   
-  // ALWAYS show Queue-only controls (Reorder, RESET)
-  const queueControls = document.getElementById('queueControls');
-  if (queueControls) {
-    queueControls.style.display = 'flex';
-  }
-  
-  // Show/hide Manage Queue button based on permission and initialize handlers
+  // Show/hide Queue management controls based on current role
+  updateQueueManagementUiVisibility();
+
+  // Initialize Manage Queue button handler if needed
   const manageQueueBtn = document.getElementById('manageQueueBtn');
   if (manageQueueBtn) {
-    const hasPermission = checkQueueManagePermission();
-    manageQueueBtn.style.display = hasPermission ? 'flex' : 'none';
-    // Always initialize button handler if not already attached (for testing)
     if (!manageQueueBtn.hasAttribute('data-handler-attached')) {
       manageQueueBtn.setAttribute('data-handler-attached', 'true');
       manageQueueBtn.onclick = function(e) {
@@ -19617,6 +19780,7 @@ function initializeAppsPanel() {
         // Save migrated data to new location
         const migratedData = { staff: migratedStaff };
         localStorage.setItem('ff_staff_v1', JSON.stringify(migratedData));
+        ffSyncLegacyWorkersFromStaffStore(migratedData, true);
         console.log('[ffGetStaffStore] Migration complete: migrated', migratedStaff.length, 'staff members');
         
         // Return migrated data
@@ -19704,6 +19868,7 @@ function initializeAppsPanel() {
         }
       }
       
+      ffSyncLegacyWorkersFromStaffStore(data, false);
       return data;
     } catch (e) {
       console.error('[ffGetStaffStore] Error loading staff store:', e);
@@ -19713,6 +19878,7 @@ function initializeAppsPanel() {
   
   function ffSaveStaffStore(data) {
     try {
+      ffSyncLegacyWorkersFromStaffStore(data, true);
       localStorage.setItem('ff_staff_v1', JSON.stringify(data));
       // Sync to Firestore (non-blocking)
       if (typeof window.ffStaffSyncToCloud === 'function') {
@@ -19722,6 +19888,8 @@ function initializeAppsPanel() {
       console.error('[ffSaveStaffStore] Error saving staff store:', e);
     }
   }
+  window.ffGetStaffStore = ffGetStaffStore;
+  window.ffSaveStaffStore = ffSaveStaffStore;
   
   // Resolve staff name to staffId from ff_staff_v1
   // Returns staffId if found, undefined otherwise
@@ -19730,7 +19898,7 @@ function initializeAppsPanel() {
     
     try {
       const staffStore = ffGetStaffStore();
-      const staff = staffStore.staff.find(s => s.name === name);
+      const staff = ffFindBestStaffRecord(staffStore.staff, name);
       return staff ? staff.id : undefined;
     } catch (e) {
       console.error('[resolveStaffNameToId] Error resolving staff name to ID:', e);
@@ -19746,15 +19914,10 @@ function initializeAppsPanel() {
     
     try {
       const staffStore = ffGetStaffStore();
-      let staff = null;
-      
-      // Try to find by staffId first (preferred method)
-      staff = staffStore.staff.find(s => s.id === staffIdOrName);
-      
-      // If not found by ID, try to find by name (backward compatibility)
-      if (!staff) {
-        staff = staffStore.staff.find(s => s.name === staffIdOrName);
-      }
+      const lookupTarget = String(staffIdOrName || '').startsWith('staff_')
+        ? { staffId: staffIdOrName }
+        : { staffId: staffIdOrName, name: staffIdOrName };
+      const staff = ffFindBestStaffRecord(staffStore.staff, lookupTarget);
       
       // If found in ff_staff_v1, return PIN
       if (staff && staff.pin !== undefined && staff.pin !== null && staff.pin !== '') {
@@ -20884,14 +21047,15 @@ function initializeAppsPanel() {
       function renderEditColorSwatches(container, colors, selectedColor, onSelect) {
         if (!container) return;
         container.innerHTML = '';
+        const normalizedSelectedColor = ffNormalizeHexColor(selectedColor || '#111827', '#111827');
         colors.forEach((color) => {
           const swatch = document.createElement('div');
-          const normalizedColor = String(color || '').toUpperCase();
+          const normalizedColor = ffNormalizeHexColor(color || '#111827', '#111827');
           swatch.style.width = '28px';
           swatch.style.height = '28px';
           swatch.style.borderRadius = '50%';
           swatch.style.background = normalizedColor;
-          swatch.style.border = normalizedColor === selectedColor.toUpperCase() ? '2px solid #111827' : '1px solid #d1d5db';
+          swatch.style.border = normalizedColor === normalizedSelectedColor ? '2px solid #111827' : '1px solid #d1d5db';
           swatch.style.cursor = 'pointer';
           swatch.style.flexShrink = '0';
           swatch.onclick = function() {
@@ -20902,14 +21066,14 @@ function initializeAppsPanel() {
       }
 
       function updateEditButtonColor(color) {
-        const normalizedColor = String(color || currentButtonColor).toUpperCase();
+        const normalizedColor = ffNormalizeHexColor(color || currentButtonColor, currentButtonColor);
         if (buttonColorInput) buttonColorInput.value = normalizedColor;
         if (buttonColorPreview) buttonColorPreview.style.background = normalizedColor;
         renderEditColorSwatches(buttonColorSwatches, palette, normalizedColor, updateEditButtonColor);
       }
 
       function updateEditFontColor(color) {
-        const normalizedColor = String(color || currentFontColor).toUpperCase();
+        const normalizedColor = ffNormalizeHexColor(color || currentFontColor, currentFontColor);
         if (fontColorInput) fontColorInput.value = normalizedColor;
         if (fontColorPreview) fontColorPreview.style.background = normalizedColor;
         renderEditColorSwatches(fontColorSwatches, ['#111111', '#FFFFFF'], normalizedColor, updateEditFontColor);
@@ -21087,8 +21251,8 @@ function initializeAppsPanel() {
       }
       
       const oldStaff = staffStore.staff[staffIndex];
-      const newButtonColor = buttonColorInput?.value || oldStaff.buttonColor || oldStaff.color || '#111827';
-      const newFontColor = fontColorInput?.value || oldStaff.fontColor || oldStaff.fcolor || '#111111';
+      const newButtonColor = ffNormalizeHexColor(buttonColorInput?.value, oldStaff.buttonColor || oldStaff.color || '#111827');
+      const newFontColor = ffNormalizeHexColor(fontColorInput?.value, oldStaff.fontColor || oldStaff.fcolor || '#111111');
       const nameChanged = oldStaff.name !== newName;
       
       // Map role selection to flags to check if role actually changed
@@ -21170,7 +21334,8 @@ function initializeAppsPanel() {
         fcolor: newFontColor,
         permissions: currentPermissions, // Preserve permissions
         isAdmin: newIsAdmin, // Set based on role selection
-        isManager: newIsManager // Set based on role selection
+        isManager: newIsManager, // Set based on role selection
+        updatedAtMs: Date.now()
       };
       delete updatedStaff.buttonColorIndex;
       
@@ -21186,6 +21351,10 @@ function initializeAppsPanel() {
       
       // Save to storage (also triggers Firestore sync via ffSaveStaffStore)
       ffSaveStaffStore(staffStore);
+      const queueReferencesChanged = ffNormalizeQueuePersonReferences();
+      if (queueReferencesChanged && typeof save === 'function') {
+        save();
+      }
 
       // Sync name change to users/{uid} + members/{uid} in Firestore
       if (nameChanged && newEmail && typeof window.ffStaffSyncNameToFirestore === 'function') {
@@ -21207,6 +21376,9 @@ function initializeAppsPanel() {
       if (nameChanged || roleChanged) {
         renderStaffList();
       }
+
+      if (typeof renderQueue === 'function') renderQueue();
+      if (typeof renderService === 'function') renderService();
       
     } catch (error) {
       console.error('[saveStaffDetails] Error saving staff details:', error);
@@ -29905,6 +30077,10 @@ function hookSettingsGuard_DISABLED(){
         sessionStorage.setItem('ff_actor_role', window.__ff_actorRole);
 
         sessionStorage.setItem('ff_actor_name', window.__ff_actorName);
+
+        if (typeof window.updateQueueManagementUiVisibility === 'function') {
+          window.updateQueueManagementUiVisibility();
+        }
 
       } catch(e){}
 

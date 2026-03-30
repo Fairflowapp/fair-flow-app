@@ -12,7 +12,7 @@
 
 import {
   collection, doc, getDocs, getDoc,
-  setDoc, writeBatch, updateDoc, deleteDoc,
+  setDoc, writeBatch, updateDoc, deleteDoc, deleteField,
   onSnapshot, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
@@ -163,16 +163,20 @@ async function _batchWrite(staff) {
       if (!s.id) return;
       const { _syncedAt, ...cleanRaw } = { ...s };
       const clean = _sanitize(cleanRaw) || {};
+      const payload = { ...clean, _syncedAt: serverTimestamp() };
+      if (cleanRaw.buttonColorIndex === undefined) {
+        payload.buttonColorIndex = deleteField();
+      }
       // Ensure technicianTypes is always written for technicians (task filter needs it)
       const isTechnician = s.role === 'technician' || (!s.isAdmin && !s.isManager);
       if (isTechnician) {
-        clean.technicianTypes = Array.isArray(s.technicianTypes) ? s.technicianTypes : [];
+        payload.technicianTypes = Array.isArray(s.technicianTypes) ? s.technicianTypes : [];
       }
       dlog('[StaffCloud] Writing staff doc:', s.id, s.name,
            'to salons/' + _salonId + '/staff/' + s.id);
       batch.set(
         doc(db, `salons/${_salonId}/staff`, s.id),
-        { ...clean, _syncedAt: serverTimestamp() },
+        payload,
         { merge: true }
       );
     });
