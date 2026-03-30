@@ -2317,9 +2317,26 @@ dialog footer button, .code-dialog footer button {
           <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
             <span>Range:</span>
             <select id="historyRangeFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
-              <option value="24h">Last 24 hours</option>
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
               <option value="7d">Last 7 days</option>
               <option value="30d">Last 30 days</option>
+            </select>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
+            <span>Action:</span>
+            <div id="historyActionFilterWrap" style="position:relative;min-width:150px;">
+              <button id="historyActionFilterBtn" type="button" style="width:100%;padding:4px 32px 4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;background:#fff;color:#111827;text-align:left;position:relative;">
+                All
+                <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;">▼</span>
+              </button>
+              <div id="historyActionFilterMenu" style="display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:280px;max-height:260px;overflow:auto;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 12px 32px rgba(15,23,42,0.14);padding:8px;z-index:100090;"></div>
+            </div>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
+            <span>Worker:</span>
+            <select id="historyWorkerFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;min-width:140px;">
+              <option value="all">All</option>
             </select>
           </label>
         </div>
@@ -2977,6 +2994,12 @@ window.__historySourceFilter = 'all';
 // Global state for history order filter (UI only, not persisted)
 window.__historyOrderFilter = 'newest';
 
+// Global state for history worker filter
+window.__historyWorkerFilter = 'all';
+
+// Global state for history action filters
+window.__historyActionFilters = [];
+
 let reorderMode=false;
 
 
@@ -3540,6 +3563,140 @@ function setHistorySourceFilter(value) {
 }
 window.setHistorySourceFilter = setHistorySourceFilter;
 
+function getHistoryActionFilterLabel(entry) {
+  const action = String(entry?.action || '').trim();
+  if (!action) return '';
+  const prefixMatch = action.match(/^(Task Selected|Task Completed|Task Returned|Tasks Reset):/i);
+  if (prefixMatch) return prefixMatch[1];
+  return action;
+}
+window.getHistoryActionFilterLabel = getHistoryActionFilterLabel;
+
+function getHistorySelectedActionFilters() {
+  return Array.from(new Set(
+    (Array.isArray(window.__historyActionFilters) ? window.__historyActionFilters : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  ));
+}
+window.getHistorySelectedActionFilters = getHistorySelectedActionFilters;
+
+function updateHistoryActionFilterButton() {
+  const button = document.getElementById('historyActionFilterBtn');
+  if (!button) return;
+  const selected = getHistorySelectedActionFilters();
+  const arrow = '<span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;">▼</span>';
+  let label = 'All';
+  if (selected.length === 1) label = selected[0];
+  else if (selected.length > 1) label = `${selected.length} selected`;
+  button.innerHTML = `${escapeHtml(label)}${arrow}`;
+  button.title = selected.length ? selected.join(', ') : 'All';
+}
+window.updateHistoryActionFilterButton = updateHistoryActionFilterButton;
+
+function setHistoryActionFilters(values) {
+  window.__historyActionFilters = Array.from(new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  ));
+  updateHistoryActionFilterButton();
+}
+window.setHistoryActionFilters = setHistoryActionFilters;
+
+function syncHistoryActionFilterOptions(entries) {
+  const menu = document.getElementById('historyActionFilterMenu');
+  if (!menu) return;
+  const actionLabels = Array.from(new Set(
+    (Array.isArray(entries) ? entries : [])
+      .map((entry) => getHistoryActionFilterLabel(entry))
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  const selectedActions = getHistorySelectedActionFilters().filter((label) => actionLabels.includes(label));
+  window.__historyActionFilters = selectedActions;
+  menu.innerHTML = '';
+  const createRow = (labelText, value, checked) => {
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;font-size:13px;color:#111827;cursor:pointer;';
+    label.addEventListener('mouseenter', () => { label.style.background = '#f5f3ff'; });
+    label.addEventListener('mouseleave', () => { label.style.background = 'transparent'; });
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = value;
+    input.checked = checked;
+    input.style.accentColor = '#7c3aed';
+    const text = document.createElement('span');
+    text.textContent = labelText;
+    label.append(input, text);
+    menu.appendChild(label);
+  };
+  createRow('All', '__all__', selectedActions.length === 0);
+  actionLabels.forEach((actionLabel) => {
+    createRow(actionLabel, actionLabel, selectedActions.includes(actionLabel));
+  });
+  updateHistoryActionFilterButton();
+}
+window.syncHistoryActionFilterOptions = syncHistoryActionFilterOptions;
+
+function syncHistoryWorkerFilterOptions(entries) {
+  const select = document.getElementById('historyWorkerFilter');
+  if (!select) return;
+  const workerNames = Array.from(new Set(
+    (Array.isArray(entries) ? entries : [])
+      .map((entry) => String(entry?.worker || '').trim())
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  let selectedWorker = String(window.__historyWorkerFilter || 'all').trim();
+  if (selectedWorker !== 'all' && !workerNames.includes(selectedWorker)) {
+    selectedWorker = 'all';
+    window.__historyWorkerFilter = 'all';
+  }
+  select.innerHTML = '<option value="all">All</option>';
+  workerNames.forEach((workerName) => {
+    const option = document.createElement('option');
+    option.value = workerName;
+    option.textContent = workerName;
+    select.appendChild(option);
+  });
+  select.value = selectedWorker || 'all';
+}
+window.syncHistoryWorkerFilterOptions = syncHistoryWorkerFilterOptions;
+
+function getFilteredHistoryEntries(options = {}) {
+  const { syncWorkerOptions = false, syncActionOptions = false, ignoreActionFilter = false, ignoreWorkerFilter = false, ignoreOrder = false } = options || {};
+  const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+  log = logArr;
+  const normalizedEntries = logArr.map(normalizeHistoryEntry);
+  const sourceFilter = (window.__historySourceFilter || 'all').toLowerCase();
+  let rows = normalizedEntries;
+  if (sourceFilter !== 'all') {
+    rows = rows.filter((normalized) => normalized.source.toLowerCase() === sourceFilter);
+  }
+  const rangeValue = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
+  rows = applyHistoryRangeFilter(rows, rangeValue);
+  if (syncActionOptions) {
+    syncHistoryActionFilterOptions(rows);
+  }
+  const selectedActions = getHistorySelectedActionFilters();
+  if (!ignoreActionFilter && selectedActions.length) {
+    const selectedActionSet = new Set(selectedActions.map((value) => value.toLowerCase()));
+    rows = rows.filter((entry) => selectedActionSet.has(getHistoryActionFilterLabel(entry).toLowerCase()));
+  }
+  if (syncWorkerOptions) {
+    syncHistoryWorkerFilterOptions(rows);
+  }
+  const workerFilter = String(window.__historyWorkerFilter || 'all').trim().toLowerCase();
+  if (!ignoreWorkerFilter && workerFilter !== 'all') {
+    rows = rows.filter((entry) => String(entry.worker || '').trim().toLowerCase() === workerFilter);
+  }
+  const orderFilter = window.__historyOrderFilter || 'newest';
+  if (!ignoreOrder && orderFilter === 'newest') {
+    rows = [...rows].reverse();
+  }
+  return rows;
+}
+window.getFilteredHistoryEntries = getFilteredHistoryEntries;
+
 // Helper function to get actor info from latest validated code
 function getHistoryActor() {
   const v = window.__ff_lastValidatedCode;
@@ -3589,11 +3746,24 @@ function getEntryTs(entry) {
 // Helper function to apply range filter to history entries
 function applyHistoryRangeFilter(entries, rangeValue) {
   const now = Date.now();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const yesterdayStart = new Date(todayStart);
+  yesterdayStart.setDate(yesterdayStart.getDate() - 1);
   let threshold;
+  let upperBound = null;
   
   switch (rangeValue) {
     case '24h':
-      threshold = now - 24 * 60 * 60 * 1000;
+    case 'today':
+      threshold = todayStart.getTime();
+      upperBound = tomorrowStart.getTime();
+      break;
+    case 'yesterday':
+      threshold = yesterdayStart.getTime();
+      upperBound = todayStart.getTime();
       break;
     case '7d':
       threshold = now - 7 * 24 * 60 * 60 * 1000;
@@ -3608,7 +3778,9 @@ function applyHistoryRangeFilter(entries, rangeValue) {
   return entries.filter(entry => {
     const ts = getEntryTs(entry);
     // Keep entry if: ts exists and ts >= threshold, OR ts is null (parsing failed)
-    return ts === null || ts >= threshold;
+    if (ts === null) return true;
+    if (upperBound != null) return ts >= threshold && ts < upperBound;
+    return ts >= threshold;
   });
 }
 
@@ -3709,34 +3881,7 @@ function normalizeHistoryEntry(entry) {
 function renderHistory() {
   const tableBody = document.getElementById('historyBody');
   if (!tableBody) return;
-
-  // Read the raw array ONLY from localStorage key "ffv24_log" (fallback [])
-  const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
-  
-  // Update in-memory log variable
-  log = logArr;
-  
-  // Map all entries through normalizeHistoryEntry()
-  const normalizedEntries = logArr.map(normalizeHistoryEntry);
-  
-  // Apply source filter on the normalized objects
-  const sourceFilter = (window.__historySourceFilter || 'all').toLowerCase();
-  let rows = normalizedEntries;
-  if (sourceFilter !== 'all') {
-    rows = normalizedEntries.filter(normalized => {
-      return normalized.source.toLowerCase() === sourceFilter;
-    });
-  }
-  
-  // Apply range filter BEFORE sorting
-  const rangeValue = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
-  rows = applyHistoryRangeFilter(rows, rangeValue);
-  
-  // Apply order filter (newest first = reverse array, oldest first = as-is)
-  const orderFilter = window.__historyOrderFilter || 'newest';
-  if (orderFilter === 'newest') {
-    rows = [...rows].reverse(); // Create a copy before reversing
-  }
+  const rows = getFilteredHistoryEntries({ syncActionOptions: true, syncWorkerOptions: true });
   
   // Render the table using normalized fields
   // Always render columns from normalized fields: Date | Time | Action | Role | Performed by | Worker
@@ -10984,7 +11129,13 @@ function openHistoryModal() {
   }
   const rangeSelect = document.getElementById('historyRangeFilter');
   if (rangeSelect) {
-    rangeSelect.value = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
+    const currentRange = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
+    rangeSelect.value = currentRange === '24h' ? 'today' : currentRange;
+  }
+  updateHistoryActionFilterButton();
+  const workerSelect = document.getElementById('historyWorkerFilter');
+  if (workerSelect) {
+    workerSelect.value = window.__historyWorkerFilter || 'all';
   }
   renderHistory();
 }
@@ -11053,30 +11204,7 @@ const historyClearBtn = document.getElementById('historyClearBtn');
 const historyCloseBtn2 = document.getElementById('historyCloseBtn2');
 
 function exportHistory() {
-  // Read from ffv24_log localStorage
-  const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
-  
-  // Normalize entries first
-  const normalizedEntries = logArr.map(normalizeHistoryEntry);
-  
-  // Apply source filter if needed
-  const sourceFilter = (window.__historySourceFilter || 'all').toLowerCase();
-  let entries = normalizedEntries;
-  if (sourceFilter !== 'all') {
-    entries = normalizedEntries.filter(entry => {
-      return entry.source.toLowerCase() === sourceFilter;
-    });
-  }
-  
-  // Apply range filter BEFORE sorting
-  const rangeValue = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
-  entries = applyHistoryRangeFilter(entries, rangeValue);
-  
-  // Apply order filter (respect the selected order)
-  const orderFilter = window.__historyOrderFilter || 'newest';
-  if (orderFilter === 'newest') {
-    entries = [...entries].reverse(); // Create a copy before reversing
-  }
+  const entries = getFilteredHistoryEntries({ syncWorkerOptions: false });
   
   const blob = new Blob([entries.map(entry => {
     // Entries are already normalized at this point
@@ -11150,7 +11278,8 @@ if (historyOrderFilterSelect) {
 // Wire up history range filter dropdown
 const historyRangeFilterSelect = document.getElementById('historyRangeFilter');
 if (historyRangeFilterSelect) {
-  const savedRange = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
+  const savedRangeRaw = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
+  const savedRange = savedRangeRaw === '24h' ? 'today' : savedRangeRaw;
   historyRangeFilterSelect.value = savedRange;
   historyRangeFilterSelect.addEventListener('change', function(e) {
     const rangeValue = e.target.value || '30d';
@@ -11159,6 +11288,54 @@ if (historyRangeFilterSelect) {
     } else {
       localStorage.setItem('ff_history_range_v1', rangeValue);
     }
+    renderHistory();
+  });
+}
+
+const historyActionFilterBtn = document.getElementById('historyActionFilterBtn');
+const historyActionFilterMenu = document.getElementById('historyActionFilterMenu');
+const historyActionFilterWrap = document.getElementById('historyActionFilterWrap');
+if (historyActionFilterBtn && historyActionFilterMenu && historyActionFilterWrap) {
+  updateHistoryActionFilterButton();
+  historyActionFilterBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const isOpen = historyActionFilterMenu.style.display === 'block';
+    historyActionFilterMenu.style.display = isOpen ? 'none' : 'block';
+  });
+  historyActionFilterMenu.addEventListener('click', function(e) {
+    e.stopPropagation();
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') return;
+    const actionOptionEntries = getFilteredHistoryEntries({ ignoreActionFilter: true, ignoreWorkerFilter: true, ignoreOrder: true });
+    if (target.value === '__all__') {
+      setHistoryActionFilters([]);
+      syncHistoryActionFilterOptions(actionOptionEntries);
+      renderHistory();
+      return;
+    }
+    const selected = new Set(getHistorySelectedActionFilters());
+    if (target.checked) {
+      selected.add(target.value);
+    } else {
+      selected.delete(target.value);
+    }
+    setHistoryActionFilters(Array.from(selected));
+    syncHistoryActionFilterOptions(actionOptionEntries);
+    renderHistory();
+  });
+  document.addEventListener('click', function(e) {
+    if (!historyActionFilterWrap.contains(e.target)) {
+      historyActionFilterMenu.style.display = 'none';
+    }
+  });
+}
+
+const historyWorkerFilterSelect = document.getElementById('historyWorkerFilter');
+if (historyWorkerFilterSelect) {
+  historyWorkerFilterSelect.value = window.__historyWorkerFilter || 'all';
+  historyWorkerFilterSelect.addEventListener('change', function(e) {
+    window.__historyWorkerFilter = e.target.value || 'all';
     renderHistory();
   });
 }
