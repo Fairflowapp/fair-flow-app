@@ -2290,6 +2290,23 @@ dialog footer button, .code-dialog footer button {
           </label>
         </div>
       </div>
+      <div style="margin-bottom:8px;padding-top:20px;border-top:1px solid #ede9fe;">
+        <div style="margin:0 0 16px 0;font-size:13px;font-weight:500;color:#111827;">Queue Location Restriction</div>
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="manageQueueGeoFenceEnabled" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
+            <span style="font-size:12px;font-weight:400;color:#111827;">Enable location restriction for Queue actions</span>
+          </label>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <button type="button" id="manageQueueSetSalonLocationBtn" class="btn-pill" style="background:#7c3aed;color:#fff;border-color:#7c3aed;padding:8px 14px;font-size:12px;">Set Salon Location</button>
+            <div id="manageQueueGeoFenceStatus" style="font-size:12px;color:#6b7280;">No salon location set</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <label for="manageQueueGeoFenceRadius" style="font-size:12px;font-weight:400;color:#111827;min-width:160px;">Allowed Radius (meters)</label>
+            <input type="number" id="manageQueueGeoFenceRadius" min="1" step="1" value="100" style="width:140px;height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;">
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -3529,6 +3546,292 @@ function addQueueCheckoutHistoryRecord({ staffId, workerName, source, role, perf
   }
 }
 
+function addQueueGeoFenceBlockedHistoryRecord({ action, staffId, staffName, reason, distanceMeters, allowedRadiusMeters, accuracy }) {
+  try {
+    const now = new Date();
+    const normalizedAction = String(action || '').trim().toLowerCase() === 'leave' ? 'leave' : 'join';
+    const type = normalizedAction === 'leave' ? 'queue_leave_blocked' : 'queue_join_blocked';
+    const labelPrefix = normalizedAction === 'leave' ? 'Leave queue blocked' : 'Join blocked';
+    let detail = 'Location blocked';
+    if (reason === 'outside_radius') detail = `Outside radius (${Math.round(Number(distanceMeters || 0))}m > ${Math.round(Number(allowedRadiusMeters || 0))}m)`;
+    else if (reason === 'low_accuracy') detail = `Low accuracy (${Math.round(Number(accuracy || 0))}m)`;
+    else if (reason === 'location_denied') detail = 'Location denied';
+    const entry = {
+      date: formatHistoryDate(now),
+      time: formatHistoryTime(now),
+      action: `${labelPrefix}: ${detail}`,
+      role: 'Tech',
+      performedBy: staffName || 'Technician',
+      worker: staffName || '',
+      source: 'queue',
+      type,
+      staffId: String(staffId || '').trim(),
+      staffName: staffName || '',
+      reason: reason || '',
+      distanceMeters: Number.isFinite(Number(distanceMeters)) ? Math.round(Number(distanceMeters)) : null,
+      allowedRadiusMeters: Number.isFinite(Number(allowedRadiusMeters)) ? Math.round(Number(allowedRadiusMeters)) : null,
+      accuracy: Number.isFinite(Number(accuracy)) ? Math.round(Number(accuracy)) : null,
+      timestamp: now.getTime(),
+      ts: now.getTime(),
+      dateTime: now.toISOString()
+    };
+    const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+    logArr.push(entry);
+    localStorage.setItem('ffv24_log', JSON.stringify(logArr));
+    log = logArr;
+    if (typeof window.enforceHistoryRetention === 'function') {
+      window.enforceHistoryRetention();
+    }
+    if (typeof window.queueCloudWrite === 'function') {
+      setTimeout(() => {
+        try {
+          window.queueCloudWrite();
+        } catch (err) {
+          console.warn('[QueueGeoFence] queueCloudWrite after blocked history add failed', err);
+        }
+      }, 0);
+    }
+  } catch (e) {
+    console.error('[QueueGeoFence] Failed to add blocked history', e);
+  }
+}
+
+function calculateHaversineDistanceMeters(userLat, userLng, salonLat, salonLng) {
+  const toRad = (deg) => (Number(deg) * Math.PI) / 180;
+  const earthRadiusMeters = 6371000;
+  const dLat = toRad(Number(salonLat) - Number(userLat));
+  const dLng = toRad(Number(salonLng) - Number(userLng));
+  const lat1 = toRad(userLat);
+  const lat2 = toRad(salonLat);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusMeters * c;
+}
+
+function requestCurrentBrowserLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== 'function') {
+      reject(new Error('Geolocation is not supported on this device.'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          lat: Number(position.coords.latitude),
+          lng: Number(position.coords.longitude),
+          accuracy: Number(position.coords.accuracy)
+        });
+      },
+      (error) => {
+        reject(error || new Error('Failed to get location.'));
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
+      }
+    );
+  });
+}
+
+function getQueueGeoFenceSetAccuracyLimitMeters() {
+  return 150;
+}
+
+function getQueueGeoFenceActionAccuracyLimitMeters() {
+  return 150;
+}
+
+function showQueueGeoFenceNotice({ title, message, confirmLabel, cancelLabel, showCancel }) {
+  return new Promise((resolve) => {
+    const existing = document.getElementById('queueGeoFenceNoticeModal');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'queueGeoFenceNoticeModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:100080;display:flex;align-items:center;justify-content:center;padding:20px;';
+    const dialog = document.createElement('div');
+    dialog.style.cssText = 'width:100%;max-width:380px;background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,0.22);border:1px solid #ede9fe;padding:20px;display:grid;gap:14px;';
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = 'font-size:16px;font-weight:600;color:#111827;';
+    titleEl.textContent = title || 'Location check';
+    const msgEl = document.createElement('div');
+    msgEl.style.cssText = 'font-size:13px;line-height:1.6;color:#4b5563;';
+    msgEl.textContent = message || '';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;';
+    const close = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+    if (showCancel !== false) {
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'btn-pill';
+      cancelBtn.textContent = cancelLabel || 'Cancel';
+      cancelBtn.style.cssText = 'font-size:12px;padding:8px 14px;background:#fff;color:#374151;border:1px solid #d1d5db;';
+      cancelBtn.onclick = () => close(false);
+      actions.appendChild(cancelBtn);
+    }
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'btn-pill';
+    confirmBtn.textContent = confirmLabel || 'OK';
+    confirmBtn.style.cssText = 'font-size:12px;padding:8px 14px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;';
+    confirmBtn.onclick = () => close(true);
+    actions.appendChild(confirmBtn);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close(false);
+    });
+    dialog.onclick = (e) => e.stopPropagation();
+    dialog.append(titleEl, msgEl, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+  });
+}
+
+async function handleSetQueueSalonLocation() {
+  while (true) {
+    try {
+      const position = await requestCurrentBrowserLocation();
+      const accuracy = Math.round(Number(position.accuracy || 0));
+      const accuracyLimit = getQueueGeoFenceSetAccuracyLimitMeters();
+      console.log('[QueueGeoFence]', {
+        action: 'set_salon_location',
+        enabled: true,
+        distanceMeters: null,
+        allowedRadiusMeters: sanitizeQueueGeoFenceRadius(getQueueGeoFenceSettings().allowedRadiusMeters),
+        accuracy,
+        blockedReason: accuracy > accuracyLimit ? 'low_accuracy' : null
+      });
+      if (accuracy > accuracyLimit) {
+        const retry = await showQueueGeoFenceNotice({
+          title: 'Location Not Accurate Enough',
+          message: `Location is not accurate enough (${accuracy}m). Please try again near the salon entrance`,
+          confirmLabel: 'Try Again',
+          cancelLabel: 'Cancel',
+          showCancel: true
+        });
+        if (retry) continue;
+        return false;
+      }
+      const queueGeoFence = getQueueGeoFenceSettings();
+      const radiusEl = document.getElementById('manageQueueGeoFenceRadius');
+      queueGeoFence.enabled = true;
+      queueGeoFence.lat = Number(position.lat.toFixed(7));
+      queueGeoFence.lng = Number(position.lng.toFixed(7));
+      queueGeoFence.accuracy = accuracy;
+      queueGeoFence.allowedRadiusMeters = sanitizeQueueGeoFenceRadius(radiusEl?.value || queueGeoFence.allowedRadiusMeters);
+      queueGeoFence.updatedAt = Date.now();
+      saveQueueGeoFenceSettings(queueGeoFence);
+      renderManageQueueGeoFenceSettings();
+      await showQueueGeoFenceNotice({
+        title: 'Salon Location Saved',
+        message: 'Salon location saved successfully',
+        confirmLabel: 'OK',
+        showCancel: false
+      });
+      return true;
+    } catch (error) {
+      console.log('[QueueGeoFence]', {
+        action: 'set_salon_location',
+        enabled: true,
+        distanceMeters: null,
+        allowedRadiusMeters: sanitizeQueueGeoFenceRadius(getQueueGeoFenceSettings().allowedRadiusMeters),
+        accuracy: null,
+        blockedReason: 'location_denied'
+      });
+      const retry = await showQueueGeoFenceNotice({
+        title: 'Location Access Needed',
+        message: 'Location access is required to set the salon location',
+        confirmLabel: 'Try Again',
+        cancelLabel: 'Cancel',
+        showCancel: true
+      });
+      if (retry) continue;
+      return false;
+    }
+  }
+}
+
+async function verifyQueueGeoFenceForAction({ action, staffId, staffName }) {
+  const queueGeoFence = getQueueGeoFenceSettings();
+  const normalizedAction = String(action || '').trim().toLowerCase() === 'leave' ? 'leave' : 'join';
+  const enabled = isQueueGeoFenceActive(queueGeoFence);
+  const allowedRadiusMeters = sanitizeQueueGeoFenceRadius(queueGeoFence.allowedRadiusMeters);
+  const accuracyLimit = getQueueGeoFenceActionAccuracyLimitMeters();
+  if (!enabled) {
+    console.log('[QueueGeoFence]', {
+      action: normalizedAction,
+      enabled: false,
+      distanceMeters: null,
+      allowedRadiusMeters,
+      accuracy: null,
+      blockedReason: null
+    });
+    return { allowed: true };
+  }
+  while (true) {
+    let accuracy = null;
+    let distanceMeters = null;
+    let blockedReason = null;
+    try {
+      const position = await requestCurrentBrowserLocation();
+      accuracy = Math.round(Number(position.accuracy || 0));
+      if (accuracy > accuracyLimit) {
+        blockedReason = 'low_accuracy';
+      } else {
+        distanceMeters = Math.round(calculateHaversineDistanceMeters(position.lat, position.lng, queueGeoFence.lat, queueGeoFence.lng));
+        if (distanceMeters > allowedRadiusMeters) {
+          blockedReason = 'outside_radius';
+        }
+      }
+    } catch (_) {
+      blockedReason = 'location_denied';
+    }
+    console.log('[QueueGeoFence]', {
+      action: normalizedAction,
+      enabled,
+      distanceMeters,
+      allowedRadiusMeters,
+      accuracy,
+      blockedReason
+    });
+    if (!blockedReason) {
+      return { allowed: true, distanceMeters, allowedRadiusMeters, accuracy };
+    }
+    addQueueGeoFenceBlockedHistoryRecord({
+      action: normalizedAction,
+      staffId,
+      staffName,
+      reason: blockedReason,
+      distanceMeters,
+      allowedRadiusMeters,
+      accuracy
+    });
+    let message = 'Location access is required to join the queue';
+    if (normalizedAction === 'leave') {
+      message = 'Location access is required to leave the queue';
+    }
+    if (blockedReason === 'low_accuracy') {
+      message = `Location is not accurate enough${accuracy != null ? ` (${accuracy}m)` : ''}. Please try again`;
+    } else if (blockedReason === 'outside_radius') {
+      message = normalizedAction === 'leave'
+        ? 'You must be at the salon to leave the queue'
+        : 'You must be at the salon to join the queue';
+    }
+    const retry = await showQueueGeoFenceNotice({
+      title: normalizedAction === 'leave' ? 'Unable to Leave Queue' : 'Unable to Join Queue',
+      message,
+      confirmLabel: 'Try Again',
+      cancelLabel: 'Cancel',
+      showCancel: true
+    });
+    if (retry) continue;
+    return { allowed: false, reason: blockedReason, distanceMeters, allowedRadiusMeters, accuracy };
+  }
+}
+
 // Wrapper function for Tasks history logging
 function logTaskHistory(actionText, extra = {}) {
   // Get actor info - try to use current actor state if available
@@ -3566,7 +3869,7 @@ window.setHistorySourceFilter = setHistorySourceFilter;
 function getHistoryActionFilterLabel(entry) {
   const action = String(entry?.action || '').trim();
   if (!action) return '';
-  const prefixMatch = action.match(/^(Task Selected|Task Completed|Task Returned|Tasks Reset):/i);
+  const prefixMatch = action.match(/^(Task Selected|Task Completed|Task Returned|Tasks Reset|Join blocked|Leave queue blocked):/i);
   if (prefixMatch) return prefixMatch[1];
   return action;
 }
@@ -4540,6 +4843,12 @@ async function selfRemoveFromQueue(i) {
     return !!storedPin && String(storedPin) === String(pin);
   });
   if (modalResult == null) return;
+  const geoFenceCheck = await verifyQueueGeoFenceForAction({
+    action: 'leave',
+    staffId: currentStaffId || target.staffId || '',
+    staffName: target.name || window.__ff_authedStaffName || 'Technician'
+  });
+  if (!geoFenceCheck.allowed) return;
   const rem = queue.splice(i, 1)[0];
   addQueueCheckoutHistoryRecord({
     staffId: rem.staffId || currentStaffId,
@@ -4750,7 +5059,7 @@ function getCurrentStaffPin(staffIdOrName) {
   }
 }
 
-function handleJoin(){
+async function handleJoin(){
   try {
   console.log('[handleJoin] Join button clicked');
 
@@ -4894,6 +5203,22 @@ function handleJoin(){
       joinErrorEl.style.display = 'block';
     } else {
       alert('This technician is already active');
+    }
+    return;
+  }
+
+  const geoFenceCheck = await verifyQueueGeoFenceForAction({
+    action: 'join',
+    staffId: currentStaffId,
+    staffName: selectedTechnicianName
+  });
+  if (!geoFenceCheck.allowed) {
+    if (joinErrorEl) {
+      let message = 'Location access is required to join the queue';
+      if (geoFenceCheck.reason === 'low_accuracy') message = 'Location is not accurate enough. Please try again';
+      if (geoFenceCheck.reason === 'outside_radius') message = 'You must be at the salon to join the queue';
+      joinErrorEl.textContent = message;
+      joinErrorEl.style.display = 'block';
     }
     return;
   }
@@ -8265,6 +8590,94 @@ function saveQueueAutoResetSettings(autoReset) {
   clearQueueLastAutoResetDate();
 }
 
+function getDefaultQueueGeoFenceSettings() {
+  return {
+    enabled: false,
+    lat: null,
+    lng: null,
+    accuracy: null,
+    allowedRadiusMeters: 100,
+    updatedAt: null
+  };
+}
+
+function sanitizeQueueGeoFenceRadius(value) {
+  const num = Math.round(Number(value));
+  if (!Number.isFinite(num) || num <= 0) return 100;
+  return num;
+}
+
+function getQueueGeoFenceSettings() {
+  const queues = getQueuesData();
+  const raw = queues?.default?.settings?.queueGeoFence;
+  if (!raw || typeof raw !== 'object') return getDefaultQueueGeoFenceSettings();
+  const defaults = getDefaultQueueGeoFenceSettings();
+  return {
+    enabled: raw.enabled === true,
+    lat: Number.isFinite(Number(raw.lat)) ? Number(raw.lat) : defaults.lat,
+    lng: Number.isFinite(Number(raw.lng)) ? Number(raw.lng) : defaults.lng,
+    accuracy: Number.isFinite(Number(raw.accuracy)) ? Math.round(Number(raw.accuracy)) : defaults.accuracy,
+    allowedRadiusMeters: sanitizeQueueGeoFenceRadius(raw.allowedRadiusMeters),
+    updatedAt: Number.isFinite(Number(raw.updatedAt)) ? Number(raw.updatedAt) : defaults.updatedAt
+  };
+}
+
+function saveQueueGeoFenceSettings(queueGeoFence) {
+  const queues = getQueuesData();
+  if (!queues.default) queues.default = {};
+  if (!queues.default.settings) queues.default.settings = {};
+  const current = getQueueGeoFenceSettings();
+  queues.default.settings.queueGeoFence = {
+    enabled: queueGeoFence?.enabled === true,
+    lat: Number.isFinite(Number(queueGeoFence?.lat)) ? Number(queueGeoFence.lat) : current.lat,
+    lng: Number.isFinite(Number(queueGeoFence?.lng)) ? Number(queueGeoFence.lng) : current.lng,
+    accuracy: Number.isFinite(Number(queueGeoFence?.accuracy)) ? Math.round(Number(queueGeoFence.accuracy)) : current.accuracy,
+    allowedRadiusMeters: sanitizeQueueGeoFenceRadius(queueGeoFence?.allowedRadiusMeters ?? current.allowedRadiusMeters),
+    updatedAt: Number.isFinite(Number(queueGeoFence?.updatedAt)) ? Number(queueGeoFence.updatedAt) : current.updatedAt
+  };
+  setQueuesData(queues);
+}
+
+function hasSavedQueueGeoFenceLocation(queueGeoFence) {
+  return Number.isFinite(Number(queueGeoFence?.lat)) && Number.isFinite(Number(queueGeoFence?.lng));
+}
+
+function isQueueGeoFenceActive(queueGeoFence) {
+  const settings = queueGeoFence || getQueueGeoFenceSettings();
+  return settings.enabled === true && hasSavedQueueGeoFenceLocation(settings);
+}
+
+function formatQueueGeoFenceUpdatedAt(updatedAt) {
+  const ts = Number(updatedAt);
+  if (!Number.isFinite(ts) || ts <= 0) return '';
+  try {
+    return new Date(ts).toLocaleString();
+  } catch (_) {
+    return '';
+  }
+}
+
+function renderManageQueueGeoFenceSettings() {
+  const queueGeoFence = getQueueGeoFenceSettings();
+  const enabledEl = document.getElementById('manageQueueGeoFenceEnabled');
+  const radiusEl = document.getElementById('manageQueueGeoFenceRadius');
+  const statusEl = document.getElementById('manageQueueGeoFenceStatus');
+  if (enabledEl) enabledEl.checked = queueGeoFence.enabled === true;
+  if (radiusEl) radiusEl.value = String(sanitizeQueueGeoFenceRadius(queueGeoFence.allowedRadiusMeters));
+  if (statusEl) {
+    if (!hasSavedQueueGeoFenceLocation(queueGeoFence)) {
+      statusEl.textContent = 'No salon location set';
+      statusEl.style.color = '#6b7280';
+    } else {
+      const updatedLabel = formatQueueGeoFenceUpdatedAt(queueGeoFence.updatedAt);
+      statusEl.textContent = updatedLabel
+        ? `Salon location saved. Last updated: ${updatedLabel}`
+        : 'Salon location saved';
+      statusEl.style.color = '#166534';
+    }
+  }
+}
+
 function openManageQueue() {
   // Hide Queue view
   const ownerView = document.getElementById('owner-view');
@@ -8286,6 +8699,7 @@ function openManageQueue() {
   if (enabledEl) enabledEl.checked = autoReset.enabled === true;
   if (timeEl) timeEl.value = autoReset.time || '04:00';
   if (forceEl) forceEl.checked = autoReset.resetWhileInService === true;
+  renderManageQueueGeoFenceSettings();
   
   // Show Manage Queue screen
   const manageQueueScreen = document.getElementById('manageQueueScreen');
@@ -8331,6 +8745,9 @@ function initManageQueueButtons() {
   const enabledEl = document.getElementById('manageQueueAutoResetEnabled');
   const timeEl = document.getElementById('manageQueueAutoResetTime');
   const forceEl = document.getElementById('manageQueueAutoResetForce');
+  const geoFenceEnabledEl = document.getElementById('manageQueueGeoFenceEnabled');
+  const geoFenceRadiusEl = document.getElementById('manageQueueGeoFenceRadius');
+  const geoFenceSetLocationBtn = document.getElementById('manageQueueSetSalonLocationBtn');
   
   if (enabledEl && !enabledEl.hasAttribute('data-handler-attached')) {
     enabledEl.setAttribute('data-handler-attached', 'true');
@@ -8376,6 +8793,39 @@ function initManageQueueButtons() {
       const autoReset = getQueueAutoResetSettings();
       autoReset.resetWhileInService = forceEl.checked === true;
       saveQueueAutoResetSettings(autoReset);
+    });
+  }
+
+  if (geoFenceEnabledEl && !geoFenceEnabledEl.hasAttribute('data-handler-attached')) {
+    geoFenceEnabledEl.setAttribute('data-handler-attached', 'true');
+    geoFenceEnabledEl.addEventListener('change', function() {
+      const queueGeoFence = getQueueGeoFenceSettings();
+      queueGeoFence.enabled = geoFenceEnabledEl.checked === true;
+      queueGeoFence.allowedRadiusMeters = sanitizeQueueGeoFenceRadius(
+        geoFenceRadiusEl?.value || queueGeoFence.allowedRadiusMeters
+      );
+      saveQueueGeoFenceSettings(queueGeoFence);
+      renderManageQueueGeoFenceSettings();
+    });
+  }
+
+  if (geoFenceRadiusEl && !geoFenceRadiusEl.hasAttribute('data-handler-attached')) {
+    geoFenceRadiusEl.setAttribute('data-handler-attached', 'true');
+    geoFenceRadiusEl.addEventListener('change', function() {
+      const queueGeoFence = getQueueGeoFenceSettings();
+      queueGeoFence.allowedRadiusMeters = sanitizeQueueGeoFenceRadius(geoFenceRadiusEl.value);
+      geoFenceRadiusEl.value = String(queueGeoFence.allowedRadiusMeters);
+      saveQueueGeoFenceSettings(queueGeoFence);
+      renderManageQueueGeoFenceSettings();
+    });
+  }
+
+  if (geoFenceSetLocationBtn && !geoFenceSetLocationBtn.hasAttribute('data-handler-attached')) {
+    geoFenceSetLocationBtn.setAttribute('data-handler-attached', 'true');
+    geoFenceSetLocationBtn.addEventListener('click', async function() {
+      if (typeof handleSetQueueSalonLocation === 'function') {
+        await handleSetQueueSalonLocation();
+      }
     });
   }
 }
@@ -24718,7 +25168,7 @@ if (!window.__ff_holdFocusTrapInstalled) {
   
   // Capture-phase focusin listener to redirect focus back to modal input
   document.addEventListener("focusin", function(e) {
-    if (!ffIsHoldModalOpen()) return;
+    if (!(window.ffIsHoldModalOpen && window.ffIsHoldModalOpen())) return;
     const modalRoot = ffGetHoldModalRoot();
     if (!modalRoot) return;
     if (modalRoot.contains(e.target)) return; // ok, inside modal
@@ -27901,7 +28351,7 @@ function hookSettingsGuard_DISABLED(){
   if (!window.__ff_holdModalCaptureInstalled) {
     window.__ff_holdModalCaptureInstalled = true;
     document.addEventListener('pointerdown', (e) => {
-      if (!ffIsHoldModalOpen()) return;
+      if (!(window.ffIsHoldModalOpen && window.ffIsHoldModalOpen())) return;
       const overlay = document.getElementById('holdCodeOverlay');
       if (!overlay) return;
       if (overlay.contains(e.target)) {
