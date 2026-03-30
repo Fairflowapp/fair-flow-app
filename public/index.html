@@ -5721,13 +5721,13 @@ async function fetchTrainingVideoProgressForUser() {
 
 function canViewTrainingReports() {
   const accountRole = String(window.__ff_user_role || '').toLowerCase().trim();
-  if (accountRole === 'owner' || accountRole === 'admin' || accountRole === 'manager') return true;
+  if (accountRole === 'owner' || accountRole === 'admin') return true;
   const actorRole = String(
     window.__ff_actorRole ||
     sessionStorage.getItem('ff_actor_role') ||
     ''
   ).toLowerCase().trim();
-  if (actorRole === 'owner' || actorRole === 'admin' || actorRole === 'manager') return true;
+  if (actorRole === 'owner' || actorRole === 'admin') return true;
   if (['tech', 'technician', 'staff'].includes(actorRole)) return false;
   return typeof ffHasAdminAccess === 'function' && ffHasAdminAccess();
 }
@@ -6165,8 +6165,6 @@ function renderTrainingReportEmployeeCard(item, staff) {
     : 'Not Completed';
   const completionColor = completedEntry ? '#059669' : '#dc2626';
   const attemptsCount = Math.max(0, Math.round(Number(progressEntry?.quizAttemptsCount || 0)));
-  const lastScorePercent = Math.max(0, Math.min(100, Math.round(Number(progressEntry?.quizLastScorePercent || progressEntry?.quizScorePercent || 0))));
-  const bestScorePercent = Math.max(0, Math.min(100, Math.round(Number(progressEntry?.quizBestScorePercent || progressEntry?.quizScorePercent || 0))));
   const lastResultLabel = progressEntry?.quizLastResult === 'passed'
     ? 'Passed'
     : (progressEntry?.quizLastResult === 'failed' ? 'Failed' : 'Not Attempted');
@@ -6175,7 +6173,7 @@ function renderTrainingReportEmployeeCard(item, staff) {
   const quizStatusHtml = !quizQuestions.length
     ? '<div style="font-size:12px;color:#9ca3af;">No quiz in this training.</div>'
     : (progressEntry?.quizSubmittedAt
-      ? `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span style="font-size:12px;color:#111827;">Last result</span><span style="font-size:12px;color:${progressEntry?.quizPassed ? '#059669' : '#b45309'};font-weight:600;">${lastResultLabel}</span></div><div style="font-size:12px;color:#6b7280;">Attempts: ${attemptsCount}</div><div style="font-size:12px;color:#6b7280;">Last score: ${lastScorePercent}%</div><div style="font-size:12px;color:#6b7280;">Best score: ${bestScorePercent}%</div>${lastAttemptText ? `<div style="font-size:12px;color:#6b7280;">Last attempt: ${lastAttemptText}</div>` : ''}${progressEntry?.quizPassed ? '' : '<div style="font-size:12px;color:#b45309;">Employee still needs to retry the quiz.</div>'}`
+      ? `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><span style="font-size:12px;color:#111827;">Last result</span><span style="font-size:12px;color:${progressEntry?.quizPassed ? '#059669' : '#b45309'};font-weight:600;">${lastResultLabel}</span></div><div style="font-size:12px;color:#6b7280;">Attempts: ${attemptsCount}</div>${lastAttemptText ? `<div style="font-size:12px;color:#6b7280;">Last attempt: ${lastAttemptText}</div>` : ''}${progressEntry?.quizPassed ? '' : '<div style="font-size:12px;color:#b45309;">Employee still needs to retry the quiz.</div>'}`
       : (completedEntry?.markedByAdmin
         ? '<div style="font-size:12px;color:#6b7280;">Completed manually by admin without quiz submission.</div>'
         : '<div style="font-size:12px;color:#b45309;">Quiz not submitted yet.</div>'));
@@ -6743,14 +6741,11 @@ function normalizeTrainingQuizQuestions(questions) {
 
 function getFilteredTrainingItems() {
   const userCtx = getCurrentTrainingUserContext();
-  const isAdminOrOwner = ['owner', 'admin'].includes(String(window.__ff_user_role || '').toLowerCase().trim());
   let scopedItems = trainingItems;
   if (trainingViewMode === 'my') {
-    scopedItems = isAdminOrOwner ? trainingItems : trainingItems.filter((item) => isTrainingRelevantToCurrentUser(item, userCtx));
+    scopedItems = trainingItems.filter((item) => isTrainingRelevantToCurrentUser(item, userCtx));
   } else if (trainingViewMode === 'required') {
-    scopedItems = isAdminOrOwner
-      ? trainingItems.filter((item) => item.required === true)
-      : trainingItems.filter((item) => isTrainingRequiredForUser(item, userCtx));
+    scopedItems = trainingItems.filter((item) => isTrainingRequiredForUser(item, userCtx));
   }
   const q = trainingSearchQuery.trim().toLowerCase();
   return scopedItems.filter((item) => {
@@ -6766,6 +6761,10 @@ function getFilteredTrainingItems() {
     ].join(' ').toLowerCase();
     return haystack.includes(q);
   });
+}
+
+function canUseTrainingRequiredTab() {
+  return !canManageTraining();
 }
 
 function canManageTraining() {
@@ -7471,14 +7470,17 @@ function bindTrainingSearchAndFilters() {
   const toggleWrap = document.getElementById('trainingViewToggleWrap');
   const canManage = canManageTraining();
   const canTabs = canSeeTrainingTabs();
+  const canUseRequiredTab = canUseTrainingRequiredTab();
   if (toggleWrap) toggleWrap.style.display = canTabs ? 'flex' : 'none';
   if (viewAllBtn) viewAllBtn.style.display = (canManage && canTabs) ? 'inline-block' : 'none';
+  if (viewRequiredBtn) viewRequiredBtn.style.display = (canTabs && canUseRequiredTab) ? 'inline-block' : 'none';
+  if (!canUseRequiredTab && trainingViewMode === 'required') trainingViewMode = canManage ? 'all' : 'my';
   const updateTabs = () => {
     const activeStyle = 'border-bottom:2px solid #111827;color:#111827;';
     const inactiveStyle = 'border-bottom:2px solid transparent;color:#6b7280;';
     if (viewAllBtn) viewAllBtn.style.cssText = `padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;background:transparent;cursor:pointer;${trainingViewMode === 'all' ? activeStyle : inactiveStyle}`;
     if (viewMyBtn) viewMyBtn.style.cssText = `padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;background:transparent;cursor:pointer;${trainingViewMode === 'my' ? activeStyle : inactiveStyle}`;
-    if (viewRequiredBtn) viewRequiredBtn.style.cssText = `padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;background:transparent;cursor:pointer;${trainingViewMode === 'required' ? activeStyle : inactiveStyle}`;
+    if (viewRequiredBtn) viewRequiredBtn.style.cssText = `padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;background:transparent;cursor:pointer;display:${(canTabs && canUseRequiredTab) ? 'inline-block' : 'none'};${trainingViewMode === 'required' ? activeStyle : inactiveStyle}`;
   };
   updateTabs();
   if (viewAllBtn && !viewAllBtn.dataset.bound) { viewAllBtn.dataset.bound = '1'; viewAllBtn.onclick = () => { trainingViewMode = 'all'; updateTabs(); renderTrainingLibrary(); }; }
@@ -31351,7 +31353,7 @@ function hookSettingsGuard_DISABLED(){
       <div id="trainingLibraryView" style="display:block;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:6px;">
           <h3 style="margin:0;font-size:15px;font-weight:600;color:#111827;">Training Library</h3>
-          <span id="trainingCreateBtnWrap"><button type="button" onclick="openCreateTrainingModal()" style="padding:6px 12px;font-size:12px;font-weight:500;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#374151;cursor:pointer;">Create Training</button></span>
+          <span id="trainingCreateBtnWrap"><button type="button" onclick="openCreateTrainingModal()" style="padding:8px 16px;font-size:12px;font-weight:600;border:1px solid #7c3aed;border-radius:999px;background:#7c3aed;color:#fff;cursor:pointer;box-shadow:0 6px 16px rgba(124,58,237,0.18);">Create Training</button></span>
         </div>
 
         <div id="trainingViewToggleWrap" style="display:flex;align-items:center;gap:0;margin-bottom:4px;border-bottom:1px solid #e5e7eb;">
