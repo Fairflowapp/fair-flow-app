@@ -2211,7 +2211,7 @@ dialog footer button, .code-dialog footer button {
 
       </div>
 
-      <button id="joinBtn" class="btn-primary">Join</button>
+      <button id="joinBtn" class="btn-primary" style="background:#7c3aed;background-image:none;border-color:#7c3aed;color:#fff;">Join</button>
 
       <span style="flex:1"></span>
 
@@ -2273,7 +2273,7 @@ dialog footer button, .code-dialog footer button {
         <div style="display:flex;flex-direction:column;gap:16px;">
           <!-- Enable queue auto reset checkbox -->
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="manageQueueAutoResetEnabled" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
+            <input type="checkbox" id="manageQueueAutoResetEnabled" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
             <span style="font-size:12px;font-weight:400;color:#111827;">Enable queue auto reset</span>
           </label>
 
@@ -2285,7 +2285,7 @@ dialog footer button, .code-dialog footer button {
 
           <!-- Reset even if people are In Service checkbox -->
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="manageQueueAutoResetForce" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
+            <input type="checkbox" id="manageQueueAutoResetForce" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
             <span style="font-size:12px;font-weight:400;color:#111827;">Reset even if people are In Service</span>
           </label>
         </div>
@@ -2294,7 +2294,7 @@ dialog footer button, .code-dialog footer button {
         <div style="margin:0 0 16px 0;font-size:13px;font-weight:500;color:#111827;">Queue Location Restriction</div>
         <div style="display:flex;flex-direction:column;gap:16px;">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="manageQueueGeoFenceEnabled" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
+            <input type="checkbox" id="manageQueueGeoFenceEnabled" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
             <span style="font-size:12px;font-weight:400;color:#111827;">Enable location restriction for Queue actions</span>
           </label>
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
@@ -6341,6 +6341,7 @@ let trainingAllProgressList = [];
 let trainingVideoProgressMap = {};
 let trainingVideoProgressCache = {};
 let trainingQuizDraftAnswers = {};
+let trainingReminderSendState = {};
 
 function getCurrentTrainingStaffId() {
   return String(
@@ -6672,7 +6673,12 @@ function showTrainingAdminConfirm({ title, message, confirmLabel }) {
       if (e.target === overlay) close(false);
     });
     cancelBtn.onclick = () => close(false);
-    okBtn.onclick = () => close(true);
+    okBtn.onclick = () => {
+      okBtn.disabled = true;
+      okBtn.style.opacity = '0.7';
+      okBtn.style.cursor = 'wait';
+      close(true);
+    };
     dialog.onclick = (e) => e.stopPropagation();
     actions.append(cancelBtn, okBtn);
     dialog.append(titleEl, bodyEl, actions);
@@ -7008,8 +7014,15 @@ function renderTrainingReportEmployeeCard(item, staff) {
       : (completedEntry?.markedByAdmin
         ? '<div style="font-size:12px;color:#6b7280;">Completed manually by admin without quiz submission.</div>'
         : '<div style="font-size:12px;color:#b45309;">Quiz not submitted yet.</div>'));
-  const adminMarkBtn = (!completedEntry && canOverrideTrainingCompletion())
-    ? `<div style="display:flex;justify-content:flex-end;margin-top:4px;"><button type="button" class="btn-pill" style="font-size:11px;padding:5px 10px;background:#7c3aed;color:#fff;border-color:#7c3aed;" onclick="markTrainingCompletedForStaffFromReport('${item.id}', '${staffId}')">Mark Completed</button></div>`
+  const actionButtons = [];
+  if (!completedEntry) {
+    actionButtons.push(`<button type="button" class="btn-pill" style="font-size:11px;padding:5px 10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd;" onclick="sendTrainingReminderFromReport('${item.id}', '${staffId}')">Send Reminder</button>`);
+  }
+  if (!completedEntry && canOverrideTrainingCompletion()) {
+    actionButtons.push(`<button type="button" class="btn-pill" style="font-size:11px;padding:5px 10px;background:#7c3aed;color:#fff;border-color:#7c3aed;" onclick="markTrainingCompletedForStaffFromReport('${item.id}', '${staffId}')">Mark Completed</button>`);
+  }
+  const adminActionsHtml = actionButtons.length
+    ? `<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:4px;">${actionButtons.join('')}</div>`
     : '';
   return `
     <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;display:grid;gap:10px;">
@@ -7027,7 +7040,7 @@ function renderTrainingReportEmployeeCard(item, staff) {
           ${quizStatusHtml}
         </div>
       </div>
-      ${adminMarkBtn}
+      ${adminActionsHtml}
     </div>
   `;
 }
@@ -7049,6 +7062,67 @@ async function markTrainingCompletedForStaffFromReport(trainingId, staffId) {
     await showTrainingAdminNotice({
       title: 'Could not mark completed',
       message: err?.message || 'Failed to mark employee as completed.',
+      buttonLabel: 'OK',
+    });
+  }
+}
+
+async function sendTrainingReminderFromReport(trainingId, staffId) {
+  const item = trainingItems.find((x) => x.id === trainingId);
+  const staffStore = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : { staff: [] };
+  const staff = (staffStore.staff || []).find((s) => s.id === staffId) || null;
+  if (!item || !staff) {
+    await showTrainingAdminNotice({
+      title: 'Could not send reminder',
+      message: 'Training or employee details were not found.',
+      buttonLabel: 'OK',
+    });
+    return;
+  }
+  const ok = await showTrainingAdminConfirm({
+    title: 'Send Training Reminder',
+    message: `Send ${staff.name || 'this employee'} a reminder to finish "${item.title}"?`,
+    confirmLabel: 'Send Reminder',
+  });
+  if (!ok) return;
+  const reminderKey = `${trainingId}__${staffId}`;
+  const existingState = trainingReminderSendState[reminderKey];
+  if (existingState?.inFlight) return;
+  if (existingState?.lastSentAt && (Date.now() - existingState.lastSentAt) < 5000) return;
+  trainingReminderSendState[reminderKey] = {
+    inFlight: true,
+    lastSentAt: existingState?.lastSentAt || 0
+  };
+  try {
+    if (typeof window.ffSendTrainingReminderChat !== 'function') {
+      throw new Error('Chat reminders are not available right now.');
+    }
+    await window.ffSendTrainingReminderChat({
+      recipientUid: staff.uid || '',
+      recipientFirebaseUid: staff.firebaseUid || '',
+      recipientEmail: staff.email || '',
+      recipientName: staff.name || '',
+      staffName: staff.name || '',
+      trainingTitle: item.title || 'this training'
+    });
+    trainingReminderSendState[reminderKey] = {
+      inFlight: false,
+      lastSentAt: Date.now()
+    };
+    await showTrainingAdminNotice({
+      title: 'Reminder Sent',
+      message: `${staff.name || 'The employee'} received a reminder to finish this training.`,
+      buttonLabel: 'OK',
+    });
+  } catch (err) {
+    trainingReminderSendState[reminderKey] = {
+      inFlight: false,
+      lastSentAt: existingState?.lastSentAt || 0
+    };
+    console.error('[Training] Send reminder failed', err);
+    await showTrainingAdminNotice({
+      title: 'Could not send reminder',
+      message: err?.message || 'Failed to send the reminder.',
       buttonLabel: 'OK',
     });
   }
@@ -19252,7 +19326,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260222_flows2');
+            const m = await import('/chat.js?v=20260329_training_reminder_fix1');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -31463,7 +31537,7 @@ function hookSettingsGuard_DISABLED(){
 
   <script type="module" src="/app.js?v=20260329_training_fix1"></script>
   <script type="module" src="/inbox.js?v=20260312_fix2"></script>
-  <script type="module" src="/chat.js?v=20260312_fix2"></script>
+  <script type="module" src="/chat.js?v=20260329_training_reminder_fix1"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260312_staffcall11"></script>
   <script type="module" src="/settings-cloud.js?v=20260312_fix4"></script>

@@ -39,6 +39,9 @@ let currentConvId      = null;   // currently open thread
 let chatSendMode       = 'template';
 let chatSelectedFlow   = null;
 let chatFlowAnswers    = [];     // during wizard: [{ stepId, prompt, optionId, label }]
+let lastChatToastKey   = '';
+let lastChatToastAtMs  = 0;
+let chatToastStateByConv = {};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const isAdmin   = r => ['admin','owner'].includes((r||'').toLowerCase());
@@ -46,6 +49,32 @@ const isMgrPlus = r => ['manager','admin','owner'].includes((r||'').toLowerCase(
 const escHtml   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const roleLabel = r => ({technician:'Technician',manager:'Manager',admin:'Admin',owner:'Owner'}[(r||'').toLowerCase()] || r || '');
 const buildConvId = (a, b) => [a, b].sort().join('__');
+const normalizeChatValue = v => String(v || '').trim().toLowerCase();
+
+function _deriveNameFromEmail(email) {
+  const raw = String(email || '').trim();
+  if (!raw || !raw.includes('@')) return '';
+  const prefix = raw.split('@')[0];
+  return prefix
+    .split(/[._-]/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function _currentSenderDisplayName() {
+  const candidates = [
+    chatUserProfile?.name,
+    chatUserProfile?.displayName,
+    auth.currentUser?.displayName,
+    _deriveNameFromEmail(chatUserProfile?.email || auth.currentUser?.email || '')
+  ];
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value) return value;
+  }
+  return 'Admin';
+}
 
 function _nameForUid(uid) {
   if (!uid) return '';
@@ -66,6 +95,104 @@ function _otherUidFromParticipants(parts, myUid) {
   if (!Array.isArray(parts)) return '';
   return parts.find(u => u && u !== myUid) || '';
 }
+
+async function _ensureChatSendContext() {
+  if (!chatUserProfile) await loadChatUserProfile();
+  if (!chatUserProfile?.salonId || !chatUserProfile?.uid) {
+    throw new Error('Chat is not ready for the current user.');
+  }
+  if (!Array.isArray(chatSalonUsers) || !chatSalonUsers.length) {
+    await loadChatSalonUsers();
+  }
+}
+
+function _resolveChatRecipient({ recipientUid, recipientName, recipientEmail, recipientFirebaseUid }) {
+  const users = Array.isArray(chatSalonUsers) ? chatSalonUsers : [];
+  const uidNorm = normalizeChatValue(recipientUid);
+  const firebaseUidNorm = normalizeChatValue(recipientFirebaseUid);
+  const emailNorm = normalizeChatValue(recipientEmail);
+  const nameNorm = normalizeChatValue(recipientName);
+  return users.find((user) => {
+    const userUid = normalizeChatValue(user?.uid);
+    const userFirebaseUid = normalizeChatValue(user?.firebaseUid);
+    const userEmail = normalizeChatValue(user?.email);
+    const userName = normalizeChatValue(user?.name);
+    if (uidNorm && userUid === uidNorm) return true;
+    if (firebaseUidNorm && (userUid === firebaseUidNorm || userFirebaseUid === firebaseUidNorm)) return true;
+    if (emailNorm && userEmail === emailNorm) return true;
+    if (nameNorm && userName === nameNorm) return true;
+    return false;
+  }) || null;
+}
+
+async function _sendDirectChatMessage({ recipientUid, recipientName, title, message, templateId = 'direct_message' }) {
+  await _ensureChatSendContext();
+  if (!recipientUid) throw new Error('Recipient not found.');
+  if (!title || !message) throw new Error('Missing reminder content.');
+
+  const salonId = chatUserProfile.salonId;
+  const senderUid  = chatUserProfile.uid;
+  const senderName = _currentSenderDisplayName();
+  const senderRole = chatUserProfile.role || '';
+  const resolvedRecipientName = recipientName || _nameForUid(recipientUid) || recipientUid;
+  const convId = buildConvId(senderUid, recipientUid);
+  const convRef = doc(db, `salons/${salonId}/conversations`, convId);
+  const convSnap = await getDoc(convRef);
+  if (!convSnap.exists()) {
+    await setDoc(
+      convRef,
+      { participants: [senderUid, recipientUid].sort(), createdAt: serverTimestamp() },
+      { merge: true }
+    );
+  }
+
+  const msgRef = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
+  const batch = writeBatch(db);
+  batch.set(msgRef, {
+    senderUid,
+    senderName,
+    senderRole,
+    recipientUid,
+    recipientName: resolvedRecipientName,
+    sentAt: serverTimestamp(),
+    readBy: [senderUid],
+    templateId,
+    title,
+    message
+  });
+  batch.set(convRef, {
+    lastMessageAt: serverTimestamp(),
+    lastMessageAtMs: Date.now(),
+    lastTitle: title,
+    lastMessage: message,
+    lastSenderUid: senderUid,
+    lastSenderName: senderName,
+    lastSenderRole: senderRole,
+    updatedAt: serverTimestamp(),
+    updatedAtMs: Date.now(),
+    unreadFor: { [recipientUid]: increment(1) }
+  }, { merge: true });
+  await batch.commit();
+}
+
+window.ffSendTrainingReminderChat = async function(payload = {}) {
+  await _ensureChatSendContext();
+  const recipient = _resolveChatRecipient(payload);
+  if (!recipient?.uid) {
+    throw new Error('Could not find this employee in Chat recipients.');
+  }
+  const trainingTitle = String(payload.trainingTitle || 'this training').trim();
+  const title = `Training Reminder: ${trainingTitle}`;
+  const message = `Please finish watching the training: ${trainingTitle}.`;
+  await _sendDirectChatMessage({
+    recipientUid: recipient.uid,
+    recipientName: recipient.name || payload.recipientName || payload.staffName || '',
+    templateId: 'training_reminder',
+    title,
+    message
+  });
+  return { ok: true, recipientUid: recipient.uid, recipientName: recipient.name || payload.staffName || '' };
+};
 
 function timeAgo(ts) {
   if (!ts) return '';
@@ -935,7 +1062,7 @@ export function subscribeToChatBadge(uid, salonId) {
 }
 
 // ─── Toast Notifications ───────────────────────────────────────────────────────
-const CHAT_TOAST_DURATION_MS = 5000;
+const CHAT_TOAST_DURATION_MS = 9000;
 
 function isChatScreenVisible() {
   const cs = document.getElementById('chatScreen');
@@ -980,6 +1107,7 @@ function showChatToast({ senderName, role, preview, convId }) {
 export function subscribeToChatToastNotifications(myUid, salonId) {
   if (!myUid || !salonId) return;
   if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
+  chatToastStateByConv = {};
   chatToastUnsub = onSnapshot(
     query(
       collection(db, `salons/${salonId}/conversations`),
@@ -987,12 +1115,27 @@ export function subscribeToChatToastNotifications(myUid, salonId) {
     ),
     snap => {
       snap.docChanges().forEach(change => {
-        if (change.type !== 'modified') return;
         const data = change.doc.data() || {};
         const convId = change.doc.id;
+        const unreadCount = (data.unreadFor && data.unreadFor[myUid]) ? Number(data.unreadFor[myUid]) : 0;
+        const lastMessageAtMs = Number(data.lastMessageAtMs || 0);
+        const previousState = chatToastStateByConv[convId] || { unreadCount: 0, lastMessageAtMs: 0 };
+        chatToastStateByConv[convId] = { unreadCount, lastMessageAtMs };
+        if (change.type !== 'modified') return;
         const lastSenderUid = data.lastSenderUid;
         if (!lastSenderUid || lastSenderUid === myUid) return;
         if (currentConvId === convId && isChatScreenVisible()) return;
+        if (unreadCount <= previousState.unreadCount && lastMessageAtMs <= previousState.lastMessageAtMs) return;
+        const toastKey = JSON.stringify({
+          convId,
+          senderUid: data.lastSenderUid || '',
+          title: data.lastTitle || '',
+          message: data.lastMessage || '',
+          lastMessageAtMs: data.lastMessageAtMs || 0
+        });
+        if (toastKey === lastChatToastKey && (Date.now() - lastChatToastAtMs) < 4000) return;
+        lastChatToastKey = toastKey;
+        lastChatToastAtMs = Date.now();
         showChatToast({
           senderName: data.lastSenderName || 'Someone',
           role: data.lastSenderRole || '',
