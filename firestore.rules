@@ -620,14 +620,14 @@ service cloud.firestore {
     match /trainingProgress/{progressId} {
       allow read: if request.auth != null
         && resource.data.salonId is string
-        && belongsToSalon(resource.data.salonId)
+        && (belongsToSalon(resource.data.salonId) || isStaffInSalon(resource.data.salonId))
         && (
           matchesOwnStaffId(resource.data.salonId, resource.data.staffId)
           || isManager(resource.data.salonId)
         );
       allow update: if request.auth != null
         && resource.data.salonId is string
-        && belongsToSalon(resource.data.salonId)
+        && (belongsToSalon(resource.data.salonId) || isStaffInSalon(resource.data.salonId))
         && (
           matchesOwnStaffId(resource.data.salonId, resource.data.staffId)
           || (
@@ -640,7 +640,7 @@ service cloud.firestore {
         && request.resource.data.salonId is string
         && request.resource.data.staffId is string
         && request.resource.data.trainingId is string
-        && belongsToSalon(request.resource.data.salonId)
+        && (belongsToSalon(request.resource.data.salonId) || isStaffInSalon(request.resource.data.salonId))
         && (
           matchesOwnStaffId(request.resource.data.salonId, request.resource.data.staffId)
           || (

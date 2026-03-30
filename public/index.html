@@ -3449,6 +3449,16 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
     // Update in-memory log variable
     log = logArr;
     
+    if ((entry.source === 'queue' || entry.source === 'tasks') && typeof window.queueCloudWrite === 'function') {
+      setTimeout(() => {
+        try {
+          window.queueCloudWrite();
+        } catch (err) {
+          console.warn('[History] queueCloudWrite after history add failed', err);
+        }
+      }, 0);
+    }
+
     console.log('[HISTORY ADD]', entry);
     
     // Quick verification (leave this as a comment for me in code):
@@ -3458,6 +3468,41 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
     return entry;
   } catch (e) {
     console.error('[HISTORY WRITE ERROR]', e);
+  }
+}
+
+function addQueueCheckoutHistoryRecord({ staffId, workerName, source, role, performedBy }) {
+  try {
+    const now = new Date();
+    const sourceLabel = source || 'self';
+    const actionText = sourceLabel === 'admin' ? 'Remove from queue' : 'Leave queue';
+    addHistoryEntry(actionText, role || '', performedBy || '', workerName || '', 'queue');
+    const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+    if (logArr.length > 0) {
+      const lastEntry = logArr[logArr.length - 1];
+      lastEntry.type = 'queue_check_out';
+      lastEntry.staffId = String(staffId || '').trim();
+      lastEntry.checkoutSource = sourceLabel;
+      lastEntry.timestamp = now.getTime();
+      lastEntry.ts = now.getTime();
+      lastEntry.dateTime = now.toISOString();
+      localStorage.setItem('ffv24_log', JSON.stringify(logArr));
+      log = logArr;
+      if (typeof window.queueCloudWrite === 'function') {
+        setTimeout(() => {
+          try {
+            window.queueCloudWrite();
+          } catch (err) {
+            console.warn('[Queue] queueCloudWrite after checkout history extension failed', err);
+          }
+        }, 0);
+      }
+    }
+    if (typeof window.enforceHistoryRetention === 'function') {
+      window.enforceHistoryRetention();
+    }
+  } catch (e) {
+    console.error('[Queue] Failed to add queue_check_out history', e);
   }
 }
 
@@ -4019,6 +4064,110 @@ function queueCallStatusLabel(presence, status){
   return '';
 }
 
+function getCurrentQueueActorRole() {
+  let role = String(
+    window.__ff_user_role ||
+    window.__ff_actorRole ||
+    sessionStorage.getItem('ff_actor_role') ||
+    ''
+  ).toLowerCase().trim();
+  if (role === 'tech' || role === 'staff') role = 'technician';
+  return role;
+}
+
+function canTechnicianSelfCheckoutQueueRow(row) {
+  if (!row) return false;
+  if (getCurrentQueueActorRole() !== 'technician') return false;
+  const currentStaffId = String(window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '').trim();
+  const currentStaffName = String(
+    window.__ff_authedStaffName ||
+    sessionStorage.getItem('ff_actor_name') ||
+    ''
+  ).trim();
+  const rowStaffId = String(row.staffId || '').trim();
+  const rowName = String(row.name || '').trim();
+  if (currentStaffId && rowStaffId && currentStaffId === rowStaffId) return true;
+  return !!currentStaffName && !!rowName && currentStaffName === rowName;
+}
+
+function showQueueSelfCheckoutModal(validator) {
+  return new Promise((resolve) => {
+    const existing = document.getElementById('queueSelfCheckoutModal');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'queueSelfCheckoutModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:100060;display:flex;align-items:center;justify-content:center;padding:20px;';
+    const dialog = document.createElement('div');
+    dialog.style.cssText = 'width:100%;max-width:360px;background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,0.22);border:1px solid #ede9fe;padding:20px;display:grid;gap:14px;';
+    const title = document.createElement('div');
+    title.style.cssText = 'font-size:16px;font-weight:600;color:#111827;';
+    title.textContent = 'Leave Queue';
+    const desc = document.createElement('div');
+    desc.style.cssText = 'font-size:13px;line-height:1.6;color:#4b5563;';
+    desc.textContent = 'Enter your PIN to leave the queue';
+    const pinInput = document.createElement('input');
+    pinInput.type = 'password';
+    pinInput.inputMode = 'numeric';
+    pinInput.placeholder = 'PIN';
+    pinInput.maxLength = 6;
+    pinInput.style.cssText = 'width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;';
+    const error = document.createElement('div');
+    error.style.cssText = 'display:none;font-size:12px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 10px;';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn-pill';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'font-size:12px;padding:8px 14px;background:#fff;color:#374151;border:1px solid #d1d5db;';
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'btn-pill';
+    okBtn.textContent = 'Leave Queue';
+    okBtn.style.cssText = 'font-size:12px;padding:8px 14px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;';
+    const close = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close(null);
+    });
+    dialog.onclick = (e) => e.stopPropagation();
+    cancelBtn.onclick = () => close(null);
+    okBtn.onclick = async () => {
+      const pin = String(pinInput.value || '').trim();
+      if (!pin) {
+        error.textContent = 'Incorrect PIN';
+        error.style.display = 'block';
+        pinInput.focus();
+        return;
+      }
+      if (typeof validator === 'function') {
+        const valid = await validator(pin);
+        if (!valid) {
+          error.textContent = 'Incorrect PIN';
+          error.style.display = 'block';
+          pinInput.select();
+          pinInput.focus();
+          return;
+        }
+      }
+      close(pin);
+    };
+    pinInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        okBtn.click();
+      }
+    });
+    actions.append(cancelBtn, okBtn);
+    dialog.append(title, desc, pinInput, error, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    pinInput.focus();
+  });
+}
+
 let ffQueuePresenceRenderTimer = null;
 document.addEventListener('ff-staff-presence-updated', () => {
   if (ffQueuePresenceRenderTimer) clearTimeout(ffQueuePresenceRenderTimer);
@@ -4166,6 +4315,27 @@ function renderQueue(){
       });
     }
 
+    if (canTechnicianSelfCheckoutQueueRow(q)) {
+      const selfLeaveBtn = document.createElement("button");
+      selfLeaveBtn.type = "button";
+      selfLeaveBtn.textContent = "✖";
+      selfLeaveBtn.title = "Leave queue";
+      selfLeaveBtn.style.cssText = [
+        "border:1px solid #fecaca",
+        "background:#fff",
+        "color:#dc2626",
+        "border-radius:999px",
+        "width:34px",
+        "height:34px",
+        "cursor:pointer",
+        "font-size:15px",
+        "line-height:1",
+        "flex-shrink:0"
+      ].join(";");
+      selfLeaveBtn.onclick = () => selfRemoveFromQueue(i);
+      ctrls.prepend(selfLeaveBtn);
+    }
+
     ctrls.append(hold,start);
 
     if(reorderMode){ const up=btn("↑","start-btn"), down=btn("↓","start-btn"); up.onclick=() =>move(i,-1); down.onclick=() =>move(i,1); const del=btn("✖","finish-btn"); del.title="Remove from queue"; del.onclick=()=>guardHold(()=>removeFromQueue(i)); ctrls.prepend(up); ctrls.append(down); ctrls.append(del); }
@@ -4184,10 +4354,6 @@ function removeFromQueue(i){
 
   const rem = queue.splice(i,1)[0];
 
-  save();
-
-  renderQueue(); 
-
   // Remove from queue is always done by manager/admin (guardHold ensures this)
   // Use the last validated code or current actor state
   const lastCode = window.__ff_lastValidatedCode;
@@ -4204,8 +4370,41 @@ function removeFromQueue(i){
     const name = window.__ff_actorName || 'Manager';
     actor = { role, name };
   }
-  addHistoryEntry('Remove from queue', actor.role, actor.name, rem.name, 'queue');
+  addQueueCheckoutHistoryRecord({
+    staffId: rem.staffId || resolveStaffNameToId(rem.name) || '',
+    workerName: rem.name || '',
+    source: 'admin',
+    role: actor.role,
+    performedBy: actor.name,
+  });
 
+  save();
+
+  renderQueue(); 
+
+}
+
+async function selfRemoveFromQueue(i) {
+  if (i < 0 || i >= queue.length) return;
+  const target = queue[i];
+  if (!canTechnicianSelfCheckoutQueueRow(target)) return;
+  const currentStaffId = String(window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || target.staffId || '').trim();
+  const pinRef = currentStaffId || target.name;
+  const modalResult = await showQueueSelfCheckoutModal((pin) => {
+    const storedPin = getCurrentStaffPin(pinRef);
+    return !!storedPin && String(storedPin) === String(pin);
+  });
+  if (modalResult == null) return;
+  const rem = queue.splice(i, 1)[0];
+  addQueueCheckoutHistoryRecord({
+    staffId: rem.staffId || currentStaffId,
+    workerName: rem.name || '',
+    source: 'self',
+    role: 'Tech',
+    performedBy: rem.name || window.__ff_authedStaffName || 'Technician',
+  });
+  save();
+  renderQueue();
 }
 
 function renderService(){
@@ -5965,10 +6164,9 @@ async function submitTrainingQuiz(trainingId) {
   const staffId = getCurrentTrainingStaffId();
   if (!staffId) throw new Error('Staff ID required to save quiz results.');
   const db = getTrainingDb();
-  const { doc, getDoc, setDoc, serverTimestamp } = await getTrainingFirestoreApi();
+  const { doc, setDoc, serverTimestamp } = await getTrainingFirestoreApi();
   const progressRef = doc(db, 'trainingProgress', getTrainingCompletionProgressDocId(trainingId, staffId));
-  const existingSnap = await getDoc(progressRef);
-  const existing = existingSnap.exists() ? (existingSnap.data() || {}) : {};
+  const existing = trainingProgressMap[trainingId] || {};
   const attemptsCount = Math.max(0, Number(existing.quizAttemptsCount || 0)) + 1;
   const bestScorePercent = Math.max(
     Math.max(0, Math.min(100, Math.round(Number(existing.quizBestScorePercent || 0)))),
@@ -26012,10 +26210,7 @@ function initTasksFunctionality() {
         console.log('[TASKS][SELECT][CONFIRM] after confirmSelectTask()', { ok, taskName, workerName });
 
         if (ok) {
-          console.log('[TASKS][SELECT] writing history now...');
-          const actor = (typeof getHistoryActor === 'function') ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
-          addHistoryEntry(`Task Selected: ${taskName}`, actor.role, actor.name, workerName, 'tasks');
-          console.log('[TASKS][SELECT] wrote history. last tasks entries:',
+          console.log('[TASKS][SELECT] confirmSelectTask already wrote history. last tasks entries:',
             JSON.parse(localStorage.getItem('ffv24_log') || '[]').filter(e=>e && typeof e==='object' && e.source==='tasks').slice(-3)
           );
         } else {
@@ -26140,10 +26335,7 @@ function initTasksFunctionality() {
         console.log('[TASKS][DONE][CONFIRM] after confirmFinishTask()', { ok, taskName, workerName });
 
         if (ok) {
-          console.log('[TASKS][DONE] writing history now...');
-          const actor = (typeof getHistoryActor === 'function') ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
-          addHistoryEntry(`Task Completed: ${taskName}`, actor.role, actor.name, workerName, 'tasks');
-          console.log('[TASKS][DONE] wrote history. last tasks entries:',
+          console.log('[TASKS][DONE] confirmFinishTask already wrote history. last tasks entries:',
             JSON.parse(localStorage.getItem('ffv24_log') || '[]').filter(e=>e && typeof e==='object' && e.source==='tasks').slice(-3)
           );
         } else {
