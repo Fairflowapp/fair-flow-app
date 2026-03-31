@@ -381,10 +381,10 @@ function subscribeTickets() {
 function updateTicketsNavBadge() {
   const badge = document.getElementById('ticketsNavBadge');
   if (!badge) return;
-  // Badge only for admin/owner/manager by FIRESTORE role
+  // Badge only for admin/manager by Firestore role, regardless of active tab.
   const profileRole = (currentUserProfile?.role || '').toLowerCase();
-  const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
-  if (!isFirebaseAdmin) {
+  const shouldShowBadge = ['admin', 'manager'].includes(profileRole);
+  if (!shouldShowBadge) {
     badge.textContent = '';
     badge.style.display = 'none';
     return;
@@ -1767,9 +1767,10 @@ export function goToTickets() {
     if (btn && !btn._ffTicketsHideHandler) {
       btn._ffTicketsHideHandler = () => {
         if (ticketsScreen) ticketsScreen.style.display = 'none';
-        // For non-admins: unsubscribe so the nav badge doesn't update
-        const { isPrimaryAdmin } = getTicketVisibility();
-        if (!isPrimaryAdmin && typeof ticketsUnsubscribe === 'function') {
+        // Keep subscription alive for admin/manager so the nav badge stays visible on other tabs.
+        const profileRole = (currentUserProfile?.role || '').toLowerCase();
+        const shouldKeepBadgeSubscription = ['admin', 'manager'].includes(profileRole);
+        if (!shouldKeepBadgeSubscription && typeof ticketsUnsubscribe === 'function') {
           ticketsUnsubscribe();
           ticketsUnsubscribe = null;
           currentTickets = [];

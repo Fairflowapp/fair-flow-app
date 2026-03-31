@@ -43,6 +43,15 @@ let currentMediaCategoryFilter = "all"; // categoryId or "all"; filter by catego
 let mediaCategories = [];
 let unsubMediaCategories = null;
 
+function updateMediaUploadButtonVisibility() {
+  const uploadBtn = document.getElementById("mediaUploadWorkBtn");
+  if (!uploadBtn) return;
+  const shouldShow = currentMediaTab === "my_uploads";
+  uploadBtn.hidden = !shouldShow;
+  uploadBtn.setAttribute("aria-hidden", shouldShow ? "false" : "true");
+  uploadBtn.style.setProperty("display", shouldShow ? "inline-flex" : "none", "important");
+}
+
 async function loadUserProfile() {
   const user = auth.currentUser;
   if (!user) return null;
@@ -134,6 +143,7 @@ function setMediaTab(tab) {
     toHandleBtn.style.background = tab === "to_handle" ? "#7c3aed" : "#f9fafb";
     toHandleBtn.style.color = tab === "to_handle" ? "#fff" : "#6b7280";
   }
+  updateMediaUploadButtonVisibility();
   renderMediaFilters();
   renderMediaList();
 }
@@ -536,6 +546,7 @@ function applyToHandleVisibility() {
   }
   const myUploadsBtn = document.getElementById("mediaTabMyUploads");
   if (myUploadsBtn) myUploadsBtn.style.borderRadius = showToHandle ? "8px 0 0 8px" : "8px";
+  updateMediaUploadButtonVisibility();
 }
 
 function getStatusLabels(work) {

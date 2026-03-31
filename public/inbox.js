@@ -302,7 +302,7 @@ function setupInboxUI() {
   const role = currentUserProfile.role || '';
 
   // "New Request" buttons — show for technician, manager, admin, owner
-  const contentNewBtn  = document.querySelector('#inboxContentContainer button[onclick="openCreateRequestModal()"]');
+  const contentNewBtn  = document.getElementById('inboxCreateRequestBtn');
   const emptyStateBtn  = document.getElementById('emptyStateNewRequestBtn');
   const emptyStateMsg  = document.getElementById('emptyStateMessage');
   const inboxTabs      = document.getElementById('inboxTabs');
@@ -390,7 +390,7 @@ window.setInboxViewMode = function(mode) {
   const filterRow = document.getElementById('inboxFilterRow');
   const inboxTabs = document.getElementById('inboxTabs');
   const emptyStateBtn = document.getElementById('emptyStateNewRequestBtn');
-  const contentNewBtn = document.querySelector('#inboxContentContainer button[onclick="openCreateRequestModal()"]');
+  const contentNewBtn = document.getElementById('inboxCreateRequestBtn');
   if (listTitle) listTitle.textContent = mode === 'mine' ? 'My Requests' : 'To handle';
   if (filterRow) filterRow.style.display = mode === 'mine' ? 'none' : 'flex';
   if (mode === 'mine') {

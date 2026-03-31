@@ -291,14 +291,17 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   filter:none !important;
 }
 
-/* Chat button active state */
+/* Tickets button active state */
 #ticketsBtn.active {
-  background: #111;
-  color: #fff;
-  border-color: #111;
+  color:#7c3aed !important;
+  border-color:#a78bfa !important;
+  font-weight:800 !important;
+  background:#ede9fe !important;
+  opacity:1 !important;
+  filter:none !important;
 }
 #ticketsBtn.active .nav-icon svg {
-  stroke: #fff;
+  stroke: #7c3aed !important;
 }
 #mediaBtn.active {
   color:#7c3aed !important;
@@ -33101,9 +33104,46 @@ function hookSettingsGuard_DISABLED(){
 </style>
 
 <style>
-.media-tab-btn.active{background:#7c3aed!important;color:#fff!important;}
+.media-tab-btn.active{background:#7c3aed!important;color:#fff!important;border-color:#7c3aed!important;}
+.media-tab-btn{
+  padding:10px 20px!important;
+  font-size:13px!important;
+  font-weight:500!important;
+  border:1px solid #e5e7eb!important;
+  background:#f9fafb!important;
+  color:#6b7280!important;
+  cursor:pointer!important;
+  pointer-events:auto!important;
+  min-height:40px!important;
+  height:40px!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  line-height:1.25!important;
+  box-sizing:border-box!important;
+  font-family:inherit!important;
+  white-space:nowrap!important;
+  appearance:none!important;
+}
 .media-work-card:hover{box-shadow:0 4px 12px rgba(0,0,0,0.1);}
-#mediaScreen .btn-pill,.media-module-modal .btn-pill:not(.btn-danger){background:#7c3aed!important;color:#fff!important;font-size:10px!important;}
+#mediaScreen .btn-pill:not(#mediaUploadWorkBtn),.media-module-modal .btn-pill:not(.btn-danger){background:#7c3aed!important;color:#fff!important;font-size:10px!important;}
+#mediaUploadWorkBtn{
+  background:#7c3aed!important;
+  color:#fff!important;
+  padding:10px 20px!important;
+  font-size:14px!important;
+  font-weight:500!important;
+  line-height:1.25!important;
+  min-height:40px!important;
+  min-width:138px!important;
+  border-color:#7c3aed!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  border-radius:999px!important;
+  box-sizing:border-box!important;
+  white-space:nowrap!important;
+}
 .media-module-modal .btn-danger{background:#dc2626!important;}
 /* Work Details modal: compact 2-row layout, smaller text/buttons */
 #workDetailsModal .btn-pill,#workDetailsModal .media-action-btn{background:#fff!important;color:#374151!important;border:1px solid #d1d5db!important;font-size:11px!important;padding:5px 10px!important;border-radius:6px!important;text-align:center!important;justify-content:center!important;}
@@ -33118,12 +33158,12 @@ function hookSettingsGuard_DISABLED(){
 <!-- Media Module Screen (like Inbox) -->
 <div id="mediaScreen" class="media-screen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f9fafb;z-index:300;flex-direction:column;overflow:hidden;">
   <!-- Tabs (left) | Filters + Sort + Upload (right, grouped) -->
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;gap:12px;flex-wrap:wrap;">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;gap:12px;flex-wrap:wrap;">
     <div id="mediaTabsWrap" style="display:flex;align-items:center;gap:0;">
-      <button type="button" id="mediaTabMyUploads" class="media-tab-btn active" data-media-tab="my_uploads" style="padding:10px 20px;font-size:10px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#7c3aed;color:#fff;cursor:pointer;">My Uploads</button>
-      <button type="button" id="mediaTabToHandle" class="media-tab-btn" data-media-tab="to_handle" style="display:none;padding:10px 20px;font-size:10px;font-weight:500;border:1px solid #e5e7eb;border-left:none;border-radius:0 8px 8px 0;background:#f9fafb;color:#6b7280;cursor:pointer;">To Handle</button>
+      <button type="button" id="mediaTabMyUploads" class="media-tab-btn inbox-view-btn active" data-media-tab="my_uploads" style="border-right:0!important;border-radius:8px 0 0 8px!important;background:#7c3aed!important;color:#fff!important;">My Uploads</button>
+      <button type="button" id="mediaTabToHandle" class="media-tab-btn inbox-view-btn" data-media-tab="to_handle" style="display:none;border-left:none!important;border-radius:0 8px 8px 0!important;">To handle</button>
     </div>
-    <div id="mediaControlsWrap" style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+    <div id="mediaControlsWrap" style="display:flex;align-items:center;gap:8px;margin-left:auto;transform:translateX(-55px);">
       <div style="position:relative;">
         <button type="button" id="mediaFilterTrigger" style="padding:8px 14px;font-size:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;cursor:pointer;display:flex;align-items:center;gap:6px;">Filters <span style="font-size:10px;">▼</span></button>
         <div id="mediaFilterDropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:140px;z-index:100;max-height:280px;overflow-y:auto;"></div>
@@ -33140,7 +33180,7 @@ function hookSettingsGuard_DISABLED(){
         <button type="button" id="mediaSortTrigger" style="padding:8px 14px;font-size:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;cursor:pointer;display:flex;align-items:center;gap:6px;">Sort <span style="font-size:10px;">▼</span></button>
         <div id="mediaSortDropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:140px;z-index:100;"></div>
       </div>
-      <button type="button" id="mediaUploadWorkBtn" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:10px;">+ Upload Work</button>
+      <button type="button" id="mediaUploadWorkBtn" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;white-space:nowrap;">+ Upload Work</button>
     </div>
   </div>
   <!-- Content area -->
@@ -33265,6 +33305,9 @@ function hookSettingsGuard_DISABLED(){
   <div id="inboxViewSwitcher" class="inbox-view-switcher" style="display:none;align-items:center;gap:0;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;pointer-events:auto;">
     <button type="button" id="inboxViewMine" class="inbox-view-btn" data-inbox-view="mine" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('mine')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;pointer-events:auto;">My Requests</button>
     <button type="button" id="inboxViewToHandle" class="inbox-view-btn active" data-inbox-view="to_handle" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('to_handle')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;pointer-events:auto;">To handle</button>
+    <div style="display:flex;gap:10px;align-items:center;margin-left:auto;transform:translateX(-55px);">
+      <button id="inboxCreateRequestBtn" onclick="openCreateRequestModal()" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;">+ New Request</button>
+    </div>
   </div>
   <!-- Tabs (only for managers/admins) — hidden by default, shown in setupInboxUI for manager/admin -->
   <div id="inboxTabs" class="inbox-tabbar hidden" style="border-bottom:1px solid #e5e7eb;background:#f9fafb;padding:0 20px;">
@@ -33300,7 +33343,6 @@ function hookSettingsGuard_DISABLED(){
         </div>
         <div style="display:flex;gap:10px;align-items:center;">
           <button id="btnManageRequestTypes" onclick="openManageRequestTypesModal()" style="display:none;padding:10px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;color:#6b7280;">Manage request types</button>
-          <button onclick="openCreateRequestModal()" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;">+ New Request</button>
         </div>
       </div>
       <!-- Will be populated with request cards -->
