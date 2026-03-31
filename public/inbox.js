@@ -276,9 +276,11 @@ async function loadCurrentUserProfile() {
           staffId: currentUserProfile.staffId || '',
           email: user.email || ''
         };
-        // Include avatarUrl so Chat, Tickets, Staff Members show the correct photo
-        if (currentUserProfile.avatarUrl) {
-          memberData.avatarUrl = currentUserProfile.avatarUrl;
+        // Include photoURL so Chat, Tickets, Staff Members share one avatar source.
+        const profilePhotoUrl = currentUserProfile.photoURL || currentUserProfile.avatarUrl;
+        if (profilePhotoUrl) {
+          memberData.photoURL = profilePhotoUrl;
+          memberData.avatarUrl = profilePhotoUrl;
           if (currentUserProfile.avatarUpdatedAtMs) {
             memberData.avatarUpdatedAtMs = currentUserProfile.avatarUpdatedAtMs;
           }

@@ -86,10 +86,22 @@ function _avatarUrlForUid(uid) {
   if (!uid) return null;
   if (uid === chatUserProfile?.uid) return (typeof window.ffGetCurrentUserAvatarUrl === 'function') ? window.ffGetCurrentUserAvatarUrl() : null;
   const u = chatSalonUsers.find(x => x.uid === uid);
-  if (!u || !u.avatarUrl) return null;
+  if (!u) return null;
+  if (typeof window.ffGetAvatarUrlForUser === 'function') {
+    return window.ffGetAvatarUrlForUser({
+      uid,
+      staffId: u.staffId || '',
+      email: u.email || '',
+      name: u.name || '',
+      photoURL: u.photoURL || u.avatarUrl || '',
+      avatarUpdatedAtMs: u.avatarUpdatedAtMs || null
+    });
+  }
+  const photoURL = u.photoURL || u.avatarUrl || '';
+  if (!photoURL) return null;
   const v = u.avatarUpdatedAtMs != null ? String(u.avatarUpdatedAtMs) : '';
-  const sep = u.avatarUrl.includes('?') ? '&' : '?';
-  return `${u.avatarUrl}${sep}v=${encodeURIComponent(v)}`;
+  const sep = photoURL.includes('?') ? '&' : '?';
+  return `${photoURL}${sep}v=${encodeURIComponent(v)}`;
 }
 function _otherUidFromParticipants(parts, myUid) {
   if (!Array.isArray(parts)) return '';
@@ -220,7 +232,7 @@ function renderChatHeaderForRole(role) {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 async function goToChat() {
-  ['tasksScreen','inboxScreen','owner-view'].forEach(id => {
+  ['tasksScreen','inboxScreen','mediaScreen','trainingScreen','ticketsScreen','owner-view'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -254,9 +266,10 @@ async function initChatScreen() {
     renderChatHeaderForRole(null);
     return;
   }
-  await Promise.all([loadChatSalonUsers(), loadChatTemplates(), loadChatFlows()]);
   renderChatHeaderForRole(chatUserProfile.role);
+  await loadChatSalonUsers();
   subscribeToConversationList();
+  Promise.allSettled([loadChatTemplates(), loadChatFlows()]).catch(() => {});
 }
 
 // ─── Profile / Users / Templates ──────────────────────────────────────────────
@@ -271,6 +284,9 @@ async function loadChatUserProfile() {
     const snap = await getDoc(doc(db, 'users', user.uid));
     if (snap.exists()) {
       chatUserProfile = { uid: user.uid, ...snap.data() };
+      if (typeof window.ffPrimeAvatarDirectory === 'function') {
+        window.ffPrimeAvatarDirectory([chatUserProfile]);
+      }
     } else {
       console.error('[Chat] loadChatUserProfile failed — Firestore doc users/' + user.uid + ' not found. Gear hidden.');
       chatUserProfile = null;
@@ -287,6 +303,9 @@ async function loadChatSalonUsers() {
     const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/members`));
     chatSalonUsers = snap.docs.map(d => ({ uid: d.id, ...d.data() }))
                               .filter(u => u.uid !== chatUserProfile.uid);
+    if (typeof window.ffPrimeAvatarDirectory === 'function') {
+      window.ffPrimeAvatarDirectory(chatSalonUsers);
+    }
   } catch(e) { chatSalonUsers = []; }
 }
 
@@ -463,11 +482,10 @@ function renderConversation(convId) {
 
   const conv = allConversations.find(c => c.id === convId);
   const otherUid = _otherUidFromParticipants(conv?.participants, uid);
-  const otherAvatarUrl = _avatarUrlForUid(otherUid);
-
   container.innerHTML = msgs.map(ev => {
     const mine = ev.senderUid === uid;
     const senderInitial = (ev.senderName || '?').charAt(0).toUpperCase();
+    const otherAvatarUrl = _avatarUrlForUid(otherUid);
     const otherAvatarHtml = !mine && otherAvatarUrl
       ? `<span class="cb-avatar" style="overflow:hidden;padding:0;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
       : (!mine ? `<span class="cb-avatar">${escHtml(senderInitial)}</span>` : '');

@@ -68,7 +68,7 @@ async function loadTicketsMembersForAvatars() {
       const u = d.data() || {};
       const uid = d.id;
       const staffId = u.staffId || '';
-      const avatarUrl = u.avatarUrl || null;
+      const avatarUrl = u.photoURL || u.avatarUrl || null;
       const avatarUpdatedAtMs = u.avatarUpdatedAtMs != null ? u.avatarUpdatedAtMs : null;
       if (avatarUrl) {
         byKey[uid] = { avatarUrl, avatarUpdatedAtMs };
@@ -76,6 +76,9 @@ async function loadTicketsMembersForAvatars() {
       }
     });
     _ticketsMembersAvatarCache = byKey;
+    if (typeof window.ffPrimeAvatarDirectory === 'function') {
+      window.ffPrimeAvatarDirectory(snap.docs.map(d => ({ uid: d.id, ...d.data() })));
+    }
   } catch (e) {
     console.warn('[Tickets] loadTicketsMembersForAvatars failed', e);
     _ticketsMembersAvatarCache = {};
@@ -101,6 +104,15 @@ function getTicketTechnicianAvatarUrl(t) {
     ));
   if (isCreator && typeof window.ffGetCurrentUserAvatarUrl === 'function') {
     return window.ffGetCurrentUserAvatarUrl();
+  }
+  if (typeof window.ffGetAvatarUrlForUser === 'function') {
+    return window.ffGetAvatarUrlForUser({
+      uid: t.createdByUid || t.finalizedByUid || '',
+      staffId: t.technicianStaffId || '',
+      name: t.technicianName || '',
+      photoURL: '',
+      avatarUpdatedAtMs: null
+    });
   }
   if (!_ticketsMembersAvatarCache || !t.technicianStaffId) return null;
   const entry = _ticketsMembersAvatarCache[t.technicianStaffId];
@@ -1778,8 +1790,8 @@ export function goToTickets() {
     await loadServices();
     await setupTicketsUI();
     subscribeTickets(); // subscribe for all (needed to show ticket list)
+    await loadTicketsMembersForAvatars();
     renderTicketsList();
-    loadTicketsMembersForAvatars().then(() => renderTicketsList());
     // After profile loads, enforce badge visibility
     updateTicketsNavBadge();
   });

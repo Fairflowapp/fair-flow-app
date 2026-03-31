@@ -5245,6 +5245,17 @@ function getCurrentStaffPin(staffIdOrName) {
 }
 
 async function handleJoin(){
+  if (window.__ff_joinInProgress) {
+    console.warn('[handleJoin] Join already in progress, ignoring duplicate trigger');
+    return;
+  }
+  window.__ff_joinInProgress = true;
+  const joinBtnEl = document.getElementById('joinBtn');
+  if (joinBtnEl) {
+    joinBtnEl.disabled = true;
+    joinBtnEl.style.opacity = '0.7';
+    joinBtnEl.style.cursor = 'wait';
+  }
   try {
   console.log('[handleJoin] Join button clicked');
 
@@ -5381,8 +5392,13 @@ async function handleJoin(){
     return;
   }
 
+  const isTechnicianAlreadyActive = () => (
+    queue.some(x => (x.staffId && x.staffId === staffId) || x.name === selectedTechnicianName) ||
+    service.some(x => (x.staffId && x.staffId === staffId) || x.name === selectedTechnicianName)
+  );
+
   // Check if technician is already in queue or service
-  if (queue.some(x => (x.staffId && x.staffId === staffId) || x.name === selectedTechnicianName) || service.some(x => (x.staffId && x.staffId === staffId) || x.name === selectedTechnicianName)) {
+  if (isTechnicianAlreadyActive()) {
     if (joinErrorEl) {
       joinErrorEl.textContent = 'This technician is already active';
       joinErrorEl.style.display = 'block';
@@ -5404,6 +5420,17 @@ async function handleJoin(){
       if (geoFenceCheck.reason === 'outside_radius') message = 'You must be at the salon to join the queue';
       joinErrorEl.textContent = message;
       joinErrorEl.style.display = 'block';
+    }
+    return;
+  }
+
+  // Re-check after async validation to avoid race conditions on fast double-clicks.
+  if (isTechnicianAlreadyActive()) {
+    if (joinErrorEl) {
+      joinErrorEl.textContent = 'This technician is already active';
+      joinErrorEl.style.display = 'block';
+    } else {
+      alert('This technician is already active');
     }
     return;
   }
@@ -5459,6 +5486,14 @@ async function handleJoin(){
       joinErrorEl.style.display = 'block';
     } else {
       alert('Error joining: ' + (e.message || 'Unknown error'));
+    }
+  } finally {
+    window.__ff_joinInProgress = false;
+    const joinBtnEl = document.getElementById('joinBtn');
+    if (joinBtnEl) {
+      joinBtnEl.disabled = false;
+      joinBtnEl.style.opacity = '';
+      joinBtnEl.style.cursor = 'pointer';
     }
   }
 }
@@ -12006,11 +12041,6 @@ function initializeJoinButton() {
             e.stopPropagation();
             handleJoin();
           };
-          freshJoinBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            handleJoin();
-          }, { capture: true });
           freshJoinBtn.style.cursor = 'pointer';
           freshJoinBtn.style.pointerEvents = 'auto';
           freshJoinBtn.style.position = 'relative';
@@ -21199,7 +21229,29 @@ function initializeAppsPanel() {
       // Render header with avatar, name, status line, and kebab menu
       const headerEl = document.getElementById('staffDetailsHeader');
       if (headerEl) {
+        const avatarCache = window.__ffAvatarDirectoryCache;
+        if (typeof window.ffEnsureSalonAvatarDirectoryLoaded === 'function' && (!avatarCache || !avatarCache.loaded) && !window.__ffStaffAvatarDirectoryLoading) {
+          window.__ffStaffAvatarDirectoryLoading = true;
+          window.ffEnsureSalonAvatarDirectoryLoaded().then(function() {
+            window.__ffStaffAvatarDirectoryLoading = false;
+            if (selectedStaffId === staff.id) renderStaffDetails();
+          }).catch(function() {
+            window.__ffStaffAvatarDirectoryLoading = false;
+          });
+        }
         const initials = getInitials(staff.name);
+        const avatarUrl = (typeof window.ffGetAvatarUrlForUser === 'function')
+          ? window.ffGetAvatarUrlForUser({
+              name: staff.name,
+              staffId: staff.id,
+              email: staff.email || '',
+              photoURL: staff.photoURL || staff.avatarUrl || '',
+              avatarUpdatedAtMs: staff.avatarUpdatedAtMs
+            })
+          : null;
+        const avatarHtml = avatarUrl
+          ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex-shrink:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);"><img src="${escapeHtml(avatarUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.outerHTML='<div style=&quot;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;flex-shrink:0;&quot;>${escapeHtml(initials)}</div>';"></div>`
+          : `<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;flex-shrink:0;">${escapeHtml(initials)}</div>`;
         // Compute role label from isAdmin/isManager flags (source of truth)
         const roleLabel = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Technician');
         const invited = staff.invited === true;
@@ -21230,9 +21282,7 @@ function initializeAppsPanel() {
         headerEl.innerHTML = `
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);position:relative;">
             <div style="display:flex;align-items:flex-start;gap:12px;flex:1;">
-              <div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;flex-shrink:0;">
-                ${escapeHtml(initials)}
-              </div>
+              ${avatarHtml}
               <div style="flex:1;">
                 <h2 style="margin:0 0 4px 0;font-size:16px;font-weight:600;color:#111827;">${escapeHtml(staff.name)}</h2>
                 <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">${escapeHtml(roleLabel)}</p>
@@ -23374,7 +23424,198 @@ function ffBuildAvatarUrlWithBust(baseUrl, avatarUpdatedAtMs) {
   if (!base) return "";
   const v = avatarUpdatedAtMs ? String(avatarUpdatedAtMs) : "";
   const sep = base.includes("?") ? "&" : "?";
-  return `${base}${sep}v=${encodeURIComponent(v)}&cb=${Date.now()}`;
+  return `${base}${sep}v=${encodeURIComponent(v)}`;
+}
+
+function ffEscapeAvatarHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function ffGetAvatarInitials(name, mode) {
+  const safeName = String(name || '').trim();
+  if (!safeName) return '?';
+  if (mode === 'single') return (safeName[0] || '?').toUpperCase();
+  const parts = safeName.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return ((parts[0][0] || '') + (parts[parts.length - 1][0] || '')).toUpperCase();
+  }
+  return (parts[0]?.[0] || '?').toUpperCase();
+}
+
+function ffCreateAvatarDirectoryCache() {
+  return { salonId: null, loaded: false, byUid: {}, byStaffId: {}, byEmail: {}, byName: {} };
+}
+
+window.__ffAvatarDirectoryCache = window.__ffAvatarDirectoryCache || ffCreateAvatarDirectoryCache();
+window.__ffCurrentUserAvatarMeta = window.__ffCurrentUserAvatarMeta || null;
+window.__ffAvatarImagePreloadCache = window.__ffAvatarImagePreloadCache || new Set();
+
+function ffPreloadAvatarImage(baseUrl, avatarUpdatedAtMs) {
+  const src = ffBuildAvatarUrlWithBust(baseUrl, avatarUpdatedAtMs);
+  if (!src) return '';
+  const cache = window.__ffAvatarImagePreloadCache || (window.__ffAvatarImagePreloadCache = new Set());
+  if (!cache.has(src)) {
+    cache.add(src);
+    try {
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = src;
+    } catch (_) {}
+  }
+  return src;
+}
+
+function ffPrimeAvatarDirectory(records) {
+  const cache = window.__ffAvatarDirectoryCache || (window.__ffAvatarDirectoryCache = ffCreateAvatarDirectoryCache());
+  (Array.isArray(records) ? records : []).forEach(function(record) {
+    if (!record || typeof record !== 'object') return;
+    const photoURL = String(record.photoURL || record.avatarUrl || '').trim();
+    const avatarUpdatedAtMs = record.avatarUpdatedAtMs != null ? Number(record.avatarUpdatedAtMs) : null;
+    const normalized = {
+      uid: String(record.uid || '').trim(),
+      staffId: String(record.staffId || '').trim(),
+      email: String(record.email || '').trim().toLowerCase(),
+      name: String(record.name || '').trim(),
+      nameKey: String(record.name || '').trim().toLowerCase(),
+      photoURL: photoURL || null,
+      avatarUrl: photoURL || null,
+      avatarUpdatedAtMs
+    };
+    if (!normalized.photoURL && !normalized.uid && !normalized.staffId && !normalized.email && !normalized.nameKey) return;
+    if (normalized.uid) cache.byUid[normalized.uid] = normalized;
+    if (normalized.staffId) cache.byStaffId[normalized.staffId] = normalized;
+    if (normalized.email) cache.byEmail[normalized.email] = normalized;
+    if (normalized.nameKey) cache.byName[normalized.nameKey] = normalized;
+    if (normalized.photoURL) ffPreloadAvatarImage(normalized.photoURL, normalized.avatarUpdatedAtMs);
+  });
+  return cache;
+}
+
+function ffGetCurrentUserAvatarMeta() {
+  const liveMeta = window.__ffCurrentUserAvatarMeta || window.__ff_avatarMeta || null;
+  if (liveMeta && (liveMeta.photoURL || liveMeta.avatarUrl)) {
+    return {
+      photoURL: liveMeta.photoURL || liveMeta.avatarUrl || null,
+      avatarUrl: liveMeta.photoURL || liveMeta.avatarUrl || null,
+      avatarUpdatedAtMs: liveMeta.avatarUpdatedAtMs != null ? Number(liveMeta.avatarUpdatedAtMs) : null
+    };
+  }
+  try {
+    const photoURL = localStorage.getItem('ff_user_photo_url_v1') || localStorage.getItem('ff_user_avatar_url_v1') || '';
+    const avatarUpdatedAtMs = Number(localStorage.getItem('ff_user_avatar_updated_at_v1') || '');
+    return {
+      photoURL: photoURL || null,
+      avatarUrl: photoURL || null,
+      avatarUpdatedAtMs: Number.isFinite(avatarUpdatedAtMs) ? avatarUpdatedAtMs : null
+    };
+  } catch (_) {
+    return { photoURL: null, avatarUrl: null, avatarUpdatedAtMs: null };
+  }
+}
+
+function ffResolveUserAvatar(options) {
+  const opts = options || {};
+  const uid = String(opts.uid || '').trim();
+  const staffId = String(opts.staffId || '').trim();
+  const email = String(opts.email || '').trim().toLowerCase();
+  const name = String(opts.name || '').trim();
+  const nameKey = name.toLowerCase();
+  const directUrl = String(opts.photoURL || opts.avatarUrl || '').trim();
+  const directUpdatedAt = opts.avatarUpdatedAtMs != null ? Number(opts.avatarUpdatedAtMs) : null;
+  if (directUrl) {
+    return {
+      src: ffPreloadAvatarImage(directUrl, directUpdatedAt),
+      photoURL: directUrl,
+      avatarUpdatedAtMs: directUpdatedAt
+    };
+  }
+
+  const currentUid = String(window.__ffGetUid ? window.__ffGetUid() || '' : '').trim();
+  const currentStaffId = String(window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '').trim();
+  const currentEmail = String(window.ffCurrentUser?.email || '').trim().toLowerCase();
+  const currentName = String(window.ffCurrentUser?.name || window.__ff_authedStaffName || sessionStorage.getItem('ff_actor_name') || '').trim().toLowerCase();
+  if ((uid && currentUid && uid === currentUid) || (staffId && currentStaffId && staffId === currentStaffId) || (email && currentEmail && email === currentEmail) || (nameKey && currentName && nameKey === currentName)) {
+    const currentMeta = ffGetCurrentUserAvatarMeta();
+    if (currentMeta.photoURL) {
+      return {
+        src: ffPreloadAvatarImage(currentMeta.photoURL, currentMeta.avatarUpdatedAtMs),
+        photoURL: currentMeta.photoURL,
+        avatarUpdatedAtMs: currentMeta.avatarUpdatedAtMs
+      };
+    }
+  }
+
+  const cache = window.__ffAvatarDirectoryCache || ffCreateAvatarDirectoryCache();
+  const record = (uid && cache.byUid[uid]) || (staffId && cache.byStaffId[staffId]) || (email && cache.byEmail[email]) || (nameKey && cache.byName[nameKey]) || null;
+  const cachedUrl = record ? String(record.photoURL || record.avatarUrl || '').trim() : '';
+  const cachedUpdatedAt = record && record.avatarUpdatedAtMs != null ? Number(record.avatarUpdatedAtMs) : null;
+  if (cachedUrl) {
+    return {
+      src: ffPreloadAvatarImage(cachedUrl, cachedUpdatedAt),
+      photoURL: cachedUrl,
+      avatarUpdatedAtMs: cachedUpdatedAt
+    };
+  }
+  return { src: '', photoURL: null, avatarUpdatedAtMs: null };
+}
+
+async function ffEnsureSalonAvatarDirectoryLoaded(force) {
+  const salonId = String(window.currentSalonId || '').trim();
+  if (!salonId || !window.ffDb) return null;
+  const cache = window.__ffAvatarDirectoryCache || (window.__ffAvatarDirectoryCache = ffCreateAvatarDirectoryCache());
+  if (!force && cache.loaded && cache.salonId === salonId) return cache;
+  try {
+    const firestoreApi = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js');
+    const snap = await firestoreApi.getDocs(firestoreApi.collection(window.ffDb, `salons/${salonId}/members`));
+    cache.salonId = salonId;
+    cache.loaded = true;
+    cache.byUid = {};
+    cache.byStaffId = {};
+    cache.byEmail = {};
+    cache.byName = {};
+    ffPrimeAvatarDirectory(snap.docs.map(function(d) {
+      return { uid: d.id, ...d.data() };
+    }));
+    return cache;
+  } catch (e) {
+    console.warn('[Avatar] Failed to load salon avatar directory', e);
+    return cache;
+  }
+}
+
+function ffGetCurrentUserAvatarUrl() {
+  return ffResolveUserAvatar({ uid: window.__ffGetUid ? window.__ffGetUid() : '' }).src || null;
+}
+
+function ffGetAvatarUrlForUser(options) {
+  const resolved = ffResolveUserAvatar(options || {});
+  return resolved && resolved.src ? resolved.src : null;
+}
+
+function ffRenderUserAvatar(options) {
+  const opts = options || {};
+  const name = String(opts.name || '').trim();
+  const initials = ffEscapeAvatarHtml(ffGetAvatarInitials(name, opts.initialsMode));
+  const className = String(opts.className || '').trim();
+  const wrapperStyle = String(opts.wrapperStyle || '').trim();
+  const imageStyle = String(opts.imageStyle || 'width:100%;height:100%;border-radius:50%;object-fit:cover;display:block;').trim();
+  const fallbackStyle = String(opts.fallbackStyle || 'display:flex;align-items:center;justify-content:center;width:100%;height:100%;').trim();
+  const tagName = String(opts.tagName || 'span').trim() || 'span';
+  const size = Number(opts.size);
+  const sizeStyle = Number.isFinite(size) && size > 0 ? `width:${size}px;height:${size}px;` : '';
+  const baseStyle = `border-radius:50%;overflow:hidden;flex-shrink:0;${sizeStyle}${wrapperStyle}`;
+  const resolved = ffResolveUserAvatar(opts);
+  const classAttr = className ? ` class="${ffEscapeAvatarHtml(className)}"` : '';
+  if (resolved.src) {
+    const src = ffEscapeAvatarHtml(resolved.src);
+    return `<${tagName}${classAttr} style="${ffEscapeAvatarHtml(baseStyle)}"><img src="${src}" alt="${ffEscapeAvatarHtml(name || 'User avatar')}" style="${ffEscapeAvatarHtml(imageStyle)}" onerror="this.style.display='none';var n=this.nextElementSibling;if(n)n.style.display='flex';"><span style="display:none;${ffEscapeAvatarHtml(fallbackStyle)}">${initials}</span></${tagName}>`;
+  }
+  return `<${tagName}${classAttr} style="${ffEscapeAvatarHtml(baseStyle + fallbackStyle)}">${initials}</${tagName}>`;
 }
 
 function ffSetAvatarDataUrl(dataUrl) {
@@ -23391,8 +23632,8 @@ function ffSetAvatarDataUrl(dataUrl) {
 
 function ffForceReloadImage(imgEl, src) {
   if (!imgEl) return;
-  imgEl.src = "about:blank";
-  void imgEl.offsetHeight;
+  if (!src) return;
+  if (imgEl.getAttribute('src') === src) return;
   imgEl.src = src;
 }
 
@@ -23440,14 +23681,35 @@ function updateTopBarAvatar(dataUrl) {
   }
 }
 
-function ffApplyAvatarFromFirestore({ avatarUrl, avatarUpdatedAtMs }) {
-  const avatarSrc = avatarUrl ? ffBuildAvatarUrlWithBust(avatarUrl, avatarUpdatedAtMs) : null;
+function ffApplyAvatarFromFirestore({ photoURL, avatarUrl, avatarUpdatedAtMs, avatarPath, uid, staffId, email, name }) {
+  const resolvedPhotoURL = photoURL || avatarUrl || null;
+  const avatarSrc = resolvedPhotoURL ? ffPreloadAvatarImage(resolvedPhotoURL, avatarUpdatedAtMs) : null;
+  window.__ffCurrentUserAvatarMeta = {
+    photoURL: resolvedPhotoURL,
+    avatarUrl: resolvedPhotoURL,
+    avatarUpdatedAtMs: avatarUpdatedAtMs != null ? Number(avatarUpdatedAtMs) : null,
+    avatarPath: avatarPath || null
+  };
+  ffPrimeAvatarDirectory([{
+    uid: uid || (window.__ffGetUid ? window.__ffGetUid() : ''),
+    staffId: staffId || window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '',
+    email: email || window.ffCurrentUser?.email || '',
+    name: name || window.ffCurrentUser?.name || '',
+    photoURL: resolvedPhotoURL,
+    avatarUpdatedAtMs
+  }]);
   updateUserProfileAvatar(avatarSrc);
   updateTopBarAvatar(avatarSrc);
 }
 
 if (typeof window !== 'undefined') {
   window.ffApplyAvatarFromFirestore = ffApplyAvatarFromFirestore;
+  window.ffPrimeAvatarDirectory = ffPrimeAvatarDirectory;
+  window.ffEnsureSalonAvatarDirectoryLoaded = ffEnsureSalonAvatarDirectoryLoaded;
+  window.ffGetCurrentUserAvatarUrl = ffGetCurrentUserAvatarUrl;
+  window.ffGetAvatarUrlForUser = ffGetAvatarUrlForUser;
+  window.ffRenderUserAvatar = ffRenderUserAvatar;
+  window.ffGetAvatarInitials = ffGetAvatarInitials;
   if (window.__ff_avatarMeta) {
     ffApplyAvatarFromFirestore(window.__ff_avatarMeta);
     window.__ff_avatarMeta = null;

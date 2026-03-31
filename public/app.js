@@ -705,6 +705,7 @@ async function ffSaveStaffAvatarMeta({ url, path }) {
 
   // 1. Save to users/{uid} (own profile)
   await updateDoc(doc(db, "users", userId), {
+    photoURL: url,
     avatarUrl: url,
     avatarPath: path,
     avatarUpdatedAtMs
@@ -728,6 +729,7 @@ async function ffSaveStaffAvatarMeta({ url, path }) {
     const memberPayload = {
       name: String(name || ""),
       role: String(role || ""),
+      photoURL: url,
       avatarUrl: url,
       avatarUpdatedAtMs
     };
@@ -738,7 +740,7 @@ async function ffSaveStaffAvatarMeta({ url, path }) {
   // 3. Apply immediately to this device's UI
   try {
     if (typeof window !== "undefined" && typeof window.ffApplyAvatarFromFirestore === "function") {
-      window.ffApplyAvatarFromFirestore({ avatarUrl: url, avatarUpdatedAtMs, avatarPath: path });
+      window.ffApplyAvatarFromFirestore({ photoURL: url, avatarUrl: url, avatarUpdatedAtMs, avatarPath: path, uid: userId, name });
     }
   } catch (e) {
     console.warn("[Avatar] Failed to apply avatar after update:", e);
@@ -761,13 +763,15 @@ function ffStartAvatarListener(userId) {
     (snap) => {
       if (!snap.exists()) return;
       const data = snap.data() || {};
-      const avatarUrl = data.avatarUrl || null;
+      const avatarUrl = data.photoURL || data.avatarUrl || null;
       const avatarUpdatedAtMs = data.avatarUpdatedAtMs || null;
       const avatarPath = data.avatarPath || null;
       try {
         if (avatarUrl) {
+          localStorage.setItem("ff_user_photo_url_v1", avatarUrl);
           localStorage.setItem("ff_user_avatar_url_v1", avatarUrl);
         } else {
+          localStorage.removeItem("ff_user_photo_url_v1");
           localStorage.removeItem("ff_user_avatar_url_v1");
         }
         if (avatarUpdatedAtMs) {
@@ -779,9 +783,9 @@ function ffStartAvatarListener(userId) {
         console.warn("[Avatar] Failed to update cached avatar meta:", e);
       }
       if (typeof window !== "undefined" && typeof window.ffApplyAvatarFromFirestore === "function") {
-        window.ffApplyAvatarFromFirestore({ avatarUrl, avatarUpdatedAtMs, avatarPath });
+        window.ffApplyAvatarFromFirestore({ photoURL: avatarUrl, avatarUrl, avatarUpdatedAtMs, avatarPath, uid: userId, staffId: data.staffId || '', email: data.email || '', name: data.name || data.displayName || '' });
       } else if (typeof window !== "undefined") {
-        window.__ff_avatarMeta = { avatarUrl, avatarUpdatedAtMs, avatarPath };
+        window.__ff_avatarMeta = { photoURL: avatarUrl, avatarUrl, avatarUpdatedAtMs, avatarPath, uid: userId, staffId: data.staffId || '', email: data.email || '', name: data.name || data.displayName || '' };
       }
     },
     (error) => {
@@ -1109,6 +1113,11 @@ async function loadUserRoleAndShowView(user) {
     // Update global reference
     if (typeof window !== 'undefined') {
       window.currentSalonId = currentSalonId;
+    }
+    if (typeof window !== 'undefined' && typeof window.ffEnsureSalonAvatarDirectoryLoaded === 'function') {
+      window.ffEnsureSalonAvatarDirectoryLoaded().catch((e) => {
+        console.warn('[Avatar] Background avatar directory preload failed:', e);
+      });
     }
 
     // Set ff_authedStaffId from user doc so avatar upload works for managers/technicians (not just PIN flow)
