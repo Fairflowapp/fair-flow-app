@@ -12,6 +12,12 @@
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, getDocs, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "./app.js?v=20260329_training_fix1";
+import {
+  cloneDefaultRolesHierarchy,
+  cloneDefaultScheduleRules,
+  normalizeRolesHierarchy,
+  normalizeScheduleRules,
+} from "./schedule-helpers.js?v=20260331_schedule_phase6_staff_profile";
 
 let _salonId = null;
 let _unsubUi = null;
@@ -93,11 +99,15 @@ function normalizeStaffCallTimeoutSeconds(value) {
   return Math.min(3600, Math.max(10, numericValue));
 }
 
+function normalizeWeekStartsOn(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "sunday" ? "sunday" : "monday";
+}
+
 function subscribeMain(salonId) {
   if (_unsubMain) { _unsubMain(); _unsubMain = null; }
   _unsubMain = onSnapshot(settingsMainRef(salonId), (snap) => {
-    if (!snap.exists()) return;
-    const data = snap.data();
+    const data = snap.exists() ? snap.data() : {};
     // Apply to global settings object
     if (typeof window.settings !== 'object' || !window.settings) return;
     let changed = false;
@@ -122,6 +132,14 @@ function subscribeMain(salonId) {
       window.settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(data.staffCallTimeoutSeconds);
       changed = true;
     }
+    const nextPreferences = {
+      ...(window.settings.preferences && typeof window.settings.preferences === 'object' ? window.settings.preferences : {}),
+      weekStartsOn: normalizeWeekStartsOn(data.preferences?.weekStartsOn)
+    };
+    if (JSON.stringify(window.settings.preferences || {}) !== JSON.stringify(nextPreferences)) {
+      window.settings.preferences = nextPreferences;
+      changed = true;
+    }
     // Task settings
     if (data.taskSettings && typeof data.taskSettings === 'object') {
       if (data.taskSettings.taskReminders !== undefined) {
@@ -137,6 +155,20 @@ function subscribeMain(salonId) {
         changed = true;
       }
     }
+    const nextRolesHierarchy = data.rolesHierarchy && typeof data.rolesHierarchy === 'object'
+      ? normalizeRolesHierarchy(data.rolesHierarchy)
+      : cloneDefaultRolesHierarchy();
+    const nextScheduleRules = data.scheduleRules && typeof data.scheduleRules === 'object'
+      ? normalizeScheduleRules(data.scheduleRules)
+      : cloneDefaultScheduleRules();
+    if (JSON.stringify(window.settings.rolesHierarchy || {}) !== JSON.stringify(nextRolesHierarchy)) {
+      window.settings.rolesHierarchy = nextRolesHierarchy;
+      changed = true;
+    }
+    if (JSON.stringify(window.settings.scheduleRules || {}) !== JSON.stringify(nextScheduleRules)) {
+      window.settings.scheduleRules = nextScheduleRules;
+      changed = true;
+    }
     if (changed) {
       // Keep localStorage in sync as cache
       try {
@@ -146,9 +178,15 @@ function subscribeMain(salonId) {
         if (data.managers) stored.managers = data.managers;
         if (data.staffCallTemplates && typeof data.staffCallTemplates === 'object') stored.staffCallTemplates = normalizeStaffCallTemplates(data.staffCallTemplates);
         if (data.staffCallTimeoutSeconds !== undefined) stored.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(data.staffCallTimeoutSeconds);
+        stored.preferences = {
+          ...(stored.preferences && typeof stored.preferences === 'object' ? stored.preferences : {}),
+          weekStartsOn: nextPreferences.weekStartsOn
+        };
         if (data.taskSettings?.taskReminders !== undefined) stored.taskReminders = data.taskSettings.taskReminders;
         if (data.taskSettings?.taskNotes !== undefined) stored.taskNotes = data.taskSettings.taskNotes;
         if (data.taskSettings?.showIncompleteTasksBadge !== undefined) stored.showIncompleteTasksBadge = data.taskSettings.showIncompleteTasksBadge;
+        stored.rolesHierarchy = nextRolesHierarchy;
+        stored.scheduleRules = nextScheduleRules;
         localStorage.setItem('ffv24_settings', JSON.stringify(stored));
       } catch (_) {}
       // Re-render brand if available
@@ -173,6 +211,17 @@ function ffSaveAppSettings(brandName, brandPalette, managers, staffCallTemplates
     .catch((e) => console.warn("[SettingsCloud] save app settings failed", e));
 }
 
+function ffSavePreferencesSettings(preferences) {
+  if (!_salonId) return;
+  const nextPreferences = preferences && typeof preferences === "object" ? preferences : {};
+  setDoc(settingsMainRef(_salonId), {
+    preferences: {
+      weekStartsOn: normalizeWeekStartsOn(nextPreferences.weekStartsOn)
+    },
+    updatedAt: serverTimestamp()
+  }, { merge: true }).catch((e) => console.warn("[SettingsCloud] save preferences settings failed", e));
+}
+
 /**
  * Save task settings (reminders, notes, badge) to Firestore.
  * Called from index.html saveSettings().
@@ -186,6 +235,16 @@ function ffSaveTaskSettings(taskReminders, taskNotes, showIncompleteTasksBadge) 
   if (Object.keys(taskSettings).length === 0) return;
   setDoc(settingsMainRef(_salonId), { taskSettings, updatedAt: serverTimestamp() }, { merge: true })
     .catch((e) => console.warn("[SettingsCloud] save task settings failed", e));
+}
+
+function ffSaveScheduleSettings(rolesHierarchy, scheduleRules) {
+  if (!_salonId) return;
+  const payload = { updatedAt: serverTimestamp() };
+  if (rolesHierarchy && typeof rolesHierarchy === "object") payload.rolesHierarchy = normalizeRolesHierarchy(rolesHierarchy);
+  if (scheduleRules && typeof scheduleRules === "object") payload.scheduleRules = normalizeScheduleRules(scheduleRules);
+  if (Object.keys(payload).length === 1) return;
+  setDoc(settingsMainRef(_salonId), payload, { merge: true })
+    .catch((e) => console.warn("[SettingsCloud] save schedule settings failed", e));
 }
 
 // ─── Technician Types ───────────────────────────────────────────────────────────
@@ -381,7 +440,9 @@ tryConnect();
 if (typeof window !== "undefined") {
   window.ffSaveHistoryRange = ffSaveHistoryRange;
   window.ffSaveAppSettings = ffSaveAppSettings;
+  window.ffSavePreferencesSettings = ffSavePreferencesSettings;
   window.ffSaveTaskSettings = ffSaveTaskSettings;
+  window.ffSaveScheduleSettings = ffSaveScheduleSettings;
   window.ffGetTechnicianTypes = ffGetTechnicianTypes;
   window.ffCreateTechnicianType = ffCreateTechnicianType;
   window.ffUpdateTechnicianType = ffUpdateTechnicianType;

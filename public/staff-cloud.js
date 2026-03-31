@@ -17,11 +17,13 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "./app.js?v=20260329_training_fix1";
+import { normalizeStaffSchedulingData } from "./schedule-helpers.js?v=20260331_schedule_phase6_staff_profile";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let _salonId  = null;
 let _unsub    = null;
 let _migrated = false;
+let _backfillingRoleModel = false;
 
 // Debug logging (off by default)
 const STAFF_CLOUD_DEBUG = false;
@@ -108,9 +110,18 @@ function _startListener() {
       }
 
       // Build staff from Firestore docs (explicit technicianTypes to handle any naming)
+      let requiresRoleModelBackfill = false;
       const staff = snap.docs.map(d => {
         const data = d.data();
-        const x = { ...data, id: d.id };
+        const x = normalizeStaffSchedulingData({ ...data, id: d.id });
+        if (
+          x.role !== data.role ||
+          x.isAdmin !== (data.isAdmin === true) ||
+          x.isManager !== (data.isManager === true) ||
+          x.managerType !== data.managerType
+        ) {
+          requiresRoleModelBackfill = true;
+        }
         delete x._syncedAt;
         // Ensure technicianTypes is preserved (Firestore may have it as technicianTypes or technicianType)
         if (data.technicianTypes !== undefined) {
@@ -124,6 +135,15 @@ function _startListener() {
       // ✅ Firestore wins: overwrite localStorage
       localStorage.setItem('ff_staff_v1', JSON.stringify({ staff }));
       dlog('[StaffCloud] localStorage updated with', staff.length, 'staff from Firestore');
+
+      if (requiresRoleModelBackfill && !_backfillingRoleModel) {
+        _backfillingRoleModel = true;
+        _batchWrite(staff)
+          .catch((e) => console.warn('[StaffCloud] Role model backfill failed:', e))
+          .finally(() => {
+            _backfillingRoleModel = false;
+          });
+      }
 
       // Refresh UI
       document.dispatchEvent(new CustomEvent('ff-staff-cloud-updated'));
@@ -161,7 +181,8 @@ async function _batchWrite(staff) {
     const batch = writeBatch(db);
     staff.slice(i, i + 400).forEach(s => {
       if (!s.id) return;
-      const { _syncedAt, ...cleanRaw } = { ...s };
+      const normalizedStaff = normalizeStaffSchedulingData(s);
+      const { _syncedAt, ...cleanRaw } = { ...normalizedStaff };
       const clean = _sanitize(cleanRaw) || {};
       const payload = { ...clean, _syncedAt: serverTimestamp() };
       if (cleanRaw.buttonColorIndex === undefined) {

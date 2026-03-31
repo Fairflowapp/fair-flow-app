@@ -1917,6 +1917,16 @@ dialog footer button, .code-dialog footer button {
         <div class="apps-col">
           <div class="apps-section-title">SETUP & MANAGEMENT</div>
           <div class="apps-section-grid">
+            <div class="apps-panel-item" data-app="schedule" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                </div>
+                <div>
+                  <div>Schedule</div>
+                </div>
+              </div>
+            </div>
             <div class="apps-panel-item" data-app="settings" style="cursor:pointer;">
               <div class="apps-panel-item__content">
                 <div>
@@ -2064,15 +2074,28 @@ dialog footer button, .code-dialog footer button {
           <h3 style="margin:0 0 20px 0;font-size:18px;font-weight:600;color:#111827;">Preferences</h3>
           <div style="display:flex;flex-direction:column;gap:24px;">
             <div>
-              <label style="display:block;font-size:14px;font-weight:500;color:#111827;margin-bottom:12px;">Time format</label>
+              <label style="display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:10px;">Time format</label>
               <div style="display:flex;gap:16px;">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                  <input type="radio" name="userProfileTimeFormat" value="12h" id="userProfileTimeFormat12h" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
+                  <input type="radio" name="userProfileTimeFormat" value="12h" id="userProfileTimeFormat12h" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
                   <span style="font-size:14px;color:#111827;">12-hour</span>
                 </label>
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                  <input type="radio" name="userProfileTimeFormat" value="24h" id="userProfileTimeFormat24h" style="width:18px;height:18px;cursor:pointer;accent-color:#2563eb;">
+                  <input type="radio" name="userProfileTimeFormat" value="24h" id="userProfileTimeFormat24h" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
                   <span style="font-size:14px;color:#111827;">24-hour</span>
+                </label>
+              </div>
+            </div>
+            <div>
+              <label style="display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:10px;">Week starts on</label>
+              <div style="display:flex;gap:16px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="radio" name="userProfileWeekStartsOn" value="monday" id="userProfileWeekStartsOnMonday" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
+                  <span style="font-size:14px;color:#111827;">Monday</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="radio" name="userProfileWeekStartsOn" value="sunday" id="userProfileWeekStartsOnSunday" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
+                  <span style="font-size:14px;color:#111827;">Sunday</span>
                 </label>
               </div>
             </div>
@@ -2831,6 +2854,25 @@ const DEFAULTS={
 
   brandPalette:["#FBE54D","#D4452D","#79A7E5","#8AD97A"],
 
+  rolesHierarchy:{
+    manager:3,
+    assistant_manager:2,
+    technician:1,
+    front_desk:1
+  },
+
+  scheduleRules:{
+    minManagersPerShift:1,
+    minFrontDeskPerDay:0,
+    minTechniciansPerDay:0,
+    minTotalStaffPerDay:0,
+    allowAssistantManagerAlone:false
+  },
+
+  preferences:{
+    weekStartsOn:"monday"
+  },
+
   core:["#111827","#5b21b6","#7c3aed","#2563eb","#0ea5e9","#10b981","#84cc16","#f59e0b","#ef4444","#f472b6"],
 
   workers:[
@@ -2879,6 +2921,21 @@ if (!settings.taskNotes) {
     yearly: ''
   };
 }
+
+settings.rolesHierarchy = {
+  ...DEFAULTS.rolesHierarchy,
+  ...((settings.rolesHierarchy && typeof settings.rolesHierarchy === 'object') ? settings.rolesHierarchy : {})
+};
+
+settings.scheduleRules = {
+  ...DEFAULTS.scheduleRules,
+  ...((settings.scheduleRules && typeof settings.scheduleRules === 'object') ? settings.scheduleRules : {})
+};
+
+settings.preferences = {
+  ...DEFAULTS.preferences,
+  ...((settings.preferences && typeof settings.preferences === 'object') ? settings.preferences : {})
+};
 
 // Initialize tasks catalog globally
 window.ff_tasks_catalog_v1 =
@@ -9865,6 +9922,7 @@ function goToUserProfile(section) {
   const mediaScreenEl = document.getElementById('mediaScreen');
   const inboxScreenEl = document.getElementById('inboxScreen');
   const ticketsScreenEl = document.getElementById('ticketsScreen');
+  const scheduleScreenEl = document.getElementById('scheduleScreen');
   if (tasksScreen && tasksScreen.style.display !== 'none') {
     previousView = 'tasks';
   } else if (chatScreen && chatScreen.style.display !== 'none') {
@@ -9875,6 +9933,8 @@ function goToUserProfile(section) {
     previousView = 'inbox';
   } else if (ticketsScreenEl && ticketsScreenEl.style.display !== 'none') {
     previousView = 'tickets';
+  } else if (scheduleScreenEl && scheduleScreenEl.style.display !== 'none') {
+    previousView = 'schedule';
   } else if (ownerView && ownerView.style.display !== 'none') {
     previousView = 'queue';
   } else {
@@ -9893,6 +9953,7 @@ function goToUserProfile(section) {
   if (inboxScreenEl) inboxScreenEl.style.display = 'none';
   if (mediaScreenEl) mediaScreenEl.style.display = 'none';
   if (ticketsScreenEl) ticketsScreenEl.style.display = 'none';
+  if (scheduleScreenEl) scheduleScreenEl.style.display = 'none';
 
   // Hide Chat screen if open (prevents "stuck at bottom" glitch)
   if (chatScreen) {
@@ -10006,6 +10067,8 @@ function goBackFromUserProfile() {
     window.goToInbox();
   } else if (previousView === 'tickets' && typeof window.goToTickets === 'function') {
     window.goToTickets();
+  } else if (previousView === 'schedule' && typeof window.goToSchedule === 'function') {
+    window.goToSchedule();
   } else {
     // For queue (default or explicit), call the exact same function as QUEUE tab click
     // This ensures full Queue UI initialization and data reload
@@ -20465,6 +20528,11 @@ function initializeAppsPanel() {
               window.goToMedia();
             }
             break;
+          case 'schedule':
+            if (typeof window.goToSchedule === 'function') {
+              window.goToSchedule();
+            }
+            break;
           case 'training':
             if (typeof window.goToTraining === 'function') {
               window.goToTraining();
@@ -20520,12 +20588,19 @@ function initializeAppsPanel() {
           // Generate ID if missing
           const id = worker.id || ('staff_' + Date.now() + '_' + index + '_' + Math.random().toString(36).substr(2, 9));
           
+          const roleFields = buildStaffRoleFields(worker.role, worker.managerType, worker);
           // Map old worker fields to new staff format
           return {
             id: id,
             name: worker.name || '',
             pin: worker.pin || '',
-            role: worker.role || 'technician', // Default to technician if role not specified
+            role: roleFields.role,
+            employmentType: window.ffScheduleHelpers?.normalizeEmploymentType
+              ? window.ffScheduleHelpers.normalizeEmploymentType(worker.employmentType)
+              : null,
+            weeklyHoursTarget: window.ffScheduleHelpers?.normalizeWeeklyHoursTarget
+              ? window.ffScheduleHelpers.normalizeWeeklyHoursTarget(worker.weeklyHoursTarget)
+              : null,
             color: worker.color || undefined,
             fcolor: worker.fcolor || undefined,
             buttonColorIndex: worker.buttonColorIndex || undefined,
@@ -20538,9 +20613,21 @@ function initializeAppsPanel() {
             isArchived: worker.isArchived === true || worker.archived === true || false,
             permissions: worker.permissions || {},
             createdAt: worker.createdAt || Date.now(),
-            // Default missing isAdmin and isManager flags to false
-            isAdmin: worker.isAdmin === true || false,
-            isManager: worker.isManager === true || false
+            isAdmin: roleFields.isAdmin,
+            isManager: roleFields.isManager,
+            managerType: roleFields.managerType,
+            defaultSchedule: window.ffScheduleHelpers?.normalizeDefaultSchedule
+              ? window.ffScheduleHelpers.normalizeDefaultSchedule(worker.defaultSchedule)
+            : (window.ffScheduleHelpers?.cloneDefaultSchedule
+                ? window.ffScheduleHelpers.cloneDefaultSchedule()
+                : {}),
+            constraints: window.ffScheduleHelpers?.normalizeConstraints
+              ? window.ffScheduleHelpers.normalizeConstraints(worker.constraints)
+            : {
+                cannotWorkAlone: false,
+                requiresManager: false,
+                maxWeeklyHours: null
+              }
           };
         });
         
@@ -20565,17 +20652,48 @@ function initializeAppsPanel() {
       let needsSave = false;
       data.staff = data.staff.map(function(staff) {
         const isArchived = staff.isArchived === true || staff.archived === true;
+        const roleFields = buildStaffRoleFields(staff.role, staff.managerType, staff);
         const normalized = {
           ...staff,
+          role: roleFields.role,
+          employmentType: window.ffScheduleHelpers?.normalizeEmploymentType
+            ? window.ffScheduleHelpers.normalizeEmploymentType(staff.employmentType)
+            : null,
+          weeklyHoursTarget: window.ffScheduleHelpers?.normalizeWeeklyHoursTarget
+            ? window.ffScheduleHelpers.normalizeWeeklyHoursTarget(staff.weeklyHoursTarget)
+            : null,
           invited: staff.invited === true,
           invitedAt: staff.invitedAt || null,
           lastActiveAt: staff.lastActiveAt || null,
           isArchived: isArchived,
           permissions: staff.permissions || {}, // Initialize permissions object
-          // Default missing isAdmin and isManager flags to false
-          isAdmin: staff.isAdmin === true || false,
-          isManager: staff.isManager === true || false
+          isAdmin: roleFields.isAdmin,
+          isManager: roleFields.isManager,
+          managerType: roleFields.managerType,
+          defaultSchedule: window.ffScheduleHelpers?.normalizeDefaultSchedule
+            ? window.ffScheduleHelpers.normalizeDefaultSchedule(staff.defaultSchedule)
+            : (window.ffScheduleHelpers?.cloneDefaultSchedule
+                ? window.ffScheduleHelpers.cloneDefaultSchedule()
+                : {}),
+          constraints: window.ffScheduleHelpers?.normalizeConstraints
+            ? window.ffScheduleHelpers.normalizeConstraints(staff.constraints)
+            : {
+                cannotWorkAlone: false,
+                requiresManager: false,
+                maxWeeklyHours: null
+              }
         };
+
+        if (
+          normalized.role !== staff.role ||
+          normalized.isAdmin !== (staff.isAdmin === true) ||
+          normalized.isManager !== (staff.isManager === true) ||
+          normalized.employmentType !== staff.employmentType ||
+          normalized.weeklyHoursTarget !== (staff.weeklyHoursTarget ?? null) ||
+          normalized.managerType !== staff.managerType
+        ) {
+          needsSave = true;
+        }
         
         // ONE-TIME migration: if pin is missing but staffPin exists, migrate staffPin -> pin
         if (!normalized.pin && normalized.staffPin !== undefined && normalized.staffPin !== null && normalized.staffPin !== '') {
@@ -20657,6 +20775,164 @@ function initializeAppsPanel() {
   }
   window.ffGetStaffStore = ffGetStaffStore;
   window.ffSaveStaffStore = ffSaveStaffStore;
+
+  function getStaffRoleValue(staff) {
+    if (staff?.isAdmin === true) return 'admin';
+    const role = String(staff?.role || '').trim().toLowerCase();
+    if (role === 'assistant_manager') return 'manager';
+    if (staff?.isManager === true || role === 'manager') return 'manager';
+    if (role === 'admin') return 'admin';
+    return role || 'technician';
+  }
+
+  function getStaffManagerTypeValue(staff) {
+    const managerType = String(staff?.managerType || '').trim().toLowerCase();
+    if (managerType === 'assistant manager' || managerType === 'assistant_manager') return 'assistant_manager';
+    return 'manager';
+  }
+
+  function buildStaffRoleFields(role, managerType, staff) {
+    const normalizedRole = String(role || '').trim().toLowerCase();
+    if (normalizedRole === 'admin' || staff?.isAdmin === true) {
+      return { role: 'admin', isAdmin: true, isManager: false, managerType: undefined };
+    }
+    if (normalizedRole === 'manager' || normalizedRole === 'assistant_manager' || staff?.isManager === true) {
+      return {
+        role: 'manager',
+        isAdmin: false,
+        isManager: true,
+        managerType: getStaffManagerTypeValue({ managerType: normalizedRole === 'assistant_manager' ? 'assistant_manager' : managerType })
+      };
+    }
+    return { role: 'technician', isAdmin: false, isManager: false, managerType: undefined };
+  }
+
+  function getSelectedManagerTypeValue(selectId) {
+    const select = document.getElementById(selectId);
+    return getStaffManagerTypeValue({ managerType: select?.value });
+  }
+
+  const STAFF_SCHEDULE_DAY_OPTIONS = [
+    { value: 'monday', label: 'Mon' },
+    { value: 'tuesday', label: 'Tue' },
+    { value: 'wednesday', label: 'Wed' },
+    { value: 'thursday', label: 'Thu' },
+    { value: 'friday', label: 'Fri' },
+    { value: 'saturday', label: 'Sat' },
+    { value: 'sunday', label: 'Sun' }
+  ];
+
+  function getWeekStartsOnPreference() {
+    const globalValue = (window.settings && window.settings.preferences && window.settings.preferences.weekStartsOn) || '';
+    if (String(globalValue).toLowerCase() === 'sunday') return 'sunday';
+    try {
+      const storedSettings = JSON.parse(localStorage.getItem('ffv24_settings') || '{}');
+      return String(storedSettings?.preferences?.weekStartsOn || '').toLowerCase() === 'sunday' ? 'sunday' : 'monday';
+    } catch (_) {
+      return 'monday';
+    }
+  }
+
+  function getOrderedStaffScheduleDayOptions() {
+    if (getWeekStartsOnPreference() !== 'sunday') return STAFF_SCHEDULE_DAY_OPTIONS.slice();
+    const sundayOption = STAFF_SCHEDULE_DAY_OPTIONS.find(function(option) { return option.value === 'sunday'; });
+    const rest = STAFF_SCHEDULE_DAY_OPTIONS.filter(function(option) { return option.value !== 'sunday'; });
+    return sundayOption ? [sundayOption].concat(rest) : STAFF_SCHEDULE_DAY_OPTIONS.slice();
+  }
+
+  function getStaffEmploymentTypeValue(staff) {
+    return window.ffScheduleHelpers?.normalizeEmploymentType
+      ? window.ffScheduleHelpers.normalizeEmploymentType(staff?.employmentType)
+      : (String(staff?.employmentType || '').trim().toLowerCase() || null);
+  }
+
+  function getStaffEmploymentTypeLabel(staff) {
+    const employmentType = getStaffEmploymentTypeValue(staff);
+    if (employmentType === 'full_time') return 'Full time';
+    if (employmentType === 'part_time') return 'Part time';
+    if (employmentType === 'flexible') return 'Flexible';
+    return '—';
+  }
+
+  function getNormalizedStaffDefaultSchedule(staff) {
+    return window.ffScheduleHelpers?.normalizeDefaultSchedule
+      ? window.ffScheduleHelpers.normalizeDefaultSchedule(staff?.defaultSchedule)
+      : (staff?.defaultSchedule || {});
+  }
+
+  function getScheduleRowsValue(containerId) {
+    const container = document.getElementById(containerId);
+    const fallbackSchedule = window.ffScheduleHelpers?.cloneDefaultSchedule
+      ? window.ffScheduleHelpers.cloneDefaultSchedule()
+      : {};
+    if (!container) return fallbackSchedule;
+    const nextSchedule = {};
+    container.querySelectorAll('[data-schedule-day]').forEach(function(row) {
+      const dayKey = String(row.getAttribute('data-schedule-day') || '').trim().toLowerCase();
+      if (!dayKey) return;
+      const enabledInput = row.querySelector('[data-field="enabled"]');
+      const startTimeInput = row.querySelector('[data-field="startTime"]');
+      const endTimeInput = row.querySelector('[data-field="endTime"]');
+      nextSchedule[dayKey] = {
+        enabled: enabledInput?.checked === true,
+        startTime: startTimeInput?.value || null,
+        endTime: endTimeInput?.value || null
+      };
+    });
+    return nextSchedule;
+  }
+
+  function renderScheduleRows(containerId, scheduleValue, readOnly) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const normalizedSchedule = window.ffScheduleHelpers?.normalizeDefaultSchedule
+      ? window.ffScheduleHelpers.normalizeDefaultSchedule(scheduleValue)
+      : (scheduleValue || {});
+    container.innerHTML = getOrderedStaffScheduleDayOptions().map(function(option) {
+      const entry = normalizedSchedule[option.value] || { enabled: false, startTime: null, endTime: null };
+      if (readOnly) {
+        return `
+          <div data-schedule-day="${option.value}" style="display:grid;grid-template-columns:80px 120px 1fr;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;">
+            <div style="font-size:13px;font-weight:600;color:#111827;">${option.label}</div>
+            <div style="font-size:12px;font-weight:600;color:${entry.enabled ? '#166534' : '#6b7280'};">${entry.enabled ? 'Enabled' : 'Off'}</div>
+            <div style="font-size:13px;color:#111827;">${entry.enabled ? `${entry.startTime || '—'} - ${entry.endTime || '—'}` : 'Not scheduled'}</div>
+          </div>
+        `;
+      }
+      return `
+        <div data-schedule-day="${option.value}" style="display:grid;grid-template-columns:80px 90px minmax(140px,1fr) minmax(140px,1fr);gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;">
+          <div style="font-size:13px;font-weight:600;color:#111827;">${option.label}</div>
+          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#374151;">
+            <input type="checkbox" data-field="enabled" ${entry.enabled ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
+            <span>On</span>
+          </label>
+          <input type="time" data-field="startTime" value="${entry.startTime || ''}" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;">
+          <input type="time" data-field="endTime" value="${entry.endTime || ''}" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;">
+        </div>
+      `;
+    }).join('');
+  }
+
+  function toggleManagerTypeSection(role) {
+    const isManager = role === 'manager' || role === 'assistant_manager';
+    const addSection = document.getElementById('staffManagerTypeSection');
+    if (addSection) addSection.style.display = isManager ? 'block' : 'none';
+    const editSection = document.getElementById('staffEditManagerTypeSection');
+    if (editSection) editSection.style.display = isManager ? 'block' : 'none';
+  }
+
+  function toggleStaffRoleSections(role) {
+    toggleManagerTypeSection(role);
+    toggleTechnicianTypesSection(role);
+  }
+
+  function getStaffRoleLabel(staff) {
+    const role = getStaffRoleValue(staff);
+    if (role === 'admin') return 'Admin';
+    if (role === 'manager') return getStaffManagerTypeValue(staff) === 'assistant_manager' ? 'Assistant Manager' : 'Manager';
+    if (role === 'front_desk') return 'Front Desk';
+    return 'Technician';
+  }
   
   // Resolve staff name to staffId from ff_staff_v1
   // Returns staffId if found, undefined otherwise
@@ -21267,9 +21543,7 @@ function initializeAppsPanel() {
         const initials = getInitials(staff.name);
         const avatarUrl = (typeof window.ffGetAvatarUrlForUser === 'function')
           ? window.ffGetAvatarUrlForUser({
-              name: staff.name,
               staffId: staff.id,
-              email: staff.email || '',
               photoURL: staff.photoURL || staff.avatarUrl || '',
               avatarUpdatedAtMs: staff.avatarUpdatedAtMs
             })
@@ -21277,8 +21551,7 @@ function initializeAppsPanel() {
         const avatarHtml = avatarUrl
           ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex-shrink:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);"><img src="${escapeHtml(avatarUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.outerHTML='<div style=&quot;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;flex-shrink:0;&quot;>${escapeHtml(initials)}</div>';"></div>`
           : `<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;flex-shrink:0;">${escapeHtml(initials)}</div>`;
-        // Compute role label from isAdmin/isManager flags (source of truth)
-        const roleLabel = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Technician');
+        const roleLabel = getStaffRoleLabel(staff);
         const invited = staff.invited === true;
         const isArchived = staff.isArchived === true;
         
@@ -21419,8 +21692,8 @@ function initializeAppsPanel() {
       // Render right-side navigation
       const navEl = document.getElementById('staffDetailsNav');
       if (navEl) {
-        const tabs = ['details', 'locations', 'notifications', 'permissions'];
-        const labels = ['Details', 'Locations', 'Notifications', 'Permissions'];
+        const tabs = ['details', 'schedule', 'locations', 'notifications', 'permissions'];
+        const labels = ['Details', 'Schedule', 'Locations', 'Notifications', 'Permissions'];
         navEl.innerHTML = tabs.map(function(tab, idx) {
           const isActive = currentTab === tab;
           return `<button class="staff-nav-item${isActive ? ' is-active' : ''}" data-tab="${tab}" style="width:100%;padding:8px 10px;min-height:36px;background:${isActive ? 'linear-gradient(90deg, #9d68b9, #ff9580)' : 'transparent'};border:none;border-radius:6px;color:${isActive ? '#fff' : '#111827'};font-weight:${isActive ? '600' : '400'};font-size:12px;cursor:pointer;text-align:left;transition:all 0.2s;">${labels[idx]}</button>`;
@@ -21446,12 +21719,9 @@ function initializeAppsPanel() {
         });
       }
       
-      // Render Details tab content (default active tab)
-      renderDetailsTab(staff, isEditingStaffDetails);
-      // Render Permissions tab
-      renderPermissionsTab(staff);
-      // Ensure Details tab is shown by default
-      switchTab('details');
+      const validTabs = ['details', 'schedule', 'locations', 'notifications', 'permissions'];
+      if (!validTabs.includes(currentTab)) currentTab = 'details';
+      switchTab(currentTab);
       
     } catch (error) {
       console.error('[renderStaffDetails] Error rendering staff details:', error);
@@ -21486,13 +21756,26 @@ function initializeAppsPanel() {
     
     // Show/hide tab content
     const detailsContent = document.getElementById('staffDetailsTabContent');
+    const scheduleContent = document.getElementById('staffScheduleTabContent');
     const locationsContent = document.getElementById('staffLocationsTabContent');
     const notificationsContent = document.getElementById('staffNotificationsTabContent');
     const permissionsContent = document.getElementById('staffPermissionsTabContent');
     
     if (detailsContent) detailsContent.style.display = tab === 'details' ? 'block' : 'none';
+    if (scheduleContent) scheduleContent.style.display = tab === 'schedule' ? 'block' : 'none';
     if (locationsContent) locationsContent.style.display = tab === 'locations' ? 'block' : 'none';
     if (notificationsContent) notificationsContent.style.display = tab === 'notifications' ? 'block' : 'none';
+    if ((tab === 'details' || tab === 'schedule') && selectedStaffId) {
+      const staffData = ffGetStaffStore();
+      const staff = staffData.staff.find(s => s.id === selectedStaffId);
+      if (staff) {
+        if (tab === 'details') {
+          renderDetailsTab(staff, isEditingStaffDetails);
+        } else if (tab === 'schedule') {
+          renderScheduleTab(staff, isEditingStaffDetails);
+        }
+      }
+    }
     if (permissionsContent) {
       permissionsContent.style.display = tab === 'permissions' ? 'block' : 'none';
       // Re-render permissions when switching to this tab
@@ -21669,6 +21952,149 @@ function initializeAppsPanel() {
       };
     });
   }
+
+  function renderScheduleTab(staff, editMode) {
+    const scheduleContent = document.getElementById('staffScheduleTabContent');
+    if (!scheduleContent) return;
+
+    const normalizedSchedule = getNormalizedStaffDefaultSchedule(staff);
+    const normalizedConstraints = window.ffScheduleHelpers?.normalizeConstraints
+      ? window.ffScheduleHelpers.normalizeConstraints(staff.constraints)
+      : (staff.constraints || { cannotWorkAlone: false, requiresManager: false, maxWeeklyHours: null });
+    const employmentType = getStaffEmploymentTypeValue(staff);
+    const weeklyHoursTarget = window.ffScheduleHelpers?.normalizeWeeklyHoursTarget
+      ? window.ffScheduleHelpers.normalizeWeeklyHoursTarget(staff.weeklyHoursTarget)
+      : (staff.weeklyHoursTarget ?? null);
+    const roleValue = getStaffRoleValue(staff);
+    const isManagerRole = roleValue === 'manager';
+
+    if (editMode) {
+      scheduleContent.innerHTML = `
+        <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;max-width:760px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;">
+            <h3 style="margin:0;font-size:15px;font-weight:700;color:#111827;">Schedule</h3>
+            <div style="display:flex;gap:8px;">
+              <button id="staffScheduleSaveBtn" style="padding:6px 12px;background:#6366f1;border:1px solid #6366f1;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;">Save</button>
+              <button id="staffScheduleCancelBtn" style="padding:6px 12px;background:#f3f4f6;border:1px solid var(--border);border-radius:8px;color:#374151;font-size:12px;font-weight:600;cursor:pointer;">Cancel</button>
+            </div>
+          </div>
+
+          <div style="display:grid;gap:18px;">
+            <section style="display:grid;gap:12px;">
+              <div style="font-size:12px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">Work Profile</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+                <div>
+                  <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#374151;">Employment Type</label>
+                  <select id="staffScheduleEmploymentType" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;cursor:pointer;">
+                    <option value="" ${employmentType ? '' : 'selected'}>Not set</option>
+                    <option value="full_time" ${employmentType === 'full_time' ? 'selected' : ''}>Full time</option>
+                    <option value="part_time" ${employmentType === 'part_time' ? 'selected' : ''}>Part time</option>
+                    <option value="flexible" ${employmentType === 'flexible' ? 'selected' : ''}>Flexible</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#374151;">Weekly Hours Target</label>
+                  <input type="number" id="staffScheduleWeeklyHoursTarget" min="0" step="0.5" value="${weeklyHoursTarget ?? ''}" placeholder="e.g. 40" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;">
+                </div>
+                ${isManagerRole ? `
+                  <div>
+                    <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#374151;">Manager Type</label>
+                    <select id="staffScheduleManagerType" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;cursor:pointer;">
+                      <option value="manager" ${getStaffManagerTypeValue(staff) === 'manager' ? 'selected' : ''}>Full</option>
+                      <option value="assistant_manager" ${getStaffManagerTypeValue(staff) === 'assistant_manager' ? 'selected' : ''}>Assistant</option>
+                    </select>
+                  </div>
+                ` : ''}
+              </div>
+            </section>
+
+            <section style="display:grid;gap:12px;">
+              <div style="font-size:12px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">Default Schedule</div>
+              <div>
+                <label style="display:block;margin-bottom:8px;font-size:12px;font-weight:600;color:#374151;">Weekly Schedule</label>
+                <div id="staffScheduleRows" style="display:grid;gap:8px;"></div>
+              </div>
+            </section>
+
+            <section style="display:grid;gap:12px;">
+              <div style="font-size:12px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">Scheduling Constraints</div>
+              <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#f9fafb;cursor:pointer;">
+                <input type="checkbox" id="staffScheduleRequiresManager" ${normalizedConstraints.requiresManager ? 'checked' : ''} style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;">
+                <span style="font-size:13px;color:#111827;font-weight:500;">Requires manager present</span>
+              </label>
+              <div style="max-width:240px;">
+                <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#374151;">Max Weekly Hours</label>
+                <input type="number" id="staffScheduleMaxWeeklyHours" min="0" step="0.5" value="${normalizedConstraints.maxWeeklyHours ?? ''}" placeholder="No limit" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;">
+              </div>
+            </section>
+          </div>
+        </div>
+      `;
+
+      renderScheduleRows('staffScheduleRows', normalizedSchedule, false);
+      const saveBtn = document.getElementById('staffScheduleSaveBtn');
+      const cancelBtn = document.getElementById('staffScheduleCancelBtn');
+      if (saveBtn) saveBtn.onclick = function() { saveStaffDetails(); };
+      if (cancelBtn) cancelBtn.onclick = function() { cancelEditStaffDetails(); };
+      return;
+    }
+
+    scheduleContent.innerHTML = `
+      <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;max-width:760px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;">
+          <h3 style="margin:0;font-size:15px;font-weight:700;color:#111827;">Schedule</h3>
+          <button id="staffScheduleEditBtn" style="padding:6px 10px;background:#f3f4f6;border:1px solid var(--border);border-radius:8px;color:#374151;font-size:12px;font-weight:600;cursor:pointer;">Edit</button>
+        </div>
+
+        <div style="display:grid;gap:18px;">
+          <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+            <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:#fafafa;">
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#9ca3af;margin-bottom:4px;">Employment Type</div>
+              <div style="font-size:14px;font-weight:600;color:#111827;">${escapeHtml(getStaffEmploymentTypeLabel(staff))}</div>
+            </div>
+            <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:#fafafa;">
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#9ca3af;margin-bottom:4px;">Weekly Hours Target</div>
+              <div style="font-size:14px;font-weight:600;color:#111827;">${weeklyHoursTarget != null ? escapeHtml(String(weeklyHoursTarget)) : '—'}</div>
+            </div>
+            ${isManagerRole ? `
+              <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:#fafafa;">
+                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#9ca3af;margin-bottom:4px;">Manager Type</div>
+                <div style="font-size:14px;font-weight:600;color:#111827;">${getStaffManagerTypeValue(staff) === 'assistant_manager' ? 'Assistant' : 'Full'}</div>
+              </div>
+            ` : ''}
+          </section>
+
+          <section style="padding:14px;border:1px solid var(--border);border-radius:12px;background:#fff;">
+            <div style="font-size:12px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;">Default Schedule</div>
+            <div id="staffScheduleRows" style="display:grid;gap:8px;"></div>
+          </section>
+
+          <section style="padding:14px;border:1px solid var(--border);border-radius:12px;background:#fff;">
+            <div style="font-size:12px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;">Scheduling Constraints</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+              <div>
+                <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Requires Manager</div>
+                <div style="font-size:14px;color:#111827;font-weight:600;">${normalizedConstraints.requiresManager ? 'Yes' : 'No'}</div>
+              </div>
+              <div>
+                <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Max Weekly Hours</div>
+                <div style="font-size:14px;color:#111827;font-weight:600;">${normalizedConstraints.maxWeeklyHours != null ? escapeHtml(String(normalizedConstraints.maxWeeklyHours)) : '—'}</div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    `;
+
+    renderScheduleRows('staffScheduleRows', normalizedSchedule, true);
+
+    const editBtn = document.getElementById('staffScheduleEditBtn');
+    if (editBtn) {
+      editBtn.onclick = function() {
+        startEditStaffDetails();
+      };
+    }
+  }
   
   // Render Details tab content (view or edit mode)
   function renderDetailsTab(staff, editMode) {
@@ -21691,8 +22117,7 @@ function initializeAppsPanel() {
       staff.fcolor ||
       fontColorOf(staff.name) ||
       '#111111';
-    // Compute role label from isAdmin/isManager flags (source of truth)
-    const roleLabel = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Technician');
+    const roleLabel = getStaffRoleLabel(staff);
     
     if (editMode) {
       // Edit mode
@@ -21713,9 +22138,16 @@ function initializeAppsPanel() {
             <div>
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Role</label>
               <select id="staffEditRole" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
-                <option value="admin" ${staff.isAdmin === true ? 'selected' : ''}>Admin</option>
-                <option value="manager" ${staff.isAdmin !== true && staff.isManager === true ? 'selected' : ''}>Manager</option>
-                <option value="technician" ${staff.isAdmin !== true && staff.isManager !== true ? 'selected' : ''}>Technician</option>
+                <option value="admin" ${getStaffRoleValue(staff) === 'admin' ? 'selected' : ''}>Admin</option>
+                <option value="manager" ${getStaffRoleValue(staff) === 'manager' ? 'selected' : ''}>Manager</option>
+                <option value="technician" ${getStaffRoleValue(staff) === 'technician' ? 'selected' : ''}>Technician</option>
+              </select>
+            </div>
+            <div id="staffEditManagerTypeSection" style="display:none;">
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Manager Type</label>
+              <select id="staffEditManagerType" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
+                <option value="manager" ${getStaffManagerTypeValue(staff) === 'manager' ? 'selected' : ''}>Manager</option>
+                <option value="assistant_manager" ${getStaffManagerTypeValue(staff) === 'assistant_manager' ? 'selected' : ''}>Assistant Manager</option>
               </select>
             </div>
             <!-- Technician Types (only shown when role is technician) -->
@@ -21782,8 +22214,8 @@ function initializeAppsPanel() {
       const editRoleSelect = document.getElementById('staffEditRole');
       if (editRoleSelect) {
         // Determine current role
-        const currentRole = staff.isAdmin === true ? 'admin' : (staff.isManager === true ? 'manager' : 'technician');
-        toggleTechnicianTypesSection(currentRole);
+        const currentRole = getStaffRoleValue(staff);
+        toggleStaffRoleSections(currentRole);
         
         // Load existing technician types if role is technician
         if (currentRole === 'technician') {
@@ -21795,7 +22227,7 @@ function initializeAppsPanel() {
         if (!editRoleSelect.__technicianTypesBound) {
           editRoleSelect.__technicianTypesBound = true;
           editRoleSelect.addEventListener('change', function() {
-            toggleTechnicianTypesSection(this.value);
+            toggleStaffRoleSections(this.value);
             if (this.value === 'technician') {
               // Load existing types when switching to technician
               const existingTypes = Array.isArray(staff.technicianTypes) ? staff.technicianTypes : [];
@@ -21979,7 +22411,11 @@ function initializeAppsPanel() {
     const staffData = ffGetStaffStore();
     const staff = staffData.staff.find(s => s.id === selectedStaffId);
     if (staff) {
-      renderDetailsTab(staff, true);
+      if (currentTab === 'schedule') {
+        renderScheduleTab(staff, true);
+      } else {
+        renderDetailsTab(staff, true);
+      }
     }
   }
   
@@ -21994,7 +22430,11 @@ function initializeAppsPanel() {
     const staffData = ffGetStaffStore();
     const staff = staffData.staff.find(s => s.id === selectedStaffId);
     if (staff) {
-      renderDetailsTab(staff, false);
+      if (currentTab === 'schedule') {
+        renderScheduleTab(staff, false);
+      } else {
+        renderDetailsTab(staff, false);
+      }
     }
   }
   
@@ -22011,15 +22451,25 @@ function initializeAppsPanel() {
       const buttonColorInput = document.getElementById('staffEditButtonColor');
       const fontColorInput = document.getElementById('staffEditFontColor');
       
-      if (!nameInput || !roleInput) {
+      const staffStore = ffGetStaffStore();
+      const staffIndex = staffStore.staff.findIndex(s => s.id === selectedStaffId);
+
+      if (staffIndex === -1) {
+        console.error('[saveStaffDetails] Staff member not found');
+        return;
+      }
+
+      const oldStaff = staffStore.staff[staffIndex];
+
+      if ((currentTab === 'details') && (!nameInput || !roleInput)) {
         console.error('[saveStaffDetails] Edit inputs not found');
         return;
       }
       
-      const newName = nameInput.value.trim();
-      const newRole = roleInput.value;
-      const newPhone = phoneInput?.value.trim() || '';
-      const newEmail = emailInput?.value.trim() || '';
+      const newName = nameInput ? nameInput.value.trim() : String(oldStaff.name || '').trim();
+      const newRole = roleInput ? roleInput.value : getStaffRoleValue(oldStaff);
+      const newPhone = phoneInput ? (phoneInput.value.trim() || '') : (oldStaff.phone || '');
+      const newEmail = emailInput ? (emailInput.value.trim() || '') : (oldStaff.email || '');
       const newPinValue = pinInput?.value.trim() || '';
       
       // Validate name
@@ -22028,33 +22478,16 @@ function initializeAppsPanel() {
         return;
       }
       
-      // Get staff store
-      const staffStore = ffGetStaffStore();
-      const staffIndex = staffStore.staff.findIndex(s => s.id === selectedStaffId);
-      
-      if (staffIndex === -1) {
-        console.error('[saveStaffDetails] Staff member not found');
-        return;
-      }
-      
-      const oldStaff = staffStore.staff[staffIndex];
       const newButtonColor = ffNormalizeHexColor(buttonColorInput?.value, oldStaff.buttonColor || oldStaff.color || '#111827');
       const newFontColor = ffNormalizeHexColor(fontColorInput?.value, oldStaff.fontColor || oldStaff.fcolor || '#111111');
       const nameChanged = oldStaff.name !== newName;
+      const scheduleManagerTypeInput = document.getElementById('staffScheduleManagerType');
+      const detailManagerTypeInput = document.getElementById('staffEditManagerType');
+      const newManagerType = getStaffManagerTypeValue({ managerType: scheduleManagerTypeInput?.value || detailManagerTypeInput?.value || oldStaff.managerType });
       
-      // Map role selection to flags to check if role actually changed
-      let newIsAdmin = false;
-      let newIsManager = false;
-      if (newRole === 'admin') {
-        newIsAdmin = true;
-        newIsManager = false;
-      } else if (newRole === 'manager') {
-        newIsAdmin = false;
-        newIsManager = true;
-      } else if (newRole === 'technician') {
-        newIsAdmin = false;
-        newIsManager = false;
-      }
+      const roleFields = buildStaffRoleFields(newRole, newManagerType);
+      const newIsAdmin = roleFields.isAdmin;
+      const newIsManager = roleFields.isManager;
       const roleChanged = (oldStaff.isAdmin !== newIsAdmin) || (oldStaff.isManager !== newIsManager);
       
       // Safety rule: Prevent removing/demoting the last remaining Admin
@@ -22104,14 +22537,41 @@ function initializeAppsPanel() {
       // Get technician types if role is technician
       let technicianTypes = [];
       if (newRole === 'technician') {
-        technicianTypes = getSelectedTechnicianTypes('staffEditTechnicianTypesCheckboxes');
+        technicianTypes = document.getElementById('staffEditTechnicianTypesCheckboxes')
+          ? getSelectedTechnicianTypes('staffEditTechnicianTypesCheckboxes')
+          : (Array.isArray(oldStaff.technicianTypes) ? oldStaff.technicianTypes : []);
       }
+
+      const scheduleEmploymentTypeInput = document.getElementById('staffScheduleEmploymentType');
+      const scheduleWeeklyHoursTargetInput = document.getElementById('staffScheduleWeeklyHoursTarget');
+      const scheduleRequiresManagerInput = document.getElementById('staffScheduleRequiresManager');
+      const scheduleMaxWeeklyHoursInput = document.getElementById('staffScheduleMaxWeeklyHours');
+      const nextEmploymentType = window.ffScheduleHelpers?.normalizeEmploymentType
+        ? window.ffScheduleHelpers.normalizeEmploymentType(scheduleEmploymentTypeInput?.value, null)
+        : (scheduleEmploymentTypeInput?.value || null);
+      const nextWeeklyHoursTarget = window.ffScheduleHelpers?.normalizeWeeklyHoursTarget
+        ? window.ffScheduleHelpers.normalizeWeeklyHoursTarget(scheduleWeeklyHoursTargetInput?.value)
+        : (scheduleWeeklyHoursTargetInput?.value || null);
+      const nextDefaultSchedule = window.ffScheduleHelpers?.normalizeDefaultSchedule
+        ? window.ffScheduleHelpers.normalizeDefaultSchedule({
+            ...(document.getElementById('staffScheduleRows')
+              ? getScheduleRowsValue('staffScheduleRows')
+              : getNormalizedStaffDefaultSchedule(oldStaff))
+          })
+        : getNormalizedStaffDefaultSchedule(oldStaff);
+      const nextConstraints = window.ffScheduleHelpers?.normalizeConstraints
+        ? window.ffScheduleHelpers.normalizeConstraints({
+            cannotWorkAlone: oldStaff.constraints?.cannotWorkAlone,
+            requiresManager: scheduleRequiresManagerInput ? scheduleRequiresManagerInput.checked : oldStaff.constraints?.requiresManager,
+            maxWeeklyHours: scheduleMaxWeeklyHoursInput ? scheduleMaxWeeklyHoursInput.value : oldStaff.constraints?.maxWeeklyHours
+          })
+        : (oldStaff.constraints || { cannotWorkAlone: false, requiresManager: false, maxWeeklyHours: null });
       
       // Update staff member
       const updatedStaff = {
         ...oldStaff,
         name: newName,
-        role: newRole, // Keep role field for backward compatibility, but isAdmin/isManager are source of truth
+        role: roleFields.role,
         phone: newPhone ? String(newPhone) : undefined,
         email: newEmail ? String(newEmail) : undefined,
         pin: newPin,
@@ -22120,8 +22580,13 @@ function initializeAppsPanel() {
         fontColor: newFontColor,
         fcolor: newFontColor,
         permissions: currentPermissions, // Preserve permissions
-        isAdmin: newIsAdmin, // Set based on role selection
-        isManager: newIsManager, // Set based on role selection
+        isAdmin: newIsAdmin,
+        isManager: newIsManager,
+        managerType: roleFields.managerType,
+        employmentType: nextEmploymentType,
+        weeklyHoursTarget: nextWeeklyHoursTarget,
+        defaultSchedule: nextDefaultSchedule,
+        constraints: nextConstraints,
         updatedAtMs: Date.now()
       };
       delete updatedStaff.buttonColorIndex;
@@ -22132,6 +22597,9 @@ function initializeAppsPanel() {
       } else {
         // Remove technicianTypes if role changed from technician
         delete updatedStaff.technicianTypes;
+      }
+      if (roleFields.role !== 'manager') {
+        delete updatedStaff.managerType;
       }
       
       staffStore.staff[staffIndex] = updatedStaff;
@@ -22235,19 +22703,8 @@ function initializeAppsPanel() {
       const email = document.getElementById('staffEmail')?.value.trim() || '';
       const phone = document.getElementById('staffPhone')?.value.trim() || '';
       
-      // Map role selection to isAdmin/isManager flags (source of truth)
-      let isAdmin = false;
-      let isManager = false;
-      if (role === 'admin') {
-        isAdmin = true;
-        isManager = false;
-      } else if (role === 'manager') {
-        isAdmin = false;
-        isManager = true;
-      } else if (role === 'technician') {
-        isAdmin = false;
-        isManager = false;
-      }
+      const managerType = getSelectedManagerTypeValue('staffManagerType');
+      const roleFields = buildStaffRoleFields(role, managerType);
       
       // Get technician types if role is technician
       let technicianTypes = [];
@@ -22262,7 +22719,7 @@ function initializeAppsPanel() {
         firstName: firstName || undefined,
         lastName: lastName || undefined,
         pin: String(pin).trim(),
-        role: role, // Keep role field for backward compatibility, but isAdmin/isManager are source of truth
+        role: roleFields.role,
         email: email ? String(email) : undefined,
         phone: phone ? String(phone) : undefined,
         invited: false,
@@ -22272,9 +22729,26 @@ function initializeAppsPanel() {
         isArchived: false,
         permissions: {}, // Initialize empty permissions object
         createdAt: Date.now(),
-        isAdmin: isAdmin, // Set based on role selection
-        isManager: isManager, // Set based on role selection
-        technicianTypes: technicianTypes.length > 0 ? technicianTypes : undefined // Only include if not empty
+        isAdmin: roleFields.isAdmin,
+        isManager: roleFields.isManager,
+        managerType: roleFields.managerType,
+        employmentType: window.ffScheduleHelpers?.normalizeEmploymentType
+          ? window.ffScheduleHelpers.normalizeEmploymentType(null)
+          : null,
+        weeklyHoursTarget: window.ffScheduleHelpers?.normalizeWeeklyHoursTarget
+          ? window.ffScheduleHelpers.normalizeWeeklyHoursTarget(null)
+          : null,
+        technicianTypes: technicianTypes.length > 0 ? technicianTypes : undefined, // Only include if not empty
+        defaultSchedule: window.ffScheduleHelpers?.cloneDefaultSchedule
+          ? window.ffScheduleHelpers.cloneDefaultSchedule()
+          : {},
+        constraints: window.ffScheduleHelpers?.cloneDefaultConstraints
+          ? window.ffScheduleHelpers.cloneDefaultConstraints()
+          : {
+              cannotWorkAlone: false,
+              requiresManager: false,
+              maxWeeklyHours: null
+            }
       };
       
       // Add to staff store and save
@@ -22287,7 +22761,9 @@ function initializeAppsPanel() {
       if (document.getElementById('staffEmail')) document.getElementById('staffEmail').value = '';
       if (document.getElementById('staffPhone')) document.getElementById('staffPhone').value = '';
       if (document.getElementById('staffRole')) document.getElementById('staffRole').value = '';
+      if (document.getElementById('staffManagerType')) document.getElementById('staffManagerType').value = 'manager';
       if (document.getElementById('staffPin')) document.getElementById('staffPin').value = '';
+      toggleStaffRoleSections('');
       
       // Re-render left sidebar list immediately
       renderStaffList();
@@ -22575,9 +23051,10 @@ function initializeAppsPanel() {
     if (roleSelect && !roleSelect.__technicianTypesBound) {
       roleSelect.__technicianTypesBound = true;
       roleSelect.addEventListener('change', function() {
-        toggleTechnicianTypesSection(this.value);
+        toggleStaffRoleSections(this.value);
       });
     }
+    toggleStaffRoleSections(roleSelect?.value || '');
     
     // Initialize button color swatches
     const palette = settings.brandPalette || DEFAULTS.brandPalette;
@@ -23180,6 +23657,10 @@ function initializeAppsPanel() {
       const technicianTypesSection = document.getElementById('staffTechnicianTypesSection');
       if (technicianTypesSection) {
         technicianTypesSection.style.display = 'none';
+      }
+      const managerTypeSection = document.getElementById('staffManagerTypeSection');
+      if (managerTypeSection) {
+        managerTypeSection.style.display = 'none';
       }
       
       // Reset button color selection
@@ -24130,16 +24611,25 @@ function initializeUserProfileMenu() {
   // Load and bind preferences
   const timeFormat12h = document.getElementById('userProfileTimeFormat12h');
   const timeFormat24h = document.getElementById('userProfileTimeFormat24h');
+  const weekStartsOnMonday = document.getElementById('userProfileWeekStartsOnMonday');
+  const weekStartsOnSunday = document.getElementById('userProfileWeekStartsOnSunday');
   const defaultScreenSelect = document.getElementById('userProfileDefaultScreen');
   
   function loadPreferences() {
     const prefs = getProfilePrefs();
+    const salonWeekStartsOn = (window.settings && window.settings.preferences && window.settings.preferences.weekStartsOn === 'sunday')
+      ? 'sunday'
+      : 'monday';
     if (timeFormat12h && timeFormat24h) {
       if (prefs.preferences.timeFormat === '24h') {
         timeFormat24h.checked = true;
       } else {
         timeFormat12h.checked = true;
       }
+    }
+    if (weekStartsOnMonday && weekStartsOnSunday) {
+      weekStartsOnSunday.checked = salonWeekStartsOn === 'sunday';
+      weekStartsOnMonday.checked = salonWeekStartsOn !== 'sunday';
     }
     if (defaultScreenSelect) {
       defaultScreenSelect.value = prefs.preferences.defaultScreen || 'queue';
@@ -24149,11 +24639,30 @@ function initializeUserProfileMenu() {
   
   function savePreferences() {
     const prefs = getProfilePrefs();
+    const nextWeekStartsOn = weekStartsOnSunday && weekStartsOnSunday.checked ? 'sunday' : 'monday';
     prefs.preferences = {
       timeFormat: timeFormat24h && timeFormat24h.checked ? '24h' : '12h',
       defaultScreen: defaultScreenSelect ? defaultScreenSelect.value : 'queue'
     };
     saveProfilePrefs(prefs);
+    try {
+      const currentSettings = JSON.parse(localStorage.getItem('ffv24_settings') || '{}');
+      currentSettings.preferences = {
+        ...(currentSettings.preferences && typeof currentSettings.preferences === 'object' ? currentSettings.preferences : {}),
+        weekStartsOn: nextWeekStartsOn
+      };
+      localStorage.setItem('ffv24_settings', JSON.stringify(currentSettings));
+      settings.preferences = {
+        ...(settings.preferences && typeof settings.preferences === 'object' ? settings.preferences : {}),
+        weekStartsOn: nextWeekStartsOn
+      };
+      window.settings = settings;
+    } catch (_) {}
+    if (typeof window.ffSavePreferencesSettings === 'function') {
+      window.ffSavePreferencesSettings({
+        weekStartsOn: nextWeekStartsOn
+      });
+    }
   }
   
   if (timeFormat12h && !timeFormat12h.__ffBound) {
@@ -24163,6 +24672,14 @@ function initializeUserProfileMenu() {
   if (timeFormat24h && !timeFormat24h.__ffBound) {
     timeFormat24h.__ffBound = true;
     timeFormat24h.addEventListener('change', savePreferences);
+  }
+  if (weekStartsOnMonday && !weekStartsOnMonday.__ffBound) {
+    weekStartsOnMonday.__ffBound = true;
+    weekStartsOnMonday.addEventListener('change', savePreferences);
+  }
+  if (weekStartsOnSunday && !weekStartsOnSunday.__ffBound) {
+    weekStartsOnSunday.__ffBound = true;
+    weekStartsOnSunday.addEventListener('change', savePreferences);
   }
   if (defaultScreenSelect && !defaultScreenSelect.__ffBound) {
     defaultScreenSelect.__ffBound = true;
@@ -32316,6 +32833,7 @@ function hookSettingsGuard_DISABLED(){
             <!-- Right content column -->
             <div style="flex:1;min-width:0;">
               <div id="staffDetailsTabContent"></div>
+              <div id="staffScheduleTabContent" style="display:none;"></div>
               <div id="staffLocationsTabContent" style="display:none;padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
                 <p style="color:#6b7280;font-size:13px;margin:0;">Coming soon.</p>
               </div>
@@ -32369,6 +32887,13 @@ function hookSettingsGuard_DISABLED(){
                 <option value="admin">Admin</option>
                 <option value="manager">Manager</option>
                 <option value="technician">Technician</option>
+              </select>
+            </div>
+            <div id="staffManagerTypeSection" style="display:none;">
+              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Manager Type</label>
+              <select id="staffManagerType" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;cursor:pointer;">
+                <option value="manager">Manager</option>
+                <option value="assistant_manager">Assistant Manager</option>
               </select>
             </div>
             
@@ -32476,6 +33001,11 @@ function hookSettingsGuard_DISABLED(){
   </div> <!-- End main-app-content -->
 
   <script type="module" src="/app.js?v=20260329_training_fix1"></script>
+  <script type="module" src="/schedule-helpers.js?v=20260331_schedule_phase6_staff_profile"></script>
+  <script type="module" src="/schedule-availability.js?v=20260331_schedule_phase6_staff_profile"></script>
+  <script type="module" src="/schedule-generator.js?v=20260331_schedule_phase6_staff_profile"></script>
+  <script type="module" src="/schedule-validator.js?v=20260331_schedule_phase6_staff_profile"></script>
+  <script type="module" src="/schedule-ui.js?v=20260331_schedule_phase6_staff_profile"></script>
   <script type="module" src="/inbox.js?v=20260312_fix2"></script>
   <script type="module" src="/chat.js?v=20260329_training_reminder_fix1"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
@@ -33216,6 +33746,29 @@ function hookSettingsGuard_DISABLED(){
       <button type="button" id="mediaEmptyUploadBtn" class="btn-pill" style="background:#7c3aed;color:#fff;padding:12px 24px;font-size:10px;">+ Upload Work</button>
     </div>
     <div id="mediaListLoading" style="display:none;text-align:center;padding:40px;color:#9ca3af;font-size:10px;">Loading...</div>
+  </div>
+</div>
+
+<!-- Schedule Preview Screen -->
+<div id="scheduleScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f8fafc;z-index:300;flex-direction:column;overflow:hidden;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-wrap:wrap;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <div style="font-size:18px;font-weight:700;color:#111827;">Schedule</div>
+      <div id="scheduleWeekLabel" style="font-size:13px;color:#6b7280;">Current week</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <button type="button" id="schedulePrevWeekBtn" class="btn-pill" style="font-size:13px;padding:8px 14px;">Previous Week</button>
+      <button type="button" id="scheduleTodayBtn" class="btn-pill" style="font-size:13px;padding:8px 14px;">Current Week</button>
+      <button type="button" id="scheduleNextWeekBtn" class="btn-pill" style="font-size:13px;padding:8px 14px;">Next Week</button>
+      <button type="button" id="scheduleRefreshBtn" class="btn-pill" style="background:#7c3aed;color:#fff;border-color:#7c3aed;font-size:13px;padding:8px 14px;">Refresh Preview</button>
+    </div>
+  </div>
+  <div id="scheduleSummaryBar" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#fff;"></div>
+  <div id="schedulePreviewContent" style="flex:1;overflow-y:auto;padding:20px;">
+    <div id="schedulePreviewLoading" style="display:none;max-width:1200px;margin:0 auto 16px;padding:14px 16px;border:1px solid #ddd6fe;background:#f5f3ff;border-radius:12px;color:#6d28d9;font-size:13px;">Loading schedule preview...</div>
+    <div id="schedulePreviewError" style="display:none;max-width:1200px;margin:0 auto 16px;padding:14px 16px;border:1px solid #fecaca;background:#fef2f2;border-radius:12px;color:#b91c1c;font-size:13px;"></div>
+    <div id="schedulePreviewEmpty" style="display:none;max-width:1200px;margin:0 auto;padding:24px;border:1px dashed #d1d5db;border-radius:16px;background:#fff;color:#6b7280;font-size:14px;text-align:center;">No schedule preview available for this week.</div>
+    <div id="scheduleDaysList" style="max-width:1200px;margin:0 auto;display:grid;gap:16px;"></div>
   </div>
 </div>
 
