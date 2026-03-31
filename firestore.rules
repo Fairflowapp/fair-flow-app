@@ -216,6 +216,53 @@ service cloud.firestore {
       allow create, update, delete: if isAdminOrOwner(salonId);
     }
 
+    match /salons/{salonId}/staffNotifications/{notificationId} {
+      function notificationShapeValid(data) {
+        return data.type == 'training_assigned'
+          && data.trainingId is string
+          && data.trainingTitle is string
+          && data.forStaffId is string
+          && data.read is bool
+          && data.required is bool
+          && data.createdAt is timestamp
+          && (data.openedAt == null || data.openedAt is timestamp)
+          && (data.completedAt == null || data.completedAt is timestamp)
+          && (!('updatedAt' in data) || data.updatedAt == null || data.updatedAt is timestamp);
+      }
+
+      allow read: if request.auth != null
+        && (belongsToSalon(salonId) || isStaffInSalon(salonId))
+        && (
+          isManager(salonId)
+          || matchesOwnStaffId(salonId, resource.data.forStaffId)
+        );
+
+      allow create: if request.auth != null
+        && isManager(salonId)
+        && notificationShapeValid(request.resource.data);
+
+      allow update: if request.auth != null
+        && (belongsToSalon(salonId) || isStaffInSalon(salonId))
+        && notificationShapeValid(request.resource.data)
+        && request.resource.data.type == resource.data.type
+        && request.resource.data.trainingId == resource.data.trainingId
+        && request.resource.data.forStaffId == resource.data.forStaffId
+        && (
+          isManager(salonId)
+          || (
+            matchesOwnStaffId(salonId, resource.data.forStaffId)
+            && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+              'read',
+              'openedAt',
+              'completedAt',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if false;
+    }
+
     // Inbox visibility settings (which request types are hidden from staff)
     match /salons/{salonId}/inboxSettings/{docId} {
       allow read: if belongsToSalon(salonId);

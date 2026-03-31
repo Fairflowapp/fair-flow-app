@@ -1879,7 +1879,10 @@ dialog footer button, .code-dialog footer button {
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5 12 3l9 3.5v11L12 21l-9-3.5v-11Z"></path><path d="M12 3v18"></path><path d="M3 6.5 12 10l9-3.5"></path></svg>
                 </div>
                 <div>
-                  <div>Training</div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span>Training</span>
+                    <span id="trainingAppsBadge" style="display:none;min-width:18px;height:18px;padding:0 6px;border-radius:999px;background:#7c3aed;color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;line-height:18px;"></span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2685,6 +2688,13 @@ async function initFirebaseAuth() {
         if (authBanner) authBanner.style.display = 'none';
         if (loginSection) loginSection.style.display = 'none';
         if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
+        if (typeof ensureTrainingNotificationsSubscription === 'function') {
+          setTimeout(() => {
+            ensureTrainingNotificationsSubscription().catch((err) => {
+              console.warn('[Training] Failed to start notifications subscription after auth', err);
+            });
+          }, 0);
+        }
         
         // Initialize Queue screen on sign-in (default view) - ensures gear icon appears on initial load
         // Call goToQueue() to set up Queue UI and check permissions for gear icon visibility
@@ -2707,6 +2717,7 @@ async function initFirebaseAuth() {
         if (authBanner) authBanner.style.display = 'none';
         if (loginSection) loginSection.style.display = 'block';
         if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
+        if (typeof stopTrainingNotificationsSubscription === 'function') stopTrainingNotificationsSubscription();
       }
     });
     
@@ -4231,6 +4242,11 @@ if (typeof document !== 'undefined') {
     }
     if (typeof renderQueue === 'function') renderQueue();
     if (typeof renderService === 'function') renderService();
+    if (typeof ensureTrainingNotificationsSubscription === 'function') {
+      ensureTrainingNotificationsSubscription().catch((err) => {
+        console.warn('[Training] Failed to refresh notifications subscription after staff update', err);
+      });
+    }
   });
 }
 
@@ -6342,13 +6358,98 @@ let trainingVideoProgressMap = {};
 let trainingVideoProgressCache = {};
 let trainingQuizDraftAnswers = {};
 let trainingReminderSendState = {};
+let trainingNotificationsList = [];
+let trainingNotificationsByTrainingId = {};
+let trainingNotificationsUnsub = null;
+let trainingNotificationsSubKey = '';
+let trainingNotificationToastStateById = {};
+let trainingItemsUnsub = null;
+let trainingItemsSubKey = '';
+let trainingItemsLoadedOnce = false;
 
-function getCurrentTrainingStaffId() {
-  return String(
+function getSeenTrainingToastKeys() {
+  try {
+    const raw = sessionStorage.getItem('ff_training_notification_toasts_seen_v1');
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.map((id) => String(id || '')).filter(Boolean) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function getTrainingToastSeenKey(notification) {
+  const id = String(notification?.id || '').trim();
+  const version = getSortTime(notification?.updatedAt || notification?.createdAt);
+  return id ? `${id}:${version}` : '';
+}
+
+function markTrainingToastSeen(notification) {
+  const seenKey = getTrainingToastSeenKey(notification);
+  if (!seenKey) return;
+  const next = Array.from(new Set([...getSeenTrainingToastKeys(), seenKey].filter(Boolean))).slice(-300);
+  try { sessionStorage.setItem('ff_training_notification_toasts_seen_v1', JSON.stringify(next)); } catch (_) {}
+}
+
+async function waitForTrainingSalonId(maxWaitMs = 10000) {
+  const startedAt = Date.now();
+  while ((Date.now() - startedAt) < maxWaitMs) {
+    const salonId = String((typeof window !== 'undefined' ? window.currentSalonId : '') || '').trim();
+    if (salonId) return salonId;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return String((typeof window !== 'undefined' ? window.currentSalonId : '') || '').trim();
+}
+
+function resolveCurrentTrainingStaffRecord() {
+  const directStaffId = String(
     window.__ff_authedStaffId ||
     (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null) ||
     ''
   ).trim();
+  const directName = String(
+    window.__ff_authedStaffName ||
+    (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_name') : null) ||
+    ''
+  ).trim();
+  const authEmail = String(
+    (window.ffCurrentUser && window.ffCurrentUser.email) ||
+    (window.ffAuth && window.ffAuth.currentUser && window.ffAuth.currentUser.email) ||
+    (window.auth && window.auth.currentUser && window.auth.currentUser.email) ||
+    ''
+  ).trim().toLowerCase();
+  if (typeof window.ffGetStaffStore !== 'function') {
+    return directStaffId ? { id: directStaffId, name: directName || '', email: authEmail || '' } : null;
+  }
+  try {
+    const staffStore = window.ffGetStaffStore();
+    const staffList = Array.isArray(staffStore?.staff) ? staffStore.staff : [];
+    let currentStaff = null;
+    if (directStaffId) {
+      currentStaff = staffList.find((staff) => String(staff?.id || staff?.staffId || '').trim() === directStaffId) || null;
+    }
+    if (!currentStaff && authEmail) {
+      currentStaff = staffList.find((staff) => String(staff?.email || '').trim().toLowerCase() === authEmail) || null;
+    }
+    if (!currentStaff && directName) {
+      const normalizedName = directName.toLowerCase();
+      currentStaff = staffList.find((staff) => String(staff?.name || staff?.fullName || '').trim().toLowerCase() === normalizedName) || null;
+    }
+    if (currentStaff?.id && currentStaff.id !== directStaffId) {
+      window.__ff_authedStaffId = currentStaff.id;
+      try { localStorage.setItem('ff_authedStaffId_v1', currentStaff.id); } catch (_) {}
+    }
+    if (currentStaff?.name && !window.__ff_authedStaffName) {
+      window.__ff_authedStaffName = currentStaff.name;
+    }
+    return currentStaff || (directStaffId ? { id: directStaffId, name: directName || '', email: authEmail || '' } : null);
+  } catch (err) {
+    console.warn('[Training] Failed resolving current staff record', err);
+    return directStaffId ? { id: directStaffId, name: directName || '', email: authEmail || '' } : null;
+  }
+}
+
+function getCurrentTrainingStaffId() {
+  return String(resolveCurrentTrainingStaffRecord()?.id || '').trim();
 }
 
 function toLabel(value) {
@@ -6418,37 +6519,55 @@ function getSortTime(value) {
   return Number.isFinite(ts) ? ts : 0;
 }
 
+function mapTrainingItemDoc(docSnap) {
+  const data = docSnap.data() || {};
+  return {
+    id: docSnap.id,
+    salonId: data.salonId || '',
+    title: data.title || '',
+    category: data.category || '',
+    description: data.description || '',
+    visibleToRoles: Array.isArray(data.visibleToRoles) ? data.visibleToRoles : [],
+    technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
+    required: data.required === true,
+    contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
+    quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
+    createdAt: data.createdAt || null,
+    updatedAt: data.updatedAt || null,
+  };
+}
+
+function replaceTrainingItems(rows) {
+  const nextRows = Array.isArray(rows) ? [...rows] : [];
+  nextRows.sort((a, b) => getSortTime(b.updatedAt) - getSortTime(a.updatedAt));
+  trainingItems.splice(0, trainingItems.length, ...nextRows);
+  trainingItemsLoadedOnce = true;
+}
+
+function hasTrainingItem(trainingId) {
+  const key = String(trainingId || '').trim();
+  return !!trainingItems.find((item) => String(item?.id || '').trim() === key);
+}
+
+function shouldDisplayTrainingNotification(notification) {
+  if (!notification) return false;
+  if (!trainingItemsLoadedOnce) return true;
+  return hasTrainingItem(notification.trainingId);
+}
+
 async function fetchTrainingItems() {
   const salonId = getCurrentTrainingSalonId();
   const db = getTrainingDb();
   const { collection, query, where, getDocs } = await getTrainingFirestoreApi();
   const snap = await getDocs(query(collection(db, 'trainingItems'), where('salonId', '==', salonId)));
-  const rows = snap.docs.map((d) => {
-    const data = d.data() || {};
-    return {
-      id: d.id,
-      salonId: data.salonId || '',
-      title: data.title || '',
-      category: data.category || '',
-      description: data.description || '',
-      visibleToRoles: Array.isArray(data.visibleToRoles) ? data.visibleToRoles : [],
-      technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
-      required: data.required === true,
-      contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
-      quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
-      createdAt: data.createdAt || null,
-      updatedAt: data.updatedAt || null,
-    };
-  });
-  rows.sort((a, b) => getSortTime(b.updatedAt) - getSortTime(a.updatedAt));
-  return rows;
+  return snap.docs.map(mapTrainingItemDoc).sort((a, b) => getSortTime(b.updatedAt) - getSortTime(a.updatedAt));
 }
 
 async function createTrainingItem(data) {
   const salonId = getCurrentTrainingSalonId();
   const db = getTrainingDb();
   const { collection, addDoc, serverTimestamp } = await getTrainingFirestoreApi();
-  await addDoc(collection(db, 'trainingItems'), {
+  const docRef = await addDoc(collection(db, 'trainingItems'), {
     salonId,
     title: data.title,
     category: data.category,
@@ -6461,6 +6580,7 @@ async function createTrainingItem(data) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  return docRef.id;
 }
 
 async function updateTrainingItem(id, data) {
@@ -6482,16 +6602,452 @@ async function updateTrainingItem(id, data) {
     quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
     updatedAt: serverTimestamp(),
   });
+  return id;
+}
+
+function getTrainingNotificationDocId(trainingId, staffId) {
+  const safe = (value) => String(value || '').replace(/[\/\\?#\[\]]+/g, '_');
+  return `training_assigned_${safe(trainingId)}_${safe(staffId)}`;
+}
+
+function normalizeTrainingTechnicianTypes(types) {
+  return Array.isArray(types)
+    ? types.map((t) => String(t || '').toLowerCase().trim()).filter(Boolean)
+    : [];
+}
+
+function getTrainingNotificationMessage(notification) {
+  if (!notification) return '';
+  if (notification.required === true && !notification.completedAt && notification.read === true) {
+    return 'Required training pending';
+  }
+  return notification.required === true ? 'New required training assigned' : 'New training available';
+}
+
+function mapTrainingNotificationDoc(docSnap) {
+  const data = docSnap.data() || {};
+  return {
+    id: docSnap.id,
+    type: String(data.type || 'training_assigned'),
+    trainingId: String(data.trainingId || '').trim(),
+    trainingTitle: String(data.trainingTitle || '').trim(),
+    forStaffId: String(data.forStaffId || '').trim(),
+    read: data.read === true,
+    required: data.required === true,
+    createdAt: data.createdAt || null,
+    openedAt: data.openedAt || null,
+    completedAt: data.completedAt || null,
+    updatedAt: data.updatedAt || null,
+  };
+}
+
+function cacheTrainingNotifications(list) {
+  trainingNotificationsList = Array.isArray(list) ? [...list] : [];
+  trainingNotificationsList.sort((a, b) => getSortTime(b.createdAt) - getSortTime(a.createdAt));
+  trainingNotificationsByTrainingId = {};
+  trainingNotificationsList.forEach((notification) => {
+    if (!notification?.trainingId) return;
+    const current = trainingNotificationsByTrainingId[notification.trainingId];
+    if (!current || getSortTime(notification.createdAt) >= getSortTime(current.createdAt)) {
+      trainingNotificationsByTrainingId[notification.trainingId] = notification;
+    }
+  });
+}
+
+function getTrainingNotificationForItem(trainingId) {
+  return trainingNotificationsByTrainingId[String(trainingId || '').trim()] || null;
+}
+
+function updateLocalTrainingNotification(trainingId, updates) {
+  const key = String(trainingId || '').trim();
+  if (!key) return;
+  let changed = false;
+  const next = trainingNotificationsList.map((notification) => {
+    if (String(notification?.trainingId || '').trim() !== key) return notification;
+    changed = true;
+    return { ...notification, ...updates };
+  });
+  if (!changed) return;
+  cacheTrainingNotifications(next);
+  renderTrainingAppsBadge();
+  renderTrainingNotificationSummary();
+  const trainingScreen = document.getElementById('trainingScreen');
+  const libraryView = document.getElementById('trainingLibraryView');
+  if (trainingScreen && trainingScreen.style.display !== 'none' && libraryView && libraryView.style.display !== 'none') {
+    renderTrainingLibrary();
+  }
+}
+
+function renderTrainingAppsBadge() {
+  const badge = document.getElementById('trainingAppsBadge');
+  if (!badge) return;
+  const unreadCount = trainingNotificationsList.filter((notification) => notification.read !== true && shouldDisplayTrainingNotification(notification)).length;
+  if (unreadCount > 0) {
+    badge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+    badge.style.display = 'inline-flex';
+  } else {
+    badge.textContent = '';
+    badge.style.display = 'none';
+  }
+}
+
+function renderTrainingNotificationSummary() {
+  const wrap = document.getElementById('trainingNotificationSummary');
+  if (!wrap) return;
+  wrap.style.display = 'none';
+  wrap.innerHTML = '';
+}
+
+function showTrainingAssignmentToast(notification) {
+  if (!notification || notification.read === true) return;
+  const seenKey = getTrainingToastSeenKey(notification);
+  if (!seenKey) return;
+  const seen = new Set(getSeenTrainingToastKeys());
+  if (seen.has(seenKey)) return;
+  markTrainingToastSeen(notification);
+  const container = document.getElementById('chatToastContainer');
+  const title = String(notification.trainingTitle || 'Training').trim() || 'Training';
+  const senderLine = notification.required === true && !notification.completedAt
+    ? 'Training · Required'
+    : 'Training';
+  const previewText = notification.required === true && !notification.completedAt
+    ? `Please complete training: ${title}`
+    : `New training available: ${title}`;
+  if (!container) {
+    if (typeof showToast === 'function') showToast(previewText, 7000);
+    return;
+  }
+  const toast = document.createElement('div');
+  toast.className = 'chat-toast';
+  toast.setAttribute('data-training-id', String(notification.trainingId || ''));
+  const header = document.createElement('div');
+  header.className = 'chat-toast-header';
+  const sender = document.createElement('div');
+  sender.className = 'chat-toast-sender';
+  sender.textContent = senderLine;
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'chat-toast-close';
+  closeBtn.setAttribute('aria-label', 'Close');
+  closeBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+  header.appendChild(sender);
+  header.appendChild(closeBtn);
+  const preview = document.createElement('div');
+  preview.className = 'chat-toast-preview';
+  preview.textContent = previewText;
+  toast.appendChild(header);
+  toast.appendChild(preview);
+  let timeoutId = null;
+  const dismiss = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    toast.classList.add('chat-toast-dismissing');
+    setTimeout(() => toast.remove(), 220);
+  };
+  const openTraining = async () => {
+    dismiss();
+    if (typeof goToTraining === 'function') await goToTraining();
+    if (typeof openTrainingDetails === 'function') await openTrainingDetails(notification.trainingId);
+  };
+  if (closeBtn) closeBtn.onclick = (e) => { e.stopPropagation(); dismiss(); };
+  toast.onclick = () => openTraining();
+  container.appendChild(toast);
+  timeoutId = setTimeout(dismiss, 9000);
+}
+
+function stopTrainingNotificationsSubscription() {
+  if (typeof trainingNotificationsUnsub === 'function') {
+    try { trainingNotificationsUnsub(); } catch (_) {}
+  }
+  trainingNotificationsUnsub = null;
+  trainingNotificationsSubKey = '';
+  trainingNotificationToastStateById = {};
+}
+
+function stopTrainingItemsSubscription() {
+  if (typeof trainingItemsUnsub === 'function') {
+    try { trainingItemsUnsub(); } catch (_) {}
+  }
+  trainingItemsUnsub = null;
+  trainingItemsSubKey = '';
+}
+
+async function ensureTrainingItemsSubscription() {
+  const salonId = await waitForTrainingSalonId();
+  if (!salonId) {
+    console.warn('[Training] Items subscription skipped: salonId not ready');
+    return;
+  }
+  if (trainingItemsSubKey === salonId && typeof trainingItemsUnsub === 'function') return;
+  stopTrainingItemsSubscription();
+  const db = getTrainingDb();
+  const { collection, query, where, onSnapshot } = await getTrainingFirestoreApi();
+  trainingItemsSubKey = salonId;
+  trainingItemsUnsub = onSnapshot(
+    query(collection(db, 'trainingItems'), where('salonId', '==', salonId)),
+    (snap) => {
+      replaceTrainingItems(snap.docs.map(mapTrainingItemDoc));
+      if (selectedTrainingItemId && !hasTrainingItem(selectedTrainingItemId)) {
+        selectedTrainingItemId = null;
+      }
+      const trainingScreen = document.getElementById('trainingScreen');
+      if (trainingScreen && trainingScreen.style.display !== 'none') {
+        const detailsView = document.getElementById('trainingDetailsView');
+        if (detailsView && detailsView.style.display !== 'none' && selectedTrainingItemId && hasTrainingItem(selectedTrainingItemId)) {
+          const item = trainingItems.find((entry) => entry.id === selectedTrainingItemId);
+          if (item) renderTrainingDetails(item);
+        } else if (typeof renderTrainingLibrary === 'function') {
+          renderTrainingLibrary();
+        }
+      }
+      renderTrainingAppsBadge();
+      renderTrainingNotificationSummary();
+    },
+    (err) => {
+      console.error('[Training] trainingItems snapshot error', err);
+    }
+  );
+}
+
+async function ensureTrainingNotificationsSubscription() {
+  const salonId = await waitForTrainingSalonId();
+  const staffId = getCurrentTrainingStaffId();
+  if (!salonId) {
+    console.warn('[Training] Notifications subscription skipped: salonId not ready');
+    return;
+  }
+  const subKey = `${salonId}__${staffId}`;
+  if (!staffId) {
+    console.warn('[Training] Notifications subscription skipped: staffId not ready');
+    return;
+  }
+  if (trainingNotificationsSubKey === subKey && typeof trainingNotificationsUnsub === 'function') return;
+  stopTrainingNotificationsSubscription();
+  const db = getTrainingDb();
+  const { collection, query, where, onSnapshot } = await getTrainingFirestoreApi();
+  trainingNotificationsSubKey = subKey;
+  trainingNotificationsUnsub = onSnapshot(
+    query(
+      collection(db, 'salons', salonId, 'staffNotifications'),
+      where('forStaffId', '==', staffId)
+    ),
+    (snap) => {
+      const list = snap.docs.map(mapTrainingNotificationDoc);
+      cacheTrainingNotifications(list);
+      renderTrainingAppsBadge();
+      renderTrainingNotificationSummary();
+      snap.docChanges().forEach((change) => {
+        const notification = mapTrainingNotificationDoc(change.doc);
+        const prev = trainingNotificationToastStateById[notification.id] || null;
+        const prevTime = getSortTime(prev?.updatedAt || prev?.createdAt);
+        const nextTime = getSortTime(notification.updatedAt || notification.createdAt);
+        const becameUnread = !!prev && prev.read === true && notification.read !== true;
+        const isNewerVersion = nextTime > prevTime;
+        const shouldToast = notification.read !== true && (
+          change.type === 'added' ||
+          becameUnread ||
+          isNewerVersion
+        );
+        if (shouldToast) showTrainingAssignmentToast(notification);
+        trainingNotificationToastStateById[notification.id] = notification;
+      });
+      list.forEach((notification) => {
+        if (notification?.id) trainingNotificationToastStateById[notification.id] = notification;
+      });
+    },
+    (err) => {
+      console.error('[Training] staffNotifications snapshot error', err);
+    }
+  );
+}
+
+function buildTrainingUserContextFromStaff(staff) {
+  return {
+    currentRole: getStaffRoleForTraining(staff),
+    currentTechnicianTypes: normalizeTrainingTechnicianTypes(staff?.technicianTypes),
+  };
+}
+
+function isStaffEligibleForTrainingNotification(trainingItem, staff) {
+  if (!trainingItem || !staff) return false;
+  if (staff.isArchived === true || staff.archived === true) return false;
+  return isTrainingRelevantToCurrentUser(trainingItem, buildTrainingUserContextFromStaff(staff));
+}
+
+async function fetchTrainingNotificationsForCurrentUser() {
+  const salonId = getCurrentTrainingSalonId();
+  const staffId = getCurrentTrainingStaffId();
+  if (!staffId) return [];
+  const db = getTrainingDb();
+  const { collection, query, where, getDocs } = await getTrainingFirestoreApi();
+  const snap = await getDocs(
+    query(
+      collection(db, 'salons', salonId, 'staffNotifications'),
+      where('forStaffId', '==', staffId)
+    )
+  );
+  return snap.docs.map(mapTrainingNotificationDoc);
+}
+
+async function refreshTrainingNotificationsForCurrentUser() {
+  if (!getCurrentTrainingStaffId()) {
+    cacheTrainingNotifications([]);
+    renderTrainingAppsBadge();
+    renderTrainingNotificationSummary();
+    return [];
+  }
+  try {
+    const notifications = await fetchTrainingNotificationsForCurrentUser();
+    cacheTrainingNotifications(notifications);
+  } catch (err) {
+    console.error('[Training] Failed loading staff notifications', err);
+    cacheTrainingNotifications([]);
+  }
+  renderTrainingAppsBadge();
+  renderTrainingNotificationSummary();
+  return trainingNotificationsList;
+}
+
+async function fetchCompletedTrainingNotificationMap(trainingId) {
+  const salonId = getCurrentTrainingSalonId();
+  const db = getTrainingDb();
+  const { collection, query, where, getDocs } = await getTrainingFirestoreApi();
+  const snap = await getDocs(
+    query(
+      collection(db, 'trainingProgress'),
+      where('salonId', '==', salonId),
+      where('trainingId', '==', trainingId)
+    )
+  );
+  const completedAtByStaffId = {};
+  snap.docs.forEach((entry) => {
+    const data = entry.data() || {};
+    if (data.blockId) return;
+    if (String(data.status || '').toLowerCase() !== 'completed') return;
+    const staffId = String(data.staffId || '').trim();
+    if (!staffId) return;
+    if (!completedAtByStaffId[staffId] || getSortTime(data.completedAt) >= getSortTime(completedAtByStaffId[staffId])) {
+      completedAtByStaffId[staffId] = data.completedAt || null;
+    }
+  });
+  return completedAtByStaffId;
+}
+
+async function sendTrainingAssignmentNotifications(trainingItem) {
+  if (!trainingItem?.id) throw new Error('Training item ID is required for notifications.');
+  const salonId = getCurrentTrainingSalonId();
+  const db = getTrainingDb();
+  const { collection, getDocs, doc, writeBatch, serverTimestamp } = await getTrainingFirestoreApi();
+  const staffSnap = await getDocs(collection(db, 'salons', salonId, 'staff'));
+  const staffRows = staffSnap.docs.map((staffDoc) => ({ id: staffDoc.id, ...(staffDoc.data() || {}) }));
+  const eligibleStaff = staffRows.filter((staff) => isStaffEligibleForTrainingNotification(trainingItem, staff));
+  if (!eligibleStaff.length) return { count: 0 };
+
+  let completedAtByStaffId = {};
+  try {
+    completedAtByStaffId = await fetchCompletedTrainingNotificationMap(trainingItem.id);
+  } catch (err) {
+    console.warn('[Training] Failed loading completion snapshot for notifications', err);
+  }
+
+  for (let i = 0; i < eligibleStaff.length; i += 400) {
+    const batch = writeBatch(db);
+    eligibleStaff.slice(i, i + 400).forEach((staff) => {
+      const notificationRef = doc(db, 'salons', salonId, 'staffNotifications', getTrainingNotificationDocId(trainingItem.id, staff.id));
+      batch.set(notificationRef, {
+        type: 'training_assigned',
+        trainingId: trainingItem.id,
+        trainingTitle: String(trainingItem.title || '').trim(),
+        forStaffId: staff.id,
+        read: false,
+        required: trainingItem.required === true,
+        createdAt: serverTimestamp(),
+        openedAt: null,
+        completedAt: completedAtByStaffId[staff.id] || null,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    });
+    await batch.commit();
+  }
+  return { count: eligibleStaff.length };
+}
+
+async function markTrainingNotificationOpened(trainingId) {
+  const staffId = getCurrentTrainingStaffId();
+  const notification = getTrainingNotificationForItem(trainingId);
+  if (!staffId || !notification || notification.read === true) return;
+  const salonId = getCurrentTrainingSalonId();
+  const db = getTrainingDb();
+  const { doc, updateDoc, serverTimestamp } = await getTrainingFirestoreApi();
+  await updateDoc(
+    doc(db, 'salons', salonId, 'staffNotifications', getTrainingNotificationDocId(trainingId, staffId)),
+    {
+      read: true,
+      openedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }
+  );
+  updateLocalTrainingNotification(trainingId, {
+    read: true,
+    openedAt: new Date(),
+    updatedAt: new Date(),
+  });
+}
+
+async function syncTrainingNotificationCompletion(trainingId, staffId, completedAtValue) {
+  const targetStaffId = String(staffId || '').trim();
+  if (!trainingId || !targetStaffId) return;
+  const salonId = getCurrentTrainingSalonId();
+  const db = getTrainingDb();
+  const { doc, updateDoc, serverTimestamp } = await getTrainingFirestoreApi();
+  try {
+    await updateDoc(
+      doc(db, 'salons', salonId, 'staffNotifications', getTrainingNotificationDocId(trainingId, targetStaffId)),
+      {
+        completedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }
+    );
+  } catch (err) {
+    const msg = String(err?.message || '').toLowerCase();
+    if (!msg.includes('no document') && !msg.includes('not-found')) {
+      console.warn('[Training] Failed syncing notification completion', err);
+    }
+  }
+  if (targetStaffId === getCurrentTrainingStaffId()) {
+    updateLocalTrainingNotification(trainingId, {
+      completedAt: completedAtValue || new Date(),
+      updatedAt: new Date(),
+    });
+  }
 }
 
 async function deleteTrainingItem(id) {
   const salonId = getCurrentTrainingSalonId();
   const db = getTrainingDb();
-  const { doc, getDoc, deleteDoc } = await getTrainingFirestoreApi();
+  const { doc, getDoc, deleteDoc, collection, query, where, getDocs, writeBatch } = await getTrainingFirestoreApi();
   const ref = doc(db, 'trainingItems', id);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error('Training item not found.');
   if (String(snap.data()?.salonId || '') !== salonId) throw new Error('Item does not belong to current salon.');
+  try {
+    const notifSnap = await getDocs(
+      query(
+        collection(db, 'salons', salonId, 'staffNotifications'),
+        where('trainingId', '==', id)
+      )
+    );
+    if (!notifSnap.empty) {
+      for (let i = 0; i < notifSnap.docs.length; i += 400) {
+        const batch = writeBatch(db);
+        notifSnap.docs.slice(i, i + 400).forEach((notifDoc) => {
+          batch.delete(doc(db, 'salons', salonId, 'staffNotifications', notifDoc.id));
+        });
+        await batch.commit();
+      }
+    }
+  } catch (err) {
+    console.warn('[Training] Failed deleting linked staff notifications', err);
+  }
   await deleteDoc(ref);
 }
 
@@ -6615,6 +7171,7 @@ async function markTrainingCompleted(trainingId) {
     await addDoc(collection(db, 'trainingProgress'), payload);
   }
   trainingProgressMap[trainingId] = { status: 'completed', completedAt: now };
+  await syncTrainingNotificationCompletion(trainingId, staffId, now);
 }
 
 async function markTrainingCompletedForStaff(trainingId, targetStaffId) {
@@ -6636,6 +7193,7 @@ async function markTrainingCompletedForStaff(trainingId, targetStaffId) {
     markedByUid: (typeof window.__ffGetUid === 'function' ? window.__ffGetUid() : null) || null,
   };
   await setDoc(doc(db, 'trainingProgress', getTrainingCompletionProgressDocId(trainingId, staffId)), payload, { merge: true });
+  await syncTrainingNotificationCompletion(trainingId, staffId, new Date());
 }
 
 function showTrainingAdminConfirm({ title, message, confirmLabel }) {
@@ -6832,6 +7390,7 @@ async function submitTrainingQuiz(trainingId) {
     quizResponses: result.responses,
   }, { merge: true });
   trainingProgressMap = await fetchTrainingProgressForUser();
+  if (passed) await syncTrainingNotificationCompletion(trainingId, staffId, new Date());
 }
 
 async function handleSubmitTrainingQuiz(trainingId) {
@@ -7170,12 +7729,13 @@ async function loadTrainingItems() {
   renderTrainingLibrary();
   try {
     const rows = await fetchTrainingItems();
-    trainingItems.splice(0, trainingItems.length, ...rows);
+    replaceTrainingItems(rows);
   } catch (err) {
     console.error('[Training] Failed loading items', err);
     trainingError = err?.message || 'Failed to load training items.';
   } finally {
     trainingLoading = false;
+    trainingItemsLoadedOnce = true;
   }
 }
 
@@ -7714,10 +8274,18 @@ function getCurrentTrainingUserContext() {
     ''
   ).toLowerCase().trim();
   if (currentRole === 'tech' || currentRole === 'staff') currentRole = 'technician';
+  const currentStaff = resolveCurrentTrainingStaffRecord();
+  if ((!currentRole || currentRole === 'technician') && currentStaff) {
+    if (currentStaff.isAdmin === true) currentRole = 'admin';
+    else if (currentStaff.isManager === true || String(currentStaff.role || '').toLowerCase().trim() === 'manager') currentRole = 'manager';
+    else currentRole = 'technician';
+  }
   if (!currentRole && getCurrentTrainingStaffId()) currentRole = 'technician';
 
   let currentTechnicianTypes = [];
-  if (Array.isArray(window.__ff_authedTechnicianTypes)) {
+  if (Array.isArray(currentStaff?.technicianTypes) && currentStaff.technicianTypes.length) {
+    currentTechnicianTypes = currentStaff.technicianTypes.map((t) => String(t || '').toLowerCase().trim()).filter(Boolean);
+  } else if (Array.isArray(window.__ff_authedTechnicianTypes)) {
     currentTechnicianTypes = window.__ff_authedTechnicianTypes.map((t) => String(t || '').toLowerCase().trim()).filter(Boolean);
   } else {
     try {
@@ -7772,11 +8340,13 @@ function resetTrainingForm() {
   const titleInput = document.getElementById('trainingTitleInput');
   const categorySelect = document.getElementById('trainingCategoryInput');
   const requiredInput = document.getElementById('trainingRequiredInput');
+  const sendNotificationInput = document.getElementById('trainingSendNotificationInput');
   const descriptionInput = document.getElementById('trainingDescriptionInput');
   const validation = document.getElementById('trainingValidationMsg');
   if (titleInput) titleInput.value = '';
   if (categorySelect) categorySelect.value = '';
   if (requiredInput) requiredInput.checked = false;
+  if (sendNotificationInput) sendNotificationInput.checked = false;
   if (descriptionInput) descriptionInput.value = '';
   document.querySelectorAll('input[name="trainingVisibleRole"]').forEach((cb) => { cb.checked = false; });
   document.querySelectorAll('input[name="trainingTechnicianType"]').forEach((cb) => { cb.checked = false; cb.disabled = false; });
@@ -7854,6 +8424,7 @@ function collectTrainingFormData() {
   const titleInput = document.getElementById('trainingTitleInput');
   const categorySelect = document.getElementById('trainingCategoryInput');
   const requiredInput = document.getElementById('trainingRequiredInput');
+  const sendNotificationInput = document.getElementById('trainingSendNotificationInput');
   const descriptionInput = document.getElementById('trainingDescriptionInput');
   return {
     title: titleInput?.value?.trim() || '',
@@ -7861,6 +8432,7 @@ function collectTrainingFormData() {
     visibleToRoles: Array.from(document.querySelectorAll('input[name="trainingVisibleRole"]:checked')).map((el) => el.value),
     technicianTypes: Array.from(document.querySelectorAll('input[name="trainingTechnicianType"]:checked')).map((el) => el.value),
     required: !!requiredInput?.checked,
+    sendNotificationNow: !!sendNotificationInput?.checked,
     description: descriptionInput?.value?.trim() || '',
     contentBlocks: normalizeTrainingBlocks(trainingDraftBlocks),
     quizQuestions: normalizeTrainingQuizQuestions(trainingDraftQuizQuestions),
@@ -7903,11 +8475,14 @@ async function saveTrainingItemLocal() {
     return;
   }
 
+  let savedTrainingId = '';
+  let notificationResult = null;
+  let notificationError = null;
   try {
     if (editingTrainingItemId) {
-      await updateTrainingItem(editingTrainingItemId, data);
+      savedTrainingId = await updateTrainingItem(editingTrainingItemId, data);
     } else {
-      await createTrainingItem(data);
+      savedTrainingId = await createTrainingItem(data);
     }
   } catch (err) {
     console.error('[Training] Save failed', err);
@@ -7918,11 +8493,41 @@ async function saveTrainingItemLocal() {
     return;
   }
 
+  if (data.sendNotificationNow) {
+    try {
+      notificationResult = await sendTrainingAssignmentNotifications({
+        ...data,
+        id: savedTrainingId,
+      });
+    } catch (err) {
+      notificationError = err;
+      console.error('[Training] Notification send failed', err);
+    }
+  }
+
   closeCreateTrainingModal();
   editingTrainingItemId = null;
   selectedTrainingItemId = null;
   await loadTrainingItems();
   renderTrainingLibrary();
+  if (data.sendNotificationNow) {
+    if (notificationError) {
+      await showTrainingAdminNotice({
+        title: 'Training Saved',
+        message: `Training was saved, but notifications could not be created: ${notificationError?.message || 'Unknown error.'}`,
+        buttonLabel: 'OK',
+      });
+    } else {
+      const count = Number(notificationResult?.count || 0);
+      await showTrainingAdminNotice({
+        title: 'Notifications Ready',
+        message: count > 0
+          ? `Training saved and notifications were created for ${count} assigned staff members.`
+          : 'Training saved. No assigned staff matched the selected roles and technician types.',
+        buttonLabel: 'OK',
+      });
+    }
+  }
 }
 
 async function deleteTrainingItemLocal(itemId) {
@@ -7950,6 +8555,8 @@ function renderTrainingLibrary() {
   const loadingEl = document.getElementById('trainingLoadingState');
   const errorEl = document.getElementById('trainingErrorState');
   if (!listEl || !emptyEl || !noMatchEl || !noRelevantEl || !listView || !detailsView || !loadingEl || !errorEl) return;
+  renderTrainingAppsBadge();
+  renderTrainingNotificationSummary();
 
   listView.style.display = 'block';
   detailsView.style.display = 'none';
@@ -8038,6 +8645,9 @@ function renderTrainingLibrary() {
   itemsToRender.forEach((item) => {
     const isCompleted = trainingProgressMap[item.id]?.status === 'completed';
     const isRequired = item.required === true;
+    const notification = getTrainingNotificationForItem(item.id);
+    const showNewBadge = !!notification && !notification.openedAt;
+    const showRequiredPendingBadge = isRequired && !isCompleted;
     const card = document.createElement('div');
     card.style.cssText = 'background:#fff;border:1px solid #eee;box-shadow:0 1px 2px rgba(0,0,0,0.04);border-radius:8px;padding:10px 12px;display:grid;gap:4px;cursor:pointer;';
 
@@ -8047,15 +8657,25 @@ function renderTrainingLibrary() {
 
     const meta = document.createElement('div');
     meta.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;';
-    const requiredBadge = isRequired
-      ? '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#fef3c7;border:1px solid #f59e0b;color:#b45309;font-weight:600;">Required</span>'
+    const newBadge = showNewBadge
+      ? '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#ede9fe;border:1px solid #c4b5fd;color:#6d28d9;font-weight:700;">NEW</span>'
+      : '';
+    const requiredBadge = showRequiredPendingBadge
+      ? '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#fee2e2;border:1px solid #fecaca;color:#b91c1c;font-weight:700;">REQUIRED</span>'
+      : (canManageTraining() && isRequired
+        ? '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#fef3c7;border:1px solid #f59e0b;color:#b45309;font-weight:600;">Required</span>'
+        : '');
+    const assignedBadge = notification
+      ? `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#f5f3ff;border:1px solid #ddd6fe;color:#6d28d9;font-weight:600;">${getTrainingNotificationMessage(notification)}</span>`
       : '';
     const completedBadge = isCompleted
       ? '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#d1fae5;border:1px solid #10b981;color:#059669;font-weight:600;">Completed ✓</span>'
       : '';
     meta.innerHTML = `
       <span style="font-size:10px;padding:2px 5px;border-radius:4px;border:1px solid #d1d5db;color:#6b7280;">${toLabel(item.category)}</span>
+      ${newBadge}
       ${requiredBadge}
+      ${assignedBadge}
       ${completedBadge}
     `;
 
@@ -8347,7 +8967,7 @@ function renderTrainingDetails(item) {
   bindTrainingVideoTracking(item.id);
 }
 
-function openTrainingDetails(itemId) {
+async function openTrainingDetails(itemId) {
   const listView = document.getElementById('trainingLibraryView');
   const detailsView = document.getElementById('trainingDetailsView');
   if (!listView || !detailsView) return;
@@ -8357,6 +8977,11 @@ function openTrainingDetails(itemId) {
   listView.style.display = 'none';
   detailsView.style.display = 'block';
   renderTrainingDetails(item);
+  try {
+    await markTrainingNotificationOpened(itemId);
+  } catch (err) {
+    console.warn('[Training] Failed opening notification state', err);
+  }
 }
 
 function backToTrainingLibrary() {
@@ -8673,6 +9298,7 @@ async function goToTraining() {
   bindTrainingSearchAndFilters();
   try { await ensureTechnicianTypesForTraining(); } catch (_) {}
   await loadTrainingItems();
+  await ensureTrainingItemsSubscription();
   try {
     trainingProgressMap = await fetchTrainingProgressForUser();
   } catch (_) {
@@ -8683,6 +9309,8 @@ async function goToTraining() {
   } catch (_) {
     trainingVideoProgressMap = {};
   }
+  await refreshTrainingNotificationsForCurrentUser();
+  await ensureTrainingNotificationsSubscription();
   if (canViewTrainingReports()) {
     try {
       trainingAllProgressList = await fetchAllTrainingProgressForSalon();
@@ -8707,6 +9335,9 @@ window.saveTrainingItemLocal = saveTrainingItemLocal;
 window.deleteTrainingItemLocal = deleteTrainingItemLocal;
 window.openTrainingDetails = openTrainingDetails;
 window.backToTrainingLibrary = backToTrainingLibrary;
+window.refreshTrainingNotificationsForCurrentUser = refreshTrainingNotificationsForCurrentUser;
+window.ensureTrainingNotificationsSubscription = ensureTrainingNotificationsSubscription;
+window.ensureTrainingItemsSubscription = ensureTrainingItemsSubscription;
 window.addTrainingBlock = addTrainingBlock;
 window.addTrainingQuizQuestion = addTrainingQuizQuestion;
 
@@ -19655,6 +20286,11 @@ function initializeAppsPanel() {
     appsOverlayBackdrop.style.display = 'block';
     appsPanel.style.display = 'flex';
     lockBodyScroll();
+    if (typeof window.refreshTrainingNotificationsForCurrentUser === 'function') {
+      window.refreshTrainingNotificationsForCurrentUser().catch((err) => {
+        console.warn('[Training] Failed refreshing badge from apps panel', err);
+      });
+    }
   }
   
   // Close panel
@@ -27657,6 +28293,12 @@ window.__ffTasksCloudInit = function() {
             }
           });
         });
+        try {
+          if (typeof cleanupOrphanTasks === 'function') cleanupOrphanTasks();
+          if (typeof cleanupBlockedTasks === 'function') cleanupBlockedTasks();
+        } catch (cleanupErr) {
+          console.warn('[TasksCloud] cleanup after applyState failed', cleanupErr);
+        }
         console.log('[TasksCloud] Applied remote state');
       } catch(e) { console.warn('[TasksCloud] applyState error', e); }
     },
@@ -32453,6 +33095,8 @@ function hookSettingsGuard_DISABLED(){
           </select>
         </div>
 
+        <div id="trainingNotificationSummary" style="display:none;gap:8px;margin-bottom:10px;"></div>
+
         <div id="trainingLoadingState" style="display:none;text-align:center;padding:20px 12px;color:#9ca3af;font-size:12px;">
           Loading training items...
         </div>
@@ -32554,7 +33198,14 @@ function hookSettingsGuard_DISABLED(){
       <div>
         <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;">
           <input id="trainingRequiredInput" type="checkbox">
-          Required
+          Required training
+        </label>
+      </div>
+
+      <div>
+        <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;">
+          <input id="trainingSendNotificationInput" type="checkbox">
+          Send notification now to assigned staff
         </label>
       </div>
 
