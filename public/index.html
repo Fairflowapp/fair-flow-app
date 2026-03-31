@@ -1277,11 +1277,11 @@ dialog footer button, .code-dialog footer button {
   transform: translateX(-140px);
 }
 
-/* Active staff nav tab - use brand gradient matching Add Staff Member button */
+/* Active staff nav tab - match app purple */
 .staff-nav-item.is-active,
 #staffDetailsNav .staff-nav-item.is-active {
-  background: var(--ff-brand-gradient) !important;
-  background-image: var(--ff-brand-gradient) !important;
+  background: #7c3aed !important;
+  background-image: none !important;
   color: var(--ff-brand-text-on-brand) !important;
   font-weight: 600 !important;
 }
@@ -1294,13 +1294,13 @@ dialog footer button, .code-dialog footer button {
 
 /* Hover state for inactive tabs - subtle brand hint */
 #staffDetailsNav .staff-nav-item:not(.is-active):hover {
-  background: rgba(157, 104, 185, 0.08) !important;
+  background: rgba(124, 58, 237, 0.08) !important;
 }
 
-/* Hover state for active tab - slightly darker gradient */
+/* Hover state for active tab - slightly darker purple */
 #staffDetailsNav .staff-nav-item.is-active:hover {
-  background: linear-gradient(90deg, #8d58a9, #ef8580) !important;
-  background-image: linear-gradient(90deg, #8d58a9, #ef8580) !important;
+  background: #6d28d9 !important;
+  background-image: none !important;
 }
 
 /* Staff modal pointer-events fix - allow header/dropdown clicks to pass through */
@@ -1384,8 +1384,8 @@ dialog footer button, .code-dialog footer button {
 }
 
 .staff-permission-toggle input:checked + .staff-permission-toggle-slider {
-  background: linear-gradient(90deg, #9d68b9, #ff9580);
-  background-image: linear-gradient(90deg, #9d68b9, #ff9580);
+  background: #7c3aed;
+  background-image: none;
 }
 
 .staff-permission-toggle input:checked + .staff-permission-toggle-slider:before {
@@ -1393,7 +1393,7 @@ dialog footer button, .code-dialog footer button {
 }
 
 .staff-permission-toggle input:focus + .staff-permission-toggle-slider {
-  box-shadow: 0 0 0 3px rgba(157, 104, 185, 0.2);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
 }
 
 .staff-permission-card {
@@ -9006,7 +9006,7 @@ function bindTrainingSearchAndFilters() {
   if (viewRequiredBtn) viewRequiredBtn.style.display = (canTabs && canUseRequiredTab) ? 'inline-block' : 'none';
   if (!canUseRequiredTab && trainingViewMode === 'required') trainingViewMode = canManage ? 'all' : 'my';
   const updateTabs = () => {
-    const activeStyle = 'border-bottom:2px solid #111827;color:#111827;';
+    const activeStyle = 'border-bottom:2px solid #7c3aed;color:#111827;';
     const inactiveStyle = 'border-bottom:2px solid transparent;color:#6b7280;';
     if (viewAllBtn) viewAllBtn.style.cssText = `padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;background:transparent;cursor:pointer;${trainingViewMode === 'all' ? activeStyle : inactiveStyle}`;
     if (viewMyBtn) viewMyBtn.style.cssText = `padding:6px 14px;font-size:12px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;background:transparent;cursor:pointer;${trainingViewMode === 'my' ? activeStyle : inactiveStyle}`;
@@ -9056,7 +9056,7 @@ function bindTrainingTopTabs() {
   const reportDetailsView = document.getElementById('trainingReportDetailsView');
   const canReports = canViewTrainingReports();
   const updateTabs = () => {
-    const activeStyle = 'border-bottom:2px solid #111827;color:#111827;background:transparent;';
+    const activeStyle = 'border-bottom:2px solid #7c3aed;color:#111827;background:transparent;';
     const inactiveStyle = 'border-bottom:2px solid transparent;color:#6b7280;background:transparent;';
     if (tabLibrary) tabLibrary.style.cssText = `padding:8px 16px;font-size:13px;font-weight:500;border:none;border-bottom:2px solid;margin-bottom:-1px;cursor:pointer;${trainingReportsMode === 'library' ? activeStyle : inactiveStyle}`;
     if (tabReports) {
@@ -14568,12 +14568,13 @@ function setTasksTab(tabName) {
     // Update tab styles
     tabs.forEach(tab => {
       const isActive = tab.dataset.tab === tabName;
+      tab.classList.toggle('active', isActive);
       if (isActive) {
-        tab.style.color = '#111';
-        tab.style.borderBottomColor = '#7b3fe4';
-        tab.style.fontWeight = '600';
+        tab.style.color = '#7c3aed';
+        tab.style.borderBottomColor = '#7c3aed';
+        tab.style.fontWeight = '500';
       } else {
-        tab.style.color = '#666';
+        tab.style.color = '#374151';
         tab.style.borderBottomColor = 'transparent';
         tab.style.fontWeight = '500';
       }
@@ -14873,12 +14874,13 @@ function setSettingsModalTab(tabName, options) {
     // Update tab styles
     tabs.forEach(tab => {
       const isActive = tab.dataset.tab === tabName;
+      tab.classList.toggle('active', isActive);
       if (isActive) {
-        tab.style.color = '#111';
-        tab.style.borderBottomColor = '#7b3fe4';
-        tab.style.fontWeight = '600';
+        tab.style.color = '#7c3aed';
+        tab.style.borderBottomColor = '#7c3aed';
+        tab.style.fontWeight = '500';
       } else {
-        tab.style.color = '#666';
+        tab.style.color = '#374151';
         tab.style.borderBottomColor = 'transparent';
         tab.style.fontWeight = '500';
       }
@@ -31077,31 +31079,29 @@ function hookSettingsGuard_DISABLED(){
       flex-shrink: 0;
     }
     
-    /* Tasks tabs styling - inactive tabs (darker and more readable) */
+    /* Tasks tabs styling - inactive tabs */
     .tasks-tab {
-      color: #1a1a1a !important;
+      color: #374151 !important;
       font-weight: 500 !important;
       opacity: 1 !important;
     }
     
-    /* Tasks tabs inactive - badge/icon color matches text */
+    /* Tasks tabs badges stay readable on all tabs */
     .tasks-tab .ff-tab-badge {
-      color: #1a1a1a !important;
+      color: #fff !important;
       opacity: 1 !important;
     }
     
-    /* Tasks tabs styling - active tab (brand purple, stronger weight) */
-    .tasks-tab[style*="border-bottom-color: #7b3fe4"],
-    .tasks-tab[style*="borderBottomColor: #7b3fe4"] {
-      color: #7b3fe4 !important;
-      font-weight: 600 !important;
+    /* Tasks tabs styling - active tab */
+    .tasks-tab.active {
+      color: #7c3aed !important;
+      font-weight: 500 !important;
       opacity: 1 !important;
     }
     
-    /* Tasks tabs active - badge/icon color matches active text color */
-    .tasks-tab[style*="border-bottom-color: #7b3fe4"] .ff-tab-badge,
-    .tasks-tab[style*="borderBottomColor: #7b3fe4"] .ff-tab-badge {
-      color: #7b3fe4 !important;
+    /* Tasks tabs active - keep badge numbers white */
+    .tasks-tab.active .ff-tab-badge {
+      color: #fff !important;
       opacity: 1 !important;
     }
     
@@ -31484,6 +31484,17 @@ function hookSettingsGuard_DISABLED(){
       z-index: 20;
       border-bottom: 1px solid rgba(0, 0, 0, 0.08);
       flex-shrink: 0;
+    }
+    
+    #tasksScreen #tasksSettingsModal .tasks-settings-tab {
+      color: #374151 !important;
+      font-weight: 500 !important;
+    }
+    
+    #tasksScreen #tasksSettingsModal .tasks-settings-tab.active {
+      color: #7c3aed !important;
+      border-bottom-color: #7c3aed !important;
+      font-weight: 500 !important;
     }
     
     /* Scrollable body content wrapper - only this scrolls */
@@ -31978,7 +31989,7 @@ function hookSettingsGuard_DISABLED(){
       <div class="staff-sidebar" style="width:220px;flex-shrink:0;background:var(--muted);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;position:relative;z-index:100002;">
         <!-- Add Staff Member Button -->
         <div style="padding:20px 20px 16px 20px;">
-          <button id="addStaffMemberBtn" class="btn-primary" style="width:100%;border:0;background-image:linear-gradient(90deg,var(--brand1),var(--brand2));color:#fff;border-radius:999px;padding:5px 10px;font-weight:800;cursor:pointer;box-shadow:0 4px 10px rgba(0,0,0,.08);font-size:11px;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;line-height:1.2;">
+          <button id="addStaffMemberBtn" class="btn-primary" style="width:100%;border:0;background:#7c3aed;background-image:none;color:#fff;border-radius:999px;padding:5px 10px;font-weight:800;cursor:pointer;box-shadow:0 4px 10px rgba(124,58,237,.2);font-size:11px;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;line-height:1.2;">
             <span style="font-size:13px;line-height:1;flex-shrink:0;">+</span>
             <span style="flex-shrink:0;">Add Staff Member</span>
           </button>
@@ -32337,10 +32348,10 @@ function hookSettingsGuard_DISABLED(){
     }
     #ticketsScreen .tickets-tab {
       padding:10px 16px; border:none; background:none; cursor:pointer;
-      font-size:13px; font-weight:500; color:#9ca3af;
+      font-size:13px; font-weight:500; color:#374151;
       border-bottom:2px solid transparent; margin-bottom:-2px;
     }
-    #ticketsScreen .tickets-tab.active { color:#111; border-bottom-color:#111; font-weight:700; }
+    #ticketsScreen .tickets-tab.active { color:#7c3aed; border-bottom-color:#7c3aed; font-weight:500; font-size:13px; }
     #ticketsScreen .tickets-body {
       flex:1; overflow-y:auto; padding:16px 12px;
       display:flex; flex-direction:column; align-items:center;
@@ -32386,7 +32397,7 @@ function hookSettingsGuard_DISABLED(){
       font-size:10px; font-weight:700; letter-spacing:0.4px;
       text-transform:uppercase; flex-shrink:0; white-space:nowrap;
     }
-    #ticketsScreen .ticket-status-badge.ready    { background:#dbeafe; color:#1e40af; }
+    #ticketsScreen .ticket-status-badge.ready    { background:#ede9fe; color:#7c3aed; }
     #ticketsScreen .ticket-status-badge.closed   { background:#d1fae5; color:#065f46; }
     #ticketsScreen .ticket-status-badge.open     { background:#fef3c7; color:#92400e; }
     #ticketsScreen .ticket-status-badge.void,
@@ -32404,7 +32415,7 @@ function hookSettingsGuard_DISABLED(){
       font-size:10px; font-weight:700; letter-spacing:0.5px;
       text-transform:uppercase; flex-shrink:0; white-space:nowrap;
     }
-    #ticketsScreen .ticket-status-pill.ready    { background:#dbeafe; color:#1e40af; }
+    #ticketsScreen .ticket-status-pill.ready    { background:#ede9fe; color:#7c3aed; }
     #ticketsScreen .ticket-status-pill.closed   { background:#d1fae5; color:#065f46; }
     #ticketsScreen .ticket-status-pill.open     { background:#fef3c7; color:#92400e; }
     #ticketsScreen .ticket-status-pill.void,
@@ -33057,7 +33068,7 @@ function hookSettingsGuard_DISABLED(){
   <div style="flex:1;padding:12px 20px;overflow-y:auto;background:#fafafa;">
     <div style="max-width:900px;margin:0 auto;">
       <div id="trainingTopTabs" style="display:flex;align-items:center;gap:0;margin-bottom:12px;border-bottom:1px solid #e5e7eb;">
-        <button id="trainingTabLibrary" type="button" class="training-top-tab" style="padding:8px 16px;font-size:13px;font-weight:500;border:none;border-bottom:2px solid #111827;background:transparent;color:#111827;cursor:pointer;margin-bottom:-1px;">Library</button>
+        <button id="trainingTabLibrary" type="button" class="training-top-tab" style="padding:8px 16px;font-size:13px;font-weight:500;border:none;border-bottom:2px solid #7c3aed;background:transparent;color:#111827;cursor:pointer;margin-bottom:-1px;">Library</button>
         <button id="trainingTabReports" type="button" class="training-top-tab" style="display:none;padding:8px 16px;font-size:13px;font-weight:500;border:none;border-bottom:2px solid transparent;background:transparent;color:#6b7280;cursor:pointer;margin-bottom:-1px;">Reports</button>
       </div>
 
