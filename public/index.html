@@ -2691,6 +2691,13 @@ async function initFirebaseAuth() {
         if (authBanner) authBanner.style.display = 'none';
         if (loginSection) loginSection.style.display = 'none';
         if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
+        if (typeof ensureTrainingItemsSubscription === 'function') {
+          setTimeout(() => {
+            ensureTrainingItemsSubscription().catch((err) => {
+              console.warn('[Training] Failed to start items subscription after auth', err);
+            });
+          }, 0);
+        }
         if (typeof ensureTrainingNotificationsSubscription === 'function') {
           setTimeout(() => {
             ensureTrainingNotificationsSubscription().catch((err) => {
@@ -4245,6 +4252,11 @@ if (typeof document !== 'undefined') {
     }
     if (typeof renderQueue === 'function') renderQueue();
     if (typeof renderService === 'function') renderService();
+    if (typeof ensureTrainingItemsSubscription === 'function') {
+      ensureTrainingItemsSubscription().catch((err) => {
+        console.warn('[Training] Failed to refresh items subscription after staff update', err);
+      });
+    }
     if (typeof ensureTrainingNotificationsSubscription === 'function') {
       ensureTrainingNotificationsSubscription().catch((err) => {
         console.warn('[Training] Failed to refresh notifications subscription after staff update', err);
@@ -6593,6 +6605,10 @@ function shouldDisplayTrainingNotification(notification) {
   return hasTrainingItem(notification.trainingId);
 }
 
+function isTrainingNotificationNew(notification) {
+  return !!notification && shouldDisplayTrainingNotification(notification) && !notification.openedAt;
+}
+
 async function fetchTrainingItems() {
   const salonId = getCurrentTrainingSalonId();
   const db = getTrainingDb();
@@ -6719,9 +6735,10 @@ function updateLocalTrainingNotification(trainingId, updates) {
 function renderTrainingAppsBadge() {
   const badge = document.getElementById('trainingAppsBadge');
   if (!badge) return;
-  const unreadCount = trainingNotificationsList.filter((notification) => notification.read !== true && shouldDisplayTrainingNotification(notification)).length;
-  if (unreadCount > 0) {
-    badge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+  const uniqueNotifications = Object.values(trainingNotificationsByTrainingId || {});
+  const newCount = uniqueNotifications.filter((notification) => isTrainingNotificationNew(notification)).length;
+  if (newCount > 0) {
+    badge.textContent = newCount > 99 ? '99+' : String(newCount);
     badge.style.display = 'inline-flex';
   } else {
     badge.textContent = '';
@@ -8684,7 +8701,7 @@ function renderTrainingLibrary() {
     const isCompleted = trainingProgressMap[item.id]?.status === 'completed';
     const isRequired = item.required === true;
     const notification = getTrainingNotificationForItem(item.id);
-    const showNewBadge = !!notification && !notification.openedAt;
+    const showNewBadge = isTrainingNotificationNew(notification);
     const showRequiredPendingBadge = isRequired && !isCompleted;
     const card = document.createElement('div');
     card.style.cssText = 'background:#fff;border:1px solid #eee;box-shadow:0 1px 2px rgba(0,0,0,0.04);border-radius:8px;padding:10px 12px;display:grid;gap:4px;cursor:pointer;';
@@ -20321,6 +20338,11 @@ function initializeAppsPanel() {
     appsOverlayBackdrop.style.display = 'block';
     appsPanel.style.display = 'flex';
     lockBodyScroll();
+    if (typeof window.ensureTrainingItemsSubscription === 'function') {
+      window.ensureTrainingItemsSubscription().catch((err) => {
+        console.warn('[Training] Failed refreshing items from apps panel', err);
+      });
+    }
     if (typeof window.refreshTrainingNotificationsForCurrentUser === 'function') {
       window.refreshTrainingNotificationsForCurrentUser().catch((err) => {
         console.warn('[Training] Failed refreshing badge from apps panel', err);
