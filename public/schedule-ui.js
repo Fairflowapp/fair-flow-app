@@ -8,17 +8,14 @@ let schedulePreviewState = {
   draft: null,
   validation: null,
   weekRange: null,
+  staffList: [],
 };
+let schedulePreviewView = "management";
 
 function getWeekStartsOnPreference() {
   const globalValue = (window.settings && window.settings.preferences && window.settings.preferences.weekStartsOn) || "";
   if (String(globalValue).toLowerCase() === "sunday") return "sunday";
-  try {
-    const storedSettings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
-    return String(storedSettings?.preferences?.weekStartsOn || "").toLowerCase() === "sunday" ? "sunday" : "monday";
-  } catch (_) {
-    return "monday";
-  }
+  return "monday";
 }
 
 function getStartOfWeek(date) {
@@ -37,6 +34,19 @@ function addDays(date, days) {
   const next = new Date(date);
   next.setDate(next.getDate() + days);
   return next;
+}
+
+function syncScheduleWeekFilterUi() {
+  const filterSelect = document.getElementById("scheduleWeekFilter");
+  const customDateInput = document.getElementById("scheduleCustomWeekDate");
+  const applyCustomButton = document.getElementById("scheduleApplyCustomWeekBtn");
+  const isCustom = filterSelect?.value === "custom";
+  if (customDateInput) {
+    customDateInput.style.display = isCustom ? "inline-flex" : "none";
+  }
+  if (applyCustomButton) {
+    applyCustomButton.style.display = isCustom ? "inline-flex" : "none";
+  }
 }
 
 function toDateKey(date) {
@@ -82,17 +92,98 @@ function getSeverityBadgeStyle(severity) {
   return "background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;";
 }
 
-function getSummaryCardHtml(label, value, tone) {
-  let style = "border:1px solid #e5e7eb;background:#fff;color:#111827;";
-  if (tone === "high") style = "border:1px solid #fecaca;background:#fff1f2;color:#b91c1c;";
-  if (tone === "medium") style = "border:1px solid #fde68a;background:#fffbeb;color:#b45309;";
-  if (tone === "positive") style = "border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;";
-  return `
-    <div style="padding:14px 16px;border-radius:14px;${style}">
-      <div style="font-size:12px;font-weight:600;opacity:0.8;">${label}</div>
-      <div style="font-size:24px;font-weight:800;margin-top:4px;">${value}</div>
-    </div>
-  `;
+function getScheduleStaffRole(staff) {
+  if (staff?.isAdmin === true) return "admin";
+  const role = String(staff?.role || "").trim().toLowerCase();
+  if (staff?.isManager === true || role === "manager" || role === "assistant_manager") return "manager";
+  if (role === "front_desk") return "front_desk";
+  return "technician";
+}
+
+function isManagementScheduleStaff(staff) {
+  const role = getScheduleStaffRole(staff);
+  return role === "admin" || role === "manager";
+}
+
+function isTechnicianScheduleStaff(staff) {
+  return getScheduleStaffRole(staff) === "technician";
+}
+
+function getFilteredScheduleStaff(staffList) {
+  const filtered = (Array.isArray(staffList) ? staffList : []).filter((staff) => {
+    return schedulePreviewView === "technicians"
+      ? isTechnicianScheduleStaff(staff)
+      : isManagementScheduleStaff(staff);
+  });
+
+  return filtered.sort((left, right) => {
+    const leftRole = getScheduleStaffRole(left);
+    const rightRole = getScheduleStaffRole(right);
+    const leftRank = leftRole === "admin" ? 0 : leftRole === "manager" ? 1 : 2;
+    const rightRank = rightRole === "admin" ? 0 : rightRole === "manager" ? 1 : 2;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return String(left?.name || "").localeCompare(String(right?.name || ""), undefined, { sensitivity: "base" });
+  });
+}
+
+function getScheduleStaffKey(staff) {
+  return String(staff?.id || staff?.staffId || staff?.uid || staff?.userUid || "").trim();
+}
+
+function buildAssignmentLookup(draft) {
+  const lookup = new Map();
+  (Array.isArray(draft?.days) ? draft.days : []).forEach((day) => {
+    (Array.isArray(day.assignments) ? day.assignments : []).forEach((assignment) => {
+      const key = String(assignment.staffId || assignment.uid || "").trim();
+      if (!key) return;
+      lookup.set(`${key}::${day.date}`, assignment);
+    });
+  });
+  return lookup;
+}
+
+function getValidationByDate(validation) {
+  return new Map((Array.isArray(validation?.days) ? validation.days : []).map((day) => [day.date, day]));
+}
+
+function formatBoardDayLabel(dateKey) {
+  const date = new Date(`${dateKey}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return { title: dateKey, subtitle: "" };
+  return {
+    title: date.toLocaleDateString("en-US", { weekday: "short" }),
+    subtitle: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+  };
+}
+
+function getScheduleRoleLabel(staff) {
+  const role = getScheduleStaffRole(staff);
+  if (role === "admin") return "Admin";
+  if (role === "manager") return staff?.managerType === "assistant_manager" ? "Assistant Manager" : "Manager";
+  if (role === "front_desk") return "Front Desk";
+  return "Technician";
+}
+
+function renderScheduleViewTabs() {
+  const managementBtn = document.getElementById("scheduleViewManagementBtn");
+  const techniciansBtn = document.getElementById("scheduleViewTechniciansBtn");
+  const applyState = (button, active, left) => {
+    if (!button) return;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.style.setProperty("display", "inline-flex", "important");
+    button.style.setProperty("align-items", "center", "important");
+    button.style.setProperty("justify-content", "center", "important");
+    button.style.setProperty("margin", "0", "important");
+    button.style.setProperty("background", active ? "#7c3aed" : "#f9fafb", "important");
+    button.style.setProperty("color", active ? "#fff" : "#6b7280", "important");
+    button.style.setProperty("border-color", active ? "#7c3aed" : "#e5e7eb", "important");
+    button.style.setProperty("font-weight", active ? "600" : "500", "important");
+    button.style.setProperty("border-radius", left ? "8px 0 0 8px" : "0 8px 8px 0", "important");
+    button.style.setProperty("box-shadow", active ? "inset 0 0 0 1px #7c3aed" : "none", "important");
+    button.style.setProperty("z-index", active ? "1" : "0", "important");
+  };
+  applyState(managementBtn, schedulePreviewView === "management", true);
+  applyState(techniciansBtn, schedulePreviewView === "technicians", false);
 }
 
 async function loadScheduleStaffList() {
@@ -124,86 +215,97 @@ function renderScheduleSummary(validation, days) {
   if (!summaryBar) return;
   const summary = validation?.summary || { totalWarnings: 0, highSeverityCount: 0, mediumSeverityCount: 0 };
   const daysWithIssues = (Array.isArray(days) ? days : []).filter((day) => Array.isArray(day.warnings) && day.warnings.length > 0).length;
-  summaryBar.innerHTML = [
-    getSummaryCardHtml("Total Warnings", summary.totalWarnings || 0, summary.totalWarnings ? "medium" : "positive"),
-    getSummaryCardHtml("High Severity", summary.highSeverityCount || 0, summary.highSeverityCount ? "high" : "positive"),
-    getSummaryCardHtml("Days With Issues", daysWithIssues, daysWithIssues ? "medium" : "positive"),
-  ].join("");
+  const hasWarnings = (summary.totalWarnings || 0) > 0;
+  summaryBar.innerHTML = hasWarnings
+    ? `<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;font-size:12px;font-weight:600;">${summary.totalWarnings} warnings</span>
+       <span style="font-size:13px;color:#6b7280;">${daysWithIssues} day${daysWithIssues === 1 ? "" : "s"} with issues.</span>`
+    : `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+         <span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;font-size:12px;font-weight:600;">No warnings</span>
+         <span style="font-size:13px;color:#6b7280;">This weekly preview is read-only.</span>
+       </div>`;
 }
 
-function renderScheduleDays(draft, validation) {
-  const daysList = document.getElementById("scheduleDaysList");
+function setSchedulePreviewView(view) {
+  schedulePreviewView = view === "technicians" ? "technicians" : "management";
+  renderScheduleViewTabs();
+  renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
+}
+
+function renderScheduleBoard(draft, validation, staffList) {
+  const board = document.getElementById("scheduleBoard");
   const empty = document.getElementById("schedulePreviewEmpty");
-  if (!daysList || !empty) return;
+  if (!board || !empty) return;
 
   const draftDays = Array.isArray(draft?.days) ? draft.days : [];
-  const validationByDate = new Map((Array.isArray(validation?.days) ? validation.days : []).map((day) => [day.date, day]));
+  const validationByDate = getValidationByDate(validation);
+  const filteredStaff = getFilteredScheduleStaff(staffList);
+  const assignmentLookup = buildAssignmentLookup(draft);
 
-  if (!draftDays.length) {
-    daysList.innerHTML = "";
+  if (!draftDays.length || !filteredStaff.length) {
+    board.innerHTML = "";
     empty.style.display = "block";
+    empty.textContent = draftDays.length
+      ? `No ${schedulePreviewView === "management" ? "management staff" : "technicians"} available for this week.`
+      : "No schedule preview available for this week.";
     return;
   }
 
   empty.style.display = "none";
-  daysList.innerHTML = draftDays.map((day) => {
-    const validationDay = validationByDate.get(day.date) || { warnings: [] };
-    const assignments = Array.isArray(day.assignments) ? day.assignments : [];
-    const warnings = Array.isArray(validationDay.warnings) ? validationDay.warnings : [];
-
-    const assignmentsHtml = assignments.length
-      ? assignments.map((assignment) => {
-          const roleLabel = assignment.role === "manager"
-            ? (assignment.managerType === "assistant_manager" ? "Manager · Assistant Manager" : "Manager")
-            : assignment.role === "front_desk"
-              ? "Front Desk"
-              : assignment.role === "admin"
-                ? "Admin"
-                : "Technician";
-          return `
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;">
-              <div style="min-width:0;">
-                <div style="font-size:14px;font-weight:700;color:#111827;">${assignment.name || "Unknown Staff"}</div>
-                <div style="margin-top:4px;font-size:12px;color:#6b7280;">${roleLabel}</div>
-                ${assignment.overrideApplied ? `<div style="margin-top:6px;display:inline-flex;padding:3px 8px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:600;">Override Applied</div>` : ""}
-              </div>
-              <div style="text-align:right;flex-shrink:0;">
-                <div style="font-size:13px;font-weight:700;color:#111827;">${assignment.startTime || "--:--"} - ${assignment.endTime || "--:--"}</div>
-                <div style="margin-top:4px;font-size:11px;color:#9ca3af;">Read-only draft</div>
-              </div>
-            </div>
-          `;
-        }).join("")
-      : `<div style="padding:16px;border:1px dashed #d1d5db;border-radius:12px;background:#fff;color:#6b7280;font-size:13px;">No staff assigned.</div>`;
-
-    const warningsHtml = warnings.length
-      ? warnings.map((warning) => `
-          <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;${getSeverityBadgeStyle(warning.severity)}">
-            <span style="display:inline-flex;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase;${getSeverityBadgeStyle(warning.severity)}">${warning.severity}</span>
-            <div style="min-width:0;">
-              <div style="font-size:12px;font-weight:700;">${warning.code}</div>
-              <div style="font-size:12px;margin-top:2px;">${warning.message}</div>
-            </div>
-          </div>
-        `).join("")
-      : `<div style="padding:12px;border-radius:10px;background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;font-size:12px;font-weight:600;">No warnings for this day.</div>`;
-
+  const gridTemplate = `220px repeat(${draftDays.length}, minmax(120px, 1fr))`;
+  const headerCells = draftDays.map((day) => {
+    const warningCount = Array.isArray(validationByDate.get(day.date)?.warnings) ? validationByDate.get(day.date).warnings.length : 0;
+    const dayLabel = formatBoardDayLabel(day.date);
     return `
-      <section style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(280px,0.9fr);gap:16px;padding:18px;border:1px solid #e5e7eb;border-radius:18px;background:#fdfdfd;box-shadow:0 1px 3px rgba(15,23,42,0.05);">
-        <div style="display:flex;flex-direction:column;gap:12px;min-width:0;">
-          <div>
-            <div style="font-size:17px;font-weight:800;color:#111827;">${formatLongDate(day.date)}</div>
-            <div style="font-size:12px;color:#9ca3af;margin-top:3px;">${day.date}</div>
-          </div>
-          <div style="display:grid;gap:10px;">${assignmentsHtml}</div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:10px;min-width:0;">
-          <div style="font-size:13px;font-weight:800;color:#111827;">Warnings</div>
-          ${warningsHtml}
-        </div>
-      </section>
+      <div style="padding:12px 10px;border-bottom:1px solid #e5e7eb;background:#f8fafc;min-width:0;">
+        <div style="font-size:13px;font-weight:700;color:#111827;">${dayLabel.title}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:2px;">${dayLabel.subtitle}</div>
+        ${warningCount > 0 ? `<div style="margin-top:6px;font-size:11px;color:#b45309;">${warningCount} issue${warningCount === 1 ? "" : "s"}</div>` : ""}
+      </div>
     `;
   }).join("");
+
+  const rowHtml = filteredStaff.map((staff) => {
+    const staffKey = getScheduleStaffKey(staff);
+    const roleLabel = getScheduleRoleLabel(staff);
+    const cells = draftDays.map((day) => {
+      const assignment = assignmentLookup.get(`${staffKey}::${day.date}`) || null;
+      const warnings = Array.isArray(validationByDate.get(day.date)?.warnings) ? validationByDate.get(day.date).warnings : [];
+      const hasWarnings = warnings.length > 0;
+      const cellStyle = assignment
+        ? `background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.35)" : "none"};`
+        : `background:#f3f4f6;border:1px solid #e5e7eb;color:#6b7280;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.28)" : "none"};`;
+      return `
+        <div style="position:relative;padding:10px;border-radius:12px;min-height:68px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:${assignment ? "700" : "500"};line-height:1.35;${cellStyle}">
+          ${hasWarnings ? `<span style="position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%;background:#f59e0b;opacity:0.9;"></span>` : ""}
+          <div>
+            <div>${assignment ? `${assignment.startTime || "--:--"} - ${assignment.endTime || "--:--"}` : "Off"}</div>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    return `
+      <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;">
+        <div style="padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#fff;display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;">
+          <div style="font-size:13px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${staff.name || "Unknown Staff"}</div>
+          <div style="font-size:11px;color:#6b7280;">${roleLabel}</div>
+        </div>
+        ${cells}
+      </div>
+    `;
+  }).join("");
+
+  board.innerHTML = `
+    <section style="border:1px solid #e5e7eb;border-radius:18px;background:#fff;overflow:auto;">
+      <div style="min-width:${220 + (draftDays.length * 120)}px;">
+        <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;">
+          <div style="padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#f8fafc;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;">Staff</div>
+          ${headerCells}
+        </div>
+        ${rowHtml}
+      </div>
+    </section>
+  `;
 }
 
 function setScheduleLoadingState({ loading = false, error = "" } = {}) {
@@ -248,23 +350,58 @@ async function refreshSchedulePreview() {
       dateRange: { startDate: weekRange.startDate, endDate: weekRange.endDate },
     });
 
-    schedulePreviewState = { draft, validation, weekRange };
+    schedulePreviewState = { draft, validation, weekRange, staffList };
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
     }
     renderScheduleSummary(validation, validation.days);
-    renderScheduleDays(draft, validation);
+    renderScheduleViewTabs();
+    renderScheduleBoard(draft, validation, staffList);
     setScheduleLoadingState({ loading: false, error: "" });
   } catch (error) {
     console.error("[ScheduleUI] Failed to refresh schedule preview", error);
-    schedulePreviewState = { draft: null, validation: null, weekRange };
+    schedulePreviewState = { draft: null, validation: null, weekRange, staffList: [] };
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
     }
     renderScheduleSummary({ summary: { totalWarnings: 0, highSeverityCount: 0 } }, []);
-    renderScheduleDays(null, null);
+    renderScheduleViewTabs();
+    renderScheduleBoard(null, null, []);
     setScheduleLoadingState({ loading: false, error: error?.message || "Failed to build schedule preview." });
   }
+}
+
+function applyScheduleWeekFilter() {
+  const filterSelect = document.getElementById("scheduleWeekFilter");
+  const customDateInput = document.getElementById("scheduleCustomWeekDate");
+  const mode = filterSelect?.value || "current";
+
+  if (mode === "previous") {
+    schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), -7);
+    syncScheduleWeekFilterUi();
+    refreshSchedulePreview();
+    return;
+  }
+
+  if (mode === "next") {
+    schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 7);
+    syncScheduleWeekFilterUi();
+    refreshSchedulePreview();
+    return;
+  }
+
+  if (mode === "custom") {
+    syncScheduleWeekFilterUi();
+    const dateValue = customDateInput?.value;
+    if (!dateValue) return;
+    schedulePreviewWeekStart = getStartOfWeek(new Date(`${dateValue}T00:00:00`));
+    refreshSchedulePreview();
+    return;
+  }
+
+  schedulePreviewWeekStart = getStartOfWeek(new Date());
+  syncScheduleWeekFilterUi();
+  refreshSchedulePreview();
 }
 
 function hideScheduleScreen() {
@@ -311,19 +448,14 @@ export async function goToSchedule() {
 
 function bindScheduleUi() {
   document.getElementById("scheduleBtn")?.addEventListener("click", goToSchedule);
-  document.getElementById("scheduleRefreshBtn")?.addEventListener("click", refreshSchedulePreview);
-  document.getElementById("scheduleTodayBtn")?.addEventListener("click", () => {
-    schedulePreviewWeekStart = getStartOfWeek(new Date());
-    refreshSchedulePreview();
+  document.getElementById("scheduleViewManagementBtn")?.addEventListener("click", () => setSchedulePreviewView("management"));
+  document.getElementById("scheduleViewTechniciansBtn")?.addEventListener("click", () => setSchedulePreviewView("technicians"));
+  document.getElementById("scheduleWeekFilter")?.addEventListener("change", () => {
+    syncScheduleWeekFilterUi();
+    const mode = document.getElementById("scheduleWeekFilter")?.value || "current";
+    if (mode !== "custom") applyScheduleWeekFilter();
   });
-  document.getElementById("schedulePrevWeekBtn")?.addEventListener("click", () => {
-    schedulePreviewWeekStart = addDays(schedulePreviewWeekStart, -7);
-    refreshSchedulePreview();
-  });
-  document.getElementById("scheduleNextWeekBtn")?.addEventListener("click", () => {
-    schedulePreviewWeekStart = addDays(schedulePreviewWeekStart, 7);
-    refreshSchedulePreview();
-  });
+  document.getElementById("scheduleApplyCustomWeekBtn")?.addEventListener("click", applyScheduleWeekFilter);
 
   ["queueBtn", "ticketsBtn", "tasksBtn", "chatBtn", "inboxBtn", "mediaBtn", "appsBtn"].forEach((id) => {
     const btn = document.getElementById(id);
@@ -339,6 +471,8 @@ function bindScheduleUi() {
 if (typeof window !== "undefined") {
   window.goToSchedule = goToSchedule;
   window.ffSchedulePreviewState = schedulePreviewState;
+  window.refreshSchedulePreview = refreshSchedulePreview;
+  window.setSchedulePreviewView = setSchedulePreviewView;
 }
 
 if (document.readyState === "loading") {
