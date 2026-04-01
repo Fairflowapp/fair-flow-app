@@ -45,6 +45,39 @@ const DEFAULT_SCHEDULE_RULES = Object.freeze({
   allowAssistantManagerAlone: false,
 });
 
+const DEFAULT_DAY_BUSINESS_HOURS = Object.freeze({
+  isOpen: false,
+  openTime: null,
+  closeTime: null,
+});
+
+const DEFAULT_BUSINESS_HOURS = Object.freeze(
+  DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = {
+      isOpen: ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(dayKey),
+      openTime: ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(dayKey) ? "09:00" : null,
+      closeTime: ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(dayKey) ? "18:00" : null,
+    };
+    return acc;
+  }, {})
+);
+
+const DEFAULT_DAY_COVERAGE_RULES = Object.freeze({
+  minTotalStaff: 0,
+  minManagers: 0,
+  minFrontDesk: 0,
+  minTechnicians: 0,
+});
+
+const DEFAULT_COVERAGE_RULES = Object.freeze(
+  DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = DEFAULT_DAY_COVERAGE_RULES;
+    return acc;
+  }, {})
+);
+
+const DEFAULT_SPECIAL_BUSINESS_DAYS = Object.freeze({});
+
 function cloneDefaultSchedule() {
   return DAY_KEYS.reduce((acc, dayKey) => {
     acc[dayKey] = {
@@ -72,6 +105,33 @@ function cloneDefaultScheduleRules() {
   return { ...DEFAULT_SCHEDULE_RULES };
 }
 
+function cloneDefaultBusinessHours() {
+  return DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = {
+      isOpen: DEFAULT_BUSINESS_HOURS[dayKey].isOpen,
+      openTime: DEFAULT_BUSINESS_HOURS[dayKey].openTime,
+      closeTime: DEFAULT_BUSINESS_HOURS[dayKey].closeTime,
+    };
+    return acc;
+  }, {});
+}
+
+function cloneDefaultCoverageRules() {
+  return DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = {
+      minTotalStaff: DEFAULT_DAY_COVERAGE_RULES.minTotalStaff,
+      minManagers: DEFAULT_DAY_COVERAGE_RULES.minManagers,
+      minFrontDesk: DEFAULT_DAY_COVERAGE_RULES.minFrontDesk,
+      minTechnicians: DEFAULT_DAY_COVERAGE_RULES.minTechnicians,
+    };
+    return acc;
+  }, {});
+}
+
+function cloneDefaultSpecialBusinessDays() {
+  return {};
+}
+
 function normalizeDay(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -88,6 +148,30 @@ function normalizeDayScheduleEntry(value, fallback = DEFAULT_DAY_SCHEDULE) {
 function normalizeTimeString(value, fallback) {
   const candidate = String(value || "").trim();
   return /^\d{2}:\d{2}$/.test(candidate) ? candidate : fallback;
+}
+
+function normalizeBusinessDayEntry(value, fallback = DEFAULT_DAY_BUSINESS_HOURS) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    isOpen: source.isOpen === true,
+    openTime: normalizeTimeString(source.openTime, fallback.openTime),
+    closeTime: normalizeTimeString(source.closeTime, fallback.closeTime),
+  };
+}
+
+function normalizeSpecialBusinessDayEntry(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const isClosed = source.isClosed === true;
+  return {
+    isClosed,
+    openTime: isClosed ? null : normalizeTimeString(source.openTime, null),
+    closeTime: isClosed ? null : normalizeTimeString(source.closeTime, null),
+    note: String(source.note || "").trim(),
+  };
+}
+
+function isValidDateKey(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
 }
 
 function normalizeRoleKey(value) {
@@ -203,6 +287,52 @@ function normalizeScheduleRules(value) {
   };
 }
 
+function normalizeCoverageDayRules(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const minTotalStaff = Number(source.minTotalStaff);
+  const minManagers = Number(source.minManagers);
+  const minFrontDesk = Number(source.minFrontDesk);
+  const minTechnicians = Number(source.minTechnicians);
+  return {
+    minTotalStaff: Number.isFinite(minTotalStaff) ? Math.max(0, Math.round(minTotalStaff)) : DEFAULT_DAY_COVERAGE_RULES.minTotalStaff,
+    minManagers: Number.isFinite(minManagers) ? Math.max(0, Math.round(minManagers)) : DEFAULT_DAY_COVERAGE_RULES.minManagers,
+    minFrontDesk: Number.isFinite(minFrontDesk) ? Math.max(0, Math.round(minFrontDesk)) : DEFAULT_DAY_COVERAGE_RULES.minFrontDesk,
+    minTechnicians: Number.isFinite(minTechnicians) ? Math.max(0, Math.round(minTechnicians)) : DEFAULT_DAY_COVERAGE_RULES.minTechnicians,
+  };
+}
+
+function normalizeBusinessHours(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const normalized = cloneDefaultBusinessHours();
+  DAY_KEYS.forEach((dayKey) => {
+    if (source[dayKey] && typeof source[dayKey] === "object") {
+      normalized[dayKey] = normalizeBusinessDayEntry(source[dayKey], DEFAULT_BUSINESS_HOURS[dayKey]);
+    }
+  });
+  return normalized;
+}
+
+function normalizeCoverageRules(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const normalized = cloneDefaultCoverageRules();
+  DAY_KEYS.forEach((dayKey) => {
+    if (source[dayKey] && typeof source[dayKey] === "object") {
+      normalized[dayKey] = normalizeCoverageDayRules(source[dayKey]);
+    }
+  });
+  return normalized;
+}
+
+function normalizeSpecialBusinessDays(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const normalized = cloneDefaultSpecialBusinessDays();
+  Object.keys(source).forEach((dateKey) => {
+    if (!isValidDateKey(dateKey)) return;
+    normalized[dateKey] = normalizeSpecialBusinessDayEntry(source[dateKey]);
+  });
+  return normalized;
+}
+
 function normalizeStaffSchedulingData(staff) {
   const source = staff && typeof staff === "object" ? staff : {};
   const explicitRole = normalizeRoleKey(source.role);
@@ -289,16 +419,23 @@ function validateStaffConstraints(staff, context = {}) {
 }
 
 const scheduleHelpers = {
+  DAY_KEYS,
   DEFAULT_DEFAULT_SCHEDULE,
   DEFAULT_CONSTRAINTS,
   DEFAULT_MANAGER_TYPE,
   DEFAULT_EMPLOYMENT_TYPE,
   DEFAULT_ROLES_HIERARCHY,
   DEFAULT_SCHEDULE_RULES,
+  DEFAULT_BUSINESS_HOURS,
+  DEFAULT_COVERAGE_RULES,
+  DEFAULT_SPECIAL_BUSINESS_DAYS,
   cloneDefaultSchedule,
   cloneDefaultConstraints,
   cloneDefaultRolesHierarchy,
   cloneDefaultScheduleRules,
+  cloneDefaultBusinessHours,
+  cloneDefaultCoverageRules,
+  cloneDefaultSpecialBusinessDays,
   normalizeEmploymentType,
   normalizeWeeklyHoursTarget,
   normalizeDefaultSchedule,
@@ -306,6 +443,9 @@ const scheduleHelpers = {
   normalizeManagerType,
   normalizeRolesHierarchy,
   normalizeScheduleRules,
+  normalizeBusinessHours,
+  normalizeCoverageRules,
+  normalizeSpecialBusinessDays,
   normalizeStaffSchedulingData,
   getStaffRoleLevel,
   canWorkAlone,
@@ -322,16 +462,23 @@ if (typeof window !== "undefined") {
 }
 
 export {
+  DAY_KEYS,
   DEFAULT_DEFAULT_SCHEDULE,
   DEFAULT_CONSTRAINTS,
   DEFAULT_MANAGER_TYPE,
   DEFAULT_EMPLOYMENT_TYPE,
   DEFAULT_ROLES_HIERARCHY,
   DEFAULT_SCHEDULE_RULES,
+  DEFAULT_BUSINESS_HOURS,
+  DEFAULT_COVERAGE_RULES,
+  DEFAULT_SPECIAL_BUSINESS_DAYS,
   cloneDefaultSchedule,
   cloneDefaultConstraints,
   cloneDefaultRolesHierarchy,
   cloneDefaultScheduleRules,
+  cloneDefaultBusinessHours,
+  cloneDefaultCoverageRules,
+  cloneDefaultSpecialBusinessDays,
   normalizeEmploymentType,
   normalizeWeeklyHoursTarget,
   normalizeDefaultSchedule,
@@ -339,6 +486,9 @@ export {
   normalizeManagerType,
   normalizeRolesHierarchy,
   normalizeScheduleRules,
+  normalizeBusinessHours,
+  normalizeCoverageRules,
+  normalizeSpecialBusinessDays,
   normalizeStaffSchedulingData,
   getStaffRoleLevel,
   canWorkAlone,

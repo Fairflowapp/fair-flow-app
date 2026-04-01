@@ -1986,6 +1986,7 @@ dialog footer button, .code-dialog footer button {
           <button class="user-profile-menu-item" data-section="media-categories" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Media Categories</button>
           <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Notifications</button>
           <button class="user-profile-menu-item" data-section="preferences" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Preferences</button>
+          <button class="user-profile-menu-item" data-section="schedule" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Schedule</button>
           <button class="user-profile-menu-item" data-section="billing" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Billing</button>
         </nav>
       </div>
@@ -2115,6 +2116,34 @@ dialog footer button, .code-dialog footer button {
               <div style="display:flex;justify-content:flex-end;margin-top:14px;">
                 <button id="userProfileSaveStaffCallTemplates" type="button" style="padding:10px 16px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">Save Staff Call Messages</button>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="userProfileCardSchedule" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 8px 0;font-size:18px;font-weight:600;color:#111827;">Schedule</h3>
+          <p style="margin:0 0 20px 0;font-size:14px;color:#6b7280;">Configure salon business hours and daily coverage targets for scheduling.</p>
+          <div style="display:flex;flex-direction:column;gap:18px;">
+            <div style="padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+              <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:10px;">Business Hours</div>
+              <div id="userProfileScheduleBusinessHoursBox" style="display:flex;flex-direction:column;gap:8px;"></div>
+            </div>
+            <div style="padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+              <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:10px;">Coverage Rules</div>
+              <div id="userProfileScheduleCoverageRulesBox" style="display:flex;flex-direction:column;gap:8px;"></div>
+            </div>
+            <div style="padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
+                <div>
+                  <div style="font-size:13px;font-weight:700;color:#111827;">Special Days</div>
+                  <div style="font-size:12px;color:#6b7280;margin-top:4px;">Set full-day closures or custom hours for specific dates.</div>
+                </div>
+                <button id="userProfileAddSpecialBusinessDayBtn" type="button" onclick="window.ffAddSpecialBusinessDayProfile && window.ffAddSpecialBusinessDayProfile()" class="btn-mini" style="font-size:13px;padding:8px 16px;">+ Add Special Day</button>
+              </div>
+              <div id="userProfileSpecialBusinessDaysBox" style="display:flex;flex-direction:column;gap:8px;"></div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;">
+              <button id="userProfileSaveScheduleSettings" type="button" onclick="window.ffSaveScheduleSettingsProfile && window.ffSaveScheduleSettingsProfile()" style="padding:10px 16px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">Save Schedule Settings</button>
             </div>
           </div>
         </div>
@@ -2869,6 +2898,28 @@ const DEFAULTS={
     allowAssistantManagerAlone:false
   },
 
+  businessHours:{
+    monday:{ isOpen:true, openTime:"09:00", closeTime:"18:00" },
+    tuesday:{ isOpen:true, openTime:"09:00", closeTime:"18:00" },
+    wednesday:{ isOpen:true, openTime:"09:00", closeTime:"18:00" },
+    thursday:{ isOpen:true, openTime:"09:00", closeTime:"18:00" },
+    friday:{ isOpen:true, openTime:"09:00", closeTime:"18:00" },
+    saturday:{ isOpen:false, openTime:null, closeTime:null },
+    sunday:{ isOpen:false, openTime:null, closeTime:null }
+  },
+
+  coverageRules:{
+    monday:{ minTotalStaff:0, minManagers:0, minFrontDesk:0, minTechnicians:0 },
+    tuesday:{ minTotalStaff:0, minManagers:0, minFrontDesk:0, minTechnicians:0 },
+    wednesday:{ minTotalStaff:0, minManagers:0, minFrontDesk:0, minTechnicians:0 },
+    thursday:{ minTotalStaff:0, minManagers:0, minFrontDesk:0, minTechnicians:0 },
+    friday:{ minTotalStaff:0, minManagers:0, minFrontDesk:0, minTechnicians:0 },
+    saturday:{ minTotalStaff:0, minManagers:0, minFrontDesk:0, minTechnicians:0 },
+    sunday:{ minTotalStaff:0, minManagers:0, minFrontDesk:0, minTechnicians:0 }
+  },
+
+  specialBusinessDays:{},
+
   preferences:{
     weekStartsOn:"monday"
   },
@@ -2931,6 +2982,18 @@ settings.scheduleRules = {
   ...DEFAULTS.scheduleRules,
   ...((settings.scheduleRules && typeof settings.scheduleRules === 'object') ? settings.scheduleRules : {})
 };
+
+settings.businessHours = window.ffScheduleHelpers?.normalizeBusinessHours
+  ? window.ffScheduleHelpers.normalizeBusinessHours(settings.businessHours)
+  : { ...DEFAULTS.businessHours };
+
+settings.coverageRules = window.ffScheduleHelpers?.normalizeCoverageRules
+  ? window.ffScheduleHelpers.normalizeCoverageRules(settings.coverageRules)
+  : { ...DEFAULTS.coverageRules };
+
+settings.specialBusinessDays = window.ffScheduleHelpers?.normalizeSpecialBusinessDays
+  ? window.ffScheduleHelpers.normalizeSpecialBusinessDays(settings.specialBusinessDays)
+  : {};
 
 settings.preferences = {
   ...DEFAULTS.preferences,
@@ -10473,6 +10536,221 @@ function renderStaffCallMessageSettings() {
   });
 }
 
+const SCHEDULE_SETTINGS_DAY_OPTIONS = [
+  { value: 'monday', label: 'Mon' },
+  { value: 'tuesday', label: 'Tue' },
+  { value: 'wednesday', label: 'Wed' },
+  { value: 'thursday', label: 'Thu' },
+  { value: 'friday', label: 'Fri' },
+  { value: 'saturday', label: 'Sat' },
+  { value: 'sunday', label: 'Sun' }
+];
+
+function renderBusinessHoursRowsInto(containerId, businessHoursValue, attrPrefix) {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  const businessHours = window.ffScheduleHelpers?.normalizeBusinessHours
+    ? window.ffScheduleHelpers.normalizeBusinessHours(businessHoursValue)
+    : (businessHoursValue || {});
+
+  box.innerHTML = SCHEDULE_SETTINGS_DAY_OPTIONS.map((day) => {
+    const entry = businessHours[day.value] || { isOpen: false, openTime: null, closeTime: null };
+    return `
+      <div style="display:grid;grid-template-columns:72px 96px minmax(120px,1fr) minmax(120px,1fr);gap:12px;align-items:center;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;">
+        <div style="font-size:13px;font-weight:600;color:#111827;">${day.label}</div>
+        <label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:#374151;cursor:pointer;">
+          <input type="checkbox" data-${attrPrefix}-business-open="${day.value}" ${entry.isOpen ? 'checked' : ''} style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;">
+          <span>Open</span>
+        </label>
+        <input type="time" data-${attrPrefix}-business-open-time="${day.value}" value="${entry.openTime || ''}" style="width:100%;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;">
+        <input type="time" data-${attrPrefix}-business-close-time="${day.value}" value="${entry.closeTime || ''}" style="width:100%;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;">
+      </div>
+    `;
+  }).join('');
+}
+
+function renderCoverageRulesRowsInto(containerId, coverageRulesValue, attrPrefix) {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  const coverageRules = window.ffScheduleHelpers?.normalizeCoverageRules
+    ? window.ffScheduleHelpers.normalizeCoverageRules(coverageRulesValue)
+    : (coverageRulesValue || {});
+
+  box.innerHTML = SCHEDULE_SETTINGS_DAY_OPTIONS.map((day) => {
+    const entry = coverageRules[day.value] || { minTotalStaff: 0, minManagers: 0, minFrontDesk: 0, minTechnicians: 0 };
+    return `
+      <div style="display:grid;grid-template-columns:72px repeat(3,minmax(92px,1fr));gap:12px;align-items:end;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;">
+        <div style="font-size:13px;font-weight:600;color:#111827;padding-bottom:8px;">${day.label}</div>
+        <label style="display:flex;flex-direction:column;gap:6px;font-size:11px;color:#6b7280;">
+          <span>Managers</span>
+          <input type="number" min="0" step="1" data-${attrPrefix}-coverage-managers="${day.value}" value="${entry.minManagers ?? 0}" style="width:100%;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:6px;font-size:11px;color:#6b7280;">
+          <span>Front Desk</span>
+          <input type="number" min="0" step="1" data-${attrPrefix}-coverage-frontdesk="${day.value}" value="${entry.minFrontDesk ?? 0}" style="width:100%;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:6px;font-size:11px;color:#6b7280;">
+          <span>Technicians</span>
+          <input type="number" min="0" step="1" data-${attrPrefix}-coverage-technicians="${day.value}" value="${entry.minTechnicians ?? 0}" style="width:100%;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;">
+        </label>
+      </div>
+    `;
+  }).join('');
+}
+
+function collectBusinessHoursFromUiPrefix(attrPrefix) {
+  const result = {};
+  SCHEDULE_SETTINGS_DAY_OPTIONS.forEach((day) => {
+    result[day.value] = {
+      isOpen: document.querySelector(`[data-${attrPrefix}-business-open="${day.value}"]`)?.checked === true,
+      openTime: document.querySelector(`[data-${attrPrefix}-business-open-time="${day.value}"]`)?.value || null,
+      closeTime: document.querySelector(`[data-${attrPrefix}-business-close-time="${day.value}"]`)?.value || null
+    };
+  });
+  return window.ffScheduleHelpers?.normalizeBusinessHours
+    ? window.ffScheduleHelpers.normalizeBusinessHours(result)
+    : result;
+}
+
+function collectCoverageRulesFromUiPrefix(attrPrefix) {
+  const result = {};
+  const existingCoverageRules = window.ffScheduleHelpers?.normalizeCoverageRules
+    ? window.ffScheduleHelpers.normalizeCoverageRules(settings.coverageRules)
+    : (settings.coverageRules || {});
+  SCHEDULE_SETTINGS_DAY_OPTIONS.forEach((day) => {
+    result[day.value] = {
+      minTotalStaff: existingCoverageRules[day.value]?.minTotalStaff ?? 0,
+      minManagers: document.querySelector(`[data-${attrPrefix}-coverage-managers="${day.value}"]`)?.value ?? 0,
+      minFrontDesk: document.querySelector(`[data-${attrPrefix}-coverage-frontdesk="${day.value}"]`)?.value ?? 0,
+      minTechnicians: document.querySelector(`[data-${attrPrefix}-coverage-technicians="${day.value}"]`)?.value ?? 0
+    };
+  });
+  return window.ffScheduleHelpers?.normalizeCoverageRules
+    ? window.ffScheduleHelpers.normalizeCoverageRules(result)
+    : result;
+}
+
+function renderSpecialBusinessDaysInto(containerId, specialBusinessDaysValue, attrPrefix) {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  const specialDays = window.ffScheduleHelpers?.normalizeSpecialBusinessDays
+    ? window.ffScheduleHelpers.normalizeSpecialBusinessDays(specialBusinessDaysValue)
+    : (specialBusinessDaysValue || {});
+  const entries = Object.entries(specialDays).sort((left, right) => left[0].localeCompare(right[0]));
+
+  if (!entries.length) {
+    box.innerHTML = `<div style="padding:16px;border:1px dashed #d1d5db;border-radius:10px;background:#fff;color:#6b7280;font-size:13px;text-align:center;">No special days yet.</div>`;
+    return;
+  }
+
+  box.innerHTML = entries.map(([dateKey, entry]) => `
+    <div data-${attrPrefix}-special-day="${dateKey}" style="display:grid;grid-template-columns:minmax(140px,160px) 130px minmax(120px,1fr) minmax(120px,1fr) minmax(140px,1.2fr) auto;gap:12px;align-items:center;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;">
+      <input type="date" data-${attrPrefix}-special-date="${dateKey}" value="${dateKey}" style="width:100%;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;">
+      <label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:#374151;cursor:pointer;">
+        <input type="checkbox" data-${attrPrefix}-special-closed="${dateKey}" ${entry.isClosed ? 'checked' : ''} style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;">
+        <span>Closed all day</span>
+      </label>
+      <input type="time" data-${attrPrefix}-special-open="${dateKey}" value="${entry.openTime || ''}" ${entry.isClosed ? 'disabled' : ''} style="width:100%;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;">
+      <input type="time" data-${attrPrefix}-special-close="${dateKey}" value="${entry.closeTime || ''}" ${entry.isClosed ? 'disabled' : ''} style="width:100%;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;">
+      <input type="text" data-${attrPrefix}-special-note="${dateKey}" value="${escapeHtml(entry.note || '')}" placeholder="Note (optional)" style="width:100%;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;">
+      <button type="button" data-${attrPrefix}-special-remove="${dateKey}" style="padding:8px 12px;border:1px solid #fecaca;border-radius:8px;background:#fff;color:#b91c1c;font-size:12px;font-weight:600;cursor:pointer;">Remove</button>
+    </div>
+  `).join('');
+
+  box.querySelectorAll(`[data-${attrPrefix}-special-closed]`).forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      const dateKey = checkbox.getAttribute(`data-${attrPrefix}-special-closed`);
+      const openInput = box.querySelector(`[data-${attrPrefix}-special-open="${dateKey}"]`);
+      const closeInput = box.querySelector(`[data-${attrPrefix}-special-close="${dateKey}"]`);
+      if (openInput) openInput.disabled = checkbox.checked;
+      if (closeInput) closeInput.disabled = checkbox.checked;
+    });
+  });
+
+  box.querySelectorAll(`[data-${attrPrefix}-special-remove]`).forEach((button) => {
+    button.addEventListener('click', () => {
+      const dateKey = button.getAttribute(`data-${attrPrefix}-special-remove`);
+      const next = window.ffScheduleHelpers?.normalizeSpecialBusinessDays
+        ? window.ffScheduleHelpers.normalizeSpecialBusinessDays(collectSpecialBusinessDaysFromUiPrefix(attrPrefix))
+        : collectSpecialBusinessDaysFromUiPrefix(attrPrefix);
+      delete next[dateKey];
+      renderSpecialBusinessDaysInto(containerId, next, attrPrefix);
+    });
+  });
+}
+
+function collectSpecialBusinessDaysFromUiPrefix(attrPrefix) {
+  const result = {};
+  document.querySelectorAll(`[data-${attrPrefix}-special-day]`).forEach((row) => {
+    const originalDate = row.getAttribute(`data-${attrPrefix}-special-day`);
+    const dateKey = row.querySelector(`[data-${attrPrefix}-special-date="${originalDate}"]`)?.value || originalDate;
+    if (!dateKey) return;
+    const isClosed = row.querySelector(`[data-${attrPrefix}-special-closed="${originalDate}"]`)?.checked === true;
+    result[dateKey] = {
+      isClosed,
+      openTime: isClosed ? null : (row.querySelector(`[data-${attrPrefix}-special-open="${originalDate}"]`)?.value || null),
+      closeTime: isClosed ? null : (row.querySelector(`[data-${attrPrefix}-special-close="${originalDate}"]`)?.value || null),
+      note: row.querySelector(`[data-${attrPrefix}-special-note="${originalDate}"]`)?.value?.trim() || ""
+    };
+  });
+  return window.ffScheduleHelpers?.normalizeSpecialBusinessDays
+    ? window.ffScheduleHelpers.normalizeSpecialBusinessDays(result)
+    : result;
+}
+
+function renderUserProfileScheduleSettings() {
+  renderBusinessHoursRowsInto('userProfileScheduleBusinessHoursBox', settings.businessHours, 'profile');
+  renderCoverageRulesRowsInto('userProfileScheduleCoverageRulesBox', settings.coverageRules, 'profile');
+  renderSpecialBusinessDaysInto('userProfileSpecialBusinessDaysBox', settings.specialBusinessDays, 'profile');
+
+  const saveBtn = document.getElementById('userProfileSaveScheduleSettings');
+  if (saveBtn && !saveBtn.__ffBound) {
+    saveBtn.__ffBound = true;
+    saveBtn.addEventListener('click', () => window.ffSaveScheduleSettingsProfile && window.ffSaveScheduleSettingsProfile());
+  }
+
+  const addBtn = document.getElementById('userProfileAddSpecialBusinessDayBtn');
+  if (addBtn && !addBtn.__ffBound) {
+    addBtn.__ffBound = true;
+    addBtn.addEventListener('click', () => window.ffAddSpecialBusinessDayProfile && window.ffAddSpecialBusinessDayProfile());
+  }
+}
+
+window.ffSaveScheduleSettingsProfile = function() {
+  settings.businessHours = collectBusinessHoursFromUiPrefix('profile');
+  settings.coverageRules = collectCoverageRulesFromUiPrefix('profile');
+  settings.specialBusinessDays = collectSpecialBusinessDaysFromUiPrefix('profile');
+  try {
+    const currentSettings = JSON.parse(localStorage.getItem('ffv24_settings') || '{}');
+    currentSettings.businessHours = settings.businessHours;
+    currentSettings.coverageRules = settings.coverageRules;
+    currentSettings.specialBusinessDays = settings.specialBusinessDays;
+    localStorage.setItem('ffv24_settings', JSON.stringify(currentSettings));
+  } catch (_) {}
+  if (typeof window.ffSaveScheduleSettings === 'function') {
+    window.ffSaveScheduleSettings(settings.rolesHierarchy, settings.scheduleRules, settings.businessHours, settings.coverageRules, settings.specialBusinessDays);
+  }
+  if (typeof window.showToast === 'function') {
+    window.showToast('Schedule settings saved', 'success');
+  }
+};
+
+window.ffAddSpecialBusinessDayProfile = function() {
+  const current = collectSpecialBusinessDaysFromUiPrefix('profile');
+  const today = new Date();
+  const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  let nextKey = dateKey;
+  let suffix = 1;
+  while (current[nextKey]) {
+    const shifted = new Date(today);
+    shifted.setDate(today.getDate() + suffix);
+    nextKey = `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}-${String(shifted.getDate()).padStart(2, '0')}`;
+    suffix += 1;
+  }
+  current[nextKey] = { isClosed: true, openTime: null, closeTime: null, note: "" };
+  renderSpecialBusinessDaysInto('userProfileSpecialBusinessDaysBox', current, 'profile');
+};
+
 function renderUserProfileStaffCallMessageSettings() {
   const section = document.getElementById("userProfileStaffCallTemplatesSection");
   const box = document.getElementById("userProfileStaffCallTemplatesBox");
@@ -11576,7 +11854,6 @@ async function saveSettings(e){
     document.getElementById("staffCallTimeoutCustomValue")?.value,
     document.getElementById("staffCallTimeoutCustomUnit")?.value
   );
-
   save();
   // Sync brand name, palette, managers to Firestore
   if (typeof window.ffSaveAppSettings === 'function') {
@@ -19948,6 +20225,7 @@ async function openSettingsSecureWithNav() {
     console.error('[Navigation] Error in openSettingsSecureWithNav:', e);
   }
 }
+window.openSettingsSecureWithNav = openSettingsSecureWithNav;
 
 async function resetDayWithNav() {
   try {
@@ -20175,11 +20453,11 @@ function initializeNavigationButtons() {
                 
                 // Small delay to ensure dropdown is closed before navigation
                 setTimeout(() => {
-                  // Navigate to User Profile with Staff Setup section
+                  // Open existing settings view at Schedule tab
                   if (typeof goToUserProfile === 'function') {
-                    goToUserProfile('technician-types');
+                    goToUserProfile('schedule');
                   } else if (typeof window.goToUserProfile === 'function') {
-                    window.goToUserProfile('technician-types');
+                    window.goToUserProfile('schedule');
                   } else {
                     console.error('[Settings] goToUserProfile function not found');
                   }
@@ -20549,11 +20827,10 @@ function initializeAppsPanel() {
             }
             break;
           case 'settings':
-            // Open User Profile with Staff Setup section
             if (typeof goToUserProfile === 'function') {
-              goToUserProfile('technician-types');
+              goToUserProfile('schedule');
             } else if (typeof window.goToUserProfile === 'function') {
-              window.goToUserProfile('technician-types');
+              window.goToUserProfile('schedule');
             }
             break;
           default:
@@ -24430,6 +24707,7 @@ function initializeUserProfileMenu() {
       'media-categories': 'userProfileCardMediaCategories',
       'notifications': 'userProfileCardNotifications',
       'preferences': 'userProfileCardPreferences',
+      'schedule': 'userProfileCardSchedule',
       'billing': 'userProfileCardBilling'
     };
     
@@ -24451,6 +24729,9 @@ function initializeUserProfileMenu() {
       if (section === 'media-categories') {
         if (typeof window.renderMediaCategoriesSettings === 'function') window.renderMediaCategoriesSettings();
         if (typeof window.initMediaCategoriesSettingsListeners === 'function') window.initMediaCategoriesSettingsListeners();
+      }
+      if (section === 'schedule' && typeof renderUserProfileScheduleSettings === 'function') {
+        renderUserProfileScheduleSettings();
       }
     }
   }
@@ -33013,7 +33294,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-availability.js?v=20260331_schedule_phase6_staff_profile"></script>
   <script type="module" src="/schedule-generator.js?v=20260331_schedule_phase6_staff_profile"></script>
   <script type="module" src="/schedule-validator.js?v=20260331_schedule_phase6_staff_profile"></script>
-  <script type="module" src="/schedule-ui.js?v=20260331_schedule_phase7_cell_ux_fix"></script>
+  <script type="module" src="/schedule-ui.js?v=20260331_schedule_phase8_drag_drop"></script>
   <script type="module" src="/inbox.js?v=20260312_fix2"></script>
   <script type="module" src="/chat.js?v=20260329_training_reminder_fix1"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>

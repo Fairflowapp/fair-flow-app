@@ -11,6 +11,7 @@ let schedulePreviewState = {
   staffList: [],
 };
 let schedulePreviewView = "management";
+let scheduleDragState = null;
 
 function getWeekStartsOnPreference() {
   const globalValue = (window.settings && window.settings.preferences && window.settings.preferences.weekStartsOn) || "";
@@ -140,6 +141,185 @@ function buildAssignmentLookup(draft) {
     });
   });
   return lookup;
+}
+
+function getAssignmentId(assignment, dateKey) {
+  const rawId = String(assignment?.shiftId || assignment?.id || "").trim();
+  if (rawId) return rawId;
+  const staffId = String(assignment?.staffId || assignment?.uid || "").trim();
+  return `${staffId}::${dateKey}`;
+}
+
+function cloneScheduleDraft(draft) {
+  return {
+    ...draft,
+    days: (Array.isArray(draft?.days) ? draft.days : []).map((day) => ({
+      ...day,
+      assignments: (Array.isArray(day.assignments) ? day.assignments : []).map((assignment) => ({ ...assignment })),
+    })),
+    context: draft?.context ? { ...draft.context } : draft?.context,
+    metadata: draft?.metadata ? { ...draft.metadata } : draft?.metadata,
+  };
+}
+
+function findDraftDay(draft, dateKey) {
+  return (Array.isArray(draft?.days) ? draft.days : []).find((day) => day.date === dateKey) || null;
+}
+
+function getStaffByScheduleKey(staffList, scheduleKey) {
+  return (Array.isArray(staffList) ? staffList : []).find((staff) => getScheduleStaffKey(staff) === scheduleKey) || null;
+}
+
+function remapAssignmentToStaff(assignment, staff) {
+  const mapped = { ...assignment };
+  const targetKey = getScheduleStaffKey(staff);
+  const targetUid = String(staff?.uid || staff?.userUid || "").trim() || null;
+  mapped.staffId = targetKey || null;
+  mapped.uid = targetUid;
+  mapped.name = String(staff?.name || mapped.name || "").trim() || mapped.name || "Unknown Staff";
+  mapped.role = getScheduleStaffRole(staff);
+  mapped.managerType = mapped.role === "manager" ? (staff?.managerType || "manager") : null;
+  return mapped;
+}
+
+function revalidateLocalDraft(nextDraft) {
+  const nextValidation = validateScheduleDraft({
+    draftSchedule: nextDraft,
+    staffList: schedulePreviewState.staffList,
+    rules: nextDraft?.rules || schedulePreviewState.draft?.rules || {},
+    dateRange: schedulePreviewState.weekRange
+      ? { startDate: schedulePreviewState.weekRange.startDate, endDate: schedulePreviewState.weekRange.endDate }
+      : undefined,
+  });
+
+  schedulePreviewState = {
+    ...schedulePreviewState,
+    draft: nextDraft,
+    validation: nextValidation,
+  };
+  if (typeof window !== "undefined") {
+    window.ffSchedulePreviewState = schedulePreviewState;
+  }
+}
+
+function clearDropZoneVisual(zone) {
+  if (!zone) return;
+  zone.style.outline = "";
+  zone.style.outlineOffset = "";
+}
+
+function handleShiftDragStart(event) {
+  const shiftEl = event.currentTarget;
+  if (!shiftEl) return;
+  const payload = {
+    shiftId: String(shiftEl.getAttribute("data-shift-id") || "").trim(),
+    sourceStaffId: String(shiftEl.getAttribute("data-staff-id") || "").trim(),
+    sourceDate: String(shiftEl.getAttribute("data-date") || "").trim(),
+  };
+  scheduleDragState = payload;
+  try {
+    event.dataTransfer.setData("text/plain", JSON.stringify(payload));
+    event.dataTransfer.effectAllowed = "move";
+  } catch (_) {}
+  shiftEl.style.opacity = "0.55";
+  console.log("[Schedule DnD] dragstart", payload);
+}
+
+function handleShiftDragEnd(event) {
+  if (event?.currentTarget) {
+    event.currentTarget.style.opacity = "1";
+  }
+  document.querySelectorAll('[data-drop-zone="true"]').forEach((zone) => clearDropZoneVisual(zone));
+  scheduleDragState = null;
+}
+
+function handleDropZoneDragOver(event) {
+  event.preventDefault();
+  const zone = event.currentTarget;
+  if (!zone) return;
+  try {
+    event.dataTransfer.dropEffect = "move";
+  } catch (_) {}
+  zone.style.outline = "2px dashed rgba(124,58,237,0.45)";
+  zone.style.outlineOffset = "-3px";
+}
+
+function handleDropZoneDragLeave(event) {
+  clearDropZoneVisual(event.currentTarget);
+}
+
+function moveDraftAssignment(payload, targetStaffId, targetDate) {
+  const nextDraft = cloneScheduleDraft(schedulePreviewState.draft);
+  const sourceDay = findDraftDay(nextDraft, payload.sourceDate);
+  const targetDay = findDraftDay(nextDraft, targetDate);
+  const sourceStaff = getStaffByScheduleKey(schedulePreviewState.staffList, payload.sourceStaffId);
+  const targetStaff = getStaffByScheduleKey(schedulePreviewState.staffList, targetStaffId);
+  if (!sourceDay || !targetDay || !sourceStaff || !targetStaff) return null;
+
+  const sourceAssignments = Array.isArray(sourceDay.assignments) ? sourceDay.assignments : [];
+  const targetAssignments = Array.isArray(targetDay.assignments) ? targetDay.assignments : [];
+
+  const sourceIndex = sourceAssignments.findIndex((assignment) => {
+    return getAssignmentId(assignment, payload.sourceDate) === payload.shiftId
+      && String(assignment.staffId || assignment.uid || "").trim() === payload.sourceStaffId;
+  });
+  if (sourceIndex === -1) return null;
+
+  const [sourceAssignment] = sourceAssignments.splice(sourceIndex, 1);
+  const targetIndex = targetAssignments.findIndex((assignment) => {
+    return String(assignment.staffId || assignment.uid || "").trim() === targetStaffId;
+  });
+
+  const movedAssignment = remapAssignmentToStaff(sourceAssignment, targetStaff);
+
+  if (targetIndex >= 0) {
+    const targetAssignment = targetAssignments[targetIndex];
+    targetAssignments[targetIndex] = movedAssignment;
+    sourceAssignments.push(remapAssignmentToStaff(targetAssignment, sourceStaff));
+  } else {
+    targetAssignments.push(movedAssignment);
+  }
+
+  sourceDay.assignments = sourceAssignments;
+  targetDay.assignments = targetAssignments;
+  return nextDraft;
+}
+
+function handleDropZoneDrop(event) {
+  event.preventDefault();
+  const zone = event.currentTarget;
+  clearDropZoneVisual(zone);
+  const targetStaffId = String(zone?.getAttribute("data-staff-id") || "").trim();
+  const targetDate = String(zone?.getAttribute("data-date") || "").trim();
+  const payload = scheduleDragState;
+  if (!payload || !payload.shiftId || !payload.sourceStaffId || !payload.sourceDate || !targetStaffId || !targetDate) return;
+  if (payload.sourceStaffId === targetStaffId && payload.sourceDate === targetDate) return;
+
+  const nextDraft = moveDraftAssignment(payload, targetStaffId, targetDate);
+  console.log("[Schedule DnD] drop", { payload, targetStaffId, targetDate });
+  if (!nextDraft) return;
+
+  revalidateLocalDraft(nextDraft);
+  renderScheduleSummary(schedulePreviewState.validation, schedulePreviewState.validation?.days || []);
+  renderScheduleViewTabs();
+  renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
+}
+
+function bindScheduleBoardDnD() {
+  document.querySelectorAll('[data-schedule-shift="true"]').forEach((el) => {
+    if (el.__ffDnDBound) return;
+    el.__ffDnDBound = true;
+    el.addEventListener("dragstart", handleShiftDragStart);
+    el.addEventListener("dragend", handleShiftDragEnd);
+  });
+
+  document.querySelectorAll('[data-drop-zone="true"]').forEach((zone) => {
+    if (zone.__ffDnDBound) return;
+    zone.__ffDnDBound = true;
+    zone.addEventListener("dragover", handleDropZoneDragOver);
+    zone.addEventListener("dragleave", handleDropZoneDragLeave);
+    zone.addEventListener("drop", handleDropZoneDrop);
+  });
 }
 
 function getValidationByDate(validation) {
@@ -274,10 +454,11 @@ function renderScheduleBoard(draft, validation, staffList) {
       const cellStyle = assignment
         ? `background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.35)" : "none"};`
         : `background:#f3f4f6;border:1px solid #e5e7eb;color:#6b7280;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.28)" : "none"};`;
+      const assignmentId = assignment ? getAssignmentId(assignment, day.date) : "";
       return `
-        <div style="position:relative;padding:10px;border-radius:12px;min-height:68px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:${assignment ? "700" : "500"};line-height:1.35;${cellStyle}">
+        <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:10px;border-radius:12px;min-height:68px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:${assignment ? "700" : "500"};line-height:1.35;transition:outline-color 0.12s ease;${cellStyle}">
           ${hasWarnings ? `<span style="position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%;background:#f59e0b;opacity:0.9;"></span>` : ""}
-          <div>
+          <div ${assignment ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : ""}>
             <div>${assignment ? `${assignment.startTime || "--:--"} - ${assignment.endTime || "--:--"}` : "Off"}</div>
           </div>
         </div>
@@ -306,6 +487,7 @@ function renderScheduleBoard(draft, validation, staffList) {
       </div>
     </section>
   `;
+  bindScheduleBoardDnD();
 }
 
 function setScheduleLoadingState({ loading = false, error = "" } = {}) {

@@ -13,8 +13,14 @@ import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, getDocs, 
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "./app.js?v=20260329_training_fix1";
 import {
+  cloneDefaultBusinessHours,
+  cloneDefaultCoverageRules,
+  cloneDefaultSpecialBusinessDays,
   cloneDefaultRolesHierarchy,
   cloneDefaultScheduleRules,
+  normalizeBusinessHours,
+  normalizeCoverageRules,
+  normalizeSpecialBusinessDays,
   normalizeRolesHierarchy,
   normalizeScheduleRules,
 } from "./schedule-helpers.js?v=20260331_schedule_phase6_staff_profile";
@@ -161,12 +167,33 @@ function subscribeMain(salonId) {
     const nextScheduleRules = data.scheduleRules && typeof data.scheduleRules === 'object'
       ? normalizeScheduleRules(data.scheduleRules)
       : cloneDefaultScheduleRules();
+    const nextBusinessHours = data.businessHours && typeof data.businessHours === 'object'
+      ? normalizeBusinessHours(data.businessHours)
+      : cloneDefaultBusinessHours();
+    const nextCoverageRules = data.coverageRules && typeof data.coverageRules === 'object'
+      ? normalizeCoverageRules(data.coverageRules)
+      : cloneDefaultCoverageRules();
+    const nextSpecialBusinessDays = data.specialBusinessDays && typeof data.specialBusinessDays === 'object'
+      ? normalizeSpecialBusinessDays(data.specialBusinessDays)
+      : cloneDefaultSpecialBusinessDays();
     if (JSON.stringify(window.settings.rolesHierarchy || {}) !== JSON.stringify(nextRolesHierarchy)) {
       window.settings.rolesHierarchy = nextRolesHierarchy;
       changed = true;
     }
     if (JSON.stringify(window.settings.scheduleRules || {}) !== JSON.stringify(nextScheduleRules)) {
       window.settings.scheduleRules = nextScheduleRules;
+      changed = true;
+    }
+    if (JSON.stringify(window.settings.businessHours || {}) !== JSON.stringify(nextBusinessHours)) {
+      window.settings.businessHours = nextBusinessHours;
+      changed = true;
+    }
+    if (JSON.stringify(window.settings.coverageRules || {}) !== JSON.stringify(nextCoverageRules)) {
+      window.settings.coverageRules = nextCoverageRules;
+      changed = true;
+    }
+    if (JSON.stringify(window.settings.specialBusinessDays || {}) !== JSON.stringify(nextSpecialBusinessDays)) {
+      window.settings.specialBusinessDays = nextSpecialBusinessDays;
       changed = true;
     }
     if (changed) {
@@ -187,6 +214,9 @@ function subscribeMain(salonId) {
         if (data.taskSettings?.showIncompleteTasksBadge !== undefined) stored.showIncompleteTasksBadge = data.taskSettings.showIncompleteTasksBadge;
         stored.rolesHierarchy = nextRolesHierarchy;
         stored.scheduleRules = nextScheduleRules;
+        stored.businessHours = nextBusinessHours;
+        stored.coverageRules = nextCoverageRules;
+        stored.specialBusinessDays = nextSpecialBusinessDays;
         localStorage.setItem('ffv24_settings', JSON.stringify(stored));
       } catch (_) {}
       // Re-render brand if available
@@ -237,11 +267,14 @@ function ffSaveTaskSettings(taskReminders, taskNotes, showIncompleteTasksBadge) 
     .catch((e) => console.warn("[SettingsCloud] save task settings failed", e));
 }
 
-function ffSaveScheduleSettings(rolesHierarchy, scheduleRules) {
+function ffSaveScheduleSettings(rolesHierarchy, scheduleRules, businessHours, coverageRules, specialBusinessDays) {
   if (!_salonId) return;
   const payload = { updatedAt: serverTimestamp() };
   if (rolesHierarchy && typeof rolesHierarchy === "object") payload.rolesHierarchy = normalizeRolesHierarchy(rolesHierarchy);
   if (scheduleRules && typeof scheduleRules === "object") payload.scheduleRules = normalizeScheduleRules(scheduleRules);
+  if (businessHours && typeof businessHours === "object") payload.businessHours = normalizeBusinessHours(businessHours);
+  if (coverageRules && typeof coverageRules === "object") payload.coverageRules = normalizeCoverageRules(coverageRules);
+  if (specialBusinessDays && typeof specialBusinessDays === "object") payload.specialBusinessDays = normalizeSpecialBusinessDays(specialBusinessDays);
   if (Object.keys(payload).length === 1) return;
   setDoc(settingsMainRef(_salonId), payload, { merge: true })
     .catch((e) => console.warn("[SettingsCloud] save schedule settings failed", e));
