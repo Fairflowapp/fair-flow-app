@@ -13032,7 +13032,7 @@ if (document.readyState === 'loading') {
           tasksScreen.style.pointerEvents = 'none';
         }
         
-        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
         const auth = window.auth || window.ffAuth;
         if (auth) await signOut(auth);
         if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
@@ -13385,7 +13385,7 @@ function initializeNavigationButtons() {
                     tasksScreen.style.pointerEvents = 'none';
                   }
                   
-                  const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+                  const { signOut } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
                   const auth = window.auth || window.ffAuth;
                   if (auth) await signOut(auth);
                   if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
@@ -16395,7 +16395,7 @@ function initializeUserProfileMenu() {
       
       try {
         // Import sendPasswordResetEmail dynamically
-        const { sendPasswordResetEmail } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        const { sendPasswordResetEmail } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
         
         // Send password reset email
         await sendPasswordResetEmail(window.auth, email);
@@ -16681,7 +16681,7 @@ function installGlobalUserAvatarDropdownDelegates() {
           tasksScreen.style.pointerEvents = 'none';
         }
 
-        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
         const auth = window.auth || window.ffAuth;
         if (auth) await signOut(auth);
         if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
@@ -16733,7 +16733,7 @@ function installGlobalUserAvatarDropdownDelegates() {
           tasksScreen.style.pointerEvents = 'none';
         }
 
-        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js');
+        const { signOut } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
         const auth = window.auth || window.ffAuth;
         if (auth) await signOut(auth);
         if (typeof window.showLoginScreen === 'function') window.showLoginScreen();

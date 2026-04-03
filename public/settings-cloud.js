@@ -4,13 +4,26 @@
  * Firestore docs:
  *   salons/{salonId}/settings/ui   → { historyRange, updatedAt }
  *   salons/{salonId}/settings/main → { adminPin (existing), brandName, brandPalette, managers,
+ *                                      staffCallTemplates,
  *                                      taskSettings: { taskReminders, taskNotes, showIncompleteTasksBadge },
  *                                      updatedAt }
  */
 
-import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, getDocs, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-import { db, auth } from "./app.js";
+import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, getDocs, addDoc, updateDoc, deleteDoc, deleteField } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+import { db, auth } from "./app.js?v=20260329_training_fix1";
+import {
+  cloneDefaultBusinessHours,
+  cloneDefaultCoverageRules,
+  cloneDefaultSpecialBusinessDays,
+  cloneDefaultRolesHierarchy,
+  cloneDefaultScheduleRules,
+  normalizeBusinessHours,
+  normalizeCoverageRules,
+  normalizeSpecialBusinessDays,
+  normalizeRolesHierarchy,
+  normalizeScheduleRules,
+} from "./schedule-helpers.js?v=20260403_reception_split";
 
 let _salonId = null;
 let _unsubUi = null;
@@ -64,11 +77,43 @@ function settingsMainRef(salonId) {
   return doc(db, `salons/${salonId}/settings`, "main");
 }
 
+function normalizeStaffCallTemplates(value) {
+  if (typeof window !== "undefined" && typeof window.ffNormalizeStaffCallTemplates === "function") {
+    return window.ffNormalizeStaffCallTemplates(value);
+  }
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    available: {
+      presetId: String(raw?.available?.presetId || "available_default"),
+      message: String(raw?.available?.message || "Your client is waiting"),
+      detail: String(raw?.available?.detail || "Please return to the queue.")
+    },
+    inService: {
+      presetId: String(raw?.inService?.presetId || "inservice_default"),
+      message: String(raw?.inService?.message || "Reception is calling you"),
+      detail: String(raw?.inService?.detail || "Please come to reception.")
+    }
+  };
+}
+
+function normalizeStaffCallTimeoutSeconds(value) {
+  if (typeof window !== "undefined" && typeof window.ffGetStaffCallTimeoutSeconds === "function" && value === undefined) {
+    return window.ffGetStaffCallTimeoutSeconds();
+  }
+  const numericValue = Math.round(Number(value || 0));
+  if (!Number.isFinite(numericValue)) return 30;
+  return Math.min(3600, Math.max(10, numericValue));
+}
+
+function normalizeWeekStartsOn(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "sunday" ? "sunday" : "monday";
+}
+
 function subscribeMain(salonId) {
   if (_unsubMain) { _unsubMain(); _unsubMain = null; }
   _unsubMain = onSnapshot(settingsMainRef(salonId), (snap) => {
-    if (!snap.exists()) return;
-    const data = snap.data();
+    const data = snap.exists() ? snap.data() : {};
     // Apply to global settings object
     if (typeof window.settings !== 'object' || !window.settings) return;
     let changed = false;
@@ -83,6 +128,22 @@ function subscribeMain(salonId) {
     }
     if (Array.isArray(data.managers)) {
       window.settings.managers = data.managers;
+      changed = true;
+    }
+    if (data.staffCallTemplates && typeof data.staffCallTemplates === 'object') {
+      window.settings.staffCallTemplates = normalizeStaffCallTemplates(data.staffCallTemplates);
+      changed = true;
+    }
+    if (data.staffCallTimeoutSeconds !== undefined) {
+      window.settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(data.staffCallTimeoutSeconds);
+      changed = true;
+    }
+    const nextPreferences = {
+      ...(window.settings.preferences && typeof window.settings.preferences === 'object' ? window.settings.preferences : {}),
+      weekStartsOn: normalizeWeekStartsOn(data.preferences?.weekStartsOn)
+    };
+    if (JSON.stringify(window.settings.preferences || {}) !== JSON.stringify(nextPreferences)) {
+      window.settings.preferences = nextPreferences;
       changed = true;
     }
     // Task settings
@@ -100,6 +161,41 @@ function subscribeMain(salonId) {
         changed = true;
       }
     }
+    const nextRolesHierarchy = data.rolesHierarchy && typeof data.rolesHierarchy === 'object'
+      ? normalizeRolesHierarchy(data.rolesHierarchy)
+      : cloneDefaultRolesHierarchy();
+    const nextScheduleRules = data.scheduleRules && typeof data.scheduleRules === 'object'
+      ? normalizeScheduleRules(data.scheduleRules)
+      : cloneDefaultScheduleRules();
+    const nextBusinessHours = data.businessHours && typeof data.businessHours === 'object'
+      ? normalizeBusinessHours(data.businessHours)
+      : cloneDefaultBusinessHours();
+    const nextCoverageRules = data.coverageRules && typeof data.coverageRules === 'object'
+      ? normalizeCoverageRules(data.coverageRules)
+      : cloneDefaultCoverageRules();
+    const nextSpecialBusinessDays = data.specialBusinessDays && typeof data.specialBusinessDays === 'object'
+      ? normalizeSpecialBusinessDays(data.specialBusinessDays)
+      : cloneDefaultSpecialBusinessDays();
+    if (JSON.stringify(window.settings.rolesHierarchy || {}) !== JSON.stringify(nextRolesHierarchy)) {
+      window.settings.rolesHierarchy = nextRolesHierarchy;
+      changed = true;
+    }
+    if (JSON.stringify(window.settings.scheduleRules || {}) !== JSON.stringify(nextScheduleRules)) {
+      window.settings.scheduleRules = nextScheduleRules;
+      changed = true;
+    }
+    if (JSON.stringify(window.settings.businessHours || {}) !== JSON.stringify(nextBusinessHours)) {
+      window.settings.businessHours = nextBusinessHours;
+      changed = true;
+    }
+    if (JSON.stringify(window.settings.coverageRules || {}) !== JSON.stringify(nextCoverageRules)) {
+      window.settings.coverageRules = nextCoverageRules;
+      changed = true;
+    }
+    if (JSON.stringify(window.settings.specialBusinessDays || {}) !== JSON.stringify(nextSpecialBusinessDays)) {
+      window.settings.specialBusinessDays = nextSpecialBusinessDays;
+      changed = true;
+    }
     if (changed) {
       // Keep localStorage in sync as cache
       try {
@@ -107,9 +203,20 @@ function subscribeMain(salonId) {
         if (data.brandName) { if (!stored.brand) stored.brand = {}; stored.brand.name = data.brandName; }
         if (data.brandPalette?.length) stored.brandPalette = data.brandPalette;
         if (data.managers) stored.managers = data.managers;
+        if (data.staffCallTemplates && typeof data.staffCallTemplates === 'object') stored.staffCallTemplates = normalizeStaffCallTemplates(data.staffCallTemplates);
+        if (data.staffCallTimeoutSeconds !== undefined) stored.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(data.staffCallTimeoutSeconds);
+        stored.preferences = {
+          ...(stored.preferences && typeof stored.preferences === 'object' ? stored.preferences : {}),
+          weekStartsOn: nextPreferences.weekStartsOn
+        };
         if (data.taskSettings?.taskReminders !== undefined) stored.taskReminders = data.taskSettings.taskReminders;
         if (data.taskSettings?.taskNotes !== undefined) stored.taskNotes = data.taskSettings.taskNotes;
         if (data.taskSettings?.showIncompleteTasksBadge !== undefined) stored.showIncompleteTasksBadge = data.taskSettings.showIncompleteTasksBadge;
+        stored.rolesHierarchy = nextRolesHierarchy;
+        stored.scheduleRules = nextScheduleRules;
+        stored.businessHours = nextBusinessHours;
+        stored.coverageRules = nextCoverageRules;
+        stored.specialBusinessDays = nextSpecialBusinessDays;
         localStorage.setItem('ffv24_settings', JSON.stringify(stored));
       } catch (_) {}
       // Re-render brand if available
@@ -119,17 +226,30 @@ function subscribeMain(salonId) {
 }
 
 /**
- * Save app settings (brand name, palette, managers) to Firestore.
+ * Save app settings (brand name, palette, managers, staff call templates) to Firestore.
  * Called from index.html settings panel save.
  */
-function ffSaveAppSettings(brandName, brandPalette, managers) {
+function ffSaveAppSettings(brandName, brandPalette, managers, staffCallTemplates, staffCallTimeoutSeconds) {
   if (!_salonId) return;
   const payload = { updatedAt: serverTimestamp() };
   if (brandName !== undefined) payload.brandName = brandName || '';
   if (Array.isArray(brandPalette)) payload.brandPalette = brandPalette;
   if (Array.isArray(managers)) payload.managers = managers;
+  if (staffCallTemplates && typeof staffCallTemplates === 'object') payload.staffCallTemplates = normalizeStaffCallTemplates(staffCallTemplates);
+  if (staffCallTimeoutSeconds !== undefined) payload.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(staffCallTimeoutSeconds);
   setDoc(settingsMainRef(_salonId), payload, { merge: true })
     .catch((e) => console.warn("[SettingsCloud] save app settings failed", e));
+}
+
+function ffSavePreferencesSettings(preferences) {
+  if (!_salonId) return;
+  const nextPreferences = preferences && typeof preferences === "object" ? preferences : {};
+  setDoc(settingsMainRef(_salonId), {
+    preferences: {
+      weekStartsOn: normalizeWeekStartsOn(nextPreferences.weekStartsOn)
+    },
+    updatedAt: serverTimestamp()
+  }, { merge: true }).catch((e) => console.warn("[SettingsCloud] save preferences settings failed", e));
 }
 
 /**
@@ -145,6 +265,35 @@ function ffSaveTaskSettings(taskReminders, taskNotes, showIncompleteTasksBadge) 
   if (Object.keys(taskSettings).length === 0) return;
   setDoc(settingsMainRef(_salonId), { taskSettings, updatedAt: serverTimestamp() }, { merge: true })
     .catch((e) => console.warn("[SettingsCloud] save task settings failed", e));
+}
+
+function ffSaveScheduleSettings(rolesHierarchy, scheduleRules, businessHours, coverageRules, specialBusinessDays, previousSpecialBusinessDays) {
+  if (!_salonId) return Promise.resolve(false);
+  const payload = { updatedAt: serverTimestamp() };
+  if (rolesHierarchy && typeof rolesHierarchy === "object") payload.rolesHierarchy = normalizeRolesHierarchy(rolesHierarchy);
+  if (scheduleRules && typeof scheduleRules === "object") payload.scheduleRules = normalizeScheduleRules(scheduleRules);
+  if (businessHours && typeof businessHours === "object") payload.businessHours = normalizeBusinessHours(businessHours);
+  if (coverageRules && typeof coverageRules === "object") payload.coverageRules = normalizeCoverageRules(coverageRules);
+  if (specialBusinessDays && typeof specialBusinessDays === "object") payload.specialBusinessDays = normalizeSpecialBusinessDays(specialBusinessDays);
+  if (Object.keys(payload).length === 1) return Promise.resolve(false);
+  const previous = previousSpecialBusinessDays && typeof previousSpecialBusinessDays === "object"
+    ? normalizeSpecialBusinessDays(previousSpecialBusinessDays)
+    : {};
+  const next = specialBusinessDays && typeof specialBusinessDays === "object"
+    ? normalizeSpecialBusinessDays(specialBusinessDays)
+    : {};
+  const removedDateKeys = Object.keys(previous).filter((dateKey) => !(dateKey in next));
+
+  return setDoc(settingsMainRef(_salonId), payload, { merge: true })
+    .then(() => {
+      if (!removedDateKeys.length) return null;
+      const deletePayload = {};
+      removedDateKeys.forEach((dateKey) => {
+        deletePayload[`specialBusinessDays.${dateKey}`] = deleteField();
+      });
+      return updateDoc(settingsMainRef(_salonId), deletePayload);
+    })
+    .catch((e) => console.warn("[SettingsCloud] save schedule settings failed", e));
 }
 
 // ─── Technician Types ───────────────────────────────────────────────────────────
@@ -309,6 +458,10 @@ async function ffUpdateTechnicianType(technicianTypeId, updates) {
     updateData.active = updates.active === true;
   }
   
+  if (updates.sortOrder !== undefined) {
+    updateData.sortOrder = updates.sortOrder;
+  }
+  
   await updateDoc(docRef, updateData);
   return { id: technicianTypeId, ...updateData };
 }
@@ -336,7 +489,9 @@ tryConnect();
 if (typeof window !== "undefined") {
   window.ffSaveHistoryRange = ffSaveHistoryRange;
   window.ffSaveAppSettings = ffSaveAppSettings;
+  window.ffSavePreferencesSettings = ffSavePreferencesSettings;
   window.ffSaveTaskSettings = ffSaveTaskSettings;
+  window.ffSaveScheduleSettings = ffSaveScheduleSettings;
   window.ffGetTechnicianTypes = ffGetTechnicianTypes;
   window.ffCreateTechnicianType = ffCreateTechnicianType;
   window.ffUpdateTechnicianType = ffUpdateTechnicianType;

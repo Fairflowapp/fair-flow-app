@@ -43,6 +43,19 @@ service cloud.firestore {
         && userRole() in ['admin', 'owner'];
     }
 
+    // Training: staffId on /users/{uid} (set when technician uses PIN / profile)
+    function userStaffId() {
+      return userExists() && userDocData().keys().hasAll(['staffId'])
+        ? userDocData().staffId
+        : '';
+    }
+
+    function trainingProgressIdentityUnchanged() {
+      return request.resource.data.salonId == resource.data.salonId
+        && request.resource.data.staffId == resource.data.staffId
+        && request.resource.data.trainingId == resource.data.trainingId;
+    }
+
     // ===== COLLECTIONS =====
 
     // Public GET for invite token docs (hashed doc id), only if unused + not expired
@@ -422,6 +435,52 @@ service cloud.firestore {
     match /salons/{salonId}/tasksState/{docId} {
       allow read: if belongsToSalon(salonId);
       allow write: if belongsToSalon(salonId);
+    }
+
+    // ===== TRAINING (root collections; each doc has salonId) =====
+    match /trainingItems/{itemId} {
+      allow read: if userExists()
+        && resource.data.salonId == userDocData().salonId;
+      allow create: if userExists()
+        && request.resource.data.salonId == userDocData().salonId
+        && request.resource.data.salonId is string
+        && request.resource.data.title is string
+        && request.resource.data.category is string
+        && isManager(request.resource.data.salonId);
+      allow update: if userExists()
+        && resource.data.salonId == userDocData().salonId
+        && request.resource.data.salonId == resource.data.salonId
+        && isManager(resource.data.salonId);
+      allow delete: if userExists()
+        && resource.data.salonId == userDocData().salonId
+        && isManager(resource.data.salonId);
+    }
+
+    match /trainingProgress/{progressId} {
+      allow read: if userExists()
+        && resource.data.salonId == userDocData().salonId
+        && (
+          isManager(resource.data.salonId)
+          || (userStaffId() != '' && resource.data.staffId == userStaffId())
+        );
+      allow create: if userExists()
+        && request.resource.data.salonId == userDocData().salonId
+        && request.resource.data.salonId is string
+        && request.resource.data.staffId is string
+        && request.resource.data.trainingId is string
+        && request.resource.data.status is string
+        && (
+          isManager(request.resource.data.salonId)
+          || (userStaffId() != '' && request.resource.data.staffId == userStaffId())
+        );
+      allow update: if userExists()
+        && resource.data.salonId == userDocData().salonId
+        && trainingProgressIdentityUnchanged()
+        && (
+          isManager(resource.data.salonId)
+          || (userStaffId() != '' && resource.data.staffId == userStaffId())
+        );
+      allow delete: if false;
     }
 
     // Default deny

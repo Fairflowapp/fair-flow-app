@@ -22,10 +22,10 @@ import {
   onSnapshot,
   serverTimestamp,
   Timestamp
-} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
-import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-storage.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth, storage } from "./app.js";
 
 // Category order for display (Schedule → Payments → Operations → Documents → Other at end)
@@ -168,6 +168,11 @@ export function goToInbox() {
   // Hide chat screen if open
   const chatScreen = document.getElementById('chatScreen');
   if (chatScreen) chatScreen.style.display = 'none';
+
+  const mediaScreen = document.getElementById('mediaScreen');
+  if (mediaScreen) mediaScreen.style.display = 'none';
+  const trainingScreen = document.getElementById('trainingScreen');
+  if (trainingScreen) trainingScreen.style.display = 'none';
   
   // Show inbox shell but hide content until ready (avoids flash of empty "My Requests")
   if (inboxScreen) inboxScreen.style.display = 'flex';
@@ -2705,6 +2710,8 @@ export function initInbox() {
   }
   
   // Global listener: close inbox when clicking a main-nav button (not when clicking inside inbox)
+  // When a nav button is clicked, we MUST explicitly call the nav function — otherwise the event
+  // may not reach the button (e.g. when modals/overlays block it), so switching tabs fails.
   document.addEventListener('click', (e) => {
     const inboxScreen = document.getElementById('inboxScreen');
     if (inboxScreen && inboxScreen.contains(e.target)) return; // don't close when clicking inside inbox
@@ -2716,10 +2723,17 @@ export function initInbox() {
         if (inboxContent) inboxContent.style.opacity = '0';
         inboxScreen.style.display = 'none';
         // Remove active class from inbox button
-        const inboxBtn = document.getElementById('inboxBtn');
-        if (inboxBtn) {
-          inboxBtn.classList.remove('active');
-        }
+        const inboxBtnEl = document.getElementById('inboxBtn');
+        if (inboxBtnEl) inboxBtnEl.classList.remove('active');
+        // Explicitly navigate to the target screen — ensures switching works even when
+        // modals/overlays block the normal click from reaching the nav button
+        const bid = navBtn.id || '';
+        if (bid === 'queueBtn' && typeof window.goToQueue === 'function') window.goToQueue();
+        else if (bid === 'ticketsBtn' && typeof window.goToTickets === 'function') window.goToTickets();
+        else if (bid === 'tasksBtn' && typeof window.openTasks === 'function') window.openTasks();
+        else if (bid === 'chatBtn' && typeof window.goToChat === 'function') window.goToChat();
+        else if (bid === 'logBtn' && (typeof window.openLog === 'function' || typeof openLog === 'function')) (window.openLog || openLog)();
+        else if (bid === 'appsBtn') { /* Apps panel handled by its own click */ }
       }
     }
   }, true); // Capture phase to run before other handlers

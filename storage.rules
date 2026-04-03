@@ -26,6 +26,12 @@ service firebase.storage {
       allow write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
     }
 
+    // Training module images (same salon as authenticated user)
+    match /salons/{salonId}/training/{allPaths=**} {
+      allow read: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+      allow write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+    }
+
     // Staff documents: any signed-in user can read/write (tighten later: uid==staffId or same salon)
     match /salons/{salonId}/staff/{staffId}/{allPaths=**} {
       allow read, write: if signedIn();
