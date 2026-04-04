@@ -1,7 +1,7 @@
 import { collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "./app.js?v=20260329_training_fix1";
 import { generateWeeklySchedule } from "./schedule-generator.js?v=20260403_mgmt_only_split";
-import { validateScheduleDraft } from "./schedule-validator.js?v=20260403_reception_split";
+import { validateScheduleDraft } from "./schedule-validator.js?v=20260403_avail_business_bounds";
 
 let schedulePreviewWeekStart = getStartOfWeek(new Date());
 let schedulePreviewState = {
@@ -447,6 +447,43 @@ function getValidationByDate(validation) {
   return new Map((Array.isArray(validation?.days) ? validation.days : []).map((day) => [day.date, day]));
 }
 
+/** Warnings tied to configured quotas (managers/FD line, techs, totals). Not availability quirks — so counts track staffing, not side effects. */
+const SCHEDULE_COVERAGE_WARNING_CODES = new Set([
+  "no_staff_assigned",
+  "management_line_below_minimum",
+  "no_technician_assigned",
+  "below_min_total_staff",
+  "assistant_manager_without_manager",
+  "manager_count_below_minimum",
+  "no_front_desk_assigned",
+  "no_manager_assigned",
+]);
+
+function filterCoverageWarnings(warnings) {
+  return (Array.isArray(warnings) ? warnings : []).filter((w) => w && SCHEDULE_COVERAGE_WARNING_CODES.has(w.code));
+}
+
+function filterNonCoverageWarnings(warnings) {
+  return (Array.isArray(warnings) ? warnings : []).filter((w) => w && !SCHEDULE_COVERAGE_WARNING_CODES.has(w.code));
+}
+
+function warningAppliesToStaffRow(warning, staffKey, staff) {
+  if (!warning || warning.code !== "assigned_staff_unavailable") return false;
+  const sid = String(warning.staffId || "").trim();
+  const uid = String(warning.uid || "").trim();
+  if (sid && sid === staffKey) return true;
+  const staffUid = String(staff?.uid || staff?.userUid || "").trim();
+  if (uid && staffUid && uid === staffUid) return true;
+  return false;
+}
+
+/** Orange highlight: day has quota issues (whole column), or this row has a row-specific warning (e.g. availability). */
+function cellShowsScheduleWarningDot(dayWarnings, staffKey, staff) {
+  const list = Array.isArray(dayWarnings) ? dayWarnings : [];
+  if (filterCoverageWarnings(list).length > 0) return true;
+  return list.some((w) => warningAppliesToStaffRow(w, staffKey, staff));
+}
+
 function formatBoardDayLabel(dateKey) {
   const date = new Date(`${dateKey}T00:00:00`);
   if (Number.isNaN(date.getTime())) return { title: dateKey, subtitle: "" };
@@ -616,15 +653,35 @@ function renderScheduleSummary(validation, days) {
   const summaryBar = document.getElementById("scheduleSummaryBar");
   if (!summaryBar) return;
   const summary = validation?.summary || { totalWarnings: 0, highSeverityCount: 0, mediumSeverityCount: 0 };
-  const daysWithIssues = (Array.isArray(days) ? days : []).filter((day) => Array.isArray(day.warnings) && day.warnings.length > 0).length;
-  const hasWarnings = (summary.totalWarnings || 0) > 0;
-  summaryBar.innerHTML = hasWarnings
-    ? `<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;font-size:12px;font-weight:600;">${summary.totalWarnings} warnings</span>
-       <span style="font-size:13px;color:#6b7280;">${daysWithIssues} day${daysWithIssues === 1 ? "" : "s"} with issues.</span>`
-    : `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+  const dayList = Array.isArray(days) ? days : [];
+  const coverageCount = dayList.reduce((n, day) => n + filterCoverageWarnings(day?.warnings).length, 0);
+  const daysWithCoverageIssues = dayList.filter((day) => filterCoverageWarnings(day?.warnings).length > 0).length;
+  const total = summary.totalWarnings || 0;
+  const otherCount = Math.max(0, total - coverageCount);
+
+  if (total === 0) {
+    summaryBar.innerHTML = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
          <span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;font-size:12px;font-weight:600;">No warnings</span>
          <span style="font-size:13px;color:#6b7280;">Edit shifts with the pen icon (saved locally in this preview only).</span>
        </div>`;
+    return;
+  }
+
+  const pieces = [];
+  if (coverageCount > 0) {
+    pieces.push(`<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;font-size:12px;font-weight:600;">${coverageCount} coverage warning${coverageCount === 1 ? "" : "s"}</span>`);
+    pieces.push(`<span style="font-size:13px;color:#6b7280;">${daysWithCoverageIssues} day${daysWithCoverageIssues === 1 ? "" : "s"} with coverage gaps.</span>`);
+  }
+  if (otherCount > 0) {
+    pieces.push(`<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;font-size:12px;font-weight:600;">+${otherCount} other</span>`);
+    pieces.push(`<span style="font-size:13px;color:#94a3b8;">availability / weekly limits</span>`);
+  }
+  if (coverageCount === 0 && otherCount > 0) {
+    pieces.length = 0;
+    pieces.push(`<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;font-size:12px;font-weight:600;">${otherCount} scheduling note${otherCount === 1 ? "" : "s"}</span>`);
+    pieces.push(`<span style="font-size:13px;color:#94a3b8;">not quota — availability or weekly hours</span>`);
+  }
+  summaryBar.innerHTML = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${pieces.join("")}</div>`;
 }
 
 function setSchedulePreviewView(view) {
@@ -655,16 +712,26 @@ function renderScheduleBoard(draft, validation, staffList) {
   empty.style.display = "none";
   const gridTemplate = `220px repeat(${draftDays.length}, minmax(120px, 1fr))`;
   const headerCells = draftDays.map((day) => {
-    const warningCount = Array.isArray(validationByDate.get(day.date)?.warnings) ? validationByDate.get(day.date).warnings.length : 0;
+    const allWarnings = Array.isArray(validationByDate.get(day.date)?.warnings) ? validationByDate.get(day.date).warnings : [];
+    const cov = filterCoverageWarnings(allWarnings);
+    const other = filterNonCoverageWarnings(allWarnings);
     const dayLabel = formatBoardDayLabel(day.date);
     const businessStatus = day.businessStatus || { isOpen: true, source: "business_hours" };
+    let issueHtml = "";
+    if (businessStatus.isOpen !== false) {
+      if (cov.length > 0) {
+        issueHtml = `<div style="margin-top:6px;font-size:11px;color:#b45309;font-weight:600;">${cov.length} coverage issue${cov.length === 1 ? "" : "s"}</div>`;
+      } else if (other.length > 0) {
+        issueHtml = `<div style="margin-top:6px;font-size:11px;color:#94a3b8;">${other.length} note${other.length === 1 ? "" : "s"}</div>`;
+      }
+    }
     return `
       <div style="padding:12px 10px;border-bottom:1px solid #e5e7eb;background:#f8fafc;min-width:0;">
         <div style="font-size:13px;font-weight:700;color:#111827;">${dayLabel.title}</div>
         <div style="font-size:11px;color:#9ca3af;margin-top:2px;">${dayLabel.subtitle}</div>
         ${businessStatus.isOpen === false
           ? `<div style="margin-top:6px;font-size:11px;color:#9ca3af;">Closed</div>`
-          : (warningCount > 0 ? `<div style="margin-top:6px;font-size:11px;color:#b45309;">${warningCount} issue${warningCount === 1 ? "" : "s"}</div>` : "")}
+          : issueHtml}
       </div>
     `;
   }).join("");
@@ -675,7 +742,7 @@ function renderScheduleBoard(draft, validation, staffList) {
     const cells = draftDays.map((day) => {
       const assignment = assignmentLookup.get(`${staffKey}::${day.date}`) || null;
       const warnings = Array.isArray(validationByDate.get(day.date)?.warnings) ? validationByDate.get(day.date).warnings : [];
-      const hasWarnings = warnings.length > 0;
+      const hasWarnings = cellShowsScheduleWarningDot(warnings, staffKey, staff);
       const businessStatus = day.businessStatus || getBusinessStatusForDate(day.date);
       const canEditShift = Boolean(assignment && businessStatus?.isOpen !== false);
       const cellStyle = assignment
@@ -697,10 +764,14 @@ function renderScheduleBoard(draft, validation, staffList) {
       `;
     }).join("");
 
+    const nameControl = staffKey
+      ? `<button type="button" data-schedule-staff-profile="true" data-staff-id="${escapeScheduleAttr(staffKey)}" title="לחיצה — עריכת לוח זמנים בפרופיל" aria-label="פתיחת לוח זמנים של העובד בפרופיל" style="font:inherit;font-size:13px;font-weight:700;line-height:1.3;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;width:100%;border:none;background:transparent;padding:0;margin:0;cursor:pointer;text-align:left;text-decoration:none;display:block;box-sizing:border-box;">${escapeScheduleAttr(staff.name || "Unknown Staff")}</button>`
+      : `<span style="font-size:13px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeScheduleAttr(staff.name || "Unknown Staff")}</span>`;
+
     return `
       <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;">
         <div style="padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#fff;display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;">
-          <div style="font-size:13px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${staff.name || "Unknown Staff"}</div>
+          ${nameControl}
           <div style="font-size:11px;color:#6b7280;">${roleLabel}</div>
         </div>
         ${cells}
@@ -721,6 +792,22 @@ function renderScheduleBoard(draft, validation, staffList) {
   `;
   bindScheduleBoardDnD();
   bindScheduleShiftEditButtons();
+  bindScheduleStaffProfileLinks();
+}
+
+function bindScheduleStaffProfileLinks() {
+  const board = document.getElementById("scheduleBoard");
+  if (!board || board.__ffStaffProfileBound) return;
+  board.__ffStaffProfileBound = true;
+  board.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-schedule-staff-profile]");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const id = String(btn.getAttribute("data-staff-id") || "").trim();
+    if (!id || typeof window.openStaffMemberScheduleTab !== "function") return;
+    window.openStaffMemberScheduleTab(id);
+  });
 }
 
 function setScheduleLoadingState({ loading = false, error = "" } = {}) {

@@ -3,6 +3,7 @@ import {
   getEffectiveScheduleRulesForDate,
   getEffectiveWeeklyHoursCap,
   assignmentDurationHoursFromTimes,
+  parseScheduleTimeToMinutes,
 } from "./schedule-helpers.js?v=20260403_reception_split";
 import {
   buildAvailabilityDirectory,
@@ -21,6 +22,7 @@ const WARNING_SEVERITY = Object.freeze({
   manager_count_below_minimum: "high",
   assigned_staff_unavailable: "high",
   no_front_desk_assigned: "medium",
+  management_line_below_minimum: "medium",
   no_technician_assigned: "medium",
   below_min_total_staff: "medium",
   weekly_hours_exceed_cap: "medium",
@@ -57,30 +59,38 @@ function countAssignmentsByRole(assignments) {
   };
 }
 
-function compareTimeValues(a, b) {
-  const left = String(a || "").trim();
-  const right = String(b || "").trim();
-  if (!left && !right) return 0;
-  if (!left) return -1;
-  if (!right) return 1;
-  return left.localeCompare(right);
+/** Management line = admin/managers + front desk (one pool; settings “manager + front desk” apply together). */
+function countManagementLine(assignments) {
+  const list = Array.isArray(assignments) ? assignments : [];
+  return list.filter(
+    (a) => a.role === "admin" || a.role === "manager" || a.role === "front_desk"
+  ).length;
 }
 
-function assignmentViolatesAvailability(assignment, availability) {
+/**
+ * Open day: shift must fall within salon business hours only (schedule is salon-centric; avoids false
+ * "unavailable" when a split segment extends past a narrow personal request but still inside business close).
+ * Otherwise: compare to effective availability window.
+ */
+function assignmentViolatesAvailability(assignment, availability, businessStatus) {
   if (!availability?.isAvailable) return true;
-  const assignmentStart = String(assignment?.startTime || "").trim();
-  const assignmentEnd = String(assignment?.endTime || "").trim();
-  const availabilityStart = String(availability?.startTime || "").trim();
-  const availabilityEnd = String(availability?.endTime || "").trim();
 
-  if (!assignmentStart || !assignmentEnd || !availabilityStart || !availabilityEnd) {
-    return true;
+  const aS = parseScheduleTimeToMinutes(assignment?.startTime);
+  const aE = parseScheduleTimeToMinutes(assignment?.endTime);
+  if (aS == null || aE == null || aE <= aS) return true;
+
+  if (businessStatus?.isOpen === true) {
+    const bo = parseScheduleTimeToMinutes(businessStatus.openTime);
+    const bc = parseScheduleTimeToMinutes(businessStatus.closeTime);
+    if (bo != null && bc != null && bc > bo) {
+      return aS < bo || aE > bc;
+    }
   }
 
-  if (compareTimeValues(assignmentStart, availabilityStart) < 0) return true;
-  if (compareTimeValues(assignmentEnd, availabilityEnd) > 0) return true;
-  if (compareTimeValues(assignmentStart, assignmentEnd) >= 0) return true;
-  return false;
+  const vS = parseScheduleTimeToMinutes(availability?.startTime);
+  const vE = parseScheduleTimeToMinutes(availability?.endTime);
+  if (vS == null || vE == null || vE <= vS) return true;
+  return aS < vS || aE > vE;
 }
 
 function findStaffForAssignment(staffList, assignment) {
@@ -118,11 +128,22 @@ function validateDraftDay({ day, staffList, availabilityDirectory, rules, covera
     ));
   }
 
-  if (counts.managers.length === 0) {
+  const managementLineCount = countManagementLine(assignments);
+  const minManagementLine =
+    Math.max(0, Math.round(Number(effectiveRules.minManagersPerShift) || 0))
+    + Math.max(0, Math.round(Number(effectiveRules.minFrontDeskPerDay) || 0));
+
+  if (counts.totalStaff > 0 && managementLineCount < minManagementLine) {
     warnings.push(buildValidationWarning(
-      "no_manager_assigned",
-      "No manager is assigned for this day.",
-      { date }
+      "management_line_below_minimum",
+      "Management line (managers + front desk) is below the configured minimum for this day.",
+      {
+        date,
+        minManagersPerShift: effectiveRules.minManagersPerShift,
+        minFrontDeskPerDay: effectiveRules.minFrontDeskPerDay,
+        minManagementLine,
+        actualManagementLine: managementLineCount,
+      }
     ));
   }
 
@@ -133,30 +154,6 @@ function validateDraftDay({ day, staffList, availabilityDirectory, rules, covera
       {
         date,
         assistantManagerStaffIds: counts.assistantManagers.map((assignment) => assignment.staffId).filter(Boolean),
-      }
-    ));
-  }
-
-  if (counts.fullManagers.length < effectiveRules.minManagersPerShift) {
-    warnings.push(buildValidationWarning(
-      "manager_count_below_minimum",
-      "Manager coverage is below the configured minimum for this day.",
-      {
-        date,
-        minManagersPerShift: effectiveRules.minManagersPerShift,
-        actualManagers: counts.fullManagers.length,
-      }
-    ));
-  }
-
-  if (counts.frontDesk.length < effectiveRules.minFrontDeskPerDay) {
-    warnings.push(buildValidationWarning(
-      "no_front_desk_assigned",
-      "Front desk coverage is below the configured minimum for this day.",
-      {
-        date,
-        minFrontDeskPerDay: effectiveRules.minFrontDeskPerDay,
-        actualFrontDesk: counts.frontDesk.length,
       }
     ));
   }
@@ -188,7 +185,7 @@ function validateDraftDay({ day, staffList, availabilityDirectory, rules, covera
   assignments.forEach((assignment) => {
     const staff = findStaffForAssignment(staffList, assignment);
     const availability = staff ? getAvailabilityForStaffDate(staff, availabilityDirectory, date) : null;
-    if (assignmentViolatesAvailability(assignment, availability)) {
+    if (assignmentViolatesAvailability(assignment, availability, businessStatus)) {
       warnings.push(buildValidationWarning(
         "assigned_staff_unavailable",
         "A scheduled staff member is outside effective availability for this day.",

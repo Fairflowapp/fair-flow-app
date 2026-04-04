@@ -23080,7 +23080,11 @@ function initializeAppsPanel() {
     }
   });
 
-  function openStaffMembersModal() {
+  function openStaffMembersModal(options) {
+    options = options || {};
+    const jumpToStaffId = options.jumpToStaffId ? String(options.jumpToStaffId).trim() : '';
+    const jumpToTab = jumpToStaffId ? String(options.jumpToTab || 'details').trim() : 'details';
+
     if (staffMembersModal) {
       // Get the global header element to calculate its height
       const header = document.querySelector('.header');
@@ -23097,25 +23101,36 @@ function initializeAppsPanel() {
       // Reset toggle to show active staff by default
       showArchivedStaff = false;
       updateArchiveToggleUI();
+
+      if (jumpToStaffId) {
+        currentTab = ['details', 'schedule', 'locations', 'notifications', 'permissions'].indexOf(jumpToTab) >= 0 ? jumpToTab : 'schedule';
+      }
+
+      const afterStaffListReady = function() {
+        updateArchiveToggleUI();
+        renderStaffList();
+        if (jumpToStaffId) {
+          selectStaffMember(jumpToStaffId);
+        }
+      };
       
       // Trigger fresh Firestore load, then render
       if (typeof window.ffStaffForceLoad === 'function') {
-        window.ffStaffForceLoad().then(() => {
-          updateArchiveToggleUI();
-          renderStaffList();
-        }).catch(() => {
-          updateArchiveToggleUI();
-          renderStaffList();
-        });
+        window.ffStaffForceLoad().then(afterStaffListReady).catch(afterStaffListReady);
       } else {
-        updateArchiveToggleUI();
-        renderStaffList();
+        afterStaffListReady();
       }
       
-      // Reset selection and edit mode when modal opens
-      selectedStaffId = null;
-      isEditingStaffDetails = false;
-      renderStaffDetails();
+      // Reset selection and edit mode when modal opens (unless jumping to a profile)
+      if (!jumpToStaffId) {
+        selectedStaffId = null;
+        isEditingStaffDetails = false;
+        renderStaffDetails();
+      } else {
+        isEditingStaffDetails = false;
+        selectedStaffId = null;
+        renderStaffDetails();
+      }
       
       // Hide form initially
       const form = document.getElementById('staffAddForm');
@@ -23314,6 +23329,17 @@ function initializeAppsPanel() {
   // Make function globally available
   window.openStaffMembersModal = openStaffMembersModal;
   window.closeStaffMembersModal = closeStaffMembersModal;
+
+  /** Open Staff Members modal on this employee and switch to the Schedule tab (weekly hours / availability). */
+  window.openStaffMemberScheduleTab = function(staffId) {
+    try {
+      const id = String(staffId || '').trim();
+      if (!id) return;
+      openStaffMembersModal({ jumpToStaffId: id, jumpToTab: 'schedule' });
+    } catch (e) {
+      console.error('[openStaffMemberScheduleTab]', e);
+    }
+  };
   
   // Staff Members Form Toggle Functions
   function showStaffAddForm() {
@@ -33307,8 +33333,8 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-helpers.js?v=20260403_reception_split"></script>
   <script type="module" src="/schedule-availability.js?v=20260403_reception_split"></script>
   <script type="module" src="/schedule-generator.js?v=20260403_mgmt_only_split"></script>
-  <script type="module" src="/schedule-validator.js?v=20260403_reception_split"></script>
-  <script type="module" src="/schedule-ui.js?v=20260403_reception_split"></script>
+  <script type="module" src="/schedule-validator.js?v=20260403_avail_business_bounds"></script>
+  <script type="module" src="/schedule-ui.js?v=20260403_staff_name_plain_click"></script>
   <script type="module" src="/inbox.js?v=20260312_fix2"></script>
   <script type="module" src="/chat.js?v=20260329_training_reminder_fix1"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
