@@ -13,12 +13,22 @@ let schedulePreviewState = {
 let schedulePreviewView = "management";
 let scheduleDragState = null;
 let scheduleShiftEditPayload = null;
+/** When drag-drop needs confirm before placing shift on Marked OFF cell: { payload, targetStaffId, targetDate } */
+let scheduleDnDConfirmPending = null;
 
 function escapeScheduleAttr(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
     .replace(/"/g, "&quot;")
     .replace(/</g, "&lt;");
+}
+
+/** Plain text for schedule board cells (not attribute context). */
+function escapeScheduleHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function ensureScheduleShiftEditModal() {
@@ -30,7 +40,8 @@ function ensureScheduleShiftEditModal() {
   backdrop.style.cssText = "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:4000;align-items:center;justify-content:center;padding:16px;";
   backdrop.innerHTML = `
     <div role="dialog" aria-modal="true" style="background:#fff;border-radius:16px;padding:20px 22px;max-width:360px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
-      <div id="scheduleShiftEditTitle" style="font-size:16px;font-weight:700;color:#111827;margin-bottom:14px;">Edit shift</div>
+      <div id="scheduleShiftEditTitle" style="font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;">Edit shift</div>
+      <div id="scheduleShiftEditHint" style="display:none;font-size:11px;color:#6b7280;margin-bottom:10px;line-height:1.4;">Preview only — not saved to staff profiles. Marked OFF for this week is remembered in this browser until you remove it or switch weeks.</div>
       <div style="display:flex;flex-direction:column;gap:12px;">
         <label style="font-size:12px;color:#6b7280;">Start
           <input type="time" id="scheduleShiftEditStart" step="300" style="width:100%;margin-top:4px;height:40px;border:1px solid #e5e7eb;border-radius:8px;padding:0 10px;box-sizing:border-box;" />
@@ -39,6 +50,8 @@ function ensureScheduleShiftEditModal() {
           <input type="time" id="scheduleShiftEditEnd" step="300" style="width:100%;margin-top:4px;height:40px;border:1px solid #e5e7eb;border-radius:8px;padding:0 10px;box-sizing:border-box;" />
         </label>
       </div>
+      <button type="button" id="scheduleShiftEditMarkOff" style="display:none;width:100%;margin-top:14px;padding:10px 12px;border-radius:10px;border:1px solid rgba(124,58,237,0.28);background:linear-gradient(180deg,rgba(124,58,237,0.14),rgba(124,58,237,0.06));color:#6d28d9;font-weight:600;cursor:pointer;font-size:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.85);">Mark day as OFF</button>
+      <button type="button" id="scheduleShiftEditRemove" style="display:none;width:100%;margin-top:10px;padding:8px 12px;border-radius:8px;border:1px solid #fecaca;background:#fff;color:#b91c1c;font-weight:600;cursor:pointer;font-size:12px;">Remove shift (OFF)</button>
       <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;">
         <button type="button" id="scheduleShiftEditCancel" style="padding:8px 14px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;">Cancel</button>
         <button type="button" id="scheduleShiftEditSave" style="padding:8px 14px;border-radius:8px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;">Save</button>
@@ -51,22 +64,90 @@ function ensureScheduleShiftEditModal() {
   });
   document.getElementById("scheduleShiftEditCancel")?.addEventListener("click", closeScheduleShiftEdit);
   document.getElementById("scheduleShiftEditSave")?.addEventListener("click", saveScheduleShiftEdit);
+  document.getElementById("scheduleShiftEditRemove")?.addEventListener("click", removeScheduleShiftFromDraft);
+  document.getElementById("scheduleShiftEditMarkOff")?.addEventListener("click", markScheduleDayAsOffFromModal);
   return backdrop;
 }
 
-function openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffName }) {
+function ensureScheduleDnDOffConfirmModal() {
+  if (document.getElementById("scheduleDnDOffConfirmBackdrop")) {
+    return document.getElementById("scheduleDnDOffConfirmBackdrop");
+  }
+  const backdrop = document.createElement("div");
+  backdrop.id = "scheduleDnDOffConfirmBackdrop";
+  backdrop.style.cssText =
+    "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:4100;align-items:center;justify-content:center;padding:20px;";
+  backdrop.innerHTML = `
+    <div role="dialog" aria-modal="true" aria-labelledby="scheduleDnDOffConfirmTitle" style="background:#fff;border-radius:16px;padding:24px 26px;max-width:420px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.28);">
+      <div id="scheduleDnDOffConfirmTitle" style="font-size:18px;font-weight:700;color:#111827;margin-bottom:10px;">Place shift on a marked OFF day?</div>
+      <p id="scheduleDnDOffConfirmBody" style="margin:0 0 22px 0;font-size:14px;color:#4b5563;line-height:1.55;">This day is marked OFF for this staff member. Placing a shift here will remove the OFF mark.</p>
+      <div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;">
+        <button type="button" id="scheduleDnDOffConfirmCancel" style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;">Cancel</button>
+        <button type="button" id="scheduleDnDOffConfirmOk" style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;">Yes, place shift</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) cancelScheduleDnDOffConfirm();
+  });
+  document.getElementById("scheduleDnDOffConfirmCancel")?.addEventListener("click", cancelScheduleDnDOffConfirm);
+  document.getElementById("scheduleDnDOffConfirmOk")?.addEventListener("click", confirmScheduleDnDOffConfirm);
+  return backdrop;
+}
+
+function openScheduleDnDOffConfirm(pending) {
+  scheduleDnDConfirmPending = pending;
+  const el = ensureScheduleDnDOffConfirmModal();
+  el.style.display = "flex";
+}
+
+function closeScheduleDnDOffConfirm() {
+  const el = document.getElementById("scheduleDnDOffConfirmBackdrop");
+  if (el) el.style.display = "none";
+  scheduleDnDConfirmPending = null;
+}
+
+function cancelScheduleDnDOffConfirm() {
+  closeScheduleDnDOffConfirm();
+}
+
+function confirmScheduleDnDOffConfirm() {
+  const pending = scheduleDnDConfirmPending;
+  closeScheduleDnDOffConfirm();
+  if (!pending?.payload || !pending.targetStaffId || !pending.targetDate) return;
+  completeScheduleDrop(pending.payload, pending.targetStaffId, pending.targetDate);
+}
+
+function openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffName, isNew }) {
   const backdrop = ensureScheduleShiftEditModal();
-  scheduleShiftEditPayload = { staffKey, dateKey };
+  const isNewShift = Boolean(isNew);
+  scheduleShiftEditPayload = { staffKey, dateKey, isNew: isNewShift };
   const title = document.getElementById("scheduleShiftEditTitle");
-  if (title) title.textContent = staffName ? `Edit shift — ${staffName}` : "Edit shift";
-  const toInput = (t) => {
+  const hint = document.getElementById("scheduleShiftEditHint");
+  const removeBtn = document.getElementById("scheduleShiftEditRemove");
+  const markOffBtn = document.getElementById("scheduleShiftEditMarkOff");
+  const saveBtn = document.getElementById("scheduleShiftEditSave");
+  const dayOpen = (getBusinessStatusForDate(dateKey).isOpen !== false);
+  if (title) {
+    title.textContent = isNewShift
+      ? (staffName ? `Add shift — ${staffName}` : "Add shift")
+      : (staffName ? `Edit shift — ${staffName}` : "Edit shift");
+  }
+  const canManual = scheduleUserCanManualEdit();
+  if (hint) hint.style.display = canManual ? "block" : "none";
+  if (removeBtn) removeBtn.style.display = !isNewShift && canManual ? "block" : "none";
+  if (markOffBtn) markOffBtn.style.display = isNewShift && canManual && dayOpen ? "block" : "none";
+  if (saveBtn) saveBtn.textContent = isNewShift ? "Add shift" : "Save";
+  const defaults = getDefaultShiftTimesForDate(dateKey);
+  const toInput = (t, fallback) => {
     const s = String(t || "").trim();
-    return /^\d{2}:\d{2}$/.test(s) ? s : "09:00";
+    return /^\d{2}:\d{2}$/.test(s) ? s : fallback;
   };
   const startEl = document.getElementById("scheduleShiftEditStart");
   const endEl = document.getElementById("scheduleShiftEditEnd");
-  if (startEl) startEl.value = toInput(startTime);
-  if (endEl) endEl.value = toInput(endTime);
+  if (startEl) startEl.value = toInput(isNewShift ? startTime || defaults.start : startTime || defaults.start, defaults.start);
+  if (endEl) endEl.value = toInput(isNewShift ? endTime || defaults.end : endTime || defaults.end, defaults.end);
   backdrop.style.display = "flex";
 }
 
@@ -81,6 +162,51 @@ function hhmmFromTimeInput(v) {
   return /^\d{2}:\d{2}$/.test(s) ? s : null;
 }
 
+function scheduleUserCanManualEditLegacy() {
+  if (typeof window !== "undefined" && typeof window.ffHasAdminAccess === "function" && window.ffHasAdminAccess()) {
+    return true;
+  }
+  const r = String(typeof window !== "undefined" && window.__ff_user_role ? window.__ff_user_role : "").toLowerCase();
+  return r === "owner" || r === "admin" || r === "manager";
+}
+
+/** Resolved from Staff → Permissions (schedule_*) when set; else legacy admin/manager behavior. */
+function getScheduleAccessContext() {
+  if (typeof window !== "undefined" && typeof window.ffGetSchedulePermissionContext === "function") {
+    try {
+      return window.ffGetSchedulePermissionContext();
+    } catch (e) {
+      console.warn("[ScheduleUI] ffGetSchedulePermissionContext failed", e);
+    }
+  }
+  const le = scheduleUserCanManualEditLegacy();
+  return { canEdit: le, viewAll: true, viewOwnOnly: false, readOnly: !le, noAccess: false };
+}
+
+/** Owner / permissions — can add shifts, edit hours, or mark OFF in the weekly preview. */
+function scheduleUserCanManualEdit() {
+  const ctx = getScheduleAccessContext();
+  return ctx.noAccess ? false : ctx.canEdit === true;
+}
+
+function buildManualDraftAssignment(staff, start, end) {
+  const role = getScheduleStaffRole(staff);
+  let managerType = null;
+  if (role === "manager") {
+    managerType = staff?.managerType === "assistant_manager" ? "assistant_manager" : "manager";
+  }
+  return {
+    staffId: getScheduleStaffKey(staff),
+    uid: String(staff?.uid || staff?.userUid || "").trim() || null,
+    name: String(staff?.name || "").trim() || "Unknown Staff",
+    role,
+    managerType,
+    startTime: start,
+    endTime: end,
+    manualAdminEdit: true,
+  };
+}
+
 function saveScheduleShiftEdit() {
   if (!scheduleShiftEditPayload || !schedulePreviewState.draft) return;
   const start = hhmmFromTimeInput(document.getElementById("scheduleShiftEditStart")?.value);
@@ -93,17 +219,53 @@ function saveScheduleShiftEdit() {
     window.alert("End time must be after start time.");
     return;
   }
-  const { staffKey, dateKey } = scheduleShiftEditPayload;
+  const { staffKey, dateKey, isNew } = scheduleShiftEditPayload;
+  const staff = getStaffByScheduleKey(schedulePreviewState.staffList, staffKey);
+  if (!staff) return;
+
+  let draft = cloneScheduleDraft(schedulePreviewState.draft);
+  const day = findDraftDay(draft, dateKey);
+  if (!day) return;
+
+  if (isNew) {
+    if ((day.assignments || []).some((a) => String(a.staffId || a.uid || "").trim() === staffKey)) {
+      window.alert("This cell already has a shift. Edit it with the pencil or remove it first.");
+      return;
+    }
+    removeManualOffForStaffDay(draft, dateKey, staffKey);
+    day.assignments = [...(day.assignments || []), buildManualDraftAssignment(staff, start, end)];
+  } else {
+    const idx = (day.assignments || []).findIndex((a) => String(a.staffId || a.uid || "").trim() === staffKey);
+    if (idx < 0) return;
+    const markManual = scheduleUserCanManualEdit();
+    day.assignments[idx] = {
+      ...day.assignments[idx],
+      startTime: start,
+      endTime: end,
+      ...(markManual ? { manualAdminEdit: true } : {}),
+    };
+  }
+
+  draft = applyBusinessSettingsToDraft(draft);
+  revalidateLocalDraft(draft);
+  renderScheduleSummary(schedulePreviewState.validation, schedulePreviewState.validation?.days || []);
+  renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
+  closeScheduleShiftEdit();
+}
+
+function removeScheduleShiftFromDraft() {
+  if (!scheduleShiftEditPayload || !schedulePreviewState.draft) return;
+  const { staffKey, dateKey, isNew } = scheduleShiftEditPayload;
+  if (isNew) {
+    closeScheduleShiftEdit();
+    return;
+  }
   let draft = cloneScheduleDraft(schedulePreviewState.draft);
   const day = findDraftDay(draft, dateKey);
   if (!day) return;
   const idx = (day.assignments || []).findIndex((a) => String(a.staffId || a.uid || "").trim() === staffKey);
   if (idx < 0) return;
-  day.assignments[idx] = {
-    ...day.assignments[idx],
-    startTime: start,
-    endTime: end,
-  };
+  day.assignments.splice(idx, 1);
   draft = applyBusinessSettingsToDraft(draft);
   revalidateLocalDraft(draft);
   renderScheduleSummary(schedulePreviewState.validation, schedulePreviewState.validation?.days || []);
@@ -125,7 +287,32 @@ function bindScheduleShiftEditButtons() {
       const startTime = String(btn.getAttribute("data-start") || "").trim();
       const endTime = String(btn.getAttribute("data-end") || "").trim();
       const staffName = String(btn.getAttribute("data-staff-name") || "").trim();
-      openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffName });
+      openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffName, isNew: false });
+    });
+  });
+}
+
+function bindScheduleBoardManualAdd() {
+  const board = document.getElementById("scheduleBoard");
+  if (!board || board.__ffManualAddBound) return;
+  board.__ffManualAddBound = true;
+  board.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-schedule-manual-add]");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!scheduleUserCanManualEdit()) return;
+    const staffKey = String(btn.getAttribute("data-staff-id") || "").trim();
+    const dateKey = String(btn.getAttribute("data-date") || "").trim();
+    const staffName = String(btn.getAttribute("data-staff-name") || "").trim();
+    const defaults = getDefaultShiftTimesForDate(dateKey);
+    openScheduleShiftEdit({
+      staffKey,
+      dateKey,
+      staffName,
+      isNew: true,
+      startTime: defaults.start,
+      endTime: defaults.end,
     });
   });
 }
@@ -228,11 +415,23 @@ function isTechnicianScheduleStaff(staff) {
 }
 
 function getFilteredScheduleStaff(staffList) {
-  const filtered = (Array.isArray(staffList) ? staffList : []).filter((staff) => {
+  const ctx = getScheduleAccessContext();
+  let filtered = (Array.isArray(staffList) ? staffList : []).filter((staff) => {
     return schedulePreviewView === "technicians"
       ? isTechnicianScheduleStaff(staff)
       : isManagementScheduleStaff(staff);
   });
+
+  if (ctx.viewOwnOnly) {
+    const sid = String(
+      typeof window !== "undefined" && window.__ff_authedStaffId
+        ? window.__ff_authedStaffId
+        : (typeof localStorage !== "undefined" ? localStorage.getItem("ff_authedStaffId_v1") : "") || "",
+    ).trim();
+    if (sid) {
+      filtered = filtered.filter((staff) => getScheduleStaffKey(staff) === sid);
+    }
+  }
 
   return filtered.sort((left, right) => {
     const leftRole = getScheduleStaffRole(left);
@@ -272,6 +471,7 @@ function cloneScheduleDraft(draft) {
     ...draft,
     days: (Array.isArray(draft?.days) ? draft.days : []).map((day) => ({
       ...day,
+      manualOffStaffIds: Array.isArray(day.manualOffStaffIds) ? [...day.manualOffStaffIds] : [],
       assignments: (Array.isArray(day.assignments) ? day.assignments : []).map((assignment) => ({ ...assignment })),
     })),
     context: draft?.context ? { ...draft.context } : draft?.context,
@@ -281,6 +481,122 @@ function cloneScheduleDraft(draft) {
 
 function findDraftDay(draft, dateKey) {
   return (Array.isArray(draft?.days) ? draft.days : []).find((day) => day.date === dateKey) || null;
+}
+
+function dayHasManualOff(day, staffKey) {
+  const ids = Array.isArray(day?.manualOffStaffIds) ? day.manualOffStaffIds : [];
+  return ids.includes(staffKey);
+}
+
+function addManualOffForStaffDay(draft, dateKey, staffKey) {
+  const day = findDraftDay(draft, dateKey);
+  if (!day || !staffKey) return;
+  const set = new Set(Array.isArray(day.manualOffStaffIds) ? day.manualOffStaffIds : []);
+  set.add(staffKey);
+  day.manualOffStaffIds = [...set];
+}
+
+function removeManualOffForStaffDay(draft, dateKey, staffKey) {
+  const day = findDraftDay(draft, dateKey);
+  if (!day || !staffKey) return;
+  day.manualOffStaffIds = (Array.isArray(day.manualOffStaffIds) ? day.manualOffStaffIds : []).filter((id) => id !== staffKey);
+}
+
+const SCHEDULE_MANUAL_OFF_STORAGE_VERSION = 1;
+
+function getSchedulePreviewSalonStorageKey() {
+  const s = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  return s || "_local";
+}
+
+function getScheduleManualOffStorageKey(weekRange) {
+  if (!weekRange?.startDate || !weekRange?.endDate) return null;
+  const salon = getSchedulePreviewSalonStorageKey();
+  return `ff_schedule_manual_off_v${SCHEDULE_MANUAL_OFF_STORAGE_VERSION}_${salon}_${weekRange.startDate}_${weekRange.endDate}`;
+}
+
+/** Load saved Marked OFF map for this salon + week (survives page refresh). */
+function loadScheduleManualOffOverrides(weekRange) {
+  const key = getScheduleManualOffStorageKey(weekRange);
+  if (!key || typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    const byDate = parsed?.manualOffByDate;
+    return byDate && typeof byDate === "object" ? byDate : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function mergeManualOffOverridesIntoDraft(draft, overrides, staffList) {
+  if (!draft?.days?.length || !overrides || typeof overrides !== "object") return draft;
+  if (Object.keys(overrides).length === 0) return draft;
+  const validKeys = new Set((staffList || []).map((s) => getScheduleStaffKey(s)).filter(Boolean));
+  return {
+    ...draft,
+    days: draft.days.map((day) => {
+      const saved = overrides[day.date];
+      if (!Array.isArray(saved) || saved.length === 0) return day;
+      const assigned = new Set(
+        (day.assignments || []).map((a) => String(a.staffId || a.uid || "").trim()).filter(Boolean),
+      );
+      const manualOffStaffIds = saved.filter((id) => validKeys.has(id) && !assigned.has(id));
+      return { ...day, manualOffStaffIds };
+    }),
+  };
+}
+
+/** Persist Marked OFF cells after local edits (same browser / device). */
+function persistScheduleManualOffFromState() {
+  const weekRange = schedulePreviewState.weekRange;
+  const draft = schedulePreviewState.draft;
+  const key = getScheduleManualOffStorageKey(weekRange);
+  if (!key || !draft?.days || typeof localStorage === "undefined") return;
+  const manualOffByDate = {};
+  draft.days.forEach((day) => {
+    const ids = Array.isArray(day.manualOffStaffIds) ? day.manualOffStaffIds.filter(Boolean) : [];
+    if (ids.length) manualOffByDate[day.date] = ids;
+  });
+  try {
+    if (Object.keys(manualOffByDate).length === 0) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(
+        key,
+        JSON.stringify({ v: SCHEDULE_MANUAL_OFF_STORAGE_VERSION, manualOffByDate }),
+      );
+    }
+  } catch (e) {
+    console.warn("[ScheduleUI] Failed to persist Marked OFF overrides", e);
+  }
+}
+
+function markScheduleDayAsOffFromModal() {
+  if (!scheduleShiftEditPayload || !schedulePreviewState.draft) return;
+  const { staffKey, dateKey, isNew } = scheduleShiftEditPayload;
+  if (!isNew || !scheduleUserCanManualEdit()) return;
+  const staff = getStaffByScheduleKey(schedulePreviewState.staffList, staffKey);
+  if (!staff) return;
+  const bs = getBusinessStatusForDate(dateKey);
+  if (bs.isOpen === false) {
+    window.alert("This day is closed for the business.");
+    return;
+  }
+  let draft = cloneScheduleDraft(schedulePreviewState.draft);
+  const day = findDraftDay(draft, dateKey);
+  if (!day) return;
+  if ((day.assignments || []).some((a) => String(a.staffId || a.uid || "").trim() === staffKey)) {
+    window.alert("This cell already has a shift. Edit or remove it first.");
+    return;
+  }
+  addManualOffForStaffDay(draft, dateKey, staffKey);
+  draft = applyBusinessSettingsToDraft(draft);
+  revalidateLocalDraft(draft);
+  renderScheduleSummary(schedulePreviewState.validation, schedulePreviewState.validation?.days || []);
+  renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
+  closeScheduleShiftEdit();
 }
 
 function getStaffByScheduleKey(staffList, scheduleKey) {
@@ -321,6 +637,7 @@ function revalidateLocalDraft(nextDraft) {
   if (typeof window !== "undefined") {
     window.ffSchedulePreviewState = schedulePreviewState;
   }
+  persistScheduleManualOffFromState();
 }
 
 function clearDropZoneVisual(zone) {
@@ -330,6 +647,10 @@ function clearDropZoneVisual(zone) {
 }
 
 function handleShiftDragStart(event) {
+  if (!scheduleUserCanManualEdit()) {
+    event.preventDefault();
+    return;
+  }
   const shiftEl = event.currentTarget;
   if (!shiftEl) return;
   const payload = {
@@ -355,6 +676,7 @@ function handleShiftDragEnd(event) {
 }
 
 function handleDropZoneDragOver(event) {
+  if (!scheduleUserCanManualEdit()) return;
   event.preventDefault();
   const zone = event.currentTarget;
   if (!zone) return;
@@ -403,19 +725,11 @@ function moveDraftAssignment(payload, targetStaffId, targetDate) {
 
   sourceDay.assignments = sourceAssignments;
   targetDay.assignments = targetAssignments;
+  removeManualOffForStaffDay(nextDraft, targetDate, targetStaffId);
   return nextDraft;
 }
 
-function handleDropZoneDrop(event) {
-  event.preventDefault();
-  const zone = event.currentTarget;
-  clearDropZoneVisual(zone);
-  const targetStaffId = String(zone?.getAttribute("data-staff-id") || "").trim();
-  const targetDate = String(zone?.getAttribute("data-date") || "").trim();
-  const payload = scheduleDragState;
-  if (!payload || !payload.shiftId || !payload.sourceStaffId || !payload.sourceDate || !targetStaffId || !targetDate) return;
-  if (payload.sourceStaffId === targetStaffId && payload.sourceDate === targetDate) return;
-
+function completeScheduleDrop(payload, targetStaffId, targetDate) {
   const nextDraft = moveDraftAssignment(payload, targetStaffId, targetDate);
   console.log("[Schedule DnD] drop", { payload, targetStaffId, targetDate });
   if (!nextDraft) return;
@@ -424,6 +738,26 @@ function handleDropZoneDrop(event) {
   renderScheduleSummary(schedulePreviewState.validation, schedulePreviewState.validation?.days || []);
   renderScheduleViewTabs();
   renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
+}
+
+function handleDropZoneDrop(event) {
+  event.preventDefault();
+  if (!scheduleUserCanManualEdit()) return;
+  const zone = event.currentTarget;
+  clearDropZoneVisual(zone);
+  const targetStaffId = String(zone?.getAttribute("data-staff-id") || "").trim();
+  const targetDate = String(zone?.getAttribute("data-date") || "").trim();
+  const payload = scheduleDragState;
+  if (!payload || !payload.shiftId || !payload.sourceStaffId || !payload.sourceDate || !targetStaffId || !targetDate) return;
+  if (payload.sourceStaffId === targetStaffId && payload.sourceDate === targetDate) return;
+
+  const targetDayPreview = findDraftDay(schedulePreviewState.draft, targetDate);
+  if (targetDayPreview && dayHasManualOff(targetDayPreview, targetStaffId)) {
+    openScheduleDnDOffConfirm({ payload, targetStaffId, targetDate });
+    return;
+  }
+
+  completeScheduleDrop(payload, targetStaffId, targetDate);
 }
 
 function bindScheduleBoardDnD() {
@@ -559,6 +893,19 @@ function getBusinessStatusForDate(dateKey) {
   };
 }
 
+/** Default shift window for manual add / empty inputs — follows business open/close when set. */
+function getDefaultShiftTimesForDate(dateKey) {
+  const bs = getBusinessStatusForDate(dateKey);
+  let start = normalizeTimeValue(bs.openTime) || "09:00";
+  let end = normalizeTimeValue(bs.closeTime) || "17:00";
+  if (!bs.isOpen) return { start: "09:00", end: "17:00" };
+  if (!start || !end || start >= end) {
+    start = "09:00";
+    end = "17:00";
+  }
+  return { start, end };
+}
+
 function applyBusinessSettingsToDraft(draft) {
   const nextDraft = {
     ...draft,
@@ -603,6 +950,11 @@ function getScheduleRoleLabel(staff) {
 }
 
 function renderScheduleViewTabs() {
+  const toggleWrap = document.getElementById("scheduleViewToggleWrap");
+  if (toggleWrap) {
+    const ctx = getScheduleAccessContext();
+    toggleWrap.style.display = ctx.viewOwnOnly ? "none" : "";
+  }
   const managementBtn = document.getElementById("scheduleViewManagementBtn");
   const techniciansBtn = document.getElementById("scheduleViewTechniciansBtn");
   const applyState = (button, active, left) => {
@@ -699,6 +1051,7 @@ function renderScheduleBoard(draft, validation, staffList) {
   const validationByDate = getValidationByDate(validation);
   const filteredStaff = getFilteredScheduleStaff(staffList);
   const assignmentLookup = buildAssignmentLookup(draft);
+  const canManual = scheduleUserCanManualEdit();
 
   if (!draftDays.length || !filteredStaff.length) {
     board.innerHTML = "";
@@ -725,6 +1078,10 @@ function renderScheduleBoard(draft, validation, staffList) {
         issueHtml = `<div style="margin-top:6px;font-size:11px;color:#94a3b8;">${other.length} note${other.length === 1 ? "" : "s"}</div>`;
       }
     }
+    const specialNoteRaw = String(businessStatus.note || "").trim();
+    const specialNoteHtml = specialNoteRaw
+      ? `<div style="margin-top:5px;font-size:10px;color:#6d28d9;line-height:1.35;font-weight:500;">* ${escapeScheduleHtml(specialNoteRaw)}</div>`
+      : "";
     return `
       <div style="padding:12px 10px;border-bottom:1px solid #e5e7eb;background:#f8fafc;min-width:0;">
         <div style="font-size:13px;font-weight:700;color:#111827;">${dayLabel.title}</div>
@@ -732,6 +1089,7 @@ function renderScheduleBoard(draft, validation, staffList) {
         ${businessStatus.isOpen === false
           ? `<div style="margin-top:6px;font-size:11px;color:#9ca3af;">Closed</div>`
           : issueHtml}
+        ${specialNoteHtml}
       </div>
     `;
   }).join("");
@@ -739,26 +1097,42 @@ function renderScheduleBoard(draft, validation, staffList) {
   const rowHtml = filteredStaff.map((staff) => {
     const staffKey = getScheduleStaffKey(staff);
     const roleLabel = getScheduleRoleLabel(staff);
+    const allowCellEdit = scheduleUserCanManualEdit();
     const cells = draftDays.map((day) => {
       const assignment = assignmentLookup.get(`${staffKey}::${day.date}`) || null;
+      const manualOff = Boolean(!assignment && dayHasManualOff(day, staffKey));
       const warnings = Array.isArray(validationByDate.get(day.date)?.warnings) ? validationByDate.get(day.date).warnings : [];
       const hasWarnings = cellShowsScheduleWarningDot(warnings, staffKey, staff);
       const businessStatus = day.businessStatus || getBusinessStatusForDate(day.date);
-      const canEditShift = Boolean(assignment && businessStatus?.isOpen !== false);
+      const canEditShift = Boolean(assignment && businessStatus?.isOpen !== false && allowCellEdit);
       const cellStyle = assignment
         ? `background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.35)" : "none"};`
-        : `background:#f3f4f6;border:1px solid #e5e7eb;color:#6b7280;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.28)" : "none"};`;
+        : manualOff
+          ? `background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.28)" : "none"};`
+          : `background:#f3f4f6;border:1px solid #e5e7eb;color:#6b7280;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.28)" : "none"};`;
       const assignmentId = assignment ? getAssignmentId(assignment, day.date) : "";
       const safeStaffName = escapeScheduleAttr(staff.name || "");
       const editBtn = canEditShift
         ? `<button type="button" data-schedule-edit-btn="true" data-staff-id="${escapeScheduleAttr(staffKey)}" data-date="${escapeScheduleAttr(day.date)}" data-start="${escapeScheduleAttr(assignment.startTime || "")}" data-end="${escapeScheduleAttr(assignment.endTime || "")}" data-staff-name="${safeStaffName}" title="Edit hours" aria-label="Edit shift hours" style="position:absolute;top:4px;left:4px;min-width:22px;min-height:22px;padding:0;border:none;background:transparent;box-shadow:none;color:#7c3aed;font-size:15px;line-height:1;cursor:pointer;opacity:0.85;z-index:2;">\u270E</button>`
         : "";
+      const manualAddBtn =
+        !assignment && !manualOff && businessStatus?.isOpen !== false && canManual
+          ? `<button type="button" data-schedule-manual-add="true" data-staff-id="${escapeScheduleAttr(staffKey)}" data-date="${escapeScheduleAttr(day.date)}" data-staff-name="${safeStaffName}" title="Add shift manually" aria-label="Add shift manually" style="margin-top:2px;padding:4px 10px;font-size:11px;font-weight:600;border:1px dashed #c4b5fd;background:#faf5ff;color:#7c3aed;border-radius:8px;cursor:pointer;">+ Add shift</button>`
+          : "";
+      const manualOffBlock = manualOff
+        ? `<div style="font-size:10px;font-weight:700;color:#64748b;margin-top:5px;letter-spacing:0.04em;text-transform:uppercase;">Marked OFF</div>`
+        : "";
+      const emptyCellWrap = !assignment
+        ? `style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:100%;"`
+        : "";
       return `
         <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:10px;border-radius:12px;min-height:68px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:${assignment ? "700" : "500"};line-height:1.35;transition:outline-color 0.12s ease;${cellStyle}">
           ${hasWarnings ? `<span style="position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%;background:#f59e0b;opacity:0.9;"></span>` : ""}
           ${editBtn}
-          <div ${assignment ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : ""}>
+          <div ${assignment && allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : assignment ? `style="user-select:none;"` : emptyCellWrap}>
             <div>${assignment ? `${assignment.startTime || "--:--"} - ${assignment.endTime || "--:--"}` : "Off"}</div>
+            ${manualOffBlock}
+            ${manualAddBtn}
           </div>
         </div>
       `;
@@ -792,6 +1166,7 @@ function renderScheduleBoard(draft, validation, staffList) {
   `;
   bindScheduleBoardDnD();
   bindScheduleShiftEditButtons();
+  bindScheduleBoardManualAdd();
   bindScheduleStaffProfileLinks();
 }
 
@@ -851,7 +1226,9 @@ async function refreshSchedulePreview() {
       coverageRules,
       dateRange: { startDate: weekRange.startDate, endDate: weekRange.endDate },
     });
-    const draftWithBusinessRules = applyBusinessSettingsToDraft(draft);
+    let draftWithBusinessRules = applyBusinessSettingsToDraft(draft);
+    const manualOffOverrides = loadScheduleManualOffOverrides(weekRange);
+    draftWithBusinessRules = mergeManualOffOverridesIntoDraft(draftWithBusinessRules, manualOffOverrides, staffList);
 
     const validation = validateScheduleDraft({
       draftSchedule: draftWithBusinessRules,
@@ -924,6 +1301,19 @@ function hideScheduleScreen() {
 }
 
 export async function goToSchedule() {
+  const schedCtx =
+    typeof window.ffGetSchedulePermissionContext === "function"
+      ? window.ffGetSchedulePermissionContext()
+      : getScheduleAccessContext();
+  if (schedCtx.noAccess) {
+    if (typeof window.showToast === "function") {
+      window.showToast("You do not have permission to open Schedule.", 4000);
+    } else {
+      window.alert("You do not have permission to open Schedule.");
+    }
+    return;
+  }
+
   if (typeof window.closeStaffMembersModal === "function") {
     window.closeStaffMembersModal();
   }
@@ -959,6 +1349,20 @@ export async function goToSchedule() {
   if (scheduleBtn) scheduleBtn.classList.add("active");
 
   await refreshSchedulePreview();
+
+  if (schedCtx.viewOwnOnly && Array.isArray(schedulePreviewState.staffList) && schedulePreviewState.staffList.length) {
+    const sid = String(
+      typeof window !== "undefined" && window.__ff_authedStaffId
+        ? window.__ff_authedStaffId
+        : (typeof localStorage !== "undefined" ? localStorage.getItem("ff_authedStaffId_v1") : "") || "",
+    ).trim();
+    const me = schedulePreviewState.staffList.find((s) => getScheduleStaffKey(s) === sid);
+    if (me) {
+      schedulePreviewView = isTechnicianScheduleStaff(me) ? "technicians" : "management";
+      renderScheduleViewTabs();
+      renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
+    }
+  }
 }
 
 function bindScheduleUi() {

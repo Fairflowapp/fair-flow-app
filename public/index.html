@@ -10673,6 +10673,58 @@ function collectCoverageRulesFromUiPrefix(attrPrefix) {
     : result;
 }
 
+function ffApplySpecialDayNoteButtonStyle(btn, hasText) {
+  if (!btn) return;
+  if (hasText) {
+    btn.style.borderColor = '#7c3aed';
+    btn.style.background = '#f5f3ff';
+    btn.style.color = '#5b21b6';
+    btn.title = 'Schedule note (shown on Schedule board) — click to edit';
+  } else {
+    btn.style.borderColor = '#e5e7eb';
+    btn.style.background = '#fff';
+    btn.style.color = '#9ca3af';
+    btn.title = 'Add schedule note for this day (shown on Schedule board under coverage line)';
+  }
+}
+
+window.ffOpenSpecialDayNoteModal = function(dateKey, attrPrefix, containerId) {
+  var box = document.getElementById(containerId);
+  var row = box && box.querySelector('[data-' + attrPrefix + '-special-day="' + dateKey + '"]');
+  var hidden = row && row.querySelector('[data-' + attrPrefix + '-special-note="' + dateKey + '"]');
+  var btn = row && row.querySelector('[data-' + attrPrefix + '-special-note-btn="' + dateKey + '"]');
+  var backdrop = document.getElementById('ffSpecialDayNoteModalBackdrop');
+  if (!backdrop) {
+    backdrop = document.createElement('div');
+    backdrop.id = 'ffSpecialDayNoteModalBackdrop';
+    backdrop.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:400000;align-items:center;justify-content:center;padding:16px;';
+    backdrop.innerHTML = '<div role="dialog" aria-modal="true" style="background:#fff;border-radius:16px;padding:20px 22px;max-width:420px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">' +
+      '<div style="font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;">Schedule note</div>' +
+      '<div style="font-size:12px;color:#6b7280;margin-bottom:12px;line-height:1.45;">Shown on the Schedule board under that day (below coverage warnings), for the week that includes this date.</div>' +
+      '<textarea id="ffSpecialDayNoteTextarea" rows="4" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;resize:vertical;font-family:inherit;" placeholder="e.g. Closing early this day — consider extra coverage"></textarea>' +
+      '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;">' +
+      '<button type="button" id="ffSpecialDayNoteCancel" style="padding:8px 16px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;">Cancel</button>' +
+      '<button type="button" id="ffSpecialDayNoteSave" style="padding:8px 16px;border:none;border-radius:10px;background:#7c3aed;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">Save</button>' +
+      '</div></div>';
+    document.body.appendChild(backdrop);
+    backdrop.addEventListener('click', function(e) { if (e.target === backdrop) { backdrop.style.display = 'none'; } });
+  }
+  var ta = document.getElementById('ffSpecialDayNoteTextarea');
+  if (ta) ta.value = hidden ? (hidden.value || '') : '';
+  backdrop.style.display = 'flex';
+  var close = function() { backdrop.style.display = 'none'; };
+  var save = function() {
+    var v = ta ? String(ta.value || '').trim() : '';
+    if (hidden) hidden.value = v;
+    ffApplySpecialDayNoteButtonStyle(btn, !!v);
+    close();
+  };
+  var cancelBtn = document.getElementById('ffSpecialDayNoteCancel');
+  var saveBtn = document.getElementById('ffSpecialDayNoteSave');
+  if (cancelBtn) cancelBtn.onclick = close;
+  if (saveBtn) saveBtn.onclick = save;
+};
+
 function renderSpecialBusinessDaysInto(containerId, specialBusinessDaysValue, attrPrefix) {
   const box = document.getElementById(containerId);
   if (!box) return;
@@ -10686,8 +10738,11 @@ function renderSpecialBusinessDaysInto(containerId, specialBusinessDaysValue, at
     return;
   }
 
-  box.innerHTML = entries.map(([dateKey, entry]) => `
-    <div data-${attrPrefix}-special-day="${dateKey}" style="display:grid;grid-template-columns:minmax(110px,120px) 86px minmax(0,1fr) minmax(0,1fr) 44px;gap:8px;align-items:center;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;max-width:100%;box-sizing:border-box;">
+  box.innerHTML = entries.map(([dateKey, entry]) => {
+    var noteVal = (entry && entry.note) ? String(entry.note) : '';
+    var hasNote = !!noteVal.trim();
+    return `
+    <div data-${attrPrefix}-special-day="${dateKey}" style="display:grid;grid-template-columns:minmax(110px,120px) 86px minmax(0,1fr) minmax(0,1fr) 40px 44px;gap:8px;align-items:center;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;max-width:100%;box-sizing:border-box;">
       <input type="date" data-${attrPrefix}-special-date="${dateKey}" value="${dateKey}" style="width:100%;min-width:0;height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;box-sizing:border-box;">
       <label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#374151;cursor:pointer;min-width:0;white-space:nowrap;">
         <input type="checkbox" data-${attrPrefix}-special-closed="${dateKey}" ${entry.isClosed ? 'checked' : ''} style="width:14px;height:14px;accent-color:#7c3aed;cursor:pointer;">
@@ -10695,9 +10750,12 @@ function renderSpecialBusinessDaysInto(containerId, specialBusinessDaysValue, at
       </label>
       <input type="time" data-${attrPrefix}-special-open="${dateKey}" value="${entry.openTime || ''}" ${entry.isClosed ? 'disabled' : ''} style="width:100%;min-width:0;height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
       <input type="time" data-${attrPrefix}-special-close="${dateKey}" value="${entry.closeTime || ''}" ${entry.isClosed ? 'disabled' : ''} style="width:100%;min-width:0;height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
+      <input type="hidden" data-${attrPrefix}-special-note="${dateKey}" value="${escapeHtmlAttr(noteVal)}">
+      <button type="button" data-${attrPrefix}-special-note-btn="${dateKey}" class="ff-special-day-note-btn" style="width:36px;height:32px;border:1px solid ${hasNote ? '#7c3aed' : '#e5e7eb'};border-radius:8px;background:${hasNote ? '#f5f3ff' : '#fff'};color:${hasNote ? '#5b21b6' : '#9ca3af'};font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;" title="${hasNote ? 'Edit schedule note' : 'Add schedule note (shown on Schedule board)'}">*</button>
       <button type="button" title="Remove special day" aria-label="Remove special day" data-${attrPrefix}-special-remove="${dateKey}" style="width:36px;height:32px;border:1px solid #fecaca;border-radius:8px;background:#fff;color:#b91c1c;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;">🗑</button>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   box.querySelectorAll(`[data-${attrPrefix}-special-closed]`).forEach((checkbox) => {
     checkbox.addEventListener('change', () => {
@@ -10717,6 +10775,16 @@ function renderSpecialBusinessDaysInto(containerId, specialBusinessDaysValue, at
         : collectSpecialBusinessDaysFromUiPrefix(attrPrefix);
       delete next[dateKey];
       renderSpecialBusinessDaysInto(containerId, next, attrPrefix);
+    });
+  });
+
+  box.querySelectorAll(`[data-${attrPrefix}-special-note-btn]`).forEach((noteBtn) => {
+    noteBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const dk = noteBtn.getAttribute(`data-${attrPrefix}-special-note-btn`);
+      if (dk && typeof window.ffOpenSpecialDayNoteModal === 'function') {
+        window.ffOpenSpecialDayNoteModal(dk, attrPrefix, containerId);
+      }
     });
   });
 }
@@ -20752,6 +20820,7 @@ function initializeAppsPanel() {
     appsOverlayBackdrop.style.display = 'block';
     appsPanel.style.display = 'flex';
     lockBodyScroll();
+    if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
     if (typeof window.ensureTrainingItemsSubscription === 'function') {
       window.ensureTrainingItemsSubscription().catch((err) => {
         console.warn('[Training] Failed refreshing items from apps panel', err);
@@ -20910,6 +20979,8 @@ function initializeAppsPanel() {
       };
     }
   });
+  
+  if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
   
   /* SANITY TEST CHECKLIST:
    * ✓ open/close works (X/backdrop/ESC)
@@ -22144,6 +22215,64 @@ function initializeAppsPanel() {
   
   // Edit mode state
   let isEditingStaffDetails = false;
+
+  /**
+   * Schedule board access for the signed-in staff member (Staff → Permissions).
+   * If no schedule_* flags are set, falls back to legacy owner/admin/manager behavior.
+   */
+  function ffGetSchedulePermissionContext() {
+    /** Full access only when salon owner/admin account — avoids locking out the business account. Staff must have at least one Schedule toggle on. */
+    function scheduleAccountOverrideFullAccess() {
+      if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+      var r = String(window.__ff_user_role || '').toLowerCase();
+      return r === 'owner' || r === 'admin';
+    }
+    const staffId = String(window.__ff_authedStaffId || (function () { try { return localStorage.getItem('ff_authedStaffId_v1'); } catch (e) { return ''; } })() || '').trim();
+    let staff = null;
+    if (typeof ffGetStaffStore === 'function') {
+      try {
+        const st = ffGetStaffStore();
+        staff = (st.staff || []).find(function (s) { return s && String(s.id) === staffId; }) || null;
+      } catch (e) { /* ignore */ }
+    }
+    var p = (staff && staff.permissions) ? staff.permissions : {};
+    var anySchedule = p.schedule_edit === true || p.schedule_view_all === true || p.schedule_view_own === true;
+    if (!anySchedule) {
+      if (scheduleAccountOverrideFullAccess()) {
+        return { canEdit: true, viewAll: true, viewOwnOnly: false, readOnly: false, noAccess: false };
+      }
+      return { canEdit: false, viewAll: false, viewOwnOnly: false, readOnly: true, noAccess: true };
+    }
+    if (p.schedule_edit === true) {
+      return { canEdit: true, viewAll: true, viewOwnOnly: false, readOnly: false, noAccess: false };
+    }
+    if (p.schedule_view_all === true) {
+      return { canEdit: false, viewAll: true, viewOwnOnly: false, readOnly: true, noAccess: false };
+    }
+    if (p.schedule_view_own === true) {
+      return { canEdit: false, viewAll: false, viewOwnOnly: true, readOnly: true, noAccess: false };
+    }
+    return { canEdit: false, viewAll: false, viewOwnOnly: false, readOnly: true, noAccess: true };
+  }
+  window.ffGetSchedulePermissionContext = ffGetSchedulePermissionContext;
+
+  function ffUpdateScheduleAppVisibility() {
+    var item = document.querySelector('.apps-panel-item[data-app="schedule"]');
+    if (!item) return;
+    var ctx = ffGetSchedulePermissionContext();
+    if (ctx.noAccess) {
+      item.style.opacity = '0.42';
+      item.style.cursor = 'not-allowed';
+      item.setAttribute('data-schedule-blocked', '1');
+      item.title = 'No permission to open Schedule';
+    } else {
+      item.style.opacity = '';
+      item.style.cursor = 'pointer';
+      item.removeAttribute('data-schedule-blocked');
+      item.title = '';
+    }
+  }
+  window.ffUpdateScheduleAppVisibility = ffUpdateScheduleAppVisibility;
   
   // Render permission toggle row
   function renderPermissionToggleRow(permissionKey, label, description, value) {
@@ -22219,6 +22348,14 @@ function initializeAppsPanel() {
           { key: 'tasks_view', label: 'View tasks', desc: 'View task lists and schedules' },
           { key: 'tasks_use', label: 'Use tasks', desc: 'Select, complete, and work with tasks' },
           { key: 'tasks_manage', label: 'Manage tasks (templates)', desc: 'Edit task templates and schedules' }
+        ]
+      },
+      {
+        title: 'Schedule',
+        permissions: [
+          { key: 'schedule_edit', label: 'Edit schedule', desc: 'Add shifts, mark days OFF, drag shifts, and change hours on the team schedule board.' },
+          { key: 'schedule_view_all', label: 'View all schedules (read-only)', desc: 'See everyone’s shifts without editing. Use when “Edit schedule” is off.' },
+          { key: 'schedule_view_own', label: 'View own schedule only', desc: 'See only your own row on the board (read-only). Narrowest access.' }
         ]
       },
       {
@@ -22302,6 +22439,7 @@ function initializeAppsPanel() {
         staff.permissions = staffStore.staff[staffIndex].permissions;
         
         console.log('[renderPermissionsTab] Saved permissions for staff:', staff.id);
+        if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
       };
     });
   }
@@ -33534,8 +33672,8 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-helpers.js?v=20260403_reception_split"></script>
   <script type="module" src="/schedule-availability.js?v=20260403_reception_split"></script>
   <script type="module" src="/schedule-generator.js?v=20260403_mgmt_only_split"></script>
-  <script type="module" src="/schedule-validator.js?v=20260403_avail_business_bounds"></script>
-  <script type="module" src="/schedule-ui.js?v=20260402_nav_close_staff"></script>
+  <script type="module" src="/schedule-validator.js?v=20260406_manual_admin_shift"></script>
+  <script type="module" src="/schedule-ui.js?v=20260414_schedule_permissions"></script>
   <script type="module" src="/inbox.js?v=20260402_nav_close_staff"></script>
   <script type="module" src="/chat.js?v=20260402_nav_close_staff"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
@@ -34318,7 +34456,7 @@ function hookSettingsGuard_DISABLED(){
         <input type="date" id="scheduleCustomWeekDate" style="display:none;height:38px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;outline:none;">
         <button type="button" id="scheduleApplyCustomWeekBtn" class="btn-pill" style="display:none;background:#7c3aed;color:#fff;border-color:#7c3aed;font-size:13px;padding:8px 14px;">Apply</button>
       </div>
-      <div style="display:flex;align-items:center;gap:0;">
+      <div id="scheduleViewToggleWrap" style="display:flex;align-items:center;gap:0;">
         <button type="button" id="scheduleViewManagementBtn" aria-pressed="true" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('management')" class="inbox-view-btn active" style="padding:10px 18px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#7c3aed;color:#fff;cursor:pointer;">Management</button>
         <button type="button" id="scheduleViewTechniciansBtn" aria-pressed="false" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('technicians')" class="inbox-view-btn" style="padding:10px 18px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#f9fafb;color:#6b7280;cursor:pointer;">Technicians</button>
       </div>

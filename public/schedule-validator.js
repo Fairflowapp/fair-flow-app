@@ -73,6 +73,8 @@ function countManagementLine(assignments) {
  * Otherwise: compare to effective availability window.
  */
 function assignmentViolatesAvailability(assignment, availability, businessStatus) {
+  if (assignment?.manualAdminEdit === true) return false;
+
   if (!availability?.isAvailable) return true;
 
   const aS = parseScheduleTimeToMinutes(assignment?.startTime);
