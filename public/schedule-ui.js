@@ -924,6 +924,9 @@ function hideScheduleScreen() {
 }
 
 export async function goToSchedule() {
+  if (typeof window.closeStaffMembersModal === "function") {
+    window.closeStaffMembersModal();
+  }
   const screenIdsToHide = [
     "tasksScreen",
     "inboxScreen",

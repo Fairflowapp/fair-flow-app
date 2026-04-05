@@ -56,6 +56,7 @@ const BUILTIN_TYPES = [
   { id: 'supplies', icon: '📦', label: 'Supplies', description: 'Request supplies or materials', category: 'operations' },
   { id: 'maintenance', icon: '🔧', label: 'Maintenance', description: 'Report maintenance issue', category: 'operations' },
   { id: 'client_issue', icon: '👤', label: 'Client Issue', description: 'Report or discuss a client-related matter', category: 'operations' },
+  { id: 'staff_birthday_reminder', icon: '🎂', label: 'Staff birthday reminder', description: 'Automated — upcoming staff birthday (management only)', category: 'operations' },
   // Documents
   { id: 'document_request', icon: '📄', label: 'Request a Document', description: 'Request a document from management (1099, employment letter, contract, etc.)', category: 'documents' },
   { id: 'document_upload', icon: '📤', label: 'Upload a Document', description: 'Upload a document to the business (license, insurance, certification)', category: 'documents' },
@@ -70,6 +71,11 @@ let currentInboxTab = 'open';
 let inboxViewMode = 'to_handle'; // 'mine' | 'to_handle' — only for admin/manager
 let inboxUnsubscribe = null;
 let currentUserProfile = null;
+
+function inboxUserRoleLc() {
+  return String((currentUserProfile && currentUserProfile.role) || "").toLowerCase();
+}
+
 let currentRequests = [];
 let customRequestTypes = [];
 let inboxStaffFilterUid = '';
@@ -147,6 +153,11 @@ function getCreateRequestSelectedRecipients() {
 // =====================
 export function goToInbox() {
   console.log('[Inbox] Opening inbox');
+
+  // Staff Members modal uses z-index above main screens — close it so the Inbox view is actually visible
+  if (typeof window.closeStaffMembersModal === 'function') {
+    window.closeStaffMembersModal();
+  }
   
   const tasksScreen = document.getElementById('tasksScreen');
   const ownerView = document.getElementById('owner-view');
@@ -241,8 +252,12 @@ function getAllRequestTypes() {
     category: 'custom',
     fields: Array.isArray(t.fields) ? t.fields : []
   }));
-  const withoutOther = BUILTIN_TYPES.filter(t => t.category !== 'other' && !hidden.has(t.id));
-  const otherOnly = BUILTIN_TYPES.filter(t => t.category === 'other' && !hidden.has(t.id));
+  const withoutOther = BUILTIN_TYPES.filter(
+    (t) => t.category !== 'other' && !hidden.has(t.id) && t.id !== 'staff_birthday_reminder'
+  );
+  const otherOnly = BUILTIN_TYPES.filter(
+    (t) => t.category === 'other' && !hidden.has(t.id) && t.id !== 'staff_birthday_reminder'
+  );
   const customVisible = custom.filter(t => !hidden.has(t.id));
   return [...withoutOther, ...customVisible, ...otherOnly];
 }
@@ -285,6 +300,16 @@ async function loadCurrentUserProfile() {
         }
         setDoc(doc(db, `salons/${currentUserProfile.salonId}/members`, user.uid), memberData, { merge: true })
           .catch(e => console.warn('[Inbox] Could not write member doc', e.message));
+        // Birthday Inbox items depend on members + settings; run after directory row exists.
+        setTimeout(() => {
+          try {
+            if (typeof window.ffRunBirthdayChatRemindersSoon === 'function') {
+              window.ffRunBirthdayChatRemindersSoon();
+            }
+          } catch (e) {
+            console.warn('[Inbox] ffRunBirthdayChatRemindersSoon', e);
+          }
+        }, 600);
       }
       return currentUserProfile;
     }
@@ -297,7 +322,7 @@ async function loadCurrentUserProfile() {
 function setupInboxUI() {
   if (!currentUserProfile) return;
 
-  const role = currentUserProfile.role || '';
+  const role = inboxUserRoleLc();
 
   // "New Request" buttons — show for technician, manager, admin, owner
   const contentNewBtn  = document.querySelector('#inboxContentContainer button[onclick="openCreateRequestModal()"]');
@@ -379,7 +404,7 @@ function setupInboxUI() {
 // View Mode (My Requests | To handle) — called from HTML onclick
 // =====================
 window.setInboxViewMode = function(mode) {
-  if (!currentUserProfile || ['technician'].includes(currentUserProfile.role || '')) return;
+  if (!currentUserProfile || inboxUserRoleLc() === "technician") return;
   inboxViewMode = mode;
   document.querySelectorAll('.inbox-view-btn').forEach(b => {
     b.classList.toggle('active', (b.dataset.inboxView || '') === mode);
@@ -423,7 +448,7 @@ async function loadInboxItems() {
   if (!currentUserProfile) return;
   
   const salonId = currentUserProfile.salonId;
-  const role = currentUserProfile.role || '';
+  const role = inboxUserRoleLc();
   const uid = currentUserProfile.uid;
 
   console.log('[Inbox] loadInboxItems', { salonId, role, uid });
@@ -575,8 +600,8 @@ async function loadInboxItems() {
 /** Update red badges: Open tab + INBOX nav button */
 /** Update unread badges on tabs and nav INBOX button. */
 function updateInboxBadges() {
-  const role = (currentUserProfile && currentUserProfile.role) || '';
-  const isManager = ['manager', 'admin', 'owner'].includes(role);
+  const role = inboxUserRoleLc();
+  const isManager = ["manager", "admin", "owner"].includes(role);
   if (!isManager) return;
 
   const uid = currentUserProfile.uid;
@@ -611,8 +636,8 @@ function updateInboxStaffFilterOptions() {
   const labelEl = document.getElementById('inboxStaffFilterLabel');
   const panel = document.getElementById('inboxStaffFilterPanel');
   if (!trigger || !labelEl || !panel) return;
-  const role = (currentUserProfile && currentUserProfile.role) || '';
-  if (role === 'technician') return;
+  const role = inboxUserRoleLc();
+  if (role === "technician") return;
 
   const seen = new Map();
   currentRequests.forEach(req => {
@@ -652,9 +677,9 @@ function renderInboxList() {
 
   // Title by role and view: technician = "My Requests"; manager "mine" = "My Requests", "to_handle" = "To handle"
   const listTitle = document.getElementById('inboxListTitle');
-  const role = (currentUserProfile && currentUserProfile.role) || '';
+  const role = inboxUserRoleLc();
   if (listTitle) {
-    if (role === 'technician') listTitle.textContent = 'My Requests';
+    if (role === "technician") listTitle.textContent = "My Requests";
     else listTitle.textContent = inboxViewMode === 'mine' ? 'My Requests' : 'To handle';
   }
 
@@ -695,7 +720,7 @@ function renderInboxList() {
   if (emptyEl) emptyEl.style.display = 'none';
   if (loadingEl) loadingEl.style.display = 'none';
 
-  const isManager = currentUserProfile && ['manager','admin','owner'].includes(currentUserProfile.role);
+  const isManager = currentUserProfile && ["manager", "admin", "owner"].includes(inboxUserRoleLc());
 
   // Group requests by type (use filtered list)
   const groups = {};
@@ -709,7 +734,7 @@ function renderInboxList() {
   const typeOrder = [
     'vacation','late_start','early_leave','schedule_change','extra_shift','swap_shift','break_change',
     'commission_review','tip_adjustment','payment_issue',
-    'supplies','maintenance','client_issue',
+    'supplies','maintenance','client_issue','staff_birthday_reminder',
     'document_request','document_upload',
     'other'
   ];
@@ -797,7 +822,9 @@ function createRequestCard(request) {
           ${request.priority === 'urgent' ? '<span style="color:#ef4444;font-size:12px;">🔥 Urgent</span>' : ''}
         </div>
         <div style="font-size:13px;color:#6b7280;margin-bottom:8px;">
-          ${request.forStaffName} • ${dateStr}
+          ${request.type === 'staff_birthday_reminder' && request.data?.subjectStaffName
+            ? escapeHtml(request.data.subjectStaffName) + ' • ' + dateStr
+            : `${request.forStaffName} • ${dateStr}`}
         </div>
         <div style="font-size:13px;color:#374151;">
           ${getRequestSummary(request)}
@@ -812,7 +839,9 @@ function createRequestCard(request) {
 function getRequestTypeInfo(type) {
   const all = getAllRequestTypes();
   const found = all.find(t => t.id === type);
-  return found || { icon: '📝', label: type || 'Request', description: '', fields: [] };
+  if (found) return found;
+  const builtinOnly = BUILTIN_TYPES.find(t => t.id === type);
+  return builtinOnly || { icon: '📝', label: type || 'Request', description: '', fields: [] };
 }
 
 function escapeHtml(s) {
@@ -943,6 +972,8 @@ function getRequestSummary(request) {
       return `${itemCount} item${itemCount !== 1 ? 's' : ''} - ${data.urgency || 'routine'}`;
     case 'maintenance':
       return `${data.area || 'Unknown area'} - ${data.severity || 'minor'} issue`;
+    case 'staff_birthday_reminder':
+      return data.details || `${data.subjectStaffName || 'Staff'} · ${data.birthdayDisplay || ''}`;
     case 'document_request':
       return `${data.documentType || 'Document'} – ${(data.reason || '').substring(0, 40)}`;
     case 'document_upload':
@@ -1085,7 +1116,7 @@ window.toggleRequestCategory = function(cat) {
 // Inbox Settings Modal (admin/owner only) — custom request types
 // =====================
 window.openInboxSettingsModal = function() {
-  if (!currentUserProfile?.salonId || !['admin', 'owner'].includes(currentUserProfile.role)) return;
+  if (!currentUserProfile?.salonId || !["admin", "owner"].includes(inboxUserRoleLc())) return;
   const modal = document.createElement('div');
   modal.id = 'inboxSettingsModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:999999;padding:20px;';
@@ -2086,7 +2117,7 @@ function showRequestDetails(requestId) {
   console.log('[Inbox] Showing request details', requestId);
 
   // Mark as read only if the current user IS the recipient (forUid), not the sender
-  const isManagerRole = currentUserProfile && ['manager', 'admin', 'owner'].includes(currentUserProfile.role);
+  const isManagerRole = currentUserProfile && ["manager", "admin", "owner"].includes(inboxUserRoleLc());
   const isRecipientViewing = isManagerRole && request.forUid === currentUserProfile.uid;
   if (isRecipientViewing && request.unreadForManagers === true && currentUserProfile.salonId) {
     // Optimistic: update local state immediately
@@ -2129,24 +2160,29 @@ function showRequestDetails(requestId) {
   const typeInfo = getRequestTypeInfo(request.type);
   const statusClass = `inbox-status-${request.status.replace('_', '-')}`;
   const createdDate = request.createdAt?.toDate ? request.createdAt.toDate() : new Date();
+  const rd = request.data || {};
   
   // Role checks
-  const isManager = currentUserProfile && ['manager', 'admin', 'owner'].includes(currentUserProfile.role);
-  const isTechnician = currentUserProfile && currentUserProfile.role === 'technician';
+  const isManager = currentUserProfile && ["manager", "admin", "owner"].includes(inboxUserRoleLc());
+  const isTechnician = currentUserProfile && inboxUserRoleLc() === "technician";
   const isMyRequest = currentUserProfile && request.forUid === currentUserProfile.uid;
   
-  let detailsHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-      <div style="display:flex;align-items:center;gap:12px;">
-        <span style="font-size:28px;">${typeInfo.icon}</span>
-        <div>
-          <h2 style="margin:0;font-size:18px;font-weight:600;">${typeInfo.label}</h2>
-          <span class="inbox-status-badge ${statusClass}">${request.status.replace('_', ' ')}</span>
+  const birthdayMeta =
+    request.type === 'staff_birthday_reminder'
+      ? `
+    <div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:20px;">
+      <div style="font-size:13px;color:#374151;line-height:1.55;">
+        <div style="font-weight:600;margin-bottom:6px;color:#111;">Automated salon reminder</div>
+        <p style="margin:0 0 12px;color:#6b7280;font-size:12px;">The employee is not notified. Visible to management only.</p>
+        <div style="display:grid;gap:8px;font-size:13px;">
+          <div><span style="color:#6b7280;">Staff member:</span> <strong>${escapeHtml(rd.subjectStaffName || '')}</strong></div>
+          <div><span style="color:#6b7280;">Birthday:</span> ${escapeHtml(rd.birthdayDisplay || '')}</div>
+          <div><span style="color:#6b7280;">When:</span> ${rd.daysUntil === 0 ? 'Today' : `In ${Number(rd.daysUntil) || 0} day(s)`}</div>
+          <div><span style="color:#6b7280;">Logged:</span> ${createdDate.toLocaleString()}</div>
         </div>
       </div>
-      <button onclick="closeRequestDetailsModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#9ca3af;">&times;</button>
-    </div>
-    
+    </div>`
+      : `
     <div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:20px;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
         <div>
@@ -2164,10 +2200,24 @@ function showRequestDetails(requestId) {
         <div style="font-weight:500;">${escapeHtml(request.sentToNames.join(', '))}</div>
       </div>
       ` : ''}
+    </div>`;
+  
+  let detailsHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:28px;">${typeInfo.icon}</span>
+        <div>
+          <h2 style="margin:0;font-size:18px;font-weight:600;">${typeInfo.label}</h2>
+          <span class="inbox-status-badge ${statusClass}">${request.status.replace('_', ' ')}</span>
+        </div>
+      </div>
+      <button onclick="closeRequestDetailsModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#9ca3af;">&times;</button>
     </div>
     
+    ${birthdayMeta}
+    
     <div style="margin-bottom:20px;">
-      <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Request Details</h3>
+      <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">${request.type === 'staff_birthday_reminder' ? 'Summary' : 'Request Details'}</h3>
       ${renderRequestData(request)}
     </div>
     
@@ -2201,7 +2251,15 @@ function showRequestDetails(requestId) {
   
   // Manager actions — only for the RECIPIENT (who the request was sent TO), not the creator
   const isRecipient = currentUserProfile && request.forUid === currentUserProfile.uid;
-  if (isManager && isRecipient && request.status === 'open') {
+  if (isManager && isRecipient && request.status === 'open' && request.type === 'staff_birthday_reminder') {
+    detailsHTML += `
+      <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
+        <button type="button" onclick="markBirthdayReminderDone('${requestId}')" style="width:100%;padding:12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
+          ✓ Mark done &amp; archive
+        </button>
+      </div>
+    `;
+  } else if (isManager && isRecipient && request.status === 'open') {
     const isDocRequest = request.type === 'document_request';
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
@@ -2451,6 +2509,13 @@ function renderRequestData(request) {
           ${data.fileUrl ? `<div><span style="color:#6b7280;">Uploaded file:</span> <a href="${escapeHtml(data.fileUrl)}" target="_blank" rel="noopener" style="color:#2563eb;">${escapeHtml(data.fileName || 'Download')}</a></div>` : ''}
         </div>
       `;
+
+    case 'staff_birthday_reminder':
+      return `
+        <div style="font-size:13px;line-height:1.5;color:#374151;">
+          ${data.details ? `<div style="padding:10px;background:#f9fafb;border-radius:8px;">${escapeHtml(data.details)}</div>` : '<div style="color:#9ca3af;">—</div>'}
+        </div>
+      `;
       
     default:
       if (data.details) {
@@ -2565,6 +2630,28 @@ window.uploadDocumentResponse = async function(requestId) {
   } catch (err) {
     console.error('[Inbox] uploadDocumentResponse error', err);
     showToast('Upload failed: ' + err.message, 'error');
+  }
+};
+
+window.markBirthdayReminderDone = async function(requestId) {
+  closeRequestDetailsModal();
+  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  renderInboxList();
+  try {
+    const salonId = currentUserProfile.salonId;
+    await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
+      status: 'archived',
+      decidedBy: currentUserProfile.uid,
+      decidedAt: serverTimestamp(),
+      lastActivityAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      unreadForManagers: false
+    });
+    showToast('Moved to Archive', 'success');
+  } catch (error) {
+    console.error('[Inbox] markBirthdayReminderDone error', error);
+    showToast(`Error: ${error.message}`, 'error');
+    loadInboxItems();
   }
 };
 

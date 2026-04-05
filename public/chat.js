@@ -93,6 +93,9 @@ function renderChatHeaderForRole(role) {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 async function goToChat() {
+  if (typeof window.closeStaffMembersModal === 'function') {
+    window.closeStaffMembersModal();
+  }
   ['tasksScreen','inboxScreen','owner-view'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';

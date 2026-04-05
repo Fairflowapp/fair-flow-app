@@ -30,8 +30,17 @@ let ticketFormAsIsMode = false;
 let _justClosedTicketId = null;
 /** Cache for member avatars (uid/staffId -> { avatarUrl, avatarUpdatedAtMs }) for ticket list. */
 let _ticketsMembersAvatarCache = null;
+/** Secondary lookup by normalized display name (when older tickets lack technicianStaffId). */
+let _ticketsMembersAvatarByName = null;
+
+function normalizeTicketTechName(name) {
+  if (!name || typeof name !== 'string') return '';
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
 /** Ticket IDs opened this session (so badge count drops immediately without waiting for Firestore). */
 let _ticketsOpenedThisSession = new Set();
+/** After subscribeTickets, hide list until first Firestore snapshot (avoids empty→full flicker). */
+let _ticketsListSnapshotReady = false;
 
 // =====================
 // User Profile
@@ -64,6 +73,7 @@ async function loadTicketsMembersForAvatars() {
   try {
     const snap = await getDocs(collection(db, `salons/${salonId}/members`));
     const byKey = {};
+    const byName = {};
     snap.docs.forEach(d => {
       const u = d.data() || {};
       const uid = d.id;
@@ -71,14 +81,19 @@ async function loadTicketsMembersForAvatars() {
       const avatarUrl = u.avatarUrl || null;
       const avatarUpdatedAtMs = u.avatarUpdatedAtMs != null ? u.avatarUpdatedAtMs : null;
       if (avatarUrl) {
-        byKey[uid] = { avatarUrl, avatarUpdatedAtMs };
-        if (staffId) byKey[staffId] = { avatarUrl, avatarUpdatedAtMs };
+        const entry = { avatarUrl, avatarUpdatedAtMs };
+        byKey[uid] = entry;
+        if (staffId) byKey[staffId] = entry;
+        const nk = normalizeTicketTechName(u.name || '');
+        if (nk && !byName[nk]) byName[nk] = entry;
       }
     });
     _ticketsMembersAvatarCache = byKey;
+    _ticketsMembersAvatarByName = byName;
   } catch (e) {
     console.warn('[Tickets] loadTicketsMembersForAvatars failed', e);
     _ticketsMembersAvatarCache = {};
+    _ticketsMembersAvatarByName = {};
   }
 }
 
@@ -100,10 +115,18 @@ function getTicketTechnicianAvatarUrl(t) {
       (currentUserProfile.name && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.name).toLowerCase()))
     ));
   if (isCreator && typeof window.ffGetCurrentUserAvatarUrl === 'function') {
-    return window.ffGetCurrentUserAvatarUrl();
+    const mine = window.ffGetCurrentUserAvatarUrl();
+    if (mine) return mine;
   }
-  if (!_ticketsMembersAvatarCache || !t.technicianStaffId) return null;
-  const entry = _ticketsMembersAvatarCache[t.technicianStaffId];
+  if (!_ticketsMembersAvatarCache) return null;
+  let entry = null;
+  if (t.technicianStaffId) {
+    entry = _ticketsMembersAvatarCache[t.technicianStaffId];
+  }
+  if ((!entry || !entry.avatarUrl) && _ticketsMembersAvatarByName) {
+    const nk = normalizeTicketTechName(t.technicianName || '');
+    if (nk) entry = _ticketsMembersAvatarByName[nk] || entry;
+  }
   if (!entry || !entry.avatarUrl) return null;
   const v = entry.avatarUpdatedAtMs != null ? String(entry.avatarUpdatedAtMs) : '';
   const sep = entry.avatarUrl.includes('?') ? '&' : '?';
@@ -332,16 +355,26 @@ function canSeeTicket(ticket) {
 // =====================
 // Tickets CRUD
 // =====================
-function subscribeTickets() {
+function subscribeTickets(options) {
+  const resetLoading = !!(options && options.resetLoading);
   const salonId = currentUserProfile?.salonId
     || (typeof window !== 'undefined' && window.currentSalonId)
     || null;
   if (!salonId) {
     console.warn('[Tickets] No salonId. Retrying in 1s...');
-    setTimeout(subscribeTickets, 1000);
+    setTimeout(() => subscribeTickets(options), 1000);
     return;
   }
   if (ticketsUnsubscribe) ticketsUnsubscribe();
+  if (resetLoading) {
+    _ticketsListSnapshotReady = false;
+    const loadEl = document.getElementById('ticketsLoading');
+    const listEl = document.getElementById('ticketsList');
+    const emptyEl = document.getElementById('ticketsEmpty');
+    if (loadEl) loadEl.style.display = 'block';
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (listEl) listEl.innerHTML = '';
+  }
   const q = query(
     collection(db, `salons/${salonId}/tickets`),
     orderBy('createdAt', 'desc'),
@@ -349,6 +382,7 @@ function subscribeTickets() {
   );
   ticketsUnsubscribe = onSnapshot(q, (snap) => {
     currentTickets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _ticketsListSnapshotReady = true;
     if (editingTicketId) {
       const t = currentTickets.find(x => x.id === editingTicketId);
       const s = t ? (t.status || '').toUpperCase() : '';
@@ -362,7 +396,11 @@ function subscribeTickets() {
     }
     renderTicketsList();
     updateTicketsNavBadge();
-  }, (err) => console.error('[Tickets] subscribe error', err));
+  }, (err) => {
+    console.error('[Tickets] subscribe error', err);
+    _ticketsListSnapshotReady = true;
+    renderTicketsList();
+  });
 }
 
 /** Red dot + number on TICKETS nav for manager/admin. Counts Ready tickets not yet opened (Firestore seenByFrontDeskAt OR opened this session). */
@@ -524,7 +562,6 @@ if (typeof window !== 'undefined') {
   window.addEventListener('resize', () => {
     const gear = document.getElementById('ticketsManageServicesBtn');
     if (gear && gear.style.display !== 'none') _alignGearToAvatar();
-    _fitTicketsScreenToHeader();
   });
 }
 
@@ -628,11 +665,29 @@ function getInitial(name) {
   return (parts[0][0] || '?').toUpperCase();
 }
 
+/** After first real list paint, remove boot cover (profile + toolbar + snapshot ready). */
+function endTicketsBootCover() {
+  const screen = document.getElementById('ticketsScreen');
+  if (!screen || !screen.classList.contains('ff-tickets-boot')) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      screen.classList.remove('ff-tickets-boot');
+    });
+  });
+}
+
 function renderTicketsList() {
   const listEl = document.getElementById('ticketsList');
   const loadingEl = document.getElementById('ticketsLoading');
   const emptyEl = document.getElementById('ticketsEmpty');
   if (!listEl) return;
+
+  if (!_ticketsListSnapshotReady) {
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (emptyEl) emptyEl.style.display = 'none';
+    listEl.innerHTML = '';
+    return;
+  }
 
   const statusFilter = { ready: 'READY_FOR_CHECKOUT', closed: 'CLOSED', archived: 'ARCHIVED' }[currentTicketsTab] || 'READY_FOR_CHECKOUT';
   let toShow = currentTicketsTab === 'archived'
@@ -763,6 +818,8 @@ function renderTicketsList() {
       }
     };
   });
+
+  endTicketsBootCover();
 }
 
 function statusBg(s) {
@@ -1713,18 +1770,10 @@ async function saveServiceFromForm() {
 // =====================
 // Navigation
 // =====================
-/** Set ticketsScreen top = actual header height (works on Mac Retina + Windows) */
-function _fitTicketsScreenToHeader() {
-  const screen = document.getElementById('ticketsScreen');
-  if (!screen || screen.dataset.dynamicTop !== 'true') return;
-  const header = document.querySelector('.header');
-  if (header) {
-    const h = Math.ceil(header.getBoundingClientRect().height);
-    screen.style.top = h + 'px';
-  }
-}
-
 export function goToTickets() {
+  if (typeof window.closeStaffMembersModal === 'function') {
+    window.closeStaffMembersModal();
+  }
   const tasksScreen = document.getElementById('tasksScreen');
   const ownerView = document.getElementById('owner-view');
   const joinBar = document.querySelector('.joinBar');
@@ -1733,16 +1782,24 @@ export function goToTickets() {
   const wrap = document.querySelector('.wrap');
   const inboxScreen = document.getElementById('inboxScreen');
   const chatScreen = document.getElementById('chatScreen');
+  const mediaScreen = document.getElementById('mediaScreen');
+  const trainingScreen = document.getElementById('trainingScreen');
+  const scheduleScreen = document.getElementById('scheduleScreen');
   const ticketsScreen = document.getElementById('ticketsScreen');
 
-  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen].forEach(el => {
+  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen, trainingScreen, scheduleScreen].forEach(el => {
     if (el) el.style.display = 'none';
   });
   if (wrap) wrap.style.display = 'none';
 
+  const headerEl = document.querySelector('.header');
+  if (headerEl) {
+    document.documentElement.style.setProperty('--header-h', `${headerEl.offsetHeight}px`);
+  }
+
   if (ticketsScreen) {
     ticketsScreen.style.display = 'flex';
-    _fitTicketsScreenToHeader(); // adjust top to actual header height on any screen
+    ticketsScreen.classList.add('ff-tickets-boot');
   }
 
   // When any other nav button is clicked:
@@ -1776,10 +1833,8 @@ export function goToTickets() {
     await loadServiceCategories();
     await loadServices();
     await setupTicketsUI();
-    subscribeTickets(); // subscribe for all (needed to show ticket list)
-    renderTicketsList();
+    subscribeTickets({ resetLoading: true });
     loadTicketsMembersForAvatars().then(() => renderTicketsList());
-    // After profile loads, enforce badge visibility
     updateTicketsNavBadge();
   });
 }

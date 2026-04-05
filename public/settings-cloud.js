@@ -142,6 +142,14 @@ function subscribeMain(salonId) {
       ...(window.settings.preferences && typeof window.settings.preferences === 'object' ? window.settings.preferences : {}),
       weekStartsOn: normalizeWeekStartsOn(data.preferences?.weekStartsOn)
     };
+    if (data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, "salonTimeZone")) {
+      const st = data.preferences.salonTimeZone;
+      if (st != null && String(st).trim() !== "") {
+        nextPreferences.salonTimeZone = String(st).trim();
+      } else {
+        delete nextPreferences.salonTimeZone;
+      }
+    }
     if (JSON.stringify(window.settings.preferences || {}) !== JSON.stringify(nextPreferences)) {
       window.settings.preferences = nextPreferences;
       changed = true;
@@ -209,6 +217,11 @@ function subscribeMain(salonId) {
           ...(stored.preferences && typeof stored.preferences === 'object' ? stored.preferences : {}),
           weekStartsOn: nextPreferences.weekStartsOn
         };
+        if (nextPreferences.salonTimeZone) {
+          stored.preferences.salonTimeZone = nextPreferences.salonTimeZone;
+        } else {
+          delete stored.preferences.salonTimeZone;
+        }
         if (data.taskSettings?.taskReminders !== undefined) stored.taskReminders = data.taskSettings.taskReminders;
         if (data.taskSettings?.taskNotes !== undefined) stored.taskNotes = data.taskSettings.taskNotes;
         if (data.taskSettings?.showIncompleteTasksBadge !== undefined) stored.showIncompleteTasksBadge = data.taskSettings.showIncompleteTasksBadge;
@@ -241,15 +254,31 @@ function ffSaveAppSettings(brandName, brandPalette, managers, staffCallTemplates
     .catch((e) => console.warn("[SettingsCloud] save app settings failed", e));
 }
 
+function normalizeSalonTimeZone(value) {
+  const s = typeof value === "string" ? value.trim() : "";
+  if (!s) return "";
+  if (s === "Etc/UTC" || s === "UTC") return "Etc/UTC";
+  if (!/^[A-Za-z_]+\/[A-Za-z0-9_+\-]+$/.test(s)) return "";
+  return s;
+}
+
 function ffSavePreferencesSettings(preferences) {
   if (!_salonId) return;
   const nextPreferences = preferences && typeof preferences === "object" ? preferences : {};
-  setDoc(settingsMainRef(_salonId), {
-    preferences: {
-      weekStartsOn: normalizeWeekStartsOn(nextPreferences.weekStartsOn)
-    },
-    updatedAt: serverTimestamp()
-  }, { merge: true }).catch((e) => console.warn("[SettingsCloud] save preferences settings failed", e));
+  const wk = normalizeWeekStartsOn(nextPreferences.weekStartsOn);
+  const payload = {
+    updatedAt: serverTimestamp(),
+    "preferences.weekStartsOn": wk
+  };
+  if (Object.prototype.hasOwnProperty.call(nextPreferences, "salonTimeZone")) {
+    const tz = normalizeSalonTimeZone(nextPreferences.salonTimeZone);
+    if (tz) {
+      payload["preferences.salonTimeZone"] = tz;
+    } else {
+      payload["preferences.salonTimeZone"] = deleteField();
+    }
+  }
+  updateDoc(settingsMainRef(_salonId), payload).catch((e) => console.warn("[SettingsCloud] save preferences settings failed", e));
 }
 
 /**

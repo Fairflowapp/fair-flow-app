@@ -7,6 +7,7 @@
 <script>
   console.log('[BUILD MARKER] index.html loaded at', new Date().toISOString());
   window.goToChat = window.goToChat || function() {
+    if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
     ['tasksScreen','inboxScreen','mediaScreen','trainingScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     ['.joinBar','.wrap'].forEach(function(sel){var el=document.querySelector(sel);if(el)el.style.display='none';});
     var cs=document.getElementById('chatScreen');if(cs){cs.style.display='flex';cs.classList.remove('chat-mobile-open');}
@@ -28,6 +29,7 @@
     var fp=document.getElementById('chatSettingsFlowsPane');if(fp)fp.style.display=tab==='flows'?'flex':'none';
   };
   window.goToMedia = window.goToMedia || function() {
+    if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
     ['tasksScreen','inboxScreen','trainingScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     var chatScreen=document.getElementById('chatScreen');if(chatScreen)chatScreen.style.display='none';
     var joinBar=document.querySelector('.joinBar');if(joinBar)joinBar.style.display='none';
@@ -2042,10 +2044,22 @@ dialog footer button, .code-dialog footer button {
           </div>
         </div>
         
-        <!-- Notifications Card -->
+        <!-- Notifications Card (Birthday reminders settings live here; see ff-build-notifications-v2) -->
         <div id="userProfileCardNotifications" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 20px 0;font-size:18px;font-weight:600;color:#111827;">Notifications</h3>
           <div style="display:flex;flex-direction:column;gap:20px;">
+            <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+              <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:6px;">Birthday reminders (Inbox)</div>
+              <div style="font-size:11px;color:#6b7280;margin-bottom:10px;line-height:1.45;">Uses the salon date from Preferences → Salon timezone. Creates an Inbox item for each admin/manager (not the birthday person). Checks run while the app is open (about every 5 minutes). Set each employee birthday under Staff → Details.</div>
+              <div style="font-size:11px;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.5;"><strong>Who sees the reminder:</strong> Only <strong>managers / admins / owners</strong> — under <strong>Inbox → To handle → Open</strong>. The employee whose birthday it is does <strong>not</strong> get this Inbox row (same as vacation requests to management).</div>
+              <div style="font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.45;">Important: <strong>Days in advance</strong> must be <strong>≥</strong> days until that person’s next birthday (salon timezone). Example: birthday in 2 days → set at least <strong>2</strong>.</div>
+              <label for="userProfileBirthdayReminderDays" style="font-size:12px;font-weight:600;color:#374151;">Days in advance</label>
+              <input type="number" id="userProfileBirthdayReminderDays" min="0" max="90" step="1" style="display:block;width:120px;margin-top:6px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;" />
+              <button type="button" id="ffTestBirthdayInboxBtn" class="btn-mini" style="display:block;margin-top:10px;font-size:12px;padding:8px 12px;border-radius:8px;border:1px solid #7c3aed;background:#f5f3ff;color:#5b21b6;cursor:pointer;font-weight:600;">Send test Inbox item (birthday)</button>
+              <div style="font-size:10px;color:#9ca3af;margin-top:6px;">Creates one “Staff birthday reminder” row to <em>your</em> Inbox — confirms Firestore + Inbox work.</div>
+              <button type="button" id="ffClearBirthdaySentFlagsBtn" class="btn-mini" style="display:block;margin-top:12px;font-size:11px;padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;">Reset “already sent this year” on all staff (for testing)</button>
+              <div style="font-size:10px;color:#9ca3af;margin-top:4px;">Use if automated reminders stopped after earlier tests. Then open Inbox as manager or wait up to 5 minutes with the app open.</div>
+            </div>
             <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
               <div>
                 <div style="font-size:14px;font-weight:500;color:#111827;margin-bottom:4px;">Task reminders</div>
@@ -2105,6 +2119,46 @@ dialog footer button, .code-dialog footer button {
               <select id="userProfileDefaultScreen" style="width:100%;max-width:300px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
                 <option value="queue">Queue</option>
                 <option value="tasks">Tasks</option>
+              </select>
+            </div>
+            <div>
+              <label for="userProfileSalonTimeZone" style="display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px;">Salon timezone</label>
+              <div style="font-size:12px;color:#6b7280;margin-bottom:8px;line-height:1.45;">Calendar date for the business (birthday reminders, “today”). Auto uses this device’s timezone.</div>
+              <select id="userProfileSalonTimeZone" style="width:100%;max-width:420px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
+                <option value="">Auto (this device)</option>
+                <optgroup label="UTC">
+                  <option value="Etc/UTC">UTC</option>
+                </optgroup>
+                <optgroup label="Middle East &amp; Africa">
+                  <option value="Asia/Jerusalem">Asia/Jerusalem (Israel)</option>
+                  <option value="Asia/Beirut">Asia/Beirut</option>
+                  <option value="Asia/Dubai">Asia/Dubai</option>
+                  <option value="Asia/Riyadh">Asia/Riyadh</option>
+                  <option value="Africa/Cairo">Africa/Cairo</option>
+                  <option value="Africa/Johannesburg">Africa/Johannesburg</option>
+                </optgroup>
+                <optgroup label="Europe">
+                  <option value="Europe/London">Europe/London</option>
+                  <option value="Europe/Paris">Europe/Paris</option>
+                  <option value="Europe/Berlin">Europe/Berlin</option>
+                  <option value="Europe/Athens">Europe/Athens</option>
+                  <option value="Europe/Moscow">Europe/Moscow</option>
+                </optgroup>
+                <optgroup label="Americas">
+                  <option value="America/New_York">America/New_York (Eastern)</option>
+                  <option value="America/Chicago">America/Chicago (Central)</option>
+                  <option value="America/Denver">America/Denver (Mountain)</option>
+                  <option value="America/Los_Angeles">America/Los_Angeles (Pacific)</option>
+                  <option value="America/Sao_Paulo">America/São Paulo</option>
+                </optgroup>
+                <optgroup label="Asia &amp; Pacific">
+                  <option value="Asia/Tokyo">Asia/Tokyo</option>
+                  <option value="Asia/Shanghai">Asia/Shanghai</option>
+                  <option value="Asia/Singapore">Asia/Singapore</option>
+                  <option value="Asia/Hong_Kong">Asia/Hong Kong</option>
+                  <option value="Australia/Sydney">Australia/Sydney</option>
+                  <option value="Pacific/Auckland">Pacific/Auckland</option>
+                </optgroup>
               </select>
             </div>
             <div id="userProfileStaffCallTemplatesSection" style="display:none;border-top:1px solid var(--border);padding-top:24px;">
@@ -2917,7 +2971,8 @@ const DEFAULTS={
   specialBusinessDays:{},
 
   preferences:{
-    weekStartsOn:"monday"
+    weekStartsOn:"monday",
+    birthdayReminderDaysBefore:7
   },
 
   core:["#111827","#5b21b6","#7c3aed","#2563eb","#0ea5e9","#10b981","#84cc16","#f59e0b","#ef4444","#f472b6"],
@@ -10720,8 +10775,10 @@ window.ffSaveScheduleSettingsProfile = async function() {
     currentSettings.businessHours = settings.businessHours;
     currentSettings.coverageRules = settings.coverageRules;
     currentSettings.specialBusinessDays = settings.specialBusinessDays;
+    currentSettings.preferences = settings.preferences;
     localStorage.setItem('ffv24_settings', JSON.stringify(currentSettings));
   } catch (_) {}
+  if (typeof save === 'function') save();
   console.log('[Schedule Settings] Saving', {
     businessHours: settings.businessHours,
     coverageRules: settings.coverageRules,
@@ -20366,7 +20423,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260329_training_reminder_fix1');
+            const m = await import('/chat.js?v=20260402_nav_close_staff');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -22044,12 +22101,18 @@ function initializeAppsPanel() {
       });
     }
     
-    // Show/hide tab content
-    const detailsContent = document.getElementById('staffDetailsTabContent');
-    const scheduleContent = document.getElementById('staffScheduleTabContent');
-    const locationsContent = document.getElementById('staffLocationsTabContent');
-    const notificationsContent = document.getElementById('staffNotificationsTabContent');
-    const permissionsContent = document.getElementById('staffPermissionsTabContent');
+    // Show/hide tab content (scope to staff details container so we always target the modal panels)
+    const staffDetailsRoot = document.getElementById('staffDetailsContainer');
+    const panel = function(id) {
+      return staffDetailsRoot
+        ? staffDetailsRoot.querySelector('#' + id)
+        : document.getElementById(id);
+    };
+    const detailsContent = panel('staffDetailsTabContent');
+    const scheduleContent = panel('staffScheduleTabContent');
+    const locationsContent = panel('staffLocationsTabContent');
+    const notificationsContent = panel('staffNotificationsTabContent');
+    const permissionsContent = panel('staffPermissionsTabContent');
     
     if (detailsContent) detailsContent.style.display = tab === 'details' ? 'block' : 'none';
     if (scheduleContent) scheduleContent.style.display = tab === 'schedule' ? 'block' : 'none';
@@ -22458,6 +22521,10 @@ function initializeAppsPanel() {
               <input type="email" id="staffEditEmail" value="${escapeHtml(email)}" placeholder="email@example.com" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
             </div>
             <div>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Birthday</label>
+              <input type="date" id="staffEditBirthday" value="${escapeHtml(staff.birthday || '')}" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
+            </div>
+            <div>
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">PIN</label>
               <div style="position:relative;">
                 <input type="password" id="staffEditPin" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" value="${escapeHtml(staff.pin || '')}" placeholder="4-6 digits" style="width:100%;height:30px;padding:0 32px 0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
@@ -22641,6 +22708,10 @@ function initializeAppsPanel() {
               <div style="font-size:12px;color:#111827;">${email ? escapeHtml(email) : '<span style="color:#9ca3af;">—</span>'}</div>
             </div>
             <div>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Birthday</label>
+              <div style="font-size:12px;color:#111827;">${staff.birthday ? escapeHtml(staff.birthday) : '<span style="color:#9ca3af;">—</span>'}</div>
+            </div>
+            <div>
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">PIN</label>
               <div style="font-size:12px;color:#111827;">****</div>
             </div>
@@ -22761,6 +22832,9 @@ function initializeAppsPanel() {
       const newPhone = phoneInput ? (phoneInput.value.trim() || '') : (oldStaff.phone || '');
       const newEmail = emailInput ? (emailInput.value.trim() || '') : (oldStaff.email || '');
       const newPinValue = pinInput?.value.trim() || '';
+      const birthdayInput = document.getElementById('staffEditBirthday');
+      const newBirthday =
+        birthdayInput && currentTab === 'details' ? String(birthdayInput.value || '').trim() : (oldStaff.birthday || '');
       
       // Validate name
       if (!newName) {
@@ -22890,6 +22964,17 @@ function initializeAppsPanel() {
       }
       if (roleFields.role !== 'manager') {
         delete updatedStaff.managerType;
+      }
+      if (currentTab === 'details') {
+        if (newBirthday) {
+          updatedStaff.birthday = newBirthday;
+          if (newBirthday !== (oldStaff.birthday || '')) {
+            delete updatedStaff.birthdayReminderSentForYear;
+          }
+        } else {
+          delete updatedStaff.birthday;
+          delete updatedStaff.birthdayReminderSentForYear;
+        }
       }
       
       staffStore.staff[staffIndex] = updatedStaff;
@@ -24773,6 +24858,16 @@ function initializeUserProfileMenu() {
       if (section === 'schedule' && typeof renderUserProfileScheduleSettings === 'function') {
         renderUserProfileScheduleSettings();
       }
+      if (section === 'notifications') {
+        if (typeof window.loadUserProfilePreferences === 'function') {
+          window.loadUserProfilePreferences();
+        }
+        setTimeout(function () {
+          if (typeof window.ffRunBirthdayChatRemindersSoon === 'function') {
+            window.ffRunBirthdayChatRemindersSoon();
+          }
+        }, 500);
+      }
     }
   }
   
@@ -24903,6 +24998,38 @@ function initializeUserProfileMenu() {
     if (taskRemindersToggle) taskRemindersToggle.checked = prefs.notifications.taskReminders;
     if (dailySummaryToggle) dailySummaryToggle.checked = prefs.notifications.dailySummary;
     if (queueAlertsToggle) queueAlertsToggle.checked = prefs.notifications.queueAlerts;
+    const bDayInput = document.getElementById('userProfileBirthdayReminderDays');
+    if (bDayInput && typeof settings !== 'undefined' && settings) {
+      const v = settings.preferences && typeof settings.preferences.birthdayReminderDaysBefore === 'number'
+        ? settings.preferences.birthdayReminderDaysBefore
+        : (typeof DEFAULTS !== 'undefined' && DEFAULTS.preferences && DEFAULTS.preferences.birthdayReminderDaysBefore) || 7;
+      bDayInput.value = String(v);
+    }
+  }
+
+  function saveBirthdayReminderPrefs() {
+    const bDayEl = document.getElementById('userProfileBirthdayReminderDays');
+    if (!bDayEl || typeof settings === 'undefined' || !settings) return;
+    let n = parseInt(bDayEl.value, 10);
+    if (!Number.isFinite(n)) n = 7;
+    n = Math.max(0, Math.min(90, n));
+    if (!settings.preferences || typeof settings.preferences !== 'object') settings.preferences = { ...(typeof DEFAULTS !== 'undefined' && DEFAULTS.preferences ? DEFAULTS.preferences : {}) };
+    settings.preferences.birthdayReminderDaysBefore = n;
+    bDayEl.value = String(n);
+    try {
+      const currentSettings = JSON.parse(localStorage.getItem('ffv24_settings') || '{}');
+      currentSettings.preferences = settings.preferences;
+      localStorage.setItem('ffv24_settings', JSON.stringify(currentSettings));
+    } catch (_) {}
+    if (typeof save === 'function') save();
+    try {
+      sessionStorage.removeItem('ff_birthday_today_parts_v1');
+    } catch (_) {}
+    setTimeout(function() {
+      if (typeof window.ffRunBirthdayChatRemindersSoon === 'function') {
+        window.ffRunBirthdayChatRemindersSoon();
+      }
+    }, 600);
   }
   
   function saveNotificationPrefs() {
@@ -24927,6 +25054,42 @@ function initializeUserProfileMenu() {
     queueAlertsToggle.__ffBound = true;
     queueAlertsToggle.addEventListener('change', saveNotificationPrefs);
   }
+
+  const birthdayReminderDaysInput = document.getElementById('userProfileBirthdayReminderDays');
+  if (birthdayReminderDaysInput && !birthdayReminderDaysInput.__ffBound) {
+    birthdayReminderDaysInput.__ffBound = true;
+    birthdayReminderDaysInput.addEventListener('change', saveBirthdayReminderPrefs);
+    birthdayReminderDaysInput.addEventListener('blur', saveBirthdayReminderPrefs);
+  }
+
+  const ffTestBirthdayInboxBtn = document.getElementById('ffTestBirthdayInboxBtn');
+  if (ffTestBirthdayInboxBtn && !ffTestBirthdayInboxBtn.__ffBound) {
+    ffTestBirthdayInboxBtn.__ffBound = true;
+    ffTestBirthdayInboxBtn.addEventListener('click', function () {
+      if (typeof window.ffSendTestBirthdayInbox !== 'function') {
+        alert('Still loading — wait a moment and try again.');
+        return;
+      }
+      window.ffSendTestBirthdayInbox().catch(function (e) {
+        alert(e && e.message ? e.message : String(e));
+      });
+    });
+  }
+
+  const ffClearBirthdaySentFlagsBtn = document.getElementById('ffClearBirthdaySentFlagsBtn');
+  if (ffClearBirthdaySentFlagsBtn && !ffClearBirthdaySentFlagsBtn.__ffBound) {
+    ffClearBirthdaySentFlagsBtn.__ffBound = true;
+    ffClearBirthdaySentFlagsBtn.addEventListener('click', function () {
+      if (!confirm('Clear “sent this year” on all staff? Use after testing so automatic reminders can run again.')) return;
+      if (typeof window.ffClearBirthdaySentFlags !== 'function') {
+        alert('Still loading — try again in a moment.');
+        return;
+      }
+      window.ffClearBirthdaySentFlags().catch(function (e) {
+        alert(e && e.message ? e.message : String(e));
+      });
+    });
+  }
   
   // Load and bind preferences
   const timeFormat12h = document.getElementById('userProfileTimeFormat12h');
@@ -24934,6 +25097,7 @@ function initializeUserProfileMenu() {
   const weekStartsOnMonday = document.getElementById('userProfileWeekStartsOnMonday');
   const weekStartsOnSunday = document.getElementById('userProfileWeekStartsOnSunday');
   const defaultScreenSelect = document.getElementById('userProfileDefaultScreen');
+  const salonTimeZoneSelect = document.getElementById('userProfileSalonTimeZone');
   
   function loadPreferences() {
     const prefs = getProfilePrefs();
@@ -24954,12 +25118,26 @@ function initializeUserProfileMenu() {
     if (defaultScreenSelect) {
       defaultScreenSelect.value = prefs.preferences.defaultScreen || 'queue';
     }
+    if (salonTimeZoneSelect) {
+      const z = (window.settings && window.settings.preferences && typeof window.settings.preferences.salonTimeZone === 'string')
+        ? window.settings.preferences.salonTimeZone.trim()
+        : '';
+      const hasOption = Array.from(salonTimeZoneSelect.options).some(function(o) { return o.value === z; });
+      if (z && !hasOption) {
+        const opt = document.createElement('option');
+        opt.value = z;
+        opt.textContent = z + ' (saved)';
+        salonTimeZoneSelect.insertBefore(opt, salonTimeZoneSelect.options[1] || null);
+      }
+      salonTimeZoneSelect.value = z || '';
+    }
     renderUserProfileStaffCallMessageSettings();
   }
   
   function savePreferences() {
     const prefs = getProfilePrefs();
     const nextWeekStartsOn = weekStartsOnSunday && weekStartsOnSunday.checked ? 'sunday' : 'monday';
+    const salonTz = salonTimeZoneSelect ? String(salonTimeZoneSelect.value || '').trim() : '';
     prefs.preferences = {
       timeFormat: timeFormat24h && timeFormat24h.checked ? '24h' : '12h',
       defaultScreen: defaultScreenSelect ? defaultScreenSelect.value : 'queue'
@@ -24971,12 +25149,25 @@ function initializeUserProfileMenu() {
         ...(currentSettings.preferences && typeof currentSettings.preferences === 'object' ? currentSettings.preferences : {}),
         weekStartsOn: nextWeekStartsOn
       };
+      if (salonTz) {
+        currentSettings.preferences.salonTimeZone = salonTz;
+      } else {
+        delete currentSettings.preferences.salonTimeZone;
+      }
       localStorage.setItem('ffv24_settings', JSON.stringify(currentSettings));
       settings.preferences = {
         ...(settings.preferences && typeof settings.preferences === 'object' ? settings.preferences : {}),
         weekStartsOn: nextWeekStartsOn
       };
+      if (salonTz) {
+        settings.preferences.salonTimeZone = salonTz;
+      } else {
+        delete settings.preferences.salonTimeZone;
+      }
       window.settings = settings;
+      try {
+        sessionStorage.removeItem('ff_birthday_today_parts_v1');
+      } catch (_) {}
     } catch (_) {}
     if (typeof renderStaffDetails === 'function') {
       try { renderStaffDetails(); } catch (_) {}
@@ -24989,9 +25180,15 @@ function initializeUserProfileMenu() {
     }
     if (typeof window.ffSavePreferencesSettings === 'function') {
       window.ffSavePreferencesSettings({
-        weekStartsOn: nextWeekStartsOn
+        weekStartsOn: nextWeekStartsOn,
+        salonTimeZone: salonTz
       });
     }
+    setTimeout(function() {
+      if (typeof window.ffRunBirthdayChatRemindersSoon === 'function') {
+        window.ffRunBirthdayChatRemindersSoon();
+      }
+    }, 800);
   }
   
   if (timeFormat12h && !timeFormat12h.__ffBound) {
@@ -25013,6 +25210,10 @@ function initializeUserProfileMenu() {
   if (defaultScreenSelect && !defaultScreenSelect.__ffBound) {
     defaultScreenSelect.__ffBound = true;
     defaultScreenSelect.addEventListener('change', savePreferences);
+  }
+  if (salonTimeZoneSelect && !salonTimeZoneSelect.__ffBound) {
+    salonTimeZoneSelect.__ffBound = true;
+    salonTimeZoneSelect.addEventListener('change', savePreferences);
   }
   
   // Load preferences on initialization
@@ -33329,20 +33530,20 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260329_training_fix1"></script>
+  <script type="module" src="/app.js?v=20260412_inbox_explain"></script>
   <script type="module" src="/schedule-helpers.js?v=20260403_reception_split"></script>
   <script type="module" src="/schedule-availability.js?v=20260403_reception_split"></script>
   <script type="module" src="/schedule-generator.js?v=20260403_mgmt_only_split"></script>
   <script type="module" src="/schedule-validator.js?v=20260403_avail_business_bounds"></script>
-  <script type="module" src="/schedule-ui.js?v=20260403_staff_name_plain_click"></script>
-  <script type="module" src="/inbox.js?v=20260312_fix2"></script>
-  <script type="module" src="/chat.js?v=20260329_training_reminder_fix1"></script>
+  <script type="module" src="/schedule-ui.js?v=20260402_nav_close_staff"></script>
+  <script type="module" src="/inbox.js?v=20260402_nav_close_staff"></script>
+  <script type="module" src="/chat.js?v=20260402_nav_close_staff"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260312_staffcall11"></script>
-  <script type="module" src="/settings-cloud.js?v=20260403_reception_split"></script>
+  <script type="module" src="/settings-cloud.js?v=20260404_salon_timezone"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/tickets.js?v=20260312_fix2"></script>
+  <script type="module" src="/tickets.js?v=20260402_tickets_boot_cover"></script>
   <script type="module" src="/media-upload.js?v=24"></script>
 
   <!-- PIN Modal -->
@@ -33485,8 +33686,26 @@ function hookSettingsGuard_DISABLED(){
 </style>
 
 <!-- Tickets Screen -->
-<div id="ticketsScreen" style="display:none;position:fixed;top:50px;left:0;right:0;bottom:0;background:#f5f5f5;z-index:300;flex-direction:column;overflow:hidden;" data-dynamic-top="true">
+<div id="ticketsScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f5f5f5;z-index:300;flex-direction:column;overflow:hidden;">
   <style>
+    /* Full-screen cover while profile + services + first Firestore snapshot load (avoids tab bar / list layout jumps). */
+    #ticketsBootCover {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      align-items: center;
+      justify-content: center;
+      background: #f5f5f5;
+      color: #9ca3af;
+      font-size: 15px;
+      pointer-events: none;
+    }
+    #ticketsScreen.ff-tickets-boot #ticketsBootCover { display: flex; }
+    #ticketsScreen.ff-tickets-boot .tickets-tabs,
+    #ticketsScreen.ff-tickets-boot .tickets-body {
+      visibility: hidden;
+    }
     /* ── Tickets Screen Layout ─────────────────────────────── */
     #ticketsScreen .tickets-tabs {
       display:flex; background:#fff; flex-shrink:0;
@@ -33613,6 +33832,8 @@ function hookSettingsGuard_DISABLED(){
       box-shadow:0 20px 60px rgba(0,0,0,0.2);
     }
   </style>
+
+  <div id="ticketsBootCover" aria-hidden="true">Loading…</div>
 
   <!-- Tabs + actions row -->
   <div class="tickets-tabs" style="gap:12px;">

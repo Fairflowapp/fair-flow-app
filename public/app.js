@@ -838,6 +838,7 @@ function showMainAppForRole(role) {
   const ownerView = document.getElementById("owner-view");
   const receptionView = document.getElementById("reception-view");
   const staffView = document.getElementById("staff-view");
+  const rl = String(role || "").toLowerCase();
 
   if (!mainApp) {
     console.warn("[UI] main-app-content not found");
@@ -855,40 +856,33 @@ function showMainAppForRole(role) {
   if (receptionView) receptionView.style.display = "none";
   if (staffView) staffView.style.display = "none";
 
-  // show the right view
-  if (role === "owner" && ownerView) {
+  const showOwnerView = () => {
+    if (!ownerView) return;
     ownerView.style.display = "block";
-    // Initialize dropdown when owner view becomes visible
     setTimeout(() => {
-      if (typeof window.renderSelect === 'function') {
+      if (typeof window.renderSelect === "function") {
         console.log("[UI] Owner view shown, calling renderSelect");
         window.renderSelect();
       }
-      if (typeof window.init === 'function') {
+      if (typeof window.init === "function") {
         console.log("[UI] Owner view shown, calling init");
         window.init();
       }
     }, 300);
-  } else if (role === "reception" && receptionView) {
+  };
+
+  // show the right view
+  if (rl === "owner") {
+    showOwnerView();
+  } else if (rl === "admin" || rl === "manager") {
+    showOwnerView();
+  } else if (rl === "reception" && receptionView) {
     receptionView.style.display = "block";
-  } else if (role === "staff" && staffView) {
+  } else if (rl === "staff" && staffView) {
     staffView.style.display = "block";
   } else {
     console.warn("[UI] Unknown role, falling back to owner view:", role);
-    if (ownerView) {
-      ownerView.style.display = "block";
-      // Initialize dropdown when owner view becomes visible
-      setTimeout(() => {
-        if (typeof window.renderSelect === 'function') {
-          console.log("[UI] Owner view shown (fallback), calling renderSelect");
-          window.renderSelect();
-        }
-        if (typeof window.init === 'function') {
-          console.log("[UI] Owner view shown (fallback), calling init");
-          window.init();
-        }
-      }, 300);
-    }
+    showOwnerView();
   }
 }
 
@@ -1185,11 +1179,77 @@ async function loadUserRoleAndShowView(user) {
     if (typeof window.updateSettingsVisibilityForRole === "function") {
       window.updateSettingsVisibilityForRole(role);
     }
+
+    const rl = (role || "").toLowerCase();
+    // Managers need this too: reminders are written to Inbox by whoever is signed in (rules allow isManager).
+    if (["owner", "admin", "manager"].includes(rl) && currentSalonId) {
+      function ffRunBirthdayChatRemindersOnce() {
+        import("./birthday-reminders.js?v=20260412_inbox_explain")
+          .then((m) => {
+            if (typeof m.runBirthdayChatRemindersOnce === "function") {
+              return m.runBirthdayChatRemindersOnce();
+            }
+            return undefined;
+          })
+          .catch((e) => console.warn("[Birthday reminders]", e));
+      }
+      window.ffRunBirthdayChatRemindersSoon = ffRunBirthdayChatRemindersOnce;
+      if (window.__ffBirthdayInterval) {
+        clearInterval(window.__ffBirthdayInterval);
+        window.__ffBirthdayInterval = null;
+      }
+      window.__ffBirthdayInterval = setInterval(ffRunBirthdayChatRemindersOnce, 5 * 60 * 1000);
+      [0, 800, 2500, 3500, 12000, 30000].forEach((ms) => setTimeout(ffRunBirthdayChatRemindersOnce, ms));
+      if (!window.__ffBirthdayAfterStaffSyncBound) {
+        window.__ffBirthdayAfterStaffSyncBound = true;
+        document.addEventListener("ff-staff-cloud-updated", () => {
+          setTimeout(ffRunBirthdayChatRemindersOnce, 2000);
+        });
+      }
+      if (!window.__ffBirthdayVisibilityBound) {
+        window.__ffBirthdayVisibilityBound = true;
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState !== "visible") return;
+          setTimeout(() => {
+            if (typeof window.ffRunBirthdayChatRemindersSoon === "function") {
+              window.ffRunBirthdayChatRemindersSoon();
+            }
+          }, 1500);
+        });
+      }
+    }
   } catch (err) {
     console.error("[Auth] Failed to load user profile:", err);
     alert("Failed to load user profile.");
     showLoginScreen();
   }
+}
+
+// DevTools: await ffDebugBirthdayReminders() — prints diagnosis (no Inbox writes from diagnose alone)
+if (typeof window !== "undefined") {
+  window.ffDebugBirthdayReminders = async () => {
+    try {
+      const m = await import("./birthday-reminders.js?v=20260412_inbox_explain");
+      if (typeof m.ffDebugBirthdayReminders === "function") {
+        return await m.ffDebugBirthdayReminders();
+      }
+    } catch (e) {
+      console.error("[ffDebugBirthdayReminders]", e);
+      throw e;
+    }
+  };
+  window.ffSendTestBirthdayInbox = async () => {
+    const m = await import("./birthday-reminders.js?v=20260412_inbox_explain");
+    if (typeof m.sendBirthdayInboxTestPing !== "function") throw new Error("sendBirthdayInboxTestPing missing");
+    return m.sendBirthdayInboxTestPing();
+  };
+  window.ffClearBirthdaySentFlags = async () => {
+    const m = await import("./birthday-reminders.js?v=20260412_inbox_explain");
+    if (typeof m.clearBirthdayReminderSentFlagsForSalon !== "function") {
+      throw new Error("clearBirthdayReminderSentFlagsForSalon missing");
+    }
+    return m.clearBirthdayReminderSentFlagsForSalon();
+  };
 }
 
 // =====================
@@ -1202,7 +1262,14 @@ onAuthStateChanged(auth, async (user) => {
   }
   if (!user) {
     console.log("[Auth] No user, showing login screen");
-    if (typeof window !== 'undefined') window.ff_is_admin_cached = null;
+    if (typeof window !== "undefined") {
+      window.ff_is_admin_cached = null;
+      if (window.__ffBirthdayInterval) {
+        clearInterval(window.__ffBirthdayInterval);
+        window.__ffBirthdayInterval = null;
+      }
+      window.ffRunBirthdayChatRemindersSoon = null;
+    }
     try {
       if (window.__ff_avatarUnsub) {
         window.__ff_avatarUnsub();
