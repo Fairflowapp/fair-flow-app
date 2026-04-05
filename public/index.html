@@ -33673,7 +33673,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-availability.js?v=20260403_reception_split"></script>
   <script type="module" src="/schedule-generator.js?v=20260403_mgmt_only_split"></script>
   <script type="module" src="/schedule-validator.js?v=20260406_manual_admin_shift"></script>
-  <script type="module" src="/schedule-ui.js?v=20260405_schedule_notify_changes"></script>
+  <script type="module" src="/schedule-ui.js?v=20260414_schedule_header_align"></script>
   <script type="module" src="/inbox.js?v=20260402_nav_close_staff"></script>
   <script type="module" src="/chat.js?v=20260402_nav_close_staff"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
@@ -34439,40 +34439,41 @@ function hookSettingsGuard_DISABLED(){
 
 <!-- Schedule Preview Screen -->
 <div id="scheduleScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f8fafc;z-index:300;flex-direction:column;overflow:hidden;">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-wrap:wrap;">
-    <div style="display:flex;flex-direction:column;gap:4px;min-width:180px;">
-      <div style="font-size:18px;font-weight:700;color:#111827;">Schedule</div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+  <div style="display:flex;flex-direction:column;gap:10px;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#fff;">
+    <div style="font-size:18px;font-weight:700;color:#111827;">Schedule</div>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;row-gap:10px;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;">
         <div id="scheduleWeekLabel" style="font-size:13px;color:#6b7280;">Current week</div>
         <button type="button" id="schedulePublishToggleBtn" title="Publish this week for all staff" aria-pressed="false" style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;outline:none;">
           <span id="schedulePublishToggleIcon" aria-hidden="true" style="font-size:14px;line-height:1;">&#128065;&#65039;</span>
           <span id="schedulePublishToggleLabel">Visible to staff</span>
         </button>
         <button type="button" id="scheduleNotifyChangesBtn" title="After editing shifts, notify only staff whose rows changed" style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #fcd34d;border-radius:999px;background:#fffbeb;color:#b45309;font-size:11px;font-weight:700;cursor:pointer;outline:none;">Notify staff of changes</button>
-        <div id="scheduleStaffChangeStrip" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px;width:100%;flex-basis:100%;" aria-live="polite"></div>
-        <div id="scheduleWeekAckStrip" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;" aria-live="polite"></div>
+      </div>
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;justify-content:flex-end;min-width:0;">
+        <div style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap;">
+          <span style="font-size:12px;font-weight:600;color:#6b7280;">Week</span>
+          <select id="scheduleWeekFilter" style="height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;cursor:pointer;outline:none;">
+            <option value="previous">Previous week</option>
+            <option value="current" selected>Current week</option>
+            <option value="next">Next week</option>
+            <option value="in2">In 2 weeks</option>
+            <option value="in3">In 3 weeks</option>
+            <option value="in4">In 4 weeks</option>
+            <option value="custom">Custom week</option>
+          </select>
+          <input type="date" id="scheduleCustomWeekDate" style="display:none;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;outline:none;">
+          <button type="button" id="scheduleApplyCustomWeekBtn" class="btn-pill" style="display:none;background:#7c3aed;color:#fff;border-color:#7c3aed;font-size:13px;padding:8px 14px;">Apply</button>
+        </div>
+        <div id="scheduleViewToggleWrap" style="display:inline-flex;align-items:stretch;flex-wrap:nowrap;gap:0;margin:0;padding:0;line-height:0;">
+          <button type="button" id="scheduleViewManagementBtn" aria-pressed="true" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('management')" class="inbox-view-btn active" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#7c3aed;color:#fff;cursor:pointer;box-sizing:border-box;">Management</button><button type="button" id="scheduleViewTechniciansBtn" aria-pressed="false" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('technicians')" class="inbox-view-btn" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-left:0;border-radius:0 8px 8px 0;background:#f9fafb;color:#6b7280;cursor:pointer;box-sizing:border-box;margin:0;">Technicians</button>
+        </div>
+        <div id="scheduleSummaryBar" style="display:flex;align-items:center;gap:10px;font-size:13px;color:#6b7280;flex-wrap:wrap;"></div>
       </div>
     </div>
-    <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;flex:1;">
-      <div style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap;">
-        <span style="font-size:12px;font-weight:600;color:#6b7280;">Week</span>
-        <select id="scheduleWeekFilter" style="height:38px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;cursor:pointer;outline:none;">
-          <option value="previous">Previous week</option>
-          <option value="current" selected>Current week</option>
-          <option value="next">Next week</option>
-          <option value="in2">In 2 weeks</option>
-          <option value="in3">In 3 weeks</option>
-          <option value="in4">In 4 weeks</option>
-          <option value="custom">Custom week</option>
-        </select>
-        <input type="date" id="scheduleCustomWeekDate" style="display:none;height:38px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;outline:none;">
-        <button type="button" id="scheduleApplyCustomWeekBtn" class="btn-pill" style="display:none;background:#7c3aed;color:#fff;border-color:#7c3aed;font-size:13px;padding:8px 14px;">Apply</button>
-      </div>
-      <div id="scheduleViewToggleWrap" style="display:flex;align-items:center;gap:0;">
-        <button type="button" id="scheduleViewManagementBtn" aria-pressed="true" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('management')" class="inbox-view-btn active" style="padding:10px 18px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#7c3aed;color:#fff;cursor:pointer;">Management</button>
-        <button type="button" id="scheduleViewTechniciansBtn" aria-pressed="false" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('technicians')" class="inbox-view-btn" style="padding:10px 18px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#f9fafb;color:#6b7280;cursor:pointer;">Technicians</button>
-      </div>
-      <div id="scheduleSummaryBar" style="display:flex;align-items:center;gap:10px;font-size:13px;color:#6b7280;flex-wrap:wrap;"></div>
+    <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
+      <div id="scheduleStaffChangeStrip" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;" aria-live="polite"></div>
+      <div id="scheduleWeekAckStrip" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;" aria-live="polite"></div>
     </div>
   </div>
   <div id="schedulePreviewContent" style="flex:1;overflow-y:auto;padding:20px;">
