@@ -1,4 +1,17 @@
-import { collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  doc,
+  getDoc,
+  updateDoc,
+  setDoc,
+  onSnapshot,
+  serverTimestamp,
+  deleteField,
+  writeBatch,
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "./app.js?v=20260329_training_fix1";
 import { generateWeeklySchedule } from "./schedule-generator.js?v=20260403_mgmt_only_split";
 import { validateScheduleDraft } from "./schedule-validator.js?v=20260403_avail_business_bounds";
@@ -13,8 +26,341 @@ let schedulePreviewState = {
 let schedulePreviewView = "management";
 let scheduleDragState = null;
 let scheduleShiftEditPayload = null;
+
+/** ISO week start (Mon/Sun per prefs) -> true when that week is published for all staff */
+let schedulePublishedMap = {};
+let schedulePublishUnsub = null;
+let schedulePublishSalonSubscribed = "";
+let schedulePublishPrevMap = null;
+let schedulePublishSuppressToast = false;
+/** Milliseconds of last seen `lastBroadcastAt` (Firestore); used to notify all clients when a week is published. */
+let schedulePublishLastSeenBroadcastMs = null;
+/** staffId -> true when that staff acknowledged viewing this published week */
+let scheduleWeekAckByStaffId = {};
+let scheduleAckUnsub = null;
+let scheduleAckSalonWeek = "";
+let scheduleChangePingUnsub = null;
+let scheduleChangePingSubKey = "";
+/** Avoid duplicate toasts for the same ping timestamp */
+let scheduleChangePingShownToastMs = 0;
 /** When drag-drop needs confirm before placing shift on Marked OFF cell: { payload, targetStaffId, targetDate } */
 let scheduleDnDConfirmPending = null;
+
+/** Toast for schedule messages — works even when `window.showToast` is not defined (common in this app shell). */
+function ffScheduleAppToast(message, duration = 5000) {
+  if (typeof window.showToast === "function") {
+    try {
+      window.showToast(message, duration);
+      return;
+    } catch (_) {
+      /* fall through */
+    }
+  }
+  let el = document.getElementById("ff-schedule-app-toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "ff-schedule-app-toast";
+    el.setAttribute("role", "status");
+    el.style.cssText =
+      "position:fixed;bottom:28px;left:50%;transform:translateX(-50%);max-width:min(94vw,440px);background:#0f172a;color:#fff;padding:16px 22px;border-radius:14px;font-size:15px;font-weight:600;z-index:100060;box-shadow:0 12px 40px rgba(0,0,0,.38);text-align:center;line-height:1.45;white-space:pre-line;";
+    document.body.appendChild(el);
+  }
+  el.textContent = message;
+  el.style.display = "block";
+  if (el.__ffHide) clearTimeout(el.__ffHide);
+  el.__ffHide = setTimeout(() => {
+    el.style.display = "none";
+  }, duration);
+}
+
+/** Shown to all other staff when a manager publishes a week — English only, centered on screen. */
+const FF_SCHEDULE_STAFF_BROADCAST_MESSAGE = "NEW SCHEDULE POSTED — PLEASE CHECK YOUR SCHEDULE";
+
+function hideScheduleStaffBroadcastToast() {
+  const el = document.getElementById("ff-schedule-staff-broadcast-toast");
+  if (!el) return;
+  el.style.display = "none";
+  if (el.__ffHide) {
+    clearTimeout(el.__ffHide);
+    el.__ffHide = null;
+  }
+}
+
+function ffScheduleStaffBroadcastToast(duration = 6500) {
+  let el = document.getElementById("ff-schedule-staff-broadcast-toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "ff-schedule-staff-broadcast-toast";
+    el.setAttribute("role", "alert");
+    el.style.cssText =
+      "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);max-width:min(92vw,480px);background:#ffffff;padding:0;border-radius:16px;z-index:100065;border:2px solid #7c3aed;box-shadow:0 10px 36px rgba(15,23,42,0.08);";
+    el.innerHTML = `
+      <div style="position:relative;padding:22px 44px 24px 22px;">
+        <button type="button" class="ff-schedule-broadcast-close" aria-label="Close notification" title="Close"
+          style="position:absolute;top:10px;right:10px;width:34px;height:34px;padding:0;border:1px solid #e5e7eb;border-radius:10px;background:#f9fafb;color:#374151;font-size:20px;line-height:1;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;">×</button>
+        <div style="color:#111827;font-size:16px;font-weight:700;letter-spacing:0.03em;text-align:center;line-height:1.45;">
+          ${FF_SCHEDULE_STAFF_BROADCAST_MESSAGE}
+        </div>
+      </div>`;
+    const closeBtn = el.querySelector(".ff-schedule-broadcast-close");
+    closeBtn?.addEventListener("click", hideScheduleStaffBroadcastToast);
+    closeBtn?.addEventListener("mouseenter", (e) => {
+      e.currentTarget.style.background = "#f3e8ff";
+      e.currentTarget.style.borderColor = "#c4b5fd";
+    });
+    closeBtn?.addEventListener("mouseleave", (e) => {
+      e.currentTarget.style.background = "#f9fafb";
+      e.currentTarget.style.borderColor = "#e5e7eb";
+    });
+    document.body.appendChild(el);
+  }
+  el.style.display = "block";
+  if (el.__ffHide) clearTimeout(el.__ffHide);
+  el.__ffHide = setTimeout(() => {
+    hideScheduleStaffBroadcastToast();
+  }, duration);
+}
+
+function getAuthedStaffIdForSchedule() {
+  return String(
+    typeof window !== "undefined" && window.__ff_authedStaffId
+      ? window.__ff_authedStaffId
+      : typeof localStorage !== "undefined"
+        ? localStorage.getItem("ff_authedStaffId_v1") || ""
+        : "",
+  ).trim();
+}
+
+function teardownScheduleAckListener() {
+  if (scheduleAckUnsub) {
+    try {
+      scheduleAckUnsub();
+    } catch (_) {
+      /* ignore */
+    }
+    scheduleAckUnsub = null;
+  }
+  scheduleAckSalonWeek = "";
+  scheduleWeekAckByStaffId = {};
+}
+
+function ensureScheduleWeekAckListener(weekStart) {
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId || !weekStart || schedulePublishedMap[weekStart] !== true) {
+    teardownScheduleAckListener();
+    updateScheduleWeekAckStrip();
+    return;
+  }
+  const subKey = `${salonId}::${weekStart}`;
+  if (scheduleAckSalonWeek === subKey && scheduleAckUnsub) {
+    updateScheduleWeekAckStrip();
+    return;
+  }
+
+  teardownScheduleAckListener();
+  scheduleAckSalonWeek = subKey;
+  const ackQ = query(collection(db, `salons/${salonId}/scheduleWeekAcks`), where("weekStart", "==", weekStart));
+  scheduleAckUnsub = onSnapshot(
+    ackQ,
+    (snap) => {
+      const next = {};
+      snap.docs.forEach((d) => {
+        const x = d.data();
+        const sid = String(x.staffId || "").trim();
+        if (sid) next[sid] = true;
+      });
+      scheduleWeekAckByStaffId = next;
+      updateScheduleWeekAckStrip();
+      if (
+        scheduleUserCanManualEdit() &&
+        schedulePreviewState.draft &&
+        document.getElementById("scheduleScreen")?.style.display !== "none"
+      ) {
+        renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
+      }
+    },
+    (err) => console.warn("[ScheduleUI] scheduleWeekAcks listener", err),
+  );
+}
+
+function updateScheduleWeekAckStrip() {
+  const strip = document.getElementById("scheduleWeekAckStrip");
+  if (!strip) return;
+  const weekRange = getWeekRange(schedulePreviewWeekStart);
+  const ws = weekRange.startDate;
+  const published = schedulePublishedMap[ws] === true;
+  const ctx = getScheduleAccessContext();
+  if (ctx.noAccess || scheduleUserCanManualEdit() || !published || !canViewScheduleBoardForCurrentWeek()) {
+    strip.style.display = "none";
+    strip.innerHTML = "";
+    return;
+  }
+  const mySid = getAuthedStaffIdForSchedule();
+  if (!mySid) {
+    strip.style.display = "none";
+    strip.innerHTML = "";
+    return;
+  }
+  strip.style.display = "inline-flex";
+  const seen = scheduleWeekAckByStaffId[mySid] === true;
+  if (seen) {
+    strip.innerHTML = `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;font-size:11px;font-weight:700;">Viewed ✓</span>`;
+    return;
+  }
+  strip.innerHTML = `<button type="button" id="scheduleWeekAckBtn" style="height:32px;padding:0 14px;border:1px solid #7c3aed;border-radius:999px;background:#fff;color:#5b21b6;font-size:11px;font-weight:700;cursor:pointer;">Confirm viewed</button>`;
+  document.getElementById("scheduleWeekAckBtn")?.addEventListener(
+    "click",
+    () => {
+      submitScheduleWeekAck();
+    },
+    { once: true },
+  );
+}
+
+async function submitScheduleWeekAck() {
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  const mySid = getAuthedStaffIdForSchedule();
+  const weekRange = getWeekRange(schedulePreviewWeekStart);
+  const ws = weekRange.startDate;
+  if (!salonId || !mySid || !ws || schedulePublishedMap[ws] !== true) return;
+  try {
+    const ref = doc(db, `salons/${salonId}/scheduleWeekAcks/${ws}_${mySid}`);
+    await setDoc(
+      ref,
+      {
+        salonId,
+        weekStart: ws,
+        staffId: mySid,
+        seenAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+    ffScheduleAppToast("Saved. Your manager can see you viewed this schedule.", 3500);
+  } catch (e) {
+    console.error("[ScheduleUI] schedule ack", e);
+    ffScheduleAppToast(e?.message || "Could not save confirmation.", 4000);
+  }
+}
+
+function scheduleChangePingStorageKey(salonId, weekStart, staffId) {
+  return `ff_schedule_changeping_${salonId}_${weekStart}_${staffId}`;
+}
+
+function teardownScheduleChangePingListener() {
+  if (scheduleChangePingUnsub) {
+    try {
+      scheduleChangePingUnsub();
+    } catch (_) {
+      /* ignore */
+    }
+    scheduleChangePingUnsub = null;
+  }
+  scheduleChangePingSubKey = "";
+  scheduleChangePingShownToastMs = 0;
+}
+
+function updateScheduleChangePingStripFromSnapshot(snap) {
+  const el = document.getElementById("scheduleStaffChangeStrip");
+  if (!el) return;
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  const mySid = getAuthedStaffIdForSchedule();
+  const weekRange = getWeekRange(schedulePreviewWeekStart);
+  const ws = weekRange.startDate;
+  if (
+    !salonId ||
+    !mySid ||
+    scheduleUserCanManualEdit() ||
+    getScheduleAccessContext().noAccess ||
+    schedulePublishedMap[ws] !== true
+  ) {
+    el.style.display = "none";
+    el.innerHTML = "";
+    return;
+  }
+  if (!snap.exists()) {
+    el.style.display = "none";
+    el.innerHTML = "";
+    return;
+  }
+  const pingAt = snap.data().pingAt;
+  const ms = pingAt && typeof pingAt.toMillis === "function" ? pingAt.toMillis() : 0;
+  if (!ms) {
+    el.style.display = "none";
+    el.innerHTML = "";
+    return;
+  }
+  let stored = 0;
+  try {
+    stored = parseInt(localStorage.getItem(scheduleChangePingStorageKey(salonId, ws, mySid)) || "0", 10);
+  } catch (_) {
+    stored = 0;
+  }
+  if (ms <= stored) {
+    el.style.display = "none";
+    el.innerHTML = "";
+    return;
+  }
+  if (ms > stored && ms !== scheduleChangePingShownToastMs) {
+    scheduleChangePingShownToastMs = ms;
+    ffScheduleAppToast("YOUR SHIFTS FOR THIS WEEK WERE UPDATED — PLEASE CHECK THE SCHEDULE.", 6500);
+  }
+  el.style.display = "flex";
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;border:1px solid #fcd34d;background:#fffbeb;border-radius:10px;max-width:min(100%,520px);">
+      <span style="font-size:12px;font-weight:600;color:#92400e;line-height:1.4;">Your shifts this week were changed — please review the schedule.</span>
+      <button type="button" id="scheduleStaffChangePingDismiss" style="height:30px;padding:0 12px;border:1px solid #f59e0b;border-radius:999px;background:#fff;color:#b45309;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;">Got it</button>
+    </div>`;
+  document.getElementById("scheduleStaffChangePingDismiss")?.addEventListener(
+    "click",
+    () => {
+      try {
+        localStorage.setItem(scheduleChangePingStorageKey(salonId, ws, mySid), String(ms));
+      } catch (_) {
+        /* ignore */
+      }
+      scheduleChangePingShownToastMs = 0;
+      el.style.display = "none";
+      el.innerHTML = "";
+    },
+    { once: true },
+  );
+}
+
+function ensureScheduleChangePingListener(weekStart) {
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  const mySid = getAuthedStaffIdForSchedule();
+  const ctx = getScheduleAccessContext();
+  if (
+    !salonId ||
+    !weekStart ||
+    !mySid ||
+    scheduleUserCanManualEdit() ||
+    ctx.noAccess ||
+    schedulePublishedMap[weekStart] !== true
+  ) {
+    teardownScheduleChangePingListener();
+    const el = document.getElementById("scheduleStaffChangeStrip");
+    if (el) {
+      el.style.display = "none";
+      el.innerHTML = "";
+    }
+    return;
+  }
+  const subKey = `${salonId}::${weekStart}::${mySid}`;
+  if (scheduleChangePingSubKey === subKey && scheduleChangePingUnsub) {
+    return;
+  }
+  teardownScheduleChangePingListener();
+  scheduleChangePingSubKey = subKey;
+  const pingRef = doc(db, `salons/${salonId}/scheduleStaffChangePings/${weekStart}_${mySid}`);
+  scheduleChangePingUnsub = onSnapshot(
+    pingRef,
+    (snap) => {
+      updateScheduleChangePingStripFromSnapshot(snap);
+    },
+    (err) => console.warn("[ScheduleUI] schedule change ping", err),
+  );
+}
 
 function escapeScheduleAttr(value) {
   return String(value || "")
@@ -391,6 +737,201 @@ function formatWeekLabel(weekRange) {
   return `${startLabel} - ${endLabel}`;
 }
 
+function getSchedulePublishDocRef() {
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId) return null;
+  return doc(db, `salons/${salonId}/schedulePublish/weeks`);
+}
+
+function teardownSchedulePublishListener() {
+  if (schedulePublishUnsub) {
+    try {
+      schedulePublishUnsub();
+    } catch (_) {
+      /* ignore */
+    }
+    schedulePublishUnsub = null;
+  }
+  schedulePublishSalonSubscribed = "";
+  schedulePublishPrevMap = null;
+  schedulePublishLastSeenBroadcastMs = null;
+}
+
+function ensureSchedulePublishListener() {
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId) {
+    teardownSchedulePublishListener();
+    return;
+  }
+  if (schedulePublishSalonSubscribed === salonId && schedulePublishUnsub) return;
+
+  teardownSchedulePublishListener();
+  schedulePublishSalonSubscribed = salonId;
+  const ref = doc(db, `salons/${salonId}/schedulePublish/weeks`);
+  schedulePublishUnsub = onSnapshot(
+    ref,
+    (snap) => {
+      const data = snap.exists() ? snap.data() : {};
+      const pub = data.published && typeof data.published === "object" ? data.published : {};
+      schedulePublishedMap = { ...pub };
+
+      const bAt = data.lastBroadcastAt;
+      const ms = bAt && typeof bAt.toMillis === "function" ? bAt.toMillis() : 0;
+      const wk = String(data.lastBroadcastWeekKey || "").trim();
+
+      if (schedulePublishLastSeenBroadcastMs === null) {
+        schedulePublishLastSeenBroadcastMs = ms;
+        schedulePublishPrevMap = { ...pub };
+        schedulePublishSuppressToast = false;
+      } else if (ms > schedulePublishLastSeenBroadcastMs && wk && !schedulePublishSuppressToast) {
+        ffScheduleStaffBroadcastToast(6500);
+        schedulePublishLastSeenBroadcastMs = ms;
+        schedulePublishPrevMap = { ...pub };
+      } else {
+        schedulePublishLastSeenBroadcastMs = Math.max(schedulePublishLastSeenBroadcastMs, ms);
+        schedulePublishPrevMap = { ...pub };
+      }
+      schedulePublishSuppressToast = false;
+
+      const screen = document.getElementById("scheduleScreen");
+      if (screen && screen.style.display !== "none" && typeof refreshSchedulePreview === "function") {
+        refreshSchedulePreview();
+      }
+    },
+    (err) => console.warn("[ScheduleUI] schedulePublish listener", err),
+  );
+}
+
+async function fetchSchedulePublishedMap() {
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId) return;
+  const ref = getSchedulePublishDocRef();
+  if (!ref) return;
+  try {
+    const snap = await getDoc(ref);
+    const data = snap.exists() ? snap.data() : {};
+    const pub = data.published && typeof data.published === "object" ? data.published : {};
+    schedulePublishedMap = { ...pub };
+  } catch (e) {
+    console.warn("[ScheduleUI] fetch schedule publish", e);
+  }
+}
+
+/** Staff who only view the schedule see content only after the week is published; schedule editors always see drafts. */
+function canViewScheduleBoardForCurrentWeek() {
+  if (scheduleUserCanManualEdit()) return true;
+  const ctx = getScheduleAccessContext();
+  if (ctx.noAccess) return false;
+  const weekRange = getWeekRange(schedulePreviewWeekStart);
+  return schedulePublishedMap[weekRange.startDate] === true;
+}
+
+function updateSchedulePublishToggleUi() {
+  const btn = document.getElementById("schedulePublishToggleBtn");
+  const icon = document.getElementById("schedulePublishToggleIcon");
+  const label = document.getElementById("schedulePublishToggleLabel");
+  if (!btn) return;
+  const canEdit = scheduleUserCanManualEdit();
+  btn.style.display = canEdit ? "inline-flex" : "none";
+  if (!canEdit) return;
+  const weekRange = getWeekRange(schedulePreviewWeekStart);
+  const published = schedulePublishedMap[weekRange.startDate] === true;
+  btn.setAttribute("aria-pressed", published ? "true" : "false");
+  btn.title = published
+    ? "Published — staff can see this week. Click to hide until ready."
+    : "Draft — hidden from staff. Click to publish and notify everyone.";
+  if (icon) icon.textContent = published ? "\uD83D\uDC41\uFE0F" : "\uD83D\uDD12";
+  if (label) label.textContent = published ? "Visible to staff" : "Hidden from staff";
+  const notifyBtn = document.getElementById("scheduleNotifyChangesBtn");
+  if (notifyBtn) {
+    notifyBtn.style.display = canEdit && published ? "inline-flex" : "none";
+  }
+  updateScheduleWeekAckStrip();
+}
+
+function renderScheduleUnpublishedPlaceholder(weekRange) {
+  const board = document.getElementById("scheduleBoard");
+  const empty = document.getElementById("schedulePreviewEmpty");
+  const summaryBar = document.getElementById("scheduleSummaryBar");
+  if (summaryBar) summaryBar.innerHTML = "";
+  if (empty) {
+    empty.style.display = "block";
+    empty.textContent =
+      "This week’s schedule has not been published yet. Ask a manager when it is ready, or check back later.";
+  }
+  if (board) {
+    board.innerHTML = `
+      <section style="border:1px solid #e5e7eb;border-radius:18px;background:#fff;padding:32px 24px;text-align:center;max-width:560px;margin:0 auto;">
+        <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:8px;">Schedule not available yet</div>
+        <div style="font-size:13px;color:#6b7280;line-height:1.5;">This week is still being prepared. You will get an on-screen notice when it is published.</div>
+        <div style="margin-top:14px;font-size:12px;color:#9ca3af;">${escapeScheduleHtml(formatWeekLabel(weekRange))}</div>
+      </section>
+    `;
+  }
+}
+
+async function toggleScheduleWeekPublished() {
+  if (!scheduleUserCanManualEdit()) return;
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId) {
+    ffScheduleAppToast("No salon selected.", 3500);
+    return;
+  }
+  const weekRange = getWeekRange(schedulePreviewWeekStart);
+  const key = weekRange.startDate;
+  const ref = getSchedulePublishDocRef();
+  if (!ref) return;
+  const nextPublished = !(schedulePublishedMap[key] === true);
+  try {
+    schedulePublishSuppressToast = true;
+    if (nextPublished) {
+      try {
+        await updateDoc(ref, {
+          [`published.${key}`]: true,
+          lastBroadcastAt: serverTimestamp(),
+          lastBroadcastWeekKey: key,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) {
+        if (e?.code === "not-found") {
+          await setDoc(ref, {
+            published: { [key]: true },
+            lastBroadcastAt: serverTimestamp(),
+            lastBroadcastWeekKey: key,
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          throw e;
+        }
+      }
+      ffScheduleAppToast("Schedule published — staff can now see this week.", 4500);
+      await persistStaffShiftFingerprintsForWeek(
+        key,
+        schedulePreviewState.draft,
+        schedulePreviewState.staffList,
+      );
+    } else {
+      try {
+        await updateDoc(ref, { [`published.${key}`]: deleteField(), updatedAt: serverTimestamp() });
+      } catch (e) {
+        if (e?.code === "not-found") {
+          await setDoc(ref, { published: {}, updatedAt: serverTimestamp() }, { merge: true });
+        } else {
+          throw e;
+        }
+      }
+      ffScheduleAppToast("This week is hidden from staff again.", 3500);
+    }
+    await fetchSchedulePublishedMap();
+    updateSchedulePublishToggleUi();
+    await refreshSchedulePreview();
+  } catch (e) {
+    console.error("[ScheduleUI] publish toggle", e);
+    schedulePublishSuppressToast = false;
+    ffScheduleAppToast(e?.message || "Could not update publish status.", 4000);
+  }
+}
+
 function getSeverityBadgeStyle(severity) {
   if (severity === "high") return "background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;";
   if (severity === "medium") return "background:#fef3c7;color:#b45309;border:1px solid #fde68a;";
@@ -486,6 +1027,138 @@ function findDraftDay(draft, dateKey) {
 function dayHasManualOff(day, staffKey) {
   const ids = Array.isArray(day?.manualOffStaffIds) ? day.manualOffStaffIds : [];
   return ids.includes(staffKey);
+}
+
+function simpleHashString(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) + h) ^ str.charCodeAt(i);
+  }
+  return (h >>> 0).toString(16);
+}
+
+/** Stable fingerprint of one staff member’s row for the draft week (shifts + OFF). */
+function computeStaffShiftFingerprintForWeek(draft, staffKey) {
+  const days = Array.isArray(draft?.days) ? draft.days : [];
+  const parts = [];
+  for (const day of days) {
+    const date = day.date;
+    const assignments = Array.isArray(day.assignments) ? day.assignments : [];
+    const a = assignments.find((x) => String(x.staffId || x.uid || "").trim() === staffKey);
+    const off = dayHasManualOff(day, staffKey);
+    if (a) {
+      parts.push(
+        `${date}|${String(a.startTime || "").trim()}|${String(a.endTime || "").trim()}`,
+      );
+    } else if (off) {
+      parts.push(`${date}|OFF`);
+    } else {
+      parts.push(`${date}|—`);
+    }
+  }
+  parts.sort();
+  return simpleHashString(parts.join("~"));
+}
+
+function computeFingerprintMapForDraft(draft, staffList) {
+  const map = {};
+  for (const staff of staffList || []) {
+    const k = getScheduleStaffKey(staff);
+    if (!k) continue;
+    map[k] = computeStaffShiftFingerprintForWeek(draft, k);
+  }
+  return map;
+}
+
+async function persistStaffShiftFingerprintsForWeek(weekStart, draft, staffList) {
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId || !weekStart || !draft) return;
+  const fp = computeFingerprintMapForDraft(draft, staffList);
+  const ref = getSchedulePublishDocRef();
+  if (!ref) return;
+  try {
+    await setDoc(
+      ref,
+      {
+        staffShiftFingerprints: { [weekStart]: fp },
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (e) {
+    console.warn("[ScheduleUI] persist shift fingerprints", e);
+  }
+}
+
+async function notifyStaffScheduleChanges() {
+  if (!scheduleUserCanManualEdit()) return;
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId) {
+    ffScheduleAppToast("No salon selected.", 3500);
+    return;
+  }
+  const weekRange = getWeekRange(schedulePreviewWeekStart);
+  const key = weekRange.startDate;
+  if (schedulePublishedMap[key] !== true) {
+    ffScheduleAppToast("Publish this week to staff before notifying about changes.", 4000);
+    return;
+  }
+  const draft = schedulePreviewState.draft;
+  const staffList = schedulePreviewState.staffList;
+  if (!draft || !Array.isArray(staffList)) {
+    ffScheduleAppToast("Schedule is still loading.", 3000);
+    return;
+  }
+  const fpNew = computeFingerprintMapForDraft(draft, staffList);
+  let fpOld = {};
+  try {
+    const snap = await getDoc(getSchedulePublishDocRef());
+    const data = snap.exists() ? snap.data() : {};
+    const sfp = data.staffShiftFingerprints && typeof data.staffShiftFingerprints === "object" ? data.staffShiftFingerprints : {};
+    fpOld = sfp[key] && typeof sfp[key] === "object" ? sfp[key] : {};
+  } catch (_) {
+    /* ignore */
+  }
+  const allKeys = new Set([...Object.keys(fpNew), ...Object.keys(fpOld)]);
+  const changed = [];
+  for (const k of allKeys) {
+    if (fpNew[k] !== fpOld[k]) changed.push(k);
+  }
+  if (changed.length === 0) {
+    ffScheduleAppToast("No shift changes detected since the last publish or notify.", 4000);
+    return;
+  }
+  const batch = writeBatch(db);
+  const weeksRef = getSchedulePublishDocRef();
+  if (!weeksRef) return;
+  for (const sid of changed) {
+    const pingRef = doc(db, `salons/${salonId}/scheduleStaffChangePings/${key}_${sid}`);
+    batch.set(
+      pingRef,
+      {
+        salonId,
+        weekStart: key,
+        staffId: sid,
+        pingAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
+  batch.set(
+    weeksRef,
+    {
+      staffShiftFingerprints: { [key]: fpNew },
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+  try {
+    await batch.commit();
+    ffScheduleAppToast(`Notified ${changed.length} staff member(s) with updated shifts.`, 4500);
+  } catch (e) {
+    console.error("[ScheduleUI] notifyStaffScheduleChanges", e);
+    ffScheduleAppToast(e?.message || "Could not send notifications.", 4000);
+  }
 }
 
 function addManualOffForStaffDay(draft, dateKey, staffKey) {
@@ -1039,6 +1712,11 @@ function renderScheduleSummary(validation, days) {
 function setSchedulePreviewView(view) {
   schedulePreviewView = view === "technicians" ? "technicians" : "management";
   renderScheduleViewTabs();
+  if (!canViewScheduleBoardForCurrentWeek()) {
+    const wr = schedulePreviewState.weekRange || getWeekRange(schedulePreviewWeekStart);
+    renderScheduleUnpublishedPlaceholder(wr);
+    return;
+  }
   renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
 }
 
@@ -1063,7 +1741,11 @@ function renderScheduleBoard(draft, validation, staffList) {
   }
 
   empty.style.display = "none";
-  const gridTemplate = `220px repeat(${draftDays.length}, minmax(120px, 1fr))`;
+  const wrAck = getWeekRange(schedulePreviewWeekStart);
+  const weekPubForAck = schedulePublishedMap[wrAck.startDate] === true;
+  const showStaffAck = scheduleUserCanManualEdit() && weekPubForAck;
+  const firstColW = showStaffAck ? 258 : 220;
+  const gridTemplate = `${firstColW}px repeat(${draftDays.length}, minmax(120px, 1fr))`;
   const headerCells = draftDays.map((day) => {
     const allWarnings = Array.isArray(validationByDate.get(day.date)?.warnings) ? validationByDate.get(day.date).warnings : [];
     const cov = filterCoverageWarnings(allWarnings);
@@ -1142,11 +1824,25 @@ function renderScheduleBoard(draft, validation, staffList) {
       ? `<button type="button" data-schedule-staff-profile="true" data-staff-id="${escapeScheduleAttr(staffKey)}" title="לחיצה — עריכת לוח זמנים בפרופיל" aria-label="פתיחת לוח זמנים של העובד בפרופיל" style="font:inherit;font-size:13px;font-weight:700;line-height:1.3;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;width:100%;border:none;background:transparent;padding:0;margin:0;cursor:pointer;text-align:left;text-decoration:none;display:block;box-sizing:border-box;">${escapeScheduleAttr(staff.name || "Unknown Staff")}</button>`
       : `<span style="font-size:13px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeScheduleAttr(staff.name || "Unknown Staff")}</span>`;
 
+    const ackSeen = Boolean(staffKey && scheduleWeekAckByStaffId[staffKey]);
+    const ackBadgeHtml = showStaffAck
+      ? ackSeen
+        ? `<span style="display:inline-flex;align-items:center;flex-shrink:0;padding:1px 7px;border-radius:999px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;font-size:9px;font-weight:700;line-height:1.35;">Seen</span>`
+        : `<span style="display:inline-flex;align-items:center;flex-shrink:0;padding:1px 7px;border-radius:999px;background:#f9fafb;color:#9ca3af;border:1px solid #e5e7eb;font-size:9px;font-weight:700;line-height:1.35;">Not seen</span>`
+      : "";
+    const roleSafe = escapeScheduleHtml(roleLabel);
+    const roleRowHtml = showStaffAck
+      ? `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font-size:11px;color:#6b7280;line-height:1.35;min-width:0;">
+          <span style="min-width:0;">${roleSafe}</span>
+          ${ackBadgeHtml}
+        </div>`
+      : `<div style="font-size:11px;color:#6b7280;line-height:1.35;">${roleSafe}</div>`;
+
     return `
       <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;">
         <div style="padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#fff;display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;">
           ${nameControl}
-          <div style="font-size:11px;color:#6b7280;">${roleLabel}</div>
+          ${roleRowHtml}
         </div>
         ${cells}
       </div>
@@ -1155,9 +1851,9 @@ function renderScheduleBoard(draft, validation, staffList) {
 
   board.innerHTML = `
     <section style="border:1px solid #e5e7eb;border-radius:18px;background:#fff;overflow:auto;">
-      <div style="min-width:${220 + (draftDays.length * 120)}px;">
+      <div style="min-width:${firstColW + (draftDays.length * 120)}px;">
         <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;">
-          <div style="padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#f8fafc;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;">Staff</div>
+          <div style="padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#f8fafc;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;">Staff${showStaffAck ? ` <span style="font-weight:600;color:#94a3b8;font-size:10px;">(viewed)</span>` : ""}</div>
           ${headerCells}
         </div>
         ${rowHtml}
@@ -1199,6 +1895,9 @@ async function refreshSchedulePreview() {
   const weekRange = getWeekRange(schedulePreviewWeekStart);
   const weekLabel = document.getElementById("scheduleWeekLabel");
   if (weekLabel) weekLabel.textContent = formatWeekLabel(weekRange);
+
+  await fetchSchedulePublishedMap();
+  ensureSchedulePublishListener();
 
   setScheduleLoadingState({ loading: true, error: "" });
 
@@ -1243,9 +1942,29 @@ async function refreshSchedulePreview() {
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
     }
+    if (!canViewScheduleBoardForCurrentWeek()) {
+      teardownScheduleAckListener();
+      teardownScheduleChangePingListener();
+      updateScheduleWeekAckStrip();
+      renderScheduleUnpublishedPlaceholder(weekRange);
+      renderScheduleViewTabs();
+      updateSchedulePublishToggleUi();
+      setScheduleLoadingState({ loading: false, error: "" });
+      return;
+    }
+    if (schedulePublishedMap[weekRange.startDate] === true) {
+      ensureScheduleWeekAckListener(weekRange.startDate);
+      ensureScheduleChangePingListener(weekRange.startDate);
+    } else {
+      teardownScheduleAckListener();
+      teardownScheduleChangePingListener();
+      updateScheduleWeekAckStrip();
+    }
     renderScheduleSummary(validation, validation.days);
     renderScheduleViewTabs();
     renderScheduleBoard(draftWithBusinessRules, validation, staffList);
+    updateSchedulePublishToggleUi();
+    updateScheduleWeekAckStrip();
     setScheduleLoadingState({ loading: false, error: "" });
   } catch (error) {
     console.error("[ScheduleUI] Failed to refresh schedule preview", error);
@@ -1256,6 +1975,10 @@ async function refreshSchedulePreview() {
     renderScheduleSummary({ summary: { totalWarnings: 0, highSeverityCount: 0 } }, []);
     renderScheduleViewTabs();
     renderScheduleBoard(null, null, []);
+    teardownScheduleAckListener();
+    teardownScheduleChangePingListener();
+    updateScheduleWeekAckStrip();
+    updateSchedulePublishToggleUi();
     setScheduleLoadingState({ loading: false, error: error?.message || "Failed to build schedule preview." });
   }
 }
@@ -1274,6 +1997,27 @@ function applyScheduleWeekFilter() {
 
   if (mode === "next") {
     schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 7);
+    syncScheduleWeekFilterUi();
+    refreshSchedulePreview();
+    return;
+  }
+
+  if (mode === "in2") {
+    schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 14);
+    syncScheduleWeekFilterUi();
+    refreshSchedulePreview();
+    return;
+  }
+
+  if (mode === "in3") {
+    schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 21);
+    syncScheduleWeekFilterUi();
+    refreshSchedulePreview();
+    return;
+  }
+
+  if (mode === "in4") {
+    schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 28);
     syncScheduleWeekFilterUi();
     refreshSchedulePreview();
     return;
@@ -1306,11 +2050,7 @@ export async function goToSchedule() {
       ? window.ffGetSchedulePermissionContext()
       : getScheduleAccessContext();
   if (schedCtx.noAccess) {
-    if (typeof window.showToast === "function") {
-      window.showToast("You do not have permission to open Schedule.", 4000);
-    } else {
-      window.alert("You do not have permission to open Schedule.");
-    }
+    ffScheduleAppToast("You do not have permission to open Schedule.", 4000);
     return;
   }
 
@@ -1357,7 +2097,7 @@ export async function goToSchedule() {
         : (typeof localStorage !== "undefined" ? localStorage.getItem("ff_authedStaffId_v1") : "") || "",
     ).trim();
     const me = schedulePreviewState.staffList.find((s) => getScheduleStaffKey(s) === sid);
-    if (me) {
+    if (me && canViewScheduleBoardForCurrentWeek()) {
       schedulePreviewView = isTechnicianScheduleStaff(me) ? "technicians" : "management";
       renderScheduleViewTabs();
       renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
@@ -1376,6 +2116,22 @@ function bindScheduleUi() {
   });
   document.getElementById("scheduleApplyCustomWeekBtn")?.addEventListener("click", applyScheduleWeekFilter);
 
+  const schedulePublishToggleBtn = document.getElementById("schedulePublishToggleBtn");
+  if (schedulePublishToggleBtn && !schedulePublishToggleBtn.__ffSchedulePublishBound) {
+    schedulePublishToggleBtn.__ffSchedulePublishBound = true;
+    schedulePublishToggleBtn.addEventListener("click", () => {
+      toggleScheduleWeekPublished();
+    });
+  }
+
+  const scheduleNotifyChangesBtn = document.getElementById("scheduleNotifyChangesBtn");
+  if (scheduleNotifyChangesBtn && !scheduleNotifyChangesBtn.__ffScheduleNotifyChangesBound) {
+    scheduleNotifyChangesBtn.__ffScheduleNotifyChangesBound = true;
+    scheduleNotifyChangesBtn.addEventListener("click", () => {
+      notifyStaffScheduleChanges();
+    });
+  }
+
   ["queueBtn", "ticketsBtn", "tasksBtn", "chatBtn", "inboxBtn", "mediaBtn", "appsBtn"].forEach((id) => {
     const btn = document.getElementById(id);
     if (btn && !btn.__ffScheduleHideBound) {
@@ -1385,6 +2141,20 @@ function bindScheduleUi() {
       }, { capture: true });
     }
   });
+
+  if (typeof window !== "undefined" && !window.__ffSchedulePublishKickStarted) {
+    window.__ffSchedulePublishKickStarted = true;
+    let tries = 0;
+    const kickId = setInterval(() => {
+      tries += 1;
+      if (String(window.currentSalonId || "").trim()) {
+        ensureSchedulePublishListener();
+        clearInterval(kickId);
+      } else if (tries > 80) {
+        clearInterval(kickId);
+      }
+    }, 400);
+  }
 }
 
 if (typeof window !== "undefined") {
@@ -1392,6 +2162,9 @@ if (typeof window !== "undefined") {
   window.ffSchedulePreviewState = schedulePreviewState;
   window.refreshSchedulePreview = refreshSchedulePreview;
   window.setSchedulePreviewView = setSchedulePreviewView;
+  window.toggleScheduleWeekPublished = toggleScheduleWeekPublished;
+  window.submitScheduleWeekAck = submitScheduleWeekAck;
+  window.notifyStaffScheduleChanges = notifyStaffScheduleChanges;
 }
 
 if (document.readyState === "loading") {

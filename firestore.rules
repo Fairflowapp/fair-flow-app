@@ -420,6 +420,54 @@ service cloud.firestore {
       allow create, update, delete: if isManager(salonId);
     }
 
+    // Weekly schedule publish flags (which ISO week-start dates are visible to all staff)
+    match /salons/{salonId}/schedulePublish/{docId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update: if belongsToSalon(salonId) && isManager(salonId);
+      allow delete: if false;
+    }
+
+    // Per-staff ping when their row changed after publish (manager triggers)
+    match /salons/{salonId}/scheduleStaffChangePings/{pingId} {
+      allow read: if belongsToSalon(salonId)
+        && (
+          isManager(salonId)
+          || (
+            userStaffId() != ''
+            && resource.data.staffId == userStaffId()
+          )
+        );
+      allow create, update: if belongsToSalon(salonId) && isManager(salonId)
+        && request.resource.data.salonId == salonId
+        && request.resource.data.weekStart is string
+        && request.resource.data.staffId is string
+        && request.resource.data.pingAt is timestamp
+        && pingId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+      allow delete: if false;
+    }
+
+    // Staff confirmed they viewed a published week (doc id = weekStart_staffId)
+    match /salons/{salonId}/scheduleWeekAcks/{ackId} {
+      allow read: if belongsToSalon(salonId);
+      allow create: if belongsToSalon(salonId)
+        && userStaffId() != ''
+        && request.resource.data.salonId == salonId
+        && request.resource.data.weekStart is string
+        && request.resource.data.staffId is string
+        && request.resource.data.staffId == userStaffId()
+        && request.resource.data.seenAt is timestamp
+        && ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+      allow update: if belongsToSalon(salonId)
+        && userStaffId() != ''
+        && resource.data.staffId == userStaffId()
+        && request.resource.data.salonId == salonId
+        && request.resource.data.weekStart == resource.data.weekStart
+        && request.resource.data.staffId == resource.data.staffId
+        && request.resource.data.seenAt is timestamp
+        && ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+      allow delete: if false;
+    }
+
     // ===== UI SETTINGS (historyRange, etc.) =====
     match /salons/{salonId}/settings/{docId} {
       allow read: if belongsToSalon(salonId);
