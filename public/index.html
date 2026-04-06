@@ -2026,20 +2026,20 @@ dialog footer button, .code-dialog footer button {
           </div>
         </div>
         
-        <!-- Media Categories Card -->
-        <div id="userProfileCardMediaCategories" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <h3 style="margin:0 0 8px 0;font-size:18px;font-weight:600;color:#111827;">Media Categories</h3>
-          <p style="margin:0 0 20px 0;font-size:14px;color:#6b7280;">Manage categories for Media uploads. The order here = order in the Upload Work dropdown. Drag (⋮⋮) to reorder. Only active categories are shown when uploading.</p>
-          <div style="margin-top:20px;">
-            <h4 style="margin:0 0 16px 0;font-size:16px;font-weight:600;color:#374151;">Categories</h4>
-            <div id="userProfileMediaCategoriesList" style="margin-bottom:16px;"></div>
-            <div id="userProfileMediaCategoriesEmptyState" style="display:none;text-align:center;padding:32px;color:#9ca3af;font-size:14px;background:#f9fafb;border-radius:8px;border:1px dashed var(--border);">
-              <div style="margin-bottom:8px;font-weight:500;">No media categories yet</div>
-              <div style="font-size:13px;">Add your first category to use in Media uploads</div>
+        <!-- Media Categories Card (typography aligned with Schedule card) -->
+        <div id="userProfileCardMediaCategories" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:100%;overflow-x:hidden;box-sizing:border-box;">
+          <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Media Categories</h3>
+          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;">Labels for Media → Upload Work. Order = dropdown order. Drag ⋮⋮ to reorder. Inactive = hidden in the uploader.</p>
+          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+            <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:10px;">Categories</div>
+            <div id="userProfileMediaCategoriesList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
+            <div id="userProfileMediaCategoriesEmptyState" style="display:none;text-align:center;padding:20px;color:#9ca3af;font-size:12px;background:#fff;border-radius:8px;border:1px dashed var(--border);">
+              <div style="margin-bottom:6px;font-weight:500;color:#6b7280;">No categories yet</div>
+              <div style="font-size:11px;">Type a name below and click Add</div>
             </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <input type="text" id="userProfileAddMediaCategoryInput" placeholder="e.g. Manicure, Pedicure" style="flex:1;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
-              <button id="userProfileAddMediaCategoryBtn" type="button" class="btn-mini" style="font-size:13px;padding:8px 16px;">+ Add</button>
+            <div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;width:100%;box-sizing:border-box;margin-top:4px;">
+              <input type="text" id="userProfileAddMediaCategoryInput" placeholder="Type new category name…" autocomplete="off" style="flex:1 1 220px;min-width:min(100%,200px);width:auto;max-width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;background:#fff;color:#111827;box-sizing:border-box;">
+              <button id="userProfileAddMediaCategoryBtn" type="button" class="btn-mini" style="flex:0 0 auto;font-size:13px;padding:10px 16px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:8px;cursor:pointer;">+ Add</button>
             </div>
           </div>
         </div>
@@ -2989,7 +2989,9 @@ const DEFAULTS={
 
     {name:"Noa", pin:"5555", color:"#111827"}
 
-  ]
+  ],
+
+  mediaCategories: []
 
 };
 
@@ -3050,6 +3052,8 @@ settings.preferences = {
   ...DEFAULTS.preferences,
   ...((settings.preferences && typeof settings.preferences === 'object') ? settings.preferences : {})
 };
+
+if (!Array.isArray(settings.mediaCategories)) settings.mediaCategories = Array.isArray(DEFAULTS.mediaCategories) ? [...DEFAULTS.mediaCategories] : [];
 
 window.settings = settings;
 
@@ -12499,6 +12503,189 @@ async function reorderTechnicianTypesFromDOM(listContainer) {
   }
 }
 
+// --- Media categories (Settings → Media Categories) — was never wired; lists + cloud sync ---
+var _editingMediaCategoryId = null;
+
+function ffNormalizeMediaCategoriesArray(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(function (c, i) {
+    return {
+      id: String(c && c.id ? c.id : '').trim() || ('mc_' + Date.now() + '_' + i),
+      name: String(c && c.name ? c.name : '').trim(),
+      active: c && c.active === false ? false : true,
+      sortOrder: typeof c.sortOrder === 'number' ? c.sortOrder : i
+    };
+  }).filter(function (c) { return c.name; });
+}
+
+function ffPersistMediaCategoriesFromProfile() {
+  if (!settings.mediaCategories) settings.mediaCategories = [];
+  settings.mediaCategories = ffNormalizeMediaCategoriesArray(settings.mediaCategories);
+  window.settings = settings;
+  save();
+  if (typeof window.ffSaveMediaCategories === 'function') {
+    window.ffSaveMediaCategories(settings.mediaCategories);
+  }
+  if (typeof window.showToast === 'function') window.showToast('Media categories saved', 2500);
+}
+
+window.renderMediaCategoriesSettings = function renderMediaCategoriesSettings() {
+  var listContainer = document.getElementById('userProfileMediaCategoriesList');
+  var emptyState = document.getElementById('userProfileMediaCategoriesEmptyState');
+  if (!listContainer) return;
+  if (!Array.isArray(settings.mediaCategories)) settings.mediaCategories = [];
+  settings.mediaCategories = ffNormalizeMediaCategoriesArray(settings.mediaCategories);
+  listContainer.querySelectorAll('.media-category-item').forEach(function (el) { el.remove(); });
+  var rows = settings.mediaCategories.slice().sort(function (a, b) {
+    return (a.sortOrder || 0) - (b.sortOrder || 0);
+  });
+  if (rows.length === 0) {
+    if (emptyState) emptyState.style.display = 'block';
+    return;
+  }
+  if (emptyState) emptyState.style.display = 'none';
+  rows.forEach(function (cat) {
+    var item = document.createElement('div');
+    item.className = 'media-category-item';
+    item.dataset.categoryId = cat.id;
+    item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;';
+    var dragHandle = document.createElement('div');
+    dragHandle.innerHTML = '⋮⋮';
+    dragHandle.style.cssText = 'cursor:grab;color:#9ca3af;font-size:12px;padding:2px 4px;user-select:none;flex-shrink:0;';
+    dragHandle.draggable = true;
+    dragHandle.addEventListener('dragstart', function (e) {
+      e.dataTransfer.setData('text/plain', cat.id);
+      e.dataTransfer.effectAllowed = 'move';
+      item.style.opacity = '0.65';
+    });
+    dragHandle.addEventListener('dragend', function () {
+      item.style.opacity = '1';
+    });
+    var statusDot = document.createElement('div');
+    statusDot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + (cat.active !== false ? '#10b981' : '#9ca3af') + ';flex-shrink:0;';
+    var nameWrap = document.createElement('div');
+    nameWrap.style.cssText = 'flex:1;min-width:0;';
+    if (_editingMediaCategoryId === cat.id) {
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.value = cat.name || '';
+      inp.style.cssText = 'width:100%;padding:6px 8px;border:1px solid #a78bfa;border-radius:6px;font-size:12px;';
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+        if (e.key === 'Escape') { _editingMediaCategoryId = null; window.renderMediaCategoriesSettings(); }
+      });
+      inp.addEventListener('blur', function () {
+        var v = inp.value.trim();
+        if (v) {
+          cat.name = v;
+          ffPersistMediaCategoriesFromProfile();
+        }
+        _editingMediaCategoryId = null;
+        window.renderMediaCategoriesSettings();
+      });
+      nameWrap.appendChild(inp);
+      setTimeout(function () { inp.focus(); }, 0);
+    } else {
+      var sp = document.createElement('span');
+      sp.textContent = cat.name || '';
+      sp.style.cssText = 'font-size:12px;font-weight:500;color:' + (cat.active !== false ? '#111827' : '#9ca3af') + ';';
+      if (cat.active === false) sp.style.textDecoration = 'line-through';
+      nameWrap.appendChild(sp);
+    }
+    var toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.textContent = cat.active !== false ? 'Active' : 'Off';
+    toggleBtn.style.cssText = 'padding:5px 10px;border:1px solid ' + (cat.active !== false ? '#10b981' : '#d1d5db') + ';border-radius:6px;background:' + (cat.active !== false ? '#d1fae5' : '#f3f4f6') + ';color:' + (cat.active !== false ? '#065f46' : '#6b7280') + ';cursor:pointer;font-size:11px;font-weight:600;';
+    toggleBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      cat.active = cat.active === false;
+      ffPersistMediaCategoriesFromProfile();
+      window.renderMediaCategoriesSettings();
+    });
+    var editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit';
+    editBtn.style.cssText = 'padding:5px 10px;border:1px solid #a78bfa;border-radius:6px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:11px;font-weight:600;';
+    editBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      _editingMediaCategoryId = cat.id;
+      window.renderMediaCategoriesSettings();
+    });
+    var delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.textContent = 'Remove';
+    delBtn.style.cssText = 'padding:5px 10px;border:1px solid #fecaca;border-radius:6px;background:#fff;color:#b91c1c;cursor:pointer;font-size:11px;font-weight:600;';
+    delBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      settings.mediaCategories = settings.mediaCategories.filter(function (x) { return x.id !== cat.id; });
+      ffPersistMediaCategoriesFromProfile();
+      window.renderMediaCategoriesSettings();
+    });
+    item.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    });
+    item.addEventListener('drop', function (e) {
+      e.preventDefault();
+      var draggedId = e.dataTransfer.getData('text/plain');
+      if (!draggedId || draggedId === cat.id) return;
+      var draggedEl = listContainer.querySelector('[data-category-id="' + draggedId + '"]');
+      if (!draggedEl) return;
+      var toIdx = Array.prototype.indexOf.call(listContainer.children, item);
+      var fromIdx = Array.prototype.indexOf.call(listContainer.children, draggedEl);
+      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+      listContainer.insertBefore(draggedEl, fromIdx < toIdx ? item.nextSibling : item);
+      var ids = [];
+      for (var i = 0; i < listContainer.children.length; i++) {
+        var id = listContainer.children[i].getAttribute('data-category-id');
+        if (id) ids.push(id);
+      }
+      ids.forEach(function (id, i) {
+        var c = settings.mediaCategories.find(function (x) { return x.id === id; });
+        if (c) c.sortOrder = i;
+      });
+      ffPersistMediaCategoriesFromProfile();
+      window.renderMediaCategoriesSettings();
+    });
+    item.appendChild(dragHandle);
+    item.appendChild(statusDot);
+    item.appendChild(nameWrap);
+    item.appendChild(toggleBtn);
+    item.appendChild(editBtn);
+    item.appendChild(delBtn);
+    listContainer.appendChild(item);
+  });
+};
+
+window.initMediaCategoriesSettingsListeners = function initMediaCategoriesSettingsListeners() {
+  var addBtn = document.getElementById('userProfileAddMediaCategoryBtn');
+  var input = document.getElementById('userProfileAddMediaCategoryInput');
+  if (addBtn && !addBtn.__ffMediaCatBound) {
+    addBtn.__ffMediaCatBound = true;
+    addBtn.addEventListener('click', function () {
+      var name = input && input.value ? input.value.trim() : '';
+      if (!name) return;
+      if (!Array.isArray(settings.mediaCategories)) settings.mediaCategories = [];
+      var id = 'mc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+      settings.mediaCategories.push({
+        id: id,
+        name: name,
+        active: true,
+        sortOrder: settings.mediaCategories.length
+      });
+      if (input) input.value = '';
+      ffPersistMediaCategoriesFromProfile();
+      window.renderMediaCategoriesSettings();
+    });
+  }
+  if (input && !input.__ffMediaCatEnterBound) {
+    input.__ffMediaCatEnterBound = true;
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); if (addBtn) addBtn.click(); }
+    });
+  }
+};
+
 // Initialize on DOM ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initializeTechnicianTypes);
@@ -20821,6 +21008,7 @@ function initializeAppsPanel() {
     appsPanel.style.display = 'flex';
     lockBodyScroll();
     if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
+    if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
     if (typeof window.ensureTrainingItemsSubscription === 'function') {
       window.ensureTrainingItemsSubscription().catch((err) => {
         console.warn('[Training] Failed refreshing items from apps panel', err);
@@ -20981,6 +21169,7 @@ function initializeAppsPanel() {
   });
   
   if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
+  if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
   
   /* SANITY TEST CHECKLIST:
    * ✓ open/close works (X/backdrop/ESC)
@@ -22277,6 +22466,9 @@ function initializeAppsPanel() {
   // Render permission toggle row
   function renderPermissionToggleRow(permissionKey, label, description, value) {
     const checked = value === true ? 'checked' : '';
+    const descBlock = String(description || '').trim()
+      ? `<div class="staff-permission-label-desc">${escapeHtml(description)}</div>`
+      : '';
     return `
       <div class="staff-permission-row">
         <label class="staff-permission-toggle">
@@ -22285,7 +22477,7 @@ function initializeAppsPanel() {
         </label>
         <div class="staff-permission-label">
           <div class="staff-permission-label-title">${escapeHtml(label)}</div>
-          <div class="staff-permission-label-desc">${escapeHtml(description)}</div>
+          ${descBlock}
         </div>
       </div>
     `;
@@ -22389,6 +22581,36 @@ function initializeAppsPanel() {
         ]
       },
       {
+        title: 'Media',
+        permissions: [
+          {
+            key: 'media_upload',
+            label: 'Upload (My Uploads)',
+            desc: 'Add photos and see your own uploads. Turn off to hide Media upload for this person.',
+            getValue: function (st) {
+              var p = st.permissions || {};
+              return p.media_upload !== false;
+            }
+          },
+          {
+            key: 'media_handle',
+            label: 'To handle',
+            desc: 'Can manage media.',
+            getValue: function (st) {
+              var p = st.permissions || {};
+              if (Object.prototype.hasOwnProperty.call(p, 'media_handle')) return p.media_handle === true;
+              function legacyH(s) {
+                if (!s) return false;
+                if (s.isAdmin === true || s.isManager === true) return true;
+                var r = String(s.role || '').toLowerCase();
+                return r === 'manager' || r === 'admin' || r === 'owner' || r === 'front_desk' || r === 'assistant_manager';
+              }
+              return legacyH(st);
+            }
+          }
+        ]
+      },
+      {
         title: 'Settings',
         permissions: [
           { key: 'settings_manage', label: 'Manage general settings', desc: 'Edit app-wide settings and preferences' }
@@ -22399,7 +22621,7 @@ function initializeAppsPanel() {
     // Build permission cards
     const cards = permissionGroups.map(function(group) {
       const rows = group.permissions.map(function(perm) {
-        const value = permissions[perm.key] === true;
+        var value = typeof perm.getValue === 'function' ? perm.getValue(staff) : permissions[perm.key] === true;
         return renderPermissionToggleRow(perm.key, perm.label, perm.desc, value);
       });
       return renderPermissionCard(group.title, rows);
@@ -22440,6 +22662,9 @@ function initializeAppsPanel() {
         
         console.log('[renderPermissionsTab] Saved permissions for staff:', staff.id);
         if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
+        if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
+        if (typeof window.updateMediaScreenTabsForRole === 'function') window.updateMediaScreenTabsForRole();
+        if (typeof window.refreshMediaWorksList === 'function') window.refreshMediaWorksList();
       };
     });
   }
@@ -33668,21 +33893,21 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260412_inbox_explain"></script>
+  <script type="module" src="/app.js?v=20260412_storage_bucket_explicit"></script>
   <script type="module" src="/schedule-helpers.js?v=20260403_reception_split"></script>
   <script type="module" src="/schedule-availability.js?v=20260403_reception_split"></script>
   <script type="module" src="/schedule-generator.js?v=20260403_mgmt_only_split"></script>
   <script type="module" src="/schedule-validator.js?v=20260406_manual_admin_shift"></script>
-  <script type="module" src="/schedule-ui.js?v=20260414_schedule_header_align"></script>
-  <script type="module" src="/inbox.js?v=20260402_nav_close_staff"></script>
+  <script type="module" src="/schedule-ui.js?v=20260402_standby_firestore_sync"></script>
+  <script type="module" src="/inbox.js?v=20260402_inbox_hide_new_on_to_handle"></script>
   <script type="module" src="/chat.js?v=20260402_nav_close_staff"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260312_staffcall11"></script>
-  <script type="module" src="/settings-cloud.js?v=20260404_salon_timezone"></script>
+  <script type="module" src="/settings-cloud.js?v=20260404_media_categories"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tickets.js?v=20260402_tickets_boot_cover"></script>
-  <script type="module" src="/media-upload.js?v=24"></script>
+  <script type="module" src="/media-upload.js?v=20260402_dl_debug_403"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -34365,6 +34590,21 @@ function hookSettingsGuard_DISABLED(){
   white-space:nowrap!important;
   appearance:none!important;
 }
+/* Must win over .media-tab-btn display — otherwise "To handle" stays visible without permission */
+.media-subtab-btn{padding:6px 14px!important;font-size:12px!important;font-weight:500!important;border:1px solid #e5e7eb!important;border-radius:8px!important;background:#fff!important;color:#6b7280!important;cursor:pointer!important;}
+.media-subtab-btn.active{background:#7c3aed!important;color:#fff!important;border-color:#7c3aed!important;}
+.media-tab-btn.media-tab--hidden{
+  display:none!important;
+  visibility:hidden!important;
+  position:absolute!important;
+  width:0!important;
+  height:0!important;
+  overflow:hidden!important;
+  padding:0!important;
+  margin:0!important;
+  border:none!important;
+  pointer-events:none!important;
+}
 .media-work-card:hover{box-shadow:0 4px 12px rgba(0,0,0,0.1);}
 #mediaScreen .btn-pill:not(#mediaUploadWorkBtn),.media-module-modal .btn-pill:not(.btn-danger){background:#7c3aed!important;color:#fff!important;font-size:10px!important;}
 #mediaUploadWorkBtn{
@@ -34390,7 +34630,7 @@ function hookSettingsGuard_DISABLED(){
 #workDetailsModal .btn-pill:hover,#workDetailsModal .media-action-btn:hover{background:#f9fafb!important;border-color:#9ca3af!important;}
 #workDetailsModal .btn-danger{background:#fff!important;color:#dc2626!important;border-color:#fecaca!important;}
 #workDetailsModal .btn-danger:hover{background:#fef2f2!important;border-color:#dc2626!important;}
-#workDetailsModal #workDetailsActions{display:grid!important;grid-template-columns:repeat(4,auto)!important;gap:6px!important;}
+#workDetailsModal #workDetailsActions{display:flex!important;flex-wrap:wrap!important;gap:8px!important;align-items:center!important;}
 #workDetailsModal #workDetailsActions .action-hint{grid-column:1/-1!important;font-size:10px!important;}
 /* Ensure MEDIA button exists, but keep normal nav visual weight */
 .header #mediaBtn,.toolbar #mediaBtn{display:inline-flex!important;visibility:visible!important;}
@@ -34399,11 +34639,11 @@ function hookSettingsGuard_DISABLED(){
 <div id="mediaScreen" class="media-screen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f9fafb;z-index:300;flex-direction:column;overflow:hidden;">
   <!-- Tabs (left) | Filters + Sort + Upload (right, grouped) -->
   <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;gap:12px;flex-wrap:wrap;">
-    <div id="mediaTabsWrap" style="display:flex;align-items:center;gap:0;">
-      <button type="button" id="mediaTabMyUploads" class="media-tab-btn inbox-view-btn active" data-media-tab="my_uploads" style="border-right:0!important;border-radius:8px 0 0 8px!important;background:#7c3aed!important;color:#fff!important;">My Uploads</button>
-      <button type="button" id="mediaTabToHandle" class="media-tab-btn inbox-view-btn" data-media-tab="to_handle" style="display:none;border-left:none!important;border-radius:0 8px 8px 0!important;">To handle</button>
+    <div id="mediaTabsWrap" style="display:flex;align-items:center;gap:0;position:relative;z-index:2;">
+      <button type="button" id="mediaTabMyUploads" class="media-tab-btn active" data-media-tab="my_uploads" style="border-right:0!important;border-radius:8px 0 0 8px!important;">My Uploads</button>
+      <button type="button" id="mediaTabToHandle" class="media-tab-btn" data-media-tab="to_handle" style="display:none;border-left:none!important;border-radius:0 8px 8px 0!important;">To handle</button>
     </div>
-    <div id="mediaControlsWrap" style="display:flex;align-items:center;gap:8px;margin-left:auto;transform:translateX(-55px);">
+    <div id="mediaControlsWrap" style="display:flex;align-items:center;gap:8px;margin-left:auto;">
       <div style="position:relative;">
         <button type="button" id="mediaFilterTrigger" style="padding:8px 14px;font-size:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;cursor:pointer;display:flex;align-items:center;gap:6px;">Filters <span style="font-size:10px;">▼</span></button>
         <div id="mediaFilterDropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:140px;z-index:100;max-height:280px;overflow-y:auto;"></div>
@@ -34423,14 +34663,21 @@ function hookSettingsGuard_DISABLED(){
       <button type="button" id="mediaUploadWorkBtn" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;white-space:nowrap;">+ Upload Work</button>
     </div>
   </div>
+  <div id="mediaToHandleSubRow" style="display:none;align-items:center;flex-wrap:wrap;gap:8px;padding:6px 20px 10px;border-bottom:1px solid #e5e7eb;background:#fafafa;flex-shrink:0;">
+    <span style="font-size:11px;color:#64748b;font-weight:600;">To handle</span>
+    <button type="button" class="media-subtab-btn active" data-media-subtab="queue">Queue</button>
+    <button type="button" class="media-subtab-btn" data-media-subtab="done">Done</button>
+    <button type="button" class="media-subtab-btn" data-media-subtab="dismissed">Dismissed</button>
+  </div>
   <!-- Content area -->
   <div id="mediaContent" style="flex:1;padding:24px;overflow-y:auto;">
     <div id="mediaList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;max-width:1200px;margin:0 auto;">
       <!-- Cards populated by JS -->
     </div>
     <div id="mediaListEmpty" style="display:none;text-align:center;padding:60px 20px;color:#9ca3af;font-size:10px;">
-      <div style="font-size:10px;font-weight:500;color:#6b7280;margin-bottom:8px;">No works yet</div>
-      <div style="font-size:10px;margin-bottom:20px;">Upload your first work to get started</div>
+      <div id="mediaEmptyTitle" style="font-size:10px;font-weight:500;color:#6b7280;margin-bottom:8px;">No works yet</div>
+      <div id="mediaEmptySubtitle" style="font-size:10px;margin-bottom:12px;">Upload your first work to get started</div>
+      <div data-media-empty-sub style="display:none;max-width:440px;margin:0 auto 16px;font-size:10px;color:#94a3b8;line-height:1.5;text-align:center;"></div>
       <button type="button" id="mediaEmptyUploadBtn" class="btn-pill" style="background:#7c3aed;color:#fff;padding:12px 24px;font-size:10px;">+ Upload Work</button>
     </div>
     <div id="mediaListLoading" style="display:none;text-align:center;padding:40px;color:#9ca3af;font-size:10px;">Loading...</div>
@@ -34443,7 +34690,10 @@ function hookSettingsGuard_DISABLED(){
     <div style="font-size:18px;font-weight:700;color:#111827;">Schedule</div>
     <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;row-gap:10px;">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;">
-        <div id="scheduleWeekLabel" style="font-size:13px;color:#6b7280;">Current week</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;">
+          <div id="scheduleWeekLabel" style="font-size:13px;color:#6b7280;flex-shrink:0;">Current week</div>
+          <div id="scheduleWeekAckStrip" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;" aria-live="polite"></div>
+        </div>
         <button type="button" id="schedulePublishToggleBtn" title="Publish this week for all staff" aria-pressed="false" style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;outline:none;">
           <span id="schedulePublishToggleIcon" aria-hidden="true" style="font-size:14px;line-height:1;">&#128065;&#65039;</span>
           <span id="schedulePublishToggleLabel">Visible to staff</span>
@@ -34465,6 +34715,9 @@ function hookSettingsGuard_DISABLED(){
           <input type="date" id="scheduleCustomWeekDate" style="display:none;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;outline:none;">
           <button type="button" id="scheduleApplyCustomWeekBtn" class="btn-pill" style="display:none;background:#7c3aed;color:#fff;border-color:#7c3aed;font-size:13px;padding:8px 14px;">Apply</button>
         </div>
+        <div id="scheduleModeToggleWrap" style="display:none;align-items:stretch;flex-wrap:nowrap;gap:0;margin:0;padding:0;line-height:0;">
+          <button type="button" id="scheduleViewMyShiftsBtn" aria-pressed="false" onclick="window.setSchedulePreviewMode && window.setSchedulePreviewMode('my_shifts')" class="inbox-view-btn" style="display:inline-flex;align-items:center;justify-content:center;padding:0 14px;height:34px;font-size:12px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;box-sizing:border-box;margin:0;">My shifts</button><button type="button" id="scheduleViewBuildScheduleBtn" aria-pressed="true" onclick="window.setSchedulePreviewMode && window.setSchedulePreviewMode('build')" class="inbox-view-btn active" style="display:inline-flex;align-items:center;justify-content:center;padding:0 14px;height:34px;font-size:12px;font-weight:600;border:1px solid #7c3aed;border-left:0;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;box-sizing:border-box;margin:0;">Build schedule</button>
+        </div>
         <div id="scheduleViewToggleWrap" style="display:inline-flex;align-items:stretch;flex-wrap:nowrap;gap:0;margin:0;padding:0;line-height:0;">
           <button type="button" id="scheduleViewManagementBtn" aria-pressed="true" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('management')" class="inbox-view-btn active" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#7c3aed;color:#fff;cursor:pointer;box-sizing:border-box;">Management</button><button type="button" id="scheduleViewTechniciansBtn" aria-pressed="false" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('technicians')" class="inbox-view-btn" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-left:0;border-radius:0 8px 8px 0;background:#f9fafb;color:#6b7280;cursor:pointer;box-sizing:border-box;margin:0;">Technicians</button>
         </div>
@@ -34473,7 +34726,6 @@ function hookSettingsGuard_DISABLED(){
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
       <div id="scheduleStaffChangeStrip" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;" aria-live="polite"></div>
-      <div id="scheduleWeekAckStrip" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;" aria-live="polite"></div>
     </div>
   </div>
   <div id="schedulePreviewContent" style="flex:1;overflow-y:auto;padding:20px;">
@@ -34543,11 +34795,11 @@ function hookSettingsGuard_DISABLED(){
 <div id="workDetailsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:100020;align-items:center;justify-content:center;padding:20px;">
   <div style="background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;padding:24px;font-size:11px;line-height:1.45;color:#374151;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3 style="margin:0;font-size:14px;font-weight:600;color:#111827;">Work Details</h3>
+      <h3 style="margin:0;font-size:14px;font-weight:600;color:#111827;">Media file</h3>
       <button type="button" id="workDetailsModalClose" style="background:none;border:none;font-size:20px;color:#9ca3af;cursor:pointer;padding:4px;line-height:1;">×</button>
     </div>
     <div id="workDetailsContent"><!-- populated by JS --></div>
-    <div id="workDetailsActions" style="margin-top:20px;padding-top:16px;border-top:1px solid #e5e7eb;display:grid;grid-template-columns:repeat(4,auto);gap:6px;"><!-- populated by JS --></div>
+    <div id="workDetailsActions" style="margin-top:20px;padding-top:16px;border-top:1px solid #e5e7eb;display:flex;flex-wrap:wrap;gap:8px;align-items:center;"><!-- populated by JS --></div>
   </div>
 </div>
 

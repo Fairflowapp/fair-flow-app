@@ -6,6 +6,7 @@ if (!admin.apps.length) admin.initializeApp();
 const functions = require("firebase-functions");
 const functionsV1 = require("firebase-functions/v1");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onRequest: onRequestV2 } = require("firebase-functions/v2/https");
 functions.region = functionsV1.region;
 
 /**
@@ -694,4 +695,215 @@ exports.onInboxRequestDraftCreated = onDocumentCreated(
 );
 
 /* sendStaffInvite HTTP removed – org policy blocks. Deploy with: firebase deploy --only "functions:testCallable,functions:testCallablePing,functions:testSendEmail,functions:onStaffInviteCreatedV2,functions:processPendingInvites,functions:sendStaffInviteCallable" */
+
+// ============================================================================
+// Media download fallbacks (client uses when fetch/getBlob/getDownloadURL fail)
+// ============================================================================
+
+const MEDIA_DL_MAX_BASE64_BYTES = 8 * 1024 * 1024; // 8 MiB
+
+/** Must match client `storageBucket` in app.js (new projects use *.firebasestorage.app). */
+const STORAGE_BUCKET_IDS = ["fairflowapp-db841.firebasestorage.app", "fairflowapp-db841.appspot.com"];
+
+function assertMediaStoragePath(storagePath) {
+  const p = String(storagePath || "").trim();
+  if (!p.startsWith("salons/")) {
+    throw new functions.https.HttpsError("invalid-argument", "Invalid storage path");
+  }
+  if (p.includes("..") || p.includes("//")) {
+    throw new functions.https.HttpsError("invalid-argument", "Invalid storage path");
+  }
+  return p;
+}
+
+/**
+ * Resolves the GCS bucket + File reference. Default admin.bucket() often points at *.appspot.com
+ * while files live in *.firebasestorage.app — wrong bucket => "not found" / cryptic errors.
+ */
+async function resolveFileForPath(storagePath) {
+  let lastErr = null;
+  for (const id of STORAGE_BUCKET_IDS) {
+    try {
+      const bucket = admin.storage().bucket(id);
+      const file = bucket.file(storagePath);
+      const [exists] = await file.exists();
+      if (exists) return { bucket, file };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (lastErr) console.error("[mediaStorage] resolveFileForPath", storagePath, lastErr);
+  throw new functions.https.HttpsError("not-found", "File not found in storage");
+}
+
+/** Signed read URL for Storage object (Admin bypasses client token issues). */
+exports.getMediaDownloadUrl = functions.region("us-central1").https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Sign in first");
+  }
+  const storagePath = assertMediaStoragePath(data?.storagePath);
+  const fileNameHint = data?.fileName ? String(data.fileName).trim() : "";
+  try {
+    const { file } = await resolveFileForPath(storagePath);
+    const [url] = await file.getSignedUrl({
+      action: "read",
+      expires: Date.now() + 60 * 60 * 1000,
+    });
+    const base = storagePath.split("/").pop() || "download";
+    const fileName = fileNameHint || base;
+    return { url, fileName };
+  } catch (err) {
+    if (err instanceof functions.https.HttpsError) throw err;
+    console.error("[getMediaDownloadUrl]", storagePath, err);
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      err?.message || "Could not create download link"
+    );
+  }
+});
+
+/** Small files only — used when client cannot read object directly. */
+exports.getMediaDownloadBase64 = functions.region("us-central1").https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Sign in first");
+  }
+  const storagePath = assertMediaStoragePath(data?.storagePath);
+  try {
+    const { file } = await resolveFileForPath(storagePath);
+    const [metadata] = await file.getMetadata();
+    const size = Number(metadata.size || 0);
+    if (size > MEDIA_DL_MAX_BASE64_BYTES) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        "File too large for direct download. Use getMediaDownloadUrl."
+      );
+    }
+    const [buf] = await file.download();
+    const base64 = Buffer.from(buf).toString("base64");
+    const base = storagePath.split("/").pop() || "file";
+    return { base64, fileName: base };
+  } catch (err) {
+    if (err instanceof functions.https.HttpsError) throw err;
+    console.error("[getMediaDownloadBase64]", storagePath, err);
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      err?.message || "Could not read file"
+    );
+  }
+});
+
+/**
+ * HTTP download proxy — streams Storage file with Content-Disposition: attachment.
+ * Browser fetches this URL (CORS) instead of firebasestorage.googleapis.com (often blocked / empty body).
+ * GET ?path=encodeURIComponent(storagePath)
+ * Auth: Authorization: Bearer <idToken> OR ?token=<idToken> (query used when Hosting rewrite strips Authorization)
+ */
+exports.mediaDownloadFile = onRequestV2(
+  /** invoker omitted — `invoker: "public"` caused deploy to fail when CLI cannot set Cloud Run IAM; set run.invoker for allUsers in GCP Console if 403. */
+  { region: "us-central1" },
+  async (req, res) => {
+  const rawPath = req.query && req.query.path;
+  const hasQueryPath = rawPath !== undefined && rawPath !== null && String(rawPath).length > 0;
+  const hasTokenQuery =
+    req.query && typeof req.query.token === "string" && req.query.token.length > 0;
+  const hasTokenHeader =
+    typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer ");
+  const hasToken = hasTokenQuery || hasTokenHeader;
+  const pathPreview20 = String(rawPath ?? "").slice(0, 20);
+  console.log("[mediaDownloadFile] entry", {
+    origin: req.headers.origin,
+    method: req.method,
+    hasQueryPath,
+    hasToken,
+    pathPreview20,
+  });
+
+  const origin = req.headers.origin;
+  const allowOrigin =
+    typeof origin === "string" &&
+    (origin.startsWith("https://") ||
+      origin.startsWith("http://localhost") ||
+      origin.startsWith("http://127.0.0.1"))
+      ? origin
+      : "https://app.fairflowapp.com";
+  res.set("Access-Control-Allow-Origin", allowOrigin);
+  res.set("Vary", "Origin");
+  res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  res.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).send("");
+  }
+  if (req.method !== "GET") {
+    console.warn("[mediaDownloadFile] error return 405 Method Not Allowed", { method: req.method });
+    return res.status(405).send("Method Not Allowed");
+  }
+
+  const authHeader = req.headers.authorization || "";
+  let idToken = null;
+  if (authHeader.startsWith("Bearer ")) {
+    idToken = authHeader.slice(7);
+  } else if (req.query && typeof req.query.token === "string" && req.query.token.length > 0) {
+    idToken = req.query.token;
+  }
+  if (!idToken) {
+    console.warn("[mediaDownloadFile] error return 401 Unauthorized — no token");
+    return res.status(401).send("Unauthorized");
+  }
+  console.log("[mediaDownloadFile] before verifyIdToken");
+  try {
+    await admin.auth().verifyIdToken(idToken);
+    console.log("[mediaDownloadFile] after verifyIdToken ok");
+  } catch (e) {
+    console.warn("[mediaDownloadFile] error return 401 Invalid token", e?.message);
+    return res.status(401).send("Invalid token");
+  }
+
+  let storagePath = "";
+  try {
+    storagePath = decodeURIComponent(String(req.query.path || ""));
+  } catch (err) {
+    console.warn("[mediaDownloadFile] error return 400 Bad path decode", err?.message);
+    return res.status(400).send("Bad path");
+  }
+  const p = String(storagePath).trim();
+  if (!p.startsWith("salons/") || p.includes("..") || p.includes("//")) {
+    console.warn("[mediaDownloadFile] error return 400 Invalid path", { p: p.slice(0, 80) });
+    return res.status(400).send("Invalid path");
+  }
+
+  console.log("[mediaDownloadFile] before resolveFileForPath", p.slice(0, 120));
+  let file;
+  try {
+    ({ file } = await resolveFileForPath(p));
+    console.log("[mediaDownloadFile] after resolveFileForPath ok");
+  } catch (e) {
+    console.warn("[mediaDownloadFile] error return 404 Not found", p.slice(0, 120), e?.message);
+    return res.status(404).send("Not found");
+  }
+
+  const base = p.split("/").pop() || "file";
+  const safeName = base.replace(/[^\w.\-]+/g, "_").slice(0, 180) || "file";
+
+  try {
+    const [meta] = await file.getMetadata();
+    const ct = meta.contentType || "application/octet-stream";
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
+  } catch (e) {
+    console.error("[mediaDownloadFile] error return 500 metadata", e);
+    return res.status(500).send("Error");
+  }
+
+  console.log("[mediaDownloadFile] before createReadStream");
+  file
+    .createReadStream()
+    .on("error", (err) => {
+      console.error("[mediaDownloadFile] stream", err);
+      if (!res.headersSent) res.status(500).end();
+      else res.end();
+    })
+    .pipe(res);
+  }
+);
 

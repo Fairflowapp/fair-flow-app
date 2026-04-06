@@ -140,7 +140,8 @@ onAuthStateChanged(auth, async user => {
 
 console.log("[CLIENT] Firebase functions SDK available:", typeof firebase !== "undefined");
 const functions = getFunctions(app, "us-central1");
-const storage = getStorage(app);
+/** Explicit gs:// bucket — default getStorage(app) can resolve the wrong bucket on *.firebasestorage.app projects. */
+const storage = getStorage(app, `gs://${firebaseConfig.storageBucket}`);
 export { storage };
 
 // Ensure we have an auth user (anonymous if needed) for HTTP callable invocations under domain-restricted sharing

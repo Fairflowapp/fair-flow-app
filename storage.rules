@@ -42,6 +42,21 @@ service firebase.storage {
       allow read, write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
     }
 
+    // Legacy Media uploads (contentWorks) — files under media/{workId}/...
+    match /salons/{salonId}/media/{workId}/{allPaths=**} {
+      allow read, write: if signedIn();
+    }
+
+    // Media module (work photos). Match staff/ path: many PIN flows have users/{uid} without salonId;
+    // strict salon match caused storage/unauthorized when salonId in app ≠ Firestore user doc.
+    match /salons/{salonId}/mediaWorks/{workId}/{allPaths=**} {
+      allow read, write: if signedIn();
+    }
+    // Some clients / error URLs show lowercase path segment — allow same access
+    match /salons/{salonId}/mediaworks/{workId}/{allPaths=**} {
+      allow read, write: if signedIn();
+    }
+
     // deny everything else
     match /{allPaths=**} {
       allow read, write: if false;

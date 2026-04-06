@@ -11,7 +11,7 @@
 
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, getDocs, addDoc, updateDoc, deleteDoc, deleteField } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260329_training_fix1";
+import { db, auth } from "./app.js?v=20260412_storage_bucket_explicit";
 import {
   cloneDefaultBusinessHours,
   cloneDefaultCoverageRules,
@@ -169,6 +169,20 @@ function subscribeMain(salonId) {
         changed = true;
       }
     }
+    if (Array.isArray(data.mediaCategories)) {
+      const normalized = data.mediaCategories
+        .map((c, i) => ({
+          id: String(c?.id || "").trim() || `mc_${i}_${Date.now()}`,
+          name: String(c?.name || "").trim(),
+          active: c?.active !== false,
+          sortOrder: typeof c?.sortOrder === "number" ? c.sortOrder : i,
+        }))
+        .filter((c) => c.name);
+      if (JSON.stringify(window.settings.mediaCategories || []) !== JSON.stringify(normalized)) {
+        window.settings.mediaCategories = normalized;
+        changed = true;
+      }
+    }
     const nextRolesHierarchy = data.rolesHierarchy && typeof data.rolesHierarchy === 'object'
       ? normalizeRolesHierarchy(data.rolesHierarchy)
       : cloneDefaultRolesHierarchy();
@@ -294,6 +308,15 @@ function ffSaveTaskSettings(taskReminders, taskNotes, showIncompleteTasksBadge) 
   if (Object.keys(taskSettings).length === 0) return;
   setDoc(settingsMainRef(_salonId), { taskSettings, updatedAt: serverTimestamp() }, { merge: true })
     .catch((e) => console.warn("[SettingsCloud] save task settings failed", e));
+}
+
+/** Media → category list for Upload Work dropdown (stored on settings/main). */
+function ffSaveMediaCategories(mediaCategories) {
+  if (!_salonId) return;
+  const arr = Array.isArray(mediaCategories) ? mediaCategories : [];
+  setDoc(settingsMainRef(_salonId), { mediaCategories: arr, updatedAt: serverTimestamp() }, { merge: true }).catch((e) =>
+    console.warn("[SettingsCloud] save mediaCategories failed", e),
+  );
 }
 
 function ffSaveScheduleSettings(rolesHierarchy, scheduleRules, businessHours, coverageRules, specialBusinessDays, previousSpecialBusinessDays) {
@@ -521,6 +544,7 @@ if (typeof window !== "undefined") {
   window.ffSavePreferencesSettings = ffSavePreferencesSettings;
   window.ffSaveTaskSettings = ffSaveTaskSettings;
   window.ffSaveScheduleSettings = ffSaveScheduleSettings;
+  window.ffSaveMediaCategories = ffSaveMediaCategories;
   window.ffGetTechnicianTypes = ffGetTechnicianTypes;
   window.ffCreateTechnicianType = ffCreateTechnicianType;
   window.ffUpdateTechnicianType = ffUpdateTechnicianType;

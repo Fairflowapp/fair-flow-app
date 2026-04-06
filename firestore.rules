@@ -50,6 +50,59 @@ service cloud.firestore {
         : '';
     }
 
+    // Staff doc on salon (for per-staff permissions.media_* on Media module)
+    function salonStaffDocData(salonId, staffId) {
+      return staffId != ''
+        && exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId))
+        ? get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data
+        : null;
+    }
+
+    function mySalonStaffDocData(salonId) {
+      return salonStaffDocData(salonId, userStaffId());
+    }
+
+    function legacyStaffMediaHandleFromDoc(d) {
+      return d != null && (
+        d.isAdmin == true
+        || d.isManager == true
+        || (
+          d.role is string
+          && d.role.lower() in ['manager', 'admin', 'owner', 'front_desk', 'assistant_manager']
+        )
+      );
+    }
+
+    function permMediaHandleAllowed(salonId) {
+      return mySalonStaffDocData(salonId) != null && (
+        (mySalonStaffDocData(salonId).permissions is map
+          && mySalonStaffDocData(salonId).permissions.keys().hasAny(['media_handle']))
+        ? mySalonStaffDocData(salonId).permissions.media_handle == true
+        : legacyStaffMediaHandleFromDoc(mySalonStaffDocData(salonId))
+      );
+    }
+
+    function permMediaUploadAllowed(salonId) {
+      return mySalonStaffDocData(salonId) != null && (
+        (mySalonStaffDocData(salonId).permissions is map
+          && mySalonStaffDocData(salonId).permissions.keys().hasAny(['media_upload']))
+        ? mySalonStaffDocData(salonId).permissions.media_upload == true
+        : true
+      );
+    }
+
+    // Legacy Media (contentWorks): PIN technicians may have staff doc but not users.salonId / members
+    function isStaffInSalon(salonId) {
+      return isSignedIn()
+        && userExists()
+        && userDocData().staffId is string
+        && exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId));
+    }
+
+    function canAccessMedia(salonId) {
+      return belongsToSalon(salonId) || isStaffInSalon(salonId);
+    }
+
     function trainingProgressIdentityUnchanged() {
       return request.resource.data.salonId == resource.data.salonId
         && request.resource.data.staffId == resource.data.staffId
@@ -75,7 +128,7 @@ service cloud.firestore {
     // Salon members directory: minimal public profile (name, role, staffId) for "Send to" lookup
     // Each user writes their own; any salon member can read the whole list
     match /salons/{salonId}/members/{uid} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
       allow create, update: if request.auth != null
         && request.auth.uid == uid
         && belongsToSalon(salonId)
@@ -466,6 +519,105 @@ service cloud.firestore {
         && request.resource.data.seenAt is timestamp
         && ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
       allow delete: if false;
+    }
+
+    // Per-staff training assignment toasts / inbox (APPS → Training); queried by forStaffId
+    match /salons/{salonId}/staffNotifications/{notifId} {
+      allow read: if belongsToSalon(salonId)
+        && (
+          isManager(salonId)
+          || (
+            userStaffId() != ''
+            && resource.data.forStaffId == userStaffId()
+          )
+        );
+      allow create: if belongsToSalon(salonId) && isManager(salonId)
+        && request.resource.data.forStaffId is string
+        && request.resource.data.trainingId is string
+        && request.resource.data.type == 'training_assigned';
+      allow update: if belongsToSalon(salonId)
+        && (
+          isManager(salonId)
+          || (
+            userStaffId() != ''
+            && resource.data.forStaffId == userStaffId()
+            && request.resource.data.forStaffId == resource.data.forStaffId
+          )
+        );
+      allow delete: if belongsToSalon(salonId) && isManager(salonId);
+    }
+
+    // Media categories (labels for Media upload) — managers/admins OR staff with media_handle (same as To handle)
+    match /salons/{salonId}/mediaCategories/{categoryId} {
+      allow read: if canAccessMedia(salonId);
+      allow create, update, delete: if canAccessMedia(salonId)
+        && (isManager(salonId) || permMediaHandleAllowed(salonId));
+    }
+
+    // Legacy Media module (contentWorks, mediaItems, postedHistory)
+    match /salons/{salonId}/contentWorks/{workId} {
+      allow read: if canAccessMedia(salonId);
+      allow create: if canAccessMedia(salonId)
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.salonId == salonId
+        && request.resource.data.staffId is string
+        && request.resource.data.staffName is string
+        && request.resource.data.createdByRole is string
+        && request.resource.data.status in ['active', 'archived', 'deleted'];
+      allow update, delete: if canAccessMedia(salonId);
+
+      match /mediaItems/{mediaId} {
+        allow read: if canAccessMedia(salonId);
+        allow create: if canAccessMedia(salonId)
+          && request.resource.data.mediaType is string
+          && request.resource.data.mediaUrl is string
+          && request.resource.data.storagePath is string;
+        allow update, delete: if canAccessMedia(salonId);
+      }
+
+      match /postedHistory/{historyId} {
+        allow read: if canAccessMedia(salonId);
+        allow create: if canAccessMedia(salonId)
+          && request.resource.data.platform is string
+          && request.resource.data.format is string
+          && request.resource.data.postedDate is string
+          && request.resource.data.markedByStaffId is string
+          && request.resource.data.markedByName is string;
+        allow update, delete: if canAccessMedia(salonId);
+      }
+    }
+
+    // Salon media gallery (all uploads start pending → To handle for staff with media_handle)
+    match /salons/{salonId}/mediaWorks/{workId} {
+      allow read: if belongsToSalon(salonId);
+      allow create: if belongsToSalon(salonId)
+        && userStaffId() != ''
+        && permMediaUploadAllowed(salonId)
+        && request.resource.data.staffId == userStaffId()
+        && request.resource.data.staffId is string
+        && request.resource.data.layout in ['single', 'before_after']
+        && request.resource.data.status == 'pending';
+      allow update: if belongsToSalon(salonId) && (
+        isManager(salonId)
+        || permMediaHandleAllowed(salonId)
+        || (
+          userStaffId() != ''
+          && resource.data.staffId == userStaffId()
+          && resource.data.status == 'pending'
+        )
+      );
+      allow delete: if belongsToSalon(salonId) && (
+        isManager(salonId)
+        || (
+          permMediaHandleAllowed(salonId)
+          && resource.data.status in ['approved', 'rejected']
+        )
+        || (
+          userStaffId() != ''
+          && resource.data.staffId == userStaffId()
+          && resource.data.status == 'pending'
+        )
+      );
     }
 
     // ===== UI SETTINGS (historyRange, etc.) =====

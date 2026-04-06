@@ -324,8 +324,8 @@ function setupInboxUI() {
 
   const role = inboxUserRoleLc();
 
-  // "New Request" buttons — show for technician, manager, admin, owner
-  const contentNewBtn  = document.querySelector('#inboxContentContainer button[onclick="openCreateRequestModal()"]');
+  // "New Request" — header button is #inboxCreateRequestBtn (inside #inboxViewSwitcher), NOT inside #inboxContentContainer
+  const headerNewBtn = document.getElementById('inboxCreateRequestBtn');
   const emptyStateBtn  = document.getElementById('emptyStateNewRequestBtn');
   const emptyStateMsg  = document.getElementById('emptyStateMessage');
   const inboxTabs      = document.getElementById('inboxTabs');
@@ -336,9 +336,9 @@ function setupInboxUI() {
   const manageTypesBtn = document.getElementById('btnManageRequestTypes');
   const settingsBtn = document.getElementById('inboxSettingsBtn');
 
-  // New Request: show only in "My Requests" (or always for technician); hide in "To handle"
+  // New Request: show only in "My Requests" (managers) or any time for technician; hide in "To handle"
   const showNewRequest = canCreateRequests && (role === 'technician' || inboxViewMode === 'mine');
-  if (contentNewBtn) contentNewBtn.style.display = showNewRequest ? '' : 'none';
+  if (headerNewBtn) headerNewBtn.style.display = showNewRequest ? '' : 'none';
   // Hide empty-state New Request — only the header button is used
   if (emptyStateBtn) emptyStateBtn.style.display = 'none';
   if (manageTypesBtn) manageTypesBtn.style.display = 'none'; // use gear only
@@ -413,7 +413,7 @@ window.setInboxViewMode = function(mode) {
   const filterRow = document.getElementById('inboxFilterRow');
   const inboxTabs = document.getElementById('inboxTabs');
   const emptyStateBtn = document.getElementById('emptyStateNewRequestBtn');
-  const contentNewBtn = document.querySelector('#inboxContentContainer button[onclick="openCreateRequestModal()"]');
+  const headerNewBtn = document.getElementById('inboxCreateRequestBtn');
   if (listTitle) listTitle.textContent = mode === 'mine' ? 'My Requests' : 'To handle';
   if (filterRow) filterRow.style.display = mode === 'mine' ? 'none' : 'flex';
   if (mode === 'mine') {
@@ -422,7 +422,7 @@ window.setInboxViewMode = function(mode) {
     if (inboxTabs) { inboxTabs.classList.remove('hidden'); inboxTabs.style.display = ''; }
   }
   if (emptyStateBtn) emptyStateBtn.style.display = 'none';
-  if (contentNewBtn) contentNewBtn.style.display = (mode === 'mine') ? '' : 'none';
+  if (headerNewBtn) headerNewBtn.style.display = mode === 'mine' ? '' : 'none';
   loadInboxItems();
 };
 

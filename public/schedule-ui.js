@@ -12,7 +12,7 @@ import {
   deleteField,
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db } from "./app.js?v=20260329_training_fix1";
+import { db } from "./app.js?v=20260412_storage_bucket_explicit";
 import { generateWeeklySchedule } from "./schedule-generator.js?v=20260403_mgmt_only_split";
 import { validateScheduleDraft } from "./schedule-validator.js?v=20260403_avail_business_bounds";
 
@@ -22,8 +22,12 @@ let schedulePreviewState = {
   validation: null,
   weekRange: null,
   staffList: [],
+  /** date (YYYY-MM-DD) -> staff id for the bottom Stand by row (per day). */
+  standByByDate: {},
 };
 let schedulePreviewView = "management";
+/** Editors only: "my_shifts" = personal row, view + ack | "build" = full grid editing. */
+let schedulePreviewMode = "build";
 let scheduleDragState = null;
 let scheduleShiftEditPayload = null;
 
@@ -180,6 +184,7 @@ function ensureScheduleWeekAckListener(weekStart) {
       updateScheduleWeekAckStrip();
       if (
         scheduleUserCanManualEdit() &&
+        schedulePreviewMode === "build" &&
         schedulePreviewState.draft &&
         document.getElementById("scheduleScreen")?.style.display !== "none"
       ) {
@@ -201,7 +206,14 @@ async function refreshScheduleWeekAckStripAsync() {
   const ws = weekRange.startDate;
   const published = schedulePublishedMap[ws] === true;
   const ctx = getScheduleAccessContext();
-  if (ctx.noAccess || scheduleUserCanManualEdit() || !published || !canViewScheduleBoardForCurrentWeek()) {
+  const editorMyShifts =
+    scheduleUserCanManualEdit() && schedulePreviewMode === "my_shifts";
+  if (
+    ctx.noAccess ||
+    (scheduleUserCanManualEdit() && !editorMyShifts) ||
+    !published ||
+    !canViewScheduleBoardForCurrentWeek()
+  ) {
     strip.style.display = "none";
     strip.innerHTML = "";
     return;
@@ -363,7 +375,7 @@ function updateScheduleChangePingStripFromSnapshot(snap) {
   if (
     !salonId ||
     !mySid ||
-    scheduleUserCanManualEdit() ||
+    (scheduleUserCanManualEdit() && schedulePreviewMode !== "my_shifts") ||
     getScheduleAccessContext().noAccess ||
     schedulePublishedMap[ws] !== true
   ) {
@@ -411,7 +423,7 @@ function ensureScheduleChangePingListener(weekStart) {
     !salonId ||
     !weekStart ||
     !mySid ||
-    scheduleUserCanManualEdit() ||
+    (scheduleUserCanManualEdit() && schedulePreviewMode !== "my_shifts") ||
     ctx.noAccess ||
     schedulePublishedMap[weekStart] !== true
   ) {
@@ -724,7 +736,7 @@ function bindScheduleBoardManualAdd() {
     if (!btn) return;
     e.preventDefault();
     e.stopPropagation();
-    if (!scheduleUserCanManualEdit()) return;
+    if (!scheduleUserCanManualEdit() || schedulePreviewMode !== "build") return;
     const staffKey = String(btn.getAttribute("data-staff-id") || "").trim();
     const dateKey = String(btn.getAttribute("data-date") || "").trim();
     const staffName = String(btn.getAttribute("data-staff-name") || "").trim();
@@ -821,19 +833,22 @@ function getSchedulePublishDocRef() {
 }
 
 /** Saved by managers on Notify / publish so all devices see the same shifts (not only localStorage). */
-async function loadWeekDraftSnapshotDaysFromPublishDoc(weekStart) {
+async function loadWeekDraftSnapshotBlockFromPublishDoc(weekStart) {
   const ref = getSchedulePublishDocRef();
-  if (!ref || !weekStart) return null;
+  if (!ref || !weekStart) return { days: null, standByByDate: {}, standByStaffId: "" };
   try {
     const snap = await getDoc(ref);
-    if (!snap.exists()) return null;
+    if (!snap.exists()) return { days: null, standByByDate: {}, standByStaffId: "" };
     const data = snap.data();
     const block = data.weekDraftSnapshots && data.weekDraftSnapshots[weekStart];
-    const days = block && Array.isArray(block.days) ? block.days : null;
-    return days && days.length ? days : null;
+    const days = block && Array.isArray(block.days) && block.days.length ? block.days : null;
+    const standByByDate =
+      block?.standByByDate && typeof block.standByByDate === "object" ? { ...block.standByByDate } : {};
+    const standByStaffId = typeof block?.standByStaffId === "string" ? block.standByStaffId.trim() : "";
+    return { days, standByByDate, standByStaffId };
   } catch (e) {
     console.warn("[ScheduleUI] load weekDraftSnapshots", e);
-    return null;
+    return { days: null, standByByDate: {}, standByStaffId: "" };
   }
 }
 
@@ -871,6 +886,16 @@ function ensureSchedulePublishListener() {
       const prevPublishedJson = JSON.stringify(schedulePublishedMap);
       schedulePublishedMap = { ...pub };
       const publishedVisibilityChanged = prevPublishedJson !== JSON.stringify(schedulePublishedMap);
+
+      const drafts = data.weekDraftSnapshots && typeof data.weekDraftSnapshots === "object" ? data.weekDraftSnapshots : {};
+      const wrSnap = getWeekRange(schedulePreviewWeekStart);
+      const wsSnap = wrSnap.startDate;
+      const blockJson = drafts[wsSnap] ? JSON.stringify(drafts[wsSnap]) : "";
+      const prevBlock = Object.prototype.hasOwnProperty.call(lastSeenWeekDraftSnapshotJsonByWeek, wsSnap)
+        ? lastSeenWeekDraftSnapshotJsonByWeek[wsSnap]
+        : undefined;
+      const weekDraftSnapshotChanged = prevBlock !== undefined && blockJson !== prevBlock;
+      lastSeenWeekDraftSnapshotJsonByWeek[wsSnap] = blockJson;
 
       const bAt = data.lastBroadcastAt;
       const ms = bAt && typeof bAt.toMillis === "function" ? bAt.toMillis() : 0;
@@ -934,7 +959,8 @@ function updateSchedulePublishToggleUi() {
   const label = document.getElementById("schedulePublishToggleLabel");
   if (!btn) return;
   const canEdit = scheduleUserCanManualEdit();
-  btn.style.display = canEdit ? "inline-flex" : "none";
+  const buildUi = !canEdit || schedulePreviewMode === "build";
+  btn.style.display = canEdit && buildUi ? "inline-flex" : "none";
   if (!canEdit) return;
   const weekRange = getWeekRange(schedulePreviewWeekStart);
   const published = schedulePublishedMap[weekRange.startDate] === true;
@@ -946,7 +972,7 @@ function updateSchedulePublishToggleUi() {
   if (label) label.textContent = published ? "Visible to staff" : "Hidden from staff";
   const notifyBtn = document.getElementById("scheduleNotifyChangesBtn");
   if (notifyBtn) {
-    notifyBtn.style.display = canEdit && published ? "inline-flex" : "none";
+    notifyBtn.style.display = canEdit && published && buildUi ? "inline-flex" : "none";
   }
   updateScheduleWeekAckStrip();
 }
@@ -1061,6 +1087,13 @@ function isTechnicianScheduleStaff(staff) {
 
 function getFilteredScheduleStaff(staffList) {
   const ctx = getScheduleAccessContext();
+  if (scheduleUserCanManualEdit() && schedulePreviewMode === "my_shifts") {
+    const sid = getAuthedStaffIdForSchedule();
+    if (!sid) return [];
+    const me = (Array.isArray(staffList) ? staffList : []).find((staff) => getScheduleStaffKey(staff) === sid);
+    return me ? [me] : [];
+  }
+
   let filtered = (Array.isArray(staffList) ? staffList : []).filter((staff) => {
     return schedulePreviewView === "technicians"
       ? isTechnicianScheduleStaff(staff)
@@ -1088,8 +1121,77 @@ function getFilteredScheduleStaff(staffList) {
   });
 }
 
+/** Per-day stand-by map for this week; migrates legacy single `standByStaffId` to every day when needed. */
+function normalizeStandByBlock(block, draftDays) {
+  const dates = (Array.isArray(draftDays) ? draftDays : []).map((d) => d.date).filter(Boolean);
+  const out = {};
+  const rawMap = block?.standByByDate && typeof block.standByByDate === "object" ? block.standByByDate : {};
+  for (const dt of dates) {
+    const v = String(rawMap[dt] || "").trim();
+    if (v) out[dt] = v;
+  }
+  if (Object.keys(out).length === 0 && typeof block?.standByStaffId === "string" && block.standByStaffId.trim()) {
+    const leg = block.standByStaffId.trim();
+    for (const dt of dates) out[dt] = leg;
+  }
+  return out;
+}
+
+function standByMapsEqual(a, b) {
+  const ma = a && typeof a === "object" ? a : {};
+  const mb = b && typeof b === "object" ? b : {};
+  const keys = new Set([...Object.keys(ma), ...Object.keys(mb)]);
+  for (const k of keys) {
+    if (String(ma[k] || "").trim() !== String(mb[k] || "").trim()) return false;
+  }
+  return true;
+}
+
 function getScheduleStaffKey(staff) {
   return String(staff?.id || staff?.staffId || staff?.uid || staff?.userUid || "").trim();
+}
+
+/** Resolve staff record for stand-by display (handles id / staffId variants). Falls back to draft assignments, then global staff store — so names show even if this user’s `staffList` is partial or the stand-by person has no shift that week. */
+function resolveStandByStaffMember(sid, staffList, draft) {
+  const s = String(sid || "").trim();
+  if (!s) return null;
+  const list = Array.isArray(staffList) ? staffList : [];
+  const byKey = getStaffByScheduleKey(list, s);
+  if (byKey) return byKey;
+  const fromList = list.find((st) => {
+    const k = getScheduleStaffKey(st);
+    return k === s || String(st?.id || "") === s || String(st?.staffId || "") === s;
+  });
+  if (fromList) return fromList;
+  const days = Array.isArray(draft?.days) ? draft.days : [];
+  for (const day of days) {
+    const assignments = Array.isArray(day.assignments) ? day.assignments : [];
+    for (const a of assignments) {
+      const k = String(a.staffId || a.uid || "").trim();
+      if (k === s) {
+        return {
+          name: String(a.name || "").trim() || "Staff",
+          id: k,
+        };
+      }
+    }
+  }
+  if (typeof window !== "undefined" && typeof window.ffGetStaffStore === "function") {
+    try {
+      const store = window.ffGetStaffStore();
+      const all = Array.isArray(store?.staff) ? store.staff : [];
+      const st =
+        all.find((x) => {
+          if (!x || x.isArchived === true) return false;
+          const k = getScheduleStaffKey(x);
+          return k === s || String(x?.id || "") === s || String(x?.staffId || "") === s;
+        }) || null;
+      if (st) return st;
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  return null;
 }
 
 function buildAssignmentLookup(draft) {
@@ -1180,6 +1282,10 @@ async function persistStaffShiftFingerprintsForWeek(weekStart, draft, staffList)
   const fp = computeFingerprintMapForDraft(draft, staffList);
   const ref = getSchedulePublishDocRef();
   if (!ref) return;
+  const standByByDate =
+    schedulePreviewState?.standByByDate && typeof schedulePreviewState.standByByDate === "object"
+      ? { ...schedulePreviewState.standByByDate }
+      : {};
   try {
     await setDoc(
       ref,
@@ -1189,6 +1295,7 @@ async function persistStaffShiftFingerprintsForWeek(weekStart, draft, staffList)
           [weekStart]: {
             savedAt: serverTimestamp(),
             days: serializeDraftDaysForStorage(draft),
+            standByByDate,
           },
         },
         updatedAt: serverTimestamp(),
@@ -1197,6 +1304,42 @@ async function persistStaffShiftFingerprintsForWeek(weekStart, draft, staffList)
     );
   } catch (e) {
     console.warn("[ScheduleUI] persist shift fingerprints", e);
+  }
+}
+
+/**
+ * Stand-by was only persisted to localStorage until "Notify staff"; VIEW users read Firestore, so they always saw "Not set".
+ * After saving stand-by in the modal, merge `standByByDate` into the published week snapshot so everyone sees it without a separate notify.
+ */
+async function syncPublishedWeekStandByToCloud(weekStart) {
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId || !weekStart) return;
+  if (schedulePublishedMap[weekStart] !== true) return;
+  if (!scheduleUserCanManualEdit()) return;
+  const ref = getSchedulePublishDocRef();
+  if (!ref) return;
+  const standByByDate =
+    schedulePreviewState?.standByByDate && typeof schedulePreviewState.standByByDate === "object"
+      ? { ...schedulePreviewState.standByByDate }
+      : {};
+  try {
+    await setDoc(
+      ref,
+      {
+        weekDraftSnapshots: {
+          [weekStart]: {
+            savedAt: serverTimestamp(),
+            standByByDate,
+          },
+        },
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+    ffScheduleAppToast("Stand by saved — visible to all staff.", 3500);
+  } catch (e) {
+    console.warn("[ScheduleUI] sync stand-by to cloud", e);
+    ffScheduleAppToast(e?.message || "Could not save stand by to the cloud.", 4500);
   }
 }
 
@@ -1221,20 +1364,28 @@ async function notifyStaffScheduleChanges() {
   }
   const fpNew = computeFingerprintMapForDraft(draft, staffList);
   let fpOld = {};
+  let cloudStandByMap = {};
   try {
     const snap = await getDoc(getSchedulePublishDocRef());
     const data = snap.exists() ? snap.data() : {};
     const sfp = data.staffShiftFingerprints && typeof data.staffShiftFingerprints === "object" ? data.staffShiftFingerprints : {};
     fpOld = sfp[key] && typeof sfp[key] === "object" ? sfp[key] : {};
+    const wb = data.weekDraftSnapshots && data.weekDraftSnapshots[key];
+    cloudStandByMap = normalizeStandByBlock(wb || {}, draft.days);
   } catch (_) {
     /* ignore */
   }
+  const localStandByMap = normalizeStandByBlock(
+    { standByByDate: schedulePreviewState?.standByByDate },
+    draft.days,
+  );
+  const standByChanged = !standByMapsEqual(cloudStandByMap, localStandByMap);
   const allKeys = new Set([...Object.keys(fpNew), ...Object.keys(fpOld)]);
   const changed = [];
   for (const k of allKeys) {
     if (fpNew[k] !== fpOld[k]) changed.push(k);
   }
-  if (changed.length === 0) {
+  if (changed.length === 0 && !standByChanged) {
     ffScheduleAppToast("No shift changes detected since the last publish or notify.", 4000);
     return;
   }
@@ -1255,6 +1406,10 @@ async function notifyStaffScheduleChanges() {
       { merge: true },
     );
   }
+  const standByByDate =
+    schedulePreviewState?.standByByDate && typeof schedulePreviewState.standByByDate === "object"
+      ? { ...schedulePreviewState.standByByDate }
+      : {};
   batch.set(
     weeksRef,
     {
@@ -1263,6 +1418,7 @@ async function notifyStaffScheduleChanges() {
         [key]: {
           savedAt: serverTimestamp(),
           days: serializeDraftDaysForStorage(draft),
+          standByByDate,
         },
       },
       updatedAt: serverTimestamp(),
@@ -1274,11 +1430,16 @@ async function notifyStaffScheduleChanges() {
     const wrAfter = getWeekRange(schedulePreviewWeekStart);
     clearSharedScheduleDraftOverrideForWeek(wrAfter);
     clearScheduleLocalDirtyForCurrentUser(key);
-    ffScheduleAppToast(`Notified ${changed.length} staff member(s) with updated shifts.`, 4500);
+    if (changed.length === 0 && standByChanged) {
+      ffScheduleAppToast("Stand by updated for this week (saved to the cloud).", 4000);
+    } else {
+      ffScheduleAppToast(`Notified ${changed.length} staff member(s) with updated shifts.`, 4500);
+    }
     await loadScheduleWeekPingMap(key);
     if (
       schedulePreviewState.draft &&
       scheduleUserCanManualEdit() &&
+      schedulePreviewMode === "build" &&
       document.getElementById("scheduleScreen")?.style.display !== "none"
     ) {
       renderScheduleBoard(
@@ -1308,8 +1469,10 @@ function removeManualOffForStaffDay(draft, dateKey, staffKey) {
 }
 
 const SCHEDULE_MANUAL_OFF_STORAGE_VERSION = 1;
-/** Full week draft (assignments + marked OFF per day) — survives refresh; same device as manual-OFF-only storage. */
-const SCHEDULE_DRAFT_OVERRIDE_VERSION = 1;
+/** Storage key segment — do not bump unless intentionally migrating to a new localStorage namespace. */
+const SCHEDULE_DRAFT_OVERRIDE_KEY_VER = 1;
+/** Payload `v` inside JSON — bump when adding fields (e.g. stand-by per day). */
+const SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER = 3;
 
 function getSchedulePreviewSalonStorageKey() {
   const s = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
@@ -1325,7 +1488,7 @@ function getScheduleManualOffStorageKey(weekRange) {
 function getScheduleDraftOverrideStorageKey(weekRange) {
   if (!weekRange?.startDate || !weekRange?.endDate) return null;
   const salon = getSchedulePreviewSalonStorageKey();
-  return `ff_schedule_draft_override_v${SCHEDULE_DRAFT_OVERRIDE_VERSION}_${salon}_${weekRange.startDate}_${weekRange.endDate}`;
+  return `ff_schedule_draft_override_v${SCHEDULE_DRAFT_OVERRIDE_KEY_VER}_${salon}_${weekRange.startDate}_${weekRange.endDate}`;
 }
 
 /** Per logged-in staff: "I have unsaved local edits" — avoids managers seeing stale shared localStorage instead of Firestore cloud. */
@@ -1391,18 +1554,31 @@ function mergeManualOffOverridesIntoDraft(draft, overrides, staffList) {
   };
 }
 
-function loadScheduleDraftDaysOverride(weekRange) {
+function loadScheduleDraftOverridePayload(weekRange) {
   const key = getScheduleDraftOverrideStorageKey(weekRange);
   if (!key || typeof localStorage === "undefined") return null;
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed?.v !== SCHEDULE_DRAFT_OVERRIDE_VERSION || !Array.isArray(parsed.days)) return null;
-    return parsed.days;
+    if (parsed?.v !== 1 && parsed?.v !== 2 && parsed?.v !== SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER) return null;
+    const days = Array.isArray(parsed.days) ? parsed.days : null;
+    const standByStaffId = typeof parsed.standByStaffId === "string" ? parsed.standByStaffId.trim() : "";
+    const standByByDate =
+      parsed.standByByDate && typeof parsed.standByByDate === "object" ? { ...parsed.standByByDate } : {};
+    return {
+      days: days && days.length ? days : null,
+      standByStaffId,
+      standByByDate,
+    };
   } catch (_) {
     return null;
   }
+}
+
+function loadScheduleDraftDaysOverride(weekRange) {
+  const p = loadScheduleDraftOverridePayload(weekRange);
+  return p?.days || null;
 }
 
 function serializeDraftDaysForStorage(draft) {
@@ -1443,7 +1619,14 @@ function persistScheduleDraftOverrideFromState() {
   try {
     localStorage.setItem(
       key,
-      JSON.stringify({ v: SCHEDULE_DRAFT_OVERRIDE_VERSION, days: serializeDraftDaysForStorage(draft) }),
+      JSON.stringify({
+        v: SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER,
+        days: serializeDraftDaysForStorage(draft),
+        standByByDate:
+          schedulePreviewState.standByByDate && typeof schedulePreviewState.standByByDate === "object"
+            ? { ...schedulePreviewState.standByByDate }
+            : {},
+      }),
     );
     if (manualKey) localStorage.removeItem(manualKey);
     if (scheduleUserCanManualEdit()) {
@@ -1537,7 +1720,7 @@ function clearDropZoneVisual(zone) {
 }
 
 function handleShiftDragStart(event) {
-  if (!scheduleUserCanManualEdit()) {
+  if (!scheduleUserCanManualEdit() || schedulePreviewMode !== "build") {
     event.preventDefault();
     return;
   }
@@ -1566,7 +1749,7 @@ function handleShiftDragEnd(event) {
 }
 
 function handleDropZoneDragOver(event) {
-  if (!scheduleUserCanManualEdit()) return;
+  if (!scheduleUserCanManualEdit() || schedulePreviewMode !== "build") return;
   event.preventDefault();
   const zone = event.currentTarget;
   if (!zone) return;
@@ -1632,7 +1815,7 @@ function completeScheduleDrop(payload, targetStaffId, targetDate) {
 
 function handleDropZoneDrop(event) {
   event.preventDefault();
-  if (!scheduleUserCanManualEdit()) return;
+  if (!scheduleUserCanManualEdit() || schedulePreviewMode !== "build") return;
   const zone = event.currentTarget;
   clearDropZoneVisual(zone);
   const targetStaffId = String(zone?.getAttribute("data-staff-id") || "").trim();
@@ -1701,10 +1884,10 @@ function warningAppliesToStaffRow(warning, staffKey, staff) {
   return false;
 }
 
-/** Orange highlight: day has quota issues (whole column), or this row has a row-specific warning (e.g. availability). */
+/** Orange highlight: day has quota issues (whole column), or this row has a row-specific warning (e.g. availability). Coverage column hints are editor-only; view-only users still see row-specific dots. */
 function cellShowsScheduleWarningDot(dayWarnings, staffKey, staff) {
   const list = Array.isArray(dayWarnings) ? dayWarnings : [];
-  if (filterCoverageWarnings(list).length > 0) return true;
+  if (scheduleUserCanManualEdit() && filterCoverageWarnings(list).length > 0) return true;
   return list.some((w) => warningAppliesToStaffRow(w, staffKey, staff));
 }
 
@@ -1840,10 +2023,51 @@ function getScheduleRoleLabel(staff) {
 }
 
 function renderScheduleViewTabs() {
+  const modeWrap = document.getElementById("scheduleModeToggleWrap");
+  const canEdit = scheduleUserCanManualEdit();
+  if (modeWrap) {
+    modeWrap.style.display = canEdit ? "inline-flex" : "none";
+  }
+  const myShiftsBtn = document.getElementById("scheduleViewMyShiftsBtn");
+  const buildScheduleBtn = document.getElementById("scheduleViewBuildScheduleBtn");
+  const applyModeState = (button, active, left) => {
+    if (!button) return;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.style.setProperty("display", "inline-flex", "important");
+    button.style.setProperty("align-items", "center", "important");
+    button.style.setProperty("justify-content", "center", "important");
+    button.style.setProperty("margin", "0", "important");
+    button.style.setProperty("height", "34px", "important");
+    button.style.setProperty("padding", "0 14px", "important");
+    button.style.setProperty("box-sizing", "border-box", "important");
+    button.style.setProperty("line-height", "1", "important");
+    button.style.setProperty("font-size", "12px", "important");
+    button.style.setProperty("font-weight", active ? "600" : "500", "important");
+    button.style.setProperty("background", active ? "#7c3aed" : "#f9fafb", "important");
+    button.style.setProperty("color", active ? "#fff" : "#6b7280", "important");
+    button.style.setProperty("border-style", "solid", "important");
+    button.style.setProperty("border-width", "1px", "important");
+    button.style.setProperty("border-color", active ? "#7c3aed" : "#e5e7eb", "important");
+    if (left) {
+      button.style.setProperty("border-right-width", "0", "important");
+      button.style.setProperty("border-radius", "8px 0 0 8px", "important");
+    } else {
+      button.style.setProperty("border-left-width", "0", "important");
+      button.style.setProperty("border-radius", "0 8px 8px 0", "important");
+    }
+    button.style.setProperty("box-shadow", active ? "inset 0 0 0 1px #7c3aed" : "none", "important");
+    button.style.setProperty("z-index", active ? "1" : "0", "important");
+    button.style.setProperty("cursor", "pointer", "important");
+  };
+  applyModeState(myShiftsBtn, schedulePreviewMode === "my_shifts", true);
+  applyModeState(buildScheduleBtn, schedulePreviewMode === "build", false);
+
   const toggleWrap = document.getElementById("scheduleViewToggleWrap");
   if (toggleWrap) {
     const ctx = getScheduleAccessContext();
-    toggleWrap.style.display = ctx.viewOwnOnly ? "none" : "";
+    const showTeamTabs = canEdit && schedulePreviewMode === "build" && !ctx.viewOwnOnly;
+    toggleWrap.style.display = showTeamTabs ? "inline-flex" : "none";
   }
   const managementBtn = document.getElementById("scheduleViewManagementBtn");
   const techniciansBtn = document.getElementById("scheduleViewTechniciansBtn");
@@ -1906,10 +2130,13 @@ async function loadApprovedScheduleRequests() {
 function renderScheduleSummary(validation, days) {
   const summaryBar = document.getElementById("scheduleSummaryBar");
   if (!summaryBar) return;
+  if (scheduleUserCanManualEdit() && schedulePreviewMode === "my_shifts") {
+    summaryBar.innerHTML = `<span style="font-size:12px;color:#6b7280;">Your shifts only — switch to <strong>Build schedule</strong> to edit the full team.</span>`;
+    return;
+  }
   const summary = validation?.summary || { totalWarnings: 0, highSeverityCount: 0, mediumSeverityCount: 0 };
   const dayList = Array.isArray(days) ? days : [];
   const coverageCount = dayList.reduce((n, day) => n + filterCoverageWarnings(day?.warnings).length, 0);
-  const daysWithCoverageIssues = dayList.filter((day) => filterCoverageWarnings(day?.warnings).length > 0).length;
   const total = summary.totalWarnings || 0;
   const otherCount = Math.max(0, total - coverageCount);
 
@@ -1921,21 +2148,40 @@ function renderScheduleSummary(validation, days) {
     return;
   }
 
+  // Coverage counts stay on each day column only — avoid duplicating them in this row.
   const pieces = [];
-  if (coverageCount > 0) {
-    pieces.push(`<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;font-size:12px;font-weight:600;">${coverageCount} coverage warning${coverageCount === 1 ? "" : "s"}</span>`);
-    pieces.push(`<span style="font-size:13px;color:#6b7280;">${daysWithCoverageIssues} day${daysWithCoverageIssues === 1 ? "" : "s"} with coverage gaps.</span>`);
-  }
   if (otherCount > 0) {
-    pieces.push(`<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;font-size:12px;font-weight:600;">+${otherCount} other</span>`);
-    pieces.push(`<span style="font-size:13px;color:#94a3b8;">availability / weekly limits</span>`);
+    if (coverageCount === 0) {
+      pieces.push(`<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;font-size:12px;font-weight:600;">${otherCount} scheduling note${otherCount === 1 ? "" : "s"}</span>`);
+      pieces.push(`<span style="font-size:13px;color:#94a3b8;">not quota — availability or weekly hours</span>`);
+    } else {
+      pieces.push(`<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;font-size:12px;font-weight:600;">+${otherCount} other</span>`);
+      pieces.push(`<span style="font-size:13px;color:#94a3b8;">availability / weekly limits</span>`);
+    }
   }
-  if (coverageCount === 0 && otherCount > 0) {
-    pieces.length = 0;
-    pieces.push(`<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;font-size:12px;font-weight:600;">${otherCount} scheduling note${otherCount === 1 ? "" : "s"}</span>`);
-    pieces.push(`<span style="font-size:13px;color:#94a3b8;">not quota — availability or weekly hours</span>`);
+  if (pieces.length === 0) {
+    summaryBar.innerHTML = "";
+    return;
   }
   summaryBar.innerHTML = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${pieces.join("")}</div>`;
+}
+
+function setSchedulePreviewMode(mode) {
+  schedulePreviewMode = mode === "my_shifts" ? "my_shifts" : "build";
+  renderScheduleViewTabs();
+  updateSchedulePublishToggleUi();
+  const weekRange = schedulePreviewState.weekRange || getWeekRange(schedulePreviewWeekStart);
+  if (schedulePublishedMap[weekRange.startDate] === true) {
+    teardownScheduleChangePingListener();
+    ensureScheduleChangePingListener(weekRange.startDate);
+  }
+  updateScheduleWeekAckStrip();
+  if (!canViewScheduleBoardForCurrentWeek()) {
+    renderScheduleUnpublishedPlaceholder(weekRange);
+    return;
+  }
+  renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
+  renderScheduleSummary(schedulePreviewState.validation, schedulePreviewState.validation?.days || []);
 }
 
 function setSchedulePreviewView(view) {
@@ -1949,6 +2195,171 @@ function setSchedulePreviewView(view) {
   renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
 }
 
+function renderScheduleStandByRowHtml({
+  draftDays,
+  gridTemplate,
+  standByByDate,
+  staffListForNames,
+  draftForNames,
+  canPickStandBy,
+}) {
+  const map = standByByDate && typeof standByByDate === "object" ? standByByDate : {};
+  /** Same visual weight as “Off” cells in staff rows */
+  const standbyTextStyle = "font-size:12px;font-weight:400;color:#6b7280;line-height:1.35;word-break:break-word;";
+
+  const cells = (Array.isArray(draftDays) ? draftDays : []).map((day) => {
+    const dateKey = day.date;
+    const bs = day.businessStatus || getBusinessStatusForDate(dateKey);
+    const open = bs.isOpen !== false;
+    const sid = String(map[dateKey] || "").trim();
+    if (!open) {
+      return `
+      <div data-schedule-standby-cell="true" style="position:relative;padding:8px;border-radius:12px;min-height:52px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:400;color:#cbd5e1;background:#f3f4f6;border:1px dashed #e5e7eb;">
+        Closed
+      </div>`;
+    }
+    const member = sid ? resolveStandByStaffMember(sid, staffListForNames, draftForNames) : null;
+    const nameShort = member
+      ? `<span style="${standbyTextStyle}">${escapeScheduleHtml(String(member.name || "Staff"))}</span>`
+      : sid
+        ? `<span style="font-size:12px;font-weight:400;color:#b45309;">Former staff</span>`
+        : `<span style="font-size:12px;font-weight:400;color:#9ca3af;">Not set</span>`;
+
+    if (canPickStandBy) {
+      return `
+      <div data-schedule-standby-cell="true" style="position:relative;padding:10px 28px 10px 10px;border-radius:12px;min-height:56px;background:#f3f4f6;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;">
+        <button type="button" data-schedule-standby-edit="true" data-date="${escapeScheduleAttr(dateKey)}" title="Choose stand by" aria-label="Edit stand by for this day"
+          style="position:absolute;top:4px;right:4px;min-width:26px;min-height:26px;padding:0;border:none;background:transparent;color:#7c3aed;font-size:16px;line-height:1;cursor:pointer;z-index:2;opacity:0.9;">\u270E</button>
+        <div style="text-align:center;width:100%;">${nameShort}</div>
+      </div>`;
+    }
+
+    return `
+      <div data-schedule-standby-cell="true" style="position:relative;padding:10px 8px;border-radius:12px;min-height:56px;display:flex;align-items:center;justify-content:center;text-align:center;background:#f3f4f6;border:1px solid #e5e7eb;">
+        <div style="width:100%;">${nameShort}</div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;border-top:2px solid #e5e7eb;background:linear-gradient(180deg,#fafafa 0%,#fff 100%);">
+      <div style="padding:12px 14px;border-bottom:1px solid #e5e7eb;display:flex;flex-direction:column;justify-content:center;min-width:0;">
+        <div style="font-size:12px;font-weight:400;color:#6b7280;letter-spacing:0.06em;text-transform:uppercase;">Stand by</div>
+      </div>
+      ${cells}
+    </div>`;
+}
+
+let scheduleStandByModalDateKey = null;
+
+function closeScheduleStandByModal() {
+  const backdrop = document.getElementById("scheduleStandByModalBackdrop");
+  if (backdrop) backdrop.style.display = "none";
+  scheduleStandByModalDateKey = null;
+}
+
+function ensureScheduleStandByModal() {
+  let backdrop = document.getElementById("scheduleStandByModalBackdrop");
+  if (backdrop) return backdrop;
+  backdrop = document.createElement("div");
+  backdrop.id = "scheduleStandByModalBackdrop";
+  backdrop.style.cssText =
+    "display:none;position:fixed;inset:0;z-index:100055;background:rgba(15,23,42,0.5);align-items:center;justify-content:center;padding:20px;box-sizing:border-box;";
+  backdrop.innerHTML = `
+    <div role="dialog" aria-modal="true" aria-labelledby="scheduleStandByModalTitle" style="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:22px 24px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);border:1px solid #e5e7eb;">
+      <div id="scheduleStandByModalTitle" style="font-size:17px;font-weight:700;color:#111827;margin:0 0 6px;">Stand by</div>
+      <p id="scheduleStandByModalSubtitle" style="font-size:13px;color:#64748b;margin:0 0 16px;line-height:1.45;"></p>
+      <label for="scheduleStandByModalSelect" style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Who is on call?</label>
+      <select id="scheduleStandByModalSelect" style="width:100%;height:42px;padding:0 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;background:#fff;color:#111827;box-sizing:border-box;"></select>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+        <button type="button" id="scheduleStandByModalCancel" style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-size:14px;font-weight:600;cursor:pointer;">Cancel</button>
+        <button type="button" id="scheduleStandByModalSave" style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+  const card = backdrop.querySelector('[role="dialog"]');
+  card?.addEventListener("click", (e) => e.stopPropagation());
+  backdrop.addEventListener("click", () => closeScheduleStandByModal());
+  backdrop.querySelector("#scheduleStandByModalCancel")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeScheduleStandByModal();
+  });
+  backdrop.querySelector("#scheduleStandByModalSave")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!scheduleStandByModalDateKey) return;
+    const sel = document.getElementById("scheduleStandByModalSelect");
+    const id = String(sel?.value || "").trim();
+    const next = {
+      ...(schedulePreviewState.standByByDate && typeof schedulePreviewState.standByByDate === "object"
+        ? schedulePreviewState.standByByDate
+        : {}),
+    };
+    if (id) next[scheduleStandByModalDateKey] = id;
+    else delete next[scheduleStandByModalDateKey];
+    schedulePreviewState.standByByDate = next;
+    if (typeof window !== "undefined") {
+      window.ffSchedulePreviewState = schedulePreviewState;
+    }
+    persistScheduleDraftOverrideFromState();
+    const wr = schedulePreviewState.weekRange || getWeekRange(schedulePreviewWeekStart);
+    const ws = wr?.startDate;
+    if (ws && schedulePublishedMap[ws] === true) {
+      void syncPublishedWeekStandByToCloud(ws);
+    }
+    closeScheduleStandByModal();
+    renderScheduleBoard(
+      schedulePreviewState.draft,
+      schedulePreviewState.validation,
+      schedulePreviewState.staffList,
+    );
+  });
+  return backdrop;
+}
+
+function openScheduleStandByModal(dateKey) {
+  const backdrop = ensureScheduleStandByModal();
+  scheduleStandByModalDateKey = String(dateKey || "").trim();
+  const dk = scheduleStandByModalDateKey;
+  const dayLabel = formatBoardDayLabel(dk);
+  const titleEl = document.getElementById("scheduleStandByModalTitle");
+  const subEl = document.getElementById("scheduleStandByModalSubtitle");
+  const tab = schedulePreviewView === "technicians" ? "Technicians" : "Management";
+  if (titleEl) titleEl.textContent = `Stand by — ${dayLabel.title} ${dayLabel.subtitle}`;
+  if (subEl) subEl.textContent = `Choose who to contact if someone cannot work. Only ${tab} staff are listed.`;
+  const staffOpts = getFilteredScheduleStaff(schedulePreviewState.staffList);
+  const current = String(schedulePreviewState.standByByDate?.[dk] || "").trim();
+  const keys = new Set(staffOpts.map((s) => getScheduleStaffKey(s)).filter(Boolean));
+  const sel = document.getElementById("scheduleStandByModalSelect");
+  if (!sel) return;
+  const parts = ['<option value="">— None —</option>'];
+  if (current && !keys.has(current)) {
+    parts.push(`<option value="${escapeScheduleAttr(current)}">Former staff</option>`);
+  }
+  staffOpts.forEach((s) => {
+    const k = getScheduleStaffKey(s);
+    if (!k) return;
+    parts.push(`<option value="${escapeScheduleAttr(k)}">${escapeScheduleHtml(String(s.name || "Staff"))}</option>`);
+  });
+  sel.innerHTML = parts.join("");
+  sel.value = current;
+  backdrop.style.display = "flex";
+}
+
+function bindScheduleStandByPen() {
+  const board = document.getElementById("scheduleBoard");
+  if (!board || board.__ffStandByPenBound) return;
+  board.__ffStandByPenBound = true;
+  board.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-schedule-standby-edit]");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!scheduleUserCanManualEdit() || schedulePreviewMode !== "build") return;
+    const dateKey = String(btn.getAttribute("data-date") || "").trim();
+    if (!dateKey) return;
+    openScheduleStandByModal(dateKey);
+  });
+}
+
 function renderScheduleBoard(draft, validation, staffList) {
   const board = document.getElementById("scheduleBoard");
   const empty = document.getElementById("schedulePreviewEmpty");
@@ -1958,21 +2369,24 @@ function renderScheduleBoard(draft, validation, staffList) {
   const validationByDate = getValidationByDate(validation);
   const filteredStaff = getFilteredScheduleStaff(staffList);
   const assignmentLookup = buildAssignmentLookup(draft);
-  const canManual = scheduleUserCanManualEdit();
+  const canBuild = scheduleUserCanManualEdit() && schedulePreviewMode === "build";
+  const canManual = canBuild;
 
   if (!draftDays.length || !filteredStaff.length) {
     board.innerHTML = "";
     empty.style.display = "block";
-    empty.textContent = draftDays.length
-      ? `No ${schedulePreviewView === "management" ? "management staff" : "technicians"} available for this week.`
-      : "No schedule preview available for this week.";
+    empty.textContent = !draftDays.length
+      ? "No schedule preview available for this week."
+      : scheduleUserCanManualEdit() && schedulePreviewMode === "my_shifts"
+        ? "Your staff profile was not found in this week's roster."
+        : `No ${schedulePreviewView === "management" ? "management staff" : "technicians"} available for this week.`;
     return;
   }
 
   empty.style.display = "none";
   const wrAck = getWeekRange(schedulePreviewWeekStart);
   const weekPubForAck = schedulePublishedMap[wrAck.startDate] === true;
-  const showStaffAck = scheduleUserCanManualEdit() && weekPubForAck;
+  const showStaffAck = canBuild && weekPubForAck;
   const firstColW = showStaffAck ? 258 : 220;
   const gridTemplate = `${firstColW}px repeat(${draftDays.length}, minmax(120px, 1fr))`;
   const headerCells = draftDays.map((day) => {
@@ -1983,7 +2397,7 @@ function renderScheduleBoard(draft, validation, staffList) {
     const businessStatus = day.businessStatus || { isOpen: true, source: "business_hours" };
     let issueHtml = "";
     if (businessStatus.isOpen !== false) {
-      if (cov.length > 0) {
+      if (scheduleUserCanManualEdit() && cov.length > 0) {
         issueHtml = `<div style="margin-top:6px;font-size:11px;color:#b45309;font-weight:600;">${cov.length} coverage issue${cov.length === 1 ? "" : "s"}</div>`;
       } else if (other.length > 0) {
         issueHtml = `<div style="margin-top:6px;font-size:11px;color:#94a3b8;">${other.length} note${other.length === 1 ? "" : "s"}</div>`;
@@ -2008,7 +2422,7 @@ function renderScheduleBoard(draft, validation, staffList) {
   const rowHtml = filteredStaff.map((staff) => {
     const staffKey = getScheduleStaffKey(staff);
     const roleLabel = getScheduleRoleLabel(staff);
-    const allowCellEdit = scheduleUserCanManualEdit();
+    const allowCellEdit = canBuild;
     const cells = draftDays.map((day) => {
       const assignment = assignmentLookup.get(`${staffKey}::${day.date}`) || null;
       const manualOff = Boolean(!assignment && dayHasManualOff(day, staffKey));
@@ -2083,6 +2497,19 @@ function renderScheduleBoard(draft, validation, staffList) {
     `;
   }).join("");
 
+  const standByMap = schedulePreviewState.standByByDate && typeof schedulePreviewState.standByByDate === "object"
+    ? schedulePreviewState.standByByDate
+    : {};
+  const canPickStandBy = scheduleUserCanManualEdit() && schedulePreviewMode === "build";
+  const standByRowHtml = renderScheduleStandByRowHtml({
+    draftDays,
+    gridTemplate,
+    standByByDate: standByMap,
+    staffListForNames: staffList,
+    draftForNames: draft,
+    canPickStandBy,
+  });
+
   board.innerHTML = `
     <section style="border:1px solid #e5e7eb;border-radius:18px;background:#fff;overflow:auto;">
       <div style="min-width:${firstColW + (draftDays.length * 120)}px;">
@@ -2091,6 +2518,7 @@ function renderScheduleBoard(draft, validation, staffList) {
           ${headerCells}
         </div>
         ${rowHtml}
+        ${standByRowHtml}
       </div>
     </section>
   `;
@@ -2098,6 +2526,7 @@ function renderScheduleBoard(draft, validation, staffList) {
   bindScheduleShiftEditButtons();
   bindScheduleBoardManualAdd();
   bindScheduleStaffProfileLinks();
+  bindScheduleStandByPen();
 }
 
 function bindScheduleStaffProfileLinks() {
@@ -2160,8 +2589,10 @@ async function refreshSchedulePreview() {
       dateRange: { startDate: weekRange.startDate, endDate: weekRange.endDate },
     });
     let draftWithBusinessRules = applyBusinessSettingsToDraft(draft);
-    const localDraftDays = loadScheduleDraftDaysOverride(weekRange);
-    const cloudDraftDays = await loadWeekDraftSnapshotDaysFromPublishDoc(weekRange.startDate);
+    const localPayload = loadScheduleDraftOverridePayload(weekRange);
+    const localDraftDays = localPayload?.days || null;
+    const cloudBlock = await loadWeekDraftSnapshotBlockFromPublishDoc(weekRange.startDate);
+    const cloudDraftDays = cloudBlock.days;
     const weekPublished = schedulePublishedMap[weekRange.startDate] === true;
     const dirtyKey = getScheduleLocalDirtyStorageKey(weekRange.startDate);
     const localDirty =
@@ -2172,17 +2603,50 @@ async function refreshSchedulePreview() {
     const hasLocal = Array.isArray(localDraftDays) && localDraftDays.length > 0;
     const hasCloud = Array.isArray(cloudDraftDays) && cloudDraftDays.length > 0;
 
+    let standByByDate = {};
+
     if (canEdit && hasLocal && localDirty) {
       draftWithBusinessRules = applyDraftDaysOverride(draftWithBusinessRules, localDraftDays, staffList);
+      standByByDate = normalizeStandByBlock(
+        {
+          standByByDate: localPayload?.standByByDate,
+          standByStaffId: localPayload?.standByStaffId,
+        },
+        draftWithBusinessRules.days,
+      );
     } else if (weekPublished && hasCloud) {
       draftWithBusinessRules = applyDraftDaysOverride(draftWithBusinessRules, cloudDraftDays, staffList);
+      standByByDate = normalizeStandByBlock(cloudBlock, draftWithBusinessRules.days);
     } else if (canEdit && hasLocal) {
       draftWithBusinessRules = applyDraftDaysOverride(draftWithBusinessRules, localDraftDays, staffList);
+      standByByDate = normalizeStandByBlock(
+        {
+          standByByDate: localPayload?.standByByDate,
+          standByStaffId: localPayload?.standByStaffId,
+        },
+        draftWithBusinessRules.days,
+      );
     } else if (hasCloud) {
       draftWithBusinessRules = applyDraftDaysOverride(draftWithBusinessRules, cloudDraftDays, staffList);
+      standByByDate = normalizeStandByBlock(cloudBlock, draftWithBusinessRules.days);
     } else {
       const manualOffOverrides = loadScheduleManualOffOverrides(weekRange);
       draftWithBusinessRules = mergeManualOffOverridesIntoDraft(draftWithBusinessRules, manualOffOverrides, staffList);
+      const fromLocal = normalizeStandByBlock(
+        {
+          standByByDate: localPayload?.standByByDate,
+          standByStaffId: localPayload?.standByStaffId,
+        },
+        draftWithBusinessRules.days,
+      );
+      const fromCloud = normalizeStandByBlock(cloudBlock, draftWithBusinessRules.days);
+      standByByDate = Object.keys(fromLocal).length > 0 ? fromLocal : fromCloud;
+    }
+
+    /* Published week: always merge stand-by from Firestore so VIEW (and everyone) sees who is on stand by, even when cloud `days` is missing or empty. Local edits still win per date key. */
+    if (weekPublished) {
+      const cloudSb = normalizeStandByBlock(cloudBlock, draftWithBusinessRules.days);
+      standByByDate = { ...cloudSb, ...standByByDate };
     }
 
     const validation = validateScheduleDraft({
@@ -2194,7 +2658,14 @@ async function refreshSchedulePreview() {
       dateRange: { startDate: weekRange.startDate, endDate: weekRange.endDate },
     });
 
-    schedulePreviewState = { draft: draftWithBusinessRules, validation, weekRange, staffList, coverageRules };
+    schedulePreviewState = {
+      draft: draftWithBusinessRules,
+      validation,
+      weekRange,
+      staffList,
+      coverageRules,
+      standByByDate,
+    };
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
     }
@@ -2225,7 +2696,7 @@ async function refreshSchedulePreview() {
     setScheduleLoadingState({ loading: false, error: "" });
   } catch (error) {
     console.error("[ScheduleUI] Failed to refresh schedule preview", error);
-    schedulePreviewState = { draft: null, validation: null, weekRange, staffList: [] };
+    schedulePreviewState = { draft: null, validation: null, weekRange, staffList: [], standByByDate: {} };
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
     }
@@ -2364,6 +2835,8 @@ export async function goToSchedule() {
 
 function bindScheduleUi() {
   document.getElementById("scheduleBtn")?.addEventListener("click", goToSchedule);
+  document.getElementById("scheduleViewMyShiftsBtn")?.addEventListener("click", () => setSchedulePreviewMode("my_shifts"));
+  document.getElementById("scheduleViewBuildScheduleBtn")?.addEventListener("click", () => setSchedulePreviewMode("build"));
   document.getElementById("scheduleViewManagementBtn")?.addEventListener("click", () => setSchedulePreviewView("management"));
   document.getElementById("scheduleViewTechniciansBtn")?.addEventListener("click", () => setSchedulePreviewView("technicians"));
   document.getElementById("scheduleWeekFilter")?.addEventListener("change", () => {
@@ -2419,6 +2892,7 @@ if (typeof window !== "undefined") {
   window.ffSchedulePreviewState = schedulePreviewState;
   window.refreshSchedulePreview = refreshSchedulePreview;
   window.setSchedulePreviewView = setSchedulePreviewView;
+  window.setSchedulePreviewMode = setSchedulePreviewMode;
   window.toggleScheduleWeekPublished = toggleScheduleWeekPublished;
   window.submitScheduleWeekAck = submitScheduleWeekAck;
   window.notifyStaffScheduleChanges = notifyStaffScheduleChanges;
