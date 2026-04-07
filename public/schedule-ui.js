@@ -2405,7 +2405,7 @@ function getScheduleRoleLabel(staff) {
   if (role === "admin") return "Admin";
   if (role === "manager") return staff?.managerType === "assistant_manager" ? "Assistant Manager" : "Manager";
   if (role === "front_desk") return "Front Desk";
-  return "Technician";
+  return "Service Provider";
 }
 
 function renderScheduleViewTabs() {
@@ -2721,7 +2721,7 @@ function openScheduleStandByModal(dateKey) {
   const dayLabel = formatBoardDayLabel(dk);
   const titleEl = document.getElementById("scheduleStandByModalTitle");
   const subEl = document.getElementById("scheduleStandByModalSubtitle");
-  const tab = schedulePreviewView === "technicians" ? "Technicians" : "Management";
+  const tab = schedulePreviewView === "technicians" ? "Service Providers" : "Management";
   if (titleEl) titleEl.textContent = `Stand by — ${dayLabel.title} ${dayLabel.subtitle}`;
   if (subEl) subEl.textContent = `Choose who to contact if someone cannot work. Only ${tab} staff are listed.`;
   const staffOpts = getFilteredScheduleStaff(schedulePreviewState.staffList);
@@ -2821,6 +2821,12 @@ function renderScheduleBoard(draft, validation, staffList) {
   const rowHtml = filteredStaff.map((staff) => {
     const staffKey = getScheduleStaffKey(staff);
     const roleLabel = getScheduleRoleLabel(staff);
+    const techTypes = Array.isArray(staff.technicianTypes) && staff.technicianTypes.length > 0
+      ? staff.technicianTypes
+          .filter(t => t !== 'all_technicians')
+          .map(t => String(t).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))
+          .join(', ')
+      : null;
     const allowCellEdit = canBuild;
     const cells = draftDays.map((day) => {
       const assignment = assignmentLookup.get(`${staffKey}::${day.date}`) || null;
@@ -2947,12 +2953,16 @@ function renderScheduleBoard(draft, validation, staffList) {
           : `<span style="display:inline-flex;align-items:center;flex-shrink:0;padding:1px 7px;border-radius:999px;background:#f9fafb;color:#9ca3af;border:1px solid #e5e7eb;font-size:9px;font-weight:700;line-height:1.35;">Not seen</span>`
       : "";
     const roleSafe = escapeScheduleHtml(roleLabel);
+    const techTypesSafe = techTypes ? escapeScheduleHtml(techTypes) : null;
     const roleRowHtml = showStaffAck
-      ? `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font-size:11px;color:#6b7280;line-height:1.35;min-width:0;">
-          <span style="min-width:0;">${roleSafe}</span>
-          ${ackBadgeHtml}
+      ? `<div style="display:flex;flex-direction:column;gap:2px;font-size:11px;color:#6b7280;line-height:1.35;min-width:0;">
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;min-width:0;">
+            <span style="min-width:0;">${roleSafe}</span>
+            ${ackBadgeHtml}
+          </div>
+          ${techTypesSafe ? `<div style="font-size:10px;color:#9ca3af;">${techTypesSafe}</div>` : ''}
         </div>`
-      : `<div style="font-size:11px;color:#6b7280;line-height:1.35;">${roleSafe}</div>`;
+      : `<div style="font-size:11px;color:#6b7280;line-height:1.35;">${roleSafe}${techTypesSafe ? `<br/><span style="font-size:10px;color:#9ca3af;">${techTypesSafe}</span>` : ''}</div>`;
 
     return `
       <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;">

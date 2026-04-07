@@ -1473,6 +1473,44 @@ dialog footer button, .code-dialog footer button {
 
 
 <style>#reorderBtn.active{filter:brightness(1.2);box-shadow:0 0 0 2px rgba(255,255,255,.35) inset}</style>
+<style>
+/* Force Media Categories rows to match Staff Setup exactly */
+#userProfileMediaCategoriesList > div {
+  display:flex !important;
+  align-items:center !important;
+  gap:8px !important;
+  padding:4px 10px !important;
+  margin-bottom:3px !important;
+  background:#f9fafb !important;
+  border:1px solid var(--border) !important;
+  border-radius:6px !important;
+  box-sizing:border-box !important;
+}
+#userProfileMediaCategoriesList > div span {
+  font-size:11px !important;
+  font-weight:500 !important;
+}
+#userProfileMediaCategoriesList > div button:not(.media-cat-delete-btn):not(.mcd-xbtn) {
+  padding:2px 8px !important;
+  font-size:10px !important;
+  font-weight:600 !important;
+  border-radius:4px !important;
+  line-height:1.4 !important;
+}
+#userProfileMediaCategoriesList .media-cat-delete-btn,
+#userProfileMediaCategoriesList .mcd-xbtn {
+  padding:0 6px !important;
+  font-size:14px !important;
+  font-weight:600 !important;
+  line-height:1.4 !important;
+  color:#b91c1c !important;
+  background:#fff !important;
+  border:1px solid #fecaca !important;
+  border-radius:4px !important;
+  cursor:pointer !important;
+  flex-shrink:0 !important;
+}
+</style>
 
   <!-- Firebase SDK (modular) -->
   <script type="module">
@@ -1540,7 +1578,7 @@ dialog footer button, .code-dialog footer button {
 
   <!-- LOGIN SECTION -->
   <section id="login-section" style="position:relative;z-index:2;max-width:400px;margin:40px auto;padding:32px;background:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.08);pointer-events:auto;">
-    <h1 style="text-align:center;font-size:28px;margin-bottom:24px;">Fair Flow – Login</h1>
+    <h1 style="text-align:center;font-size:28px;margin-bottom:24px;">Welcome to<br>Fair Flow App</h1>
 
     <input id="login-email" type="email" placeholder="Email"
            style="width:100%;margin-bottom:12px;padding:12px 16px;border-radius:8px;border:1px solid #ddd;font-size:14px;" />
@@ -1549,7 +1587,7 @@ dialog footer button, .code-dialog footer button {
            style="width:100%;margin-bottom:16px;padding:12px 16px;border-radius:8px;border:1px solid #ddd;font-size:14px;" />
 
     <button id="login-button" type="button"
-            style="width:100%;padding:12px 16px;border:none;border-radius:999px;background:linear-gradient(90deg,#a855f7,#fb7185);color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:16px;pointer-events:auto;position:relative;z-index:3;">
+            style="width:100%;padding:12px 16px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:16px;pointer-events:auto;position:relative;z-index:3;">
       Log in
     </button>
 
@@ -1983,63 +2021,68 @@ dialog footer button, .code-dialog footer button {
       <!-- Left Side Menu -->
       <div style="flex-shrink:0;width:160px;">
         <nav style="display:flex;flex-direction:column;gap:4px;">
-          <button class="user-profile-menu-item" data-section="password" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Password</button>
-          <button class="user-profile-menu-item" data-section="technician-types" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Staff Setup</button>
-          <button class="user-profile-menu-item" data-section="media-categories" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Media Categories</button>
-          <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Notifications</button>
-          <button class="user-profile-menu-item" data-section="preferences" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Preferences</button>
-          <button class="user-profile-menu-item" data-section="schedule" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Schedule</button>
-          <button class="user-profile-menu-item" data-section="billing" style="width:100%;padding:12px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:14px;color:#6b7280;transition:all 0.2s;">Billing</button>
+          <button class="user-profile-menu-item" data-section="technician-types" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Staff Setup</button>
+          <button class="user-profile-menu-item" data-section="schedule" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Schedule</button>
+          <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Notifications</button>
+          <button class="user-profile-menu-item" data-section="preferences" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Preferences</button>
+          <button class="user-profile-menu-item" data-section="media-categories" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Media Categories</button>
+          <button class="user-profile-menu-item" data-section="billing" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Billing</button>
+          <button class="user-profile-menu-item" data-section="password" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Password</button>
         </nav>
       </div>
       
       <!-- Right Side Card Container -->
       <div style="flex:1;min-width:0;">
         <!-- Password Card -->
-        <div id="userProfileCardPassword" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <h3 style="margin:0 0 8px 0;font-size:18px;font-weight:600;color:#111827;">Password</h3>
-          <p style="margin:0 0 20px 0;font-size:14px;color:#6b7280;">Update your password to keep your account secure.</p>
-          <button id="userProfileChangePasswordBtn" class="btn-primary" style="font-size:14px;">Change</button>
+        <div id="userProfileCardPassword" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Password</h3>
+          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;">Update your password to keep your account secure.</p>
+          <button id="userProfileChangePasswordBtn" class="btn-primary" style="font-size:12px;background:#7c3aed;background-image:none;border-color:#7c3aed;">Change</button>
         </div>
         
         <!-- Staff Setup / Technician Types Card -->
-        <div id="userProfileCardTechnicianTypes" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <h3 style="margin:0 0 8px 0;font-size:18px;font-weight:600;color:#111827;">Staff Setup</h3>
-          <p style="margin:0 0 20px 0;font-size:14px;color:#6b7280;">Define the types of technicians in your salon. Drag (⋮⋮) to reorder. You can add, edit, and activate/deactivate types.</p>
+        <div id="userProfileCardTechnicianTypes" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Staff Setup</h3>
+          <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">Set up your service provider</p>
+          <p style="margin:0 0 16px 0;font-size:11px;color:#9ca3af;">Drag to reorder. You can add, edit and activate types.</p>
           
-          <!-- Technician Types Subsection -->
-          <div style="margin-top:20px;">
-            <h4 style="margin:0 0 16px 0;font-size:16px;font-weight:600;color:#374151;">Technician Types</h4>
+          <!-- Service Provider Types Subsection -->
+          <div style="margin-top:12px;">
+            <h4 style="margin:0 0 12px 0;font-size:13px;font-weight:600;color:#374151;">Service Provider Types</h4>
             
-            <!-- Technician Types List -->
+            <!-- Service Provider Types List -->
             <div id="userProfileTechnicianTypesList" style="margin-bottom:16px;">
               <!-- Empty state - will be shown if no types exist -->
-              <div id="userProfileTechnicianTypesEmptyState" style="display:none;text-align:center;padding:32px;color:#9ca3af;font-size:14px;background:#f9fafb;border-radius:8px;border:1px dashed var(--border);">
-                <div style="margin-bottom:8px;font-weight:500;">No technician types yet</div>
-                <div style="font-size:13px;">Add your first technician type to get started</div>
+              <div id="userProfileTechnicianTypesEmptyState" style="display:none;text-align:center;padding:24px;color:#9ca3af;font-size:12px;background:#f9fafb;border-radius:8px;border:1px dashed var(--border);">
+                <div style="margin-bottom:6px;font-weight:500;">No service provider types yet</div>
+                <div style="font-size:11px;">Add your first service provider type to get started</div>
               </div>
               <!-- List items - populated dynamically -->
             </div>
             
-            <!-- Add Technician Type Button -->
-            <button id="userProfileAddTechnicianTypeBtn" type="button" class="btn-mini" style="font-size:13px;padding:8px 16px;">+ Add Technician Type</button>
+            <!-- Add Service Provider Button -->
+            <button id="userProfileAddTechnicianTypeBtn" type="button" class="btn-mini" style="font-size:12px;padding:6px 14px;background:#7c3aed;color:#fff;border-color:#7c3aed;">+ Add service provider</button>
           </div>
         </div>
         
         <!-- Media Categories Card (typography aligned with Schedule card) -->
         <div id="userProfileCardMediaCategories" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:100%;overflow-x:hidden;box-sizing:border-box;">
           <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Media Categories</h3>
-          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;">Labels for Media → Upload Work. Order = dropdown order. Drag ⋮⋮ to reorder. Inactive = hidden in the uploader.</p>
-          <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
-            <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:10px;">Categories</div>
-            <div id="userProfileMediaCategoriesList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
-            <div id="userProfileMediaCategoriesEmptyState" style="display:none;text-align:center;padding:20px;color:#9ca3af;font-size:12px;background:#fff;border-radius:8px;border:1px dashed var(--border);">
-              <div style="margin-bottom:6px;font-weight:500;color:#6b7280;">No categories yet</div>
-              <div style="font-size:11px;">Type a name below and click Add</div>
+          <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;">Labels for uploads. Drag to reorder.</p>
+          <div style="margin-top:4px;">
+            <h4 style="margin:0 0 8px 0;font-size:13px;font-weight:600;color:#374151;">Categories</h4>
+            <div id="userProfileMediaCategoriesList" style="margin-bottom:16px;"></div>
+            <div id="userProfileMediaCategoriesEmptyState" style="display:none;text-align:center;padding:16px;color:#9ca3af;font-size:11px;background:#f9fafb;border-radius:6px;border:1px dashed var(--border);">
+              <div style="margin-bottom:4px;font-weight:500;color:#6b7280;">No categories yet</div>
+              <div style="font-size:10px;">Type a name below and click Add</div>
             </div>
-            <div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;width:100%;box-sizing:border-box;margin-top:4px;">
-              <input type="text" id="userProfileAddMediaCategoryInput" placeholder="Type new category name…" autocomplete="off" style="flex:1 1 220px;min-width:min(100%,200px);width:auto;max-width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;background:#fff;color:#111827;box-sizing:border-box;">
-              <button id="userProfileAddMediaCategoryBtn" type="button" class="btn-mini" style="flex:0 0 auto;font-size:13px;padding:10px 16px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:8px;cursor:pointer;">+ Add</button>
+            <button id="userProfileAddMediaCategoryBtn" type="button" class="btn-mini" style="font-size:12px;padding:6px 14px;background:#7c3aed;color:#fff;border-color:#7c3aed;">+ Add category</button>
+            <div id="userProfileAddMediaCategoryForm" style="display:none;margin-top:6px;">
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="text" id="userProfileAddMediaCategoryInput" placeholder="Category name…" autocomplete="off" style="flex:1;padding:3px 8px;border:1px solid #a78bfa;border-radius:4px;font-size:11px;background:#fff;color:#111827;">
+                <button id="userProfileSaveMediaCategoryBtn" type="button" style="padding:2px 10px;border:none;border-radius:4px;background:#7c3aed;color:#fff;font-size:10px;font-weight:600;cursor:pointer;">Save</button>
+                <button id="userProfileCancelMediaCategoryBtn" type="button" style="padding:2px 8px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;color:#6b7280;font-size:10px;cursor:pointer;">Cancel</button>
+              </div>
             </div>
           </div>
         </div>
@@ -2216,8 +2259,8 @@ dialog footer button, .code-dialog footer button {
           
           <!-- Action Buttons -->
           <div style="display:flex;gap:12px;margin-bottom:24px;align-items:center;">
-            <button id="billingSubscribeBtn" class="btn-primary" style="font-size:14px;padding:8px 16px;">Subscribe / Upgrade</button>
-            <button id="billingManageBtn" class="btn-ghost" style="font-size:14px;padding:8px 16px;">Manage Billing</button>
+            <button id="billingSubscribeBtn" class="btn-primary" style="font-size:12px;padding:6px 14px;background:#7c3aed;background-image:none;border-color:#7c3aed;color:#fff;">Subscribe / Upgrade</button>
+            <button id="billingManageBtn" class="btn-ghost" style="font-size:12px;padding:6px 14px;border:1px solid #7c3aed;color:#7c3aed;background:#fff;">Manage Billing</button>
           </div>
           
           <!-- Invoices / Receipts -->
@@ -2309,7 +2352,7 @@ dialog footer button, .code-dialog footer button {
 
       <label>JOIN</label>
 
-      <select id="nameSelect" class="grow" style="cursor:pointer;"></select>
+      <select id="nameSelect" class="grow" style="cursor:pointer;font-size:12px;"></select>
 
       <div class="grow pinwrap">
 
@@ -2351,7 +2394,7 @@ dialog footer button, .code-dialog footer button {
 
         <div id="reorderHeader" style="display:none;background:#f3fbff;border:1px solid #60a5fa;border-radius:14px;padding:16px 12px;margin-bottom:10px;text-align:center;">
 
-          <button id="addTechBtn" class="btn-primary">+ Add technician</button>
+          <button id="addTechBtn" class="btn-primary" style="background:#7c3aed;background-image:none;border-color:#7c3aed;">+ Add service provider</button>
 
         </div>
 
@@ -2590,14 +2633,14 @@ dialog footer button, .code-dialog footer button {
   <div id="addTechnicianTypeModal" class="technician-type-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200001;align-items:center;justify-content:center;backdrop-filter:blur(2px);">
     <div class="technician-type-modal-box" style="background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,0.25);width:92vw;max-width:480px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;">
       <div class="technician-type-modal-header" style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #e5e7eb;flex-shrink:0;">
-        <h3 style="margin:0;font-size:18px;font-weight:700;color:#111827;">Add Technician Type</h3>
+        <h3 style="margin:0;font-size:18px;font-weight:700;color:#111827;">Add service provider</h3>
         <button id="addTechnicianTypeModalClose" style="background:none;border:none;cursor:pointer;padding:6px;border-radius:6px;color:#6b7280;display:flex;align-items:center;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
       </div>
       <div class="technician-type-modal-body" style="flex:1;overflow-y:auto;padding:24px;">
         <div style="margin-bottom:20px;">
-          <label style="display:block;font-size:14px;font-weight:600;color:#374151;margin-bottom:8px;">Technician Type Name</label>
+          <label style="display:block;font-size:14px;font-weight:600;color:#374151;margin-bottom:8px;">Service Provider Name</label>
           <input id="addTechnicianTypeInput" type="text" placeholder="e.g., Nail Technician, Massage Technician" style="width:100%;padding:12px 16px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box;transition:border-color 0.2s;" onfocus="this.style.borderColor='#7c3aed';this.style.outline='none'" onblur="this.style.borderColor='#d1d5db'">
           <div style="margin-top:8px;font-size:13px;color:#6b7280;line-height:1.5;">
             <div style="margin-bottom:4px;">Examples:</div>
@@ -2657,17 +2700,17 @@ dialog footer button, .code-dialog footer button {
 
       <div class="dlg">
 
-        <h3>Add Technician to AVAILABLE</h3>
+        <h3 style="font-size:18px;">Add service provider to AVAILABLE</h3>
 
         <div class="row">
 
           <label style="display:flex;flex-direction:column;gap:6px;width:100%;">
 
-            <span style="font-weight:600;">Technician name:</span>
+            <span style="font-weight:600;">Service provider</span>
 
             <select id="addTechSelect" style="height:42px;padding:0 16px;border:1px solid var(--border);border-radius:22px;background:#fff;font-size:16px;width:100%">
 
-              <option value="">-- Select technician --</option>
+              <option value="">-- Select service provider --</option>
 
             </select>
 
@@ -2677,7 +2720,7 @@ dialog footer button, .code-dialog footer button {
 
         <p class="small" style="margin-top:8px;color:var(--sub);">
 
-          The technician will be added to the end of the AVAILABLE list.
+          The service provider will be added to the end of the AVAILABLE list.
 
         </p>
 
@@ -2687,7 +2730,7 @@ dialog footer button, .code-dialog footer button {
 
         <button type="button" id="addTechCancel" class="btn-pill">Cancel</button>
 
-        <button type="button" id="addTechConfirm" class="btn-primary">Add</button>
+        <button type="button" id="addTechConfirm" class="btn-primary" style="background:#7c3aed;background-image:none;border-color:#7c3aed;">Add</button>
 
       </footer>
 
@@ -4700,7 +4743,7 @@ function renderSelect(){
   // Add a default "Select technician" option
   const defaultOption = document.createElement("option");
   defaultOption.value = "";
-  defaultOption.textContent = "Select technician...";
+  defaultOption.textContent = "Select service provider...";
   defaultOption.disabled = true;
   defaultOption.selected = true;
   selectEl.appendChild(defaultOption);
@@ -5503,7 +5546,7 @@ async function handleJoin(){
   console.log('[handleJoin] Available workers:', settings.workers?.length || 0);
   
   // Validate that both name and PIN are provided
-  if (!selectedTechnicianId || !selectedTechnicianName || selectedTechnicianName === 'Select technician...') {
+  if (!selectedTechnicianId || !selectedTechnicianName || selectedTechnicianName === 'Select service provider...') {
     if (joinErrorEl) {
       joinErrorEl.textContent = 'Please select a technician';
       joinErrorEl.style.display = 'block';
@@ -8548,6 +8591,32 @@ function isTrainingRequiredForUser(item, ctx) {
   return item.required === true && isTrainingRelevantToCurrentUser(item, ctx);
 }
 
+async function populateTrainingTechTypes() {
+  const container = document.getElementById('trainingTechTypesCheckboxes');
+  if (!container) return;
+  // Keep "All Service Providers" checkbox, rebuild the rest
+  const allLabel = container.querySelector('label');
+  container.innerHTML = '';
+  if (allLabel) container.appendChild(allLabel);
+  if (typeof window.ffGetTechnicianTypes !== 'function') return;
+  try {
+    const types = await window.ffGetTechnicianTypes();
+    const active = types.filter(t => t.active !== false);
+    active.forEach(t => {
+      const lbl = document.createElement('label');
+      lbl.style.cssText = 'font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.name = 'trainingTechnicianType';
+      cb.value = t.id;
+      lbl.appendChild(cb);
+      lbl.appendChild(document.createTextNode(t.name || t.id));
+      container.appendChild(lbl);
+    });
+  } catch(e) { console.warn('[Training] Could not load service provider types', e); }
+  syncTechnicianTypesUI();
+}
+
 function syncTechnicianTypesUI() {
   const roleTechnician = document.querySelector('input[name="trainingVisibleRole"][value="technician"]');
   const typesWrap = document.getElementById('trainingTechnicianTypesWrap');
@@ -8592,7 +8661,13 @@ function resetTrainingForm() {
 
 function bindTrainingFormEvents() {
   document.querySelectorAll('input[name="trainingVisibleRole"]').forEach((cb) => {
-    cb.onchange = () => syncTechnicianTypesUI();
+    cb.onchange = () => {
+      if (cb.value === 'technician' && cb.checked) {
+        populateTrainingTechTypes();
+      } else {
+        syncTechnicianTypesUI();
+      }
+    };
   });
   const allTechCb = document.querySelector('input[name="trainingTechnicianType"][value="all_technicians"]');
   if (allTechCb) allTechCb.onchange = () => syncTechnicianTypesUI();
@@ -8980,7 +9055,7 @@ function renderTrainingDetails(item) {
   if (!detailsView || !item) return;
 
   const techRow = item.technicianTypes?.length
-    ? `<div style="font-size:13px;color:#374151;"><strong>Technician Types:</strong> ${item.technicianTypes.map(toLabel).join(', ')}</div>`
+    ? `<div style="font-size:13px;color:#374151;"><strong>Service Provider Types:</strong> ${item.technicianTypes.map(toLabel).join(', ')}</div>`
     : '';
   const contentBlocks = Array.isArray(item.contentBlocks) ? item.contentBlocks : [];
 
@@ -12083,12 +12158,12 @@ async function renderTechnicianTypes() {
   _technicianTypes.forEach(type => {
     const item = document.createElement('div');
     item.className = 'technician-type-item';
-    item.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 12px;margin-bottom:8px;background:#fff;border:1px solid var(--border);border-radius:6px;';
+    item.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 10px;margin-bottom:4px;background:#fff;border:1px solid var(--border);border-radius:6px;';
     item.dataset.typeId = type.id;
     
     // Status indicator
     const statusIndicator = document.createElement('div');
-    statusIndicator.style.cssText = `width:8px;height:8px;border-radius:50%;background:${type.active !== false ? '#10b981' : '#9ca3af'};flex-shrink:0;`;
+    statusIndicator.style.cssText = `width:6px;height:6px;border-radius:50%;background:${type.active !== false ? '#10b981' : '#9ca3af'};flex-shrink:0;`;
     statusIndicator.title = type.active !== false ? 'Active' : 'Inactive';
     
     // Name display/edit
@@ -12119,7 +12194,7 @@ async function renderTechnicianTypes() {
       // Display mode
       const nameSpan = document.createElement('span');
       nameSpan.textContent = type.name || '';
-      nameSpan.style.cssText = `font-size:13px;color:${type.active !== false ? '#111827' : '#9ca3af'};`;
+      nameSpan.style.cssText = `font-size:11px;color:${type.active !== false ? '#111827' : '#9ca3af'};`;
       if (type.active === false) {
         nameSpan.style.textDecoration = 'line-through';
       }
@@ -12130,7 +12205,7 @@ async function renderTechnicianTypes() {
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
     toggleBtn.textContent = type.active !== false ? 'Active' : 'Inactive';
-    toggleBtn.style.cssText = `padding:4px 10px;border:1px solid ${type.active !== false ? '#10b981' : '#9ca3af'};border-radius:4px;background:${type.active !== false ? '#d1fae5' : '#f3f4f6'};color:${type.active !== false ? '#065f46' : '#6b7280'};cursor:pointer;font-size:11px;font-weight:600;`;
+    toggleBtn.style.cssText = `padding:2px 8px;border:1px solid ${type.active !== false ? '#10b981' : '#9ca3af'};border-radius:4px;background:${type.active !== false ? '#d1fae5' : '#f3f4f6'};color:${type.active !== false ? '#065f46' : '#6b7280'};cursor:pointer;font-size:10px;font-weight:600;`;
     toggleBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       await toggleTechnicianType(type.id, !type.active);
@@ -12140,7 +12215,7 @@ async function renderTechnicianTypes() {
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.textContent = 'Edit';
-    editBtn.style.cssText = 'padding:4px 10px;border:1px solid #a78bfa;border-radius:4px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:11px;font-weight:600;';
+    editBtn.style.cssText = 'padding:2px 8px;border:1px solid #a78bfa;border-radius:4px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:10px;font-weight:600;';
     editBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       _editingTechnicianTypeId = type.id;
@@ -12202,6 +12277,80 @@ async function toggleTechnicianType(typeId, newActive) {
   } catch (e) {
     alert('Error updating technician type: ' + (e.message || e));
     console.error('[TechnicianTypes] Toggle error:', e);
+  }
+}
+
+/**
+ * Show centered custom confirm modal, returns Promise<boolean>
+ */
+function showDeleteConfirm(typeName) {
+  return new Promise(function(resolve) {
+    // Overlay
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:999999;display:flex;align-items:center;justify-content:center;';
+
+    // Box
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,0.25);width:92vw;max-width:380px;padding:28px 24px 20px;display:flex;flex-direction:column;gap:16px;';
+
+    // Title
+    const title = document.createElement('div');
+    title.style.cssText = 'font-size:15px;font-weight:700;color:#111827;';
+    title.textContent = 'Remove service provider type?';
+
+    // Body
+    const body = document.createElement('div');
+    body.style.cssText = 'font-size:13px;color:#6b7280;line-height:1.5;';
+    body.textContent = '"' + typeName + '" will be permanently removed. This cannot be undone.';
+
+    // Buttons row
+    const btns = document.createElement('div');
+    btns.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;margin-top:4px;';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'padding:8px 20px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:13px;font-weight:600;cursor:pointer;';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = 'Remove';
+    confirmBtn.style.cssText = 'padding:8px 20px;border:1px solid #fecaca;border-radius:8px;background:#fff;color:#b91c1c;font-size:13px;font-weight:600;cursor:pointer;';
+
+    cancelBtn.addEventListener('click', function() { document.body.removeChild(overlay); resolve(false); });
+    confirmBtn.addEventListener('click', function() { document.body.removeChild(overlay); resolve(true); });
+
+    btns.appendChild(cancelBtn);
+    btns.appendChild(confirmBtn);
+    box.appendChild(title);
+    box.appendChild(body);
+    box.appendChild(btns);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    // Close on overlay click
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) { document.body.removeChild(overlay); resolve(false); }
+    });
+  });
+}
+
+/**
+ * Delete technician type with custom confirmation modal
+ */
+async function deleteTechnicianType(typeId, typeName) {
+  const confirmed = await showDeleteConfirm(typeName);
+  if (!confirmed) return;
+  if (typeof window.ffDeleteTechnicianType !== 'function') {
+    alert('Delete not available. Please refresh and try again.');
+    return;
+  }
+  try {
+    await window.ffDeleteTechnicianType(typeId);
+    if (typeof renderTechnicianTypes === 'function') await renderTechnicianTypes();
+    if (typeof renderUserProfileTechnicianTypes === 'function') await renderUserProfileTechnicianTypes();
+  } catch (e) {
+    alert('Error removing service provider type: ' + (e.message || e));
   }
 }
 
@@ -12371,13 +12520,13 @@ async function renderUserProfileTechnicianTypes() {
   _technicianTypes.forEach(type => {
     const item = document.createElement('div');
     item.className = 'technician-type-item';
-    item.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 16px;margin-bottom:8px;background:#f9fafb;border:1px solid var(--border);border-radius:8px;transition:background 0.15s, opacity 0.15s;';
+    item.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 10px;margin-bottom:3px;background:#f9fafb;border:1px solid var(--border);border-radius:6px;transition:background 0.15s, opacity 0.15s;';
     item.dataset.typeId = type.id;
     
     // Drag handle
     const dragHandle = document.createElement('div');
     dragHandle.innerHTML = '⋮⋮';
-    dragHandle.style.cssText = 'cursor:grab;color:#9ca3af;font-size:14px;padding:4px;user-select:none;flex-shrink:0;';
+    dragHandle.style.cssText = 'cursor:grab;color:#9ca3af;font-size:11px;padding:2px;user-select:none;flex-shrink:0;';
     dragHandle.title = 'Drag to reorder';
     dragHandle.draggable = true;
     dragHandle.dataset.typeId = type.id;
@@ -12396,7 +12545,7 @@ async function renderUserProfileTechnicianTypes() {
     
     // Status indicator
     const statusIndicator = document.createElement('div');
-    statusIndicator.style.cssText = `width:10px;height:10px;border-radius:50%;background:${type.active !== false ? '#10b981' : '#9ca3af'};flex-shrink:0;`;
+    statusIndicator.style.cssText = `width:6px;height:6px;border-radius:50%;background:${type.active !== false ? '#10b981' : '#9ca3af'};flex-shrink:0;`;
     statusIndicator.title = type.active !== false ? 'Active' : 'Inactive';
     
     // Name display/edit
@@ -12427,7 +12576,7 @@ async function renderUserProfileTechnicianTypes() {
       // Display mode
       const nameSpan = document.createElement('span');
       nameSpan.textContent = type.name || '';
-      nameSpan.style.cssText = `font-size:14px;color:${type.active !== false ? '#111827' : '#9ca3af'};font-weight:500;`;
+      nameSpan.style.cssText = `font-size:11px;color:${type.active !== false ? '#111827' : '#9ca3af'};font-weight:500;`;
       if (type.active === false) {
         nameSpan.style.textDecoration = 'line-through';
       }
@@ -12438,7 +12587,7 @@ async function renderUserProfileTechnicianTypes() {
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
     toggleBtn.textContent = type.active !== false ? 'Active' : 'Inactive';
-    toggleBtn.style.cssText = `padding:6px 12px;border:1px solid ${type.active !== false ? '#10b981' : '#9ca3af'};border-radius:6px;background:${type.active !== false ? '#d1fae5' : '#f3f4f6'};color:${type.active !== false ? '#065f46' : '#6b7280'};cursor:pointer;font-size:12px;font-weight:600;`;
+    toggleBtn.style.cssText = `padding:2px 8px;border:1px solid ${type.active !== false ? '#10b981' : '#9ca3af'};border-radius:4px;background:${type.active !== false ? '#d1fae5' : '#f3f4f6'};color:${type.active !== false ? '#065f46' : '#6b7280'};cursor:pointer;font-size:10px;font-weight:600;`;
     toggleBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       await toggleTechnicianType(type.id, !type.active);
@@ -12448,11 +12597,22 @@ async function renderUserProfileTechnicianTypes() {
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.textContent = 'Edit';
-    editBtn.style.cssText = 'padding:6px 12px;border:1px solid #a78bfa;border-radius:6px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:12px;font-weight:600;';
+    editBtn.style.cssText = 'padding:2px 8px;border:1px solid #a78bfa;border-radius:4px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:10px;font-weight:600;';
     editBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       _editingTechnicianTypeId = type.id;
       renderUserProfileTechnicianTypes();
+    });
+
+    // Delete (X) button
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.textContent = '×';
+    deleteBtn.title = 'Remove';
+    deleteBtn.style.cssText = 'padding:0 6px;border:1px solid #fecaca;border-radius:4px;background:#fff;color:#b91c1c;cursor:pointer;font-size:14px;font-weight:600;line-height:1.4;';
+    deleteBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await deleteTechnicianType(type.id, type.name || '');
     });
     
     item.addEventListener('dragover', function(e) {
@@ -12483,6 +12643,7 @@ async function renderUserProfileTechnicianTypes() {
     item.appendChild(nameContainer);
     item.appendChild(toggleBtn);
     item.appendChild(editBtn);
+    item.appendChild(deleteBtn);
     
     listContainer.appendChild(item);
   });
@@ -12535,7 +12696,7 @@ window.renderMediaCategoriesSettings = function renderMediaCategoriesSettings() 
   if (!listContainer) return;
   if (!Array.isArray(settings.mediaCategories)) settings.mediaCategories = [];
   settings.mediaCategories = ffNormalizeMediaCategoriesArray(settings.mediaCategories);
-  listContainer.querySelectorAll('.media-category-item').forEach(function (el) { el.remove(); });
+  listContainer.querySelectorAll('.technician-type-item, .media-category-item').forEach(function (el) { el.remove(); });
   var rows = settings.mediaCategories.slice().sort(function (a, b) {
     return (a.sortOrder || 0) - (b.sortOrder || 0);
   });
@@ -12544,89 +12705,98 @@ window.renderMediaCategoriesSettings = function renderMediaCategoriesSettings() 
     return;
   }
   if (emptyState) emptyState.style.display = 'none';
+  // ── EXACT COPY of renderUserProfileTechnicianTypes forEach (lines 12376-12493) ──
+  // Only substitutions: type→cat, data-type-id→data-category-id, technician functions→category functions
   rows.forEach(function (cat) {
-    var item = document.createElement('div');
-    item.className = 'media-category-item';
+    const item = document.createElement('div');
+    item.className = 'technician-type-item';
+    item.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 10px;margin-bottom:3px;background:#f9fafb;border:1px solid var(--border);border-radius:6px;transition:background 0.15s, opacity 0.15s;';
     item.dataset.categoryId = cat.id;
-    item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;';
-    var dragHandle = document.createElement('div');
+
+    const dragHandle = document.createElement('div');
     dragHandle.innerHTML = '⋮⋮';
-    dragHandle.style.cssText = 'cursor:grab;color:#9ca3af;font-size:12px;padding:2px 4px;user-select:none;flex-shrink:0;';
+    dragHandle.style.cssText = 'cursor:grab;color:#9ca3af;font-size:11px;padding:2px;user-select:none;flex-shrink:0;';
+    dragHandle.title = 'Drag to reorder';
     dragHandle.draggable = true;
-    dragHandle.addEventListener('dragstart', function (e) {
+    dragHandle.dataset.categoryId = cat.id;
+    dragHandle.addEventListener('dragstart', function(e) {
       e.dataTransfer.setData('text/plain', cat.id);
       e.dataTransfer.effectAllowed = 'move';
-      item.style.opacity = '0.65';
+      item.style.opacity = '0.6';
+      item.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+      dragHandle.style.cursor = 'grabbing';
     });
-    dragHandle.addEventListener('dragend', function () {
+    dragHandle.addEventListener('dragend', function() {
       item.style.opacity = '1';
+      item.style.boxShadow = '';
+      dragHandle.style.cursor = 'grab';
     });
-    var statusDot = document.createElement('div');
-    statusDot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + (cat.active !== false ? '#10b981' : '#9ca3af') + ';flex-shrink:0;';
-    var nameWrap = document.createElement('div');
-    nameWrap.style.cssText = 'flex:1;min-width:0;';
+
+    const statusIndicator = document.createElement('div');
+    statusIndicator.style.cssText = `width:6px;height:6px;border-radius:50%;background:${cat.active !== false ? '#10b981' : '#9ca3af'};flex-shrink:0;`;
+    statusIndicator.title = cat.active !== false ? 'Active' : 'Inactive';
+
+    const nameContainer = document.createElement('div');
+    nameContainer.style.cssText = 'flex:1;min-width:0;';
+
     if (_editingMediaCategoryId === cat.id) {
-      var inp = document.createElement('input');
-      inp.type = 'text';
-      inp.value = cat.name || '';
-      inp.style.cssText = 'width:100%;padding:6px 8px;border:1px solid #a78bfa;border-radius:6px;font-size:12px;';
-      inp.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
-        if (e.key === 'Escape') { _editingMediaCategoryId = null; window.renderMediaCategoriesSettings(); }
+      const editInput = document.createElement('input');
+      editInput.type = 'text';
+      editInput.value = cat.name || '';
+      editInput.style.cssText = 'width:100%;padding:6px 10px;border:1px solid #a78bfa;border-radius:6px;font-size:14px;';
+      editInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); editInput.blur(); }
+        else if (e.key === 'Escape') { _editingMediaCategoryId = null; window.renderMediaCategoriesSettings(); }
       });
-      inp.addEventListener('blur', function () {
-        var v = inp.value.trim();
-        if (v) {
-          cat.name = v;
-          ffPersistMediaCategoriesFromProfile();
-        }
+      editInput.addEventListener('blur', function() {
+        var v = editInput.value.trim();
+        if (v) { cat.name = v; ffPersistMediaCategoriesFromProfile(); }
         _editingMediaCategoryId = null;
         window.renderMediaCategoriesSettings();
       });
-      nameWrap.appendChild(inp);
-      setTimeout(function () { inp.focus(); }, 0);
+      nameContainer.appendChild(editInput);
+      setTimeout(() => editInput.focus(), 0);
     } else {
-      var sp = document.createElement('span');
-      sp.textContent = cat.name || '';
-      sp.style.cssText = 'font-size:12px;font-weight:500;color:' + (cat.active !== false ? '#111827' : '#9ca3af') + ';';
-      if (cat.active === false) sp.style.textDecoration = 'line-through';
-      nameWrap.appendChild(sp);
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = cat.name || '';
+      nameSpan.style.cssText = `font-size:11px;color:${cat.active !== false ? '#111827' : '#9ca3af'};font-weight:500;`;
+      if (cat.active === false) { nameSpan.style.textDecoration = 'line-through'; }
+      nameContainer.appendChild(nameSpan);
     }
-    var toggleBtn = document.createElement('button');
+
+    const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
-    toggleBtn.textContent = cat.active !== false ? 'Active' : 'Off';
-    toggleBtn.style.cssText = 'padding:5px 10px;border:1px solid ' + (cat.active !== false ? '#10b981' : '#d1d5db') + ';border-radius:6px;background:' + (cat.active !== false ? '#d1fae5' : '#f3f4f6') + ';color:' + (cat.active !== false ? '#065f46' : '#6b7280') + ';cursor:pointer;font-size:11px;font-weight:600;';
-    toggleBtn.addEventListener('click', function (e) {
+    toggleBtn.textContent = cat.active !== false ? 'Active' : 'Inactive';
+    toggleBtn.style.cssText = `padding:2px 8px;border:1px solid ${cat.active !== false ? '#10b981' : '#9ca3af'};border-radius:4px;background:${cat.active !== false ? '#d1fae5' : '#f3f4f6'};color:${cat.active !== false ? '#065f46' : '#6b7280'};cursor:pointer;font-size:10px;font-weight:600;`;
+    toggleBtn.addEventListener('click', function(e) {
       e.stopPropagation();
-      cat.active = cat.active === false;
+      cat.active = cat.active !== false ? false : true;
       ffPersistMediaCategoriesFromProfile();
       window.renderMediaCategoriesSettings();
     });
-    var editBtn = document.createElement('button');
+
+    const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.textContent = 'Edit';
-    editBtn.style.cssText = 'padding:5px 10px;border:1px solid #a78bfa;border-radius:6px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:11px;font-weight:600;';
-    editBtn.addEventListener('click', function (e) {
+    editBtn.style.cssText = 'padding:2px 8px;border:1px solid #a78bfa;border-radius:4px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:10px;font-weight:600;';
+    editBtn.addEventListener('click', function(e) {
       e.stopPropagation();
       _editingMediaCategoryId = cat.id;
       window.renderMediaCategoriesSettings();
     });
-    var delBtn = document.createElement('button');
-    delBtn.type = 'button';
-    delBtn.textContent = 'Remove';
-    delBtn.style.cssText = 'padding:5px 10px;border:1px solid #fecaca;border-radius:6px;background:#fff;color:#b91c1c;cursor:pointer;font-size:11px;font-weight:600;';
-    delBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      settings.mediaCategories = settings.mediaCategories.filter(function (x) { return x.id !== cat.id; });
-      ffPersistMediaCategoriesFromProfile();
-      window.renderMediaCategoriesSettings();
-    });
-    item.addEventListener('dragover', function (e) {
+
+    item.addEventListener('dragover', function(e) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
+      var draggedId = e.dataTransfer.getData('text/plain');
+      if (draggedId && draggedId !== cat.id) item.style.background = '#e5e7eb';
     });
-    item.addEventListener('drop', function (e) {
+    item.addEventListener('dragleave', function(e) {
+      if (!item.contains(e.relatedTarget)) item.style.background = '#f9fafb';
+    });
+    item.addEventListener('drop', function(e) {
       e.preventDefault();
+      item.style.background = '#f9fafb';
       var draggedId = e.dataTransfer.getData('text/plain');
       if (!draggedId || draggedId === cat.id) return;
       var draggedEl = listContainer.querySelector('[data-category-id="' + draggedId + '"]');
@@ -12640,50 +12810,88 @@ window.renderMediaCategoriesSettings = function renderMediaCategoriesSettings() 
         var id = listContainer.children[i].getAttribute('data-category-id');
         if (id) ids.push(id);
       }
-      ids.forEach(function (id, i) {
-        var c = settings.mediaCategories.find(function (x) { return x.id === id; });
+      ids.forEach(function(id, i) {
+        var c = settings.mediaCategories.find(function(x) { return x.id === id; });
         if (c) c.sortOrder = i;
       });
       ffPersistMediaCategoriesFromProfile();
       window.renderMediaCategoriesSettings();
     });
+
     item.appendChild(dragHandle);
-    item.appendChild(statusDot);
-    item.appendChild(nameWrap);
+    item.appendChild(statusIndicator);
+    item.appendChild(nameContainer);
     item.appendChild(toggleBtn);
     item.appendChild(editBtn);
-    item.appendChild(delBtn);
+
     listContainer.appendChild(item);
   });
+
+  // Event delegation for delete buttons
+  if (!listContainer.__mediaCatDeleteBound) {
+    listContainer.__mediaCatDeleteBound = true;
+    listContainer.addEventListener('click', async function(e) {
+      var btn = e.target.closest('.media-cat-delete-btn');
+      if (!btn) return;
+      e.stopPropagation();
+      var catId = btn.getAttribute('data-cat-id');
+      var cat = settings.mediaCategories.find(function(x) { return x.id === catId; });
+      var confirmed = await showDeleteConfirm(cat ? cat.name : 'this category');
+      if (!confirmed) return;
+      settings.mediaCategories = settings.mediaCategories.filter(function(x) { return x.id !== catId; });
+      ffPersistMediaCategoriesFromProfile();
+      window.renderMediaCategoriesSettings();
+    });
+  }
+  // ── END COPY ──
 };
 
 window.initMediaCategoriesSettingsListeners = function initMediaCategoriesSettingsListeners() {
   var addBtn = document.getElementById('userProfileAddMediaCategoryBtn');
+  var form = document.getElementById('userProfileAddMediaCategoryForm');
   var input = document.getElementById('userProfileAddMediaCategoryInput');
+  var saveBtn = document.getElementById('userProfileSaveMediaCategoryBtn');
+  var cancelBtn = document.getElementById('userProfileCancelMediaCategoryBtn');
+
+  function doAdd() {
+    var name = input && input.value ? input.value.trim() : '';
+    if (!name) return;
+    if (!Array.isArray(settings.mediaCategories)) settings.mediaCategories = [];
+    var id = 'mc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+    settings.mediaCategories.push({ id: id, name: name, active: true, sortOrder: settings.mediaCategories.length });
+    if (input) input.value = '';
+    if (form) form.style.display = 'none';
+    ffPersistMediaCategoriesFromProfile();
+    window.renderMediaCategoriesSettings();
+  }
+
   if (addBtn && !addBtn.__ffMediaCatBound) {
     addBtn.__ffMediaCatBound = true;
     addBtn.addEventListener('click', function () {
-      var name = input && input.value ? input.value.trim() : '';
-      if (!name) return;
-      if (!Array.isArray(settings.mediaCategories)) settings.mediaCategories = [];
-      var id = 'mc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
-      settings.mediaCategories.push({
-        id: id,
-        name: name,
-        active: true,
-        sortOrder: settings.mediaCategories.length
-      });
+      if (form) { form.style.display = 'block'; if (input) { input.focus(); } }
+    });
+  }
+  if (saveBtn && !saveBtn.__ffMediaSaveBound) {
+    saveBtn.__ffMediaSaveBound = true;
+    saveBtn.addEventListener('click', doAdd);
+  }
+  if (cancelBtn && !cancelBtn.__ffMediaCancelBound) {
+    cancelBtn.__ffMediaCancelBound = true;
+    cancelBtn.addEventListener('click', function () {
       if (input) input.value = '';
-      ffPersistMediaCategoriesFromProfile();
-      window.renderMediaCategoriesSettings();
+      if (form) form.style.display = 'none';
     });
   }
   if (input && !input.__ffMediaCatEnterBound) {
     input.__ffMediaCatEnterBound = true;
     input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); if (addBtn) addBtn.click(); }
+      if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
+      if (e.key === 'Escape') { if (input) input.value = ''; if (form) form.style.display = 'none'; }
     });
   }
+
+  // Call the guaranteed × adder if available
+  if (typeof window.__addMediaCatXButtons === 'function') window.__addMediaCatXButtons();
 };
 
 // Initialize on DOM ready
@@ -13700,9 +13908,9 @@ function renderSettingsTaskList(tabKey) {
         } else if (assignTo === 'technicians') {
           if (technicianTypes.length > 0) {
             // We'll show the types in the edit UI
-            assignToDisplay = 'Technicians (Selected Types)';
+            assignToDisplay = 'Service Provider (Selected Types)';
           } else {
-            assignToDisplay = 'All Technicians';
+            assignToDisplay = 'All Service Providers';
           }
         }
         
@@ -13751,9 +13959,9 @@ function renderSettingsTaskList(tabKey) {
                   typeNames = technicianTypes;
                 }
               }
-              assignToDisplay = 'Technicians: ' + (typeNames.length > 0 ? typeNames.join(', ') : 'Selected Types');
+              assignToDisplay = 'Service Provider: ' + (typeNames.length > 0 ? typeNames.join(', ') : 'Selected Types');
             } else {
-              assignToDisplay = 'All Technicians';
+              assignToDisplay = 'All Service Providers';
             }
           }
           
@@ -20182,7 +20390,7 @@ function initializeResetButton() {
 function populateTasksAdminFilter(filterEl) {
   if (!filterEl) return;
   const currentVal = filterEl.value || 'all';
-  filterEl.innerHTML = '<option value="all">All tasks</option><option value="manager">Managers only</option><option value="technicians">All technicians</option>';
+  filterEl.innerHTML = '<option value="all">All tasks</option><option value="manager">Managers only</option><option value="technicians">All service providers</option>';
   if (typeof window.ffGetTechnicianTypes === 'function') {
     window.ffGetTechnicianTypes().then(types => {
       if (!types || !Array.isArray(types)) return;
@@ -21538,7 +21746,7 @@ function initializeAppsPanel() {
     if (role === 'admin') return 'Admin';
     if (role === 'manager') return getStaffManagerTypeValue(staff) === 'assistant_manager' ? 'Assistant Manager' : 'Manager';
     if (role === 'front_desk') return 'Front Desk';
-    return 'Technician';
+    return 'Service Provider';
   }
   
   // Resolve staff name to staffId from ff_staff_v1
@@ -22039,7 +22247,7 @@ function initializeAppsPanel() {
       
       // Render technicians based on toggle state
       if (technicians.length === 0) {
-        techniciansList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">' + (showArchivedStaff ? 'No archived technicians.' : 'No technicians yet.') + '</p>';
+        techniciansList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">' + (showArchivedStaff ? 'No archived service providers.' : 'No service providers yet.') + '</p>';
       } else {
         technicians.forEach(function(t) {
           const item = document.createElement('div');
@@ -22083,7 +22291,7 @@ function initializeAppsPanel() {
     }
     
     if (techniciansHeader) {
-      techniciansHeader.textContent = showArchivedStaff ? 'Archived Technicians' : 'Technicians';
+      techniciansHeader.textContent = showArchivedStaff ? 'Archived Service Providers' : 'Service Providers';
     }
   }
   
@@ -22842,7 +23050,7 @@ function initializeAppsPanel() {
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
             <h3 style="margin:0;font-size:13px;font-weight:600;color:#111827;">Details</h3>
             <div style="display:flex;gap:3px;">
-              <button id="staffDetailsSaveBtn" style="padding:3px 7px;background:#6366f1;border:1px solid #6366f1;border-radius:4px;color:#fff;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;">Save</button>
+              <button id="staffDetailsSaveBtn" style="padding:3px 7px;background:#7c3aed;border:1px solid #7c3aed;border-radius:4px;color:#fff;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;">Save</button>
               <button id="staffDetailsCancelBtn" style="padding:3px 7px;background:#f3f4f6;border:1px solid var(--border);border-radius:4px;color:#374151;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;">Cancel</button>
             </div>
           </div>
@@ -22856,7 +23064,7 @@ function initializeAppsPanel() {
               <select id="staffEditRole" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
                 <option value="admin" ${getStaffRoleValue(staff) === 'admin' ? 'selected' : ''}>Admin</option>
                 <option value="manager" ${getStaffRoleValue(staff) === 'manager' ? 'selected' : ''}>Manager</option>
-                <option value="technician" ${getStaffRoleValue(staff) === 'technician' ? 'selected' : ''}>Technician</option>
+                <option value="technician" ${getStaffRoleValue(staff) === 'technician' ? 'selected' : ''}>Service Provider</option>
               </select>
             </div>
             <div id="staffEditManagerTypeSection" style="display:none;">
@@ -22868,7 +23076,7 @@ function initializeAppsPanel() {
             </div>
             <!-- Technician Types (only shown when role is technician) -->
             <div id="staffEditTechnicianTypesSection" style="display:none;">
-              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Technician Types</label>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Service Provider</label>
               <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">Select one or more types</div>
               <div id="staffEditTechnicianTypesCheckboxes" style="display:flex;flex-direction:column;gap:6px;padding:8px;background:#f9fafb;border:1px solid var(--border);border-radius:4px;max-height:150px;overflow-y:auto;">
                 <!-- Checkboxes will be populated dynamically -->
@@ -25217,6 +25425,38 @@ function initializeUserProfileMenu() {
       if (section === 'media-categories') {
         if (typeof window.renderMediaCategoriesSettings === 'function') window.renderMediaCategoriesSettings();
         if (typeof window.initMediaCategoriesSettingsListeners === 'function') window.initMediaCategoriesSettingsListeners();
+        // Add × delete buttons using direct children iteration
+        window.__addMediaCatXButtons = function() {
+          var listEl = document.getElementById('userProfileMediaCategoriesList');
+          if (!listEl) return;
+          var ch = listEl.children;
+          for (var i = 0; i < ch.length; i++) {
+            var row = ch[i];
+            var catId = row.getAttribute('data-category-id');
+            if (!catId || row.querySelector('.mcd-xbtn')) continue;
+            var xb = document.createElement('button');
+            xb.type = 'button';
+            xb.className = 'mcd-xbtn';
+            xb.innerHTML = '&times;';
+            xb.title = 'Remove';
+            xb.style.cssText = 'padding:0 6px;border:1px solid #fecaca;border-radius:4px;background:#fff;color:#b91c1c;cursor:pointer;font-size:14px;font-weight:600;line-height:1.4;flex-shrink:0;';
+            (function(rowRef, id) {
+              xb.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var cat = Array.isArray(settings.mediaCategories) ? settings.mediaCategories.find(function(x){ return x.id === id; }) : null;
+                showDeleteConfirm(cat ? cat.name : 'category').then(function(confirmed) {
+                  if (!confirmed) return;
+                  settings.mediaCategories = settings.mediaCategories.filter(function(x){ return x.id !== id; });
+                  ffPersistMediaCategoriesFromProfile();
+                  window.renderMediaCategoriesSettings();
+                  setTimeout(window.__addMediaCatXButtons, 50);
+                });
+              });
+            })(row, catId);
+            row.appendChild(xb);
+          }
+        };
+        window.__addMediaCatXButtons();
       }
       if (section === 'schedule' && typeof renderUserProfileScheduleSettings === 'function') {
         renderUserProfileScheduleSettings();
@@ -27960,8 +28200,8 @@ function ffTasksGetSelectedTechIdentifier() {
         const optionText = (option.textContent || '').trim().toLowerCase();
         
         // Skip placeholder options
-        if (optionValue === '' || optionValue === 'select technician...' || 
-            optionText === 'select technician...' || option.disabled) {
+        if (optionValue === '' || optionValue === 'select service provider...' || 
+            optionText === 'select service provider...' || option.disabled) {
           continue;
         }
         
@@ -28002,11 +28242,11 @@ function ffTasksGetSelectedTechIdentifier() {
     // Prefer select.value if non-empty and not placeholder, else use option text
     let selectedName = undefined;
     if (selectedValue && selectedValue.trim() && 
-        selectedValue.toLowerCase() !== 'select technician...' &&
+        selectedValue.toLowerCase() !== 'select service provider...' &&
         selectedValue.toLowerCase() !== '') {
       selectedName = selectedValue.trim();
     } else if (optionText && optionText.trim() && 
-               optionText.toLowerCase() !== 'select technician...' &&
+               optionText.toLowerCase() !== 'select service provider...' &&
                optionText.toLowerCase() !== '') {
       selectedName = optionText.trim();
     }
@@ -29692,7 +29932,7 @@ function openAddTechDialog(){
 
   // Clear and populate select with technicians not already in queue
 
-  addTechSelect.innerHTML = '<option value="">-- Select technician --</option>';
+  addTechSelect.innerHTML = '<option value="">-- Select service provider --</option>';
 
   
 
@@ -33345,7 +33585,7 @@ function hookSettingsGuard_DISABLED(){
         <select id="tasksAdminFilter" title="Filter tasks by assignee" style="display:none;padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-size:10px;color:#374151;cursor:pointer;min-width:140px;pointer-events:auto;z-index:301;">
           <option value="all">All tasks</option>
           <option value="manager">Managers only</option>
-          <option value="technicians">All technicians</option>
+          <option value="technicians">All service providers</option>
         </select>
         <button id="btnTasksSettings" aria-label="Manage Tasks" title="Manage Tasks" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;pointer-events:auto;z-index:301;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -33554,7 +33794,7 @@ function hookSettingsGuard_DISABLED(){
           
           <!-- Add Task section (always visible, fixed position above catalog) -->
           <div style="flex-shrink:0;margin-bottom:12px;">
-            <button id="tasksModalToggleForm" type="button" class="btn-pill" style="margin-bottom:8px;font-size:10px;font-weight:500;border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:8px;cursor:pointer;">Add Task</button>
+            <button id="tasksModalToggleForm" type="button" class="btn-pill" style="margin-bottom:8px;font-size:10px;font-weight:500;border:1px solid #7c3aed;background:#7c3aed;color:#fff;border-radius:8px;cursor:pointer;">Add Task</button>
           
           <!-- Collapsible form section -->
             <div id="tasksAddFormWrap" style="display:none;padding:12px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;margin-bottom:0;">
@@ -33583,12 +33823,12 @@ function hookSettingsGuard_DISABLED(){
                     </label>
                     <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer;padding:6px 8px;border-radius:4px;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='transparent'">
                       <input type="radio" name="taskAssignTo" value="technicians" id="taskAssignToTechnicians" style="cursor:pointer;accent-color:#7c3aed;">
-                      <span>Technicians</span>
+                      <span>Service Provider</span>
                     </label>
                   </div>
                   <!-- Technician Types checkboxes (shown only when "Technicians" is selected) -->
                   <div id="taskAssignToTechnicianTypes" style="display:none;margin-top:8px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;">
-                    <div style="font-size:10px;color:#6b7280;margin-bottom:6px;">Select technician types:</div>
+                    <div style="font-size:10px;color:#6b7280;margin-bottom:6px;">Select service provider type:</div>
                     <div id="taskAssignToTechnicianTypesCheckboxes" style="display:flex;flex-direction:column;gap:4px;max-height:150px;overflow-y:auto;">
                       <div style="text-align:center;padding:8px;color:#9ca3af;font-size:10px;">Loading...</div>
                     </div>
@@ -33703,7 +33943,7 @@ function hookSettingsGuard_DISABLED(){
         </div>
         <!-- Technicians Section -->
         <div style="padding:0 16px 12px 16px;border-top:1px solid var(--border);margin-top:4px;padding-top:12px;">
-          <h3 id="staffTechniciansHeader" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Technicians</h3>
+          <h3 id="staffTechniciansHeader" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Service Providers</h3>
           <div id="staffTechniciansList" style="display:flex;flex-direction:column;gap:4px;"></div>
         </div>
         <!-- Show Archived Staff Toggle -->
@@ -34497,7 +34737,7 @@ function hookSettingsGuard_DISABLED(){
             <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#374151;">
               <input type="checkbox" id="chatTmplSenderTech" value="technician"
                 style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;">
-              <span style="font-weight:500;">Technician</span>
+              <span style="font-weight:500;">Service Provider</span>
             </label>
             <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#374151;">
               <input type="checkbox" id="chatTmplSenderMgr" value="manager"
@@ -34542,7 +34782,7 @@ function hookSettingsGuard_DISABLED(){
           <div style="margin-bottom:14px;">
             <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:8px;">Who Can Use</label>
             <div style="display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">
-              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;"><input type="checkbox" id="chatFlowSenderTech" style="accent-color:#7c3aed;"> Technician</label>
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;"><input type="checkbox" id="chatFlowSenderTech" style="accent-color:#7c3aed;"> Service Provider</label>
               <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;"><input type="checkbox" id="chatFlowSenderMgr" style="accent-color:#7c3aed;"> Manager</label>
               <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;"><input type="checkbox" id="chatFlowSenderAdmin" style="accent-color:#7c3aed;"> Admin</label>
             </div>
@@ -34641,7 +34881,7 @@ function hookSettingsGuard_DISABLED(){
   <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;gap:12px;flex-wrap:wrap;">
     <div id="mediaTabsWrap" style="display:flex;align-items:center;gap:0;position:relative;z-index:2;">
       <button type="button" id="mediaTabMyUploads" class="media-tab-btn active" data-media-tab="my_uploads" style="border-right:0!important;border-radius:8px 0 0 8px!important;">My Uploads</button>
-      <button type="button" id="mediaTabToHandle" class="media-tab-btn" data-media-tab="to_handle" style="display:none;border-left:none!important;border-radius:0 8px 8px 0!important;">Team</button>
+      <button type="button" id="mediaTabToHandle" class="media-tab-btn" data-media-tab="to_handle" style="display:none;border-left:none!important;border-radius:0 8px 8px 0!important;">To handle</button>
     </div>
     <div id="mediaControlsWrap" style="display:flex;align-items:center;gap:8px;margin-left:auto;">
       <div style="position:relative;">
@@ -34719,7 +34959,7 @@ function hookSettingsGuard_DISABLED(){
           <button type="button" id="scheduleViewMyShiftsBtn" aria-pressed="false" onclick="window.setSchedulePreviewMode && window.setSchedulePreviewMode('my_shifts')" class="inbox-view-btn" style="display:inline-flex;align-items:center;justify-content:center;padding:0 14px;height:34px;font-size:12px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;box-sizing:border-box;margin:0;">My shifts</button><button type="button" id="scheduleViewBuildScheduleBtn" aria-pressed="true" onclick="window.setSchedulePreviewMode && window.setSchedulePreviewMode('build')" class="inbox-view-btn active" style="display:inline-flex;align-items:center;justify-content:center;padding:0 14px;height:34px;font-size:12px;font-weight:600;border:1px solid #7c3aed;border-left:0;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;box-sizing:border-box;margin:0;">Build schedule</button>
         </div>
         <div id="scheduleViewToggleWrap" style="display:inline-flex;align-items:stretch;flex-wrap:nowrap;gap:0;margin:0;padding:0;line-height:0;">
-          <button type="button" id="scheduleViewManagementBtn" aria-pressed="true" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('management')" class="inbox-view-btn active" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#7c3aed;color:#fff;cursor:pointer;box-sizing:border-box;">Management</button><button type="button" id="scheduleViewTechniciansBtn" aria-pressed="false" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('technicians')" class="inbox-view-btn" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-left:0;border-radius:0 8px 8px 0;background:#f9fafb;color:#6b7280;cursor:pointer;box-sizing:border-box;margin:0;">Technicians</button>
+          <button type="button" id="scheduleViewManagementBtn" aria-pressed="true" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('management')" class="inbox-view-btn active" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#7c3aed;color:#fff;cursor:pointer;box-sizing:border-box;">Management</button><button type="button" id="scheduleViewTechniciansBtn" aria-pressed="false" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('technicians')" class="inbox-view-btn" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-left:0;border-radius:0 8px 8px 0;background:#f9fafb;color:#6b7280;cursor:pointer;box-sizing:border-box;margin:0;">Service Providers</button>
         </div>
         <div id="scheduleSummaryBar" style="display:flex;align-items:center;gap:10px;font-size:13px;color:#6b7280;flex-wrap:wrap;"></div>
       </div>
@@ -34844,7 +35084,7 @@ function hookSettingsGuard_DISABLED(){
   <div id="inboxViewSwitcher" class="inbox-view-switcher" style="display:none;align-items:center;gap:0;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;pointer-events:auto;">
     <button type="button" id="inboxViewMine" class="inbox-view-btn" data-inbox-view="mine" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('mine')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;pointer-events:auto;">My Requests</button>
     <button type="button" id="inboxViewToHandle" class="inbox-view-btn active" data-inbox-view="to_handle" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('to_handle')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;pointer-events:auto;">To handle</button>
-    <div style="display:flex;gap:10px;align-items:center;margin-left:10px;">
+    <div style="display:flex;gap:10px;align-items:center;margin-left:auto;">
       <button id="inboxCreateRequestBtn" onclick="openCreateRequestModal()" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;">+ New Request</button>
     </div>
     <div id="inboxFilterRow" style="display:none;align-items:center;gap:8px;flex-wrap:nowrap;margin-left:auto;">
@@ -34940,7 +35180,7 @@ function hookSettingsGuard_DISABLED(){
             <option value="all">All Roles</option>
             <option value="admin">admin</option>
             <option value="manager">manager</option>
-            <option value="technician">technician</option>
+            <option value="technician">service provider</option>
           </select>
           <select id="trainingRequiredFilter" style="width:85px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:12px;color:#374151;">
             <option value="all">All</option>
@@ -35034,18 +35274,15 @@ function hookSettingsGuard_DISABLED(){
         <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;">
           <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingVisibleRole" value="admin">admin</label>
           <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingVisibleRole" value="manager">manager</label>
-          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingVisibleRole" value="technician">technician</label>
+          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingVisibleRole" value="technician">service provider</label>
         </div>
       </div>
 
       <div id="trainingTechnicianTypesWrap" style="display:none;">
-        <div style="font-size:12px;color:#374151;margin-bottom:6px;">Technician Types</div>
-        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;">
-          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="all_technicians">all_technicians</label>
-          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="nails">nails</label>
-          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="massage">massage</label>
-          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="esthetician">esthetician</label>
-          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="waxing">waxing</label>
+        <div style="font-size:12px;color:#374151;margin-bottom:6px;">Service Provider Types</div>
+        <div id="trainingTechTypesCheckboxes" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;">
+          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="all_technicians">All Service Providers</label>
+          <span style="font-size:12px;color:#9ca3af;">Loading...</span>
         </div>
       </div>
 

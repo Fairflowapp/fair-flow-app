@@ -24,6 +24,7 @@ import {
   subscribeMediaCategories,
   createMediaCategory,
   updateMediaCategory,
+  deleteMediaCategory,
 } from "./media-cloud.js?v=20260402_firebase_sdk_align";
 
 let currentUserProfile = null;
@@ -1930,11 +1931,31 @@ async function renderMediaCategoriesSettings() {
       await reorderMediaCategories(cats, fromIdx, toIdx);
     });
 
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.textContent = "×";
+    deleteBtn.title = "Remove";
+    deleteBtn.style.cssText = "padding:0 6px;border:1px solid #fecaca;border-radius:4px;background:#fff;color:#b91c1c;cursor:pointer;font-size:14px;font-weight:600;line-height:1.4;flex-shrink:0;";
+    deleteBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const confirmed = typeof showDeleteConfirm === "function"
+        ? await showDeleteConfirm(cat.name || "category")
+        : window.confirm(`Remove "${cat.name}"?\nThis cannot be undone.`);
+      if (!confirmed) return;
+      try {
+        await deleteMediaCategory(cat.id);
+        await renderMediaCategoriesSettings();
+      } catch (err) {
+        alert("Error removing category: " + (err.message || err));
+      }
+    });
+
     item.appendChild(dragHandle);
     item.appendChild(statusIndicator);
     item.appendChild(nameContainer);
     item.appendChild(toggleBtn);
     item.appendChild(editBtn);
+    item.appendChild(deleteBtn);
 
     listContainer.appendChild(item);
   });

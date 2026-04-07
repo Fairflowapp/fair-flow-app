@@ -44,7 +44,7 @@ let chatFlowAnswers    = [];     // during wizard: [{ stepId, prompt, optionId, 
 const isAdmin   = r => ['admin','owner'].includes((r||'').toLowerCase());
 const isMgrPlus = r => ['manager','admin','owner'].includes((r||'').toLowerCase());
 const escHtml   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-const roleLabel = r => ({technician:'Technician',manager:'Manager',admin:'Admin',owner:'Owner'}[(r||'').toLowerCase()] || r || '');
+const roleLabel = r => ({technician:'Service Provider',manager:'Manager',admin:'Admin',owner:'Owner'}[(r||'').toLowerCase()] || r || '');
 const buildConvId = (a, b) => [a, b].sort().join('__');
 
 function _nameForUid(uid) {

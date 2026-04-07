@@ -1085,7 +1085,6 @@ window.openCreateRequestModal = function() {
       <span style="font-size:20px;">${t.icon}</span>
       <div>
         <div style="font-weight:500;font-size:14px;">${t.label}</div>
-        ${t.description ? `<div style="font-size:12px;color:#6b7280;">${t.description}</div>` : ''}
       </div>
     </button>
   `;

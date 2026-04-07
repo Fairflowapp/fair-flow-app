@@ -518,6 +518,17 @@ async function ffUpdateTechnicianType(technicianTypeId, updates) {
   return { id: technicianTypeId, ...updateData };
 }
 
+/**
+ * Delete a technician type
+ */
+async function ffDeleteTechnicianType(technicianTypeId) {
+  if (!_salonId || !technicianTypeId) {
+    throw new Error("Technician type ID is required");
+  }
+  const docRef = technicianTypeDocRef(_salonId, technicianTypeId);
+  await deleteDoc(docRef);
+}
+
 // ─── Connect ──────────────────────────────────────────────────────────────────
 
 function tryConnect() {
@@ -549,4 +560,5 @@ if (typeof window !== "undefined") {
   window.ffCreateTechnicianType = ffCreateTechnicianType;
   window.ffUpdateTechnicianType = ffUpdateTechnicianType;
   window.ffCheckTechnicianTypeExists = ffCheckTechnicianTypeExists;
+  window.ffDeleteTechnicianType = ffDeleteTechnicianType;
 }

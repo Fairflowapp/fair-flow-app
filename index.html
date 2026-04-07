@@ -1637,7 +1637,7 @@ dialog footer button, .code-dialog footer button {
 
       <label>JOIN</label>
 
-      <select id="nameSelect" class="grow" style="cursor:pointer;"></select>
+      <select id="nameSelect" class="grow" style="cursor:pointer;font-size:12px;"></select>
 
       <div class="grow pinwrap">
 
@@ -1682,7 +1682,7 @@ dialog footer button, .code-dialog footer button {
 
         <div id="reorderHeader" style="display:none;background:#f3fbff;border:1px solid #60a5fa;border-radius:14px;padding:16px 12px;margin-bottom:10px;text-align:center;">
 
-          <button id="addTechBtn" class="btn-primary">+ Add technician</button>
+          <button id="addTechBtn" class="btn-primary" style="background:#7c3aed;background-image:none;border-color:#7c3aed;">+ Add service provider</button>
 
         </div>
 
@@ -1905,17 +1905,17 @@ dialog footer button, .code-dialog footer button {
 
       <div class="dlg">
 
-        <h3>Add Technician to AVAILABLE</h3>
+        <h3 style="font-size:18px;">Add service provider to AVAILABLE</h3>
 
         <div class="row">
 
           <label style="display:flex;flex-direction:column;gap:6px;width:100%;">
 
-            <span style="font-weight:600;">Technician name:</span>
+            <span style="font-weight:600;">Service provider</span>
 
             <select id="addTechSelect" style="height:42px;padding:0 16px;border:1px solid var(--border);border-radius:22px;background:#fff;font-size:16px;width:100%">
 
-              <option value="">-- Select technician --</option>
+              <option value="">-- Select service provider --</option>
 
             </select>
 
@@ -1925,7 +1925,7 @@ dialog footer button, .code-dialog footer button {
 
         <p class="small" style="margin-top:8px;color:var(--sub);">
 
-          The technician will be added to the end of the AVAILABLE list.
+          The service provider will be added to the end of the AVAILABLE list.
 
         </p>
 
@@ -1935,7 +1935,7 @@ dialog footer button, .code-dialog footer button {
 
         <button type="button" id="addTechCancel" class="btn-pill">Cancel</button>
 
-        <button type="button" id="addTechConfirm" class="btn-primary">Add</button>
+        <button type="button" id="addTechConfirm" class="btn-primary" style="background:#7c3aed;background-image:none;border-color:#7c3aed;">Add</button>
 
       </footer>
 
@@ -3109,7 +3109,7 @@ function renderSelect(){
   // Add a default "Select technician" option
   const defaultOption = document.createElement("option");
   defaultOption.value = "";
-  defaultOption.textContent = "Select technician...";
+  defaultOption.textContent = "Select service provider...";
   defaultOption.disabled = true;
   defaultOption.selected = true;
   selectEl.appendChild(defaultOption);
@@ -3427,7 +3427,7 @@ function handleJoin(){
   console.log('[handleJoin] Available workers:', settings.workers?.length || 0);
   
   // Validate that both name and PIN are provided
-  if (!selectedTechnicianName || selectedTechnicianName === '' || selectedTechnicianName === 'Select technician...') {
+  if (!selectedTechnicianName || selectedTechnicianName === '' || selectedTechnicianName === 'Select service provider...') {
     if (joinErrorEl) {
       joinErrorEl.textContent = 'Please select a technician';
       joinErrorEl.style.display = 'block';
@@ -14191,7 +14191,7 @@ function initializeAppsPanel() {
       
       // Render technicians based on toggle state
       if (technicians.length === 0) {
-        techniciansList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">' + (showArchivedStaff ? 'No archived technicians.' : 'No technicians yet.') + '</p>';
+        techniciansList.innerHTML = '<p style="color:#6b7280;font-size:12px;margin:0;padding:8px 0;">' + (showArchivedStaff ? 'No archived service providers.' : 'No service providers yet.') + '</p>';
       } else {
         technicians.forEach(function(t) {
           const item = document.createElement('div');
@@ -14235,7 +14235,7 @@ function initializeAppsPanel() {
     }
     
     if (techniciansHeader) {
-      techniciansHeader.textContent = showArchivedStaff ? 'Archived Technicians' : 'Technicians';
+      techniciansHeader.textContent = showArchivedStaff ? 'Archived Service Providers' : 'Service Providers';
     }
   }
   
@@ -14291,7 +14291,7 @@ function initializeAppsPanel() {
       if (headerEl) {
         const initials = getInitials(staff.name);
         // Compute role label from isAdmin/isManager flags (source of truth)
-        const roleLabel = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Technician');
+        const roleLabel = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Service Provider');
         const invited = staff.invited === true;
         const isArchived = staff.isArchived === true;
         
@@ -14682,7 +14682,7 @@ function initializeAppsPanel() {
     const phone = staff.phone || '';
     const email = staff.email || '';
     // Compute role label from isAdmin/isManager flags (source of truth)
-    const roleLabel = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Technician');
+    const roleLabel = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Service Provider');
     
     if (editMode) {
       // Edit mode
@@ -14691,7 +14691,7 @@ function initializeAppsPanel() {
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
             <h3 style="margin:0;font-size:13px;font-weight:600;color:#111827;">Details</h3>
             <div style="display:flex;gap:3px;">
-              <button id="staffDetailsSaveBtn" style="padding:3px 7px;background:#6366f1;border:1px solid #6366f1;border-radius:4px;color:#fff;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;">Save</button>
+              <button id="staffDetailsSaveBtn" style="padding:3px 7px;background:#7c3aed;border:1px solid #7c3aed;border-radius:4px;color:#fff;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;">Save</button>
               <button id="staffDetailsCancelBtn" style="padding:3px 7px;background:#f3f4f6;border:1px solid var(--border);border-radius:4px;color:#374151;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;">Cancel</button>
             </div>
           </div>
@@ -14705,7 +14705,7 @@ function initializeAppsPanel() {
               <select id="staffEditRole" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
                 <option value="admin" ${staff.isAdmin === true ? 'selected' : ''}>Admin</option>
                 <option value="manager" ${staff.isAdmin !== true && staff.isManager === true ? 'selected' : ''}>Manager</option>
-                <option value="technician" ${staff.isAdmin !== true && staff.isManager !== true ? 'selected' : ''}>Technician</option>
+                <option value="technician" ${staff.isAdmin !== true && staff.isManager !== true ? 'selected' : ''}>Service Provider</option>
               </select>
             </div>
             <div>
@@ -18903,8 +18903,8 @@ function ffTasksGetSelectedTechIdentifier() {
         const optionText = (option.textContent || '').trim().toLowerCase();
         
         // Skip placeholder options
-        if (optionValue === '' || optionValue === 'select technician...' || 
-            optionText === 'select technician...' || option.disabled) {
+        if (optionValue === '' || optionValue === 'select service provider...' || 
+            optionText === 'select service provider...' || option.disabled) {
           continue;
         }
         
@@ -18945,11 +18945,11 @@ function ffTasksGetSelectedTechIdentifier() {
     // Prefer select.value if non-empty and not placeholder, else use option text
     let selectedName = undefined;
     if (selectedValue && selectedValue.trim() && 
-        selectedValue.toLowerCase() !== 'select technician...' &&
+        selectedValue.toLowerCase() !== 'select service provider...' &&
         selectedValue.toLowerCase() !== '') {
       selectedName = selectedValue.trim();
     } else if (optionText && optionText.trim() && 
-               optionText.toLowerCase() !== 'select technician...' &&
+               optionText.toLowerCase() !== 'select service provider...' &&
                optionText.toLowerCase() !== '') {
       selectedName = optionText.trim();
     }
@@ -20624,7 +20624,7 @@ function openAddTechDialog(){
 
   // Clear and populate select with technicians not already in queue
 
-  addTechSelect.innerHTML = '<option value="">-- Select technician --</option>';
+  addTechSelect.innerHTML = '<option value="">-- Select service provider --</option>';
 
   
 
@@ -24338,7 +24338,7 @@ function hookSettingsGuard_DISABLED(){
           
           <!-- Add Task section (always visible, fixed position above catalog) -->
           <div style="flex-shrink:0;margin-bottom:12px;">
-            <button id="tasksModalToggleForm" type="button" class="btn-pill" style="margin-bottom:8px;font-size:13px;">Add Task</button>
+            <button id="tasksModalToggleForm" type="button" class="btn-pill" style="margin-bottom:8px;font-size:13px;background:#7c3aed;color:#fff;border-color:#7c3aed;">Add Task</button>
           
           <!-- Collapsible form section -->
             <div id="tasksAddFormWrap" style="display:none;padding:12px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;margin-bottom:0;">
@@ -24350,7 +24350,7 @@ function hookSettingsGuard_DISABLED(){
               <textarea id="taskInfoInput" class="taskInfoInput" placeholder="Write the instructions..." rows="3" style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;"></textarea>
             
             <div style="display:flex;gap:8px;">
-                <button id="taskAddBtn" type="button" class="btn-primary" style="padding:6px 14px;font-size:12px;">Add</button>
+                <button id="taskAddBtn" type="button" class="btn-primary" style="padding:6px 14px;font-size:12px;background:#7c3aed;background-image:none;border-color:#7c3aed;">Add</button>
                 <button id="taskCancelBtn" type="button" class="btn-pill" style="padding:6px 14px;font-size:12px;">Cancel</button>
               </div>
             </div>
@@ -24412,7 +24412,7 @@ function hookSettingsGuard_DISABLED(){
         </div>
         <!-- Technicians Section -->
         <div style="padding:0 16px 12px 16px;border-top:1px solid var(--border);margin-top:4px;padding-top:12px;">
-          <h3 id="staffTechniciansHeader" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Technicians</h3>
+          <h3 id="staffTechniciansHeader" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Service Providers</h3>
           <div id="staffTechniciansList" style="display:flex;flex-direction:column;gap:4px;"></div>
         </div>
         <!-- Show Archived Staff Toggle -->

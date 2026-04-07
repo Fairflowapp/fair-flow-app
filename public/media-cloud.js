@@ -590,3 +590,9 @@ export async function updateMediaCategory(categoryId, updates) {
 
   await updateDoc(mediaCategoriesRef(salonId, categoryId), sanitize(safe));
 }
+
+export async function deleteMediaCategory(categoryId) {
+  const salonId = await getSalonId();
+  if (!salonId) throw new Error("No salonId");
+  await deleteDoc(mediaCategoriesRef(salonId, categoryId));
+}
