@@ -96,15 +96,15 @@ async function goToChat() {
   if (typeof window.closeStaffMembersModal === 'function') {
     window.closeStaffMembersModal();
   }
-  ['tasksScreen','inboxScreen','owner-view'].forEach(id => {
+  ['tasksScreen', 'inboxScreen', 'owner-view', 'mediaScreen', 'trainingScreen', 'scheduleScreen', 'ticketsScreen'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
-  ['.joinBar','.wrap'].forEach(sel => {
+  ['.joinBar', '.wrap'].forEach((sel) => {
     const el = document.querySelector(sel);
     if (el) el.style.display = 'none';
   });
-  ['queueControls','userProfileScreen'].forEach(id => {
+  ['queueControls', 'userProfileScreen'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });

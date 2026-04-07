@@ -2051,7 +2051,7 @@ dialog footer button, .code-dialog footer button {
             <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
               <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:6px;">Birthday reminders (Inbox)</div>
               <div style="font-size:11px;color:#6b7280;margin-bottom:10px;line-height:1.45;">Uses the salon date from Preferences → Salon timezone. Creates an Inbox item for each admin/manager (not the birthday person). Checks run while the app is open (about every 5 minutes). Set each employee birthday under Staff → Details.</div>
-              <div style="font-size:11px;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.5;"><strong>Who sees the reminder:</strong> Only <strong>managers / admins / owners</strong> — under <strong>Inbox → To handle → Open</strong>. The employee whose birthday it is does <strong>not</strong> get this Inbox row (same as vacation requests to management).</div>
+              <div style="font-size:11px;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.5;"><strong>Who sees the reminder:</strong> Only <strong>managers / admins / owners</strong> — under <strong>Inbox → Team → Open</strong>. The employee whose birthday it is does <strong>not</strong> get this Inbox row (same as vacation requests to management).</div>
               <div style="font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.45;">Important: <strong>Days in advance</strong> must be <strong>≥</strong> days until that person’s next birthday (salon timezone). Example: birthday in 2 days → set at least <strong>2</strong>.</div>
               <label for="userProfileBirthdayReminderDays" style="font-size:12px;font-weight:600;color:#374151;">Days in advance</label>
               <input type="number" id="userProfileBirthdayReminderDays" min="0" max="90" step="1" style="display:block;width:120px;margin-top:6px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;" />
@@ -20678,7 +20678,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260402_nav_close_staff');
+            const m = await import('/chat.js?v=20260416_chat_hide_media');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -22594,7 +22594,7 @@ function initializeAppsPanel() {
           },
           {
             key: 'media_handle',
-            label: 'To handle',
+            label: 'Media review queue',
             desc: 'Can manage media.',
             getValue: function (st) {
               var p = st.permissions || {};
@@ -33893,21 +33893,21 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260412_storage_bucket_explicit"></script>
+  <script type="module" src="/app.js?v=20260409_en_ui_strings"></script>
   <script type="module" src="/schedule-helpers.js?v=20260403_reception_split"></script>
-  <script type="module" src="/schedule-availability.js?v=20260403_reception_split"></script>
-  <script type="module" src="/schedule-generator.js?v=20260403_mgmt_only_split"></script>
-  <script type="module" src="/schedule-validator.js?v=20260406_manual_admin_shift"></script>
-  <script type="module" src="/schedule-ui.js?v=20260402_standby_firestore_sync"></script>
-  <script type="module" src="/inbox.js?v=20260402_inbox_hide_new_on_to_handle"></script>
-  <script type="module" src="/chat.js?v=20260402_nav_close_staff"></script>
+  <script type="module" src="/schedule-availability.js?v=20260416_modal_ensure_first"></script>
+  <script type="module" src="/schedule-generator.js?v=20260416_modal_ensure_first"></script>
+  <script type="module" src="/schedule-validator.js?v=20260416_modal_ensure_first"></script>
+  <script type="module" src="/schedule-ui.js?v=20260416_modal_ensure_first"></script>
+  <script type="module" src="/inbox.js?v=20260417_inbox_title_far_side"></script>
+  <script type="module" src="/chat.js?v=20260416_chat_hide_media"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260312_staffcall11"></script>
   <script type="module" src="/settings-cloud.js?v=20260404_media_categories"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tickets.js?v=20260402_tickets_boot_cover"></script>
-  <script type="module" src="/media-upload.js?v=20260402_dl_debug_403"></script>
+  <script type="module" src="/media-upload.js?v=20260409_en_ui_strings"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -34641,7 +34641,7 @@ function hookSettingsGuard_DISABLED(){
   <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;gap:12px;flex-wrap:wrap;">
     <div id="mediaTabsWrap" style="display:flex;align-items:center;gap:0;position:relative;z-index:2;">
       <button type="button" id="mediaTabMyUploads" class="media-tab-btn active" data-media-tab="my_uploads" style="border-right:0!important;border-radius:8px 0 0 8px!important;">My Uploads</button>
-      <button type="button" id="mediaTabToHandle" class="media-tab-btn" data-media-tab="to_handle" style="display:none;border-left:none!important;border-radius:0 8px 8px 0!important;">To handle</button>
+      <button type="button" id="mediaTabToHandle" class="media-tab-btn" data-media-tab="to_handle" style="display:none;border-left:none!important;border-radius:0 8px 8px 0!important;">Team</button>
     </div>
     <div id="mediaControlsWrap" style="display:flex;align-items:center;gap:8px;margin-left:auto;">
       <div style="position:relative;">
@@ -34664,7 +34664,7 @@ function hookSettingsGuard_DISABLED(){
     </div>
   </div>
   <div id="mediaToHandleSubRow" style="display:none;align-items:center;flex-wrap:wrap;gap:8px;padding:6px 20px 10px;border-bottom:1px solid #e5e7eb;background:#fafafa;flex-shrink:0;">
-    <span style="font-size:11px;color:#64748b;font-weight:600;">To handle</span>
+    <span style="font-size:11px;color:#64748b;font-weight:600;">Team</span>
     <button type="button" class="media-subtab-btn active" data-media-subtab="queue">Queue</button>
     <button type="button" class="media-subtab-btn" data-media-subtab="done">Done</button>
     <button type="button" class="media-subtab-btn" data-media-subtab="dismissed">Dismissed</button>
@@ -34844,8 +34844,20 @@ function hookSettingsGuard_DISABLED(){
   <div id="inboxViewSwitcher" class="inbox-view-switcher" style="display:none;align-items:center;gap:0;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;pointer-events:auto;">
     <button type="button" id="inboxViewMine" class="inbox-view-btn" data-inbox-view="mine" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('mine')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;pointer-events:auto;">My Requests</button>
     <button type="button" id="inboxViewToHandle" class="inbox-view-btn active" data-inbox-view="to_handle" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('to_handle')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;pointer-events:auto;">To handle</button>
-    <div style="display:flex;gap:10px;align-items:center;margin-left:auto;transform:translateX(-55px);">
+    <div style="display:flex;gap:10px;align-items:center;margin-left:10px;">
       <button id="inboxCreateRequestBtn" onclick="openCreateRequestModal()" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;">+ New Request</button>
+    </div>
+    <div id="inboxFilterRow" style="display:none;align-items:center;gap:8px;flex-wrap:nowrap;margin-left:auto;">
+      <label class="inbox-staff-filter-label" style="font-size:13px;color:#6b7280;white-space:nowrap;">Filter by staff</label>
+      <div id="inboxStaffFilterWrap" style="position:relative;">
+        <button type="button" id="inboxStaffFilterTrigger" aria-haspopup="listbox" aria-expanded="false" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;height:40px;min-height:40px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-size:13px;min-width:200px;max-width:240px;color:#374151;cursor:pointer;text-align:left;">
+          <span id="inboxStaffFilterLabel">All staff</span>
+          <span style="margin-left:8px;opacity:0.7;">▼</span>
+        </button>
+        <div id="inboxStaffFilterPanel" role="listbox" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:1000;max-height:240px;overflow-y:auto;">
+          <!-- options filled by JS -->
+        </div>
+      </div>
     </div>
   </div>
   <!-- Tabs (only for managers/admins) — hidden by default, shown in setupInboxUI for manager/admin -->
@@ -34864,21 +34876,9 @@ function hookSettingsGuard_DISABLED(){
   <div id="inboxContent" style="flex:1;padding:24px;overflow-y:auto;background:#f9fafb;transition:opacity 0.2s ease;">
     <div id="inboxContentContainer" style="max-width:900px;margin:0 auto;">
       <!-- Header: title + filter (managers only) + New Request -->
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
-        <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
-          <h3 id="inboxListTitle" style="margin:0;font-size:16px;font-weight:600;color:#374151;">My Requests</h3>
-          <div id="inboxFilterRow" style="display:none;align-items:center;gap:8px;flex-wrap:nowrap;margin-left:0;">
-            <label class="inbox-staff-filter-label" style="font-size:13px;color:#6b7280;white-space:nowrap;">Filter by staff</label>
-            <div id="inboxStaffFilterWrap" style="position:relative;">
-              <button type="button" id="inboxStaffFilterTrigger" aria-haspopup="listbox" aria-expanded="false" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;height:40px;min-height:40px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-size:13px;min-width:200px;max-width:240px;color:#374151;cursor:pointer;text-align:left;">
-                <span id="inboxStaffFilterLabel">All staff</span>
-                <span style="margin-left:8px;opacity:0.7;">▼</span>
-              </button>
-              <div id="inboxStaffFilterPanel" role="listbox" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:1000;max-height:240px;overflow-y:auto;">
-                <!-- options filled by JS -->
-              </div>
-            </div>
-          </div>
+      <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+        <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;width:100%;justify-content:flex-end;">
+          <h3 id="inboxListTitle" style="margin:0;text-align:right;font-size:16px;font-weight:600;color:#374151;">My Requests</h3>
         </div>
         <div style="display:flex;gap:10px;align-items:center;">
           <button id="btnManageRequestTypes" onclick="openManageRequestTypesModal()" style="display:none;padding:10px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;color:#6b7280;">Manage request types</button>

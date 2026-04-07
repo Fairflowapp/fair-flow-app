@@ -1,7 +1,7 @@
 import {
   enumerateDateRange,
   getEffectiveAvailability,
-} from "./schedule-availability.js?v=20260403_reception_split";
+} from "./schedule-availability.js?v=20260416_modal_ensure_first";
 import {
   normalizeManagerType,
   normalizeScheduleRules,

@@ -1869,7 +1869,7 @@ async function renderMediaCategoriesSettings() {
     const dragHandle = document.createElement("div");
     dragHandle.innerHTML = "⋮⋮";
     dragHandle.style.cssText = "cursor:grab;color:#9ca3af;font-size:14px;padding:4px;user-select:none;flex-shrink:0;";
-    dragHandle.title = "גרור למיקום";
+    dragHandle.title = "Drag to reorder";
     dragHandle.draggable = true;
     dragHandle.dataset.categoryId = cat.id;
     dragHandle.addEventListener("dragstart", (e) => {

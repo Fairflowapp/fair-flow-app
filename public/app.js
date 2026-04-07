@@ -2194,7 +2194,7 @@ function moveTaskToPending(taskId, workerName) {
             if (existingPending && existingPending.assignedTo && String(existingPending.assignedTo).trim() !== '' && String(existingPending.assignedTo).trim().toLowerCase() !== String(workerName || '').trim().toLowerCase()) {
                 console.warn(`[MOVE TO PENDING] Task ${taskId} already assigned to ${existingPending.assignedTo}, cannot reassign to ${workerName}`);
                 if (typeof window !== 'undefined' && window.alert) {
-                    window.alert('משימה זו כבר מוקצית ל-' + (existingPending.assignedTo || 'מישהו') + '. לא ניתן להקצות מחדש.');
+                    window.alert('This task is already assigned to ' + (existingPending.assignedTo || 'someone') + '. It cannot be reassigned.');
                 }
                 return;
             }

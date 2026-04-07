@@ -41,7 +41,7 @@ const REQUEST_CATEGORY_LABELS = {
 // Built-in request types (id, icon, label, description, category)
 const BUILTIN_TYPES = [
   // Schedule
-  { id: 'vacation', icon: '🏖️', label: 'Vacation Request', description: 'Request time off', category: 'schedule' },
+  { id: 'vacation', icon: '🏖️', label: 'Vacation Request', description: 'PTO — one day or a date range (same start & end = single day)', category: 'schedule' },
   { id: 'late_start', icon: '⏰', label: 'Late Start', description: 'Request to start later', category: 'schedule' },
   { id: 'early_leave', icon: '🏃', label: 'Early Leave', description: 'Request to leave early', category: 'schedule' },
   { id: 'schedule_change', icon: '📅', label: 'Schedule Change', description: 'Request schedule modification', category: 'schedule' },
@@ -63,6 +63,31 @@ const BUILTIN_TYPES = [
   // Other (always last)
   { id: 'other', icon: '📝', label: 'Other', description: 'Other request', category: 'other' }
 ];
+
+/** Old inbox items only — not offered in “New request”. */
+const LEGACY_INBOX_TYPE_INFO = {
+  day_off: { id: 'day_off', icon: '📴', label: 'Day off', description: 'Legacy request', category: 'schedule' },
+  time_off: { id: 'time_off', icon: '🕐', label: 'Time off', description: 'Legacy request', category: 'schedule' },
+};
+
+/** Inclusive YYYY-MM-DD list — same shape schedule-availability expects for ranges / affectedDates. */
+function enumerateInclusiveDateKeysForInbox(startDateStr, endDateStr) {
+  const start = String(startDateStr || "").trim();
+  const end = String(endDateStr || start || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return [];
+  const a = new Date(`${start}T12:00:00`);
+  const b = new Date(`${end}T12:00:00`);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || a > b) return [];
+  const out = [];
+  for (let d = new Date(a.getTime()); d <= b; d.setDate(d.getDate() + 1)) {
+    out.push([
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, "0"),
+      String(d.getDate()).padStart(2, "0"),
+    ].join("-"));
+  }
+  return out;
+}
 
 // =====================
 // State
@@ -218,6 +243,7 @@ async function loadCustomTypes() {
 }
 
 const INBOX_SETTINGS_DOC_ID = 'visibility';
+
 async function loadInboxSettings() {
   if (!currentUserProfile?.salonId) return;
   try {
@@ -382,9 +408,9 @@ function setupInboxUI() {
     document.querySelectorAll('.inbox-view-btn').forEach(btn => {
       btn.classList.toggle('active', (btn.dataset.inboxView || '') === inboxViewMode);
     });
-    // Handlers are in HTML onclick; setInboxViewMode() does the work
     if (filterRow) filterRow.style.display = inboxViewMode === 'mine' ? 'none' : 'flex';
-    if (listTitle) listTitle.textContent = inboxViewMode === 'mine' ? 'My Requests' : 'To handle';
+    if (listTitle) listTitle.style.display = inboxViewMode === 'mine' ? '' : 'none';
+    if (listTitle) listTitle.textContent = 'My Requests';
     // In "My Requests": hide status tabs (Open/Needs Info/etc) and center New Request button
     if (inboxViewMode === 'mine') {
       if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
@@ -414,7 +440,8 @@ window.setInboxViewMode = function(mode) {
   const inboxTabs = document.getElementById('inboxTabs');
   const emptyStateBtn = document.getElementById('emptyStateNewRequestBtn');
   const headerNewBtn = document.getElementById('inboxCreateRequestBtn');
-  if (listTitle) listTitle.textContent = mode === 'mine' ? 'My Requests' : 'To handle';
+  if (listTitle) listTitle.style.display = mode === 'mine' ? '' : 'none';
+  if (listTitle) listTitle.textContent = 'My Requests';
   if (filterRow) filterRow.style.display = mode === 'mine' ? 'none' : 'flex';
   if (mode === 'mine') {
     if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
@@ -431,13 +458,10 @@ window.setInboxViewMode = function(mode) {
 // =====================
 window.setInboxTab = function(tab) {
   currentInboxTab = tab;
-  
   // Update active tab
   document.querySelectorAll('.inbox-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.inboxTab === tab);
   });
-  
-  // Reload items
   loadInboxItems();
 };
 
@@ -675,12 +699,15 @@ function renderInboxList() {
   const listEl = document.getElementById('inboxList');
   if (!listEl) return;
 
-  // Title by role and view: technician = "My Requests"; manager "mine" = "My Requests", "to_handle" = "To handle"
+  // Title by role and view: technician = "My Requests"; manager "mine" / "To handle"
   const listTitle = document.getElementById('inboxListTitle');
   const role = inboxUserRoleLc();
   if (listTitle) {
     if (role === "technician") listTitle.textContent = "My Requests";
-    else listTitle.textContent = inboxViewMode === 'mine' ? 'My Requests' : 'To handle';
+    else {
+      listTitle.style.display = inboxViewMode === 'mine' ? '' : 'none';
+      listTitle.textContent = 'My Requests';
+    }
   }
 
   // Remove only dynamically-added group elements (preserve loading/empty state divs)
@@ -711,9 +738,13 @@ function renderInboxList() {
   }
 
   if (requestsToShow.length === 0) {
+    if (loadingEl) loadingEl.style.display = 'none';
     if (emptyEl) {
       emptyEl.style.display = 'block';
-      emptyEl.querySelector('#emptyStateMessage').textContent = inboxStaffFilterUid ? 'No requests from this staff in this tab' : 'No requests in this category';
+      const msgEl = emptyEl.querySelector('#emptyStateMessage');
+      if (msgEl) {
+        msgEl.textContent = inboxStaffFilterUid ? 'No requests from this staff in this tab' : 'No requests in this category';
+      }
     }
     return;
   }
@@ -732,7 +763,7 @@ function renderInboxList() {
 
   // Order: by category (schedule → payments → operations), then custom type ids, then other last
   const typeOrder = [
-    'vacation','late_start','early_leave','schedule_change','extra_shift','swap_shift','break_change',
+    'vacation','day_off','time_off','late_start','early_leave','schedule_change','extra_shift','swap_shift','break_change',
     'commission_review','tip_adjustment','payment_issue',
     'supplies','maintenance','client_issue','staff_birthday_reminder',
     'document_request','document_upload',
@@ -840,6 +871,7 @@ function getRequestTypeInfo(type) {
   const all = getAllRequestTypes();
   const found = all.find(t => t.id === type);
   if (found) return found;
+  if (type && LEGACY_INBOX_TYPE_INFO[type]) return LEGACY_INBOX_TYPE_INFO[type];
   const builtinOnly = BUILTIN_TYPES.find(t => t.id === type);
   return builtinOnly || { icon: '📝', label: type || 'Request', description: '', fields: [] };
 }
@@ -956,7 +988,16 @@ function getRequestSummary(request) {
     case 'late_start':
     case 'early_leave':
       return `${data.date || ''} - ${data.requestedTime || ''}`;
+    case 'day_off':
+      return data.date ? `Day off · ${data.date}` : 'Day off';
+    case 'time_off':
+      return data.startDate && data.endDate
+        ? `Time off · ${data.startDate} → ${data.endDate}`
+        : (data.startDate || 'Time off');
     case 'schedule_change':
+      if (data.startDate && data.endDate) {
+        return `Schedule change · ${data.startDate}→${data.endDate}${data.requestedSchedule ? ` · ${String(data.requestedSchedule).slice(0, 40)}` : ''}`;
+      }
       return data.reason || 'Schedule change request';
     case 'extra_shift':
     case 'swap_shift':
@@ -1483,6 +1524,32 @@ function createRequestForm(type) {
         <textarea id="earlyleave_reason" rows="2" required placeholder="e.g., Family emergency" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
       </div>
     `;
+  } else if (type === 'day_off') {
+    fieldsContainer.innerHTML = `
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Date</label>
+        <input type="date" id="dayoff_date" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Note (optional)</label>
+        <textarea id="dayoff_note" rows="2" placeholder="Optional context" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+    `;
+  } else if (type === 'time_off') {
+    fieldsContainer.innerHTML = `
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">First day off</label>
+        <input type="date" id="timeoff_startDate" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Last day off (same as first for one day)</label>
+        <input type="date" id="timeoff_endDate" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Note (optional)</label>
+        <textarea id="timeoff_note" rows="2" placeholder="Optional context" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+    `;
   } else if (type === 'schedule_change') {
     fieldsContainer.innerHTML = `
       <div>
@@ -1496,6 +1563,17 @@ function createRequestForm(type) {
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Reason</label>
         <textarea id="schedchange_reason" rows="2" required placeholder="Why do you need this change?" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+      <div style="font-size:12px;color:#4b5563;line-height:1.45;padding:8px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
+        <strong>Calendar impact (when approved):</strong> dates below map to availability. Single day = same start and end date.
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">First date this change applies to</label>
+        <input type="date" id="schedchange_startDate" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Last date (optional; defaults to first date)</label>
+        <input type="date" id="schedchange_endDate" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
       </div>
       <div>
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
@@ -1768,7 +1846,14 @@ async function submitRequest(type) {
       const end = new Date(endDate);
       const daysCount = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
       
-      data = { startDate, endDate, daysCount, note };
+      data = {
+        startDate,
+        endDate,
+        daysCount,
+        note,
+        subjectUid: currentUserProfile.uid,
+        subjectStaffId: currentUserProfile.staffId || '',
+      };
       
     } else if (type === 'late_start') {
       const date = document.getElementById('latestart_date')?.value;
@@ -1780,7 +1865,15 @@ async function submitRequest(type) {
         return;
       }
       
-      data = { date, requestedTime: time, reason, normalTime: null };
+      data = {
+        date,
+        requestedTime: time,
+        startTime: time,
+        reason,
+        normalTime: null,
+        subjectUid: currentUserProfile.uid,
+        subjectStaffId: currentUserProfile.staffId || '',
+      };
       
     } else if (type === 'early_leave') {
       const date = document.getElementById('earlyleave_date')?.value;
@@ -1792,25 +1885,76 @@ async function submitRequest(type) {
         return;
       }
       
-      data = { date, requestedTime: time, reason, normalTime: null };
+      data = {
+        date,
+        requestedTime: time,
+        endTime: time,
+        reason,
+        normalTime: null,
+        subjectUid: currentUserProfile.uid,
+        subjectStaffId: currentUserProfile.staffId || '',
+      };
       
+    } else if (type === 'day_off') {
+      const date = document.getElementById('dayoff_date')?.value;
+      const note = document.getElementById('dayoff_note')?.value?.trim() || null;
+      if (!date) {
+        showToast('Please select a date', 'error');
+        return;
+      }
+      data = {
+        date,
+        note,
+        affectedDates: [date],
+        subjectUid: currentUserProfile.uid,
+        subjectStaffId: currentUserProfile.staffId || '',
+      };
+
+    } else if (type === 'time_off') {
+      const startDate = document.getElementById('timeoff_startDate')?.value;
+      const endDate = document.getElementById('timeoff_endDate')?.value || startDate;
+      const note = document.getElementById('timeoff_note')?.value?.trim() || null;
+      if (!startDate) {
+        showToast('Please select the first day off', 'error');
+        return;
+      }
+      const affectedDates = enumerateInclusiveDateKeysForInbox(startDate, endDate);
+      data = {
+        startDate,
+        endDate: endDate || startDate,
+        note,
+        affectedDates,
+        subjectUid: currentUserProfile.uid,
+        subjectStaffId: currentUserProfile.staffId || '',
+      };
+
     } else if (type === 'schedule_change') {
       const current = document.getElementById('schedchange_current')?.value || '';
       const requested = document.getElementById('schedchange_requested')?.value;
       const reason = document.getElementById('schedchange_reason')?.value;
       const isTemporary = document.getElementById('schedchange_temporary')?.checked || false;
+      const startDate = document.getElementById('schedchange_startDate')?.value || '';
+      const endDate = document.getElementById('schedchange_endDate')?.value || startDate;
       
       if (!requested || !reason) {
         showToast('Please fill in all required fields', 'error');
         return;
       }
-      
-      data = { 
-        currentSchedule: current, 
-        requestedSchedule: requested, 
-        reason, 
+      if (!startDate) {
+        showToast('Please select the first date this change applies to.', 'error');
+        return;
+      }
+      const affectedDates = enumerateInclusiveDateKeysForInbox(startDate, endDate);
+      data = {
+        currentSchedule: current,
+        requestedSchedule: requested,
+        reason,
         isTemporary,
-        affectedDates: []
+        startDate,
+        endDate: endDate || startDate,
+        affectedDates,
+        subjectUid: currentUserProfile.uid,
+        subjectStaffId: currentUserProfile.staffId || '',
       };
       
     } else if (type === 'extra_shift') {
@@ -2390,9 +2534,26 @@ function renderRequestData(request) {
         </div>
       `;
       
+    case 'day_off':
+      return `
+        <div style="display:grid;gap:12px;font-size:13px;">
+          <div><span style="color:#6b7280;">Date:</span><span style="font-weight:500;margin-left:8px;">${data.date || 'N/A'}</span></div>
+          ${data.note ? `<div><span style="color:#6b7280;">Note:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${data.note}</div></div>` : ''}
+        </div>
+      `;
+    case 'time_off':
+      return `
+        <div style="display:grid;gap:12px;font-size:13px;">
+          <div><span style="color:#6b7280;">Range:</span><span style="font-weight:500;margin-left:8px;">${data.startDate || 'N/A'} → ${data.endDate || data.startDate || 'N/A'}</span></div>
+          ${Array.isArray(data.affectedDates) && data.affectedDates.length ? `<div><span style="color:#6b7280;">Days (${data.affectedDates.length}):</span><span style="font-weight:500;margin-left:8px;">${data.affectedDates.join(', ')}</span></div>` : ''}
+          ${data.note ? `<div><span style="color:#6b7280;">Note:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${data.note}</div></div>` : ''}
+        </div>
+      `;
     case 'schedule_change':
       return `
         <div style="display:grid;gap:12px;font-size:13px;">
+          ${data.startDate ? `<div><span style="color:#6b7280;">Applies:</span><span style="font-weight:500;margin-left:8px;">${data.startDate}${data.endDate && data.endDate !== data.startDate ? ` → ${data.endDate}` : ''}</span></div>` : ''}
+          ${Array.isArray(data.affectedDates) && data.affectedDates.length ? `<div><span style="color:#6b7280;">Affected dates:</span><span style="font-weight:500;margin-left:8px;font-size:12px;">${data.affectedDates.join(', ')}</span></div>` : ''}
           ${data.currentSchedule ? `<div><span style="color:#6b7280;">Current:</span><span style="font-weight:500;margin-left:8px;">${data.currentSchedule}</span></div>` : ''}
           <div>
             <span style="color:#6b7280;">Requested:</span>
@@ -2748,10 +2909,14 @@ window.archiveRequest = async function(requestId) {
 
   try {
     const salonId = currentUserProfile.salonId;
-    await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
+    const ref = doc(db, `salons/${salonId}/inboxItems`, requestId);
+    const prevSnap = await getDoc(ref);
+    const previousStatus = String(prevSnap.data()?.status || "").trim() || null;
+    await updateDoc(ref, {
       status: 'archived',
+      previousStatus,
       lastActivityAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
+      updatedAt: serverTimestamp(),
     });
     showToast('Request archived', 'success');
   } catch (error) {

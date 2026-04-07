@@ -137,12 +137,65 @@ function buildDefaultAvailabilityForDate(staff, dateKey, options = {}) {
   };
 }
 
+/**
+ * When defaultSchedule has this weekday off but Inbox has approved late_start / early_leave only,
+ * use salon business hours (or 09:00–18:00) as the baseline window so partial overrides can apply.
+ * Full-day blocks (vacation, etc.) keep the default "off" row.
+ */
+function resolveDefaultAvailabilityForOverrides(staff, dateKey, businessHours, dayOverrides) {
+  const bh = businessHours && typeof businessHours === "object" ? businessHours : null;
+  const base = buildDefaultAvailabilityForDate(staff, dateKey, { businessHours: bh });
+  const overrides = Array.isArray(dayOverrides) ? dayOverrides : [];
+  const hasBlocking = overrides.some((o) => o && o.mode === "unavailable");
+  const hasPartial = overrides.some((o) => o && (o.mode === "late_start" || o.mode === "early_leave"));
+  if (base.isAvailable || hasBlocking || !hasPartial) {
+    return base;
+  }
+  const dayName = getDayNameFromDateKey(dateKey);
+  const bhEntry = dayName && bh && bh[dayName] ? bh[dayName] : null;
+  let startTime = null;
+  let endTime = null;
+  if (bhEntry && bhEntry.isOpen === true) {
+    startTime = normalizeTimeValue(bhEntry.openTime);
+    endTime = normalizeTimeValue(bhEntry.closeTime);
+  }
+  if (!startTime || !endTime || compareTimeValues(startTime, endTime) >= 0) {
+    startTime = normalizeTimeValue("09:00");
+    endTime = normalizeTimeValue("18:00");
+  }
+  return {
+    isAvailable: true,
+    startTime,
+    endTime,
+    source: "default_schedule",
+  };
+}
+
 function normalizeRequestType(type) {
   return String(type || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
+function isScheduleAvailabilityRequestType(type) {
+  const t = normalizeRequestType(type);
+  const x = t === "time_off" ? "day_off" : t;
+  return ["vacation", "day_off", "late_start", "early_leave", "schedule_change"].includes(x);
+}
+
+/**
+ * Approved schedule items still apply after "archive" (status becomes archived).
+ * Also treat "done" like approved for calendar purposes.
+ */
 function isApprovedRequest(request) {
-  return String(request?.status || "").trim().toLowerCase() === "approved";
+  const s = String(request?.status || "").trim().toLowerCase();
+  if (s === "approved" || s === "done") return true;
+  if (s === "archived") {
+    const p = String(request?.previousStatus || "").trim().toLowerCase();
+    if (p === "approved" || p === "done") return true;
+    // Legacy: archived before we stored previousStatus — keep schedule impact for schedule request types
+    if (!p && isScheduleAvailabilityRequestType(request?.type)) return true;
+    return false;
+  }
+  return false;
 }
 
 function getStaffIdentity(staff) {
@@ -154,6 +207,10 @@ function getStaffIdentity(staff) {
   };
 }
 
+/**
+ * Which staff member this approved schedule request applies to.
+ * Inbox may set forUid to the approver/recipient while createdByUid is the requester — both must NOT match.
+ */
 function requestMatchesStaff(request, staff) {
   const identity = getStaffIdentity(staff);
   const createdByUid = String(request?.createdByUid || "").trim();
@@ -162,6 +219,27 @@ function requestMatchesStaff(request, staff) {
   const forStaffId = String(request?.forStaffId || "").trim();
   const createdByName = String(request?.createdByName || "").trim().toLowerCase();
   const forStaffName = String(request?.forStaffName || "").trim().toLowerCase();
+  const data = request?.data && typeof request.data === "object" ? request.data : {};
+  const subjectUid = String(data.subjectUid || "").trim();
+  const subjectStaffId = String(data.subjectStaffId || "").trim();
+
+  if (subjectUid || subjectStaffId) {
+    if (identity.uid && subjectUid && identity.uid === subjectUid) return true;
+    if (identity.staffId && subjectStaffId && identity.staffId === subjectStaffId) return true;
+    return false;
+  }
+
+  const sched = isScheduleAvailabilityRequestType(request?.type);
+  if (sched && createdByUid && forUid && createdByUid !== forUid) {
+    if (identity.uid && identity.uid === createdByUid) return true;
+    if (identity.staffId && createdByStaffId && identity.staffId === createdByStaffId) return true;
+    if (!identity.uid && !identity.staffId && identity.email) {
+      const createdByEmail = String(request?.createdByEmail || request?.email || "").trim().toLowerCase();
+      if (createdByEmail && createdByEmail === identity.email) return true;
+    }
+    if (!identity.uid && !identity.staffId && identity.name && createdByName && createdByName === identity.name) return true;
+    return false;
+  }
 
   if (identity.uid && (createdByUid === identity.uid || forUid === identity.uid)) return true;
   if (identity.staffId && (createdByStaffId === identity.staffId || forStaffId === identity.staffId)) return true;
@@ -178,7 +256,8 @@ function requestMatchesStaff(request, staff) {
 
 function buildRequestDateKeys(request) {
   const data = request?.data && typeof request.data === "object" ? request.data : {};
-  const type = normalizeRequestType(request?.type);
+  let type = normalizeRequestType(request?.type);
+  if (type === "time_off") type = "day_off";
 
   if (type === "vacation") {
     return enumerateDateRange({ startDate: data.startDate, endDate: data.endDate });
@@ -190,12 +269,22 @@ function buildRequestDateKeys(request) {
     return enumerateDateRange({ startDate: data.startDate, endDate: data.endDate });
   }
 
+  if (type === "schedule_change") {
+    const ad = data.affectedDates;
+    if (Array.isArray(ad) && ad.length > 0) {
+      return ad.map((d) => normalizeDateKey(d)).filter(Boolean);
+    }
+    const range = enumerateDateRange({ startDate: data.startDate, endDate: data.endDate || data.startDate });
+    return range.length > 0 ? range : [];
+  }
+
   const singleDate = normalizeDateKey(data.date);
   return singleDate ? [singleDate] : [];
 }
 
 function getRequestOverrideInfo(request, dateKey) {
-  const type = normalizeRequestType(request?.type);
+  let type = normalizeRequestType(request?.type);
+  if (type === "time_off") type = "day_off";
   const data = request?.data && typeof request.data === "object" ? request.data : {};
   const dates = buildRequestDateKeys(request);
   if (!dates.includes(dateKey)) return null;
@@ -203,6 +292,17 @@ function getRequestOverrideInfo(request, dateKey) {
   if (type === "vacation" || type === "day_off") {
     return {
       type,
+      mode: "unavailable",
+      date: dateKey,
+      requestId: request?.id || request?.requestId || null,
+      requestedTime: null,
+      request,
+    };
+  }
+
+  if (type === "schedule_change") {
+    return {
+      type: "schedule_change",
       mode: "unavailable",
       date: dateKey,
       requestId: request?.id || request?.requestId || null,
@@ -320,9 +420,15 @@ function getEffectiveAvailabilityForDate(staff, requests, dateKey, options = {})
   const bhNormalized = options.businessHours
     ? normalizeBusinessHours(options.businessHours)
     : null;
-  const defaultAvailability = buildDefaultAvailabilityForDate(staff, normalizedDate, { businessHours: bhNormalized });
   const overridesByDate = getApprovedAvailabilityOverrides(staff, requests, { startDate: normalizedDate, endDate: normalizedDate });
-  const applied = applyAvailabilityOverrides(defaultAvailability, overridesByDate[normalizedDate] || []);
+  const dayOverrides = overridesByDate[normalizedDate] || [];
+  const defaultAvailability = resolveDefaultAvailabilityForOverrides(
+    staff,
+    normalizedDate,
+    bhNormalized,
+    dayOverrides,
+  );
+  const applied = applyAvailabilityOverrides(defaultAvailability, dayOverrides);
   return {
     date: normalizedDate,
     isAvailable: applied.isAvailable,
@@ -343,8 +449,9 @@ function getEffectiveAvailability(staff, requests, dateRange, options = {}) {
     ? normalizeBusinessHours(options.businessHours)
     : null;
   const availability = dates.map((dateKey) => {
-    const defaultAvailability = buildDefaultAvailabilityForDate(staff, dateKey, { businessHours: bhNormalized });
-    const applied = applyAvailabilityOverrides(defaultAvailability, overridesByDate[dateKey] || []);
+    const dayOverrides = overridesByDate[dateKey] || [];
+    const defaultAvailability = resolveDefaultAvailabilityForOverrides(staff, dateKey, bhNormalized, dayOverrides);
+    const applied = applyAvailabilityOverrides(defaultAvailability, dayOverrides);
     return {
       date: dateKey,
       isAvailable: applied.isAvailable,
@@ -372,7 +479,57 @@ function getEffectiveAvailability(staff, requests, dateRange, options = {}) {
 }
 
 function getSupportedAvailabilityRequestTypes() {
-  return ["vacation", "day_off", "late_start", "early_leave"];
+  return ["vacation", "day_off", "time_off", "late_start", "early_leave", "schedule_change"];
+}
+
+/**
+ * Raw Inbox approvals for this staff + date (does not merge overrides).
+ * Use for UI labels so a late_start on a day is never hidden behind an unrelated full-day row.
+ */
+function getInboxApprovalDisplayForDate(staff, requests, dateKey) {
+  const normalized = normalizeDateKey(dateKey);
+  const empty = {
+    hasFullDayRequest: false,
+    lateStart: null,
+    earlyLeave: null,
+    hasConflict: false,
+  };
+  if (!normalized) return empty;
+
+  let hasFullDayRequest = false;
+  let lateStart = null;
+  let earlyLeave = null;
+
+  (Array.isArray(requests) ? requests : []).forEach((req) => {
+    if (!isApprovedRequest(req) || !requestMatchesStaff(req, staff)) return;
+    const keys = buildRequestDateKeys(req);
+    if (!keys.includes(normalized)) return;
+
+    let t = normalizeRequestType(req?.type);
+    if (t === "time_off") t = "day_off";
+
+    if (t === "vacation" || t === "day_off" || t === "schedule_change") {
+      hasFullDayRequest = true;
+    }
+
+    const data = req?.data && typeof req.data === "object" ? req.data : {};
+    if (t === "late_start") {
+      const lt = normalizeTimeValue(data.requestedTime || data.time || data.startTime);
+      if (lt) lateStart = lt;
+    }
+    if (t === "early_leave") {
+      const et = normalizeTimeValue(data.requestedTime || data.time || data.endTime);
+      if (et) earlyLeave = et;
+    }
+  });
+
+  const hasPartial = Boolean(lateStart || earlyLeave);
+  return {
+    hasFullDayRequest,
+    lateStart,
+    earlyLeave,
+    hasConflict: Boolean(hasFullDayRequest && hasPartial),
+  };
 }
 
 const scheduleAvailabilityHelpers = {
@@ -384,6 +541,7 @@ const scheduleAvailabilityHelpers = {
   getEffectiveAvailabilityForDate,
   getEffectiveAvailability,
   getSupportedAvailabilityRequestTypes,
+  getInboxApprovalDisplayForDate,
 };
 
 if (typeof window !== "undefined") {
@@ -400,4 +558,5 @@ export {
   getEffectiveAvailabilityForDate,
   getEffectiveAvailability,
   getSupportedAvailabilityRequestTypes,
+  getInboxApprovalDisplayForDate,
 };

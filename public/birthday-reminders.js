@@ -854,7 +854,7 @@ export async function sendBirthdayInboxTestPing() {
   });
 
   if (typeof window !== "undefined" && typeof window.showToast === "function") {
-    window.showToast("Test Inbox item created — open Inbox → To handle → Open.", 9000);
+    window.showToast("Test Inbox item created — open Inbox → Team → Open.", 9000);
   }
   return { ok: true, inboxItemId: ref.id, salonId };
 }

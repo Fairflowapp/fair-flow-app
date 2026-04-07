@@ -13,7 +13,7 @@ import {
   getStaffUid,
   getStaffDisplayName,
   generateWeeklySchedule,
-} from "./schedule-generator.js?v=20260403_mgmt_only_split";
+} from "./schedule-generator.js?v=20260416_modal_ensure_first";
 
 const WARNING_SEVERITY = Object.freeze({
   no_staff_assigned: "high",
@@ -68,31 +68,78 @@ function countManagementLine(assignments) {
 }
 
 /**
- * Open day: shift must fall within salon business hours only (schedule is salon-centric; avoids false
- * "unavailable" when a split segment extends past a narrow personal request but still inside business close).
- * Otherwise: compare to effective availability window.
+ * Returns a violation description, or null if the assignment fits effective availability + business hours.
+ * Effective window already includes approved late_start / early_leave (schedule-availability).
  */
-function assignmentViolatesAvailability(assignment, availability, businessStatus) {
-  if (assignment?.manualAdminEdit === true) return false;
+function getAvailabilityViolationDetail(assignment, availability, businessStatus) {
+  if (assignment?.manualAdminEdit === true) return null;
 
-  if (!availability?.isAvailable) return true;
+  if (!availability?.isAvailable) {
+    const ovs = Array.isArray(availability?.overrides) ? availability.overrides : [];
+    const blocking = ovs.filter((o) => o && o.mode === "unavailable");
+    const types = blocking.map((o) => o.type).filter(Boolean);
+    return {
+      conflictKind: "full_day_unavailable",
+      message: types.length
+        ? `Not available: approved time-off / schedule hold (${types.join(", ")}). Adjust the shift or the approved request in Inbox.`
+        : "Staff is not available this day.",
+      overrideTypes: types,
+    };
+  }
 
   const aS = parseScheduleTimeToMinutes(assignment?.startTime);
   const aE = parseScheduleTimeToMinutes(assignment?.endTime);
-  if (aS == null || aE == null || aE <= aS) return true;
-
-  if (businessStatus?.isOpen === true) {
-    const bo = parseScheduleTimeToMinutes(businessStatus.openTime);
-    const bc = parseScheduleTimeToMinutes(businessStatus.closeTime);
-    if (bo != null && bc != null && bc > bo) {
-      return aS < bo || aE > bc;
-    }
+  if (aS == null || aE == null || aE <= aS) {
+    return { conflictKind: "invalid_shift", message: "Shift has invalid start/end times." };
   }
 
   const vS = parseScheduleTimeToMinutes(availability?.startTime);
   const vE = parseScheduleTimeToMinutes(availability?.endTime);
-  if (vS == null || vE == null || vE <= vS) return true;
-  return aS < vS || aE > vE;
+  if (vS == null || vE == null || vE <= vS) {
+    return { conflictKind: "invalid_availability", message: "Effective availability window is invalid." };
+  }
+
+  const ovs = Array.isArray(availability?.overrides) ? availability.overrides : [];
+  const hasLate = ovs.some((o) => o && o.mode === "late_start");
+  const hasEarly = ovs.some((o) => o && o.mode === "early_leave");
+
+  if (aS < vS) {
+    const lateOv = ovs.find((o) => o && o.mode === "late_start");
+    const approved = lateOv?.requestedTime || availability.startTime;
+    return {
+      conflictKind: "late_start",
+      message: hasLate
+        ? `Shift starts at ${assignment.startTime}, before the approved late start (${approved}).`
+        : `Shift starts at ${assignment.startTime}, before effective availability (${availability.startTime}).`,
+    };
+  }
+  if (aE > vE) {
+    const earlyOv = ovs.find((o) => o && o.mode === "early_leave");
+    const approved = earlyOv?.requestedTime || availability.endTime;
+    return {
+      conflictKind: "early_leave",
+      message: hasEarly
+        ? `Shift ends at ${assignment.endTime}, after the approved early leave (${approved}).`
+        : `Shift ends at ${assignment.endTime}, after effective availability (${availability.endTime}).`,
+    };
+  }
+
+  if (businessStatus?.isOpen === true) {
+    const bo = parseScheduleTimeToMinutes(businessStatus.openTime);
+    const bc = parseScheduleTimeToMinutes(businessStatus.closeTime);
+    if (bo != null && bc != null && bc > bo && (aS < bo || aE > bc)) {
+      return {
+        conflictKind: "business_hours",
+        message: `Shift (${assignment.startTime}–${assignment.endTime}) is outside salon business hours (${businessStatus.openTime}–${businessStatus.closeTime}).`,
+      };
+    }
+  }
+
+  return null;
+}
+
+function assignmentViolatesAvailability(assignment, availability, businessStatus) {
+  return getAvailabilityViolationDetail(assignment, availability, businessStatus) !== null;
 }
 
 function findStaffForAssignment(staffList, assignment) {
@@ -186,16 +233,44 @@ function validateDraftDay({ day, staffList, availabilityDirectory, rules, covera
 
   assignments.forEach((assignment) => {
     const staff = findStaffForAssignment(staffList, assignment);
-    const availability = staff ? getAvailabilityForStaffDate(staff, availabilityDirectory, date) : null;
-    if (assignmentViolatesAvailability(assignment, availability, businessStatus)) {
+    if (!staff) {
       warnings.push(buildValidationWarning(
         "assigned_staff_unavailable",
-        "A scheduled staff member is outside effective availability for this day.",
+        "Could not match this assignment to a staff profile for availability.",
         {
           date,
           staffId: assignment.staffId || null,
           uid: assignment.uid || null,
           name: assignment.name || null,
+          conflictKind: "unknown_staff",
+        }
+      ));
+      return;
+    }
+    const availability = getAvailabilityForStaffDate(staff, availabilityDirectory, date);
+    const detail = getAvailabilityViolationDetail(assignment, availability, businessStatus);
+    if (detail) {
+      const ovs = Array.isArray(availability?.overrides) ? availability.overrides : [];
+      const blocking = ovs.filter((o) => o && o.mode === "unavailable");
+      const types = blocking.map((o) => o.type).filter(Boolean);
+      const hasApprovedTimeOff = types.some((t) =>
+        t === "vacation" || t === "day_off" || t === "time_off" || t === "schedule_change"
+      );
+      const hasPartial =
+        detail.conflictKind === "late_start" ||
+        detail.conflictKind === "early_leave" ||
+        hasApprovedTimeOff;
+      warnings.push(buildValidationWarning(
+        "assigned_staff_unavailable",
+        detail.message,
+        {
+          date,
+          staffId: assignment.staffId || null,
+          uid: assignment.uid || null,
+          name: assignment.name || null,
+          conflictKind: detail.conflictKind || null,
+          conflictWithApprovedInboxRequest: hasPartial,
+          overrideTypes: detail.overrideTypes || types,
         }
       ));
     }

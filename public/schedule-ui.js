@@ -13,8 +13,14 @@ import {
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "./app.js?v=20260412_storage_bucket_explicit";
-import { generateWeeklySchedule } from "./schedule-generator.js?v=20260403_mgmt_only_split";
-import { validateScheduleDraft } from "./schedule-validator.js?v=20260403_avail_business_bounds";
+import { generateWeeklySchedule } from "./schedule-generator.js?v=20260416_modal_ensure_first";
+import { validateScheduleDraft } from "./schedule-validator.js?v=20260416_modal_ensure_first";
+import {
+  getEffectiveAvailabilityForDate,
+  getInboxApprovalDisplayForDate,
+  isApprovedRequest,
+} from "./schedule-availability.js?v=20260416_modal_ensure_first";
+import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260403_reception_split";
 
 let schedulePreviewWeekStart = getStartOfWeek(new Date());
 let schedulePreviewState = {
@@ -22,6 +28,10 @@ let schedulePreviewState = {
   validation: null,
   weekRange: null,
   staffList: [],
+  /** Approved inbox items used for availability (same as generator/validator). */
+  requests: [],
+  /** Salon business hours object from settings (optional). */
+  businessHours: undefined,
   /** date (YYYY-MM-DD) -> staff id for the bottom Stand by row (per day). */
   standByByDate: {},
 };
@@ -53,6 +63,9 @@ let scheduleChangePingSubKey = "";
 let scheduleChangePingShownToastMs = 0;
 /** When drag-drop needs confirm before placing shift on Marked OFF cell: { payload, targetStaffId, targetDate } */
 let scheduleDnDConfirmPending = null;
+/** After user confirms placing a shift that conflicts with approved late_start / early_leave */
+let scheduleApprovedTimeConflictContinue = null;
+let scheduleSaveSkipApprovedTimeConflictOnce = false;
 
 /** Toast for schedule messages — works even when `window.showToast` is not defined (common in this app shell). */
 function ffScheduleAppToast(message, duration = 5000) {
@@ -514,11 +527,11 @@ function ensureScheduleDnDOffConfirmModal() {
     "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:4100;align-items:center;justify-content:center;padding:20px;";
   backdrop.innerHTML = `
     <div role="dialog" aria-modal="true" aria-labelledby="scheduleDnDOffConfirmTitle" style="background:#fff;border-radius:16px;padding:24px 26px;max-width:420px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.28);">
-      <div id="scheduleDnDOffConfirmTitle" style="font-size:18px;font-weight:700;color:#111827;margin-bottom:10px;">Place shift on a marked OFF day?</div>
-      <p id="scheduleDnDOffConfirmBody" style="margin:0 0 22px 0;font-size:14px;color:#4b5563;line-height:1.55;">This day is marked OFF for this staff member. Placing a shift here will remove the OFF mark.</p>
+      <div id="scheduleDnDOffConfirmTitle" style="font-size:18px;font-weight:700;color:#111827;margin-bottom:10px;">Note</div>
+      <p id="scheduleDnDOffConfirmBody" style="margin:0 0 22px 0;font-size:14px;color:#4b5563;line-height:1.55;"></p>
       <div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;">
         <button type="button" id="scheduleDnDOffConfirmCancel" style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;">Cancel</button>
-        <button type="button" id="scheduleDnDOffConfirmOk" style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;">Yes, place shift</button>
+        <button type="button" id="scheduleDnDOffConfirmOk" style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;">Continue</button>
       </div>
     </div>
   `;
@@ -531,9 +544,106 @@ function ensureScheduleDnDOffConfirmModal() {
   return backdrop;
 }
 
+/** Fallback when staff/date missing — keep minimal */
+function setScheduleDnDConfirmModalVariant(variant) {
+  const titleEl = document.getElementById("scheduleDnDOffConfirmTitle");
+  const bodyEl = document.getElementById("scheduleDnDOffConfirmBody");
+  const okEl = document.getElementById("scheduleDnDOffConfirmOk");
+  if (titleEl) titleEl.textContent = "Note";
+  if (bodyEl) {
+    bodyEl.textContent =
+      variant === "approved_inbox"
+        ? "Please note: Inbox may restrict this cell."
+        : "Please note: this cell may be marked OFF for this week.";
+  }
+  if (okEl) okEl.textContent = "Continue";
+}
+
+/**
+ * One line: what applies to this cell (Inbox + optional weekly OFF). Used for Add shift / drag confirm.
+ * @param {"manual_off"|"approved_inbox"} kind — manual_off ⇒ include weekly Marked OFF in the line.
+ */
+function buildScheduleCellApprovalNoteLine(staff, dateKey, kind) {
+  const manualOff = kind === "manual_off";
+  const requests = Array.isArray(schedulePreviewState.requests) ? schedulePreviewState.requests : [];
+  const d = getInboxApprovalDisplayForDate(staff, requests, dateKey);
+  const chunks = [];
+  if (d.lateStart) chunks.push(`Approved START ${formatScheduleTimeShortAmPm(d.lateStart)}`);
+  if (d.earlyLeave) chunks.push(`Approved leave by ${formatScheduleTimeShortAmPm(d.earlyLeave)}`);
+  const hasPartial = chunks.length > 0;
+  if (!hasPartial && d.hasFullDayRequest) chunks.push("Approved day off (Inbox)");
+  if (manualOff) chunks.push("Marked OFF for this week");
+  return chunks.join(" · ");
+}
+
+/** @param {"manual_off"|"approved_inbox"} kind */
+function applySchedulePlaceShiftConfirmCopy(staff, dateKey, kind) {
+  const titleEl = document.getElementById("scheduleDnDOffConfirmTitle");
+  const bodyEl = document.getElementById("scheduleDnDOffConfirmBody");
+  const okEl = document.getElementById("scheduleDnDOffConfirmOk");
+  const line = buildScheduleCellApprovalNoteLine(staff, dateKey, kind);
+  if (titleEl) titleEl.textContent = "Note";
+  if (bodyEl) {
+    bodyEl.textContent = line
+      ? `Please note: ${line}.`
+      : "Please note: you can place a shift on this cell.";
+  }
+  if (okEl) okEl.textContent = "Continue";
+}
+
 function openScheduleDnDOffConfirm(pending) {
-  scheduleDnDConfirmPending = pending;
+  scheduleDnDConfirmPending = {
+    action: "dnd_move",
+    variant: pending.variant || "manual_off",
+    payload: pending.payload,
+    targetStaffId: pending.targetStaffId,
+    targetDate: pending.targetDate,
+  };
   const el = ensureScheduleDnDOffConfirmModal();
+  const staff = getStaffByScheduleKey(schedulePreviewState.staffList, pending.targetStaffId);
+  if (staff && pending.targetDate) {
+    applySchedulePlaceShiftConfirmCopy(
+      staff,
+      pending.targetDate,
+      scheduleDnDConfirmPending.variant === "approved_inbox" ? "approved_inbox" : "manual_off",
+    );
+  } else {
+    setScheduleDnDConfirmModalVariant(scheduleDnDConfirmPending.variant);
+  }
+  el.style.display = "flex";
+}
+
+function openScheduleAddShiftApprovedInboxConfirm({ staffKey, dateKey, staffName, startTime, endTime }) {
+  scheduleDnDConfirmPending = {
+    action: "open_add_shift",
+    variant: "approved_inbox",
+    staffKey,
+    dateKey,
+    staffName,
+    startTime,
+    endTime,
+  };
+  const el = ensureScheduleDnDOffConfirmModal();
+  const staff = getStaffByScheduleKey(schedulePreviewState.staffList, staffKey);
+  if (staff) applySchedulePlaceShiftConfirmCopy(staff, dateKey, "approved_inbox");
+  else setScheduleDnDConfirmModalVariant("approved_inbox");
+  el.style.display = "flex";
+}
+
+function openScheduleAddShiftManualOffConfirm({ staffKey, dateKey, staffName, startTime, endTime }) {
+  scheduleDnDConfirmPending = {
+    action: "open_add_shift",
+    variant: "manual_off",
+    staffKey,
+    dateKey,
+    staffName,
+    startTime,
+    endTime,
+  };
+  const el = ensureScheduleDnDOffConfirmModal();
+  const staff = getStaffByScheduleKey(schedulePreviewState.staffList, staffKey);
+  if (staff) applySchedulePlaceShiftConfirmCopy(staff, dateKey, "manual_off");
+  else setScheduleDnDConfirmModalVariant("manual_off");
   el.style.display = "flex";
 }
 
@@ -550,14 +660,47 @@ function cancelScheduleDnDOffConfirm() {
 function confirmScheduleDnDOffConfirm() {
   const pending = scheduleDnDConfirmPending;
   closeScheduleDnDOffConfirm();
-  if (!pending?.payload || !pending.targetStaffId || !pending.targetDate) return;
-  completeScheduleDrop(pending.payload, pending.targetStaffId, pending.targetDate);
+  if (!pending) return;
+  if (pending.action === "open_add_shift") {
+    openScheduleShiftEdit({
+      staffKey: pending.staffKey,
+      dateKey: pending.dateKey,
+      staffName: pending.staffName,
+      isNew: true,
+      startTime: pending.startTime,
+      endTime: pending.endTime,
+      overrideApprovedInbox: pending.variant === "approved_inbox",
+    });
+    return;
+  }
+  if (pending.action === "dnd_move" && pending.payload && pending.targetStaffId && pending.targetDate) {
+    completeScheduleDrop(pending.payload, pending.targetStaffId, pending.targetDate);
+  }
 }
 
-function openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffName, isNew }) {
-  const backdrop = ensureScheduleShiftEditModal();
+function openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffName, isNew, overrideApprovedInbox }) {
   const isNewShift = Boolean(isNew);
-  scheduleShiftEditPayload = { staffKey, dateKey, isNew: isNewShift };
+  if (isNewShift && !overrideApprovedInbox) {
+    const staff = getStaffByScheduleKey(schedulePreviewState.staffList, staffKey);
+    if (staff && staffDayBlockedByApprovedInbox(staff, dateKey)) {
+      const defaults = getDefaultShiftTimesForDate(dateKey);
+      openScheduleAddShiftApprovedInboxConfirm({
+        staffKey,
+        dateKey,
+        staffName,
+        startTime: startTime || defaults.start,
+        endTime: endTime || defaults.end,
+      });
+      return;
+    }
+  }
+  const backdrop = ensureScheduleShiftEditModal();
+  scheduleShiftEditPayload = {
+    staffKey,
+    dateKey,
+    isNew: isNewShift,
+    overrideApprovedInbox: Boolean(overrideApprovedInbox),
+  };
   const title = document.getElementById("scheduleShiftEditTitle");
   const hint = document.getElementById("scheduleShiftEditHint");
   const removeBtn = document.getElementById("scheduleShiftEditRemove");
@@ -570,19 +713,45 @@ function openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffNam
       : (staffName ? `Edit shift — ${staffName}` : "Edit shift");
   }
   const canManual = scheduleUserCanManualEdit();
-  if (hint) hint.style.display = canManual ? "block" : "none";
+  if (hint) {
+    const editStaff = getStaffByScheduleKey(schedulePreviewState.staffList, staffKey);
+    const ph = editStaff ? getApprovedPartialRequestHints(editStaff, dateKey) : { lateStart: null, earlyLeave: null };
+    const parts = [];
+    if (ph.lateStart) parts.push(`Approved START ${formatScheduleTimeShortAmPm(ph.lateStart)}`);
+    if (ph.earlyLeave) parts.push(`Approved leave by ${formatScheduleTimeShortAmPm(ph.earlyLeave)}`);
+    if (parts.length > 0) {
+      hint.innerHTML = `<span style="color:#0f766e;font-weight:600;">${parts.join(" · ")}</span>`;
+      hint.style.display = "block";
+    } else {
+      hint.textContent = "";
+      hint.style.display = canManual ? "block" : "none";
+    }
+  }
   if (removeBtn) removeBtn.style.display = !isNewShift && canManual ? "block" : "none";
   if (markOffBtn) markOffBtn.style.display = isNewShift && canManual && dayOpen ? "block" : "none";
   if (saveBtn) saveBtn.textContent = isNewShift ? "Add shift" : "Save";
   const defaults = getDefaultShiftTimesForDate(dateKey);
+  const editStaffForDefaults = getStaffByScheduleKey(schedulePreviewState.staffList, staffKey);
+  const phDefaults = editStaffForDefaults ? getApprovedPartialRequestHints(editStaffForDefaults, dateKey) : { lateStart: null, earlyLeave: null };
+  let defStart = defaults.start;
+  let defEnd = defaults.end;
+  if (phDefaults.lateStart) defStart = laterScheduleHHMM(defStart, phDefaults.lateStart);
+  if (phDefaults.earlyLeave) defEnd = earlierScheduleHHMM(defEnd, phDefaults.earlyLeave);
   const toInput = (t, fallback) => {
     const s = String(t || "").trim();
     return /^\d{2}:\d{2}$/.test(s) ? s : fallback;
   };
   const startEl = document.getElementById("scheduleShiftEditStart");
   const endEl = document.getElementById("scheduleShiftEditEnd");
-  if (startEl) startEl.value = toInput(isNewShift ? startTime || defaults.start : startTime || defaults.start, defaults.start);
-  if (endEl) endEl.value = toInput(isNewShift ? endTime || defaults.end : endTime || defaults.end, defaults.end);
+  if (startEl) {
+    startEl.value = toInput(
+      isNewShift ? startTime || defStart : startTime || defStart,
+      defStart,
+    );
+  }
+  if (endEl) {
+    endEl.value = toInput(isNewShift ? endTime || defEnd : endTime || defEnd, defEnd);
+  }
   backdrop.style.display = "flex";
 }
 
@@ -654,9 +823,30 @@ function saveScheduleShiftEdit() {
     window.alert("End time must be after start time.");
     return;
   }
-  const { staffKey, dateKey, isNew } = scheduleShiftEditPayload;
+  const { staffKey, dateKey, isNew, overrideApprovedInbox } = scheduleShiftEditPayload;
   const staff = getStaffByScheduleKey(schedulePreviewState.staffList, staffKey);
   if (!staff) return;
+  if (isNew && staffDayBlockedByApprovedInbox(staff, dateKey) && !overrideApprovedInbox) {
+    ffScheduleAppToast(
+      "This person has approved time off on this day. Update Inbox or pick another day.",
+    );
+    return;
+  }
+
+  if (!scheduleSaveSkipApprovedTimeConflictOnce) {
+    const conflictMsg = getApprovedPartialTimeConflictMessage(staff, dateKey, start, end);
+    if (conflictMsg) {
+      openScheduleApprovedTimeConflictModal(conflictMsg.message, () => {
+        scheduleSaveSkipApprovedTimeConflictOnce = true;
+        try {
+          saveScheduleShiftEdit();
+        } finally {
+          scheduleSaveSkipApprovedTimeConflictOnce = false;
+        }
+      });
+      return;
+    }
+  }
 
   let draft = cloneScheduleDraft(schedulePreviewState.draft);
   const day = findDraftDay(draft, dateKey);
@@ -741,6 +931,32 @@ function bindScheduleBoardManualAdd() {
     const dateKey = String(btn.getAttribute("data-date") || "").trim();
     const staffName = String(btn.getAttribute("data-staff-name") || "").trim();
     const defaults = getDefaultShiftTimesForDate(dateKey);
+    const staff = getStaffByScheduleKey(schedulePreviewState.staffList, staffKey);
+    const day = findDraftDay(schedulePreviewState.draft, dateKey);
+    const approvedInbox =
+      btn.getAttribute("data-approved-inbox") === "1" &&
+      staff &&
+      staffDayBlockedByApprovedInbox(staff, dateKey);
+    if (approvedInbox) {
+      openScheduleAddShiftApprovedInboxConfirm({
+        staffKey,
+        dateKey,
+        staffName,
+        startTime: defaults.start,
+        endTime: defaults.end,
+      });
+      return;
+    }
+    if (staff && day && dayHasManualOff(day, staffKey)) {
+      openScheduleAddShiftManualOffConfirm({
+        staffKey,
+        dateKey,
+        staffName,
+        startTime: defaults.start,
+        endTime: defaults.end,
+      });
+      return;
+    }
     openScheduleShiftEdit({
       staffKey,
       dateKey,
@@ -1669,6 +1885,144 @@ function markScheduleDayAsOffFromModal() {
   closeScheduleShiftEdit();
 }
 
+/** Full-day approved block (vacation / schedule_change / day off) — not late_start / early_leave partial windows. */
+function staffDayBlockedByApprovedInbox(staff, dateKey) {
+  const requests = Array.isArray(schedulePreviewState.requests) ? schedulePreviewState.requests : [];
+  const bh =
+    schedulePreviewState.businessHours && typeof schedulePreviewState.businessHours === "object"
+      ? schedulePreviewState.businessHours
+      : undefined;
+  const av = getEffectiveAvailabilityForDate(staff, requests, dateKey, { businessHours: bh });
+  if (!av || !av.hasApprovedOverride) return false;
+  const hasBlockingOverride = Array.isArray(av.overrides) && av.overrides.some((o) => o && o.mode === "unavailable");
+  return Boolean(av.isAvailable === false && hasBlockingOverride);
+}
+
+function compareScheduleHHMM(a, b) {
+  const ma = parseScheduleTimeToMinutes(a);
+  const mb = parseScheduleTimeToMinutes(b);
+  if (ma == null || mb == null) return 0;
+  return ma - mb;
+}
+
+/** "HH:mm" -> compact label e.g. "11 AM", "2:30 PM" */
+function formatScheduleTimeShortAmPm(hhmm) {
+  const m = parseScheduleTimeToMinutes(String(hhmm || "").trim());
+  if (m == null) return String(hhmm || "").trim() || "";
+  const h24 = Math.floor(m / 60) % 24;
+  const min = m % 60;
+  const isAm = h24 < 12;
+  let h12 = h24 % 12;
+  if (h12 === 0) h12 = 12;
+  const minPart = min === 0 ? "" : `:${String(min).padStart(2, "0")}`;
+  return `${h12}${minPart} ${isAm ? "AM" : "PM"}`;
+}
+
+function laterScheduleHHMM(a, b) {
+  if (!a) return b || null;
+  if (!b) return a || null;
+  return compareScheduleHHMM(a, b) >= 0 ? a : b;
+}
+
+function earlierScheduleHHMM(a, b) {
+  if (!a) return b || null;
+  if (!b) return a || null;
+  return compareScheduleHHMM(a, b) <= 0 ? a : b;
+}
+
+/** Inbox partial times from raw requests (not merged with vacation). */
+function getApprovedPartialRequestHints(staff, dateKey) {
+  const requests = Array.isArray(schedulePreviewState.requests) ? schedulePreviewState.requests : [];
+  const d = getInboxApprovalDisplayForDate(staff, requests, dateKey);
+  return { lateStart: d.lateStart, earlyLeave: d.earlyLeave };
+}
+
+/** Returns { kind, message } if shift times conflict with approved partial request; otherwise null. */
+function getApprovedPartialTimeConflictMessage(staff, dateKey, shiftStart, shiftEnd) {
+  const { lateStart, earlyLeave } = getApprovedPartialRequestHints(staff, dateKey);
+  const start = hhmmFromTimeInput(shiftStart);
+  const end = hhmmFromTimeInput(shiftEnd);
+  if (!start || !end) return null;
+  if (lateStart && compareScheduleHHMM(start, lateStart) < 0) {
+    return {
+      kind: "late_start",
+      message: `Approved START ${formatScheduleTimeShortAmPm(lateStart)} or later. Shift starts ${formatScheduleTimeShortAmPm(start)}. Save anyway?`,
+    };
+  }
+  if (earlyLeave && compareScheduleHHMM(end, earlyLeave) > 0) {
+    return {
+      kind: "early_leave",
+      message: `Approved leave by ${formatScheduleTimeShortAmPm(earlyLeave)}. Shift ends ${formatScheduleTimeShortAmPm(end)}. Save anyway?`,
+    };
+  }
+  return null;
+}
+
+function getAssignmentFromDragPayload(payload) {
+  const day = findDraftDay(schedulePreviewState.draft, payload?.sourceDate);
+  const list = Array.isArray(day?.assignments) ? day.assignments : [];
+  return (
+    list.find(
+      (a) =>
+        getAssignmentId(a, payload.sourceDate) === payload.shiftId &&
+        String(a.staffId || a.uid || "").trim() === payload.sourceStaffId,
+    ) || null
+  );
+}
+
+function ensureScheduleApprovedTimeConflictModal() {
+  if (document.getElementById("scheduleApprovedTimeConflictBackdrop")) {
+    return document.getElementById("scheduleApprovedTimeConflictBackdrop");
+  }
+  const backdrop = document.createElement("div");
+  backdrop.id = "scheduleApprovedTimeConflictBackdrop";
+  backdrop.style.cssText =
+    "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:4150;align-items:center;justify-content:center;padding:20px;";
+  backdrop.innerHTML = `
+    <div role="dialog" aria-modal="true" aria-labelledby="scheduleApprovedTimeConflictTitle" style="background:#fff;border-radius:16px;padding:24px 26px;max-width:460px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.28);">
+      <div id="scheduleApprovedTimeConflictTitle" style="font-size:18px;font-weight:700;color:#111827;margin-bottom:10px;">Does not match approved request</div>
+      <p id="scheduleApprovedTimeConflictBody" style="margin:0 0 22px 0;font-size:14px;color:#4b5563;line-height:1.55;"></p>
+      <div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;">
+        <button type="button" id="scheduleApprovedTimeConflictCancel" style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;">Cancel</button>
+        <button type="button" id="scheduleApprovedTimeConflictOk" style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;">Yes, use these times</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) closeScheduleApprovedTimeConflictModal();
+  });
+  document.getElementById("scheduleApprovedTimeConflictCancel")?.addEventListener("click", closeScheduleApprovedTimeConflictModal);
+  document.getElementById("scheduleApprovedTimeConflictOk")?.addEventListener("click", confirmScheduleApprovedTimeConflictModal);
+  return backdrop;
+}
+
+function closeScheduleApprovedTimeConflictModal() {
+  const el = document.getElementById("scheduleApprovedTimeConflictBackdrop");
+  if (el) el.style.display = "none";
+  scheduleApprovedTimeConflictContinue = null;
+}
+
+function openScheduleApprovedTimeConflictModal(message, onConfirm) {
+  scheduleApprovedTimeConflictContinue = onConfirm;
+  const body = document.getElementById("scheduleApprovedTimeConflictBody");
+  if (body) body.textContent = message;
+  const el = ensureScheduleApprovedTimeConflictModal();
+  el.style.display = "flex";
+}
+
+function confirmScheduleApprovedTimeConflictModal() {
+  const fn = scheduleApprovedTimeConflictContinue;
+  closeScheduleApprovedTimeConflictModal();
+  if (typeof fn === "function") {
+    try {
+      fn();
+    } catch (e) {
+      console.error("[ScheduleUI] approved time conflict confirm", e);
+    }
+  }
+}
+
 function getStaffByScheduleKey(staffList, scheduleKey) {
   return (Array.isArray(staffList) ? staffList : []).find((staff) => getScheduleStaffKey(staff) === scheduleKey) || null;
 }
@@ -1692,9 +2046,11 @@ function revalidateLocalDraft(nextDraft) {
   const coverageRules = schedulePreviewState.coverageRules !== undefined
     ? schedulePreviewState.coverageRules
     : (window.settings && typeof window.settings.coverageRules === "object" ? window.settings.coverageRules : undefined);
+  const requests = Array.isArray(schedulePreviewState.requests) ? schedulePreviewState.requests : [];
   const nextValidation = validateScheduleDraft({
     draftSchedule: nextDraft,
     staffList: schedulePreviewState.staffList,
+    requests,
     rules: nextDraft?.rules || schedulePreviewState.draft?.rules || {},
     coverageRules,
     dateRange: schedulePreviewState.weekRange
@@ -1802,7 +2158,26 @@ function moveDraftAssignment(payload, targetStaffId, targetDate) {
   return nextDraft;
 }
 
-function completeScheduleDrop(payload, targetStaffId, targetDate) {
+function completeScheduleDrop(payload, targetStaffId, targetDate, options = {}) {
+  if (!options.skipApprovedTimeConflictCheck) {
+    const targetStaff = getStaffByScheduleKey(schedulePreviewState.staffList, targetStaffId);
+    const sourceAssignment = getAssignmentFromDragPayload(payload);
+    if (targetStaff && sourceAssignment) {
+      const conflictMsg = getApprovedPartialTimeConflictMessage(
+        targetStaff,
+        targetDate,
+        sourceAssignment.startTime,
+        sourceAssignment.endTime,
+      );
+      if (conflictMsg) {
+        openScheduleApprovedTimeConflictModal(conflictMsg.message, () => {
+          completeScheduleDrop(payload, targetStaffId, targetDate, { skipApprovedTimeConflictCheck: true });
+        });
+        return;
+      }
+    }
+  }
+
   const nextDraft = moveDraftAssignment(payload, targetStaffId, targetDate);
   console.log("[Schedule DnD] drop", { payload, targetStaffId, targetDate });
   if (!nextDraft) return;
@@ -1824,9 +2199,20 @@ function handleDropZoneDrop(event) {
   if (!payload || !payload.shiftId || !payload.sourceStaffId || !payload.sourceDate || !targetStaffId || !targetDate) return;
   if (payload.sourceStaffId === targetStaffId && payload.sourceDate === targetDate) return;
 
+  const targetStaff = getStaffByScheduleKey(schedulePreviewState.staffList, targetStaffId);
+  if (targetStaff && staffDayBlockedByApprovedInbox(targetStaff, targetDate)) {
+    openScheduleDnDOffConfirm({
+      variant: "approved_inbox",
+      payload,
+      targetStaffId,
+      targetDate,
+    });
+    return;
+  }
+
   const targetDayPreview = findDraftDay(schedulePreviewState.draft, targetDate);
   if (targetDayPreview && dayHasManualOff(targetDayPreview, targetStaffId)) {
-    openScheduleDnDOffConfirm({ payload, targetStaffId, targetDate });
+    openScheduleDnDOffConfirm({ variant: "manual_off", payload, targetStaffId, targetDate });
     return;
   }
 
@@ -2111,19 +2497,32 @@ async function loadScheduleStaffList() {
   return (Array.isArray(store?.staff) ? store.staff : []).filter((staff) => staff && staff.isArchived !== true);
 }
 
+/** Inbox types that feed effective availability (approved only; see schedule-availability.js). */
+const SCHEDULE_INBOX_TYPES_FOR_AVAILABILITY = new Set([
+  "vacation",
+  "late_start",
+  "early_leave",
+  "schedule_change",
+  "day_off",
+  "time_off",
+]);
+
 async function loadApprovedScheduleRequests() {
   const salonId = String(window.currentSalonId || "").trim();
   if (!salonId) return [];
+  const mapDoc = (docSnap) => ({ id: docSnap.id, ...docSnap.data() });
+  const keepScheduleType = (item) =>
+    SCHEDULE_INBOX_TYPES_FOR_AVAILABILITY.has(String(item?.type || "").trim());
   try {
     const inboxRef = collection(db, `salons/${salonId}/inboxItems`);
-    const snap = await getDocs(query(inboxRef, where("status", "==", "approved")));
-    return snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+    const snap = await getDocs(
+      query(inboxRef, where("status", "in", ["approved", "done", "archived"])),
+    );
+    return snap.docs.map(mapDoc).filter(keepScheduleType).filter(isApprovedRequest);
   } catch (error) {
     console.warn("[ScheduleUI] Failed to load approved requests via query, retrying full scan", error);
     const snap = await getDocs(collection(db, `salons/${salonId}/inboxItems`));
-    return snap.docs
-      .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-      .filter((item) => String(item?.status || "").toLowerCase() === "approved");
+    return snap.docs.map(mapDoc).filter(keepScheduleType).filter(isApprovedRequest);
   }
 }
 
@@ -2426,13 +2825,16 @@ function renderScheduleBoard(draft, validation, staffList) {
     const cells = draftDays.map((day) => {
       const assignment = assignmentLookup.get(`${staffKey}::${day.date}`) || null;
       const manualOff = Boolean(!assignment && dayHasManualOff(day, staffKey));
+      const inboxApprovedOff = Boolean(
+        !assignment && !manualOff && staffDayBlockedByApprovedInbox(staff, day.date),
+      );
       const warnings = Array.isArray(validationByDate.get(day.date)?.warnings) ? validationByDate.get(day.date).warnings : [];
       const hasWarnings = cellShowsScheduleWarningDot(warnings, staffKey, staff);
       const businessStatus = day.businessStatus || getBusinessStatusForDate(day.date);
       const canEditShift = Boolean(assignment && businessStatus?.isOpen !== false && allowCellEdit);
       const cellStyle = assignment
         ? `background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.35)" : "none"};`
-        : manualOff
+        : manualOff || inboxApprovedOff
           ? `background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.28)" : "none"};`
           : `background:#f3f4f6;border:1px solid #e5e7eb;color:#6b7280;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.28)" : "none"};`;
       const assignmentId = assignment ? getAssignmentId(assignment, day.date) : "";
@@ -2442,11 +2844,68 @@ function renderScheduleBoard(draft, validation, staffList) {
         : "";
       const manualAddBtn =
         !assignment && !manualOff && businessStatus?.isOpen !== false && canManual
-          ? `<button type="button" data-schedule-manual-add="true" data-staff-id="${escapeScheduleAttr(staffKey)}" data-date="${escapeScheduleAttr(day.date)}" data-staff-name="${safeStaffName}" title="Add shift manually" aria-label="Add shift manually" style="margin-top:2px;padding:4px 10px;font-size:11px;font-weight:600;border:1px dashed #c4b5fd;background:#faf5ff;color:#7c3aed;border-radius:8px;cursor:pointer;">+ Add shift</button>`
+          ? `<button type="button" data-schedule-manual-add="true" data-approved-inbox="${inboxApprovedOff ? "1" : "0"}" data-staff-id="${escapeScheduleAttr(staffKey)}" data-date="${escapeScheduleAttr(day.date)}" data-staff-name="${safeStaffName}" title="Add shift manually" aria-label="Add shift manually" style="margin-top:2px;padding:4px 10px;font-size:11px;font-weight:600;border:1px dashed #c4b5fd;background:#faf5ff;color:#7c3aed;border-radius:8px;cursor:pointer;">+ Add shift</button>`
           : "";
       const manualOffBlock = manualOff
         ? `<div style="font-size:10px;font-weight:700;color:#64748b;margin-top:5px;letter-spacing:0.04em;text-transform:uppercase;">Marked OFF</div>`
         : "";
+      const requestsList = Array.isArray(schedulePreviewState.requests) ? schedulePreviewState.requests : [];
+      const inboxDisp = getInboxApprovalDisplayForDate(staff, requestsList, day.date);
+      const showGreenFullDayInboxLabel = Boolean(
+        inboxApprovedOff &&
+          inboxDisp.hasFullDayRequest &&
+          !inboxDisp.hasConflict &&
+          !inboxDisp.lateStart &&
+          !inboxDisp.earlyLeave,
+      );
+      const hasPartialApproval = Boolean(
+        !assignment &&
+          !manualOff &&
+          (inboxDisp.lateStart || inboxDisp.earlyLeave) &&
+          !inboxDisp.hasFullDayRequest,
+      );
+      const inboxConflictBlock =
+        !assignment && inboxDisp.hasConflict
+          ? `<div style="font-size:10px;font-weight:700;color:#b45309;margin-top:5px;line-height:1.35;">Inbox lists a full-day request and a partial time — remove the extra one if wrong.</div>`
+          : "";
+      const inboxOffBlock = showGreenFullDayInboxLabel
+        ? `<div style="font-size:10px;font-weight:700;color:#0f766e;margin-top:5px;letter-spacing:0.04em;text-transform:uppercase;">Approved day off</div>`
+        : "";
+      const approvedRequestLines = [];
+      if (
+        (inboxDisp.lateStart || inboxDisp.earlyLeave) &&
+        (!inboxDisp.hasFullDayRequest || inboxDisp.hasConflict)
+      ) {
+        if (inboxDisp.lateStart) {
+          approvedRequestLines.push(`Approved START ${formatScheduleTimeShortAmPm(inboxDisp.lateStart)}`);
+        }
+        if (inboxDisp.earlyLeave) {
+          approvedRequestLines.push(`Approved leave by ${formatScheduleTimeShortAmPm(inboxDisp.earlyLeave)}`);
+        }
+      }
+      const approvedRequestBlock =
+        !assignment && approvedRequestLines.length > 0
+          ? `<div style="font-size:${hasPartialApproval || inboxDisp.hasConflict ? "11" : "9"}px;font-weight:700;color:#0e7490;margin-top:6px;line-height:1.35;max-width:100%;">${approvedRequestLines.map(escapeScheduleHtml).join("<br/>")}</div>`
+          : "";
+      let approvedMismatchBlock = "";
+      if (assignment && (inboxDisp.lateStart || inboxDisp.earlyLeave)) {
+        const st = assignment.startTime;
+        const en = assignment.endTime;
+        const mismatch = [];
+        if (inboxDisp.lateStart && compareScheduleHHMM(st, inboxDisp.lateStart) < 0) {
+          mismatch.push(
+            `Start from ${formatScheduleTimeShortAmPm(inboxDisp.lateStart)} · shift ${formatScheduleTimeShortAmPm(st) || st || "—"}`,
+          );
+        }
+        if (inboxDisp.earlyLeave && en && compareScheduleHHMM(en, inboxDisp.earlyLeave) > 0) {
+          mismatch.push(
+            `Leave by ${formatScheduleTimeShortAmPm(inboxDisp.earlyLeave)} · shift ${formatScheduleTimeShortAmPm(en) || en}`,
+          );
+        }
+        if (mismatch.length > 0) {
+          approvedMismatchBlock = `<div style="font-size:9px;font-weight:600;color:#b45309;margin-top:4px;line-height:1.3;max-width:100%;">${mismatch.map(escapeScheduleHtml).join("<br/>")}</div>`;
+        }
+      }
       const emptyCellWrap = !assignment
         ? `style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:100%;"`
         : "";
@@ -2455,8 +2914,17 @@ function renderScheduleBoard(draft, validation, staffList) {
           ${hasWarnings ? `<span style="position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%;background:#f59e0b;opacity:0.9;"></span>` : ""}
           ${editBtn}
           <div ${assignment && allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : assignment ? `style="user-select:none;"` : emptyCellWrap}>
-            <div>${assignment ? `${assignment.startTime || "--:--"} - ${assignment.endTime || "--:--"}` : "Off"}</div>
+            <div>${
+              assignment
+                ? `${assignment.startTime || "--:--"} - ${assignment.endTime || "--:--"}`
+                : hasPartialApproval
+                  ? `<span style="font-weight:600;color:#475569;">Not scheduled</span>`
+                  : "Off"
+            }</div>
+            ${approvedMismatchBlock}
             ${manualOffBlock}
+            ${inboxOffBlock}
+            ${approvedRequestBlock}
             ${manualAddBtn}
           </div>
         </div>
@@ -2464,7 +2932,7 @@ function renderScheduleBoard(draft, validation, staffList) {
     }).join("");
 
     const nameControl = staffKey
-      ? `<button type="button" data-schedule-staff-profile="true" data-staff-id="${escapeScheduleAttr(staffKey)}" title="לחיצה — עריכת לוח זמנים בפרופיל" aria-label="פתיחת לוח זמנים של העובד בפרופיל" style="font:inherit;font-size:13px;font-weight:700;line-height:1.3;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;width:100%;border:none;background:transparent;padding:0;margin:0;cursor:pointer;text-align:left;text-decoration:none;display:block;box-sizing:border-box;">${escapeScheduleAttr(staff.name || "Unknown Staff")}</button>`
+      ? `<button type="button" data-schedule-staff-profile="true" data-staff-id="${escapeScheduleAttr(staffKey)}" title="Open staff profile — edit default schedule" aria-label="Open staff profile to edit default schedule" style="font:inherit;font-size:13px;font-weight:700;line-height:1.3;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;width:100%;border:none;background:transparent;padding:0;margin:0;cursor:pointer;text-align:left;text-decoration:none;display:block;box-sizing:border-box;">${escapeScheduleAttr(staff.name || "Unknown Staff")}</button>`
       : `<span style="font-size:13px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeScheduleAttr(staff.name || "Unknown Staff")}</span>`;
 
     const seenMsRow = staffKey ? scheduleWeekAckSeenAtByStaffId[staffKey] || 0 : 0;
@@ -2664,6 +3132,8 @@ async function refreshSchedulePreview() {
       weekRange,
       staffList,
       coverageRules,
+      requests,
+      businessHours,
       standByByDate,
     };
     if (typeof window !== "undefined") {
@@ -2696,7 +3166,15 @@ async function refreshSchedulePreview() {
     setScheduleLoadingState({ loading: false, error: "" });
   } catch (error) {
     console.error("[ScheduleUI] Failed to refresh schedule preview", error);
-    schedulePreviewState = { draft: null, validation: null, weekRange, staffList: [], standByByDate: {} };
+    schedulePreviewState = {
+      draft: null,
+      validation: null,
+      weekRange,
+      staffList: [],
+      requests: [],
+      businessHours: undefined,
+      standByByDate: {},
+    };
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
     }
