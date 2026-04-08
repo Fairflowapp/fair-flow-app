@@ -26,6 +26,7 @@ let chatTemplates      = [];
 let chatFlows          = [];     // { id, title, allowedSenders, startStepId, steps: [{id,prompt,order,options:[{id,label,nextStepId,finish}]}] }
 let chatSalonUsers     = [];
 let chatConvsUnsub     = null;
+let _chatInitialized   = false;  // cache flag — skip re-fetching on repeat visits
 let chatMsgsUnsub      = null;
 let chatBadgeUnsub     = null;
 let chatToastUnsub     = null;
@@ -104,7 +105,7 @@ async function goToChat() {
     const el = document.querySelector(sel);
     if (el) el.style.display = 'none';
   });
-  ['queueControls', 'userProfileScreen'].forEach((id) => {
+  ['queueControls', 'userProfileScreen', 'manageQueueScreen'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -124,6 +125,12 @@ async function goToChat() {
 }
 
 async function initChatScreen() {
+  // Skip full re-init if already loaded — just re-render header & ensure listener
+  if (_chatInitialized && chatUserProfile) {
+    renderChatHeaderForRole(chatUserProfile.role);
+    if (!chatConvsUnsub) subscribeToConversationList();
+    return;
+  }
   await loadChatUserProfile();
   if (!chatUserProfile) {
     console.error('[Chat] No profile loaded — Gear hidden. Reason: auth.currentUser missing, Firestore doc not found, or load error. See loadChatUserProfile logs.');
@@ -133,6 +140,7 @@ async function initChatScreen() {
   await Promise.all([loadChatSalonUsers(), loadChatTemplates(), loadChatFlows()]);
   renderChatHeaderForRole(chatUserProfile.role);
   subscribeToConversationList();
+  _chatInitialized = true;
 }
 
 // ─── Profile / Users / Templates ──────────────────────────────────────────────

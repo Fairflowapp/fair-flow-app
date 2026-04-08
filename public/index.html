@@ -1210,26 +1210,26 @@ dialog footer button, .code-dialog footer button {
 }
 
 #staffAddForm {
-  margin-top: -20px;
+  margin-top: -80px;
   align-self: flex-start;
 }
 
 .staff-form-card {
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 24px;
+  border-radius: 10px;
+  padding: 12px 16px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .staff-form-header {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .staff-form-title {
-  font-size: 18px;
+  font-size: 13px;
   font-weight: 600;
-  margin: 0 0 12px 0;
+  margin: 0 0 8px 0;
   color: var(--text, var(--text-primary, #111827));
 }
 
@@ -2385,6 +2385,9 @@ dialog footer button, .code-dialog footer button {
 
 
   <div class="wrap">
+
+    <!-- Queue Filter Bar — lives inside .wrap so it hides/shows with the queue automatically -->
+    <div id="ffQueueFilterBar" style="padding:0 0 10px;display:none;align-items:center;gap:8px;flex-wrap:wrap;"></div>
 
     <div class="grid">
 
@@ -5033,16 +5036,86 @@ document.addEventListener('ff-staff-presence-updated', () => {
   if (ffQueuePresenceRenderTimer) clearTimeout(ffQueuePresenceRenderTimer);
   ffQueuePresenceRenderTimer = setTimeout(() => {
     ffQueuePresenceRenderTimer = null;
+    if (typeof ffRenderQueueFilterChips === 'function') ffRenderQueueFilterChips();
     if (typeof renderQueue === 'function') renderQueue();
     if (typeof renderService === 'function') renderService();
   }, 60);
 });
 
+// ─── Queue Filter by technicianTypes ──────────────────────────────────────
+window._ffQueueFilter = window._ffQueueFilter || 'all';
+
+function ffGetQueueItemTechTypes(item) {
+  // Look up technicianTypes from ff_staff_v1 by matching name
+  try {
+    const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    const itemName = (item.name || '').trim().toLowerCase();
+    const match = staffList.find(s => (s.name || '').trim().toLowerCase() === itemName);
+    return match ? (Array.isArray(match.technicianTypes) ? match.technicianTypes : []) : [];
+  } catch(e) { return []; }
+}
+
+function filterQueue(arr, filter) {
+  if (filter === 'all') return arr;
+  return arr.filter(item => {
+    const types = ffGetQueueItemTechTypes(item);
+    return types.includes(filter);
+  });
+}
+
+function ffGetAllQueueTechTypes() {
+  try {
+    const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    const types = new Set();
+    staffList.forEach(s => {
+      if (s.isArchived !== true && Array.isArray(s.technicianTypes)) {
+        s.technicianTypes.forEach(t => { if (t) types.add(t); });
+      }
+    });
+    return Array.from(types).sort();
+  } catch(e) { return []; }
+}
+
+function ffHideQueueFilterBar() {
+  const bar = document.getElementById('ffQueueFilterBar');
+  if (bar) bar.style.display = 'none';
+}
+window.ffHideQueueFilterBar = ffHideQueueFilterBar;
+
+function ffRenderQueueFilterChips() {
+  const bar = document.getElementById('ffQueueFilterBar');
+  if (!bar) return;
+  const types = ffGetAllQueueTechTypes();
+  if (types.length === 0) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = '';
+  const allChips = ['all', ...types];
+  allChips.forEach(type => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    const label = type === 'all' ? 'All' : type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    chip.textContent = label;
+    const isActive = window._ffQueueFilter === type;
+    chip.style.cssText = `padding:4px 12px;border-radius:999px;border:1px solid ${isActive ? '#7c3aed' : '#e5e7eb'};background:${isActive ? '#7c3aed' : '#fff'};color:${isActive ? '#fff' : '#374151'};font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;white-space:nowrap;`;
+    chip.addEventListener('click', function() {
+      window._ffQueueFilter = type;
+      ffRenderQueueFilterChips();
+      renderQueue();
+      renderService();
+    });
+    bar.appendChild(chip);
+  });
+}
+// ─── End Queue Filter ──────────────────────────────────────────────────────
+
 function renderQueue(){
 
   queueList.innerHTML="";
 
-  queue.forEach((q,i)=>{
+  const filteredQueue = filterQueue(queue, window._ffQueueFilter || 'all');
+  filteredQueue.forEach((q,i)=>{
 
     const li=document.createElement("li"); li.className="item"; li.setAttribute("held",q.held?"true":"false");
 
@@ -5279,7 +5352,8 @@ function renderService(){
 
   serviceList.innerHTML="";
 
-  service.forEach((s,i)=>{
+  const filteredService = filterQueue(service, window._ffQueueFilter || 'all');
+  filteredService.forEach((s,i)=>{
 
     const li=document.createElement("li"); li.className="item";
 
@@ -6605,6 +6679,9 @@ function goToQueue() {
   // Set active tab (clear all first)
   document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
   if (queueBtn) queueBtn.classList.add('active');
+
+  // Show queue filter bar
+  if (typeof ffRenderQueueFilterChips === 'function') ffRenderQueueFilterChips();
 }
 
 // Training Library (MVP): local state only, no Firestore yet.
@@ -8838,7 +8915,8 @@ async function saveTrainingItemLocal() {
 }
 
 async function deleteTrainingItemLocal(itemId) {
-  if (!confirm('Are you sure you want to delete this training item?')) return;
+  const confirmed = await showDeleteConfirm('this training item');
+  if (!confirmed) return;
   try {
     await deleteTrainingItem(itemId);
   } catch (err) {
@@ -13186,6 +13264,9 @@ function exitReorderMode() {
     btn.style.outline = '';
     btn.style.boxShadow = '';
     btn.style.border = '';
+    btn.style.background = '';
+    btn.style.backgroundImage = '';
+    btn.style.color = '';
     btn.style.opacity = '';
     btn.style.cursor = '';
     btn.style.pointerEvents = '';
@@ -13281,7 +13362,11 @@ async function handleReorderClick() {
       if (btn) {
         btn.textContent = 'Reorder mode';
         btn.classList.remove('btn-pill');
-        btn.classList.add('btn-primary');
+        btn.classList.remove('btn-primary');
+        btn.style.background = '#a78bfa';
+        btn.style.backgroundImage = 'none';
+        btn.style.color = '#fff';
+        btn.style.border = '1px solid #a78bfa';
         if (header) header.style.display = 'block';
         
         // Ensure "+ Add technician" button handler is properly attached when entering reorder mode
@@ -24111,9 +24196,22 @@ function initializeAppsPanel() {
     }
     
     // Update selected color from HSV
+    let editingSwatchIndex = -1; // -1 = not editing a swatch
+
     function updateColorFromHsv() {
       const rgb = hsvToRgb(currentHue, currentSaturation, currentValue);
       const hex = rgbToHex(rgb.r, rgb.g, rgb.b);
+      // If editing a specific swatch, update it live
+      if (editingSwatchIndex >= 0 && editingSwatchIndex < palette.length) {
+        palette[editingSwatchIndex] = hex;
+        settings.brandPalette = palette.slice();
+        // Update the swatch visually
+        const swatches = swatchesContainer.querySelectorAll('.staff-color-swatch[data-color]');
+        if (swatches[editingSwatchIndex]) {
+          swatches[editingSwatchIndex].style.background = hex;
+          swatches[editingSwatchIndex].setAttribute('data-color', hex);
+        }
+      }
       updateSelectedColor(hex);
     }
     
@@ -24169,6 +24267,11 @@ function initializeAppsPanel() {
     function closePopover() {
       if (popover) {
         popover.hidden = true;
+        // Reset swatch editing state
+        editingSwatchIndex = -1;
+        swatchesContainer.querySelectorAll('.staff-color-swatch[data-color]').forEach(function(s) {
+          s.style.outline = '';
+        });
       }
     }
     
@@ -24210,6 +24313,22 @@ function initializeAppsPanel() {
           updateSelectedColor(color);
           updateHsvFromHex(color);
         };
+
+        // Double-click: open color picker to edit THIS swatch
+        (function(swatchEl, swatchIndex, swatchColor) {
+          swatchEl.ondblclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            editingSwatchIndex = swatchIndex;
+            updateHsvFromHex(swatchColor);
+            if (popover) popover.hidden = false;
+            // Visual feedback: outline the swatch being edited
+            swatchesContainer.querySelectorAll('.staff-color-swatch[data-color]').forEach(function(s) {
+              s.style.outline = '';
+            });
+            swatchEl.style.outline = '2px solid #7c3aed';
+          };
+        })(swatch, index, color);
         
         swatchesContainer.appendChild(swatch);
       });
@@ -30289,6 +30408,7 @@ window.__ffQueueCloudInit = function() {
       if (qd && typeof qd === 'object' && Object.keys(qd).length > 0) {
         setQueuesData(qd, true);
       }
+      if (typeof ffRenderQueueFilterChips === 'function') ffRenderQueueFilterChips();
       renderQueue();
       renderService();
     },
@@ -30820,7 +30940,7 @@ function hookSettingsGuard_DISABLED(){
 
       <button id="codePromptCancel" style="padding:8px 14px;border-radius:8px;border:1px solid #ddd;background:#fff;cursor:pointer">Cancel</button>
 
-      <button id="codePromptOk" style="padding:8px 14px;border-radius:8px;border:0;background:#111;color:#fff;cursor:pointer">OK</button>
+      <button id="codePromptOk" style="padding:8px 14px;border-radius:8px;border:0;background:#7c3aed;color:#fff;cursor:pointer">OK</button>
 
     </div>
 
@@ -33952,7 +34072,7 @@ function hookSettingsGuard_DISABLED(){
         </div>
       </div>
       <!-- Right Content Area -->
-      <div class="staff-content-area" style="flex:1;overflow-y:auto;padding:40px 20px;">
+      <div class="staff-content-area" style="flex:1;overflow-y:auto;padding:12px 20px;">
         <!-- Placeholder Message -->
         <p id="staffPlaceholderMessage" style="margin:0;font-size:14px;color:#6b7280;text-align:center;display:flex;align-items:center;justify-content:center;height:100%;">Select a staff member to view details</p>
         
@@ -33981,62 +34101,61 @@ function hookSettingsGuard_DISABLED(){
         </div>
         
         <!-- Add Staff Member Form (hidden by default) -->
-        <div class="staff-form-section" id="staffAddForm" style="display:none;width:100%;max-width:500px;margin:0 auto;">
+        <div class="staff-form-section" id="staffAddForm" style="display:none;width:100%;max-width:420px;margin:0 auto;">
           <div class="staff-form-card">
             <div class="staff-form-header">
               <h2 class="staff-form-title">New Staff Member</h2>
               <div class="staff-form-divider"></div>
             </div>
-          <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="display:flex;flex-direction:column;gap:8px;">
             <!-- First Name -->
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">First Name</label>
-              <input type="text" id="staffFirstName" placeholder="First name" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;">
+              <label style="display:block;margin-bottom:3px;font-size:11px;font-weight:500;color:#374151;">First Name</label>
+              <input type="text" id="staffFirstName" placeholder="First name" style="width:100%;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
             </div>
             
             <!-- Last Name -->
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Last Name</label>
-              <input type="text" id="staffLastName" placeholder="Last name" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;">
+              <label style="display:block;margin-bottom:3px;font-size:11px;font-weight:500;color:#374151;">Last Name</label>
+              <input type="text" id="staffLastName" placeholder="Last name" style="width:100%;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
             </div>
             
             <!-- Email -->
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Email</label>
-              <input type="email" id="staffEmail" placeholder="email@example.com" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;">
+              <label style="display:block;margin-bottom:3px;font-size:11px;font-weight:500;color:#374151;">Email</label>
+              <input type="email" id="staffEmail" placeholder="email@example.com" style="width:100%;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
             </div>
             
             <!-- Phone -->
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Phone</label>
-              <input type="tel" id="staffPhone" placeholder="Phone number" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;">
+              <label style="display:block;margin-bottom:3px;font-size:11px;font-weight:500;color:#374151;">Phone</label>
+              <input type="tel" id="staffPhone" placeholder="Phone number" style="width:100%;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
             </div>
             
             <!-- Role -->
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Role</label>
-              <select id="staffRole" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;cursor:pointer;">
+              <label style="display:block;margin-bottom:3px;font-size:11px;font-weight:500;color:#374151;">Role</label>
+              <select id="staffRole" style="width:100%;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
                 <option value="">Select role</option>
                 <option value="admin">Admin</option>
                 <option value="manager">Manager</option>
-                <option value="technician">Technician</option>
+                <option value="technician">Service Provider</option>
               </select>
             </div>
             <div id="staffManagerTypeSection" style="display:none;">
-              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Manager Type</label>
-              <select id="staffManagerType" style="width:100%;height:42px;padding:0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;cursor:pointer;">
+              <label style="display:block;margin-bottom:3px;font-size:11px;font-weight:500;color:#374151;">Manager Type</label>
+              <select id="staffManagerType" style="width:100%;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
                 <option value="manager">Manager</option>
                 <option value="assistant_manager">Assistant Manager</option>
               </select>
             </div>
             
-            <!-- Technician Types (only shown when role is technician) -->
+            <!-- Service Provider Types (only shown when role is technician) -->
             <div id="staffTechnicianTypesSection" style="display:none;">
-              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Technician Types</label>
-              <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">Select one or more types for this technician</div>
-              <div id="staffTechnicianTypesCheckboxes" style="display:flex;flex-direction:column;gap:8px;padding:12px;background:#f9fafb;border:1px solid var(--border);border-radius:8px;max-height:200px;overflow-y:auto;">
-                <!-- Checkboxes will be populated dynamically -->
-                <div style="text-align:center;padding:16px;color:#9ca3af;font-size:13px;">Loading technician types...</div>
+              <label style="display:block;margin-bottom:3px;font-size:11px;font-weight:500;color:#374151;">Service Provider Types</label>
+              <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">Select one or more types</div>
+              <div id="staffTechnicianTypesCheckboxes" style="display:flex;flex-direction:column;gap:5px;padding:8px;background:#f9fafb;border:1px solid var(--border);border-radius:6px;max-height:120px;overflow-y:auto;">
+                <div style="text-align:center;padding:8px;color:#9ca3af;font-size:11px;">Loading...</div>
               </div>
             </div>
             
@@ -34094,20 +34213,20 @@ function hookSettingsGuard_DISABLED(){
             
             <!-- PIN -->
             <div>
-              <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">PIN</label>
+              <label style="display:block;margin-bottom:3px;font-size:11px;font-weight:500;color:#374151;">PIN</label>
               <div style="position:relative;">
-                <input type="password" id="staffPin" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" placeholder="4-6 digits" style="width:100%;height:42px;padding:0 45px 0 16px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-family:inherit;outline:none;">
-                <button type="button" id="staffPinToggle" aria-label="Toggle PIN visibility" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px;color:#6b7280;font-size:16px;line-height:1;">👁️</button>
+                <input type="password" id="staffPin" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" placeholder="4-6 digits" style="width:100%;height:32px;padding:0 36px 0 12px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
+                <button type="button" id="staffPinToggle" aria-label="Toggle PIN visibility" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:2px;color:#6b7280;font-size:13px;line-height:1;">👁️</button>
               </div>
             </div>
           </div>
           
           <!-- Form Actions -->
-          <div style="display:flex;flex-direction:column;gap:8px;margin-top:24px;padding-top:20px;border-top:1px solid var(--border);">
-            <div id="staffFormError" style="display:none;color:#dc2626;font-size:12px;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;"></div>
-            <div style="display:flex;gap:12px;justify-content:flex-end;">
-              <button id="staffFormCancel" type="button" class="btn-ghost" style="border:1px solid var(--border);background:#fff;border-radius:8px;padding:8px 16px;font-weight:600;cursor:pointer;font-size:14px;color:#374151;">Cancel</button>
-              <button id="staffFormCreate" type="button" class="btn-primary" style="border:0;background-image:linear-gradient(90deg,var(--brand1),var(--brand2));color:#fff;border-radius:8px;padding:8px 16px;font-weight:600;cursor:pointer;font-size:14px;">Create</button>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+            <div id="staffFormError" style="display:none;color:#dc2626;font-size:11px;padding:6px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+              <button id="staffFormCancel" type="button" class="btn-ghost" style="border:1px solid var(--border);background:#fff;border-radius:6px;padding:6px 14px;font-weight:600;cursor:pointer;font-size:12px;color:#374151;">Cancel</button>
+              <button id="staffFormCreate" type="button" class="btn-primary" style="border:0;background:#7c3aed;background-image:none;color:#fff;border-radius:6px;padding:6px 14px;font-weight:600;cursor:pointer;font-size:12px;">Create</button>
             </div>
           </div>
           </div>

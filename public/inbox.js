@@ -200,6 +200,8 @@ export function goToInbox() {
   if (queueControls) queueControls.style.display = 'none';
   if (userProfileScreen) userProfileScreen.style.display = 'none';
   if (wrap) wrap.style.display = 'none';
+  const manageQueueScreen = document.getElementById('manageQueueScreen');
+  if (manageQueueScreen) manageQueueScreen.style.display = 'none';
 
   // Hide chat screen if open
   const chatScreen = document.getElementById('chatScreen');

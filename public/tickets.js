@@ -23,6 +23,7 @@ let salonServices = [];
 let serviceCategories = [];
 let currentTickets = [];
 let ticketsUnsubscribe = null;
+let _ticketsDataReady = false; // cache flag — skip Firestore re-fetch on repeat visits
 let currentTicketsTab = 'ready';
 let editingTicketId = null;
 let ticketFormAsIsMode = false;
@@ -1787,7 +1788,8 @@ export function goToTickets() {
   const scheduleScreen = document.getElementById('scheduleScreen');
   const ticketsScreen = document.getElementById('ticketsScreen');
 
-  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen, trainingScreen, scheduleScreen].forEach(el => {
+  const manageQueueScreen = document.getElementById('manageQueueScreen');
+  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen, trainingScreen, scheduleScreen, manageQueueScreen].forEach(el => {
     if (el) el.style.display = 'none';
   });
   if (wrap) wrap.style.display = 'none';
@@ -1829,14 +1831,25 @@ export function goToTickets() {
   const ticketsBtn = document.getElementById('ticketsBtn');
   if (ticketsBtn) ticketsBtn.classList.add('active');
 
-  loadCurrentUserProfile().then(async () => {
-    await loadServiceCategories();
-    await loadServices();
-    await setupTicketsUI();
-    subscribeTickets({ resetLoading: true });
-    loadTicketsMembersForAvatars().then(() => renderTicketsList());
-    updateTicketsNavBadge();
-  });
+  if (_ticketsDataReady && currentUserProfile) {
+    // Data already cached — skip Firestore fetches, just re-subscribe and render
+    ticketsScreen.classList.remove('ff-tickets-boot');
+    setupTicketsUI().then(() => {
+      subscribeTickets({ resetLoading: true });
+      renderTicketsList();
+      updateTicketsNavBadge();
+    });
+  } else {
+    loadCurrentUserProfile().then(async () => {
+      await loadServiceCategories();
+      await loadServices();
+      await setupTicketsUI();
+      _ticketsDataReady = true;
+      subscribeTickets({ resetLoading: true });
+      loadTicketsMembersForAvatars().then(() => renderTicketsList());
+      updateTicketsNavBadge();
+    });
+  }
 }
 
 const AS_IS_OPTION_VALUE = '__as_is__';
