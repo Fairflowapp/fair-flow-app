@@ -5,7 +5,7 @@ import {
   getEffectiveShiftSegmentsForDay,
   clipTimeWindowToBestShiftSegment,
   clipTimeWindowToUnionOfShiftSegments,
-} from "./schedule-helpers.js?v=20260414_segment_union_stagger";
+} from "./schedule-helpers.js?v=20260409_coverage_plain_cards";
 
 function normalizeDateKey(value) {
   if (!value) return "";

@@ -7,7 +7,11 @@ import {
   formatMinutesAsScheduleTime,
   getDayNameFromDateKey,
   getCustomSegmentOverlapCoverageGaps,
-} from "./schedule-helpers.js?v=20260414_segment_union_stagger";
+  buildSegmentOverlapCoverageGapsFromSegments,
+  isFullManagerAssignmentForCoverage,
+  isAssistantManagerAssignmentForCoverage,
+  countAssignmentsOverlappingMinuteRange,
+} from "./schedule-helpers.js?v=20260409_coverage_plain_cards";
 import {
   buildAvailabilityDirectory,
   getAvailabilityForStaffDate,
@@ -16,7 +20,7 @@ import {
   getStaffUid,
   getStaffDisplayName,
   generateWeeklySchedule,
-} from "./schedule-generator.js?v=20260414_segment_union_stagger";
+} from "./schedule-generator.js?v=20260409_stagger_by_coverage_min";
 
 const WARNING_SEVERITY = Object.freeze({
   no_staff_assigned: "high",
@@ -138,27 +142,6 @@ function assignmentViolatesAvailability(assignment, availability, businessStatus
   return getAvailabilityViolationDetail(assignment, availability, businessStatus) !== null;
 }
 
-function isFullManagerAssignmentForValidation(a) {
-  if (!a) return false;
-  if (a.role === "admin") return true;
-  if (a.role === "manager") return a.managerType !== "assistant_manager";
-  return false;
-}
-
-function isAssistantManagerAssignmentForValidation(a) {
-  return a.role === "manager" && a.managerType === "assistant_manager";
-}
-
-function countAssignmentsOverlappingMinuteRange(assignments, lo, hi, predicate) {
-  return (Array.isArray(assignments) ? assignments : []).filter((a) => {
-    if (!predicate(a)) return false;
-    const aS = parseScheduleTimeToMinutes(a.startTime);
-    const aE = parseScheduleTimeToMinutes(a.endTime);
-    if (aS == null || aE == null || aE <= aS) return false;
-    return Math.min(aE, hi) > Math.max(aS, lo);
-  }).length;
-}
-
 function findStaffForAssignment(staffList, assignment) {
   const normalizedStaffList = getNormalizedStaffList(staffList);
   return normalizedStaffList.find((candidate) => {
@@ -184,10 +167,24 @@ function validateDraftDay({ day, staffList, availabilityDirectory, rules, covera
   const counts = countAssignmentsByRole(assignments);
   const businessStatus = day?.businessStatus || null;
   const dayName = getDayNameFromDateKey(date);
-  const segmentOverlapGaps =
-    dayName && covInput && bh && dss
-      ? getCustomSegmentOverlapCoverageGaps(dayName, bh, dss, covInput)
-      : null;
+  /** Must match `getBusinessStatusForDate` / board: same segment list as `applyBusinessSettingsToDraft`. */
+  let segmentOverlapGaps = null;
+  if (dayName && covInput && bh && dss) {
+    if (
+      businessStatus &&
+      businessStatus.isOpen !== false &&
+      Array.isArray(businessStatus.shiftSegments) &&
+      businessStatus.shiftSegments.length > 0
+    ) {
+      segmentOverlapGaps = buildSegmentOverlapCoverageGapsFromSegments(
+        dayName,
+        businessStatus.shiftSegments,
+        covInput,
+      );
+    } else {
+      segmentOverlapGaps = getCustomSegmentOverlapCoverageGaps(dayName, bh, dss, covInput);
+    }
+  }
   const useOverlapSegmentValidation = Array.isArray(segmentOverlapGaps) && segmentOverlapGaps.length > 0;
 
   if (businessStatus && businessStatus.isOpen === false) {
@@ -212,13 +209,13 @@ function validateDraftDay({ day, staffList, availabilityDirectory, rules, covera
     segmentOverlapGaps.forEach((gap) => {
       const parts = [];
       if (gap.needFull > 0) {
-        const actual = countAssignmentsOverlappingMinuteRange(assignments, gap.startMin, gap.endMin, isFullManagerAssignmentForValidation);
+        const actual = countAssignmentsOverlappingMinuteRange(assignments, gap.startMin, gap.endMin, isFullManagerAssignmentForCoverage);
         if (actual < gap.needFull) {
           parts.push(`need ${gap.needFull} full manager(s), have ${actual}`);
         }
       }
       if (gap.needAsst > 0) {
-        const actual = countAssignmentsOverlappingMinuteRange(assignments, gap.startMin, gap.endMin, isAssistantManagerAssignmentForValidation);
+        const actual = countAssignmentsOverlappingMinuteRange(assignments, gap.startMin, gap.endMin, isAssistantManagerAssignmentForCoverage);
         if (actual < gap.needAsst) {
           parts.push(`need ${gap.needAsst} assistant manager(s), have ${actual}`);
         }
@@ -279,13 +276,13 @@ function validateDraftDay({ day, staffList, availabilityDirectory, rules, covera
           assignments,
           gap.startMin,
           gap.endMin,
-          isAssistantManagerAssignmentForValidation,
+          isAssistantManagerAssignmentForCoverage,
         );
         const fullN = countAssignmentsOverlappingMinuteRange(
           assignments,
           gap.startMin,
           gap.endMin,
-          isFullManagerAssignmentForValidation,
+          isFullManagerAssignmentForCoverage,
         );
         if (asstN > 0 && fullN === 0) {
           const rangeLabel = `${formatMinutesAsScheduleTime(gap.startMin)}–${formatMinutesAsScheduleTime(gap.endMin)}`;
@@ -324,7 +321,12 @@ function validateDraftDay({ day, staffList, availabilityDirectory, rules, covera
     ));
   }
 
-  if (counts.totalStaff < effectiveRules.minTotalStaffPerDay) {
+  /* Segment overlap mode already enforces concurrent staffing per sub-interval; the legacy
+     per-day minTotalStaff target often disagrees (e.g. min total 4 vs three roles covering segments). */
+  if (
+    !useOverlapSegmentValidation &&
+    counts.totalStaff < effectiveRules.minTotalStaffPerDay
+  ) {
     warnings.push(buildValidationWarning(
       "below_min_total_staff",
       "Total staff coverage is below the configured minimum for this day.",

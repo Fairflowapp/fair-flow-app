@@ -278,6 +278,28 @@ function formatMinutesAsScheduleTime(totalMinutes) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+/** Same role checks as schedule coverage validation (full manager vs assistant manager). */
+function isFullManagerAssignmentForCoverage(a) {
+  if (!a) return false;
+  if (a.role === "admin") return true;
+  if (a.role === "manager") return a.managerType !== "assistant_manager";
+  return false;
+}
+
+function isAssistantManagerAssignmentForCoverage(a) {
+  return Boolean(a && a.role === "manager" && a.managerType === "assistant_manager");
+}
+
+function countAssignmentsOverlappingMinuteRange(assignments, lo, hi, predicate) {
+  return (Array.isArray(assignments) ? assignments : []).filter((a) => {
+    if (!predicate(a)) return false;
+    const aS = parseScheduleTimeToMinutes(a.startTime);
+    const aE = parseScheduleTimeToMinutes(a.endTime);
+    if (aS == null || aE == null || aE <= aS) return false;
+    return Math.min(aE, hi) > Math.max(aS, lo);
+  }).length;
+}
+
 /** Builds a shift window of durationHours starting at availability open, without exceeding close. */
 function sliceTimeWindowFromStart(startTime, endTime, durationHours) {
   const s = parseScheduleTimeToMinutes(startTime);
@@ -503,14 +525,10 @@ function resolvedSegmentCoverage(seg, dayCov) {
  * and compute concurrent coverage required in each sub-interval (sum of overlapping segments).
  * Returns null if there are no custom segments (falls back to a single business-hours window).
  */
-function getCustomSegmentOverlapCoverageGaps(dayName, businessHours, dayShiftSegments, coverageRules) {
-  const rawSeg = normalizeDayShiftSegments(dayShiftSegments || {})[dayName] || [];
-  if (!rawSeg.length) return null;
+function buildSegmentOverlapCoverageGapsFromSegments(dayName, segs, coverageRules) {
+  if (!dayName || !Array.isArray(segs) || segs.length === 0) return null;
   const cov = normalizeCoverageRules(coverageRules || {});
   const dayCov = cov[dayName] || DEFAULT_DAY_COVERAGE_RULES;
-  const bhNorm = normalizeBusinessHours(businessHours || {});
-  const segs = getEffectiveShiftSegmentsForDay(dayName, bhNorm, dayShiftSegments);
-  if (!Array.isArray(segs) || segs.length === 0) return null;
   const bounds = new Set();
   segs.forEach((seg) => {
     const s = parseScheduleTimeToMinutes(seg.startTime);
@@ -545,6 +563,15 @@ function getCustomSegmentOverlapCoverageGaps(dayName, businessHours, dayShiftSeg
     gaps.push({ startMin: lo, endMin: hi, needFull, needAsst, needTech });
   }
   return gaps.length ? gaps : null;
+}
+
+function getCustomSegmentOverlapCoverageGaps(dayName, businessHours, dayShiftSegments, coverageRules) {
+  const rawSeg = normalizeDayShiftSegments(dayShiftSegments || {})[dayName] || [];
+  if (!rawSeg.length) return null;
+  const bhNorm = normalizeBusinessHours(businessHours || {});
+  const segs = getEffectiveShiftSegmentsForDay(dayName, bhNorm, dayShiftSegments);
+  if (!Array.isArray(segs) || segs.length === 0) return null;
+  return buildSegmentOverlapCoverageGapsFromSegments(dayName, segs, coverageRules);
 }
 
 /**
@@ -825,6 +852,9 @@ const scheduleHelpers = {
   parseScheduleTimeToMinutes,
   assignmentDurationHoursFromTimes,
   formatMinutesAsScheduleTime,
+  isFullManagerAssignmentForCoverage,
+  isAssistantManagerAssignmentForCoverage,
+  countAssignmentsOverlappingMinuteRange,
   sliceTimeWindowFromStart,
   normalizeDefaultSchedule,
   normalizeConstraints,
@@ -836,6 +866,7 @@ const scheduleHelpers = {
   getEffectiveShiftSegmentsForDay,
   resolvedSegmentCoverage,
   getCustomSegmentOverlapCoverageGaps,
+  buildSegmentOverlapCoverageGapsFromSegments,
   clipTimeWindowToBestShiftSegment,
   clipTimeWindowToUnionOfShiftSegments,
   hasSegmentListCoverageMinimums,
@@ -884,6 +915,9 @@ export {
   parseScheduleTimeToMinutes,
   assignmentDurationHoursFromTimes,
   formatMinutesAsScheduleTime,
+  isFullManagerAssignmentForCoverage,
+  isAssistantManagerAssignmentForCoverage,
+  countAssignmentsOverlappingMinuteRange,
   sliceTimeWindowFromStart,
   normalizeDefaultSchedule,
   normalizeConstraints,
@@ -895,6 +929,7 @@ export {
   getEffectiveShiftSegmentsForDay,
   resolvedSegmentCoverage,
   getCustomSegmentOverlapCoverageGaps,
+  buildSegmentOverlapCoverageGapsFromSegments,
   clipTimeWindowToBestShiftSegment,
   clipTimeWindowToUnionOfShiftSegments,
   hasSegmentListCoverageMinimums,

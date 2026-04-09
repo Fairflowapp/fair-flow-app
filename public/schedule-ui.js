@@ -13,14 +13,14 @@ import {
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { auth, db } from "./app.js?v=20260412_storage_bucket_explicit";
-import { generateWeeklySchedule } from "./schedule-generator.js?v=20260414_segment_union_stagger";
-import { validateScheduleDraft } from "./schedule-validator.js?v=20260414_segment_union_stagger";
+import { generateWeeklySchedule } from "./schedule-generator.js?v=20260409_stagger_by_coverage_min";
+import { validateScheduleDraft } from "./schedule-validator.js?v=20260409_coverage_total_staff_skip";
 import {
   getEffectiveAvailabilityForDate,
   getInboxApprovalDisplayForDate,
   isApprovedRequest,
-} from "./schedule-availability.js?v=20260414_segment_union_stagger";
-import { parseScheduleTimeToMinutes, clipTimeWindowToBestShiftSegment } from "./schedule-helpers.js?v=20260414_segment_union_stagger";
+} from "./schedule-availability.js?v=20260409_coverage_plain_cards";
+import { parseScheduleTimeToMinutes, clipTimeWindowToBestShiftSegment } from "./schedule-helpers.js?v=20260409_coverage_plain_cards";
 
 // Default to next week — managers usually plan/publish the upcoming week, not the one already in progress.
 let schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 7);
@@ -500,6 +500,69 @@ function escapeScheduleHtml(value) {
     .replace(/>/g, "&gt;");
 }
 
+/** Optional lunch break label for schedule cells. */
+function formatLunchBreakCellSubtitle(assignment) {
+  if (!assignment || !assignment.lunchBreakEnabled) return "";
+  const ls = String(assignment.lunchStartTime || "").trim();
+  const le = String(assignment.lunchEndTime || "").trim();
+  if (ls && le) {
+    return `Lunch break ${formatScheduleTimeShortAmPm(ls)}–${formatScheduleTimeShortAmPm(le)}`;
+  }
+  return "Lunch break";
+}
+
+function syncScheduleShiftEditLunchRowVisibility() {
+  const cb = document.getElementById("scheduleShiftEditLunchEnabled");
+  const row = document.getElementById("scheduleShiftEditLunchTimesRow");
+  if (row) row.style.display = cb?.checked ? "flex" : "none";
+}
+
+function readLunchBreakFieldsFromShiftEditForm(shiftStart, shiftEnd) {
+  const cb = document.getElementById("scheduleShiftEditLunchEnabled");
+  const enabled = Boolean(cb?.checked);
+  if (!enabled) {
+    return { ok: true, lunchBreakEnabled: false, lunchStartTime: null, lunchEndTime: null };
+  }
+  const lsRaw = hhmmFromTimeInput(document.getElementById("scheduleShiftEditLunchStart")?.value);
+  const leRaw = hhmmFromTimeInput(document.getElementById("scheduleShiftEditLunchEnd")?.value);
+  const hasLs = Boolean(lsRaw);
+  const hasLe = Boolean(leRaw);
+  if (hasLs !== hasLe) {
+    return {
+      ok: false,
+      error: "Enter both lunch start and end times, or leave both fields empty.",
+    };
+  }
+  if (!hasLs && !hasLe) {
+    return { ok: true, lunchBreakEnabled: true, lunchStartTime: null, lunchEndTime: null };
+  }
+  if (lsRaw >= leRaw) {
+    return { ok: false, error: "Lunch end time must be after lunch start time." };
+  }
+  if (compareScheduleHHMM(lsRaw, shiftStart) < 0 || compareScheduleHHMM(leRaw, shiftEnd) > 0) {
+    return { ok: false, error: "Lunch break must fall within the shift hours." };
+  }
+  return { ok: true, lunchBreakEnabled: true, lunchStartTime: lsRaw, lunchEndTime: leRaw };
+}
+
+function applyLunchBreakToAssignment(assignment, lunchRes) {
+  if (!assignment || !lunchRes || !lunchRes.ok) return;
+  if (!lunchRes.lunchBreakEnabled) {
+    delete assignment.lunchBreakEnabled;
+    delete assignment.lunchStartTime;
+    delete assignment.lunchEndTime;
+    return;
+  }
+  assignment.lunchBreakEnabled = true;
+  if (lunchRes.lunchStartTime && lunchRes.lunchEndTime) {
+    assignment.lunchStartTime = lunchRes.lunchStartTime;
+    assignment.lunchEndTime = lunchRes.lunchEndTime;
+  } else {
+    delete assignment.lunchStartTime;
+    delete assignment.lunchEndTime;
+  }
+}
+
 function ensureScheduleShiftEditModal() {
   if (document.getElementById("scheduleShiftEditBackdrop")) {
     return document.getElementById("scheduleShiftEditBackdrop");
@@ -508,7 +571,7 @@ function ensureScheduleShiftEditModal() {
   backdrop.id = "scheduleShiftEditBackdrop";
   backdrop.style.cssText = "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:4000;align-items:center;justify-content:center;padding:16px;";
   backdrop.innerHTML = `
-    <div role="dialog" aria-modal="true" style="background:#fff;border-radius:16px;padding:20px 22px;max-width:360px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
+    <div role="dialog" aria-modal="true" style="background:#fff;border-radius:16px;padding:20px 22px;max-width:400px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
       <div id="scheduleShiftEditTitle" style="font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;">Edit shift</div>
       <div id="scheduleShiftEditHint" style="display:none;font-size:11px;color:#6b7280;margin-bottom:10px;line-height:1.4;">Preview only — not saved to staff profiles. Marked OFF for this week is remembered in this browser until you remove it or switch weeks.</div>
       <div style="display:flex;flex-direction:column;gap:12px;">
@@ -518,6 +581,18 @@ function ensureScheduleShiftEditModal() {
         <label style="font-size:12px;color:#6b7280;">End
           <input type="time" id="scheduleShiftEditEnd" step="300" style="width:100%;margin-top:4px;height:40px;border:1px solid #e5e7eb;border-radius:8px;padding:0 10px;box-sizing:border-box;" />
         </label>
+        <label style="display:flex;align-items:flex-start;gap:10px;font-size:12px;color:#374151;cursor:pointer;margin-top:2px;">
+          <input type="checkbox" id="scheduleShiftEditLunchEnabled" style="margin-top:3px;width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;flex-shrink:0;" />
+          <span style="line-height:1.4;"><strong style="color:#111827;">Lunch break</strong><span style="display:block;font-size:11px;color:#6b7280;font-weight:400;margin-top:2px;">Optional — shown under the shift hours on the board</span></span>
+        </label>
+        <div id="scheduleShiftEditLunchTimesRow" style="display:none;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+          <label style="font-size:12px;color:#6b7280;flex:1;min-width:120px;">Lunch from
+            <input type="time" id="scheduleShiftEditLunchStart" step="300" style="width:100%;margin-top:4px;height:40px;border:1px solid #e5e7eb;border-radius:8px;padding:0 10px;box-sizing:border-box;" />
+          </label>
+          <label style="font-size:12px;color:#6b7280;flex:1;min-width:120px;">Lunch to
+            <input type="time" id="scheduleShiftEditLunchEnd" step="300" style="width:100%;margin-top:4px;height:40px;border:1px solid #e5e7eb;border-radius:8px;padding:0 10px;box-sizing:border-box;" />
+          </label>
+        </div>
       </div>
       <button type="button" id="scheduleShiftEditMarkOff" style="display:none;width:100%;margin-top:14px;padding:10px 12px;border-radius:10px;border:1px solid rgba(124,58,237,0.28);background:linear-gradient(180deg,rgba(124,58,237,0.14),rgba(124,58,237,0.06));color:#6d28d9;font-weight:600;cursor:pointer;font-size:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.85);">Mark day as OFF</button>
       <button type="button" id="scheduleShiftEditRemove" style="display:none;width:100%;margin-top:10px;padding:8px 12px;border-radius:8px;border:1px solid #fecaca;background:#fff;color:#b91c1c;font-weight:600;cursor:pointer;font-size:12px;">Remove shift (OFF)</button>
@@ -535,6 +610,7 @@ function ensureScheduleShiftEditModal() {
   document.getElementById("scheduleShiftEditSave")?.addEventListener("click", saveScheduleShiftEdit);
   document.getElementById("scheduleShiftEditRemove")?.addEventListener("click", removeScheduleShiftFromDraft);
   document.getElementById("scheduleShiftEditMarkOff")?.addEventListener("click", markScheduleDayAsOffFromModal);
+  document.getElementById("scheduleShiftEditLunchEnabled")?.addEventListener("change", syncScheduleShiftEditLunchRowVisibility);
   return backdrop;
 }
 
@@ -810,6 +886,30 @@ function openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffNam
   if (endEl) {
     endEl.value = toInput(isNewShift ? endTime || defEnd : endTime || defEnd, defEnd);
   }
+  let existingAssign = null;
+  if (!isNewShift && schedulePreviewState.draft) {
+    const dEx = findDraftDay(schedulePreviewState.draft, dateKey);
+    existingAssign =
+      dEx && Array.isArray(dEx.assignments)
+        ? dEx.assignments.find((x) => String(x.staffId || x.uid || "").trim() === staffKey)
+        : null;
+  }
+  const lunchCb = document.getElementById("scheduleShiftEditLunchEnabled");
+  const lunchSt = document.getElementById("scheduleShiftEditLunchStart");
+  const lunchEn = document.getElementById("scheduleShiftEditLunchEnd");
+  if (lunchCb) {
+    lunchCb.checked = Boolean(existingAssign?.lunchBreakEnabled);
+    lunchCb.disabled = !canManual;
+  }
+  if (lunchSt) {
+    lunchSt.value = toInput(existingAssign?.lunchStartTime || "", "");
+    lunchSt.disabled = !canManual;
+  }
+  if (lunchEn) {
+    lunchEn.value = toInput(existingAssign?.lunchEndTime || "", "");
+    lunchEn.disabled = !canManual;
+  }
+  syncScheduleShiftEditLunchRowVisibility();
   backdrop.style.display = "flex";
 }
 
@@ -881,6 +981,11 @@ function saveScheduleShiftEdit() {
     window.alert("End time must be after start time.");
     return;
   }
+  const lunchRes = readLunchBreakFieldsFromShiftEditForm(start, end);
+  if (!lunchRes.ok) {
+    window.alert(lunchRes.error);
+    return;
+  }
   const { staffKey, dateKey, isNew, overrideApprovedInbox } = scheduleShiftEditPayload;
   const staff = getStaffByScheduleKey(schedulePreviewState.staffList, staffKey);
   if (!staff) return;
@@ -916,17 +1021,21 @@ function saveScheduleShiftEdit() {
       return;
     }
     removeManualOffForStaffDay(draft, dateKey, staffKey);
-    day.assignments = [...(day.assignments || []), buildManualDraftAssignment(staff, start, end)];
+    const newRow = buildManualDraftAssignment(staff, start, end);
+    applyLunchBreakToAssignment(newRow, lunchRes);
+    day.assignments = [...(day.assignments || []), newRow];
   } else {
     const idx = (day.assignments || []).findIndex((a) => String(a.staffId || a.uid || "").trim() === staffKey);
     if (idx < 0) return;
     const markManual = scheduleUserCanManualEdit();
-    day.assignments[idx] = {
+    const merged = {
       ...day.assignments[idx],
       startTime: start,
       endTime: end,
       ...(markManual ? { manualAdminEdit: true } : {}),
     };
+    applyLunchBreakToAssignment(merged, lunchRes);
+    day.assignments[idx] = merged;
   }
 
   draft = applyBusinessSettingsToDraft(draft);
@@ -1611,9 +1720,10 @@ function computeStaffShiftFingerprintForWeek(draft, staffKey) {
     const a = assignments.find((x) => String(x.staffId || x.uid || "").trim() === staffKey);
     const off = dayHasManualOff(day, staffKey);
     if (a) {
-      parts.push(
-        `${date}|${String(a.startTime || "").trim()}|${String(a.endTime || "").trim()}`,
-      );
+      const lunch = a.lunchBreakEnabled
+        ? `|L:${String(a.lunchStartTime || "").trim()}-${String(a.lunchEndTime || "").trim()}`
+        : "";
+      parts.push(`${date}|${String(a.startTime || "").trim()}|${String(a.endTime || "").trim()}${lunch}`);
     } else if (off) {
       parts.push(`${date}|OFF`);
     } else {
@@ -2497,10 +2607,9 @@ function warningAppliesToStaffRow(warning, staffKey, staff) {
   return false;
 }
 
-/** Orange highlight: day has quota issues (whole column), or this row has a row-specific warning (e.g. availability). Coverage column hints are editor-only; view-only users still see row-specific dots. */
+/** Row/cell orange dot: row-specific issues only (e.g. availability). Coverage quota hints are not shown on the board — segment rules are visible in Settings. */
 function cellShowsScheduleWarningDot(dayWarnings, staffKey, staff) {
   const list = Array.isArray(dayWarnings) ? dayWarnings : [];
-  if (scheduleUserCanManualEdit() && filterCoverageWarnings(list).length > 0) return true;
   return list.some((w) => warningAppliesToStaffRow(w, staffKey, staff));
 }
 
@@ -2514,7 +2623,7 @@ function formatBoardDayLabel(dateKey) {
 }
 
 function getDayNameFromDateKey(dateKey) {
-  const date = new Date(`${dateKey}T00:00:00`);
+  const date = new Date(`${String(dateKey || "").trim()}T12:00:00`);
   if (Number.isNaN(date.getTime())) return "";
   return ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][date.getDay()];
 }
@@ -2849,27 +2958,12 @@ function renderScheduleSummary(validation, days) {
   const total = summary.totalWarnings || 0;
   const otherCount = Math.max(0, total - coverageCount);
 
-  if (total === 0) {
-    summaryBar.innerHTML = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-         <span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;font-size:12px;font-weight:600;">No warnings</span>
-         <span style="font-size:13px;color:#6b7280;">Edit shifts with the pen icon (saved locally in this preview only).</span>
-       </div>`;
-    return;
-  }
-
-  // Coverage counts stay on each day column. Non-coverage issues show on affected rows/cells only —
-  // keep this row compact so the control bar above does not need horizontal scrolling.
-  const pieces = [];
-  if (otherCount > 0 && coverageCount === 0) {
-    pieces.push(
-      `<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#fffbeb;color:#b45309;border:1px solid #fcd34d;font-size:12px;font-weight:600;">${otherCount} issue${otherCount === 1 ? "" : "s"}</span>`,
-    );
-  }
-  if (pieces.length === 0) {
+  if (otherCount === 0) {
     summaryBar.innerHTML = "";
     return;
   }
-  summaryBar.innerHTML = pieces.join("");
+
+  summaryBar.innerHTML = `<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#fffbeb;color:#b45309;border:1px solid #fcd34d;font-size:12px;font-weight:600;">${otherCount} issue${otherCount === 1 ? "" : "s"}</span>`;
 }
 
 function setSchedulePreviewMode(mode) {
@@ -2938,7 +3032,7 @@ function renderScheduleStandByRowHtml({
     const slotIds = entry[viewKey] || ["", ""];
     if (!open) {
       return `
-      <div data-schedule-standby-cell="true" style="position:relative;padding:8px;border-radius:12px;min-height:52px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:400;color:#cbd5e1;background:#f3f4f6;border:1px dashed #e5e7eb;">
+      <div data-schedule-standby-cell="true" style="position:relative;padding:4px;border-radius:8px;min-height:40px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:400;color:#cbd5e1;background:#f3f4f6;border:1px dashed #e5e7eb;">
         Closed
       </div>`;
     }
@@ -2946,7 +3040,7 @@ function renderScheduleStandByRowHtml({
 
     if (canPickStandBy) {
       return `
-      <div data-schedule-standby-cell="true" style="position:relative;padding:10px 28px 10px 10px;border-radius:12px;min-height:56px;background:#f3f4f6;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;">
+      <div data-schedule-standby-cell="true" style="position:relative;padding:6px 24px 6px 6px;border-radius:8px;min-height:42px;background:#f3f4f6;border:1px solid #e5e7eb;display:flex;align-items:center;justify-content:center;">
         <button type="button" data-schedule-standby-edit="true" data-date="${escapeScheduleAttr(dateKey)}" title="Choose stand by" aria-label="Edit stand by for this day"
           style="position:absolute;top:4px;right:4px;min-width:26px;min-height:26px;padding:0;border:none;background:transparent;color:#7c3aed;font-size:16px;line-height:1;cursor:pointer;z-index:2;opacity:0.9;">\u270E</button>
         <div style="text-align:center;width:100%;">${nameShort}</div>
@@ -2954,15 +3048,15 @@ function renderScheduleStandByRowHtml({
     }
 
     return `
-      <div data-schedule-standby-cell="true" style="position:relative;padding:10px 8px;border-radius:12px;min-height:56px;display:flex;align-items:center;justify-content:center;text-align:center;background:#f3f4f6;border:1px solid #e5e7eb;">
+      <div data-schedule-standby-cell="true" style="position:relative;padding:6px 4px;border-radius:8px;min-height:42px;display:flex;align-items:center;justify-content:center;text-align:center;background:#f3f4f6;border:1px solid #e5e7eb;">
         <div style="width:100%;">${nameShort}</div>
       </div>`;
   }).join("");
 
   return `
     <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;border-top:2px solid #e5e7eb;background:linear-gradient(180deg,#fafafa 0%,#fff 100%);">
-      <div style="padding:12px 14px;border-bottom:1px solid #e5e7eb;display:flex;flex-direction:column;justify-content:center;min-width:0;">
-        <div style="font-size:12px;font-weight:600;color:#6b7280;letter-spacing:0.08em;">STAND BY</div>
+      <div style="padding:7px 9px;border-bottom:1px solid #e5e7eb;display:flex;flex-direction:column;justify-content:center;min-width:0;">
+        <div style="font-size:11px;font-weight:600;color:#6b7280;letter-spacing:0.08em;">STAND BY</div>
       </div>
       ${cells}
     </div>`;
@@ -3110,6 +3204,210 @@ function bindScheduleStandByPen() {
   });
 }
 
+function formatScheduleCoverageModalDateTitle(dateKey) {
+  const date = new Date(`${String(dateKey || "").trim()}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return String(dateKey || "").trim() || "—";
+  return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+}
+
+function getCoverageOverlapGapsForModal(dayName, helpers, businessHours, dayShiftSegments, coverageRules) {
+  if (!dayName || !helpers) return null;
+  let gaps = null;
+  if (typeof helpers.getCustomSegmentOverlapCoverageGaps === "function") {
+    gaps = helpers.getCustomSegmentOverlapCoverageGaps(dayName, businessHours, dayShiftSegments, coverageRules);
+  }
+  if (Array.isArray(gaps) && gaps.length > 0) return gaps;
+  if (
+    typeof helpers.getEffectiveShiftSegmentsForDay === "function" &&
+    typeof helpers.buildSegmentOverlapCoverageGapsFromSegments === "function"
+  ) {
+    const segs = helpers.getEffectiveShiftSegmentsForDay(dayName, businessHours, dayShiftSegments);
+    if (Array.isArray(segs) && segs.length > 0) {
+      gaps = helpers.buildSegmentOverlapCoverageGapsFromSegments(dayName, segs, coverageRules);
+    }
+  }
+  return Array.isArray(gaps) && gaps.length > 0 ? gaps : null;
+}
+
+/** One short line per gap (same overlap math as validation). */
+function buildCoverageMinimalGapLinesHtml(gaps, assignments, helpers) {
+  if (!Array.isArray(gaps) || !gaps.length || !helpers?.formatMinutesAsScheduleTime) return "";
+  const fmt = helpers.formatMinutesAsScheduleTime;
+  const count = helpers.countAssignmentsOverlappingMinuteRange;
+  const isFull = helpers.isFullManagerAssignmentForCoverage;
+  const isAsst = helpers.isAssistantManagerAssignmentForCoverage;
+  if (typeof count !== "function" || typeof isFull !== "function" || typeof isAsst !== "function") return "";
+  const techPred = (a) => a && a.role === "technician";
+
+  const parts = [];
+  for (const g of gaps) {
+    const nf = Number(g.needFull) || 0;
+    const na = Number(g.needAsst) || 0;
+    const nt = Number(g.needTech) || 0;
+    if (nf + na + nt === 0) continue;
+    const lo = g.startMin;
+    const hi = g.endMin;
+    const af = count(assignments, lo, hi, isFull);
+    const aa = count(assignments, lo, hi, isAsst);
+    const at = count(assignments, lo, hi, techPred);
+    const shortFull = nf > af;
+    const shortAsst = na > aa;
+    const shortTech = nt > at;
+    if (!shortFull && !shortAsst && !shortTech) continue;
+
+    const range = `${fmt(lo)}–${fmt(hi)}`;
+    const missBits = [];
+    if (shortFull) missBits.push(`${nf - af} full manager${nf - af === 1 ? "" : "s"}`);
+    if (shortAsst) missBits.push(`${na - aa} assistant manager${na - aa === 1 ? "" : "s"}`);
+    if (shortTech) missBits.push(`${nt - at} service provider${nt - at === 1 ? "" : "s"}`);
+    const line = `Missing: ${missBits.join(", ")}.`;
+    parts.push(`<div style="margin:0 0 10px;font-size:14px;line-height:1.45;color:#334155;">
+      <span style="font-weight:700;color:#c2410c;">${escapeScheduleHtml(range)}</span>
+      <span> — ${escapeScheduleHtml(line)}</span>
+    </div>`);
+  }
+  return parts.join("");
+}
+
+function shortenCoverageWarningForModal(w) {
+  if (!w) return "";
+  const code = w.code;
+  if (code === "assistant_manager_without_manager") {
+    const r = String(w.rangeLabel || "").trim();
+    return r
+      ? `Assistant manager on shift without a full manager/admin overlapping (${r}).`
+      : "Assistant manager on shift without a full manager/admin overlapping.";
+  }
+  if (code === "no_staff_assigned") return "No staff assigned for this day.";
+  if (code === "no_manager_assigned") return "No full manager or admin assigned for this day.";
+  if (code === "manager_count_below_minimum") return "Full managers are below the minimum set for this day.";
+  if (code === "assistant_manager_count_below_minimum") return "Assistant managers are below the minimum set for this day.";
+  if (code === "no_technician_assigned") return "No service provider assigned for this day.";
+  if (code === "below_min_total_staff") return "Total staff for the day is below the minimum.";
+  if (code === "no_front_desk_assigned") return "No front desk coverage for this day.";
+  if (code === "segment_coverage_shortfall") {
+    const msg = String(w.message || "").trim();
+    if (msg.length <= 120) return msg;
+    return `${msg.slice(0, 117)}…`;
+  }
+  return String(w.message || w.code || "").trim();
+}
+
+function buildScheduleCoverageModalBodyHtml(dateKey) {
+  const validationByDate = getValidationByDate(schedulePreviewState.validation);
+  const dayEntry = validationByDate.get(dateKey);
+  const cov = filterCoverageWarnings(dayEntry?.warnings);
+  const helpers = window.ffScheduleHelpers;
+  const dayName = getDayNameFromDateKey(dateKey);
+  const businessHours = window.settings?.businessHours || {};
+  const dayShiftSegments = window.settings?.dayShiftSegments || {};
+  const coverageRules = window.settings?.coverageRules || {};
+  const draftDay = findDraftDay(schedulePreviewState.draft, dateKey);
+  const assignments = Array.isArray(draftDay?.assignments) ? draftDay.assignments : [];
+
+  const gapsRaw = getCoverageOverlapGapsForModal(dayName, helpers, businessHours, dayShiftSegments, coverageRules);
+  const gaps =
+    Array.isArray(gapsRaw) && gapsRaw.length
+      ? gapsRaw.filter((g) => (Number(g.needFull) || 0) + (Number(g.needAsst) || 0) + (Number(g.needTech) || 0) > 0)
+      : [];
+  const minimalGapHtml = gaps.length > 0 ? buildCoverageMinimalGapLinesHtml(gaps, assignments, helpers) : "";
+
+  const seenMsg = new Set();
+  const uniqueCov = cov.filter((w) => {
+    if (minimalGapHtml && w.code === "segment_coverage_shortfall") return false;
+    if (minimalGapHtml && w.code === "assistant_manager_without_manager") return false;
+    const m = String(w.message || w.code || "");
+    if (seenMsg.has(m)) return false;
+    seenMsg.add(m);
+    return true;
+  });
+
+  const otherLines = uniqueCov
+    .map((w) => shortenCoverageWarningForModal(w))
+    .filter(Boolean);
+
+  let body = "";
+  if (minimalGapHtml) {
+    body += minimalGapHtml;
+  }
+  if (otherLines.length > 0) {
+    otherLines.forEach((line) => {
+      body += `<div style="margin:0 0 10px;font-size:14px;line-height:1.45;color:#334155;">${escapeScheduleHtml(line)}</div>`;
+    });
+  }
+  if (!body) {
+    body = `<p style="font-size:14px;color:#64748b;margin:0;">No coverage issues for this day.</p>`;
+  }
+
+  return body;
+}
+
+function closeScheduleDayCoverageModal() {
+  const backdrop = document.getElementById("scheduleDayCoverageModalBackdrop");
+  if (backdrop) backdrop.style.display = "none";
+}
+
+function ensureScheduleDayCoverageModal() {
+  let backdrop = document.getElementById("scheduleDayCoverageModalBackdrop");
+  if (backdrop && document.getElementById("scheduleDayCoverageModalIntro")) {
+    try {
+      backdrop.remove();
+    } catch (_) {
+      /* ignore */
+    }
+    backdrop = null;
+  }
+  if (backdrop) return backdrop;
+  backdrop = document.createElement("div");
+  backdrop.id = "scheduleDayCoverageModalBackdrop";
+  backdrop.style.cssText =
+    "display:none;position:fixed;inset:0;z-index:100056;background:rgba(15,23,42,0.5);align-items:center;justify-content:center;padding:20px;box-sizing:border-box;";
+  backdrop.innerHTML = `
+    <div role="dialog" aria-modal="true" aria-labelledby="scheduleDayCoverageModalTitle" style="background:#fff;border-radius:14px;max-width:min(92vw,420px);width:100%;max-height:min(80vh,520px);overflow:auto;padding:18px 20px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);border:1px solid #e5e7eb;">
+      <div id="scheduleDayCoverageModalTitle" style="font-size:16px;font-weight:700;color:#111827;margin:0 0 14px;line-height:1.3;">Coverage</div>
+      <div id="scheduleDayCoverageModalBody" style="font-size:14px;color:#334155;"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:20px;">
+        <button type="button" id="scheduleDayCoverageModalClose" style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+  const card = backdrop.querySelector('[role="dialog"]');
+  card?.addEventListener("click", (e) => e.stopPropagation());
+  backdrop.addEventListener("click", () => closeScheduleDayCoverageModal());
+  backdrop.querySelector("#scheduleDayCoverageModalClose")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeScheduleDayCoverageModal();
+  });
+  return backdrop;
+}
+
+function openScheduleCoverageDayModal(dateKey) {
+  const dk = String(dateKey || "").trim();
+  if (!dk) return;
+  const backdrop = ensureScheduleDayCoverageModal();
+  const titleEl = document.getElementById("scheduleDayCoverageModalTitle");
+  const bodyEl = document.getElementById("scheduleDayCoverageModalBody");
+  if (titleEl) titleEl.textContent = `Coverage — ${formatScheduleCoverageModalDateTitle(dk)}`;
+  if (bodyEl) bodyEl.innerHTML = buildScheduleCoverageModalBodyHtml(dk);
+  backdrop.style.display = "flex";
+}
+
+function bindScheduleCoverageDayClick() {
+  const board = document.getElementById("scheduleBoard");
+  if (!board || board.__ffCoverageDayBound) return;
+  board.__ffCoverageDayBound = true;
+  board.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-schedule-coverage-day]");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!scheduleUserCanManualEdit() || schedulePreviewMode !== "build") return;
+    const dateKey = String(btn.getAttribute("data-date") || "").trim();
+    if (!dateKey) return;
+    openScheduleCoverageDayModal(dateKey);
+  });
+}
+
 function renderScheduleBoard(draft, validation, staffList) {
   const board = document.getElementById("scheduleBoard");
   const empty = document.getElementById("schedulePreviewEmpty");
@@ -3138,29 +3436,37 @@ function renderScheduleBoard(draft, validation, staffList) {
   const weekPubForAck = schedulePublishedMap[wrAck.startDate] === true;
   const showStaffAck = canBuild && weekPubForAck;
   const firstColW = showStaffAck ? (canBuild ? 288 : 258) : canBuild ? 252 : 220;
-  const gridTemplate = `${firstColW}px repeat(${draftDays.length}, minmax(120px, 1fr))`;
+  const gridTemplate = `${firstColW}px repeat(${draftDays.length}, minmax(104px, 1fr))`;
   const headerCells = draftDays.map((day) => {
     const allWarnings = Array.isArray(validationByDate.get(day.date)?.warnings) ? validationByDate.get(day.date).warnings : [];
-    const cov = filterCoverageWarnings(allWarnings);
     const other = filterNonCoverageWarnings(allWarnings);
+    const coverageWarnings = filterCoverageWarnings(allWarnings);
     const dayLabel = formatBoardDayLabel(day.date);
     const businessStatus = day.businessStatus || { isOpen: true, source: "business_hours" };
     let issueHtml = "";
     if (businessStatus.isOpen !== false) {
-      if (scheduleUserCanManualEdit() && cov.length > 0) {
-        issueHtml = `<div style="margin-top:6px;font-size:11px;color:#b45309;font-weight:600;">${cov.length} coverage issue${cov.length === 1 ? "" : "s"}</div>`;
-      } else if (other.length > 0) {
+      if (other.length > 0) {
         issueHtml = `<div style="margin-top:6px;font-size:11px;color:#94a3b8;">${other.length} note${other.length === 1 ? "" : "s"}</div>`;
       }
     }
+    const showCoverageStar =
+      canBuild && businessStatus.isOpen !== false && coverageWarnings.length > 0;
+    const coverageStarHtml = showCoverageStar
+      ? `<button type="button" data-schedule-coverage-day="true" data-date="${escapeScheduleAttr(day.date)}" title="Coverage staffing — open details" aria-label="Coverage staffing issues for this day" style="flex-shrink:0;margin:0;padding:0 4px;border:none;background:transparent;color:#ea580c;font-size:20px;font-weight:800;line-height:1;cursor:pointer;align-self:flex-start;">*</button>`
+      : "";
     const specialNoteRaw = String(businessStatus.note || "").trim();
     const specialNoteHtml = specialNoteRaw
       ? `<div style="margin-top:5px;font-size:10px;color:#6d28d9;line-height:1.35;font-weight:500;">* ${escapeScheduleHtml(specialNoteRaw)}</div>`
       : "";
     return `
-      <div style="padding:12px 10px;border-bottom:1px solid #e5e7eb;background:#f8fafc;min-width:0;">
-        <div style="font-size:13px;font-weight:700;color:#111827;">${dayLabel.title}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:2px;">${dayLabel.subtitle}</div>
+      <div style="padding:7px 6px;border-bottom:1px solid #e5e7eb;background:#f8fafc;min-width:0;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:4px;">
+          <div style="min-width:0;flex:1;">
+            <div style="font-size:12px;font-weight:700;color:#111827;">${dayLabel.title}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-top:1px;">${dayLabel.subtitle}</div>
+          </div>
+          ${coverageStarHtml}
+        </div>
         ${businessStatus.isOpen === false
           ? `<div style="margin-top:6px;font-size:11px;color:#9ca3af;">Closed</div>`
           : issueHtml}
@@ -3263,12 +3569,16 @@ function renderScheduleBoard(draft, validation, staffList) {
           approvedMismatchBlock = `<div style="font-size:9px;font-weight:600;color:#b45309;margin-top:4px;line-height:1.3;max-width:100%;">${mismatch.map(escapeScheduleHtml).join("<br/>")}</div>`;
         }
       }
+      const lunchSubline =
+        assignment && assignment.lunchBreakEnabled
+          ? `<div style="font-size:9px;font-weight:600;color:#92400e;margin-top:4px;line-height:1.3;max-width:100%;">${escapeScheduleHtml(formatLunchBreakCellSubtitle(assignment))}</div>`
+          : "";
       const emptyCellWrap = !assignment
         ? `style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:100%;"`
         : "";
       return `
-        <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:10px;border-radius:12px;min-height:68px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:${assignment ? "700" : "500"};line-height:1.35;transition:outline-color 0.12s ease;${cellStyle}">
-          ${hasWarnings ? `<span style="position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%;background:#f59e0b;opacity:0.9;"></span>` : ""}
+        <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:6px;border-radius:8px;min-height:50px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:${assignment ? "700" : "500"};line-height:1.25;transition:outline-color 0.12s ease;${cellStyle}">
+          ${hasWarnings ? `<span style="position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:#f59e0b;opacity:0.9;"></span>` : ""}
           ${editBtn}
           <div ${assignment && allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : assignment ? `style="user-select:none;"` : emptyCellWrap}>
             <div>${
@@ -3278,6 +3588,7 @@ function renderScheduleBoard(draft, validation, staffList) {
                   ? `<span style="font-weight:600;color:#475569;">Not scheduled</span>`
                   : "Off"
             }</div>
+            ${lunchSubline}
             ${approvedMismatchBlock}
             ${manualOffBlock}
             ${inboxOffBlock}
@@ -3293,8 +3604,8 @@ function renderScheduleBoard(draft, validation, staffList) {
       ? ` <span style="font-weight:600;color:#64748b;">(${formatWeeklyHoursShort(weeklyMins)})</span>`
       : "";
     const nameControl = staffKey
-      ? `<button type="button" data-schedule-staff-profile="true" data-staff-id="${escapeScheduleAttr(staffKey)}" title="Open staff profile — edit default schedule" aria-label="Open staff profile to edit default schedule" style="font:inherit;font-size:13px;font-weight:700;line-height:1.3;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;width:100%;border:none;background:transparent;padding:0;margin:0;cursor:pointer;text-align:left;text-decoration:none;display:block;box-sizing:border-box;">${escapeScheduleAttr(staff.name || "Unknown Staff")}${weeklyHoursSuffix}</button>`
-      : `<span style="font-size:13px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeScheduleAttr(staff.name || "Unknown Staff")}${weeklyHoursSuffix}</span>`;
+      ? `<button type="button" data-schedule-staff-profile="true" data-staff-id="${escapeScheduleAttr(staffKey)}" title="Open staff profile — edit default schedule" aria-label="Open staff profile to edit default schedule" style="font:inherit;font-size:12px;font-weight:700;line-height:1.25;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;width:100%;border:none;background:transparent;padding:0;margin:0;cursor:pointer;text-align:left;text-decoration:none;display:block;box-sizing:border-box;">${escapeScheduleAttr(staff.name || "Unknown Staff")}${weeklyHoursSuffix}</button>`
+      : `<span style="font-size:12px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeScheduleAttr(staff.name || "Unknown Staff")}${weeklyHoursSuffix}</span>`;
 
     const seenMsRow = staffKey ? scheduleWeekAckSeenAtByStaffId[staffKey] || 0 : 0;
     const pingMsRow = staffKey ? scheduleWeekPingAtByStaffId[staffKey] || 0 : 0;
@@ -3321,7 +3632,7 @@ function renderScheduleBoard(draft, validation, staffList) {
 
     return `
       <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;">
-        <div style="padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#fff;display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;">
+        <div style="padding:7px 9px;border-bottom:1px solid #e5e7eb;background:#fff;display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:0;">
           ${nameControl}
           ${roleRowHtml}
         </div>
@@ -3345,10 +3656,10 @@ function renderScheduleBoard(draft, validation, staffList) {
   });
 
   board.innerHTML = `
-    <section style="border:1px solid #e5e7eb;border-radius:18px;background:#fff;overflow:auto;">
-      <div style="min-width:${firstColW + (draftDays.length * 120)}px;">
+    <section style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;overflow:auto;">
+      <div style="min-width:${firstColW + (draftDays.length * 104)}px;">
         <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;">
-          <div style="padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#f8fafc;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;">Staff${showStaffAck ? ` <span style="font-weight:600;color:#94a3b8;font-size:10px;">(viewed)</span>` : ""}</div>
+          <div style="padding:9px 11px;border-bottom:1px solid #e5e7eb;background:#f8fafc;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;">Staff${showStaffAck ? ` <span style="font-weight:600;color:#94a3b8;font-size:10px;">(viewed)</span>` : ""}</div>
           ${headerCells}
         </div>
         ${rowHtml}
@@ -3361,6 +3672,7 @@ function renderScheduleBoard(draft, validation, staffList) {
   bindScheduleBoardManualAdd();
   bindScheduleStaffProfileLinks();
   bindScheduleStandByPen();
+  bindScheduleCoverageDayClick();
 }
 
 function bindScheduleStaffProfileLinks() {

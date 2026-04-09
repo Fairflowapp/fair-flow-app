@@ -1,7 +1,7 @@
 import {
   enumerateDateRange,
   getEffectiveAvailability,
-} from "./schedule-availability.js?v=20260414_segment_union_stagger";
+} from "./schedule-availability.js?v=20260409_coverage_plain_cards";
 import {
   normalizeManagerType,
   normalizeScheduleRules,
@@ -22,7 +22,7 @@ import {
   parseScheduleTimeToMinutes,
   formatMinutesAsScheduleTime,
   clipTimeWindowToBestShiftSegment,
-} from "./schedule-helpers.js?v=20260414_segment_union_stagger";
+} from "./schedule-helpers.js?v=20260409_coverage_plain_cards";
 
 function getNormalizedStaffList(staffList) {
   return (Array.isArray(staffList) ? staffList : [])
@@ -304,8 +304,9 @@ function buildAssignmentsForDate(staffList, availabilityDirectory, dateKey) {
 }
 
 /**
- * With 2+ custom segments, full managers are assigned to segment windows in order (by segment start time)
- * so the second segment can show a manager from 2:00 PM onward while the first covers the morning block.
+ * With 2+ custom segments, full managers are assigned to segment windows that actually require
+ * full managers (minManagers &gt; 0 per segment), in start-time order — not to raw segment index 1, 2,
+ * so a middle segment that only needs an assistant does not "steal" the second full manager.
  */
 function applyStaggeredFullManagerSegmentWindows({
   date,
@@ -314,6 +315,7 @@ function applyStaggeredFullManagerSegmentWindows({
   availabilityDirectory,
   businessHours,
   dayShiftSegments,
+  coverageRules,
 }) {
   const dayName = getDayNameFromDateKey(date);
   if (!dayName) return assignments;
@@ -331,6 +333,11 @@ function applyStaggeredFullManagerSegmentWindows({
     const mb = parseScheduleTimeToMinutes(b.startTime);
     return (ma ?? 0) - (mb ?? 0);
   });
+
+  const cov = normalizeCoverageRules(coverageRules || {});
+  const dayCov = cov[dayName] || {};
+  const fullManagerSegs = sortedSegs.filter((seg) => resolvedSegmentCoverage(seg, dayCov).minManagers > 0);
+  if (fullManagerSegs.length === 0) return assignments;
 
   let minH = Infinity;
   let maxH = -Infinity;
@@ -350,14 +357,14 @@ function applyStaggeredFullManagerSegmentWindows({
   const fullMgrs = assignments.filter(isFullManagerAssignment).sort((a, b) =>
     String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }),
   );
-  if (fullMgrs.length < 2) return assignments;
+  if (fullMgrs.length < 1) return assignments;
 
   const nextAssignments = assignments.map((a) => ({ ...a }));
 
   fullMgrs.forEach((orig, i) => {
     const target = nextAssignments.find((x) => assignmentStaffKey(x) === assignmentStaffKey(orig));
     if (!target) return;
-    const seg = i < sortedSegs.length ? sortedSegs[i] : hullSeg;
+    const seg = i < fullManagerSegs.length ? fullManagerSegs[i] : hullSeg;
     if (!seg) return;
     const staff = findStaffForAssignmentList(staffList, target);
     const s = parseScheduleTimeToMinutes(seg.startTime);
@@ -374,6 +381,10 @@ function applyStaggeredFullManagerSegmentWindows({
   return nextAssignments.sort(compareAssignmentsByTime);
 }
 
+/**
+ * Clamps assistant managers to the shift segment(s) that require assistant coverage (minFrontDesk &gt; 0),
+ * not always the first segment of the day.
+ */
 function narrowAssistantManagersToFirstSegment({
   date,
   assignments,
@@ -381,6 +392,7 @@ function narrowAssistantManagersToFirstSegment({
   availabilityDirectory,
   businessHours,
   dayShiftSegments,
+  coverageRules,
 }) {
   const dayName = getDayNameFromDateKey(date);
   if (!dayName) return assignments;
@@ -398,13 +410,25 @@ function narrowAssistantManagersToFirstSegment({
     const mb = parseScheduleTimeToMinutes(b.startTime);
     return (ma ?? 0) - (mb ?? 0);
   });
-  const firstSeg = sortedSegs[0];
+
+  const cov = normalizeCoverageRules(coverageRules || {});
+  const dayCov = cov[dayName] || {};
+  const asstSegs = sortedSegs.filter((seg) => resolvedSegmentCoverage(seg, dayCov).minFrontDesk > 0);
+  if (asstSegs.length === 0) return assignments;
+
+  const assistants = assignments
+    .filter(isAssistantManagerAssignment)
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }));
+  if (assistants.length === 0) return assignments;
+
   const next = assignments.map((a) => ({ ...a }));
 
-  next.forEach((target) => {
-    if (!isAssistantManagerAssignment(target)) return;
-    const s = parseScheduleTimeToMinutes(firstSeg.startTime);
-    const e = parseScheduleTimeToMinutes(firstSeg.endTime);
+  assistants.forEach((orig, i) => {
+    const target = next.find((x) => assignmentStaffKey(x) === assignmentStaffKey(orig));
+    if (!target) return;
+    const seg = asstSegs[Math.min(i, asstSegs.length - 1)];
+    const s = parseScheduleTimeToMinutes(seg.startTime);
+    const e = parseScheduleTimeToMinutes(seg.endTime);
     if (s == null || e == null || e <= s) return;
     const staff = findStaffForAssignmentList(staffList, target);
     const c = staff
@@ -470,6 +494,7 @@ function buildDayDraft({ date, staffList, availabilityDirectory, rules, coverage
     availabilityDirectory,
     businessHours,
     dayShiftSegments,
+    coverageRules,
   });
   assignments = narrowAssistantManagersToFirstSegment({
     date,
@@ -478,6 +503,7 @@ function buildDayDraft({ date, staffList, availabilityDirectory, rules, coverage
     availabilityDirectory,
     businessHours,
     dayShiftSegments,
+    coverageRules,
   });
   assignments = narrowTechniciansToBestSegment({
     date,
