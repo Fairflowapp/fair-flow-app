@@ -335,9 +335,9 @@ service cloud.firestore {
     }
 
     // ===== STAFF MEMBERS (cloud sync) =====
-    // Manager/Admin/Owner: full CRUD. All salon members: read (needed for queue/join flow)
+    // Manager/Admin/Owner: full CRUD. Salon members + PIN/staff linked via users.staffId: read (queue, schedule, etc.)
     match /salons/{salonId}/staff/{staffId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
       allow create, update, delete: if belongsToSalon(salonId)
         && isManager(salonId);
     }
@@ -475,7 +475,7 @@ service cloud.firestore {
 
     // Weekly schedule publish flags (which ISO week-start dates are visible to all staff)
     match /salons/{salonId}/schedulePublish/{docId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
       allow create, update: if belongsToSalon(salonId) && isManager(salonId);
       allow delete: if false;
     }
@@ -501,7 +501,7 @@ service cloud.firestore {
 
     // Staff confirmed they viewed a published week (doc id = weekStart_staffId)
     match /salons/{salonId}/scheduleWeekAcks/{ackId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
       allow create: if belongsToSalon(salonId)
         && userStaffId() != ''
         && request.resource.data.salonId == salonId

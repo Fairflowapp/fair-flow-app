@@ -189,6 +189,26 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   pointer-events: auto !important;
 }
 
+/* When opening Settings → Schedule while on the Schedule screen, keep the schedule board visible
+   behind a frosted overlay so the week toolbar does not “disappear”. */
+#userProfileScreen.ff-overlay-from-schedule {
+  position: fixed;
+  top: var(--header-h, 60px);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 350;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 16px 20px 32px !important;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: rgba(248, 250, 252, 0.92);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-sizing: border-box;
+}
+
 .btn-pill{border-radius:999px;border:1px solid var(--border);background:#fff;padding:5px 14px;font-weight:500;cursor:pointer;font-size:17px;line-height:1.25;display:inline-flex;align-items:center}
 
 /* Active state for navigation tabs */
@@ -3014,6 +3034,11 @@ const DEFAULTS={
     sunday:{ minTotalStaff:0, minManagers:0, minFrontDesk:0, minTechnicians:0 }
   },
 
+  /** Internal shift windows per weekday (optional). Empty = use open/close as one segment. Does not replace opening hours. */
+  dayShiftSegments:{
+    monday:[], tuesday:[], wednesday:[], thursday:[], friday:[], saturday:[], sunday:[]
+  },
+
   specialBusinessDays:{},
 
   preferences:{
@@ -3089,6 +3114,10 @@ settings.businessHours = window.ffScheduleHelpers?.normalizeBusinessHours
 settings.coverageRules = window.ffScheduleHelpers?.normalizeCoverageRules
   ? window.ffScheduleHelpers.normalizeCoverageRules(settings.coverageRules)
   : { ...DEFAULTS.coverageRules };
+
+settings.dayShiftSegments = window.ffScheduleHelpers?.normalizeDayShiftSegments
+  ? window.ffScheduleHelpers.normalizeDayShiftSegments(settings.dayShiftSegments)
+  : { ...DEFAULTS.dayShiftSegments };
 
 settings.specialBusinessDays = window.ffScheduleHelpers?.normalizeSpecialBusinessDays
   ? window.ffScheduleHelpers.normalizeSpecialBusinessDays(settings.specialBusinessDays)
@@ -10135,7 +10164,15 @@ function goToUserProfile(section) {
     console.error('goToUserProfile RETURN: Missing #userProfileScreen in DOM');
     return;
   }
-  
+
+  document.body.classList.remove('ff-avatar-dropdown-open');
+  document.body.classList.remove('ff-staff-editing');
+
+  const scheduleScreenElPre = document.getElementById('scheduleScreen');
+  const scheduleWasVisible =
+    scheduleScreenElPre && window.getComputedStyle(scheduleScreenElPre).display !== 'none';
+  const keepScheduleUnderSettings = targetSection === 'schedule' && scheduleWasVisible;
+
   // Reset Staff Member state BEFORE navigation to prevent re-render override
   const staffMembersModal = document.getElementById('staffMembersModal');
   const staffDetailsContainer = document.getElementById('staffDetailsContainer');
@@ -10226,7 +10263,14 @@ function goToUserProfile(section) {
   if (inboxScreenEl) inboxScreenEl.style.display = 'none';
   if (mediaScreenEl) mediaScreenEl.style.display = 'none';
   if (ticketsScreenEl) ticketsScreenEl.style.display = 'none';
-  if (scheduleScreenEl) scheduleScreenEl.style.display = 'none';
+  if (scheduleScreenEl && !keepScheduleUnderSettings) {
+    scheduleScreenEl.style.display = 'none';
+  }
+
+  const trainingScreenGoProf = document.getElementById('trainingScreen');
+  if (trainingScreenGoProf) trainingScreenGoProf.style.display = 'none';
+  const manageQueueGoProf = document.getElementById('manageQueueScreen');
+  if (manageQueueGoProf) manageQueueGoProf.style.display = 'none';
 
   // Hide Chat screen if open (prevents "stuck at bottom" glitch)
   if (chatScreen) {
@@ -10245,6 +10289,15 @@ function goToUserProfile(section) {
   if (wrap) wrap.style.display = 'none';
   
   // Show User Profile screen
+  if (keepScheduleUnderSettings) {
+    userProfileScreen.classList.add('ff-overlay-from-schedule');
+    if (scheduleScreenEl) {
+      scheduleScreenEl.style.pointerEvents = 'none';
+      scheduleScreenEl.setAttribute('data-ff-under-settings-overlay', '1');
+    }
+  } else {
+    userProfileScreen.classList.remove('ff-overlay-from-schedule');
+  }
   userProfileScreen.style.display = 'block';
   
   // Load avatar from localStorage when User Profile screen is shown
@@ -10301,6 +10354,12 @@ function goBackFromUserProfile() {
   const userProfileScreen = document.getElementById('userProfileScreen');
   if (userProfileScreen) {
     userProfileScreen.style.display = 'none';
+    userProfileScreen.classList.remove('ff-overlay-from-schedule');
+  }
+  const scheduleUnder = document.getElementById('scheduleScreen');
+  if (scheduleUnder && scheduleUnder.getAttribute('data-ff-under-settings-overlay') === '1') {
+    scheduleUnder.style.pointerEvents = '';
+    scheduleUnder.removeAttribute('data-ff-under-settings-overlay');
   }
   
   // Restore previous view - use the same navigation functions as the top tabs
@@ -10754,7 +10813,91 @@ const SCHEDULE_SETTINGS_DAY_OPTIONS = [
   { value: 'sunday', label: 'Sun' }
 ];
 
-function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverageRulesValue, attrPrefix) {
+function ffCreateShiftSegmentRowEl(day, start, end, cov) {
+  cov = cov || {};
+  var m = cov.minManagers != null && cov.minManagers !== '' ? String(cov.minManagers) : '';
+  var f = cov.minFrontDesk != null && cov.minFrontDesk !== '' ? String(cov.minFrontDesk) : '';
+  var t = cov.minTechnicians != null && cov.minTechnicians !== '' ? String(cov.minTechnicians) : '';
+  const div = document.createElement('div');
+  div.className = 'ff-shift-row';
+  div.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin-bottom:6px;width:100%;box-sizing:border-box;';
+  div.innerHTML =
+    '<input type="time" class="ff-shift-start" value="' + String(start || '') + '" style="flex:1 1 108px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
+    '<input type="time" class="ff-shift-end" value="' + String(end || '') + '" style="flex:1 1 108px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
+    '<input type="number" min="0" step="1" class="ff-shift-cov-mgr" value="' + m + '" placeholder="0" title="Managers" style="flex:0 0 52px;width:52px;height:30px;padding:0 4px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
+    '<input type="number" min="0" step="1" class="ff-shift-cov-fd" value="' + f + '" placeholder="0" title="Assistant Manager (Manager + Assistant Manager type)" style="flex:0 0 52px;width:52px;height:30px;padding:0 4px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
+    '<input type="number" min="0" step="1" class="ff-shift-cov-sp" value="' + t + '" placeholder="0" title="Service providers" style="flex:0 0 64px;width:64px;height:30px;padding:0 4px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
+    '<button type="button" class="ff-shift-remove" data-shift-remove="' + day + '" style="flex:0 0 76px;min-width:76px;font-size:10px;padding:4px 8px;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;cursor:pointer;white-space:nowrap;box-sizing:border-box;">Remove</button>';
+  return div;
+}
+
+function ffInitDayShiftSegmentPanelsInBox(box, dayShiftSeg, attrPrefix, coverageRulesValue) {
+  if (!box) return;
+  const cov = window.ffScheduleHelpers?.normalizeCoverageRules
+    ? window.ffScheduleHelpers.normalizeCoverageRules(coverageRulesValue || {})
+    : (coverageRulesValue || {});
+  SCHEDULE_SETTINGS_DAY_OPTIONS.forEach((day) => {
+    const segs = dayShiftSeg[day.value] || [];
+    const container = box.querySelector('[data-' + attrPrefix + '-shift-container="' + day.value + '"]');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!segs.length) {
+      const d = cov[day.value] || { minManagers: 0, minFrontDesk: 0, minTechnicians: 0 };
+      container.appendChild(ffCreateShiftSegmentRowEl(day.value, '', '', {
+        minManagers: d.minManagers,
+        minFrontDesk: d.minFrontDesk,
+        minTechnicians: d.minTechnicians
+      }));
+    } else {
+      segs.forEach((s) => {
+        container.appendChild(ffCreateShiftSegmentRowEl(day.value, s.startTime || '', s.endTime || '', {
+          minManagers: s.minManagers,
+          minFrontDesk: s.minFrontDesk,
+          minTechnicians: s.minTechnicians
+        }));
+      });
+    }
+  });
+  if (!box.__ffShiftSegDelegated) {
+    box.__ffShiftSegDelegated = true;
+    box.addEventListener('click', function (ev) {
+      var addBtn = ev.target.closest('[data-' + attrPrefix + '-shift-add]');
+      if (addBtn) {
+        var d = addBtn.getAttribute('data-' + attrPrefix + '-shift-add');
+        var c = box.querySelector('[data-' + attrPrefix + '-shift-container="' + d + '"]');
+        if (c) c.appendChild(ffCreateShiftSegmentRowEl(d, '', '', {}));
+        return;
+      }
+      if (ev.target.closest('.ff-shift-remove')) {
+        var rm = ev.target.closest('.ff-shift-remove');
+        var d = rm.getAttribute('data-shift-remove');
+        var row = rm.closest('.ff-shift-row');
+        var c = box.querySelector('[data-' + attrPrefix + '-shift-container="' + d + '"]');
+        if (row && c && c.contains(row)) {
+          row.remove();
+          if (!c.querySelector('.ff-shift-row')) {
+            c.appendChild(ffCreateShiftSegmentRowEl(d, '', '', {}));
+          }
+        }
+        return;
+      }
+      var tg = ev.target.closest('[data-' + attrPrefix + '-shift-toggle]');
+      if (tg) {
+        var d = tg.getAttribute('data-' + attrPrefix + '-shift-toggle');
+        var panel = box.querySelector('[data-' + attrPrefix + '-shift-panel="' + d + '"]');
+        if (panel) {
+          var hidden = panel.style.display === 'none' || !panel.style.display;
+          panel.style.display = hidden ? 'block' : 'none';
+          tg.setAttribute('aria-expanded', hidden ? 'true' : 'false');
+          var chev = tg.querySelector('.ff-shift-chevron');
+          if (chev) chev.textContent = hidden ? '▲' : '▼';
+        }
+      }
+    });
+  }
+}
+
+function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverageRulesValue, dayShiftSegmentsValue, attrPrefix) {
   const box = document.getElementById(containerId);
   if (!box) return;
   const businessHours = window.ffScheduleHelpers?.normalizeBusinessHours
@@ -10763,39 +10906,54 @@ function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverag
   const coverageRules = window.ffScheduleHelpers?.normalizeCoverageRules
     ? window.ffScheduleHelpers.normalizeCoverageRules(coverageRulesValue)
     : (coverageRulesValue || {});
+  const dayShiftSeg = window.ffScheduleHelpers?.normalizeDayShiftSegments
+    ? window.ffScheduleHelpers.normalizeDayShiftSegments(dayShiftSegmentsValue)
+    : (dayShiftSegmentsValue || {});
 
   const header = `
-    <div style="display:grid;grid-template-columns:36px 60px minmax(0,1fr) minmax(0,1fr) 60px 60px 68px;gap:6px;align-items:end;padding:0 8px 4px 8px;max-width:100%;box-sizing:border-box;">
+    <div style="display:grid;grid-template-columns:36px 60px minmax(0,1fr) minmax(0,1fr);gap:6px;align-items:end;padding:0 8px 4px 8px;max-width:100%;box-sizing:border-box;">
       <div></div>
       <div></div>
       <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Open</div>
       <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Close</div>
-      <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Managers</div>
-      <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Front Desk</div>
-      <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Technicians</div>
     </div>
   `;
 
   const rows = SCHEDULE_SETTINGS_DAY_OPTIONS.map((day) => {
     const hoursEntry = businessHours[day.value] || { isOpen: false, openTime: null, closeTime: null };
-    const coverageEntry = coverageRules[day.value] || { minTotalStaff: 0, minManagers: 0, minFrontDesk: 0, minTechnicians: 0 };
     return `
-      <div style="display:grid;grid-template-columns:36px 60px minmax(0,1fr) minmax(0,1fr) 60px 60px 68px;gap:6px;align-items:center;padding:8px 8px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;max-width:100%;box-sizing:border-box;">
-        <div style="font-size:11px;font-weight:600;color:#111827;">${day.label}</div>
-        <label style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#374151;cursor:pointer;min-width:0;">
-          <input type="checkbox" data-${attrPrefix}-business-open="${day.value}" ${hoursEntry.isOpen ? 'checked' : ''} style="width:14px;height:14px;accent-color:#7c3aed;cursor:pointer;">
-          <span>Open</span>
-        </label>
-        <input type="time" data-${attrPrefix}-business-open-time="${day.value}" value="${hoursEntry.openTime || ''}" style="width:100%;min-width:0;max-width:100%;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
-        <input type="time" data-${attrPrefix}-business-close-time="${day.value}" value="${hoursEntry.closeTime || ''}" style="width:100%;min-width:0;max-width:100%;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
-        <input type="number" min="0" step="1" data-${attrPrefix}-coverage-managers="${day.value}" value="${coverageEntry.minManagers ?? 0}" style="width:60px;max-width:60px;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
-        <input type="number" min="0" step="1" data-${attrPrefix}-coverage-frontdesk="${day.value}" value="${coverageEntry.minFrontDesk ?? 0}" style="width:60px;max-width:60px;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
-        <input type="number" min="0" step="1" data-${attrPrefix}-coverage-technicians="${day.value}" value="${coverageEntry.minTechnicians ?? 0}" style="width:68px;max-width:68px;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
+      <div style="border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:8px;overflow:hidden;max-width:100%;box-sizing:border-box;">
+        <div style="display:grid;grid-template-columns:36px 60px minmax(0,1fr) minmax(0,1fr);gap:6px;align-items:center;padding:8px 8px;">
+          <div style="font-size:11px;font-weight:600;color:#111827;">${day.label}</div>
+          <label style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#374151;cursor:pointer;min-width:0;">
+            <input type="checkbox" data-${attrPrefix}-business-open="${day.value}" ${hoursEntry.isOpen ? 'checked' : ''} style="width:14px;height:14px;accent-color:#7c3aed;cursor:pointer;">
+            <span>Open</span>
+          </label>
+          <input type="time" data-${attrPrefix}-business-open-time="${day.value}" value="${hoursEntry.openTime || ''}" style="width:100%;min-width:0;max-width:100%;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
+          <input type="time" data-${attrPrefix}-business-close-time="${day.value}" value="${hoursEntry.closeTime || ''}" style="width:100%;min-width:0;max-width:100%;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
+        </div>
+        <button type="button" data-${attrPrefix}-shift-toggle="${day.value}" aria-expanded="false" style="width:100%;text-align:left;padding:8px 12px;border:none;border-top:1px solid #f3f4f6;background:#fafafa;font-size:11px;font-weight:600;color:#5b21b6;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <span>Shift segments &amp; coverage</span>
+          <span class="ff-shift-chevron" aria-hidden="true">▼</span>
+        </button>
+        <div data-${attrPrefix}-shift-panel="${day.value}" style="display:none;padding:10px 12px 12px;background:#fafafa;border-top:1px solid #e5e7eb;">
+          <div style="display:flex;align-items:flex-end;gap:6px;padding:0 0 6px 0;font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.02em;flex-wrap:nowrap;width:100%;box-sizing:border-box;">
+            <div style="flex:1 1 108px;min-width:0;text-align:left;">Start</div>
+            <div style="flex:1 1 108px;min-width:0;text-align:left;">End</div>
+            <div style="flex:0 0 52px;text-align:center;">Mgr</div>
+            <div style="flex:0 0 52px;text-align:center;">Asst mgr</div>
+            <div style="flex:0 0 64px;text-align:center;">Svc prov</div>
+            <div style="flex:0 0 76px;min-width:76px;" aria-hidden="true"></div>
+          </div>
+          <div data-${attrPrefix}-shift-container="${day.value}"></div>
+          <button type="button" data-${attrPrefix}-shift-add="${day.value}" style="margin-top:8px;padding:6px 12px;font-size:11px;font-weight:600;border:1px dashed #c4b5fd;background:#fff;color:#6d28d9;border-radius:8px;cursor:pointer;">+ Add segment</button>
+        </div>
       </div>
     `;
   }).join('');
 
   box.innerHTML = header + rows;
+  ffInitDayShiftSegmentPanelsInBox(box, dayShiftSeg, attrPrefix, coverageRules);
 }
 
 function collectBusinessHoursFromUiPrefix(attrPrefix) {
@@ -10817,16 +10975,75 @@ function collectCoverageRulesFromUiPrefix(attrPrefix) {
   const existingCoverageRules = window.ffScheduleHelpers?.normalizeCoverageRules
     ? window.ffScheduleHelpers.normalizeCoverageRules(settings.coverageRules)
     : (settings.coverageRules || {});
+  const root = document.getElementById('userProfileScheduleCombinedBox');
   SCHEDULE_SETTINGS_DAY_OPTIONS.forEach((day) => {
+    const container = root?.querySelector('[data-' + attrPrefix + '-shift-container="' + day.value + '"]');
+    const rows = container ? container.querySelectorAll('.ff-shift-row') : [];
+    let maxM = 0;
+    let maxF = 0;
+    let maxT = 0;
+    rows.forEach((row) => {
+      const m = Number(row.querySelector('.ff-shift-cov-mgr')?.value || 0);
+      const f = Number(row.querySelector('.ff-shift-cov-fd')?.value || 0);
+      const t = Number(row.querySelector('.ff-shift-cov-sp')?.value || 0);
+      if (Number.isFinite(m)) maxM = Math.max(maxM, m);
+      if (Number.isFinite(f)) maxF = Math.max(maxF, f);
+      if (Number.isFinite(t)) maxT = Math.max(maxT, t);
+    });
     result[day.value] = {
       minTotalStaff: existingCoverageRules[day.value]?.minTotalStaff ?? 0,
-      minManagers: document.querySelector(`[data-${attrPrefix}-coverage-managers="${day.value}"]`)?.value ?? 0,
-      minFrontDesk: document.querySelector(`[data-${attrPrefix}-coverage-frontdesk="${day.value}"]`)?.value ?? 0,
-      minTechnicians: document.querySelector(`[data-${attrPrefix}-coverage-technicians="${day.value}"]`)?.value ?? 0
+      minManagers: maxM,
+      minFrontDesk: maxF,
+      minTechnicians: maxT
     };
   });
   return window.ffScheduleHelpers?.normalizeCoverageRules
     ? window.ffScheduleHelpers.normalizeCoverageRules(result)
+    : result;
+}
+
+function collectDayShiftSegmentsFromUiPrefix(attrPrefix) {
+  const result = {};
+  const root = document.getElementById('userProfileScheduleCombinedBox');
+  SCHEDULE_SETTINGS_DAY_OPTIONS.forEach((day) => {
+    const container = root?.querySelector(`[data-${attrPrefix}-shift-container="${day.value}"]`);
+    const rows = container ? container.querySelectorAll('.ff-shift-row') : [];
+    const list = [];
+    let maxUntimedM = 0;
+    let maxUntimedF = 0;
+    let maxUntimedT = 0;
+    rows.forEach((row) => {
+      const start = row.querySelector('.ff-shift-start')?.value;
+      const end = row.querySelector('.ff-shift-end')?.value;
+      const mgr = Math.max(0, Math.round(Number(row.querySelector('.ff-shift-cov-mgr')?.value ?? 0)) || 0);
+      const fd = Math.max(0, Math.round(Number(row.querySelector('.ff-shift-cov-fd')?.value ?? 0)) || 0);
+      const sp = Math.max(0, Math.round(Number(row.querySelector('.ff-shift-cov-sp')?.value ?? 0)) || 0);
+      if (start && end) {
+        list.push({ startTime: start, endTime: end, minManagers: mgr, minFrontDesk: fd, minTechnicians: sp });
+      } else if (mgr > 0 || fd > 0 || sp > 0) {
+        maxUntimedM = Math.max(maxUntimedM, mgr);
+        maxUntimedF = Math.max(maxUntimedF, fd);
+        maxUntimedT = Math.max(maxUntimedT, sp);
+      }
+    });
+    if (!list.length && (maxUntimedM > 0 || maxUntimedF > 0 || maxUntimedT > 0)) {
+      const isOpen = root?.querySelector(`[data-${attrPrefix}-business-open="${day.value}"]`)?.checked === true;
+      const openT = root?.querySelector(`[data-${attrPrefix}-business-open-time="${day.value}"]`)?.value || '';
+      const closeT = root?.querySelector(`[data-${attrPrefix}-business-close-time="${day.value}"]`)?.value || '';
+      if (isOpen && openT && closeT) {
+        list.push({
+          startTime: openT,
+          endTime: closeT,
+          minManagers: maxUntimedM,
+          minFrontDesk: maxUntimedF,
+          minTechnicians: maxUntimedT
+        });
+      }
+    }
+    result[day.value] = list;
+  });
+  return window.ffScheduleHelpers?.normalizeDayShiftSegments
+    ? window.ffScheduleHelpers.normalizeDayShiftSegments(result)
     : result;
 }
 
@@ -10966,7 +11183,7 @@ function collectSpecialBusinessDaysFromUiPrefix(attrPrefix) {
 }
 
 function renderUserProfileScheduleSettings() {
-  renderCombinedScheduleRowsInto('userProfileScheduleCombinedBox', settings.businessHours, settings.coverageRules, 'profile');
+  renderCombinedScheduleRowsInto('userProfileScheduleCombinedBox', settings.businessHours, settings.coverageRules, settings.dayShiftSegments, 'profile');
   renderSpecialBusinessDaysInto('userProfileSpecialBusinessDaysBox', settings.specialBusinessDays, 'profile');
 
   const saveBtn = document.getElementById('userProfileSaveScheduleSettings');
@@ -10995,11 +11212,13 @@ window.ffSaveScheduleSettingsProfile = async function() {
   settings.businessHours = collectBusinessHoursFromUiPrefix('profile');
   settings.coverageRules = collectCoverageRulesFromUiPrefix('profile');
   settings.specialBusinessDays = collectSpecialBusinessDaysFromUiPrefix('profile');
+  settings.dayShiftSegments = collectDayShiftSegmentsFromUiPrefix('profile');
   try {
     const currentSettings = JSON.parse(localStorage.getItem('ffv24_settings') || '{}');
     currentSettings.businessHours = settings.businessHours;
     currentSettings.coverageRules = settings.coverageRules;
     currentSettings.specialBusinessDays = settings.specialBusinessDays;
+    currentSettings.dayShiftSegments = settings.dayShiftSegments;
     currentSettings.preferences = settings.preferences;
     localStorage.setItem('ffv24_settings', JSON.stringify(currentSettings));
   } catch (_) {}
@@ -11007,19 +11226,26 @@ window.ffSaveScheduleSettingsProfile = async function() {
   console.log('[Schedule Settings] Saving', {
     businessHours: settings.businessHours,
     coverageRules: settings.coverageRules,
-    specialBusinessDays: settings.specialBusinessDays
+    specialBusinessDays: settings.specialBusinessDays,
+    dayShiftSegments: settings.dayShiftSegments
   });
   try {
     if (typeof window.ffSaveScheduleSettings === 'function') {
-      await window.ffSaveScheduleSettings(settings.rolesHierarchy, settings.scheduleRules, settings.businessHours, settings.coverageRules, settings.specialBusinessDays, previousSpecialBusinessDays);
-    }
-    if (typeof window.showToast === 'function') {
-      window.showToast('Schedule settings saved', 3000);
+      const cloudResult = await window.ffSaveScheduleSettings(settings.rolesHierarchy, settings.scheduleRules, settings.businessHours, settings.coverageRules, settings.specialBusinessDays, previousSpecialBusinessDays, settings.dayShiftSegments);
+      if (typeof window.showToast === 'function') {
+        if (cloudResult === false) {
+          window.showToast('Saved on this device. Cloud sync needs an active salon session — open the app while logged into the salon.', 5000);
+        } else {
+          window.showToast('Schedule settings saved', 3000);
+        }
+      }
+    } else if (typeof window.showToast === 'function') {
+      window.showToast('Schedule settings saved locally', 3000);
     }
   } catch (e) {
     console.error('[Schedule Settings] Save failed', e);
     if (typeof window.showToast === 'function') {
-      window.showToast('Failed to save schedule settings', 3500);
+      window.showToast('Failed to save schedule settings to the cloud. Check connection and try again.', 4500);
     }
   } finally {
     if (saveBtn) {
@@ -21792,22 +22018,22 @@ function initializeAppsPanel() {
       const entry = normalizedSchedule[option.value] || { enabled: false, startTime: null, endTime: null };
       if (readOnly) {
         return `
-          <div data-schedule-day="${option.value}" style="display:grid;grid-template-columns:80px 120px 1fr;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;">
-            <div style="font-size:13px;font-weight:600;color:#111827;">${option.label}</div>
-            <div style="font-size:12px;font-weight:600;color:${entry.enabled ? '#166534' : '#6b7280'};">${entry.enabled ? 'Enabled' : 'Off'}</div>
-            <div style="font-size:13px;color:#111827;">${entry.enabled ? `${entry.startTime || '—'} - ${entry.endTime || '—'}` : 'Not scheduled'}</div>
+          <div data-schedule-day="${option.value}" style="display:grid;grid-template-columns:44px 76px 1fr;gap:6px;align-items:center;padding:6px 8px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:8px;box-sizing:border-box;">
+            <div style="font-size:11px;font-weight:600;color:#111827;">${option.label}</div>
+            <div style="font-size:10px;font-weight:600;color:${entry.enabled ? '#166534' : '#6b7280'};">${entry.enabled ? 'Enabled' : 'Off'}</div>
+            <div style="font-size:11px;color:#111827;">${entry.enabled ? `${entry.startTime || '—'} - ${entry.endTime || '—'}` : 'Not scheduled'}</div>
           </div>
         `;
       }
       return `
-        <div data-schedule-day="${option.value}" style="display:grid;grid-template-columns:80px 90px minmax(140px,1fr) minmax(140px,1fr);gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;">
-          <div style="font-size:13px;font-weight:600;color:#111827;">${option.label}</div>
-          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#374151;">
-            <input type="checkbox" data-field="enabled" ${entry.enabled ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
+        <div data-schedule-day="${option.value}" style="display:grid;grid-template-columns:44px 64px minmax(0,1fr) minmax(0,1fr);gap:6px;align-items:center;padding:6px 8px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:8px;box-sizing:border-box;">
+          <div style="font-size:11px;font-weight:600;color:#111827;">${option.label}</div>
+          <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:10px;color:#374151;min-width:0;">
+            <input type="checkbox" data-field="enabled" ${entry.enabled ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;accent-color:#7c3aed;">
             <span>On</span>
           </label>
-          <input type="time" data-field="startTime" value="${entry.startTime || ''}" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;">
-          <input type="time" data-field="endTime" value="${entry.endTime || ''}" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;">
+          <input type="time" data-field="startTime" value="${entry.startTime || ''}" style="width:100%;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
+          <input type="time" data-field="endTime" value="${entry.endTime || ''}" style="width:100%;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
         </div>
       `;
     }).join('');
@@ -22979,22 +23205,22 @@ function initializeAppsPanel() {
 
     if (editMode) {
       scheduleContent.innerHTML = `
-        <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;max-width:760px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;">
-            <h3 style="margin:0;font-size:15px;font-weight:700;color:#111827;">Schedule</h3>
-            <div style="display:flex;gap:8px;">
-              <button id="staffScheduleSaveBtn" style="padding:6px 12px;background:#6366f1;border:1px solid #6366f1;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;">Save</button>
-              <button id="staffScheduleCancelBtn" style="padding:6px 12px;background:#f3f4f6;border:1px solid var(--border);border-radius:8px;color:#374151;font-size:12px;font-weight:600;cursor:pointer;">Cancel</button>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;max-width:100%;box-sizing:border-box;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;">
+            <h3 style="margin:0;font-size:14px;font-weight:600;color:#111827;">Schedule</h3>
+            <div style="display:flex;gap:6px;">
+              <button id="staffScheduleSaveBtn" style="padding:5px 10px;background:#7c3aed;border:1px solid #7c3aed;border-radius:8px;color:#fff;font-size:11px;font-weight:600;cursor:pointer;">Save</button>
+              <button id="staffScheduleCancelBtn" style="padding:5px 10px;background:#f3f4f6;border:1px solid var(--border);border-radius:8px;color:#374151;font-size:11px;font-weight:600;cursor:pointer;">Cancel</button>
             </div>
           </div>
 
-          <div style="display:grid;gap:18px;">
-            <section style="display:grid;gap:12px;">
-              <div style="font-size:12px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">Work Profile</div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+          <div style="display:grid;gap:10px;">
+            <section style="padding:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+              <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:8px;">Work profile</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
                 <div>
-                  <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#374151;">Employment Type</label>
-                  <select id="staffScheduleEmploymentType" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;cursor:pointer;">
+                  <label style="display:block;margin-bottom:4px;font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Employment type</label>
+                  <select id="staffScheduleEmploymentType" style="width:100%;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;cursor:pointer;">
                     <option value="" ${employmentType ? '' : 'selected'}>Not set</option>
                     <option value="full_time" ${employmentType === 'full_time' ? 'selected' : ''}>Full time</option>
                     <option value="part_time" ${employmentType === 'part_time' ? 'selected' : ''}>Part time</option>
@@ -23002,13 +23228,13 @@ function initializeAppsPanel() {
                   </select>
                 </div>
                 <div>
-                  <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#374151;">Weekly Hours Target</label>
-                  <input type="number" id="staffScheduleWeeklyHoursTarget" min="0" step="0.5" value="${weeklyHoursTarget ?? ''}" placeholder="e.g. 40" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;">
+                  <label style="display:block;margin-bottom:4px;font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Weekly hours target</label>
+                  <input type="number" id="staffScheduleWeeklyHoursTarget" min="0" step="0.5" value="${weeklyHoursTarget ?? ''}" placeholder="e.g. 40" style="width:100%;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;">
                 </div>
                 ${isManagerRole ? `
                   <div>
-                    <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#374151;">Manager Type</label>
-                    <select id="staffScheduleManagerType" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;cursor:pointer;">
+                    <label style="display:block;margin-bottom:4px;font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Manager type</label>
+                    <select id="staffScheduleManagerType" style="width:100%;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;cursor:pointer;">
                       <option value="manager" ${getStaffManagerTypeValue(staff) === 'manager' ? 'selected' : ''}>Full</option>
                       <option value="assistant_manager" ${getStaffManagerTypeValue(staff) === 'assistant_manager' ? 'selected' : ''}>Assistant</option>
                     </select>
@@ -23017,23 +23243,21 @@ function initializeAppsPanel() {
               </div>
             </section>
 
-            <section style="display:grid;gap:12px;">
-              <div style="font-size:12px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">Default Schedule</div>
-              <div>
-                <label style="display:block;margin-bottom:8px;font-size:12px;font-weight:600;color:#374151;">Weekly Schedule</label>
-                <div id="staffScheduleRows" style="display:grid;gap:8px;"></div>
-              </div>
+            <section style="padding:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+              <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:8px;">Default schedule</div>
+              <div style="font-size:10px;color:#6b7280;margin-bottom:6px;line-height:1.4;">Weekly schedule — leave times empty on an “On” day to use the salon’s open hours for that day.</div>
+              <div id="staffScheduleRows" style="display:flex;flex-direction:column;gap:0;"></div>
             </section>
 
-            <section style="display:grid;gap:12px;">
-              <div style="font-size:12px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">Scheduling Constraints</div>
-              <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#f9fafb;cursor:pointer;">
-                <input type="checkbox" id="staffScheduleRequiresManager" ${normalizedConstraints.requiresManager ? 'checked' : ''} style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;">
-                <span style="font-size:13px;color:#111827;font-weight:500;">Requires manager present</span>
+            <section style="padding:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+              <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:8px;">Scheduling constraints</div>
+              <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;">
+                <input type="checkbox" id="staffScheduleRequiresManager" ${normalizedConstraints.requiresManager ? 'checked' : ''} style="width:14px;height:14px;accent-color:#7c3aed;cursor:pointer;">
+                <span style="font-size:11px;color:#111827;font-weight:500;">Requires manager present</span>
               </label>
-              <div style="max-width:240px;">
-                <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#374151;">Max Weekly Hours</label>
-                <input type="number" id="staffScheduleMaxWeeklyHours" min="0" step="0.5" value="${normalizedConstraints.maxWeeklyHours ?? ''}" placeholder="No limit" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-family:inherit;outline:none;">
+              <div style="max-width:220px;margin-top:8px;">
+                <label style="display:block;margin-bottom:4px;font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Max weekly hours</label>
+                <input type="number" id="staffScheduleMaxWeeklyHours" min="0" step="0.5" value="${normalizedConstraints.maxWeeklyHours ?? ''}" placeholder="No limit" style="width:100%;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;">
               </div>
             </section>
           </div>
@@ -23049,45 +23273,45 @@ function initializeAppsPanel() {
     }
 
     scheduleContent.innerHTML = `
-      <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;max-width:760px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;">
-          <h3 style="margin:0;font-size:15px;font-weight:700;color:#111827;">Schedule</h3>
-          <button id="staffScheduleEditBtn" style="padding:6px 10px;background:#f3f4f6;border:1px solid var(--border);border-radius:8px;color:#374151;font-size:12px;font-weight:600;cursor:pointer;">Edit</button>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;max-width:100%;box-sizing:border-box;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;">
+          <h3 style="margin:0;font-size:14px;font-weight:600;color:#111827;">Schedule</h3>
+          <button id="staffScheduleEditBtn" style="padding:5px 10px;background:#f3f4f6;border:1px solid var(--border);border-radius:8px;color:#374151;font-size:11px;font-weight:600;cursor:pointer;">Edit</button>
         </div>
 
-        <div style="display:grid;gap:18px;">
-          <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
-            <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:#fafafa;">
-              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#9ca3af;margin-bottom:4px;">Employment Type</div>
-              <div style="font-size:14px;font-weight:600;color:#111827;">${escapeHtml(getStaffEmploymentTypeLabel(staff))}</div>
+        <div style="display:grid;gap:10px;">
+          <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;">
+            <div style="padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+              <div style="font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Employment type</div>
+              <div style="font-size:12px;font-weight:600;color:#111827;">${escapeHtml(getStaffEmploymentTypeLabel(staff))}</div>
             </div>
-            <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:#fafafa;">
-              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#9ca3af;margin-bottom:4px;">Weekly Hours Target</div>
-              <div style="font-size:14px;font-weight:600;color:#111827;">${weeklyHoursTarget != null ? escapeHtml(String(weeklyHoursTarget)) : '—'}</div>
+            <div style="padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+              <div style="font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Weekly hours target</div>
+              <div style="font-size:12px;font-weight:600;color:#111827;">${weeklyHoursTarget != null ? escapeHtml(String(weeklyHoursTarget)) : '—'}</div>
             </div>
             ${isManagerRole ? `
-              <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:#fafafa;">
-                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#9ca3af;margin-bottom:4px;">Manager Type</div>
-                <div style="font-size:14px;font-weight:600;color:#111827;">${getStaffManagerTypeValue(staff) === 'assistant_manager' ? 'Assistant' : 'Full'}</div>
+              <div style="padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+                <div style="font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Manager type</div>
+                <div style="font-size:12px;font-weight:600;color:#111827;">${getStaffManagerTypeValue(staff) === 'assistant_manager' ? 'Assistant' : 'Full'}</div>
               </div>
             ` : ''}
           </section>
 
-          <section style="padding:14px;border:1px solid var(--border);border-radius:12px;background:#fff;">
-            <div style="font-size:12px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;">Default Schedule</div>
-            <div id="staffScheduleRows" style="display:grid;gap:8px;"></div>
+          <section style="padding:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+            <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:8px;">Default schedule</div>
+            <div id="staffScheduleRows" style="display:flex;flex-direction:column;gap:0;"></div>
           </section>
 
-          <section style="padding:14px;border:1px solid var(--border);border-radius:12px;background:#fff;">
-            <div style="font-size:12px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;">Scheduling Constraints</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+          <section style="padding:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+            <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:8px;">Scheduling constraints</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;">
               <div>
-                <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Requires Manager</div>
-                <div style="font-size:14px;color:#111827;font-weight:600;">${normalizedConstraints.requiresManager ? 'Yes' : 'No'}</div>
+                <div style="font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Requires manager</div>
+                <div style="font-size:12px;color:#111827;font-weight:600;">${normalizedConstraints.requiresManager ? 'Yes' : 'No'}</div>
               </div>
               <div>
-                <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Max Weekly Hours</div>
-                <div style="font-size:14px;color:#111827;font-weight:600;">${normalizedConstraints.maxWeeklyHours != null ? escapeHtml(String(normalizedConstraints.maxWeeklyHours)) : '—'}</div>
+                <div style="font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Max weekly hours</div>
+                <div style="font-size:12px;color:#111827;font-weight:600;">${normalizedConstraints.maxWeeklyHours != null ? escapeHtml(String(normalizedConstraints.maxWeeklyHours)) : '—'}</div>
               </div>
             </div>
           </section>
@@ -23464,7 +23688,9 @@ function initializeAppsPanel() {
       const roleInput = document.getElementById('staffEditRole');
       const phoneInput = document.getElementById('staffEditPhone');
       const emailInput = document.getElementById('staffEditEmail');
-      const pinInput = document.getElementById('staffEditPin');
+      // PIN lives only on the Details tab — when saving from Schedule, a hidden Details edit panel
+      // can still be in the DOM with the real PIN value, which wrongly triggered duplicate-PIN checks.
+      const pinInput = currentTab === 'details' ? document.getElementById('staffEditPin') : null;
       const buttonColorInput = document.getElementById('staffEditButtonColor');
       const fontColorInput = document.getElementById('staffEditFontColor');
       
@@ -23487,7 +23713,7 @@ function initializeAppsPanel() {
       const newRole = roleInput ? roleInput.value : getStaffRoleValue(oldStaff);
       const newPhone = phoneInput ? (phoneInput.value.trim() || '') : (oldStaff.phone || '');
       const newEmail = emailInput ? (emailInput.value.trim() || '') : (oldStaff.email || '');
-      const newPinValue = pinInput?.value.trim() || '';
+      const newPinValue = pinInput && pinInput.value != null ? String(pinInput.value).trim() : '';
       const birthdayInput = document.getElementById('staffEditBirthday');
       const newBirthday =
         birthdayInput && currentTab === 'details' ? String(birthdayInput.value || '').trim() : (oldStaff.birthday || '');
@@ -23520,9 +23746,9 @@ function initializeAppsPanel() {
         }
       }
       
-      // Handle PIN update (only validate if PIN is provided)
+      // Handle PIN update — only from Details tab (Schedule save must not re-validate hidden PIN field)
       let newPin = oldStaff.pin;
-      if (newPinValue) {
+      if (currentTab === 'details' && newPinValue) {
         // Validate PIN is numeric only
         if (!/^\d+$/.test(newPinValue)) {
           alert('PIN must contain only digits');
@@ -34253,16 +34479,16 @@ function hookSettingsGuard_DISABLED(){
   </div> <!-- End main-app-content -->
 
   <script type="module" src="/app.js?v=20260409_en_ui_strings"></script>
-  <script type="module" src="/schedule-helpers.js?v=20260403_reception_split"></script>
-  <script type="module" src="/schedule-availability.js?v=20260416_modal_ensure_first"></script>
-  <script type="module" src="/schedule-generator.js?v=20260416_modal_ensure_first"></script>
-  <script type="module" src="/schedule-validator.js?v=20260416_modal_ensure_first"></script>
-  <script type="module" src="/schedule-ui.js?v=20260416_modal_ensure_first"></script>
+  <script type="module" src="/schedule-helpers.js?v=20260414_segment_union_stagger"></script>
+  <script type="module" src="/schedule-availability.js?v=20260414_segment_union_stagger"></script>
+  <script type="module" src="/schedule-generator.js?v=20260414_segment_union_stagger"></script>
+  <script type="module" src="/schedule-validator.js?v=20260414_segment_union_stagger"></script>
+  <script type="module" src="/schedule-ui.js?v=20260414_rebuild_modal_short"></script>
   <script type="module" src="/inbox.js?v=20260417_inbox_title_far_side"></script>
   <script type="module" src="/chat.js?v=20260416_chat_hide_media"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260312_staffcall11"></script>
-  <script type="module" src="/settings-cloud.js?v=20260404_media_categories"></script>
+  <script type="module" src="/settings-cloud.js?v=20260409_segment_save_toast"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tickets.js?v=20260402_tickets_boot_cover"></script>
@@ -35047,41 +35273,44 @@ function hookSettingsGuard_DISABLED(){
 <div id="scheduleScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f8fafc;z-index:300;flex-direction:column;overflow:hidden;">
   <div style="display:flex;flex-direction:column;gap:10px;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#fff;">
     <div style="font-size:18px;font-weight:700;color:#111827;">Schedule</div>
-    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;row-gap:10px;">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;">
-          <div id="scheduleWeekLabel" style="font-size:13px;color:#6b7280;flex-shrink:0;">Current week</div>
-          <div id="scheduleWeekAckStrip" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;" aria-live="polite"></div>
-        </div>
-        <button type="button" id="schedulePublishToggleBtn" title="Publish this week for all staff" aria-pressed="false" style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;outline:none;">
-          <span id="schedulePublishToggleIcon" aria-hidden="true" style="font-size:14px;line-height:1;">&#128065;&#65039;</span>
-          <span id="schedulePublishToggleLabel">Visible to staff</span>
-        </button>
-        <button type="button" id="scheduleNotifyChangesBtn" title="After editing shifts, notify only staff whose rows changed" style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #fcd34d;border-radius:999px;background:#fffbeb;color:#b45309;font-size:11px;font-weight:700;cursor:pointer;outline:none;">Notify staff of changes</button>
+    <div style="width:100%;min-width:0;box-sizing:border-box;padding-bottom:2px;">
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:28px;row-gap:10px;width:100%;">
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0;">
+      <div id="scheduleWeekLabel" style="font-size:13px;color:#6b7280;flex-shrink:0;white-space:nowrap;">Next week</div>
+      <div id="scheduleWeekAckStrip" style="display:none;align-items:center;gap:8px;flex-shrink:0;" aria-live="polite"></div>
+      <span style="font-size:12px;font-weight:600;color:#6b7280;flex-shrink:0;">Week</span>
+      <div style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0;white-space:nowrap;">
+        <select id="scheduleWeekFilter" style="height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;cursor:pointer;outline:none;">
+          <option value="previous">Previous week</option>
+          <option value="current">Current week</option>
+          <option value="next" selected>Next week</option>
+          <option value="in2">In 2 weeks</option>
+          <option value="in3">In 3 weeks</option>
+          <option value="in4">In 4 weeks</option>
+          <option value="custom">Custom week</option>
+        </select>
+        <input type="date" id="scheduleCustomWeekDate" style="display:none;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;outline:none;">
+        <button type="button" id="scheduleApplyCustomWeekBtn" class="btn-pill" style="display:none;background:#7c3aed;color:#fff;border-color:#7c3aed;font-size:13px;padding:8px 14px;">Apply</button>
       </div>
-      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;justify-content:flex-end;min-width:0;">
-        <div style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap;">
-          <span style="font-size:12px;font-weight:600;color:#6b7280;">Week</span>
-          <select id="scheduleWeekFilter" style="height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;cursor:pointer;outline:none;">
-            <option value="previous">Previous week</option>
-            <option value="current" selected>Current week</option>
-            <option value="next">Next week</option>
-            <option value="in2">In 2 weeks</option>
-            <option value="in3">In 3 weeks</option>
-            <option value="in4">In 4 weeks</option>
-            <option value="custom">Custom week</option>
-          </select>
-          <input type="date" id="scheduleCustomWeekDate" style="display:none;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;outline:none;">
-          <button type="button" id="scheduleApplyCustomWeekBtn" class="btn-pill" style="display:none;background:#7c3aed;color:#fff;border-color:#7c3aed;font-size:13px;padding:8px 14px;">Apply</button>
-        </div>
-        <div id="scheduleModeToggleWrap" style="display:none;align-items:stretch;flex-wrap:nowrap;gap:0;margin:0;padding:0;line-height:0;">
-          <button type="button" id="scheduleViewMyShiftsBtn" aria-pressed="false" onclick="window.setSchedulePreviewMode && window.setSchedulePreviewMode('my_shifts')" class="inbox-view-btn" style="display:inline-flex;align-items:center;justify-content:center;padding:0 14px;height:34px;font-size:12px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;box-sizing:border-box;margin:0;">My shifts</button><button type="button" id="scheduleViewBuildScheduleBtn" aria-pressed="true" onclick="window.setSchedulePreviewMode && window.setSchedulePreviewMode('build')" class="inbox-view-btn active" style="display:inline-flex;align-items:center;justify-content:center;padding:0 14px;height:34px;font-size:12px;font-weight:600;border:1px solid #7c3aed;border-left:0;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;box-sizing:border-box;margin:0;">Build schedule</button>
-        </div>
-        <div id="scheduleViewToggleWrap" style="display:inline-flex;align-items:stretch;flex-wrap:nowrap;gap:0;margin:0;padding:0;line-height:0;">
-          <button type="button" id="scheduleViewManagementBtn" aria-pressed="true" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('management')" class="inbox-view-btn active" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#7c3aed;color:#fff;cursor:pointer;box-sizing:border-box;">Management</button><button type="button" id="scheduleViewTechniciansBtn" aria-pressed="false" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('technicians')" class="inbox-view-btn" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-left:0;border-radius:0 8px 8px 0;background:#f9fafb;color:#6b7280;cursor:pointer;box-sizing:border-box;margin:0;">Service Providers</button>
-        </div>
-        <div id="scheduleSummaryBar" style="display:flex;align-items:center;gap:10px;font-size:13px;color:#6b7280;flex-wrap:wrap;"></div>
+      <button type="button" id="schedulePublishToggleBtn" title="Publish this week for all staff" aria-pressed="false" style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;outline:none;flex-shrink:0;white-space:nowrap;">
+        <span id="schedulePublishToggleIcon" aria-hidden="true" style="font-size:14px;line-height:1;">&#128065;&#65039;</span>
+        <span id="schedulePublishToggleLabel">Visible to staff</span>
+      </button>
+      <button type="button" id="scheduleNotifyChangesBtn" title="After editing shifts, notify only staff whose rows changed" style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #fcd34d;border-radius:999px;background:#fffbeb;color:#b45309;font-size:11px;font-weight:700;cursor:pointer;outline:none;flex-shrink:0;white-space:nowrap;">Notify staff of changes</button>
+      <button type="button" id="scheduleDiscardSavedDraftBtn" title="Replace this week’s saved draft (on this device and in the cloud) with a new auto-generated schedule from your coverage rules." style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#64748b;font-size:11px;font-weight:600;cursor:pointer;outline:none;flex-shrink:0;white-space:nowrap;">Build schedule</button>
       </div>
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-shrink:0;margin-left:auto;padding-left:20px;border-left:1px solid #e5e7eb;">
+      <div id="scheduleModeToggleWrap" style="display:none;align-items:stretch;flex-wrap:nowrap;gap:0;margin:0;padding:0;line-height:0;flex-shrink:0;">
+        <button type="button" id="scheduleViewMyShiftsBtn" aria-pressed="false" onclick="window.setSchedulePreviewMode && window.setSchedulePreviewMode('my_shifts')" class="inbox-view-btn" style="display:inline-flex;align-items:center;justify-content:center;padding:0 14px;height:34px;font-size:12px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;box-sizing:border-box;margin:0;">My shifts</button><button type="button" id="scheduleViewBuildScheduleBtn" aria-pressed="true" onclick="window.setSchedulePreviewMode && window.setSchedulePreviewMode('build')" class="inbox-view-btn active" style="display:inline-flex;align-items:center;justify-content:center;padding:0 14px;height:34px;font-size:12px;font-weight:600;border:1px solid #7c3aed;border-left:0;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;box-sizing:border-box;margin:0;">Team view</button>
+      </div>
+      <div id="scheduleViewToggleWrap" style="display:inline-flex;align-items:stretch;flex-wrap:nowrap;gap:0;margin:0;padding:0;line-height:0;flex-shrink:0;">
+        <button type="button" id="scheduleViewManagementBtn" aria-pressed="true" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('management')" class="inbox-view-btn active" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#7c3aed;color:#fff;cursor:pointer;box-sizing:border-box;">Management</button><button type="button" id="scheduleViewTechniciansBtn" aria-pressed="false" onclick="window.setSchedulePreviewView && window.setSchedulePreviewView('technicians')" class="inbox-view-btn" style="padding:0 16px;height:34px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-left:0;border-radius:0 8px 8px 0;background:#f9fafb;color:#6b7280;cursor:pointer;box-sizing:border-box;margin:0;">Service Providers</button>
+      </div>
+      </div>
+    </div>
+    </div>
+    <div id="scheduleSummaryBarWrap" style="width:100%;min-width:0;box-sizing:border-box;">
+      <div id="scheduleSummaryBar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:#6b7280;min-width:0;"></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
       <div id="scheduleStaffChangeStrip" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;" aria-live="polite"></div>

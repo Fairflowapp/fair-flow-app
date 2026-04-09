@@ -14,16 +14,18 @@ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/fi
 import { db, auth } from "./app.js?v=20260412_storage_bucket_explicit";
 import {
   cloneDefaultBusinessHours,
+  cloneDefaultDayShiftSegments,
   cloneDefaultCoverageRules,
   cloneDefaultSpecialBusinessDays,
   cloneDefaultRolesHierarchy,
   cloneDefaultScheduleRules,
   normalizeBusinessHours,
+  normalizeDayShiftSegments,
   normalizeCoverageRules,
   normalizeSpecialBusinessDays,
   normalizeRolesHierarchy,
   normalizeScheduleRules,
-} from "./schedule-helpers.js?v=20260403_reception_split";
+} from "./schedule-helpers.js?v=20260414_segment_union_stagger";
 
 let _salonId = null;
 let _unsubUi = null;
@@ -198,6 +200,9 @@ function subscribeMain(salonId) {
     const nextSpecialBusinessDays = data.specialBusinessDays && typeof data.specialBusinessDays === 'object'
       ? normalizeSpecialBusinessDays(data.specialBusinessDays)
       : cloneDefaultSpecialBusinessDays();
+    const nextDayShiftSegments = data.dayShiftSegments && typeof data.dayShiftSegments === 'object'
+      ? normalizeDayShiftSegments(data.dayShiftSegments)
+      : cloneDefaultDayShiftSegments();
     if (JSON.stringify(window.settings.rolesHierarchy || {}) !== JSON.stringify(nextRolesHierarchy)) {
       window.settings.rolesHierarchy = nextRolesHierarchy;
       changed = true;
@@ -216,6 +221,10 @@ function subscribeMain(salonId) {
     }
     if (JSON.stringify(window.settings.specialBusinessDays || {}) !== JSON.stringify(nextSpecialBusinessDays)) {
       window.settings.specialBusinessDays = nextSpecialBusinessDays;
+      changed = true;
+    }
+    if (JSON.stringify(window.settings.dayShiftSegments || {}) !== JSON.stringify(nextDayShiftSegments)) {
+      window.settings.dayShiftSegments = nextDayShiftSegments;
       changed = true;
     }
     if (changed) {
@@ -244,6 +253,7 @@ function subscribeMain(salonId) {
         stored.businessHours = nextBusinessHours;
         stored.coverageRules = nextCoverageRules;
         stored.specialBusinessDays = nextSpecialBusinessDays;
+        stored.dayShiftSegments = nextDayShiftSegments;
         localStorage.setItem('ffv24_settings', JSON.stringify(stored));
       } catch (_) {}
       // Re-render brand if available
@@ -319,7 +329,7 @@ function ffSaveMediaCategories(mediaCategories) {
   );
 }
 
-function ffSaveScheduleSettings(rolesHierarchy, scheduleRules, businessHours, coverageRules, specialBusinessDays, previousSpecialBusinessDays) {
+function ffSaveScheduleSettings(rolesHierarchy, scheduleRules, businessHours, coverageRules, specialBusinessDays, previousSpecialBusinessDays, dayShiftSegments) {
   if (!_salonId) return Promise.resolve(false);
   const payload = { updatedAt: serverTimestamp() };
   if (rolesHierarchy && typeof rolesHierarchy === "object") payload.rolesHierarchy = normalizeRolesHierarchy(rolesHierarchy);
@@ -327,6 +337,7 @@ function ffSaveScheduleSettings(rolesHierarchy, scheduleRules, businessHours, co
   if (businessHours && typeof businessHours === "object") payload.businessHours = normalizeBusinessHours(businessHours);
   if (coverageRules && typeof coverageRules === "object") payload.coverageRules = normalizeCoverageRules(coverageRules);
   if (specialBusinessDays && typeof specialBusinessDays === "object") payload.specialBusinessDays = normalizeSpecialBusinessDays(specialBusinessDays);
+  if (dayShiftSegments && typeof dayShiftSegments === "object") payload.dayShiftSegments = normalizeDayShiftSegments(dayShiftSegments);
   if (Object.keys(payload).length === 1) return Promise.resolve(false);
   const previous = previousSpecialBusinessDays && typeof previousSpecialBusinessDays === "object"
     ? normalizeSpecialBusinessDays(previousSpecialBusinessDays)
@@ -338,14 +349,17 @@ function ffSaveScheduleSettings(rolesHierarchy, scheduleRules, businessHours, co
 
   return setDoc(settingsMainRef(_salonId), payload, { merge: true })
     .then(() => {
-      if (!removedDateKeys.length) return null;
+      if (!removedDateKeys.length) return true;
       const deletePayload = {};
       removedDateKeys.forEach((dateKey) => {
         deletePayload[`specialBusinessDays.${dateKey}`] = deleteField();
       });
-      return updateDoc(settingsMainRef(_salonId), deletePayload);
+      return updateDoc(settingsMainRef(_salonId), deletePayload).then(() => true);
     })
-    .catch((e) => console.warn("[SettingsCloud] save schedule settings failed", e));
+    .catch((e) => {
+      console.warn("[SettingsCloud] save schedule settings failed", e);
+      return Promise.reject(e);
+    });
 }
 
 // ─── Technician Types ───────────────────────────────────────────────────────────

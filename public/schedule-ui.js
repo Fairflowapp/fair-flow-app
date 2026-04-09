@@ -12,17 +12,18 @@ import {
   deleteField,
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db } from "./app.js?v=20260412_storage_bucket_explicit";
-import { generateWeeklySchedule } from "./schedule-generator.js?v=20260416_modal_ensure_first";
-import { validateScheduleDraft } from "./schedule-validator.js?v=20260416_modal_ensure_first";
+import { auth, db } from "./app.js?v=20260412_storage_bucket_explicit";
+import { generateWeeklySchedule } from "./schedule-generator.js?v=20260414_segment_union_stagger";
+import { validateScheduleDraft } from "./schedule-validator.js?v=20260414_segment_union_stagger";
 import {
   getEffectiveAvailabilityForDate,
   getInboxApprovalDisplayForDate,
   isApprovedRequest,
-} from "./schedule-availability.js?v=20260416_modal_ensure_first";
-import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260403_reception_split";
+} from "./schedule-availability.js?v=20260414_segment_union_stagger";
+import { parseScheduleTimeToMinutes, clipTimeWindowToBestShiftSegment } from "./schedule-helpers.js?v=20260414_segment_union_stagger";
 
-let schedulePreviewWeekStart = getStartOfWeek(new Date());
+// Default to next week — managers usually plan/publish the upcoming week, not the one already in progress.
+let schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 7);
 let schedulePreviewState = {
   draft: null,
   validation: null,
@@ -32,7 +33,7 @@ let schedulePreviewState = {
   requests: [],
   /** Salon business hours object from settings (optional). */
   businessHours: undefined,
-  /** date (YYYY-MM-DD) -> staff id for the bottom Stand by row (per day). */
+  /** date (YYYY-MM-DD) -> { technicians: [id,id], management: [id,id] } (legacy: string per day). */
   standByByDate: {},
 };
 let schedulePreviewView = "management";
@@ -317,6 +318,26 @@ async function loadScheduleWeekPingMap(weekStart) {
   const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
   if (!salonId) return;
   try {
+    /**
+     * Managers may list all pings for the week. Non-managers may only read their own ping doc (Firestore rules).
+     * Staff with schedule_edit but role technician used to trigger permission-denied on the broad query.
+     */
+    if (!scheduleInboxUserIsFirestoreManager()) {
+      const mySid = getAuthedStaffIdForSchedule();
+      if (!mySid) return;
+      const pingRef = doc(db, `salons/${salonId}/scheduleStaffChangePings/${weekStart}_${mySid}`);
+      const snap = await getDoc(pingRef);
+      const m = {};
+      if (snap.exists()) {
+        const x = snap.data();
+        const sid = String(x.staffId || "").trim();
+        const pt = x.pingAt;
+        const ms = pt && typeof pt.toMillis === "function" ? pt.toMillis() : 0;
+        if (sid && ms) m[sid] = ms;
+      }
+      scheduleWeekPingAtByStaffId = m;
+      return;
+    }
     const pingQ = query(
       collection(db, `salons/${salonId}/scheduleStaffChangePings`),
       where("weekStart", "==", weekStart),
@@ -542,6 +563,43 @@ function ensureScheduleDnDOffConfirmModal() {
   document.getElementById("scheduleDnDOffConfirmCancel")?.addEventListener("click", cancelScheduleDnDOffConfirm);
   document.getElementById("scheduleDnDOffConfirmOk")?.addEventListener("click", confirmScheduleDnDOffConfirm);
   return backdrop;
+}
+
+function ensureScheduleRebuildConfirmModal() {
+  if (document.getElementById("scheduleRebuildConfirmBackdrop")) {
+    return document.getElementById("scheduleRebuildConfirmBackdrop");
+  }
+  const backdrop = document.createElement("div");
+  backdrop.id = "scheduleRebuildConfirmBackdrop";
+  backdrop.style.cssText =
+    "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:4100;align-items:center;justify-content:center;padding:20px;";
+  backdrop.innerHTML = `
+    <div role="dialog" aria-modal="true" aria-labelledby="scheduleRebuildConfirmTitle" style="background:#fff;border-radius:16px;padding:24px 26px;max-width:440px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.28);">
+      <div id="scheduleRebuildConfirmTitle" style="font-size:18px;font-weight:700;color:#111827;margin-bottom:10px;">Replace this week’s draft?</div>
+      <p id="scheduleRebuildConfirmBody" style="margin:0 0 22px 0;font-size:14px;color:#4b5563;line-height:1.55;">We’ll delete the saved draft (here and online) and build a new schedule from your coverage rules.</p>
+      <div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;">
+        <button type="button" id="scheduleRebuildConfirmCancel" style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;">Cancel</button>
+        <button type="button" id="scheduleRebuildConfirmOk" style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;">Build schedule</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) closeScheduleRebuildConfirmModal();
+  });
+  document.getElementById("scheduleRebuildConfirmCancel")?.addEventListener("click", closeScheduleRebuildConfirmModal);
+  document.getElementById("scheduleRebuildConfirmOk")?.addEventListener("click", confirmScheduleRebuildConfirmModal);
+  return backdrop;
+}
+
+function closeScheduleRebuildConfirmModal() {
+  const el = document.getElementById("scheduleRebuildConfirmBackdrop");
+  if (el) el.style.display = "none";
+}
+
+function confirmScheduleRebuildConfirmModal() {
+  closeScheduleRebuildConfirmModal();
+  void runDiscardSavedScheduleWeekDraftAndReload();
 }
 
 /** Fallback when staff/date missing — keep minimal */
@@ -1059,7 +1117,9 @@ async function loadWeekDraftSnapshotBlockFromPublishDoc(weekStart) {
     const block = data.weekDraftSnapshots && data.weekDraftSnapshots[weekStart];
     const days = block && Array.isArray(block.days) && block.days.length ? block.days : null;
     const standByByDate =
-      block?.standByByDate && typeof block.standByByDate === "object" ? { ...block.standByByDate } : {};
+      block?.standByByDate && typeof block.standByByDate === "object"
+        ? cloneStandByByDateMap(block.standByByDate)
+        : {};
     const standByStaffId = typeof block?.standByStaffId === "string" ? block.standByStaffId.trim() : "";
     return { days, standByByDate, standByStaffId };
   } catch (e) {
@@ -1189,6 +1249,10 @@ function updateSchedulePublishToggleUi() {
   const notifyBtn = document.getElementById("scheduleNotifyChangesBtn");
   if (notifyBtn) {
     notifyBtn.style.display = canEdit && published && buildUi ? "inline-flex" : "none";
+  }
+  const discardBtn = document.getElementById("scheduleDiscardSavedDraftBtn");
+  if (discardBtn) {
+    discardBtn.style.display = canEdit && buildUi ? "inline-flex" : "none";
   }
   updateScheduleWeekAckStrip();
 }
@@ -1337,18 +1401,73 @@ function getFilteredScheduleStaff(staffList) {
   });
 }
 
-/** Per-day stand-by map for this week; migrates legacy single `standByStaffId` to every day when needed. */
+/** Max two stand-by contacts per view (technicians vs management) per day. */
+const STAND_BY_SLOTS = 2;
+
+function normalizeTwoStandBySlots(val) {
+  if (Array.isArray(val)) {
+    return [String(val[0] || "").trim(), String(val[1] || "").trim()];
+  }
+  if (typeof val === "string") {
+    const s = val.trim();
+    return s ? [s, ""] : ["", ""];
+  }
+  return ["", ""];
+}
+
+/**
+ * Legacy: string (one staff id per day).
+ * New: { technicians: [a,b], management: [a,b] }.
+ */
+function parseStandByDayEntry(raw) {
+  if (raw == null || raw === "") {
+    return { technicians: ["", ""], management: ["", ""] };
+  }
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (!s) return { technicians: ["", ""], management: ["", ""] };
+    return { technicians: [s, ""], management: [s, ""] };
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    return {
+      technicians: normalizeTwoStandBySlots(raw.technicians),
+      management: normalizeTwoStandBySlots(raw.management),
+    };
+  }
+  return { technicians: ["", ""], management: ["", ""] };
+}
+
+function standByDayEntryHasAny(entry) {
+  const e = parseStandByDayEntry(entry);
+  return (
+    e.technicians[0] ||
+    e.technicians[1] ||
+    e.management[0] ||
+    e.management[1]
+  );
+}
+
+function cloneStandByByDateMap(map) {
+  try {
+    return JSON.parse(JSON.stringify(map && typeof map === "object" ? map : {}));
+  } catch (_) {
+    return {};
+  }
+}
+
+/** Per-day stand-by map for this week; migrates legacy single `standByStaffId` / string map. */
 function normalizeStandByBlock(block, draftDays) {
   const dates = (Array.isArray(draftDays) ? draftDays : []).map((d) => d.date).filter(Boolean);
   const out = {};
   const rawMap = block?.standByByDate && typeof block.standByByDate === "object" ? block.standByByDate : {};
   for (const dt of dates) {
-    const v = String(rawMap[dt] || "").trim();
-    if (v) out[dt] = v;
+    const parsed = parseStandByDayEntry(rawMap[dt]);
+    if (standByDayEntryHasAny(parsed)) out[dt] = parsed;
   }
   if (Object.keys(out).length === 0 && typeof block?.standByStaffId === "string" && block.standByStaffId.trim()) {
     const leg = block.standByStaffId.trim();
-    for (const dt of dates) out[dt] = leg;
+    const entry = { technicians: [leg, ""], management: [leg, ""] };
+    for (const dt of dates) out[dt] = { ...entry };
   }
   return out;
 }
@@ -1358,9 +1477,32 @@ function standByMapsEqual(a, b) {
   const mb = b && typeof b === "object" ? b : {};
   const keys = new Set([...Object.keys(ma), ...Object.keys(mb)]);
   for (const k of keys) {
-    if (String(ma[k] || "").trim() !== String(mb[k] || "").trim()) return false;
+    const pa = parseStandByDayEntry(ma[k]);
+    const pb = parseStandByDayEntry(mb[k]);
+    if (pa.technicians.join("\0") !== pb.technicians.join("\0")) return false;
+    if (pa.management.join("\0") !== pb.management.join("\0")) return false;
   }
   return true;
+}
+
+/** Merge local stand-by into cloud when published; per-view fallback if local left a view empty. */
+function mergeStandByByDatePreferLocal(cloudMap, localMap, draftDays) {
+  const dates = (Array.isArray(draftDays) ? draftDays : []).map((d) => d.date).filter(Boolean);
+  const out = {};
+  for (const dt of dates) {
+    const c = parseStandByDayEntry(cloudMap[dt]);
+    const l = parseStandByDayEntry(localMap[dt]);
+    const hasLocalKey = localMap && Object.prototype.hasOwnProperty.call(localMap, dt);
+    if (!hasLocalKey) {
+      if (standByDayEntryHasAny(c)) out[dt] = c;
+      continue;
+    }
+    out[dt] = {
+      technicians: l.technicians[0] || l.technicians[1] ? l.technicians : c.technicians,
+      management: l.management[0] || l.management[1] ? l.management : c.management,
+    };
+  }
+  return out;
 }
 
 function getScheduleStaffKey(staff) {
@@ -1500,7 +1642,7 @@ async function persistStaffShiftFingerprintsForWeek(weekStart, draft, staffList)
   if (!ref) return;
   const standByByDate =
     schedulePreviewState?.standByByDate && typeof schedulePreviewState.standByByDate === "object"
-      ? { ...schedulePreviewState.standByByDate }
+      ? cloneStandByByDateMap(schedulePreviewState.standByByDate)
       : {};
   try {
     await setDoc(
@@ -1536,7 +1678,7 @@ async function syncPublishedWeekStandByToCloud(weekStart) {
   if (!ref) return;
   const standByByDate =
     schedulePreviewState?.standByByDate && typeof schedulePreviewState.standByByDate === "object"
-      ? { ...schedulePreviewState.standByByDate }
+      ? cloneStandByByDateMap(schedulePreviewState.standByByDate)
       : {};
   try {
     await setDoc(
@@ -1624,7 +1766,7 @@ async function notifyStaffScheduleChanges() {
   }
   const standByByDate =
     schedulePreviewState?.standByByDate && typeof schedulePreviewState.standByByDate === "object"
-      ? { ...schedulePreviewState.standByByDate }
+      ? cloneStandByByDateMap(schedulePreviewState.standByByDate)
       : {};
   batch.set(
     weeksRef,
@@ -1688,7 +1830,7 @@ const SCHEDULE_MANUAL_OFF_STORAGE_VERSION = 1;
 /** Storage key segment — do not bump unless intentionally migrating to a new localStorage namespace. */
 const SCHEDULE_DRAFT_OVERRIDE_KEY_VER = 1;
 /** Payload `v` inside JSON — bump when adding fields (e.g. stand-by per day). */
-const SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER = 3;
+const SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER = 4;
 
 function getSchedulePreviewSalonStorageKey() {
   const s = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
@@ -1737,6 +1879,64 @@ function clearScheduleLocalDirtyForCurrentUser(weekStart) {
   }
 }
 
+/**
+ * Clears local draft + Firestore week snapshot so the next load uses fresh generateWeeklySchedule output.
+ * (Deleting only localStorage is not enough — published weeks also load weekDraftSnapshots from Firestore.)
+ */
+async function runDiscardSavedScheduleWeekDraftAndReload() {
+  if (!scheduleUserCanManualEdit()) return;
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId) {
+    ffScheduleAppToast("No salon selected.", 3500);
+    return;
+  }
+  const weekRange = getWeekRange(schedulePreviewWeekStart);
+  const weekStart = weekRange.startDate;
+  if (!weekStart) return;
+  clearSharedScheduleDraftOverrideForWeek(weekRange);
+  clearScheduleLocalDirtyForCurrentUser(weekStart);
+  const manualKey = getScheduleManualOffStorageKey(weekRange);
+  if (manualKey && typeof localStorage !== "undefined") {
+    try {
+      localStorage.removeItem(manualKey);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  const ref = getSchedulePublishDocRef();
+  if (ref) {
+    try {
+      await updateDoc(ref, {
+        [`weekDraftSnapshots.${weekStart}`]: deleteField(),
+        [`staffShiftFingerprints.${weekStart}`]: deleteField(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn("[ScheduleUI] discard week draft snapshot", e);
+      ffScheduleAppToast(
+        e?.message || "Could not clear the cloud draft. Check connection or Firestore rules.",
+        5000,
+      );
+    }
+  }
+  await refreshSchedulePreview();
+  ffScheduleAppToast("Schedule rebuilt from rules for this week.", 4000);
+}
+
+async function discardSavedScheduleWeekDraftAndReload() {
+  if (!scheduleUserCanManualEdit()) return;
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId) {
+    ffScheduleAppToast("No salon selected.", 3500);
+    return;
+  }
+  const weekRange = getWeekRange(schedulePreviewWeekStart);
+  const weekStart = weekRange.startDate;
+  if (!weekStart) return;
+  const el = ensureScheduleRebuildConfirmModal();
+  el.style.display = "flex";
+}
+
 /** Load saved Marked OFF map for this salon + week (survives page refresh). */
 function loadScheduleManualOffOverrides(weekRange) {
   const key = getScheduleManualOffStorageKey(weekRange);
@@ -1777,11 +1977,14 @@ function loadScheduleDraftOverridePayload(weekRange) {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed?.v !== 1 && parsed?.v !== 2 && parsed?.v !== SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER) return null;
+    if (parsed?.v !== 1 && parsed?.v !== 2 && parsed?.v !== 3 && parsed?.v !== SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER)
+      return null;
     const days = Array.isArray(parsed.days) ? parsed.days : null;
     const standByStaffId = typeof parsed.standByStaffId === "string" ? parsed.standByStaffId.trim() : "";
     const standByByDate =
-      parsed.standByByDate && typeof parsed.standByByDate === "object" ? { ...parsed.standByByDate } : {};
+      parsed.standByByDate && typeof parsed.standByByDate === "object"
+        ? cloneStandByByDateMap(parsed.standByByDate)
+        : {};
     return {
       days: days && days.length ? days : null,
       standByStaffId,
@@ -1840,7 +2043,7 @@ function persistScheduleDraftOverrideFromState() {
         days: serializeDraftDaysForStorage(draft),
         standByByDate:
           schedulePreviewState.standByByDate && typeof schedulePreviewState.standByByDate === "object"
-            ? { ...schedulePreviewState.standByByDate }
+            ? cloneStandByByDateMap(schedulePreviewState.standByByDate)
             : {},
       }),
     );
@@ -1903,6 +2106,29 @@ function compareScheduleHHMM(a, b) {
   const mb = parseScheduleTimeToMinutes(b);
   if (ma == null || mb == null) return 0;
   return ma - mb;
+}
+
+function computeStaffWeeklyScheduledMinutes(staffKey, draftDays, assignmentLookup) {
+  let total = 0;
+  for (const day of draftDays) {
+    const a = assignmentLookup.get(`${staffKey}::${day.date}`);
+    if (!a || !a.startTime || !a.endTime) continue;
+    const sm = parseScheduleTimeToMinutes(String(a.startTime || "").trim());
+    const em = parseScheduleTimeToMinutes(String(a.endTime || "").trim());
+    if (sm == null || em == null) continue;
+    let diff = em - sm;
+    if (diff <= 0) diff += 24 * 60;
+    total += diff;
+  }
+  return total;
+}
+
+function formatWeeklyHoursShort(totalMinutes) {
+  if (!totalMinutes || totalMinutes <= 0) return "0h";
+  const h = totalMinutes / 60;
+  const rounded = Math.round(h * 10) / 10;
+  if (Math.abs(rounded - Math.round(rounded)) < 0.05) return `${Math.round(rounded)}h`;
+  return `${rounded.toFixed(1)}h`;
 }
 
 /** "HH:mm" -> compact label e.g. "11 AM", "2:30 PM" */
@@ -2243,7 +2469,8 @@ function getValidationByDate(validation) {
 /** Warnings tied to configured quotas (managers/FD line, techs, totals). Not availability quirks — so counts track staffing, not side effects. */
 const SCHEDULE_COVERAGE_WARNING_CODES = new Set([
   "no_staff_assigned",
-  "management_line_below_minimum",
+  "assistant_manager_count_below_minimum",
+  "segment_coverage_shortfall",
   "no_technician_assigned",
   "below_min_total_staff",
   "assistant_manager_without_manager",
@@ -2323,6 +2550,14 @@ function getBusinessStatusForDate(dateKey) {
     : (window.settings?.specialBusinessDays || {});
 
   const baseDay = businessHours[dayName] || { isOpen: false, openTime: null, closeTime: null };
+  const shiftSegmentsBase =
+    typeof window.ffScheduleHelpers?.getEffectiveShiftSegmentsForDay === "function"
+      ? window.ffScheduleHelpers.getEffectiveShiftSegmentsForDay(
+          dayName,
+          businessHours,
+          window.settings?.dayShiftSegments,
+        )
+      : [];
   const specialDay = specialDays[dateKey] || null;
   if (specialDay) {
     if (specialDay.isClosed === true) {
@@ -2332,14 +2567,26 @@ function getBusinessStatusForDate(dateKey) {
         closeTime: null,
         source: "special_day_closed",
         note: specialDay.note || "",
+        shiftSegments: [],
       };
     }
+    const o = specialDay.openTime || baseDay.openTime || null;
+    const c = specialDay.closeTime || baseDay.closeTime || null;
+    const om = window.ffScheduleHelpers?.parseScheduleTimeToMinutes
+      ? window.ffScheduleHelpers.parseScheduleTimeToMinutes(o)
+      : null;
+    const cm = window.ffScheduleHelpers?.parseScheduleTimeToMinutes
+      ? window.ffScheduleHelpers.parseScheduleTimeToMinutes(c)
+      : null;
+    const oneSeg =
+      om != null && cm != null && cm > om ? [{ startTime: o, endTime: c }] : [];
     return {
       isOpen: true,
-      openTime: specialDay.openTime || baseDay.openTime || null,
-      closeTime: specialDay.closeTime || baseDay.closeTime || null,
+      openTime: o,
+      closeTime: c,
       source: "special_day_hours",
       note: specialDay.note || "",
+      shiftSegments: oneSeg,
     };
   }
 
@@ -2349,15 +2596,23 @@ function getBusinessStatusForDate(dateKey) {
     closeTime: baseDay.closeTime || null,
     source: "business_hours",
     note: "",
+    shiftSegments: Array.isArray(shiftSegmentsBase) ? shiftSegmentsBase : [],
   };
 }
 
-/** Default shift window for manual add / empty inputs — follows business open/close when set. */
+/** Default shift window for manual add / empty inputs — first shift segment when configured, else open/close. */
 function getDefaultShiftTimesForDate(dateKey) {
   const bs = getBusinessStatusForDate(dateKey);
+  if (!bs.isOpen) return { start: "09:00", end: "17:00" };
+  const segs = Array.isArray(bs.shiftSegments) ? bs.shiftSegments : [];
+  if (segs.length > 0) {
+    const first = segs[0];
+    let start = normalizeTimeValue(first?.startTime) || normalizeTimeValue(bs.openTime) || "09:00";
+    let end = normalizeTimeValue(first?.endTime) || normalizeTimeValue(bs.closeTime) || "17:00";
+    if (start && end && start < end) return { start, end };
+  }
   let start = normalizeTimeValue(bs.openTime) || "09:00";
   let end = normalizeTimeValue(bs.closeTime) || "17:00";
-  if (!bs.isOpen) return { start: "09:00", end: "17:00" };
   if (!start || !end || start >= end) {
     start = "09:00";
     end = "17:00";
@@ -2375,8 +2630,32 @@ function applyBusinessSettingsToDraft(draft) {
       if (!businessStatus.isOpen) {
         assignments = [];
       } else {
+        const segs = Array.isArray(businessStatus.shiftSegments) ? businessStatus.shiftSegments : [];
         assignments = assignments
           .map((assignment) => {
+            if (segs.length === 1) {
+              const clipped = clipTimeWindowToBestShiftSegment(
+                assignment.startTime,
+                assignment.endTime,
+                segs,
+              );
+              if (!clipped) return null;
+              return {
+                ...assignment,
+                startTime: clipped.startTime,
+                endTime: clipped.endTime,
+              };
+            }
+            if (segs.length > 1) {
+              const startTime = maxTimeValue(assignment.startTime, businessStatus.openTime);
+              const endTime = minTimeValue(assignment.endTime, businessStatus.closeTime);
+              if (!startTime || !endTime || startTime >= endTime) return null;
+              return {
+                ...assignment,
+                startTime,
+                endTime,
+              };
+            }
             const startTime = maxTimeValue(assignment.startTime, businessStatus.openTime);
             const endTime = minTimeValue(assignment.endTime, businessStatus.closeTime);
             if (!startTime || !endTime || startTime >= endTime) return null;
@@ -2507,22 +2786,53 @@ const SCHEDULE_INBOX_TYPES_FOR_AVAILABILITY = new Set([
   "time_off",
 ]);
 
+function scheduleInboxUserIsFirestoreManager() {
+  const r = String(
+    typeof window !== "undefined" && window.__ff_user_role ? window.__ff_user_role : "",
+  ).toLowerCase();
+  return r === "owner" || r === "admin" || r === "manager";
+}
+
 async function loadApprovedScheduleRequests() {
   const salonId = String(window.currentSalonId || "").trim();
   if (!salonId) return [];
   const mapDoc = (docSnap) => ({ id: docSnap.id, ...docSnap.data() });
   const keepScheduleType = (item) =>
     SCHEDULE_INBOX_TYPES_FOR_AVAILABILITY.has(String(item?.type || "").trim());
+  const filterPipeline = (docs) =>
+    docs.map(mapDoc).filter(keepScheduleType).filter(isApprovedRequest);
+
+  const inboxRef = collection(db, `salons/${salonId}/inboxItems`);
+  const statusApproved = ["approved", "done", "archived"];
+
   try {
-    const inboxRef = collection(db, `salons/${salonId}/inboxItems`);
-    const snap = await getDocs(
-      query(inboxRef, where("status", "in", ["approved", "done", "archived"])),
-    );
-    return snap.docs.map(mapDoc).filter(keepScheduleType).filter(isApprovedRequest);
+    if (scheduleInboxUserIsFirestoreManager()) {
+      const snap = await getDocs(query(inboxRef, where("status", "in", statusApproved)));
+      return filterPipeline(snap.docs);
+    }
+
+    const uid = auth?.currentUser?.uid ? String(auth.currentUser.uid).trim() : "";
+    if (!uid) return [];
+
+    /**
+     * Firestore rules let technicians read only inbox docs they created or are the recipient of.
+     * A salon-wide query is rejected ("Missing or insufficient permissions"). Load by uid and merge.
+     */
+    const [snapFor, snapBy] = await Promise.all([
+      getDocs(query(inboxRef, where("forUid", "==", uid))),
+      getDocs(query(inboxRef, where("createdByUid", "==", uid))),
+    ]);
+    const byId = new Map();
+    for (const d of snapFor.docs) byId.set(d.id, d);
+    for (const d of snapBy.docs) byId.set(d.id, d);
+    const merged = [...byId.values()].filter((d) => {
+      const st = String(d.data()?.status || "").trim();
+      return statusApproved.includes(st);
+    });
+    return filterPipeline(merged);
   } catch (error) {
-    console.warn("[ScheduleUI] Failed to load approved requests via query, retrying full scan", error);
-    const snap = await getDocs(collection(db, `salons/${salonId}/inboxItems`));
-    return snap.docs.map(mapDoc).filter(keepScheduleType).filter(isApprovedRequest);
+    console.warn("[ScheduleUI] Failed to load approved inbox for schedule; continuing without it", error);
+    return [];
   }
 }
 
@@ -2530,7 +2840,7 @@ function renderScheduleSummary(validation, days) {
   const summaryBar = document.getElementById("scheduleSummaryBar");
   if (!summaryBar) return;
   if (scheduleUserCanManualEdit() && schedulePreviewMode === "my_shifts") {
-    summaryBar.innerHTML = `<span style="font-size:12px;color:#6b7280;">Your shifts only — switch to <strong>Build schedule</strong> to edit the full team.</span>`;
+    summaryBar.innerHTML = `<span style="font-size:12px;color:#6b7280;">Your shifts only — switch to <strong>Team view</strong> to edit the full team.</span>`;
     return;
   }
   const summary = validation?.summary || { totalWarnings: 0, highSeverityCount: 0, mediumSeverityCount: 0 };
@@ -2547,22 +2857,19 @@ function renderScheduleSummary(validation, days) {
     return;
   }
 
-  // Coverage counts stay on each day column only — avoid duplicating them in this row.
+  // Coverage counts stay on each day column. Non-coverage issues show on affected rows/cells only —
+  // keep this row compact so the control bar above does not need horizontal scrolling.
   const pieces = [];
-  if (otherCount > 0) {
-    if (coverageCount === 0) {
-      pieces.push(`<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;font-size:12px;font-weight:600;">${otherCount} scheduling note${otherCount === 1 ? "" : "s"}</span>`);
-      pieces.push(`<span style="font-size:13px;color:#94a3b8;">not quota — availability or weekly hours</span>`);
-    } else {
-      pieces.push(`<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;font-size:12px;font-weight:600;">+${otherCount} other</span>`);
-      pieces.push(`<span style="font-size:13px;color:#94a3b8;">availability / weekly limits</span>`);
-    }
+  if (otherCount > 0 && coverageCount === 0) {
+    pieces.push(
+      `<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#fffbeb;color:#b45309;border:1px solid #fcd34d;font-size:12px;font-weight:600;">${otherCount} issue${otherCount === 1 ? "" : "s"}</span>`,
+    );
   }
   if (pieces.length === 0) {
     summaryBar.innerHTML = "";
     return;
   }
-  summaryBar.innerHTML = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${pieces.join("")}</div>`;
+  summaryBar.innerHTML = pieces.join("");
 }
 
 function setSchedulePreviewMode(mode) {
@@ -2594,6 +2901,21 @@ function setSchedulePreviewView(view) {
   renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
 }
 
+function renderStandBySlotNamesHtml(slotIds, staffList, draftForNames, standbyTextStyle) {
+  const lines = [];
+  for (let i = 0; i < STAND_BY_SLOTS; i++) {
+    const sid = String(slotIds[i] || "").trim();
+    if (!sid) continue;
+    const member = resolveStandByStaffMember(sid, staffList, draftForNames);
+    const nameShort = member
+      ? `<span style="${standbyTextStyle}">${escapeScheduleHtml(String(member.name || "Staff"))}</span>`
+      : `<span style="font-size:12px;font-weight:400;color:#b45309;">Former staff</span>`;
+    lines.push(nameShort);
+  }
+  if (lines.length === 0) return `<span style="font-size:12px;font-weight:400;color:#9ca3af;">Not set</span>`;
+  return `<div style="display:flex;flex-direction:column;gap:3px;align-items:center;width:100%;">${lines.join("")}</div>`;
+}
+
 function renderScheduleStandByRowHtml({
   draftDays,
   gridTemplate,
@@ -2601,8 +2923,10 @@ function renderScheduleStandByRowHtml({
   staffListForNames,
   draftForNames,
   canPickStandBy,
+  standByView,
 }) {
   const map = standByByDate && typeof standByByDate === "object" ? standByByDate : {};
+  const viewKey = standByView === "technicians" ? "technicians" : "management";
   /** Same visual weight as “Off” cells in staff rows */
   const standbyTextStyle = "font-size:12px;font-weight:400;color:#6b7280;line-height:1.35;word-break:break-word;";
 
@@ -2610,19 +2934,15 @@ function renderScheduleStandByRowHtml({
     const dateKey = day.date;
     const bs = day.businessStatus || getBusinessStatusForDate(dateKey);
     const open = bs.isOpen !== false;
-    const sid = String(map[dateKey] || "").trim();
+    const entry = parseStandByDayEntry(map[dateKey]);
+    const slotIds = entry[viewKey] || ["", ""];
     if (!open) {
       return `
       <div data-schedule-standby-cell="true" style="position:relative;padding:8px;border-radius:12px;min-height:52px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:400;color:#cbd5e1;background:#f3f4f6;border:1px dashed #e5e7eb;">
         Closed
       </div>`;
     }
-    const member = sid ? resolveStandByStaffMember(sid, staffListForNames, draftForNames) : null;
-    const nameShort = member
-      ? `<span style="${standbyTextStyle}">${escapeScheduleHtml(String(member.name || "Staff"))}</span>`
-      : sid
-        ? `<span style="font-size:12px;font-weight:400;color:#b45309;">Former staff</span>`
-        : `<span style="font-size:12px;font-weight:400;color:#9ca3af;">Not set</span>`;
+    const nameShort = renderStandBySlotNamesHtml(slotIds, staffListForNames, draftForNames, standbyTextStyle);
 
     if (canPickStandBy) {
       return `
@@ -2642,7 +2962,7 @@ function renderScheduleStandByRowHtml({
   return `
     <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;border-top:2px solid #e5e7eb;background:linear-gradient(180deg,#fafafa 0%,#fff 100%);">
       <div style="padding:12px 14px;border-bottom:1px solid #e5e7eb;display:flex;flex-direction:column;justify-content:center;min-width:0;">
-        <div style="font-size:12px;font-weight:400;color:#6b7280;letter-spacing:0.06em;text-transform:uppercase;">Stand by</div>
+        <div style="font-size:12px;font-weight:600;color:#6b7280;letter-spacing:0.08em;">STAND BY</div>
       </div>
       ${cells}
     </div>`;
@@ -2658,6 +2978,14 @@ function closeScheduleStandByModal() {
 
 function ensureScheduleStandByModal() {
   let backdrop = document.getElementById("scheduleStandByModalBackdrop");
+  if (backdrop && !document.getElementById("scheduleStandByModalSelect1")) {
+    try {
+      backdrop.remove();
+    } catch (_) {
+      /* ignore */
+    }
+    backdrop = null;
+  }
   if (backdrop) return backdrop;
   backdrop = document.createElement("div");
   backdrop.id = "scheduleStandByModalBackdrop";
@@ -2667,8 +2995,10 @@ function ensureScheduleStandByModal() {
     <div role="dialog" aria-modal="true" aria-labelledby="scheduleStandByModalTitle" style="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:22px 24px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);border:1px solid #e5e7eb;">
       <div id="scheduleStandByModalTitle" style="font-size:17px;font-weight:700;color:#111827;margin:0 0 6px;">Stand by</div>
       <p id="scheduleStandByModalSubtitle" style="font-size:13px;color:#64748b;margin:0 0 16px;line-height:1.45;"></p>
-      <label for="scheduleStandByModalSelect" style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Who is on call?</label>
-      <select id="scheduleStandByModalSelect" style="width:100%;height:42px;padding:0 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;background:#fff;color:#111827;box-sizing:border-box;"></select>
+      <label for="scheduleStandByModalSelect1" style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Stand by — contact 1</label>
+      <select id="scheduleStandByModalSelect1" style="width:100%;height:42px;padding:0 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;background:#fff;color:#111827;box-sizing:border-box;"></select>
+      <label for="scheduleStandByModalSelect2" style="display:block;font-size:12px;font-weight:600;color:#374151;margin-top:12px;margin-bottom:6px;">Stand by — contact 2 (optional)</label>
+      <select id="scheduleStandByModalSelect2" style="width:100%;height:42px;padding:0 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;background:#fff;color:#111827;box-sizing:border-box;"></select>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
         <button type="button" id="scheduleStandByModalCancel" style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-size:14px;font-weight:600;cursor:pointer;">Cancel</button>
         <button type="button" id="scheduleStandByModalSave" style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Save</button>
@@ -2685,16 +3015,23 @@ function ensureScheduleStandByModal() {
   backdrop.querySelector("#scheduleStandByModalSave")?.addEventListener("click", (e) => {
     e.stopPropagation();
     if (!scheduleStandByModalDateKey) return;
-    const sel = document.getElementById("scheduleStandByModalSelect");
-    const id = String(sel?.value || "").trim();
-    const next = {
-      ...(schedulePreviewState.standByByDate && typeof schedulePreviewState.standByByDate === "object"
-        ? schedulePreviewState.standByByDate
-        : {}),
+    const sel1 = document.getElementById("scheduleStandByModalSelect1");
+    const sel2 = document.getElementById("scheduleStandByModalSelect2");
+    const id1 = String(sel1?.value || "").trim();
+    const id2 = String(sel2?.value || "").trim();
+    const viewKey = schedulePreviewView === "technicians" ? "technicians" : "management";
+    const dk = scheduleStandByModalDateKey;
+    const prevMap =
+      schedulePreviewState.standByByDate && typeof schedulePreviewState.standByByDate === "object"
+        ? cloneStandByByDateMap(schedulePreviewState.standByByDate)
+        : {};
+    const base = parseStandByDayEntry(prevMap[dk]);
+    prevMap[dk] = {
+      ...base,
+      [viewKey]: [id1, id2],
     };
-    if (id) next[scheduleStandByModalDateKey] = id;
-    else delete next[scheduleStandByModalDateKey];
-    schedulePreviewState.standByByDate = next;
+    if (!standByDayEntryHasAny(prevMap[dk])) delete prevMap[dk];
+    schedulePreviewState.standByByDate = prevMap;
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
     }
@@ -2722,24 +3059,38 @@ function openScheduleStandByModal(dateKey) {
   const titleEl = document.getElementById("scheduleStandByModalTitle");
   const subEl = document.getElementById("scheduleStandByModalSubtitle");
   const tab = schedulePreviewView === "technicians" ? "Service Providers" : "Management";
-  if (titleEl) titleEl.textContent = `Stand by — ${dayLabel.title} ${dayLabel.subtitle}`;
-  if (subEl) subEl.textContent = `Choose who to contact if someone cannot work. Only ${tab} staff are listed.`;
-  const staffOpts = getFilteredScheduleStaff(schedulePreviewState.staffList);
-  const current = String(schedulePreviewState.standByByDate?.[dk] || "").trim();
-  const keys = new Set(staffOpts.map((s) => getScheduleStaffKey(s)).filter(Boolean));
-  const sel = document.getElementById("scheduleStandByModalSelect");
-  if (!sel) return;
-  const parts = ['<option value="">— None —</option>'];
-  if (current && !keys.has(current)) {
-    parts.push(`<option value="${escapeScheduleAttr(current)}">Former staff</option>`);
+  const viewKey = schedulePreviewView === "technicians" ? "technicians" : "management";
+  if (titleEl) titleEl.textContent = `Stand by (${tab}) — ${dayLabel.title} ${dayLabel.subtitle}`;
+  if (subEl) {
+    subEl.textContent = `Up to two contacts for this day. Lists only ${tab} staff. The other tab has its own stand-by row.`;
   }
-  staffOpts.forEach((s) => {
-    const k = getScheduleStaffKey(s);
-    if (!k) return;
-    parts.push(`<option value="${escapeScheduleAttr(k)}">${escapeScheduleHtml(String(s.name || "Staff"))}</option>`);
-  });
-  sel.innerHTML = parts.join("");
-  sel.value = current;
+  const staffOpts = getFilteredScheduleStaff(schedulePreviewState.staffList);
+  const entry = parseStandByDayEntry(schedulePreviewState.standByByDate?.[dk]);
+  const slots = entry[viewKey] || ["", ""];
+  const cur1 = String(slots[0] || "").trim();
+  const cur2 = String(slots[1] || "").trim();
+  const keys = new Set(staffOpts.map((s) => getScheduleStaffKey(s)).filter(Boolean));
+  const sel1 = document.getElementById("scheduleStandByModalSelect1");
+  const sel2 = document.getElementById("scheduleStandByModalSelect2");
+  if (!sel1 || !sel2) return;
+
+  function buildOptions(currentId) {
+    const parts = ['<option value="">— None —</option>'];
+    if (currentId && !keys.has(currentId)) {
+      parts.push(`<option value="${escapeScheduleAttr(currentId)}">Former staff</option>`);
+    }
+    staffOpts.forEach((s) => {
+      const k = getScheduleStaffKey(s);
+      if (!k) return;
+      parts.push(`<option value="${escapeScheduleAttr(k)}">${escapeScheduleHtml(String(s.name || "Staff"))}</option>`);
+    });
+    return parts.join("");
+  }
+
+  sel1.innerHTML = buildOptions(cur1);
+  sel2.innerHTML = buildOptions(cur2);
+  sel1.value = cur1;
+  sel2.value = cur2;
   backdrop.style.display = "flex";
 }
 
@@ -2786,7 +3137,7 @@ function renderScheduleBoard(draft, validation, staffList) {
   const wrAck = getWeekRange(schedulePreviewWeekStart);
   const weekPubForAck = schedulePublishedMap[wrAck.startDate] === true;
   const showStaffAck = canBuild && weekPubForAck;
-  const firstColW = showStaffAck ? 258 : 220;
+  const firstColW = showStaffAck ? (canBuild ? 288 : 258) : canBuild ? 252 : 220;
   const gridTemplate = `${firstColW}px repeat(${draftDays.length}, minmax(120px, 1fr))`;
   const headerCells = draftDays.map((day) => {
     const allWarnings = Array.isArray(validationByDate.get(day.date)?.warnings) ? validationByDate.get(day.date).warnings : [];
@@ -2937,9 +3288,13 @@ function renderScheduleBoard(draft, validation, staffList) {
       `;
     }).join("");
 
+    const weeklyMins = computeStaffWeeklyScheduledMinutes(staffKey, draftDays, assignmentLookup);
+    const weeklyHoursSuffix = canBuild
+      ? ` <span style="font-weight:600;color:#64748b;">(${formatWeeklyHoursShort(weeklyMins)})</span>`
+      : "";
     const nameControl = staffKey
-      ? `<button type="button" data-schedule-staff-profile="true" data-staff-id="${escapeScheduleAttr(staffKey)}" title="Open staff profile — edit default schedule" aria-label="Open staff profile to edit default schedule" style="font:inherit;font-size:13px;font-weight:700;line-height:1.3;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;width:100%;border:none;background:transparent;padding:0;margin:0;cursor:pointer;text-align:left;text-decoration:none;display:block;box-sizing:border-box;">${escapeScheduleAttr(staff.name || "Unknown Staff")}</button>`
-      : `<span style="font-size:13px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeScheduleAttr(staff.name || "Unknown Staff")}</span>`;
+      ? `<button type="button" data-schedule-staff-profile="true" data-staff-id="${escapeScheduleAttr(staffKey)}" title="Open staff profile — edit default schedule" aria-label="Open staff profile to edit default schedule" style="font:inherit;font-size:13px;font-weight:700;line-height:1.3;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;width:100%;border:none;background:transparent;padding:0;margin:0;cursor:pointer;text-align:left;text-decoration:none;display:block;box-sizing:border-box;">${escapeScheduleAttr(staff.name || "Unknown Staff")}${weeklyHoursSuffix}</button>`
+      : `<span style="font-size:13px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeScheduleAttr(staff.name || "Unknown Staff")}${weeklyHoursSuffix}</span>`;
 
     const seenMsRow = staffKey ? scheduleWeekAckSeenAtByStaffId[staffKey] || 0 : 0;
     const pingMsRow = staffKey ? scheduleWeekPingAtByStaffId[staffKey] || 0 : 0;
@@ -2986,6 +3341,7 @@ function renderScheduleBoard(draft, validation, staffList) {
     staffListForNames: staffList,
     draftForNames: draft,
     canPickStandBy,
+    standByView: schedulePreviewView,
   });
 
   board.innerHTML = `
@@ -3057,6 +3413,9 @@ async function refreshSchedulePreview() {
     const businessHours = (window.settings && typeof window.settings.businessHours === "object")
       ? window.settings.businessHours
       : undefined;
+    const dayShiftSegments = (window.settings && typeof window.settings.dayShiftSegments === "object")
+      ? window.settings.dayShiftSegments
+      : undefined;
 
     const draft = generateWeeklySchedule({
       staffList,
@@ -3064,6 +3423,7 @@ async function refreshSchedulePreview() {
       rules,
       businessHours,
       coverageRules,
+      dayShiftSegments,
       dateRange: { startDate: weekRange.startDate, endDate: weekRange.endDate },
     });
     let draftWithBusinessRules = applyBusinessSettingsToDraft(draft);
@@ -3121,10 +3481,10 @@ async function refreshSchedulePreview() {
       standByByDate = Object.keys(fromLocal).length > 0 ? fromLocal : fromCloud;
     }
 
-    /* Published week: always merge stand-by from Firestore so VIEW (and everyone) sees who is on stand by, even when cloud `days` is missing or empty. Local edits still win per date key. */
+    /* Published week: merge stand-by from Firestore; local wins per date when set; per-view fallback from cloud. */
     if (weekPublished) {
       const cloudSb = normalizeStandByBlock(cloudBlock, draftWithBusinessRules.days);
-      standByByDate = { ...cloudSb, ...standByByDate };
+      standByByDate = mergeStandByByDatePreferLocal(cloudSb, standByByDate, draftWithBusinessRules.days);
     }
 
     const validation = validateScheduleDraft({
@@ -3329,7 +3689,7 @@ function bindScheduleUi() {
   document.getElementById("scheduleViewTechniciansBtn")?.addEventListener("click", () => setSchedulePreviewView("technicians"));
   document.getElementById("scheduleWeekFilter")?.addEventListener("change", () => {
     syncScheduleWeekFilterUi();
-    const mode = document.getElementById("scheduleWeekFilter")?.value || "current";
+    const mode = document.getElementById("scheduleWeekFilter")?.value || "next";
     if (mode !== "custom") applyScheduleWeekFilter();
   });
   document.getElementById("scheduleApplyCustomWeekBtn")?.addEventListener("click", applyScheduleWeekFilter);
@@ -3347,6 +3707,14 @@ function bindScheduleUi() {
     scheduleNotifyChangesBtn.__ffScheduleNotifyChangesBound = true;
     scheduleNotifyChangesBtn.addEventListener("click", () => {
       notifyStaffScheduleChanges();
+    });
+  }
+
+  const scheduleDiscardSavedDraftBtn = document.getElementById("scheduleDiscardSavedDraftBtn");
+  if (scheduleDiscardSavedDraftBtn && !scheduleDiscardSavedDraftBtn.__ffScheduleDiscardSavedDraftBound) {
+    scheduleDiscardSavedDraftBtn.__ffScheduleDiscardSavedDraftBound = true;
+    scheduleDiscardSavedDraftBtn.addEventListener("click", () => {
+      discardSavedScheduleWeekDraftAndReload();
     });
   }
 
@@ -3384,6 +3752,7 @@ if (typeof window !== "undefined") {
   window.toggleScheduleWeekPublished = toggleScheduleWeekPublished;
   window.submitScheduleWeekAck = submitScheduleWeekAck;
   window.notifyStaffScheduleChanges = notifyStaffScheduleChanges;
+  window.ffDiscardSavedScheduleWeekDraft = discardSavedScheduleWeekDraftAndReload;
 }
 
 if (document.readyState === "loading") {
