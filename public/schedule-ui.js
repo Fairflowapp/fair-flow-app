@@ -3229,7 +3229,7 @@ function getCoverageOverlapGapsForModal(dayName, helpers, businessHours, dayShif
   return Array.isArray(gaps) && gaps.length > 0 ? gaps : null;
 }
 
-/** One short line per gap (same overlap math as validation). */
+/** One line per gap; consecutive gaps with identical “Missing” text merge into a single time range (avoids “1 SP” × 3 rows). */
 function buildCoverageMinimalGapLinesHtml(gaps, assignments, helpers) {
   if (!Array.isArray(gaps) || !gaps.length || !helpers?.formatMinutesAsScheduleTime) return "";
   const fmt = helpers.formatMinutesAsScheduleTime;
@@ -3239,7 +3239,7 @@ function buildCoverageMinimalGapLinesHtml(gaps, assignments, helpers) {
   if (typeof count !== "function" || typeof isFull !== "function" || typeof isAsst !== "function") return "";
   const techPred = (a) => a && a.role === "technician";
 
-  const parts = [];
+  const rows = [];
   for (const g of gaps) {
     const nf = Number(g.needFull) || 0;
     const na = Number(g.needAsst) || 0;
@@ -3255,15 +3255,31 @@ function buildCoverageMinimalGapLinesHtml(gaps, assignments, helpers) {
     const shortTech = nt > at;
     if (!shortFull && !shortAsst && !shortTech) continue;
 
-    const range = `${fmt(lo)}–${fmt(hi)}`;
     const missBits = [];
     if (shortFull) missBits.push(`${nf - af} full manager${nf - af === 1 ? "" : "s"}`);
     if (shortAsst) missBits.push(`${na - aa} assistant manager${na - aa === 1 ? "" : "s"}`);
     if (shortTech) missBits.push(`${nt - at} service provider${nt - at === 1 ? "" : "s"}`);
     const line = `Missing: ${missBits.join(", ")}.`;
+    const lineKey = missBits.join(" | ");
+    rows.push({ lo, hi, line, lineKey });
+  }
+
+  const merged = [];
+  for (const r of rows) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.hi === r.lo && prev.lineKey === r.lineKey) {
+      prev.hi = r.hi;
+    } else {
+      merged.push({ lo: r.lo, hi: r.hi, line: r.line, lineKey: r.lineKey });
+    }
+  }
+
+  const parts = [];
+  for (const m of merged) {
+    const range = `${fmt(m.lo)}–${fmt(m.hi)}`;
     parts.push(`<div style="margin:0 0 10px;font-size:14px;line-height:1.45;color:#334155;">
       <span style="font-weight:700;color:#c2410c;">${escapeScheduleHtml(range)}</span>
-      <span> — ${escapeScheduleHtml(line)}</span>
+      <span> — ${escapeScheduleHtml(m.line)}</span>
     </div>`);
   }
   return parts.join("");
@@ -3994,6 +4010,19 @@ export async function goToSchedule() {
 }
 
 function bindScheduleUi() {
+  const scheduleOpenSettingsBtn = document.getElementById("scheduleScreenOpenSettingsBtn");
+  if (scheduleOpenSettingsBtn && !scheduleOpenSettingsBtn.__ffOpenScheduleSettingsBound) {
+    scheduleOpenSettingsBtn.__ffOpenScheduleSettingsBound = true;
+    scheduleOpenSettingsBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      // Close the board first so goToUserProfile does not use ff-overlay-from-schedule (same layout as Settings → Schedule from the menu).
+      hideScheduleScreen();
+      if (typeof window !== "undefined" && typeof window.goToUserProfile === "function") {
+        window.goToUserProfile("schedule");
+      }
+    });
+  }
+
   document.getElementById("scheduleBtn")?.addEventListener("click", goToSchedule);
   document.getElementById("scheduleViewMyShiftsBtn")?.addEventListener("click", () => setSchedulePreviewMode("my_shifts"));
   document.getElementById("scheduleViewBuildScheduleBtn")?.addEventListener("click", () => setSchedulePreviewMode("build"));

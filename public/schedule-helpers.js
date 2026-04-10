@@ -522,7 +522,9 @@ function resolvedSegmentCoverage(seg, dayCov) {
 
 /**
  * When a weekday has multiple custom shift segments, split the day at all segment start/end times
- * and compute concurrent coverage required in each sub-interval (sum of overlapping segments).
+ * and compute concurrent coverage required in each sub-interval.
+ * Overlapping segments: take the **maximum** per role (Mgr / Asst Mgr / Svc prov), not the sum — each row
+ * is its own minimum for that time band; where bands overlap, the highest requirement applies.
  * Returns null if there are no custom segments (falls back to a single business-hours window).
  */
 function buildSegmentOverlapCoverageGapsFromSegments(dayName, segs, coverageRules) {
@@ -555,9 +557,9 @@ function buildSegmentOverlapCoverageGapsFromSegments(dayName, segs, coverageRule
       if (s == null || e == null || e <= s) return;
       if (mid >= s && mid < e) {
         const req = resolvedSegmentCoverage(seg, dayCov);
-        needFull += req.minManagers;
-        needAsst += req.minFrontDesk;
-        needTech += req.minTechnicians;
+        needFull = Math.max(needFull, req.minManagers);
+        needAsst = Math.max(needAsst, req.minFrontDesk);
+        needTech = Math.max(needTech, req.minTechnicians);
       }
     });
     gaps.push({ startMin: lo, endMin: hi, needFull, needAsst, needTech });

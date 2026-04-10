@@ -1115,7 +1115,7 @@ dialog footer button, .code-dialog footer button {
   gap: 6px;
 }
 
-/* Clean row items (no border by default) */
+/* Clean row items (no border by default) — hover uses brand purple (#7c3aed) at low alpha */
 .apps-panel-item {
   display: flex;
   align-items: center;
@@ -1127,20 +1127,28 @@ dialog footer button, .code-dialog footer button {
   box-shadow: none !important;
   width: 100%;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .apps-panel-item:hover {
-  background: rgba(17, 24, 39, 0.06) !important;
+  background: rgba(124, 58, 237, 0.10) !important;
 }
 
 .apps-panel-item:focus,
 .apps-panel-item:focus-visible {
   outline: none;
-  background: rgba(17, 24, 39, 0.10) !important;
+  background: rgba(124, 58, 237, 0.14) !important;
 }
 
 .apps-panel-item.is-active {
-  background: rgba(17, 24, 39, 0.10) !important;
+  background: rgba(124, 58, 237, 0.12) !important;
+}
+
+.apps-panel-item:hover .apps-panel-item__content > div:first-child,
+.apps-panel-item:focus .apps-panel-item__content > div:first-child,
+.apps-panel-item:focus-visible .apps-panel-item__content > div:first-child,
+.apps-panel-item.is-active .apps-panel-item__content > div:first-child {
+  background: rgba(124, 58, 237, 0.12) !important;
 }
 
 /* Item content wrapper */
@@ -1212,6 +1220,11 @@ dialog footer button, .code-dialog footer button {
   background: transparent !important;
 }
 
+.apps-panel-item[style*="cursor:not-allowed"]:hover .apps-panel-item__content > div:first-child,
+.apps-panel-item.is-disabled:hover .apps-panel-item__content > div:first-child {
+  background: rgba(17, 24, 39, 0.05) !important;
+}
+
 /* Responsive breakpoints */
 @media (max-width: 1000px) {
   .apps-launcher-grid {
@@ -1223,6 +1236,23 @@ dialog footer button, .code-dialog footer button {
   .apps-launcher-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Settings sidebar (User Profile) — light purple hover/active, same family as APPS (#7c3aed) */
+.user-profile-menu-item {
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.user-profile-menu-item:hover {
+  background: rgba(124, 58, 237, 0.10) !important;
+  color: #111827 !important;
+}
+.user-profile-menu-item.user-profile-menu-item--active {
+  background: rgba(124, 58, 237, 0.12) !important;
+  color: #111827 !important;
+  font-weight: 500 !important;
+}
+.user-profile-menu-item.user-profile-menu-item--active:hover {
+  background: rgba(124, 58, 237, 0.16) !important;
 }
 
 .staff-form-section {
@@ -1302,29 +1332,32 @@ dialog footer button, .code-dialog footer button {
   transform: translateX(-140px);
 }
 
-/* Active staff nav tab - match app purple */
+/* Active staff nav tab — light purple + dark text (same as sidebar selection / Settings), not solid brand fill */
 .staff-nav-item.is-active,
 #staffDetailsNav .staff-nav-item.is-active {
-  background: #7c3aed !important;
+  background: rgba(124, 58, 237, 0.14) !important;
   background-image: none !important;
-  color: var(--ff-brand-text-on-brand) !important;
+  color: #111827 !important;
   font-weight: 600 !important;
 }
 
-/* Target all text elements inside active tab */
 .staff-nav-item.is-active *,
 #staffDetailsNav .staff-nav-item.is-active * {
-  color: var(--ff-brand-text-on-brand) !important;
+  color: #111827 !important;
 }
 
-/* Hover state for inactive tabs - subtle brand hint */
+#staffDetailsNav .staff-nav-item:not(.is-active) {
+  background: transparent !important;
+  color: #111827 !important;
+  font-weight: 400 !important;
+}
+/* Hover state for inactive tabs — same light purple as Settings / APPS */
 #staffDetailsNav .staff-nav-item:not(.is-active):hover {
-  background: rgba(124, 58, 237, 0.08) !important;
+  background: rgba(124, 58, 237, 0.10) !important;
 }
 
-/* Hover state for active tab - slightly darker purple */
 #staffDetailsNav .staff-nav-item.is-active:hover {
-  background: #6d28d9 !important;
+  background: rgba(124, 58, 237, 0.20) !important;
   background-image: none !important;
 }
 
@@ -1340,11 +1373,27 @@ dialog footer button, .code-dialog footer button {
   border-radius: 0;
 }
 .staff-sidebar .staff-sidebar-item:hover {
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(124, 58, 237, 0.10) !important;
 }
 .staff-sidebar .staff-sidebar-item.is-selected {
-  background: rgba(99, 102, 241, 0.12);
-  border-left-color: #6366f1;
+  background: rgba(124, 58, 237, 0.12) !important;
+  border-left-color: #7c3aed;
+}
+.staff-sidebar .staff-sidebar-item.is-selected:hover {
+  background: rgba(124, 58, 237, 0.16) !important;
+}
+/* Category labels (Admins / Managers / Service Providers) — light purple on hover */
+.staff-sidebar .staff-sidebar-section-title {
+  display: inline-block;
+  padding: 4px 8px;
+  margin-left: -4px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.staff-sidebar .staff-sidebar-section-title:hover {
+  background: rgba(124, 58, 237, 0.10);
 }
 .staff-modal-content,
 .staff-sidebar,
@@ -2108,86 +2157,88 @@ dialog footer button, .code-dialog footer button {
         </div>
         
         <!-- Notifications Card (Birthday reminders settings live here; see ff-build-notifications-v2) -->
-        <div id="userProfileCardNotifications" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <h3 style="margin:0 0 20px 0;font-size:18px;font-weight:600;color:#111827;">Notifications</h3>
-          <div style="display:flex;flex-direction:column;gap:20px;">
-            <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
-              <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:6px;">Birthday reminders (Inbox)</div>
-              <div style="font-size:11px;color:#6b7280;margin-bottom:10px;line-height:1.45;">Uses the salon date from Preferences → Salon timezone. Creates an Inbox item for each admin/manager (not the birthday person). Checks run while the app is open (about every 5 minutes). Set each employee birthday under Staff → Details.</div>
-              <div style="font-size:11px;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.5;"><strong>Who sees the reminder:</strong> Only <strong>managers / admins / owners</strong> — under <strong>Inbox → Team → Open</strong>. The employee whose birthday it is does <strong>not</strong> get this Inbox row (same as vacation requests to management).</div>
-              <div style="font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.45;">Important: <strong>Days in advance</strong> must be <strong>≥</strong> days until that person’s next birthday (salon timezone). Example: birthday in 2 days → set at least <strong>2</strong>.</div>
+        <div id="userProfileCardNotifications" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Notifications</h3>
+          <p style="margin:0 0 14px 0;font-size:11px;color:#9ca3af;">Birthday Inbox rows, task reminders, and queue alerts.</p>
+          <div style="display:flex;flex-direction:column;gap:14px;">
+            <div style="padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+              <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Birthday reminders (Inbox)</div>
+              <div style="font-size:11px;color:#6b7280;margin-bottom:8px;line-height:1.4;">Salon date from <strong>Preferences → Salon timezone</strong>. Birthdays in <strong>Staff → Details</strong>. While the app is open, checks about every 5 minutes.</div>
+              <div style="font-size:11px;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:6px 8px;margin-bottom:8px;line-height:1.4;"><strong>Who sees it:</strong> managers / admins / owners — <strong>Inbox → Team → Open</strong>. Not the person whose birthday it is.</div>
+              <div style="font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:6px 8px;margin-bottom:8px;line-height:1.4;"><strong>Days in advance</strong> must be ≥ full days until that birthday (salon date). E.g. birthday in 2 days → set at least <strong>2</strong>.</div>
               <label for="userProfileBirthdayReminderDays" style="font-size:12px;font-weight:600;color:#374151;">Days in advance</label>
-              <input type="number" id="userProfileBirthdayReminderDays" min="0" max="90" step="1" style="display:block;width:120px;margin-top:6px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;" />
-              <button type="button" id="ffTestBirthdayInboxBtn" class="btn-mini" style="display:block;margin-top:10px;font-size:12px;padding:8px 12px;border-radius:8px;border:1px solid #7c3aed;background:#f5f3ff;color:#5b21b6;cursor:pointer;font-weight:600;">Send test Inbox item (birthday)</button>
-              <div style="font-size:10px;color:#9ca3af;margin-top:6px;">Creates one “Staff birthday reminder” row to <em>your</em> Inbox — confirms Firestore + Inbox work.</div>
-              <button type="button" id="ffClearBirthdaySentFlagsBtn" class="btn-mini" style="display:block;margin-top:12px;font-size:11px;padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;">Reset “already sent this year” on all staff (for testing)</button>
-              <div style="font-size:10px;color:#9ca3af;margin-top:4px;">Use if automated reminders stopped after earlier tests. Then open Inbox as manager or wait up to 5 minutes with the app open.</div>
+              <input type="number" id="userProfileBirthdayReminderDays" min="0" max="90" step="1" style="display:block;width:120px;margin-top:6px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;box-sizing:border-box;" />
+              <button type="button" id="ffTestBirthdayInboxBtn" class="btn-mini" style="display:block;margin-top:8px;font-size:12px;padding:6px 12px;border-radius:8px;border:1px solid #7c3aed;background:#f5f3ff;color:#5b21b6;cursor:pointer;font-weight:600;">Send test Inbox item (birthday)</button>
+              <div style="font-size:11px;color:#9ca3af;margin-top:4px;">Adds one test row to <em>your</em> Inbox.</div>
+              <button type="button" id="ffClearBirthdaySentFlagsBtn" class="btn-mini" style="display:block;margin-top:8px;font-size:11px;padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;">Reset “sent this year” (all staff)</button>
+              <div style="font-size:11px;color:#9ca3af;margin-top:4px;">For testing if reminders stopped firing.</div>
             </div>
-            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px;">
               <div>
-                <div style="font-size:14px;font-weight:500;color:#111827;margin-bottom:4px;">Task reminders</div>
-                <div style="font-size:13px;color:#6b7280;">Receive reminders for scheduled tasks</div>
+                <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:2px;">Task reminders</div>
+                <div style="font-size:11px;color:#6b7280;">Reminders for scheduled tasks</div>
               </div>
-              <input type="checkbox" id="userProfileToggleTaskReminders" style="width:44px;height:24px;cursor:pointer;accent-color:#2563eb;">
+              <input type="checkbox" id="userProfileToggleTaskReminders" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;flex-shrink:0;">
             </label>
-            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px;">
               <div>
-                <div style="font-size:14px;font-weight:500;color:#111827;margin-bottom:4px;">Daily summary</div>
-                <div style="font-size:13px;color:#6b7280;">Get a daily summary of activity</div>
+                <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:2px;">Daily summary</div>
+                <div style="font-size:11px;color:#6b7280;">Daily activity summary</div>
               </div>
-              <input type="checkbox" id="userProfileToggleDailySummary" style="width:44px;height:24px;cursor:pointer;accent-color:#2563eb;">
+              <input type="checkbox" id="userProfileToggleDailySummary" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;flex-shrink:0;">
             </label>
-            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px;">
               <div>
-                <div style="font-size:14px;font-weight:500;color:#111827;margin-bottom:4px;">Queue alerts</div>
-                <div style="font-size:13px;color:#6b7280;">Get notified about queue changes</div>
+                <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:2px;">Queue alerts</div>
+                <div style="font-size:11px;color:#6b7280;">Notify on queue changes</div>
               </div>
-              <input type="checkbox" id="userProfileToggleQueueAlerts" style="width:44px;height:24px;cursor:pointer;accent-color:#2563eb;">
+              <input type="checkbox" id="userProfileToggleQueueAlerts" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;flex-shrink:0;">
             </label>
           </div>
         </div>
         
-        <!-- Preferences Card -->
-        <div id="userProfileCardPreferences" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <h3 style="margin:0 0 20px 0;font-size:18px;font-weight:600;color:#111827;">Preferences</h3>
-          <div style="display:flex;flex-direction:column;gap:24px;">
+        <!-- Preferences Card (typography aligned with Staff Setup) -->
+        <div id="userProfileCardPreferences" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Preferences</h3>
+          <p style="margin:0 0 14px 0;font-size:11px;color:#9ca3af;">Display, week start, default screen, and salon timezone.</p>
+          <div style="display:flex;flex-direction:column;gap:14px;">
             <div>
-              <label style="display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:10px;">Time format</label>
-              <div style="display:flex;gap:16px;">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                  <input type="radio" name="userProfileTimeFormat" value="12h" id="userProfileTimeFormat12h" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
-                  <span style="font-size:14px;color:#111827;">12-hour</span>
+              <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Time format</label>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                  <input type="radio" name="userProfileTimeFormat" value="12h" id="userProfileTimeFormat12h" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
+                  <span style="font-size:12px;color:#111827;">12-hour</span>
                 </label>
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                  <input type="radio" name="userProfileTimeFormat" value="24h" id="userProfileTimeFormat24h" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
-                  <span style="font-size:14px;color:#111827;">24-hour</span>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                  <input type="radio" name="userProfileTimeFormat" value="24h" id="userProfileTimeFormat24h" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
+                  <span style="font-size:12px;color:#111827;">24-hour</span>
                 </label>
               </div>
             </div>
             <div>
-              <label style="display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:10px;">Week starts on</label>
-              <div style="display:flex;gap:16px;">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                  <input type="radio" name="userProfileWeekStartsOn" value="monday" id="userProfileWeekStartsOnMonday" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
-                  <span style="font-size:14px;color:#111827;">Monday</span>
+              <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Week starts on</label>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                  <input type="radio" name="userProfileWeekStartsOn" value="monday" id="userProfileWeekStartsOnMonday" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
+                  <span style="font-size:12px;color:#111827;">Monday</span>
                 </label>
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                  <input type="radio" name="userProfileWeekStartsOn" value="sunday" id="userProfileWeekStartsOnSunday" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
-                  <span style="font-size:14px;color:#111827;">Sunday</span>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                  <input type="radio" name="userProfileWeekStartsOn" value="sunday" id="userProfileWeekStartsOnSunday" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
+                  <span style="font-size:12px;color:#111827;">Sunday</span>
                 </label>
               </div>
             </div>
             <div>
-              <label style="display:block;font-size:14px;font-weight:500;color:#111827;margin-bottom:8px;">Default screen</label>
-              <select id="userProfileDefaultScreen" style="width:100%;max-width:300px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
+              <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Default screen</label>
+              <select id="userProfileDefaultScreen" style="width:100%;max-width:280px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:#fff;cursor:pointer;">
                 <option value="queue">Queue</option>
                 <option value="tasks">Tasks</option>
               </select>
             </div>
             <div>
-              <label for="userProfileSalonTimeZone" style="display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px;">Salon timezone</label>
-              <div style="font-size:12px;color:#6b7280;margin-bottom:8px;line-height:1.45;">Calendar date for the business (birthday reminders, “today”). Auto uses this device’s timezone.</div>
-              <select id="userProfileSalonTimeZone" style="width:100%;max-width:420px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
+              <label for="userProfileSalonTimeZone" style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">Salon timezone</label>
+              <div style="font-size:11px;color:#6b7280;margin-bottom:6px;line-height:1.4;">Calendar date for the business (birthday reminders, “today”). Auto uses this device’s timezone.</div>
+              <select id="userProfileSalonTimeZone" style="width:100%;max-width:380px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:#fff;cursor:pointer;">
                 <option value="">Auto (this device)</option>
                 <optgroup label="UTC">
                   <option value="Etc/UTC">UTC</option>
@@ -2224,14 +2275,14 @@ dialog footer button, .code-dialog footer button {
                 </optgroup>
               </select>
             </div>
-            <div id="userProfileStaffCallTemplatesSection" style="display:none;border-top:1px solid var(--border);padding-top:24px;">
-              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
-                <h4 style="margin:0;font-size:16px;font-weight:600;color:#111827;">Staff Call Messages</h4>
-                <div style="font-size:13px;color:#6b7280;line-height:1.5;">Salon-wide messages for calls sent to technicians from Available and In Service.</div>
+            <div id="userProfileStaffCallTemplatesSection" style="display:none;border-top:1px solid var(--border);padding-top:14px;">
+              <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
+                <h4 style="margin:0;font-size:13px;font-weight:600;color:#374151;">Staff Call Messages</h4>
+                <div style="font-size:11px;color:#6b7280;line-height:1.45;">Salon-wide messages for calls sent to technicians from Available and In Service.</div>
               </div>
-              <div id="userProfileStaffCallTemplatesBox" style="display:flex;flex-direction:column;gap:14px;"></div>
-              <div style="display:flex;justify-content:flex-end;margin-top:14px;">
-                <button id="userProfileSaveStaffCallTemplates" type="button" style="padding:10px 16px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">Save Staff Call Messages</button>
+              <div id="userProfileStaffCallTemplatesBox" style="display:flex;flex-direction:column;gap:10px;"></div>
+              <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+                <button id="userProfileSaveStaffCallTemplates" type="button" style="padding:6px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:12px;font-weight:600;cursor:pointer;">Save Staff Call Messages</button>
               </div>
             </div>
           </div>
@@ -10937,16 +10988,17 @@ function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverag
           <span class="ff-shift-chevron" aria-hidden="true">▼</span>
         </button>
         <div data-${attrPrefix}-shift-panel="${day.value}" style="display:none;padding:10px 12px 12px;background:#fafafa;border-top:1px solid #e5e7eb;">
+          <p style="margin:0 0 8px 0;font-size:10px;line-height:1.4;color:#6b7280;">Each row is a time window with <strong>minimum</strong> staff per column. If two rows overlap, we use the <strong>higher</strong> number in each column (not added together).</p>
           <div style="display:flex;align-items:flex-end;gap:6px;padding:0 0 6px 0;font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.02em;flex-wrap:nowrap;width:100%;box-sizing:border-box;">
             <div style="flex:1 1 108px;min-width:0;text-align:left;">Start</div>
             <div style="flex:1 1 108px;min-width:0;text-align:left;">End</div>
-            <div style="flex:0 0 52px;text-align:center;">Mgr</div>
-            <div style="flex:0 0 52px;text-align:center;">Asst mgr</div>
-            <div style="flex:0 0 64px;text-align:center;">Svc prov</div>
+            <div style="flex:0 0 52px;text-align:center;" title="Full manager or admin (not assistant manager)">Mgr</div>
+            <div style="flex:0 0 52px;text-align:center;" title="Assistant Manager">Asst.&nbsp;Mgr</div>
+            <div style="flex:0 0 64px;text-align:center;" title="Service providers (technicians)">Svc&nbsp;prov</div>
             <div style="flex:0 0 76px;min-width:76px;" aria-hidden="true"></div>
           </div>
           <div data-${attrPrefix}-shift-container="${day.value}"></div>
-          <button type="button" data-${attrPrefix}-shift-add="${day.value}" style="margin-top:8px;padding:6px 12px;font-size:11px;font-weight:600;border:1px dashed #c4b5fd;background:#fff;color:#6d28d9;border-radius:8px;cursor:pointer;">+ Add segment</button>
+          <button type="button" data-${attrPrefix}-shift-add="${day.value}" title="Add another time window for this day" style="margin-top:8px;padding:6px 12px;font-size:11px;font-weight:600;border:1px dashed #c4b5fd;background:#fff;color:#6d28d9;border-radius:8px;cursor:pointer;">+ Add shift</button>
         </div>
       </div>
     `;
@@ -11289,14 +11341,14 @@ function renderUserProfileStaffCallMessageSettings() {
   const timeoutUi = getStaffCallTimeoutUiValue(settings.staffCallTimeoutSeconds);
 
   const timeoutCard = document.createElement("div");
-  timeoutCard.style.cssText = "padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;display:flex;flex-direction:column;gap:10px;";
+  timeoutCard.style.cssText = "padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;display:flex;flex-direction:column;gap:8px;";
 
   const timeoutTitle = document.createElement("div");
-  timeoutTitle.style.cssText = "font-size:13px;font-weight:700;color:#111827;";
+  timeoutTitle.style.cssText = "font-size:12px;font-weight:700;color:#111827;";
   timeoutTitle.textContent = "Call timeout";
 
   const timeoutDescription = document.createElement("div");
-  timeoutDescription.style.cssText = "font-size:12px;color:#6b7280;line-height:1.5;";
+  timeoutDescription.style.cssText = "font-size:11px;color:#6b7280;line-height:1.45;";
   timeoutDescription.textContent = "Controls how long the call stays on the technician screen and when admin sees No response.";
 
   const timeoutLabel = document.createElement("label");
@@ -11305,7 +11357,7 @@ function renderUserProfileStaffCallMessageSettings() {
 
   const timeoutSelect = document.createElement("select");
   timeoutSelect.id = "userProfileStaffCallTimeoutSeconds";
-  timeoutSelect.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+  timeoutSelect.style.cssText = "height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
   STAFF_CALL_TIMEOUT_OPTIONS.forEach((option) => {
     const optionEl = document.createElement("option");
     optionEl.value = String(option.value);
@@ -11330,11 +11382,11 @@ function renderUserProfileStaffCallMessageSettings() {
   customTimeoutInput.min = "1";
   customTimeoutInput.step = "1";
   customTimeoutInput.value = timeoutUi.customValue || "1";
-  customTimeoutInput.style.cssText = "width:110px;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+  customTimeoutInput.style.cssText = "width:100px;height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
 
   const customTimeoutUnit = document.createElement("select");
   customTimeoutUnit.id = "userProfileStaffCallTimeoutCustomUnit";
-  customTimeoutUnit.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+  customTimeoutUnit.style.cssText = "height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
   [
     { value: "seconds", label: "Seconds" },
     { value: "minutes", label: "Minutes" }
@@ -11347,7 +11399,7 @@ function renderUserProfileStaffCallMessageSettings() {
   });
 
   const customTimeoutHint = document.createElement("div");
-  customTimeoutHint.style.cssText = "font-size:12px;color:#6b7280;";
+  customTimeoutHint.style.cssText = "font-size:11px;color:#6b7280;";
   customTimeoutHint.textContent = "Custom range: 10 seconds to 60 minutes.";
 
   timeoutSelect.addEventListener("change", () => {
@@ -11375,19 +11427,19 @@ function renderUserProfileStaffCallMessageSettings() {
     const template = settings.staffCallTemplates[sectionConfig.key];
     const presets = STAFF_CALL_TEMPLATE_PRESETS[sectionConfig.key] || [];
     const card = document.createElement("div");
-    card.style.cssText = "padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;display:flex;flex-direction:column;gap:10px;";
+    card.style.cssText = "padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;display:flex;flex-direction:column;gap:8px;";
 
     const title = document.createElement("div");
-    title.style.cssText = "font-size:13px;font-weight:700;color:#111827;";
+    title.style.cssText = "font-size:12px;font-weight:700;color:#111827;";
     title.textContent = sectionConfig.label;
 
     const description = document.createElement("div");
-    description.style.cssText = "font-size:12px;color:#6b7280;line-height:1.5;";
+    description.style.cssText = "font-size:11px;color:#6b7280;line-height:1.45;";
     description.textContent = sectionConfig.description;
 
     const presetSelect = document.createElement("select");
     presetSelect.id = `userProfileStaffCallPreset_${sectionConfig.key}`;
-    presetSelect.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+    presetSelect.style.cssText = "height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
     presets.forEach((preset) => {
       const option = document.createElement("option");
       option.value = preset.id;
@@ -11406,14 +11458,14 @@ function renderUserProfileStaffCallMessageSettings() {
     messageInput.id = `userProfileStaffCallMessage_${sectionConfig.key}`;
     messageInput.value = template.message;
     messageInput.maxLength = 90;
-    messageInput.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+    messageInput.style.cssText = "height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
 
     const detailInput = document.createElement("input");
     detailInput.type = "text";
     detailInput.id = `userProfileStaffCallDetail_${sectionConfig.key}`;
     detailInput.value = template.detail;
     detailInput.maxLength = 140;
-    detailInput.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+    detailInput.style.cssText = "height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
 
     function applyTemplate(nextTemplate) {
       const normalized = normalizeStaffCallTemplateEntry(sectionConfig.key, nextTemplate);
@@ -11446,7 +11498,7 @@ function renderUserProfileStaffCallMessageSettings() {
     const resetBtn = document.createElement("button");
     resetBtn.type = "button";
     resetBtn.textContent = "Reset to default";
-    resetBtn.style.cssText = "padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;align-self:flex-end;";
+    resetBtn.style.cssText = "padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-size:11px;font-weight:600;cursor:pointer;align-self:flex-end;";
     resetBtn.addEventListener("click", () => applyTemplate(presets[0]));
 
     const presetLabel = document.createElement("label");
@@ -22822,25 +22874,13 @@ function initializeAppsPanel() {
         const labels = ['Details', 'Schedule', 'Locations', 'Notifications', 'Permissions'];
         navEl.innerHTML = tabs.map(function(tab, idx) {
           const isActive = currentTab === tab;
-          return `<button class="staff-nav-item${isActive ? ' is-active' : ''}" data-tab="${tab}" style="width:100%;padding:8px 10px;min-height:36px;background:${isActive ? 'linear-gradient(90deg, #9d68b9, #ff9580)' : 'transparent'};border:none;border-radius:6px;color:${isActive ? '#fff' : '#111827'};font-weight:${isActive ? '600' : '400'};font-size:12px;cursor:pointer;text-align:left;transition:all 0.2s;">${labels[idx]}</button>`;
+          return `<button type="button" class="staff-nav-item${isActive ? ' is-active' : ''}" data-tab="${tab}" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;transition:background 0.15s ease,color 0.15s ease;">${labels[idx]}</button>`;
         }).join('');
         
-        // Wire up navigation clicks and hover effects
         navEl.querySelectorAll('.staff-nav-item').forEach(function(btn) {
           btn.onclick = function() {
             const tab = btn.getAttribute('data-tab');
             switchTab(tab);
-          };
-          // Add hover effect (handled by CSS for active, inline for inactive)
-          btn.onmouseenter = function() {
-            if (!btn.classList.contains('is-active')) {
-              btn.style.background = '#f3f4f6';
-            }
-          };
-          btn.onmouseleave = function() {
-            if (!btn.classList.contains('is-active')) {
-              btn.style.background = 'transparent';
-            }
           };
         });
       }
@@ -22866,16 +22906,16 @@ function initializeAppsPanel() {
         const btnTab = btn.getAttribute('data-tab');
         if (btnTab === tab) {
           btn.classList.add('is-active');
-          btn.style.background = 'linear-gradient(90deg, #9d68b9, #ff9580)';
-          btn.style.backgroundImage = 'linear-gradient(90deg, #9d68b9, #ff9580)';
-          btn.style.color = '#fff';
-          btn.style.fontWeight = '600';
+          btn.style.background = '';
+          btn.style.backgroundImage = '';
+          btn.style.color = '';
+          btn.style.fontWeight = '';
         } else {
           btn.classList.remove('is-active');
-          btn.style.background = 'transparent';
-          btn.style.backgroundImage = 'none';
-          btn.style.color = '#111827';
-          btn.style.fontWeight = '400';
+          btn.style.background = '';
+          btn.style.backgroundImage = '';
+          btn.style.color = '';
+          btn.style.fontWeight = '';
         }
       });
     }
@@ -25723,16 +25763,12 @@ function initializeUserProfileMenu() {
   function handleMenuClick(section) {
     // Expose for external use
     window.__ff_handleMenuClick = handleMenuClick;
-    // Update menu item active states
+    // Update menu item active states (purple tint via .user-profile-menu-item--active; see CSS)
     menuItems.forEach(item => {
       if (item.dataset.section === section) {
-        item.style.background = '#f3f4f6';
-        item.style.color = '#111827';
-        item.style.fontWeight = '500';
+        item.classList.add('user-profile-menu-item--active');
       } else {
-        item.style.background = 'none';
-        item.style.color = '#6b7280';
-        item.style.fontWeight = 'normal';
+        item.classList.remove('user-profile-menu-item--active');
       }
     });
     
@@ -34278,18 +34314,18 @@ function hookSettingsGuard_DISABLED(){
           </button>
         </div>
         <!-- Admins Section -->
-        <div style="padding:0 16px 12px 16px;border-top:1px solid var(--border);padding-top:12px;">
-          <h3 id="staffAdminsHeader" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Admins</h3>
+        <div class="staff-sidebar-section" style="padding:0 16px 12px 16px;border-top:1px solid var(--border);padding-top:12px;">
+          <h3 id="staffAdminsHeader" class="staff-sidebar-section-title" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Admins</h3>
           <div id="staffAdminsList" style="display:flex;flex-direction:column;gap:4px;"></div>
         </div>
         <!-- Managers Section -->
-        <div style="padding:0 16px 12px 16px;border-top:1px solid var(--border);margin-top:4px;padding-top:12px;">
-          <h3 id="staffManagersHeader" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Managers</h3>
+        <div class="staff-sidebar-section" style="padding:0 16px 12px 16px;border-top:1px solid var(--border);margin-top:4px;padding-top:12px;">
+          <h3 id="staffManagersHeader" class="staff-sidebar-section-title" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Managers</h3>
           <div id="staffManagersList" style="display:flex;flex-direction:column;gap:4px;"></div>
         </div>
         <!-- Technicians Section -->
-        <div style="padding:0 16px 12px 16px;border-top:1px solid var(--border);margin-top:4px;padding-top:12px;">
-          <h3 id="staffTechniciansHeader" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Service Providers</h3>
+        <div class="staff-sidebar-section" style="padding:0 16px 12px 16px;border-top:1px solid var(--border);margin-top:4px;padding-top:12px;">
+          <h3 id="staffTechniciansHeader" class="staff-sidebar-section-title" style="margin:0 0 6px 0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;">Service Providers</h3>
           <div id="staffTechniciansList" style="display:flex;flex-direction:column;gap:4px;"></div>
         </div>
         <!-- Show Archived Staff Toggle -->
@@ -34483,7 +34519,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
-  <script type="module" src="/schedule-ui.js?v=20260409_schedule_ultra_compact"></script>
+  <script type="module" src="/schedule-ui.js?v=20260409_schedule_settings_normal_layout"></script>
   <script type="module" src="/inbox.js?v=20260417_inbox_title_far_side"></script>
   <script type="module" src="/chat.js?v=20260416_chat_hide_media"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
@@ -35270,9 +35306,22 @@ function hookSettingsGuard_DISABLED(){
 </div>
 
 <!-- Schedule Preview Screen -->
+<style>
+  /* Plain title look — no purple/underline on hover; neutral focus ring for keyboard only */
+  #scheduleScreenOpenSettingsBtn:hover {
+    color: #111827;
+    text-decoration: none;
+    background: none;
+  }
+  #scheduleScreenOpenSettingsBtn:focus-visible {
+    color: #111827;
+    outline: 2px solid #cbd5e1;
+    outline-offset: 3px;
+  }
+</style>
 <div id="scheduleScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f8fafc;z-index:300;flex-direction:column;overflow:hidden;">
   <div style="display:flex;flex-direction:column;gap:8px;padding:12px 16px;border-bottom:1px solid #e5e7eb;background:#fff;">
-    <div style="font-size:16px;font-weight:700;color:#111827;line-height:1.2;">Schedule</div>
+    <button type="button" id="scheduleScreenOpenSettingsBtn" title="Business hours, shift segments &amp; coverage (Settings → Schedule)" aria-label="Open schedule settings" style="font-size:16px;font-weight:700;color:#111827;line-height:1.2;border:none;background:none;padding:0;margin:0;cursor:pointer;text-align:left;font:inherit;max-width:100%;align-self:flex-start;">Schedule</button>
     <div style="width:100%;min-width:0;box-sizing:border-box;padding-bottom:2px;">
     <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:28px;row-gap:10px;width:100%;">
       <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0;">
