@@ -2740,11 +2740,14 @@ function showRequestDetails(requestId) {
     const badgeBg = isSoon ? '#fef3c7' : '#fee2e2';
     const badgeColor = isSoon ? '#92400e' : '#991b1b';
     const msg = (request.message || rd.message || '').trim();
+    const docAlertMgmtNote = isManager
+      ? `<span style="font-size:11px;color:#6b7280;">${he ? 'העובד לא קיבל התראה · נראה למנהלים בלבד' : 'Employee not notified · managers only'}</span>`
+      : '';
     docAlertPanelHtml = `
     <div style="${panelStyle}">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
         <span style="display:inline-block;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;background:${badgeBg};color:${badgeColor};">${escapeHtml(badgeLabel)}</span>
-        <span style="font-size:11px;color:#6b7280;">${he ? 'העובד לא קיבל התראה · נראה למנהלים בלבד' : 'Employee not notified · managers only'}</span>
+        ${docAlertMgmtNote}
       </div>
       <p style="margin:0 0 12px;font-size:15px;font-weight:600;color:#111827;line-height:1.45;">${escapeHtml(ffDocAlertHumanSummary(request))}</p>
       <p style="margin:0 0 14px;font-size:13px;color:#4b5563;line-height:1.5;">${escapeHtml(ffDocAlertWhatToDoLine())}</p>
@@ -2902,9 +2905,14 @@ function showRequestDetails(requestId) {
       </div>
     `;
   } else if (isManager && isRecipient && request.status === 'open' && isDocAlert) {
+    const docAlertBtnBase =
+      'display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:6px 12px;font-size:12px;font-weight:600;border-radius:999px;line-height:1.2;font-family:inherit;box-sizing:border-box;white-space:nowrap;';
+    const docAlertBtnOutline = `${docAlertBtnBase}background:#fff;color:#374151;border:1px solid #d1d5db;cursor:pointer;`;
+    const docAlertBtnChat = `${docAlertBtnBase}cursor:pointer;border:1px solid #7c3aed;background:#ede9fe;color:#5b21b6;touch-action:manipulation;`;
+    const docAlertBtnDone = `${docAlertBtnBase}background:#7c3aed;color:#fff;border:none;cursor:pointer;`;
     const sid = ffDocAlertStaffId(request);
     const openStaffBtn = sid && typeof window.openStaffMembersModal === 'function'
-      ? `<button type="button" onclick="openDocumentAlertStaffMember(${JSON.stringify(sid)})" style="flex:1;min-width:0;padding:12px 14px;background:#fff;color:#111827;border:1px solid #d1d5db;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
+      ? `<button type="button" onclick="openDocumentAlertStaffMember(${JSON.stringify(sid)})" style="${docAlertBtnOutline}">
           ${ffDocAlertIsHebrewUI() ? 'פתח עובד' : 'Open Staff Member'}
         </button>`
       : '';
@@ -2913,18 +2921,24 @@ function showRequestDetails(requestId) {
       documentType: (rd.documentType || request.documentType || '').trim(),
       documentId: (rd.documentId || request.documentId || '').trim(),
     };
-    const renewBtn = renewPayload.staffId
-      ? `<button type="button" onclick="ffOpenDocumentRenewalFromAlert(${JSON.stringify(renewPayload).replace(/</g, '\\u003c')})" style="flex:1;min-width:0;padding:12px 14px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
-          ${ffDocAlertIsHebrewUI() ? 'בקש מסמך חדש' : 'Request new document'}
+    const chatPayload = {
+      salonId: currentUserProfile.salonId,
+      staffId: renewPayload.staffId,
+      documentId: renewPayload.documentId,
+    };
+    const chatBtn =
+      renewPayload.staffId && renewPayload.documentId
+        ? `<button type="button" onclick="ffDocAlertSendChatReminder(${JSON.stringify(chatPayload).replace(/</g, '\\u003c')})" style="${docAlertBtnChat}" title="${ffDocAlertIsHebrewUI() ? 'שליחת תזכורת בצ׳אט לעובד' : 'Send this staff member a chat reminder'}">
+          ${ffDocAlertIsHebrewUI() ? 'שלח תזכורת בצ׳אט' : 'Send chat reminder'}
         </button>`
-      : '';
+        : '';
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">${ffDocAlertIsHebrewUI() ? 'פעולות' : 'Actions'}</h3>
-        <div style="display:flex;align-items:stretch;gap:10px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           ${openStaffBtn}
-          ${renewBtn}
-          <button type="button" onclick="markBirthdayReminderDone('${requestId}')" style="flex:1;min-width:0;padding:12px 14px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
+          ${chatBtn}
+          <button type="button" onclick="markBirthdayReminderDone('${requestId}')" style="${docAlertBtnDone}">
             ✓ ${ffDocAlertIsHebrewUI() ? 'סמן כבוצע וארכב' : 'Mark done &amp; archive'}
           </button>
         </div>
