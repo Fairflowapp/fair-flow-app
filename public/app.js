@@ -1225,6 +1225,14 @@ async function loadUserRoleAndShowView(user) {
             return undefined;
           })
           .catch((e) => console.warn("[Birthday reminders]", e));
+        import("./staff-doc-expiry-inbox.js?v=20260411_salon30")
+          .then((m) => {
+            if (typeof m.runStaffDocExpiryInboxRemindersOnce === "function") {
+              return m.runStaffDocExpiryInboxRemindersOnce();
+            }
+            return undefined;
+          })
+          .catch((e) => console.warn("[Staff doc expiry Inbox]", e));
       }
       window.ffRunBirthdayChatRemindersSoon = ffRunBirthdayChatRemindersOnce;
       if (window.__ffBirthdayInterval) {

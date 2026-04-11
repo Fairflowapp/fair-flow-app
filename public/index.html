@@ -2174,6 +2174,11 @@ dialog footer button, .code-dialog footer button {
               <button type="button" id="ffClearBirthdaySentFlagsBtn" class="btn-mini" style="display:block;margin-top:8px;font-size:11px;padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;">Reset “sent this year” (all staff)</button>
               <div style="font-size:11px;color:#9ca3af;margin-top:4px;">For testing if reminders stopped firing.</div>
             </div>
+            <div style="padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+              <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Staff document expiry (Inbox)</div>
+              <div style="font-size:11px;color:#6b7280;margin-bottom:6px;line-height:1.4;">When a <strong>licensed / approved</strong> staff document reaches <strong>exactly 30 calendar days</strong> before its expiration date (by <strong>salon timezone</strong>), each owner / admin / manager gets an automatic <strong>Inbox → Team → Open</strong> row — same idea as birthday reminders. Runs about every 5 minutes while the app is open; a daily server job also backs this up.</div>
+              <div style="font-size:11px;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:6px 8px;line-height:1.4;">Deduped per document: once sent, it won’t repeat until the document is replaced or the flag is cleared in Firestore.</div>
+            </div>
             <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px;">
               <div>
                 <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:2px;">Task reminders</div>
