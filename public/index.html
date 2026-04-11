@@ -21267,7 +21267,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260416_chat_hide_media');
+            const m = await import('/chat.js?v=20260408_inbox_upload_deeplink');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -34556,16 +34556,16 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260411_chat_reminder_attrfix"></script>
+  <script type="module" src="/app.js?v=20260408_inbox_upload_deeplink"></script>
   <script type="module" src="/schedule-helpers.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-ui.js?v=20260412_app_js_unify"></script>
-  <script type="module" src="/inbox.js?v=20260408_doc_types_unified"></script>
-  <script type="module" src="/chat.js?v=20260408_chat_toast_dedupe"></script>
+  <script type="module" src="/inbox.js?v=20260408_inbox_upload_deeplink"></script>
+  <script type="module" src="/chat.js?v=20260408_inbox_upload_deeplink"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/staff-documents.js?v=20260408_conv_skip_setdoc"></script>
+  <script type="module" src="/staff-documents.js?v=20260408_inbox_upload_deeplink"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260312_staffcall11"></script>
   <script type="module" src="/settings-cloud.js?v=20260412_app_js_unify"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>

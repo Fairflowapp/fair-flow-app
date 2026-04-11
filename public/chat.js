@@ -18,7 +18,7 @@ import {
   onSnapshot, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260411_chat_reminder_attrfix";
+import { db, auth } from "./app.js?v=20260408_inbox_upload_deeplink";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let chatUserProfile    = null;
@@ -45,6 +45,19 @@ let chatFlowAnswers    = [];     // during wizard: [{ stepId, prompt, optionId, 
 const isAdmin   = r => ['admin','owner'].includes((r||'').toLowerCase());
 const isMgrPlus = r => ['manager','admin','owner'].includes((r||'').toLowerCase());
 const escHtml   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const escapeAttr = s => String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+/** Plain text with https URLs → safe HTML with clickable links (expiry reminders, etc.). */
+function linkifyMessageHtml(raw) {
+  const s = String(raw ?? '');
+  const parts = s.split(/(https?:\/\/[^\s]+)/g);
+  return parts.map(p => {
+    if (/^https?:\/\//.test(p)) {
+      const href = escapeAttr(p);
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;word-break:break-all;">${escHtml(p)}</a>`;
+    }
+    return escHtml(p);
+  }).join('');
+}
 const roleLabel = r => ({technician:'Service Provider',manager:'Manager',admin:'Admin',owner:'Owner'}[(r||'').toLowerCase()] || r || '');
 const buildConvId = (a, b) => [a, b].sort().join('__');
 
@@ -362,7 +375,7 @@ function renderConversation(convId) {
           ${!mine ? `<span class="cb-sender-name">${escHtml(ev.senderName||'Unknown')} · ${roleLabel(ev.senderRole)}</span>` : ''}
           <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}">
             <div class="cb-title">${escHtml(ev.title||'')}</div>
-            ${ev.message ? `<div class="cb-body">${escHtml(ev.message)}</div>` : ''}
+            ${ev.message ? `<div class="cb-body">${linkifyMessageHtml(ev.message)}</div>` : ''}
           </div>
           <span class="cb-time">${fmtTime(ev.sentAt)}</span>
         </div>

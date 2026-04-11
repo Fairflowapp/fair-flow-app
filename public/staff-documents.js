@@ -28,7 +28,7 @@ import {
   getDownloadURL,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
-import { db, auth, storage } from "./app.js?v=20260411_chat_reminder_attrfix";
+import { db, auth, storage } from "./app.js?v=20260408_inbox_upload_deeplink";
 
 // --- Phase 2: Inbox → staff /documents sync (approve / reject) ---
 
@@ -1004,7 +1004,24 @@ async function ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId })
   const daysUntil = expDate ? calendarDaysUntilExpiry(expDate.getTime()) : 0;
   const dayLabel = daysUntil === 1 ? "day" : "days";
   const title = `${docType} — expiring soon`;
-  const message = `Your ${docType} is expiring in ${daysUntil} ${dayLabel}. Please upload a new version through Inbox (Requests → Upload a Document).`;
+  let uploadLink = "";
+  try {
+    const origin =
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "https://fairflowapp-db841.web.app";
+    const u = new URL(origin);
+    u.pathname = "/";
+    u.searchParams.set("ffInboxUpload", "1");
+    u.searchParams.set("docType", docType);
+    u.searchParams.set("renewForDoc", did);
+    uploadLink = u.toString();
+  } catch (e) {
+    console.warn("[staff-documents] upload deep link", e);
+  }
+  const message =
+    `Your ${docType} is expiring in ${daysUntil} ${dayLabel}. Please upload a new version.` +
+    (uploadLink ? `\n\nTap to open upload (same tab or new tab): ${uploadLink}` : "");
 
   const senderName =
     trimStr(userSnap.data()?.name || userSnap.data()?.displayName) || "Manager";

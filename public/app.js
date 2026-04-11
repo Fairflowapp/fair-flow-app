@@ -1171,6 +1171,16 @@ async function loadUserRoleAndShowView(user) {
     }
 
     showMainAppForRole(role);
+
+    setTimeout(() => {
+      try {
+        if (typeof window.ffTryConsumeInboxUploadDeepLink === "function") {
+          window.ffTryConsumeInboxUploadDeepLink();
+        }
+      } catch (e) {
+        console.warn("[app] inbox upload deep link", e);
+      }
+    }, 400);
     
     // Reinitialize all buttons after view is shown
     if (role === "owner") {
@@ -1310,6 +1320,7 @@ onAuthStateChanged(auth, async (user) => {
         window.__ffBirthdayInterval = null;
       }
       window.ffRunBirthdayChatRemindersSoon = null;
+      window.__ffInboxUploadConsumed = false;
     }
     try {
       if (window.__ff_avatarUnsub) {

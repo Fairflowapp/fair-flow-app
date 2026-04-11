@@ -26,7 +26,7 @@ import {
 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth, storage } from "./app.js?v=20260411_chat_reminder_attrfix";
+import { db, auth, storage } from "./app.js?v=20260408_inbox_upload_deeplink";
 import {
   ffSyncStaffDocumentOnInboxApprove,
   ffSyncStaffDocumentOnInboxReject,
@@ -257,7 +257,7 @@ function getCreateRequestSelectedRecipients() {
 // =====================
 // Navigation
 // =====================
-export function goToInbox() {
+export function goToInbox(onReady) {
   console.log('[Inbox] Opening inbox');
 
   // Staff Members modal uses z-index above main screens — close it so the Inbox view is actually visible
@@ -308,6 +308,13 @@ export function goToInbox() {
         loadInboxItems();
         // Show content when UI is ready and loading has started
         if (inboxContent) inboxContent.style.opacity = '1';
+        if (typeof onReady === 'function') {
+          try {
+            onReady();
+          } catch (e) {
+            console.warn('[Inbox] goToInbox onReady', e);
+          }
+        }
       });
     });
   });
@@ -1760,6 +1767,23 @@ window.selectRequestType = async function(type) {
     const emailEl = document.getElementById('doc_req_email');
     if (emailEl && auth.currentUser?.email) emailEl.value = auth.currentUser.email;
   }
+  if (type === 'document_upload') {
+    const p = window.__ffDocUploadPrefill;
+    if (p) {
+      if (p.documentType) {
+        const sel = document.getElementById('doc_up_type');
+        const val = String(p.documentType || '').trim();
+        if (sel && val && Array.from(sel.options).some((o) => o.value === val)) {
+          sel.value = val;
+        }
+      }
+      if (p.renewForDocId) {
+        const hid = document.getElementById('doc_up_renew_for_doc_id');
+        if (hid) hid.value = String(p.renewForDocId).trim();
+      }
+    }
+    window.__ffDocUploadPrefill = null;
+  }
   if (type === 'document_renewal_request') {
     const p = window.__ffDocRenewalPrefill;
     if (p && (p.staffId || p.documentType || p.documentId)) {
@@ -2059,6 +2083,7 @@ function createRequestForm(type) {
     `;
   } else if (type === 'document_upload') {
     fieldsContainer.innerHTML = `
+      <input type="hidden" id="doc_up_renew_for_doc_id" value="" />
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Document type</label>
         <select id="doc_up_type" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
@@ -2393,6 +2418,7 @@ async function submitRequest(type) {
     } else if (type === 'document_upload') {
       const documentType = document.getElementById('doc_up_type')?.value;
       const expirationDate = document.getElementById('doc_up_expiry')?.value || null;
+      const renewForDocId = (document.getElementById('doc_up_renew_for_doc_id')?.value || '').trim();
       const fileInput = document.getElementById('doc_up_file');
       const notes = document.getElementById('doc_up_notes')?.value?.trim() || null;
       const salonId = currentUserProfile.salonId;
@@ -2424,6 +2450,7 @@ async function submitRequest(type) {
         fileName: file.name,
         notes,
         documentOwnerStaffId: ownerStaffId,
+        ...(renewForDocId ? { staffDocumentId: renewForDocId } : {}),
       };
       
     } else if (type === 'supplies') {
@@ -3742,6 +3769,45 @@ window.deleteArchivedRequest = async function(requestId) {
     showToast(`Error: ${error.message}`, 'error');
   }
 };
+
+// =====================
+// Deep link: ?ffInboxUpload=1&docType=…&renewForDoc=… — open Inbox → New Request → Upload a Document
+// =====================
+function ffTryConsumeInboxUploadDeepLink() {
+  if (window.__ffInboxUploadConsumed) return;
+  const sp = new URLSearchParams(window.location.search);
+  if (sp.get('ffInboxUpload') !== '1') return;
+  window.__ffInboxUploadConsumed = true;
+  const docType = String(sp.get('docType') || '').trim();
+  const renewForDoc = String(sp.get('renewForDoc') || '').trim();
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('ffInboxUpload');
+    url.searchParams.delete('docType');
+    url.searchParams.delete('renewForDoc');
+    const qs = url.searchParams.toString();
+    window.history.replaceState({}, '', url.pathname + (qs ? '?' + qs : '') + (url.hash || ''));
+  } catch (e) {
+    console.warn('[Inbox] strip deep link params', e);
+  }
+  window.__ffDocUploadPrefill = {
+    documentType: docType || null,
+    renewForDocId: renewForDoc || null,
+  };
+  goToInbox(() => {
+    setTimeout(() => {
+      try {
+        if (typeof window.openCreateRequestModal === 'function') window.openCreateRequestModal();
+        setTimeout(() => {
+          if (typeof window.selectRequestType === 'function') void window.selectRequestType('document_upload');
+        }, 60);
+      } catch (e) {
+        console.warn('[Inbox] open upload from deep link', e);
+      }
+    }, 120);
+  });
+}
+window.ffTryConsumeInboxUploadDeepLink = ffTryConsumeInboxUploadDeepLink;
 
 // =====================
 // Initialization
