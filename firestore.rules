@@ -43,6 +43,12 @@ service cloud.firestore {
         && userRole() in ['admin', 'owner'];
     }
 
+    // Staff /documents delete: must match archived (UI writes lowercase; tolerate casing)
+    function staffDocumentLifecycleIsArchived() {
+      return resource.data.lifecycleStatus is string
+        && resource.data.lifecycleStatus.lower() == 'archived';
+    }
+
     // Training: staffId on /users/{uid} (set when technician uses PIN / profile)
     function userStaffId() {
       return userExists() && userDocData().keys().hasAll(['staffId'])
@@ -350,7 +356,9 @@ service cloud.firestore {
             || (isTechnician(salonId) && userStaffId() == staffId)
           );
         allow create, update: if belongsToSalon(salonId) && isManager(salonId);
-        allow delete: if false;
+        // Permanent delete (UI: archived docs only); client also enforces archived
+        allow delete: if belongsToSalon(salonId) && isManager(salonId)
+          && staffDocumentLifecycleIsArchived();
       }
     }
 

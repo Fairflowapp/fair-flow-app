@@ -14,6 +14,7 @@ import {
   query,
   setDoc,
   updateDoc,
+  deleteDoc,
   onSnapshot,
   serverTimestamp,
   Timestamp,
@@ -26,6 +27,7 @@ import {
   ref as storageRef,
   uploadBytes,
   getDownloadURL,
+  deleteObject,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
 import { db, auth, storage } from "./app.js?v=20260408_inbox_upload_deeplink";
@@ -393,8 +395,8 @@ let _onDocActionClick = null;
 /** @type {Array<Record<string, unknown>> | null} */
 let _lastDocList = null;
 
-/** Staff Member > Documents filter chip (Phase 9). Default "all". */
-let _staffDocumentsFilter = "all";
+/** Staff Member > Documents filter chip (Phase 9). Default "active" (less confusing than "all"). */
+let _staffDocumentsFilter = "active";
 
 const STAFF_DOC_FILTER_IDS = new Set([
   "all",
@@ -505,8 +507,13 @@ function ffToast(msg, kind) {
 /**
  * Centered confirm dialog (matches app purple / white styling; avoids browser confirm()).
  * Resolves true if user confirms.
+ * @param {object} opts
+ * @param {boolean} [opts.destructive] — red confirm button (irreversible actions)
  */
-function ffStaffDocumentsConfirm({ title, message, confirmLabel, cancelLabel = "Cancel" }) {
+function ffStaffDocumentsConfirm({ title, message, confirmLabel, cancelLabel = "Cancel", destructive = false }) {
+  const okStyle = destructive
+    ? "padding:10px 18px;border-radius:10px;border:1px solid #b91c1c;background:#dc2626;color:#fff;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;box-shadow:0 1px 2px rgba(220,38,38,0.35);"
+    : "padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;box-shadow:0 1px 2px rgba(124,58,237,0.25);";
   return new Promise((resolve) => {
     const rid = `ffstaffdoc_confirm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const overlay = document.createElement("div");
@@ -523,9 +530,7 @@ function ffStaffDocumentsConfirm({ title, message, confirmLabel, cancelLabel = "
           <button type="button" data-ff-cancel style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">${escapeHtml(
             cancelLabel,
           )}</button>
-          <button type="button" data-ff-ok style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;box-shadow:0 1px 2px rgba(124,58,237,0.25);">${escapeHtml(
-            confirmLabel,
-          )}</button>
+          <button type="button" data-ff-ok style="${okStyle}">${escapeHtml(confirmLabel)}</button>
         </div>
       </div>`;
     const finish = (v) => {
@@ -841,6 +846,48 @@ async function ffHandleStaffDocumentActionClick(e) {
     } catch (err) {
       console.warn("[staff-documents] archive", err);
       ffToast(String(err?.message || err || "Could not archive."), "error");
+    }
+    return;
+  }
+
+  if (action === "delete_permanent") {
+    const okDel = await ffStaffDocumentsConfirm({
+      title: "Delete this document permanently?",
+      message:
+        "This will remove the document from the system and delete the stored file. There is no way to recover it. Are you sure you want to continue?",
+      confirmLabel: "Delete permanently",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+    if (!okDel) return;
+    if (!auth.currentUser) {
+      ffToast("Sign in required.", "error");
+      return;
+    }
+    try {
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        ffToast("Document not found.", "error");
+        return;
+      }
+      const d = snap.data() || {};
+      if (trimStr(String(d.lifecycleStatus || "")).toLowerCase() !== "archived") {
+        ffToast("Only archived documents can be permanently deleted. Unarchive first if this was a mistake.", "error");
+        return;
+      }
+      const storagePath = trimStr(d.storagePath || d.filePath || "");
+      if (storagePath) {
+        try {
+          await deleteObject(storageRef(storage, storagePath));
+        } catch (serr) {
+          console.warn("[staff-documents] storage delete (continuing with Firestore)", serr);
+        }
+      }
+      await deleteDoc(ref);
+      ffToast("Document deleted permanently.", "success");
+    } catch (err) {
+      console.warn("[staff-documents] delete_permanent", err);
+      ffToast(String(err?.message || err || "Could not delete document."), "error");
     }
     return;
   }
@@ -1269,7 +1316,7 @@ function badgeHtml(kind) {
 }
 
 function groupDocument(doc) {
-  const lifecycle = String(doc.lifecycleStatus || "").toLowerCase();
+  const lifecycle = trimStr(String(doc.lifecycleStatus || "")).toLowerCase();
   if (lifecycle === "archived") return "archived";
   const approval = String(doc.approvalStatus || "").toLowerCase();
   if (approval === "pending") return "pending_review";
@@ -1484,9 +1531,9 @@ function renderSearchRowHtml() {
 
 function renderListContentBody(list) {
   if (!STAFF_DOC_FILTER_IDS.has(_staffDocumentsFilter)) {
-    _staffDocumentsFilter = "all";
+    _staffDocumentsFilter = "active";
   }
-  const f = _staffDocumentsFilter || "all";
+  const f = _staffDocumentsFilter || "active";
   const q = normalizeStaffDocSearch(_staffDocumentsSearchQuery);
   const chips = renderFilterChipsHtml(f, list);
   const searchRow = renderSearchRowHtml();
@@ -1606,7 +1653,7 @@ function ensureSubscription(sid, stid) {
   _mountedKey = key;
   _mountCtx = { salonId: sid, staffId: stid };
   _lastDocList = null;
-  _staffDocumentsFilter = "all";
+  _staffDocumentsFilter = "active";
   _staffDocumentsSearchQuery = "";
 
   if (_ffBoundContainer) {
@@ -1651,7 +1698,7 @@ function renderDocumentCard(doc) {
   const approvalDisplay = formatApprovalLabel(doc.approvalStatus != null ? String(doc.approvalStatus) : "");
   const expirationDate = doc.expirationDate;
   const lifecycleRaw = doc.lifecycleStatus != null ? String(doc.lifecycleStatus) : "";
-  const lifeLower = String(doc.lifecycleStatus || "").toLowerCase();
+  const lifeLower = trimStr(String(doc.lifecycleStatus || "")).toLowerCase();
   const isArchived = lifeLower === "archived";
   const lifecycleDisplay = isArchived
     ? formatLifecycleLabel("archived")
@@ -1677,9 +1724,18 @@ function renderDocumentCard(doc) {
     badges.push(badgeHtml("archived"));
   }
 
-  const badgeRow = badges.length
-    ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center;">${badges.join("")}</div>`
+  // Pill-sized delete (same line as status badges; matches badgeHtml ~10px / 3px 9px padding)
+  const deletePillBtn = isArchived
+    ? `<button type="button" data-ff-doc-action="delete_permanent" data-doc-id="${escapeHtml(doc.id)}" title="Permanently delete this document and its file. This cannot be undone." style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.02em;line-height:1.3;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;flex-shrink:0;">Delete</button>`
     : "";
+
+  const badgeRow =
+    badges.length || deletePillBtn
+      ? `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px;">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex:1;min-width:0;">${badges.join("")}</div>
+          ${deletePillBtn}
+        </div>`
+      : "";
 
   const path = trimStr(doc.storagePath || doc.filePath || "");
   const fUrl = trimStr(doc.fileUrl || "");
@@ -1785,7 +1841,7 @@ export function ffStaffDocumentsUnmount() {
   _mountedKey = "";
   _mountCtx = { salonId: "", staffId: "" };
   _lastDocList = null;
-  _staffDocumentsFilter = "all";
+  _staffDocumentsFilter = "active";
   _staffDocumentsSearchQuery = "";
   if (_ffBoundContainer && _onDocActionClick) {
     try {
