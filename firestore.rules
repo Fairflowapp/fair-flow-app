@@ -307,6 +307,19 @@ service cloud.firestore {
             ])
           )
           ||
+          // Manager: edit nested data (type / dates) before approve — only data + updatedAt may change
+          // (Avoid field-by-field == on optional keys like staffDocumentId / decidedBy; those break when null vs missing.)
+          (
+            isManager(salonId)
+            && (resource.data.type == 'document_upload' || resource.data.type == 'document_request')
+            && (resource.data.status == 'open' || resource.data.status == 'needs_info')
+            && (
+              changedKeys().hasOnly(['data', 'updatedAt'])
+              || changedKeys().hasOnly(['data'])
+              || changedKeys().hasOnly(['updatedAt'])
+            )
+          )
+          ||
           // Any role: creator can reply when needs_info
           (
             belongsToSalon(salonId)

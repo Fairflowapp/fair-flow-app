@@ -47,6 +47,125 @@ function stripUndefined(obj) {
 }
 
 /**
+ * Shared &lt;option&gt; list for Request / Upload / Renewal / edit metadata (same values app-wide).
+ */
+export function ffStaffDocumentTypeSelectOptionsHtml() {
+  return `
+          <option value="">Select...</option>
+          <optgroup label="Employment &amp; tax">
+            <option value="I-9">I-9 (employment eligibility)</option>
+            <option value="W-2">W-2</option>
+            <option value="W-4">W-4</option>
+            <option value="1099">1099</option>
+            <option value="Employment Letter">Employment Letter</option>
+            <option value="Contract">Contract</option>
+          </optgroup>
+          <optgroup label="Identity &amp; verification">
+            <option value="Government ID">Government ID</option>
+            <option value="SSN card">SSN card</option>
+          </optgroup>
+          <optgroup label="Beauty, spa &amp; wellness (professional)">
+            <option value="Cosmetology license">Cosmetology license</option>
+            <option value="Esthetician license">Esthetician license</option>
+            <option value="Nail technician license">Nail technician license</option>
+            <option value="Barber license">Barber license</option>
+            <option value="Massage therapy license">Massage therapy license</option>
+            <option value="Salon / shop license">Salon / shop license</option>
+            <option value="Continuing education certificate">Continuing education certificate</option>
+          </optgroup>
+          <optgroup label="Coverage &amp; business">
+            <option value="Insurance">Insurance</option>
+            <option value="Liability insurance (COI)">Liability insurance (COI)</option>
+            <option value="Workers compensation">Workers compensation</option>
+          </optgroup>
+          <optgroup label="Training &amp; compliance">
+            <option value="Certification">Certification</option>
+            <option value="BBP / infection control">BBP / infection control</option>
+            <option value="OSHA / safety training">OSHA / safety training</option>
+          </optgroup>
+          <optgroup label="General">
+            <option value="License">License</option>
+            <option value="Other">Other</option>
+          </optgroup>`;
+}
+
+/** YYYY-MM-DD for &lt;input type="date"&gt; from Timestamp / string / Date. */
+export function ffExpirationTimestampToYmdInput(raw) {
+  const d = toDateMaybe(raw);
+  if (!d) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Manager-facing edit of type / title / expiration on an existing staff document (no file change).
+ */
+export async function ffUpdateStaffDocumentMetadata({ salonId, staffId, documentId, type, expirationYmd, title }) {
+  const sid = trimStr(salonId);
+  const stid = trimStr(staffId);
+  const did = trimStr(documentId);
+  const docType = trimStr(type);
+  if (!sid || !stid || !did || !docType) {
+    ffToast("Choose a document type.", "error");
+    return;
+  }
+  if (!auth.currentUser) {
+    ffToast("Sign in required.", "error");
+    return;
+  }
+  const ref = doc(db, "salons", sid, "staff", stid, "documents", did);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    ffToast("Document not found.", "error");
+    return;
+  }
+  const prev = snap.data() || {};
+  const wasArchived = trimStr(String(prev.lifecycleStatus || "")).toLowerCase() === "archived";
+
+  const expStr = expirationYmd == null ? "" : String(expirationYmd).trim();
+  const clearExp = expStr === "";
+
+  let nextTitle = trimStr(title);
+  if (!nextTitle) {
+    const fn = trimStr(prev.fileName || "");
+    nextTitle = [docType, fn].filter(Boolean).join(" — ") || docType;
+  }
+
+  /** @type {Record<string, unknown>} */
+  const payload = {
+    type: docType,
+    title: nextTitle,
+    updatedAt: serverTimestamp(),
+    updatedBy: auth.currentUser.uid,
+  };
+
+  if (clearExp) {
+    payload.expirationDate = deleteField();
+    if (!wasArchived) {
+      payload.lifecycleStatus = "active";
+    }
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(expStr)) {
+    const parsed = parseExpirationForStaffDoc(expStr);
+    if (parsed) {
+      payload.expirationDate = parsed;
+      if (!wasArchived) {
+        payload.lifecycleStatus = ffComputeLifecycleFromExpiration(parsed);
+      }
+    }
+  }
+
+  try {
+    await updateDoc(ref, payload);
+    ffToast("Document details updated.", "success");
+  } catch (err) {
+    console.warn("[staff-documents] ffUpdateStaffDocumentMetadata", err);
+    ffToast(String(err?.message || err || "Could not update document."), "error");
+  }
+}
+
+/**
  * Firestore staff id for the employee whose profile should receive this document.
  *
  * - **document_upload**: the uploader is the owner. `forStaffId` / `forUid` identify the *recipient*
@@ -409,6 +528,9 @@ const STAFF_DOC_FILTER_IDS = new Set([
 /** Phase 10: search query (raw); empty = no search filter. */
 let _staffDocumentsSearchQuery = "";
 
+/** True when signed-in user may edit document type / expiration (managers etc.). */
+let _staffDocsViewerCanEditMeta = false;
+
 let _onStaffDocSearchInput = null;
 
 const _functions = getFunctions(getApp(), "us-central1");
@@ -551,6 +673,112 @@ function ffStaffDocumentsConfirm({ title, message, confirmLabel, cancelLabel = "
     overlay.querySelector("[data-ff-ok]").onclick = () => finish(true);
     document.body.appendChild(overlay);
   });
+}
+
+async function refreshStaffDocViewerEditMeta() {
+  _staffDocsViewerCanEditMeta = false;
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  try {
+    const u = await getDoc(doc(db, "users", uid));
+    const role = String(u.data()?.role || "").toLowerCase();
+    _staffDocsViewerCanEditMeta = ["manager", "admin", "owner", "assistant_manager", "front_desk"].includes(role);
+  } catch (_) {}
+}
+
+async function ffOpenStaffDocumentEditMetadataModal(docId) {
+  const sid = trimStr(_mountCtx.salonId);
+  const stid = trimStr(_mountCtx.staffId);
+  const did = trimStr(docId);
+  if (!sid || !stid || !did) {
+    ffToast("Missing context.", "error");
+    return;
+  }
+  if (!_staffDocsViewerCanEditMeta) {
+    ffToast("Only managers can edit document details.", "error");
+    return;
+  }
+  const ref = doc(db, "salons", sid, "staff", stid, "documents", did);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    ffToast("Document not found.", "error");
+    return;
+  }
+  const prev = snap.data() || {};
+  if (trimStr(String(prev.lifecycleStatus || "")).toLowerCase() === "archived") {
+    ffToast("Unarchive this document before editing details.", "error");
+    return;
+  }
+  const rid = `ffstaffdoc_editmeta_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const overlay = document.createElement("div");
+  overlay.id = rid;
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.style.cssText =
+    "position:fixed;left:0;top:0;right:0;bottom:0;width:100%;min-height:100vh;min-height:100dvh;background:rgba(0,0,0,0.45);z-index:2147483646;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;overflow-y:auto;overflow-x:hidden;";
+  const curType = trimStr(prev.type || "");
+  const curTitle = trimStr(prev.title != null ? String(prev.title) : "");
+  const curExp = ffExpirationTimestampToYmdInput(prev.expirationDate);
+  overlay.innerHTML = `
+      <div style="background:#fff;border-radius:16px;padding:24px 26px;max-width:420px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.28);margin:auto;flex-shrink:0;">
+        <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:10px;line-height:1.3;">Edit document details</div>
+        <p style="margin:0 0 16px 0;font-size:13px;color:#6b7280;line-height:1.45;">Change type, title, or expiration. The file is not replaced.</p>
+        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Document type</label>
+        <select id="${rid}_type" style="width:100%;padding:12px;margin-bottom:12px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;color:#111827;">${ffStaffDocumentTypeSelectOptionsHtml()}</select>
+        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Title (optional)</label>
+        <input type="text" id="${rid}_title" placeholder="Auto from type if empty" style="width:100%;padding:12px;margin-bottom:12px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;" />
+        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Expiration date</label>
+        <input type="date" id="${rid}_exp" style="width:100%;padding:12px;margin-bottom:8px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;" />
+        <p style="margin:0 0 16px 0;font-size:11px;color:#9ca3af;">Clear the date to remove expiration.</p>
+        <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+          <button type="button" data-ff-cancel style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">Cancel</button>
+          <button type="button" data-ff-save style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">Save</button>
+        </div>
+      </div>`;
+  const sel = overlay.querySelector(`#${rid}_type`);
+  if (sel && curType) {
+    try {
+      sel.value = curType;
+    } catch (_) {}
+  }
+  const titInp = overlay.querySelector(`#${rid}_title`);
+  if (titInp) titInp.value = curTitle;
+  const expInp = overlay.querySelector(`#${rid}_exp`);
+  if (expInp) expInp.value = curExp;
+
+  const finish = () => {
+    try {
+      overlay.remove();
+    } catch (_) {}
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (ev) => {
+    if (ev.key === "Escape") finish();
+  };
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) finish();
+  });
+  overlay.querySelector("[data-ff-cancel]").onclick = () => finish();
+  overlay.querySelector("[data-ff-save]").onclick = async () => {
+    const ty = trimStr(overlay.querySelector(`#${rid}_type`)?.value || "");
+    const ti = trimStr(overlay.querySelector(`#${rid}_title`)?.value || "");
+    const ex = trimStr(overlay.querySelector(`#${rid}_exp`)?.value || "");
+    if (!ty) {
+      ffToast("Select a document type.", "error");
+      return;
+    }
+    await ffUpdateStaffDocumentMetadata({
+      salonId: sid,
+      staffId: stid,
+      documentId: did,
+      type: ty,
+      expirationYmd: ex,
+      title: ti,
+    });
+    finish();
+  };
+  document.body.appendChild(overlay);
 }
 
 function closePopupIfOpen(w) {
@@ -819,6 +1047,11 @@ async function ffHandleStaffDocumentActionClick(e) {
       console.warn("[staff-documents] view", err);
       ffToast(String(err?.message || err || "Could not open file."), "error");
     }
+    return;
+  }
+
+  if (action === "edit_meta") {
+    void ffOpenStaffDocumentEditMetadataModal(docId);
     return;
   }
 
@@ -1656,6 +1889,12 @@ function ensureSubscription(sid, stid) {
   _staffDocumentsFilter = "active";
   _staffDocumentsSearchQuery = "";
 
+  void refreshStaffDocViewerEditMeta().then(() => {
+    if (_mountedKey === key && _lastDocList && _ffBoundContainer) {
+      applyDocumentsSnapshot();
+    }
+  });
+
   if (_ffBoundContainer) {
     _ffBoundContainer.innerHTML = `<div style="min-height:88px;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;"><p style="margin:0;font-size:13px;color:#6b7280;">Loading documents…</p></div>`;
   }
@@ -1724,16 +1963,21 @@ function renderDocumentCard(doc) {
     badges.push(badgeHtml("archived"));
   }
 
-  // Pill-sized delete (same line as status badges; matches badgeHtml ~10px / 3px 9px padding)
+  // Pill-sized actions (same line as status badges; ~10px / 3px 9px padding)
+  const editMetaPillBtn =
+    _staffDocsViewerCanEditMeta && !isArchived
+      ? `<button type="button" data-ff-doc-action="edit_meta" data-doc-id="${escapeHtml(doc.id)}" title="Edit type, title, expiration" style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.02em;line-height:1.3;background:#faf5ff;color:#5b21b6;border:1px solid #c4b5fd;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;flex-shrink:0;">✎ Edit</button>`
+      : "";
   const deletePillBtn = isArchived
     ? `<button type="button" data-ff-doc-action="delete_permanent" data-doc-id="${escapeHtml(doc.id)}" title="Permanently delete this document and its file. This cannot be undone." style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.02em;line-height:1.3;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;flex-shrink:0;">Delete</button>`
     : "";
+  const badgeActions = [editMetaPillBtn, deletePillBtn].filter(Boolean).join("");
 
   const badgeRow =
-    badges.length || deletePillBtn
+    badges.length || badgeActions
       ? `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px;">
           <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex:1;min-width:0;">${badges.join("")}</div>
-          ${deletePillBtn}
+          ${badgeActions ? `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex-shrink:0;">${badgeActions}</div>` : ""}
         </div>`
       : "";
 
@@ -1843,6 +2087,7 @@ export function ffStaffDocumentsUnmount() {
   _lastDocList = null;
   _staffDocumentsFilter = "active";
   _staffDocumentsSearchQuery = "";
+  _staffDocsViewerCanEditMeta = false;
   if (_ffBoundContainer && _onDocActionClick) {
     try {
       _ffBoundContainer.removeEventListener("click", _onDocActionClick);

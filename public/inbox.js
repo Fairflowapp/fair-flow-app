@@ -31,6 +31,8 @@ import {
   ffSyncStaffDocumentOnInboxApprove,
   ffSyncStaffDocumentOnInboxReject,
   ffSendExpiryChatReminderForStaffDocContext,
+  ffStaffDocumentTypeSelectOptionsHtml,
+  ffExpirationTimestampToYmdInput,
 } from "./staff-documents.js";
 
 // Category order for display (Schedule → Payments → Operations → Documents → Other at end)
@@ -84,48 +86,12 @@ const LEGACY_INBOX_TYPE_INFO = {
   time_off: { id: 'time_off', icon: '🕐', label: 'Time off', description: 'Legacy request', category: 'schedule' },
 };
 
-/**
- * Shared &lt;option&gt; list for Request a Document, Upload a Document, and renewal requests.
- * Same values everywhere so renewals and uploads stay comparable (salon / spa / employment).
- */
-function ffStaffDocumentTypeSelectOptionsHtml() {
-  return `
-          <option value="">Select...</option>
-          <optgroup label="Employment &amp; tax">
-            <option value="I-9">I-9 (employment eligibility)</option>
-            <option value="W-2">W-2</option>
-            <option value="W-4">W-4</option>
-            <option value="1099">1099</option>
-            <option value="Employment Letter">Employment Letter</option>
-            <option value="Contract">Contract</option>
-          </optgroup>
-          <optgroup label="Identity &amp; verification">
-            <option value="Government ID">Government ID</option>
-            <option value="SSN card">SSN card</option>
-          </optgroup>
-          <optgroup label="Beauty, spa &amp; wellness (professional)">
-            <option value="Cosmetology license">Cosmetology license</option>
-            <option value="Esthetician license">Esthetician license</option>
-            <option value="Nail technician license">Nail technician license</option>
-            <option value="Barber license">Barber license</option>
-            <option value="Massage therapy license">Massage therapy license</option>
-            <option value="Salon / shop license">Salon / shop license</option>
-            <option value="Continuing education certificate">Continuing education certificate</option>
-          </optgroup>
-          <optgroup label="Coverage &amp; business">
-            <option value="Insurance">Insurance</option>
-            <option value="Liability insurance (COI)">Liability insurance (COI)</option>
-            <option value="Workers compensation">Workers compensation</option>
-          </optgroup>
-          <optgroup label="Training &amp; compliance">
-            <option value="Certification">Certification</option>
-            <option value="BBP / infection control">BBP / infection control</option>
-            <option value="OSHA / safety training">OSHA / safety training</option>
-          </optgroup>
-          <optgroup label="General">
-            <option value="License">License</option>
-            <option value="Other">Other</option>
-          </optgroup>`;
+/** Normalize Firestore/string date to YYYY-MM-DD for &lt;input type="date"&gt;. */
+function ffInboxYmdFromRaw(v) {
+  if (v == null || v === "") return "";
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  return ffExpirationTimestampToYmdInput(v);
 }
 
 /** Inclusive YYYY-MM-DD list — same shape schedule-availability expects for ranges / affectedDates. */
@@ -157,6 +123,9 @@ let currentUserProfile = null;
 /** Technicians: merge outgoing (createdByUid) + incoming (forUid) inbox queries. */
 let _techInboxOutgoing = [];
 let _techInboxIncoming = [];
+
+/** Automated inbox items for management ("To handle") only — never list for technicians. */
+const MANAGER_ONLY_INBOX_TYPES = new Set(["staff_birthday_reminder", "document_expiring_soon", "document_expired"]);
 
 function inboxItemActivityMs(r) {
   const la = r && r.lastActivityAt;
@@ -876,6 +845,10 @@ function renderInboxList() {
   const loadingEl = document.getElementById('inboxLoading');
 
   let requestsToShow = currentRequests;
+
+  if (role === "technician") {
+    requestsToShow = requestsToShow.filter((r) => !MANAGER_ONLY_INBOX_TYPES.has(String(r.type || "").trim()));
+  }
 
   // Client-side status filter to prevent flicker when Firestore sends intermediate snapshots
   if (inboxViewMode === 'to_handle' || role === 'technician') {
@@ -3006,6 +2979,20 @@ function showRequestDetails(requestId) {
     `;
   } else if (isManager && isRecipient && request.status === 'open') {
     const isDocRequest = request.type === 'document_request';
+    const isDocMeta = request.type === 'document_upload' || request.type === 'document_request';
+    const docMetaEditBtn = isDocMeta
+      ? `<button type="button" onclick="ffInboxOpenDocumentMetadataEdit('${requestId}')" title="Edit document type, expiration, etc. before approving" style="min-width:44px;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">✏️</button>`
+      : '';
+    const approveRow = isDocMeta
+      ? `<div style="display:flex;align-items:stretch;gap:8px;margin-bottom:12px;">
+          <button onclick="approveRequest('${requestId}')" style="flex:1;padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+            ✓ Approve
+          </button>
+          ${docMetaEditBtn}
+        </div>`
+      : `<button onclick="approveRequest('${requestId}')" style="padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;margin-bottom:12px;">
+            ✓ Approve
+          </button>`;
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Manager Actions</h3>
@@ -3024,9 +3011,7 @@ function showRequestDetails(requestId) {
             ❓ Request More Info
           </button>
           
-          <button onclick="approveRequest('${requestId}')" style="padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
-            ✓ Approve
-          </button>
+          ${approveRow}
           
           <button onclick="denyRequest('${requestId}')" style="padding:10px;border:1px solid #ef4444;background:#ef4444;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
             ✗ Deny
@@ -3038,15 +3023,27 @@ function showRequestDetails(requestId) {
   
   // Manager actions for needs_info status — only for recipient
   if (isManager && isRecipient && request.status === 'needs_info') {
+    const isDocMetaNi = request.type === 'document_upload' || request.type === 'document_request';
+    const docMetaEditBtnNi = isDocMetaNi
+      ? `<button type="button" onclick="ffInboxOpenDocumentMetadataEdit('${requestId}')" title="Edit document details" style="min-width:44px;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">✏️</button>`
+      : '';
+    const approveAnywayRow = isDocMetaNi
+      ? `<div style="display:flex;align-items:stretch;gap:8px;margin-bottom:8px;">
+          <button onclick="approveRequest('${requestId}')" style="flex:1;padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+            ✓ Approve Anyway
+          </button>
+          ${docMetaEditBtnNi}
+        </div>`
+      : `<button onclick="approveRequest('${requestId}')" style="padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;margin-bottom:8px;">
+          ✓ Approve Anyway
+        </button>`;
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Manager Actions</h3>
         <div style="font-size:13px;color:#6b7280;margin-bottom:12px;">
           Waiting for staff response...
         </div>
-        <button onclick="approveRequest('${requestId}')" style="padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;margin-bottom:8px;">
-          ✓ Approve Anyway
-        </button>
+        ${approveAnywayRow}
         <button onclick="denyRequest('${requestId}')" style="padding:10px;border:1px solid #ef4444;background:#ef4444;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;">
           ✗ Deny
         </button>
@@ -3587,6 +3584,139 @@ window.ffOpenDocumentRenewalFromAlert = function (opts) {
   if (typeof window.closeCreateRequestModal === 'function') window.closeCreateRequestModal();
   if (typeof window.openCreateRequestModal === 'function') window.openCreateRequestModal();
   if (typeof window.selectRequestType === 'function') window.selectRequestType('document_renewal_request');
+};
+
+/**
+ * Manager: edit document type / expiration on inbox item before approving (document_upload / document_request).
+ */
+window.ffInboxOpenDocumentMetadataEdit = async function (requestId) {
+  const rid = String(requestId || "").trim();
+  if (!rid || !currentUserProfile?.salonId) return;
+  const salonId = currentUserProfile.salonId;
+  const inboxRef = doc(db, `salons/${salonId}/inboxItems`, rid);
+  let snap;
+  try {
+    snap = await getDoc(inboxRef);
+  } catch (e) {
+    console.warn("[Inbox] edit metadata get", e);
+    showToast("Could not load request.", "error");
+    return;
+  }
+  if (!snap.exists()) {
+    showToast("Request not found.", "error");
+    return;
+  }
+  const item = { id: rid, ...snap.data() };
+  const t = String(item.type || "").trim();
+  if (t !== "document_upload" && t !== "document_request") {
+    showToast("Editing is only for document upload or request.", "info");
+    return;
+  }
+  const d = item.data || {};
+  const curType = String(d.documentType || "").trim();
+  let curExp = "";
+  if (t === "document_upload") {
+    curExp =
+      ffInboxYmdFromRaw(d.expirationDate) || ffInboxYmdFromRaw(d.expiryDate) || ffInboxYmdFromRaw(d.dueDate);
+  } else {
+    curExp = ffInboxYmdFromRaw(d.dueDate) || ffInboxYmdFromRaw(d.expirationDate);
+  }
+
+  const overlayRid = `ffinbox_editdoc_${Date.now()}`;
+  const overlay = document.createElement("div");
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.style.cssText =
+    "position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000000;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;overflow-y:auto;";
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 25px 50px rgba(0,0,0,0.2);">
+      <div style="font-size:18px;font-weight:700;margin-bottom:8px;color:#111827;">Edit document details</div>
+      <p style="margin:0 0 16px;font-size:13px;color:#6b7280;">Updates what will be saved to the staff profile when you approve.</p>
+      <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">Document type</label>
+      <select id="${overlayRid}_type" style="width:100%;padding:12px;margin-bottom:12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;">${ffStaffDocumentTypeSelectOptionsHtml()}</select>
+      <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">Expiration / due date</label>
+      <input type="date" id="${overlayRid}_exp" style="width:100%;padding:12px;margin-bottom:8px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;" />
+      <p style="margin:0 0 16px;font-size:11px;color:#9ca3af;">Clear the date field if not applicable.</p>
+      <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+        <button type="button" data-ff-cancel style="padding:10px 18px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;">Cancel</button>
+        <button type="button" data-ff-save style="padding:10px 18px;border-radius:8px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;">Save</button>
+      </div>
+    </div>`;
+  const sel = overlay.querySelector(`#${overlayRid}_type`);
+  if (sel && curType) {
+    try {
+      sel.value = curType;
+    } catch (_) {}
+  }
+  const expIn = overlay.querySelector(`#${overlayRid}_exp`);
+  if (expIn) expIn.value = curExp;
+
+  const remove = () => {
+    try {
+      overlay.remove();
+    } catch (_) {}
+  };
+  const onKey = (ev) => {
+    if (ev.key === "Escape") remove();
+  };
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) remove();
+  });
+  overlay.querySelector("[data-ff-cancel]").onclick = () => {
+    document.removeEventListener("keydown", onKey);
+    remove();
+  };
+  overlay.querySelector("[data-ff-save]").onclick = async () => {
+    const ty = String(sel?.value || "").trim();
+    const ex = String(expIn?.value || "").trim();
+    if (!ty) {
+      showToast("Select a document type.", "error");
+      return;
+    }
+    const merged = { ...d };
+    merged.documentType = ty;
+    if (t === "document_upload") {
+      if (ex) {
+        merged.expirationDate = ex;
+        merged.expiryDate = ex;
+        merged.dueDate = ex;
+      } else {
+        merged.expirationDate = null;
+        merged.expiryDate = null;
+        merged.dueDate = null;
+      }
+    } else {
+      if (ex) {
+        merged.dueDate = ex;
+        merged.expirationDate = ex;
+      } else {
+        merged.dueDate = null;
+        merged.expirationDate = null;
+      }
+    }
+    try {
+      await updateDoc(inboxRef, {
+        data: merged,
+        updatedAt: serverTimestamp(),
+      });
+      const fresh = await getDoc(inboxRef);
+      if (fresh.exists()) {
+        const row = { id: rid, ...fresh.data() };
+        const idx2 = currentRequests.findIndex((r) => r.id === rid);
+        if (idx2 !== -1) currentRequests[idx2] = row;
+      }
+      showToast("Details saved.", "success");
+      document.removeEventListener("keydown", onKey);
+      remove();
+      if (typeof closeRequestDetailsModal === "function") closeRequestDetailsModal();
+      showRequestDetails(rid);
+    } catch (err) {
+      console.warn("[Inbox] save document metadata", err);
+      showToast(String(err?.message || err || "Could not save."), "error");
+    }
+  };
+  document.body.appendChild(overlay);
 };
 
 window.approveRequest = async function(requestId) {
