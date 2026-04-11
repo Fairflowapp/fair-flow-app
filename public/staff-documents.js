@@ -25,7 +25,7 @@ import {
   getDownloadURL,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
-import { db, auth, storage } from "./app.js?v=20260409_index_safejson";
+import { db, auth, storage } from "./app.js?v=20260411_index_jsonsafe_full";
 
 // --- Phase 2: Inbox → staff /documents sync (approve / reject) ---
 

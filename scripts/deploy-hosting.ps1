@@ -14,6 +14,10 @@ if (-not $html.Contains("Permissions', 'Documents")) {
   Write-Error "public\index.html is missing the Staff 'Documents' tab (old file?). Fix or deploy from the correct folder. Root: $root"
 }
 
-Write-Host "OK: index.html contains Staff Documents tab." -ForegroundColor Green
+if ($html -match "JSON\.parse\(localStorage\.getItem") {
+  Write-Error "public\index.html still has JSON.parse(localStorage...) — run scripts/replace-index-localstorage-json.mjs before deploy. Root: $root"
+}
+
+Write-Host "OK: index.html contains Staff Documents tab and no raw JSON.parse(localStorage)." -ForegroundColor Green
 Write-Host "Deploying Hosting from: $root" -ForegroundColor Cyan
 firebase deploy --only hosting
