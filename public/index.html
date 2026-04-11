@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- FF_BUILD_STAMP: index-ffSafeParseJSON-all-localstorage:20260411 — View Source on production to verify deploy. -->
+<!-- FF_BUILD_STAMP: 20260411-jsonsafe+chat-reminder-inline-fix — View Source on production. -->
 
 <html lang="en">
 
@@ -3199,7 +3199,7 @@ window.settings = settings;
 // Initialize tasks catalog globally
 window.ff_tasks_catalog_v1 =
     window.ff_tasks_catalog_v1 ||
-    JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+    ffSafeParseJSON(localStorage.getItem("ff_tasks_catalog_v1"), {});
 
 // Initialize incomplete tasks badge setting (backward compatible)
 if (settings.showIncompleteTasksBadge === undefined) {
@@ -3774,11 +3774,11 @@ function getActorInfo(code = null, workerName = '') {
 // Helper function to load users from localStorage (prefer ffv24_users, else ff_users_v1)
 function ffGetUsers() {
   try {
-    const ffv24Users = JSON.parse(localStorage.getItem('ffv24_users') || '[]');
+    const ffv24Users = ffSafeParseJSON(localStorage.getItem('ffv24_users'), []);
     if (Array.isArray(ffv24Users) && ffv24Users.length > 0) {
       return ffv24Users;
     }
-    const ffUsers = JSON.parse(localStorage.getItem('ff_users_v1') || '[]');
+    const ffUsers = ffSafeParseJSON(localStorage.getItem('ff_users_v1'), []);
     return Array.isArray(ffUsers) ? ffUsers : [];
   } catch (e) {
     console.error('[ffGetUsers] Error loading users:', e);
@@ -3791,7 +3791,7 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
   console.log('[ADD_HISTORY_ENTRY CALLED]', { args: Array.from(arguments) });
   try {
     // Read existing log array from ffv24_log
-    const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+    const logArr = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
     
     // Use fallback values if no operator/session exists
     const finalRole = role || 'Unknown';
@@ -3814,7 +3814,7 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
     logArr.push(entry);
     
     // Write back to localStorage
-    const logLenBefore = (typeof ls === 'function' ? (ls('ffv24_log') || []) : JSON.parse(localStorage.getItem('ffv24_log') || '[]')).length;
+    const logLenBefore = (typeof ls === 'function' ? (ls('ffv24_log') || []) : ffSafeParseJSON(localStorage.getItem('ffv24_log'), [])).length;
     console.log('[ADD_HISTORY_ENTRY BEFORE SAVE]', { entry, source: entry?.source, logLenBefore });
     localStorage.setItem('ffv24_log', JSON.stringify(logArr));
     
@@ -3839,7 +3839,7 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
     console.log('[HISTORY ADD]', entry);
     
     // Quick verification (leave this as a comment for me in code):
-    // After clicking a QUEUE action: JSON.parse(localStorage.getItem('ffv24_log')||'[]').slice(-1)
+    // After clicking a QUEUE action: ffSafeParseJSON(localStorage.getItem('ffv24_log'), []).slice(-1)
     // After selecting a TASK: same command should show an object with source:'tasks'
     
     return entry;
@@ -3854,7 +3854,7 @@ function addQueueCheckoutHistoryRecord({ staffId, workerName, source, role, perf
     const sourceLabel = source || 'self';
     const actionText = sourceLabel === 'admin' ? 'Remove from queue' : 'Leave queue';
     addHistoryEntry(actionText, role || '', performedBy || '', workerName || '', 'queue');
-    const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+    const logArr = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
     if (logArr.length > 0) {
       const lastEntry = logArr[logArr.length - 1];
       lastEntry.type = 'queue_check_out';
@@ -3912,7 +3912,7 @@ function addQueueGeoFenceBlockedHistoryRecord({ action, staffId, staffName, reas
       ts: now.getTime(),
       dateTime: now.toISOString()
     };
-    const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+    const logArr = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
     logArr.push(entry);
     localStorage.setItem('ffv24_log', JSON.stringify(logArr));
     log = logArr;
@@ -4304,7 +4304,7 @@ window.syncHistoryWorkerFilterOptions = syncHistoryWorkerFilterOptions;
 
 function getFilteredHistoryEntries(options = {}) {
   const { syncWorkerOptions = false, syncActionOptions = false, ignoreActionFilter = false, ignoreWorkerFilter = false, ignoreOrder = false } = options || {};
-  const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+  const logArr = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
   log = logArr;
   const normalizedEntries = logArr.map(normalizeHistoryEntry);
   const sourceFilter = (window.__historySourceFilter || 'all').toLowerCase();
@@ -4795,7 +4795,7 @@ function renderSelect(){
   // Load staff from ff_staff_v1 (new primary source) - direct localStorage read
   let technicians = [];
   try {
-    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const store = ffSafeParseJSON(localStorage.getItem("ff_staff_v1"), {});
     const staffList = Array.isArray(store.staff) ? store.staff : [];
     // Filter to only active Technicians (role-based)
     technicians = staffList.filter(s => 
@@ -5141,7 +5141,7 @@ window._ffQueueFilter = window._ffQueueFilter || 'all';
 function ffGetQueueItemTechTypes(item) {
   // Look up technicianTypes from ff_staff_v1 by matching name
   try {
-    const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+    const store = ffSafeParseJSON(localStorage.getItem('ff_staff_v1'), {});
     const staffList = Array.isArray(store.staff) ? store.staff : [];
     const itemName = (item.name || '').trim().toLowerCase();
     const match = staffList.find(s => (s.name || '').trim().toLowerCase() === itemName);
@@ -5159,7 +5159,7 @@ function filterQueue(arr, filter) {
 
 function ffGetAllQueueTechTypes() {
   try {
-    const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+    const store = ffSafeParseJSON(localStorage.getItem('ff_staff_v1'), {});
     const staffList = Array.isArray(store.staff) ? store.staff : [];
     const types = new Set();
     staffList.forEach(s => {
@@ -5567,7 +5567,7 @@ function resolveStaffNameToId(name) {
   if (!name) return undefined;
   
   try {
-    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const store = ffSafeParseJSON(localStorage.getItem("ff_staff_v1"), {});
     const staffList = Array.isArray(store.staff) ? store.staff : [];
     const normalizedName = String(name || '').trim().toLowerCase();
     const candidates = staffList.filter(s => String(s?.name || '').trim().toLowerCase() === normalizedName);
@@ -5602,7 +5602,7 @@ function getCurrentStaffPin(staffIdOrName) {
   
   try {
     // First, try to get PIN from ff_staff_v1
-    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const store = ffSafeParseJSON(localStorage.getItem("ff_staff_v1"), {});
     const staffList = Array.isArray(store.staff) ? store.staff : [];
     let staff = null;
     
@@ -5738,7 +5738,7 @@ async function handleJoin(){
   let foundInStaffStore = false;
   
   try {
-    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const store = ffSafeParseJSON(localStorage.getItem("ff_staff_v1"), {});
     const staffList = Array.isArray(store.staff) ? store.staff : [];
     technician = staffList.find(s => s.id === selectedTechnicianId) || staffList.find(s => s.name === selectedTechnicianName);
     if (technician) {
@@ -6535,7 +6535,7 @@ async function guardStart(workerName, idx, fn){
   // Find target technician by name
   let targetStaff = null;
   try {
-    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const store = ffSafeParseJSON(localStorage.getItem("ff_staff_v1"), {});
     const staffList = Array.isArray(store.staff) ? store.staff : [];
     targetStaff = staffList.find(s => s.name === workerName && s.isArchived !== true);
   } catch (e) {
@@ -6593,7 +6593,7 @@ async function guardFinish(workerName, fn){
   // Find target technician by name
   let targetStaff = null;
   try {
-    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const store = ffSafeParseJSON(localStorage.getItem("ff_staff_v1"), {});
     const staffList = Array.isArray(store.staff) ? store.staff : [];
     targetStaff = staffList.find(s => s.name === workerName && s.isArchived !== true);
   } catch (e) {
@@ -7568,7 +7568,7 @@ function canViewTrainingReports() {
 
 function getTrainingReportsStaffList() {
   try {
-    const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+    const store = ffSafeParseJSON(localStorage.getItem('ff_staff_v1'), {});
     const list = Array.isArray(store.staff) ? store.staff : [];
     return list.filter((s) => s.isArchived !== true);
   } catch (_) {
@@ -9851,7 +9851,7 @@ function getQueueAutoResetSettings() {
   }
   
   // Fallback: read from old structure and initialize new structure
-  const oldSettings = JSON.parse(localStorage.getItem('ff_queue_settings_v1') || '{}');
+  const oldSettings = ffSafeParseJSON(localStorage.getItem('ff_queue_settings_v1'), {});
   if (oldSettings.autoResetEnabled !== undefined || oldSettings.autoResetTime || oldSettings.autoResetForce !== undefined) {
     const autoReset = {
       enabled: oldSettings.autoResetEnabled === true,
@@ -9885,7 +9885,7 @@ function getQueueRuntime() {
   }
   
   // Fallback: migrate from old structure
-  const oldSettings = JSON.parse(localStorage.getItem('ff_queue_settings_v1') || '{}');
+  const oldSettings = ffSafeParseJSON(localStorage.getItem('ff_queue_settings_v1'), {});
   if (oldSettings.lastAutoResetDate !== undefined) {
     // Initialize new structure and migrate
     if (!queues.default) queues.default = {};
@@ -11279,7 +11279,7 @@ window.ffSaveScheduleSettingsProfile = async function() {
   settings.specialBusinessDays = collectSpecialBusinessDaysFromUiPrefix('profile');
   settings.dayShiftSegments = collectDayShiftSegmentsFromUiPrefix('profile');
   try {
-    const currentSettings = JSON.parse(localStorage.getItem('ffv24_settings') || '{}');
+    const currentSettings = ffSafeParseJSON(localStorage.getItem('ffv24_settings'), {});
     currentSettings.businessHours = settings.businessHours;
     currentSettings.coverageRules = settings.coverageRules;
     currentSettings.specialBusinessDays = settings.specialBusinessDays;
@@ -14189,7 +14189,7 @@ function renderSettingsTaskList(tabKey) {
     let orphanTasks = [];
     try {
       const activeKey = `ff_tasks_${tab}_active_v1`;
-      const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+      const activeTasks = ffSafeParseJSON(localStorage.getItem(activeKey), []);
       
       // Build set of catalog task IDs for quick lookup (normalized: taskId || id)
       const catalogIds = new Set();
@@ -14260,7 +14260,7 @@ function renderSettingsTaskList(tabKey) {
           // Try to get from catalog if not in task object
           if ((!displayId && !displayTaskId) || isOrphan) {
             try {
-              const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+              const catalogObj = ffSafeParseJSON(localStorage.getItem("ff_tasks_catalog_v1"), {});
               const catalogList = catalogObj[tab] || [];
               const catalogTask = catalogList.find(t => {
                 const tId = t.taskId || t.id;
@@ -14571,7 +14571,7 @@ function renderSettingsTaskList(tabKey) {
           
           // Remove from catalog
           try {
-            const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+            const catalogObj = ffSafeParseJSON(localStorage.getItem("ff_tasks_catalog_v1"), {});
             if (catalogObj[settingsTab]) {
               catalogObj[settingsTab] = catalogObj[settingsTab].filter(t => {
                 const tId = t.taskId || t.id;
@@ -14596,7 +14596,7 @@ function renderSettingsTaskList(tabKey) {
           ['active', 'pending', 'done'].forEach(kind => {
             const key = `ff_tasks_${settingsTab}_${kind}_v1`;
             try {
-              const arr = JSON.parse(localStorage.getItem(key) || "[]");
+              const arr = ffSafeParseJSON(localStorage.getItem(key), []);
               const filtered = arr.filter(t => {
                 const tId = t.taskId || t.id;
                 return !idVariants.has(String(tId || "").trim());
@@ -14745,7 +14745,7 @@ function renderSettingsTaskList(tabKey) {
           
           // Persist to localStorage (ensure yearly tasks preserve scheduleMonth/scheduleDay)
           try {
-            const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+            const catalogObj = ffSafeParseJSON(localStorage.getItem("ff_tasks_catalog_v1"), {});
             // For yearly tasks, ensure scheduleMonth/scheduleDay are preserved
             if (tab === 'yearly') {
               catalogObj[tab] = reorderedCatalog.map(task => ({
@@ -15274,7 +15274,7 @@ function cleanupBlockedTasks() {
       // Clean ACTIVE list
       const activeKey = `ff_tasks_${tab}_active_v1`;
       try {
-        const arr = JSON.parse(localStorage.getItem(activeKey) || "[]");
+        const arr = ffSafeParseJSON(localStorage.getItem(activeKey), []);
         const filtered = arr.filter(t => {
           if (!t || typeof t !== 'object') return false;
           const ids = new Set([t?.taskId, t?.id].filter(Boolean).map(v => String(v).trim()));
@@ -15291,7 +15291,7 @@ function cleanupBlockedTasks() {
       // Clean PENDING list
       const pendingKey = `ff_tasks_${tab}_pending_v1`;
       try {
-        const arr = JSON.parse(localStorage.getItem(pendingKey) || "[]");
+        const arr = ffSafeParseJSON(localStorage.getItem(pendingKey), []);
         const filtered = arr.filter(t => {
           if (!t || typeof t !== 'object') return false;
           const ids = new Set([t?.taskId, t?.id].filter(Boolean).map(v => String(v).trim()));
@@ -15308,7 +15308,7 @@ function cleanupBlockedTasks() {
       // Clean DONE list
       const doneKey = `ff_tasks_${tab}_done_v1`;
       try {
-        const arr = JSON.parse(localStorage.getItem(doneKey) || "[]");
+        const arr = ffSafeParseJSON(localStorage.getItem(doneKey), []);
         const filtered = arr.filter(t => {
           if (!t || typeof t !== 'object') return false;
           const ids = new Set([t?.taskId, t?.id].filter(Boolean).map(v => String(v).trim()));
@@ -15490,7 +15490,7 @@ function getTaskIdVariants(t) {
 
 function getTombstone() {
   try {
-    return JSON.parse(localStorage.getItem("ff_tasks_active_deleted_v1") || "{}");
+    return ffSafeParseJSON(localStorage.getItem("ff_tasks_active_deleted_v1"), {});
   } catch {
     return {};
   }
@@ -15562,7 +15562,7 @@ function openTasks() {
             }
             
             // Load tombstone DIRECTLY from localStorage every time
-            const tomb = JSON.parse(localStorage.getItem("ff_tasks_active_deleted_v1") || "{}");
+            const tomb = ffSafeParseJSON(localStorage.getItem("ff_tasks_active_deleted_v1"), {});
             const blocked = new Set((tomb[tab] || []).map(x => String(x || "").trim()).filter(Boolean));
             
             if (blocked.size === 0) {
@@ -15651,7 +15651,7 @@ function openTasks() {
     
     // FINAL ROOT FIX: Cleanup blocked tasks from active list (direct execution, no cache)
     // MUST run for ALL TABS, not only currentTasksTab
-    const tombstone = JSON.parse(localStorage.getItem("ff_tasks_active_deleted_v1") || "{}");
+    const tombstone = ffSafeParseJSON(localStorage.getItem("ff_tasks_active_deleted_v1"), {});
     const tabs = ["opening", "closing", "weekly", "monthly", "yearly"];
     
     tabs.forEach(tab => {
@@ -15659,7 +15659,7 @@ function openTasks() {
       if (!blocked.size) return;
       
       const key = `ff_tasks_${tab}_active_v1`;
-      const arr = JSON.parse(localStorage.getItem(key) || "[]");
+      const arr = ffSafeParseJSON(localStorage.getItem(key), []);
       
       const filtered = arr.filter(t => {
         const ids = [t?.taskId, t?.id].filter(Boolean).map(v => String(v).trim());
@@ -15749,7 +15749,7 @@ function openTasks() {
 
           const _now = new Date();
           const _TABS = ['opening','closing','weekly','monthly','yearly'];
-          const _aw = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          const _aw = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
 
           _TABS.forEach(function(_tab) {
             try {
@@ -15764,8 +15764,8 @@ function openTasks() {
               if (_now < _sched) return;
 
               // Check all tasks done
-              const _active  = JSON.parse(localStorage.getItem('ff_tasks_' + _tab + '_active_v1')  || '[]');
-              const _pending = JSON.parse(localStorage.getItem('ff_tasks_' + _tab + '_pending_v1') || '[]');
+              const _active  = ffSafeParseJSON(localStorage.getItem('ff_tasks_' + _tab + '_active_v1'), []);
+              const _pending = ffSafeParseJSON(localStorage.getItem('ff_tasks_' + _tab + '_pending_v1'), []);
               if (_active.length === 0) return;
 
               const _isDone = t => {
@@ -15784,7 +15784,7 @@ function openTasks() {
               // All conditions met — fire reset
               // Guard: only once per day per tab (save lastRunDate)
               const _stateKey = 'ff_tasks_auto_reset_state_v1';
-              const _stateAll = JSON.parse(localStorage.getItem(_stateKey) || '{}');
+              const _stateAll = ffSafeParseJSON(localStorage.getItem(_stateKey), {});
               if (!_stateAll[_tab]) _stateAll[_tab] = {};
               const _todayStr = _now.getFullYear() + '-' +
                 String(_now.getMonth() + 1).padStart(2, '0') + '-' +
@@ -15945,14 +15945,14 @@ window.ffDebugTaskFilterFull = function() {
   const authEmail = (window.__ffAuth && window.__ffAuth.currentUser && window.__ffAuth.currentUser.email) || (window.auth && window.auth.currentUser && window.auth.currentUser.email) || null;
   console.log('=== A. Connected user ===');
   console.log(JSON.stringify({ sid, actorRole, authEmail }, null, 2));
-  const staff = (JSON.parse(localStorage.getItem('ff_staff_v1') || '{}').staff) || [];
+  const staff = (ffSafeParseJSON(localStorage.getItem('ff_staff_v1'), {}).staff) || [];
   const currentStaff = staff.find(s =>
     ((s.id || s.staffId) && sid && String(s.id || s.staffId) === String(sid)) ||
     (s.email && authEmail && String(s.email).toLowerCase() === String(authEmail).toLowerCase())
   );
   console.log('=== B. Current staff record ===');
   console.log(JSON.stringify(currentStaff || null, null, 2));
-  const activeTasks = (JSON.parse(localStorage.getItem('ff_tasks_opening_active_v1') || '[]') || []);
+  const activeTasks = (ffSafeParseJSON(localStorage.getItem('ff_tasks_opening_active_v1'), []) || []);
   console.log('=== C. Opening active tasks ===');
   activeTasks.forEach((t, i) => console.log('Task ' + i + ':', JSON.stringify({ title: t.title, taskId: t.taskId || t.id, assignTo: t.assignTo, technicianTypes: t.technicianTypes }, null, 2)));
   const technicians = (staff || []).filter(s => s.role === 'technician' || (!s.isAdmin && !s.isManager));
@@ -16244,7 +16244,7 @@ function setSettingsModalTab(tabName, options) {
     if (tasksYearlyAutoResetSection) tasksYearlyAutoResetSection.style.display = 'none';
     
     // Load alert window settings
-    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
     const tabConfig = alertWindows[tabName] || {};
     
     // Show appropriate control based on tab
@@ -16256,7 +16256,7 @@ function setSettingsModalTab(tabName, options) {
         
         // Save on change
         alertTimeInput.onchange = function() {
-          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
           if (!alertWindows[tabName]) {
             alertWindows[tabName] = {};
           }
@@ -16275,7 +16275,7 @@ function setSettingsModalTab(tabName, options) {
         if (showOnHomeCheckbox) {
           showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
           showOnHomeCheckbox.onchange = function() {
-            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
             if (!alertWindows[tabName]) {
               alertWindows[tabName] = {};
             }
@@ -16314,7 +16314,7 @@ function setSettingsModalTab(tabName, options) {
             autoResetSection.style.display = 'block';
             
             // Load config
-            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
             const openingConfig = alertWindows.opening || {};
             const enabled = openingConfig.autoResetEnabled === true;
             const time = openingConfig.autoResetTime || '21:00';
@@ -16328,7 +16328,7 @@ function setSettingsModalTab(tabName, options) {
             if (!autoResetEnabledCheckbox.__ffChangeBound) {
               autoResetEnabledCheckbox.__ffChangeBound = true;
               autoResetEnabledCheckbox.addEventListener('change', function() {
-                const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+                const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
                 if (!alertWindows.opening) {
                   alertWindows.opening = {};
                 }
@@ -16352,7 +16352,7 @@ function setSettingsModalTab(tabName, options) {
             if (!autoResetTimeInput.__ffChangeBound) {
               autoResetTimeInput.__ffChangeBound = true;
               autoResetTimeInput.addEventListener('change', function() {
-                const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+                const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
                 if (!alertWindows.opening) {
                   alertWindows.opening = {};
                 }
@@ -16366,7 +16366,7 @@ function setSettingsModalTab(tabName, options) {
             if (!autoResetTimeInput.__ffInputBound) {
               autoResetTimeInput.__ffInputBound = true;
               autoResetTimeInput.addEventListener('input', function() {
-                const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+                const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
                 if (!alertWindows.opening) {
                   alertWindows.opening = {};
                 }
@@ -16387,11 +16387,11 @@ function setSettingsModalTab(tabName, options) {
           if (enforceSelectSection && enforceSelectCheckbox) {
             enforceSelectSection.style.display = 'flex';
             // Load setting
-            const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+            const enforceSelectSettings = ffSafeParseJSON(localStorage.getItem('ff_tasks_enforce_select_v1'), {});
             enforceSelectCheckbox.checked = enforceSelectSettings.opening === true;
             // Save on change
             enforceSelectCheckbox.onchange = function() {
-              const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+              const enforceSelectSettings = ffSafeParseJSON(localStorage.getItem('ff_tasks_enforce_select_v1'), {});
               enforceSelectSettings.opening = enforceSelectCheckbox.checked === true;
               localStorage.setItem('ff_tasks_enforce_select_v1', JSON.stringify(enforceSelectSettings));
             };
@@ -16421,7 +16421,7 @@ function setSettingsModalTab(tabName, options) {
             autoResetSection.style.display = 'block';
             
             // Load config
-            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
             const closingConfig = alertWindows.closing || {};
             const enabled = closingConfig.autoResetEnabled === true;
             const time = closingConfig.autoResetTime || '21:00';
@@ -16435,7 +16435,7 @@ function setSettingsModalTab(tabName, options) {
             if (!autoResetEnabledCheckbox.__ffChangeBound) {
               autoResetEnabledCheckbox.__ffChangeBound = true;
               autoResetEnabledCheckbox.addEventListener('change', function() {
-                const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+                const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
                 if (!alertWindows.closing) {
                   alertWindows.closing = {};
                 }
@@ -16459,7 +16459,7 @@ function setSettingsModalTab(tabName, options) {
             if (!autoResetTimeInput.__ffChangeBound) {
               autoResetTimeInput.__ffChangeBound = true;
               autoResetTimeInput.addEventListener('change', function() {
-                const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+                const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
                 if (!alertWindows.closing) {
                   alertWindows.closing = {};
                 }
@@ -16473,7 +16473,7 @@ function setSettingsModalTab(tabName, options) {
             if (!autoResetTimeInput.__ffInputBound) {
               autoResetTimeInput.__ffInputBound = true;
               autoResetTimeInput.addEventListener('input', function() {
-                const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+                const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
                 if (!alertWindows.closing) {
                   alertWindows.closing = {};
                 }
@@ -16494,11 +16494,11 @@ function setSettingsModalTab(tabName, options) {
           if (enforceSelectSection && enforceSelectCheckbox) {
             enforceSelectSection.style.display = 'flex';
             // Load setting
-            const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+            const enforceSelectSettings = ffSafeParseJSON(localStorage.getItem('ff_tasks_enforce_select_v1'), {});
             enforceSelectCheckbox.checked = enforceSelectSettings.closing === true;
             // Save on change
             enforceSelectCheckbox.onchange = function() {
-              const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+              const enforceSelectSettings = ffSafeParseJSON(localStorage.getItem('ff_tasks_enforce_select_v1'), {});
               enforceSelectSettings.closing = enforceSelectCheckbox.checked === true;
               localStorage.setItem('ff_tasks_enforce_select_v1', JSON.stringify(enforceSelectSettings));
             };
@@ -16529,7 +16529,7 @@ function setSettingsModalTab(tabName, options) {
         
         // Save on change
         alertWeekdayTimeInput.onchange = function() {
-          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
           if (!alertWindows[tabName]) {
             alertWindows[tabName] = {};
           }
@@ -16548,7 +16548,7 @@ function setSettingsModalTab(tabName, options) {
         if (showOnHomeCheckbox) {
           showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
           showOnHomeCheckbox.onchange = function() {
-            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
             if (!alertWindows[tabName]) {
               alertWindows[tabName] = {};
             }
@@ -16596,7 +16596,7 @@ function setSettingsModalTab(tabName, options) {
           autoResetSection.style.display = 'block';
           
           // Load config
-          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
           const weeklyConfig = alertWindows.weekly || {};
           const enabled = weeklyConfig.autoResetEnabled === true;
           const time = weeklyConfig.autoResetTime || '21:00';
@@ -16610,7 +16610,7 @@ function setSettingsModalTab(tabName, options) {
           if (!autoResetEnabledCheckbox.__ffChangeBound) {
             autoResetEnabledCheckbox.__ffChangeBound = true;
             autoResetEnabledCheckbox.addEventListener('change', function() {
-              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
               if (!alertWindows.weekly) {
                 alertWindows.weekly = {};
               }
@@ -16634,7 +16634,7 @@ function setSettingsModalTab(tabName, options) {
           if (!autoResetTimeInput.__ffChangeBound) {
             autoResetTimeInput.__ffChangeBound = true;
             autoResetTimeInput.addEventListener('change', function() {
-              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
               if (!alertWindows.weekly) {
                 alertWindows.weekly = {};
               }
@@ -16648,7 +16648,7 @@ function setSettingsModalTab(tabName, options) {
           if (!autoResetTimeInput.__ffInputBound) {
             autoResetTimeInput.__ffInputBound = true;
             autoResetTimeInput.addEventListener('input', function() {
-              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
               if (!alertWindows.weekly) {
                 alertWindows.weekly = {};
               }
@@ -16682,7 +16682,7 @@ function setSettingsModalTab(tabName, options) {
         
         // Save on change
         alertTimeInput.onchange = function() {
-          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
           if (!alertWindows[tabName]) {
             alertWindows[tabName] = {};
           }
@@ -16711,7 +16711,7 @@ function setSettingsModalTab(tabName, options) {
         if (showOnHomeCheckbox) {
           showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
           showOnHomeCheckbox.onchange = function() {
-            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
             if (!alertWindows[tabName]) {
               alertWindows[tabName] = {};
             }
@@ -16736,7 +16736,7 @@ function setSettingsModalTab(tabName, options) {
           clearAutoResetSection(tasksMonthlyAutoResetSection);
           tasksMonthlyAutoResetSection.style.display = 'block';
           
-          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
           const cfg = alertWindows.monthly || {};
           
           tasksMonthlyAutoResetEnabled.checked = !!cfg.autoResetEnabled;
@@ -16747,7 +16747,7 @@ function setSettingsModalTab(tabName, options) {
           if (!tasksMonthlyAutoResetEnabled.__ffChangeBound) {
             tasksMonthlyAutoResetEnabled.__ffChangeBound = true;
             tasksMonthlyAutoResetEnabled.addEventListener('change', function() {
-              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
               if (!alertWindows.monthly) {
                 alertWindows.monthly = {};
               }
@@ -16767,7 +16767,7 @@ function setSettingsModalTab(tabName, options) {
           if (!tasksMonthlyAutoResetTime.__ffChangeBound) {
             tasksMonthlyAutoResetTime.__ffChangeBound = true;
             tasksMonthlyAutoResetTime.addEventListener('change', function() {
-              const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+              const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
               if (!alertWindows.monthly) {
                 alertWindows.monthly = {};
               }
@@ -16816,7 +16816,7 @@ function setSettingsModalTab(tabName, options) {
         clearAutoResetSection(tasksYearlyAutoResetSection);
         tasksYearlyAutoResetSection.style.display = 'block';
         
-        const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+        const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
         const cfg = alertWindows.yearly || {};
         
         tasksYearlyAutoResetEnabled.checked = !!cfg.autoResetEnabled;
@@ -16827,7 +16827,7 @@ function setSettingsModalTab(tabName, options) {
         if (!tasksYearlyAutoResetEnabled.__ffChangeBound) {
           tasksYearlyAutoResetEnabled.__ffChangeBound = true;
           tasksYearlyAutoResetEnabled.addEventListener('change', function() {
-            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
             if (!alertWindows.yearly) {
               alertWindows.yearly = {};
             }
@@ -16847,7 +16847,7 @@ function setSettingsModalTab(tabName, options) {
         if (!tasksYearlyAutoResetTime.__ffChangeBound) {
           tasksYearlyAutoResetTime.__ffChangeBound = true;
           tasksYearlyAutoResetTime.addEventListener('change', function() {
-            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
             if (!alertWindows.yearly) {
               alertWindows.yearly = {};
             }
@@ -16864,7 +16864,7 @@ function setSettingsModalTab(tabName, options) {
         
         // Save on change
         alertYearlyTimeInput.onchange = function() {
-          const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+          const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
           if (!alertWindows[tabName]) {
             alertWindows[tabName] = {};
           }
@@ -16896,7 +16896,7 @@ function setSettingsModalTab(tabName, options) {
         if (showOnHomeCheckbox) {
           showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
           showOnHomeCheckbox.onchange = function() {
-            const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+            const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
             if (!alertWindows[tabName]) {
               alertWindows[tabName] = {};
             }
@@ -17112,7 +17112,7 @@ function saveTasksToStorage() {
     
     // Debug log for yearly - after saving
     if (tab === 'yearly') {
-      const saved = JSON.parse(localStorage.getItem('ff_tasks_catalog_v1'));
+      const saved = ffSafeParseJSON(localStorage.getItem('ff_tasks_catalog_v1'), null);
       console.log('[SAVE] yearly saved:', (saved?.yearly||[]).map(t => ({id:t.taskId||t.id, m:t.scheduleMonth, d:t.scheduleDay})));
     }
     
@@ -17443,7 +17443,7 @@ function saveTasksToStorage() {
     // TEMP debug: log v1 active count after save
     try {
       const newKey = getTabStorageKey(tab, 'active');
-      const count = JSON.parse(localStorage.getItem(newKey) || "[]").length;
+      const count = ffSafeParseJSON(localStorage.getItem(newKey), []).length;
       console.log("ACTIVE v1 count", tab, count);
     } catch (e) {
       console.warn('[Tasks] Error logging ACTIVE v1 count:', e);
@@ -17585,7 +17585,7 @@ function migrateLegacyActiveToV1(tab) {
     
     // TEMP debug log for active v1 count after migration
     try {
-      const count = JSON.parse(localStorage.getItem(newKey) || "[]").length;
+      const count = ffSafeParseJSON(localStorage.getItem(newKey), []).length;
       console.log("ACTIVE v1 count", tab, count);
     } catch (e) {
       console.warn('[Tasks] Error logging ACTIVE v1 count after migration:', e);
@@ -18038,7 +18038,7 @@ function renderTasksList(tab, opts) {
         // Apply catalog order to MY LIST (display order only, no state changes)
         let catalogOrder = [];
         try {
-          const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+          const catalogObj = ffSafeParseJSON(localStorage.getItem("ff_tasks_catalog_v1"), {});
           catalogOrder = (catalogObj[mainTab] || []).map(t => String(t.taskId || t.id || '').trim()).filter(Boolean);
         } catch (e) {
           console.warn('[MY LIST] Error loading catalog for ordering:', e);
@@ -18142,7 +18142,7 @@ function renderTasksList(tab, opts) {
               const isAdmin = getCurrentActorRole() === 'Admin';
               if (!isAdmin) {
                 // Check if ENFORCE SELECT is enabled for this tab
-                const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+                const enforceSelectSettings = ffSafeParseJSON(localStorage.getItem('ff_tasks_enforce_select_v1'), {});
                 const isEnforced = enforceSelectSettings[mainTab] === true;
                 if (isEnforced) {
                   // Find index of this task in sortedIncomplete array
@@ -18772,7 +18772,7 @@ function removeTaskFromDraft(index) {
       // Check if current user is ADMIN
       let isAdmin = false;
       try {
-        const currentSettings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+        const currentSettings = ffSafeParseJSON(localStorage.getItem("ffv24_settings"), {});
         const role = currentSettings.role?.toLowerCase();
         if (role === 'admin' || role === 'owner') {
           isAdmin = true;
@@ -18836,7 +18836,7 @@ function removeTaskFromDraft(index) {
         allTabs.forEach(t => {
           // Remove from ACTIVE
           const activeKey = `ff_tasks_${t}_active_v1`;
-          const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+          const activeTasks = ffSafeParseJSON(localStorage.getItem(activeKey), []);
           const activeBefore = activeTasks.length;
           const activeFiltered = activeTasks.filter(item => {
             if (!item || typeof item !== 'object') return true;
@@ -18849,7 +18849,7 @@ function removeTaskFromDraft(index) {
           
           // Remove from PENDING
           const pendingKey = `ff_tasks_${t}_pending_v1`;
-          const pendingTasks = JSON.parse(localStorage.getItem(pendingKey) || '[]');
+          const pendingTasks = ffSafeParseJSON(localStorage.getItem(pendingKey), []);
           const pendingBefore = pendingTasks.length;
           const pendingFiltered = pendingTasks.filter(item => {
             if (!item || typeof item !== 'object') return true;
@@ -18862,7 +18862,7 @@ function removeTaskFromDraft(index) {
           
           // Remove from DONE
           const doneKey = `ff_tasks_${t}_done_v1`;
-          const doneTasks = JSON.parse(localStorage.getItem(doneKey) || '[]');
+          const doneTasks = ffSafeParseJSON(localStorage.getItem(doneKey), []);
           const doneBefore = doneTasks.length;
           const doneFiltered = doneTasks.filter(item => {
             if (!item || typeof item !== 'object') return true;
@@ -18927,7 +18927,7 @@ function removeTaskFromDraftByTaskId(taskId, isOrphan, settingsTab) {
     // First, try to find in ACTIVE list (most complete data)
     try {
       const activeKey = `ff_tasks_${tab}_active_v1`;
-      const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+      const activeTasks = ffSafeParseJSON(localStorage.getItem(activeKey), []);
       taskObj = activeTasks.find(task => {
         const itemResolvedId = task?.taskId || task?.id;
         return itemResolvedId && String(itemResolvedId).trim() === rid;
@@ -18948,7 +18948,7 @@ function removeTaskFromDraftByTaskId(taskId, isOrphan, settingsTab) {
     // If still not found, try catalog storage
     if (!taskObj) {
       try {
-        const catalogObj = JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+        const catalogObj = ffSafeParseJSON(localStorage.getItem("ff_tasks_catalog_v1"), {});
         const catalogList = catalogObj[tab] || [];
         taskObj = catalogList.find(task => {
           const itemResolvedId = task?.taskId || task?.id;
@@ -19022,7 +19022,7 @@ function removeTaskFromDraftByTaskId(taskId, isOrphan, settingsTab) {
     
     keys.forEach(key => {
       try {
-        const arr = JSON.parse(localStorage.getItem(key) || "[]");
+        const arr = ffSafeParseJSON(localStorage.getItem(key), []);
         const filtered = arr.filter(filterByVariants);
         if (filtered.length !== arr.length) {
           localStorage.setItem(key, JSON.stringify(filtered));
@@ -19599,7 +19599,7 @@ window.loadTasks = loadTasks;
 function showResetBtnIfAllowed() {
   try {
     // Read settings from localStorage
-    const settings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+    const settings = ffSafeParseJSON(localStorage.getItem("ffv24_settings"), {});
     
     // Get role: first from current user's worker entry, then from settings.role
     let role = settings.workers?.find(w => w.name === settings.currentUser)?.role?.toLowerCase() 
@@ -19773,7 +19773,7 @@ function closeTasksResetConfirmModal() {
 // Reload tasks for a specific tab from catalog
 function reloadTasksForTab(tab) {
   // Use global catalog if available, otherwise load from localStorage
-  const catalog = window.ff_tasks_catalog_v1 || JSON.parse(localStorage.getItem("ff_tasks_catalog_v1") || "{}");
+  const catalog = window.ff_tasks_catalog_v1 || ffSafeParseJSON(localStorage.getItem("ff_tasks_catalog_v1"), {});
   const fresh = catalog[tab] || [];
 
   // Save new active list
@@ -20485,7 +20485,7 @@ function ffMaybeAutoResetOpening(now = new Date(), skipSigCheck = false) {
     if (window.__ffOpeningResetRunning) return;
 
     // Must be enabled
-    const alertWindowsData = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const alertWindowsData = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
     const openingCfg = alertWindowsData.opening || {};
     if (openingCfg.autoResetEnabled !== true) return;
 
@@ -20511,8 +20511,8 @@ function ffMaybeAutoResetOpening(now = new Date(), skipSigCheck = false) {
     const keyPending = typeof getTabStorageKey === 'function'
       ? getTabStorageKey('opening', 'pending') : 'ff_tasks_opening_pending_v1';
     let active = [], pending = [];
-    try { active  = JSON.parse(localStorage.getItem(keyActive)  || '[]'); } catch(e) { return; }
-    try { pending = JSON.parse(localStorage.getItem(keyPending) || '[]'); } catch(e) {}
+    try { active  = ffSafeParseJSON(localStorage.getItem(keyActive), []); } catch(e) { return; }
+    try { pending = ffSafeParseJSON(localStorage.getItem(keyPending), []); } catch(e) {}
 
     if (active.length === 0) return;
 
@@ -20528,7 +20528,7 @@ function ffMaybeAutoResetOpening(now = new Date(), skipSigCheck = false) {
 
     // Only block on duplicate sig for passive checks (openTasks / interval).
     // When called from markTaskDone (skipSigCheck=true), always allow — user just completed tasks now.
-    const state = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+    const state = ffSafeParseJSON(localStorage.getItem('ff_tasks_auto_reset_state_v1'), {});
     if (!state.opening) state.opening = {};
     if (!skipSigCheck && state.opening.lastAllCompletedSig === sig) return;
 
@@ -20563,7 +20563,7 @@ function ffMaybeAutoResetOpeningAtTime(now = new Date(), skipSigCheck = false) {
   try {
     if (window.__ffOpeningResetRunning) return;
 
-    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
     const openingConfig = alertWindows.opening || {};
     if (openingConfig.autoResetEnabled !== true || !openingConfig.autoResetTime) return;
 
@@ -20583,8 +20583,8 @@ function ffMaybeAutoResetOpeningAtTime(now = new Date(), skipSigCheck = false) {
     const keyActive  = typeof getTabStorageKey === 'function' ? getTabStorageKey('opening', 'active')  : 'ff_tasks_opening_active_v1';
     const keyPending = typeof getTabStorageKey === 'function' ? getTabStorageKey('opening', 'pending') : 'ff_tasks_opening_pending_v1';
     let active = [], pending = [];
-    try { active  = JSON.parse(localStorage.getItem(keyActive)  || '[]'); } catch(e) { return; }
-    try { pending = JSON.parse(localStorage.getItem(keyPending) || '[]'); } catch(e) {}
+    try { active  = ffSafeParseJSON(localStorage.getItem(keyActive), []); } catch(e) { return; }
+    try { pending = ffSafeParseJSON(localStorage.getItem(keyPending), []); } catch(e) {}
 
     if (!active || active.length === 0) return;
 
@@ -20599,7 +20599,7 @@ function ffMaybeAutoResetOpeningAtTime(now = new Date(), skipSigCheck = false) {
     const sig = todayStr + '|' + active.map(t => String(t.taskId || t.id || '')).filter(Boolean).sort().join(',');
 
     // Block if same sig already reset today (unless skipSigCheck=true from markTaskDone)
-    const state = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+    const state = ffSafeParseJSON(localStorage.getItem('ff_tasks_auto_reset_state_v1'), {});
     if (!state.opening) state.opening = {};
     if (!skipSigCheck && state.opening.lastAllCompletedSig === sig) return;
 
@@ -25240,7 +25240,7 @@ function ffGetCurrentUserInfo() {
   // PRIMARY: ff_staff_v1 (Firestore staff) - match by email for Firebase Auth users
   if (email && !name) {
     try {
-      const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+      const store = ffSafeParseJSON(localStorage.getItem('ff_staff_v1'), {});
       const staffList = Array.isArray(store.staff) ? store.staff : [];
       const match = staffList.find(s => (s.email || '').toLowerCase() === email.toLowerCase());
       if (match && (match.name || match.displayName)) {
@@ -25252,8 +25252,8 @@ function ffGetCurrentUserInfo() {
   // Try localStorage user data - match current user by email when available
   if (!email || !name) {
     try {
-      const ffv24Users = JSON.parse(localStorage.getItem('ffv24_users') || '[]');
-      const ffUsers = JSON.parse(localStorage.getItem('ff_users_v1') || '[]');
+      const ffv24Users = ffSafeParseJSON(localStorage.getItem('ffv24_users'), []);
+      const ffUsers = ffSafeParseJSON(localStorage.getItem('ff_users_v1'), []);
       const users = ffv24Users.length > 0 ? ffv24Users : ffUsers;
       
       if (users.length > 0) {
@@ -26037,7 +26037,7 @@ function initializeUserProfileMenu() {
     settings.preferences.birthdayReminderDaysBefore = n;
     bDayEl.value = String(n);
     try {
-      const currentSettings = JSON.parse(localStorage.getItem('ffv24_settings') || '{}');
+      const currentSettings = ffSafeParseJSON(localStorage.getItem('ffv24_settings'), {});
       currentSettings.preferences = settings.preferences;
       localStorage.setItem('ffv24_settings', JSON.stringify(currentSettings));
     } catch (_) {}
@@ -26164,7 +26164,7 @@ function initializeUserProfileMenu() {
     };
     saveProfilePrefs(prefs);
     try {
-      const currentSettings = JSON.parse(localStorage.getItem('ffv24_settings') || '{}');
+      const currentSettings = ffSafeParseJSON(localStorage.getItem('ffv24_settings'), {});
       currentSettings.preferences = {
         ...(currentSettings.preferences && typeof currentSettings.preferences === 'object' ? currentSettings.preferences : {}),
         weekStartsOn: nextWeekStartsOn
@@ -27375,8 +27375,8 @@ let completedTasks = {};
 function countIncompleteTasks(category) {
   try {
     var tab = category.toLowerCase();
-    var active = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_active_v1') || '[]');
-    var pending = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_pending_v1') || '[]');
+    var active = ffSafeParseJSON(localStorage.getItem('ff_tasks_' + tab + '_active_v1'), []);
+    var pending = ffSafeParseJSON(localStorage.getItem('ff_tasks_' + tab + '_pending_v1'), []);
     return active.length + pending.length;
   } catch (e) {
     return 0;
@@ -27397,7 +27397,7 @@ function updateTabBadge(category) {
 // Check if reminder/alert window is active for a category
 function isReminderActive(category) {
   try {
-    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
     const tabName = category.toLowerCase();
     const config = alertWindows[tabName];
     if (!config) return true;
@@ -27426,7 +27426,7 @@ window.ffUpdateHomeTasksBadge = function() {
     var TABS = ['opening','closing','weekly','monthly','yearly'];
     var totalIncomplete = 0;
     var alertWindows = {};
-    try { alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}'); } catch(e) {}
+    try { alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {}); } catch(e) {}
     TABS.forEach(function(tab) {
       var cfg = alertWindows[tab];
       var showOnHome = !cfg || cfg.showOnHome !== false;
@@ -27448,7 +27448,7 @@ function getCurrentTasksCategory() {
 // Helper: Check if enforceSelect is enabled for a tab
 function enforceSelectEnabledForTab(tab) {
   try {
-    const enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
+    const enforceSelectSettings = ffSafeParseJSON(localStorage.getItem('ff_tasks_enforce_select_v1'), {});
     return enforceSelectSettings[tab] === true;
   } catch (e) {
     return false;
@@ -28352,7 +28352,7 @@ function ffAuthAdminOrManagerByCodeFromHoldModal() {
     }
     
     // Read staff list ONLY from ff_staff_v1
-    const staff = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}")?.staff || [];
+    const staff = ffSafeParseJSON(localStorage.getItem("ff_staff_v1"), {})?.staff || [];
     
     // Match by PIN
     const match = staff.find(s => {
@@ -30076,7 +30076,7 @@ function initTasksFunctionality() {
 
         if (ok) {
           console.log('[TASKS][SELECT] confirmSelectTask already wrote history. last tasks entries:',
-            JSON.parse(localStorage.getItem('ffv24_log') || '[]').filter(e=>e && typeof e==='object' && e.source==='tasks').slice(-3)
+            ffSafeParseJSON(localStorage.getItem('ffv24_log'), []).filter(e=>e && typeof e==='object' && e.source==='tasks').slice(-3)
           );
         } else {
           console.warn('[TASKS][SELECT] ok=false so NO history write');
@@ -30201,7 +30201,7 @@ function initTasksFunctionality() {
 
         if (ok) {
           console.log('[TASKS][DONE] confirmFinishTask already wrote history. last tasks entries:',
-            JSON.parse(localStorage.getItem('ffv24_log') || '[]').filter(e=>e && typeof e==='object' && e.source==='tasks').slice(-3)
+            ffSafeParseJSON(localStorage.getItem('ffv24_log'), []).filter(e=>e && typeof e==='object' && e.source==='tasks').slice(-3)
           );
         } else {
           console.warn('[TASKS][DONE] ok=false so NO history write');
@@ -30359,7 +30359,7 @@ function openAddTechDialog(){
 
   let staffList = [];
   try {
-    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const store = ffSafeParseJSON(localStorage.getItem("ff_staff_v1"), {});
     staffList = Array.isArray(store.staff) ? store.staff : [];
   } catch (e) {
     console.error('[AddTech] Error loading ff_staff_v1:', e);
@@ -30589,17 +30589,17 @@ window.__ffTasksCloudInit = function() {
   window.initTasksCloud({
     getState: function() {
       var TABS = ['opening','closing','weekly','monthly','yearly'];
-      var catalog = JSON.parse(localStorage.getItem('ff_tasks_catalog_v1') || '{}');
-      var tombstone = JSON.parse(localStorage.getItem('ff_tasks_active_deleted_v1') || '{}');
-      var alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
-      var enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
-      var autoResetState = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+      var catalog = ffSafeParseJSON(localStorage.getItem('ff_tasks_catalog_v1'), {});
+      var tombstone = ffSafeParseJSON(localStorage.getItem('ff_tasks_active_deleted_v1'), {});
+      var alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
+      var enforceSelectSettings = ffSafeParseJSON(localStorage.getItem('ff_tasks_enforce_select_v1'), {});
+      var autoResetState = ffSafeParseJSON(localStorage.getItem('ff_tasks_auto_reset_state_v1'), {});
       var state = { catalog: catalog, tombstone: tombstone, alertWindows: alertWindows, enforceSelectSettings: enforceSelectSettings, autoResetState: autoResetState };
       TABS.forEach(function(tab) {
         state[tab] = {
-          active:  JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_active_v1')  || '[]'),
-          pending: JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_pending_v1') || '[]'),
-          done:    JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_done_v1')    || '[]')
+          active:  ffSafeParseJSON(localStorage.getItem('ff_tasks_' + tab + '_active_v1'), []),
+          pending: ffSafeParseJSON(localStorage.getItem('ff_tasks_' + tab + '_pending_v1'), []),
+          done:    ffSafeParseJSON(localStorage.getItem('ff_tasks_' + tab + '_done_v1'), [])
         };
       });
       return state;
@@ -30618,7 +30618,7 @@ window.__ffTasksCloudInit = function() {
         // Merge auto-reset state: keep the LATER lastRunDate per tab to avoid re-running a reset
         if (data.autoResetState && typeof data.autoResetState === 'object') {
           try {
-            var localResetState = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+            var localResetState = ffSafeParseJSON(localStorage.getItem('ff_tasks_auto_reset_state_v1'), {});
             var mergedResetState = Object.assign({}, data.autoResetState);
             Object.keys(localResetState).forEach(function(tab) {
               var local = localResetState[tab] || {};
@@ -30913,13 +30913,13 @@ function syncWorkersToUsers() {
     const validWorkers = (settings.workers || []).filter(w => w && w.name && w.name.trim() && w.pin);
     
     // Initialize ff_users_v1 if it doesn't exist
-    let ffUsers = JSON.parse(localStorage.getItem('ff_users_v1') || '[]');
+    let ffUsers = ffSafeParseJSON(localStorage.getItem('ff_users_v1'), []);
     if (!Array.isArray(ffUsers)) {
       ffUsers = [];
     }
     
     // Initialize ffv24_users if it doesn't exist
-    let ffv24Users = JSON.parse(localStorage.getItem('ffv24_users') || '[]');
+    let ffv24Users = ffSafeParseJSON(localStorage.getItem('ffv24_users'), []);
     if (!Array.isArray(ffv24Users)) {
       ffv24Users = [];
     }
@@ -31663,7 +31663,7 @@ function hookSettingsGuard_DISABLED(){
               isSelfRelease = true;
             } else if (targetName && staff.id) {
               try {
-                const store = typeof ffGetStaffStore === 'function' ? ffGetStaffStore() : (JSON.parse(localStorage.getItem("ff_staff_v1") || "{}") || {});
+                const store = typeof ffGetStaffStore === 'function' ? ffGetStaffStore() : (ffSafeParseJSON(localStorage.getItem("ff_staff_v1"), {}) || {});
                 const staffList = Array.isArray(store.staff) ? store.staff : [];
                 const targetStaff = staffList.find(s => s.name === targetName && s.isArchived !== true);
                 if (targetStaff && targetStaff.id && staff.id === targetStaff.id) {
@@ -32668,7 +32668,7 @@ function hookSettingsGuard_DISABLED(){
 
 
 
-  const load = () => { try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; } };
+  const load = () => { try { return ffSafeParseJSON(localStorage.getItem(LS_KEY), []); } catch { return []; } };
 
   const save = (arr) => localStorage.setItem(LS_KEY, JSON.stringify(arr));
 
@@ -34551,7 +34551,7 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260409_index_safejson"></script>
+  <script type="module" src="/app.js?v=20260411_chat_reminder_attrfix"></script>
   <script type="module" src="/schedule-helpers.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
@@ -34560,7 +34560,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/inbox.js?v=20260408_doc_renewal_inbox"></script>
   <script type="module" src="/chat.js?v=20260416_chat_hide_media"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/staff-documents.js?v=20260411_index_jsonsafe_full"></script>
+  <script type="module" src="/staff-documents.js?v=20260411_chat_reminder_attrfix"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260312_staffcall11"></script>
   <script type="module" src="/settings-cloud.js?v=20260412_app_js_unify"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>

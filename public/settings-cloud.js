@@ -11,7 +11,7 @@
 
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, getDocs, addDoc, updateDoc, deleteDoc, deleteField } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260411_index_jsonsafe_full";
+import { db, auth } from "./app.js?v=20260411_chat_reminder_attrfix";
 import {
   cloneDefaultBusinessHours,
   cloneDefaultDayShiftSegments,

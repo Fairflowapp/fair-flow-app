@@ -25,7 +25,7 @@ import {
   getDownloadURL,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
-import { db, auth, storage } from "./app.js?v=20260411_index_jsonsafe_full";
+import { db, auth, storage } from "./app.js?v=20260411_chat_reminder_attrfix";
 
 // --- Phase 2: Inbox → staff /documents sync (approve / reject) ---
 
@@ -1493,7 +1493,7 @@ function renderDocumentCard(doc) {
     ? `<button type="button" data-ff-doc-action="replace" data-doc-id="${escapeHtml(doc.id)}" title="Replace file on this document (same record)" style="${btnBase}cursor:pointer;border:1px dashed #7c3aed;background:#faf5ff;color:#6d28d9;">Upload New Version</button>`
     : "";
   const expiringSoonChatBtn = showExpiringSoonChat
-    ? `<button type="button" data-doc-id="${escapeHtml(doc.id)}" title="Send this staff member a chat reminder" onclick="event.preventDefault();event.stopPropagation();if(typeof window.ffStaffDocSendExpiryChatReminder==='function')window.ffStaffDocSendExpiryChatReminder(${JSON.stringify(doc.id)});" style="${btnBase}cursor:pointer;border:1px solid #7c3aed;background:#ede9fe;color:#5b21b6;pointer-events:auto;position:relative;z-index:2;touch-action:manipulation;">Send chat reminder</button>`
+    ? `<button type="button" data-doc-id="${escapeHtml(doc.id)}" title="Send this staff member a chat reminder" onclick="event.preventDefault();event.stopPropagation();if(typeof window.ffStaffDocSendExpiryChatReminder==='function')window.ffStaffDocSendExpiryChatReminder(this.getAttribute('data-doc-id'));" style="${btnBase}cursor:pointer;border:1px solid #7c3aed;background:#ede9fe;color:#5b21b6;pointer-events:auto;position:relative;z-index:2;touch-action:manipulation;">Send chat reminder</button>`
     : "";
 
   const actionsRow = `
