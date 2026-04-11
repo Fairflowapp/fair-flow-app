@@ -84,6 +84,50 @@ const LEGACY_INBOX_TYPE_INFO = {
   time_off: { id: 'time_off', icon: '🕐', label: 'Time off', description: 'Legacy request', category: 'schedule' },
 };
 
+/**
+ * Shared &lt;option&gt; list for Request a Document, Upload a Document, and renewal requests.
+ * Same values everywhere so renewals and uploads stay comparable (salon / spa / employment).
+ */
+function ffStaffDocumentTypeSelectOptionsHtml() {
+  return `
+          <option value="">Select...</option>
+          <optgroup label="Employment &amp; tax">
+            <option value="I-9">I-9 (employment eligibility)</option>
+            <option value="W-2">W-2</option>
+            <option value="W-4">W-4</option>
+            <option value="1099">1099</option>
+            <option value="Employment Letter">Employment Letter</option>
+            <option value="Contract">Contract</option>
+          </optgroup>
+          <optgroup label="Identity &amp; verification">
+            <option value="Government ID">Government ID</option>
+            <option value="SSN card">SSN card</option>
+          </optgroup>
+          <optgroup label="Beauty, spa &amp; wellness (professional)">
+            <option value="Cosmetology license">Cosmetology license</option>
+            <option value="Esthetician license">Esthetician license</option>
+            <option value="Nail technician license">Nail technician license</option>
+            <option value="Barber license">Barber license</option>
+            <option value="Massage therapy license">Massage therapy license</option>
+            <option value="Salon / shop license">Salon / shop license</option>
+            <option value="Continuing education certificate">Continuing education certificate</option>
+          </optgroup>
+          <optgroup label="Coverage &amp; business">
+            <option value="Insurance">Insurance</option>
+            <option value="Liability insurance (COI)">Liability insurance (COI)</option>
+            <option value="Workers compensation">Workers compensation</option>
+          </optgroup>
+          <optgroup label="Training &amp; compliance">
+            <option value="Certification">Certification</option>
+            <option value="BBP / infection control">BBP / infection control</option>
+            <option value="OSHA / safety training">OSHA / safety training</option>
+          </optgroup>
+          <optgroup label="General">
+            <option value="License">License</option>
+            <option value="Other">Other</option>
+          </optgroup>`;
+}
+
 /** Inclusive YYYY-MM-DD list — same shape schedule-availability expects for ranges / affectedDates. */
 function enumerateInclusiveDateKeysForInbox(startDateStr, endDateStr) {
   const start = String(startDateStr || "").trim();
@@ -1972,12 +2016,7 @@ function createRequestForm(type) {
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Document type</label>
         <select id="doc_renew_type" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
-          <option value="">Select...</option>
-          <option value="License">License</option>
-          <option value="Insurance">Insurance</option>
-          <option value="Certification">Certification</option>
-          <option value="1099">1099</option>
-          <option value="Other">Other</option>
+          ${ffStaffDocumentTypeSelectOptionsHtml()}
         </select>
       </div>
       <div>
@@ -1994,13 +2033,7 @@ function createRequestForm(type) {
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Document type</label>
         <select id="doc_req_type" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
-          <option value="">Select...</option>
-          <option value="1099">1099</option>
-          <option value="W-2">W-2</option>
-          <option value="Employment Letter">Employment Letter</option>
-          <option value="Contract">Contract</option>
-          <option value="Insurance">Insurance</option>
-          <option value="Other">Other</option>
+          ${ffStaffDocumentTypeSelectOptionsHtml()}
         </select>
       </div>
       <div>
@@ -2029,11 +2062,7 @@ function createRequestForm(type) {
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Document type</label>
         <select id="doc_up_type" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
-          <option value="">Select...</option>
-          <option value="License">License</option>
-          <option value="Insurance">Insurance</option>
-          <option value="Certification">Certification</option>
-          <option value="Other">Other</option>
+          ${ffStaffDocumentTypeSelectOptionsHtml()}
         </select>
       </div>
       <div>
