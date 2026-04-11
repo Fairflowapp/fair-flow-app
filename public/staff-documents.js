@@ -1104,6 +1104,20 @@ async function ffRunExpiryChatNotify(docId) {
   }
 }
 
+/** Run the same expiry chat reminder as Staff → Documents, with explicit salon/staff (e.g. Inbox alert modal). */
+export async function ffSendExpiryChatReminderForStaffDocContext({ salonId, staffId, docId }) {
+  const sid = trimStr(salonId);
+  const stid = trimStr(staffId);
+  const did = trimStr(docId);
+  const prevCtx = _mountCtx;
+  try {
+    _mountCtx = { salonId: sid, staffId: stid };
+    await ffRunExpiryChatNotify(did);
+  } finally {
+    _mountCtx = prevCtx;
+  }
+}
+
 function escapeHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -1852,4 +1866,5 @@ if (typeof window !== "undefined") {
   window.ffStaffDocSendExpiryChatReminder = function (docId) {
     return ffRunExpiryChatNotify(docId);
   };
+  window.ffStaffDocSendExpiryChatReminderWithContext = ffSendExpiryChatReminderForStaffDocContext;
 }

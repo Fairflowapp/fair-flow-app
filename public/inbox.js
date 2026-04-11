@@ -30,6 +30,7 @@ import { db, auth, storage } from "./app.js?v=20260411_chat_reminder_attrfix";
 import {
   ffSyncStaffDocumentOnInboxApprove,
   ffSyncStaffDocumentOnInboxReject,
+  ffSendExpiryChatReminderForStaffDocContext,
 } from "./staff-documents.js";
 
 // Category order for display (Schedule → Payments → Operations → Documents → Other at end)
@@ -3442,6 +3443,23 @@ window.openDocumentAlertStaffMember = function(staffId) {
   if (typeof window.closeRequestDetailsModal === 'function') window.closeRequestDetailsModal();
   if (typeof window.openStaffMembersModal === 'function') {
     window.openStaffMembersModal({ jumpToStaffId: id, jumpToTab: 'documents' });
+  }
+};
+
+/** Same chat reminder as Staff → Documents (expiring soon). Payload: { salonId, staffId, documentId }. */
+window.ffDocAlertSendChatReminder = async function (payload) {
+  const p = payload && typeof payload === 'object' ? payload : {};
+  const salonId = String(p.salonId || currentUserProfile?.salonId || '').trim();
+  const staffId = String(p.staffId || '').trim();
+  const docId = String(p.documentId || '').trim();
+  if (!salonId || !staffId || !docId) {
+    if (typeof showToast === 'function') showToast('Missing staff or document.', 'error');
+    return;
+  }
+  try {
+    await ffSendExpiryChatReminderForStaffDocContext({ salonId, staffId, docId });
+  } catch (e) {
+    console.warn('[Inbox] ffDocAlertSendChatReminder', e);
   }
 };
 
