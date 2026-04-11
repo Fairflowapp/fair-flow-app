@@ -3034,13 +3034,22 @@ function showRequestDetails(requestId) {
     }
     const chatEl = content.querySelector('[data-ff-doc-alert-chat]');
     if (chatEl) {
-      chatEl.addEventListener('click', () => {
+      chatEl.addEventListener('click', async () => {
+        if (chatEl.disabled) return;
         const raw = chatEl.getAttribute('data-payload');
         if (!raw) return;
         try {
           const payload = JSON.parse(decodeURIComponent(raw));
-          if (typeof window.ffDocAlertSendChatReminder === 'function') {
-            void window.ffDocAlertSendChatReminder(payload);
+          if (typeof window.ffDocAlertSendChatReminder !== 'function') return;
+          chatEl.disabled = true;
+          chatEl.style.opacity = '0.65';
+          chatEl.style.pointerEvents = 'none';
+          try {
+            await window.ffDocAlertSendChatReminder(payload);
+          } finally {
+            chatEl.disabled = false;
+            chatEl.style.opacity = '';
+            chatEl.style.pointerEvents = '';
           }
         } catch (err) {
           console.warn('[Inbox] doc alert chat payload', err);

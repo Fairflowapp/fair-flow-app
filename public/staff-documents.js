@@ -1072,20 +1072,20 @@ async function ffRunExpiryChatNotify(docId) {
     ffToast("Still sending the previous reminder…", "info");
     return;
   }
-
-  ffToast("Sending reminder…", "info");
-  if (!auth.currentUser) {
-    ffToast("Sign in required.", "error");
-    return;
-  }
-  const { salonId, staffId } = _mountCtx;
-  if (!salonId || !staffId || !did) {
-    ffToast("Missing context. Refresh the page.", "error");
-    return;
-  }
-
+  // Set immediately after checks — otherwise two parallel calls can both pass the guard and send twice.
   _ffExpiryNotifyInFlight = true;
   try {
+    ffToast("Sending reminder…", "info");
+    if (!auth.currentUser) {
+      ffToast("Sign in required.", "error");
+      return;
+    }
+    const { salonId, staffId } = _mountCtx;
+    if (!salonId || !staffId || !did) {
+      ffToast("Missing context. Refresh the page.", "error");
+      return;
+    }
+
     await ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId: did });
     _ffExpiryNotifyDedupe = { key: dk, at: Date.now() };
     console.log("[staff-documents] Chat reminder flow finished (check toast + Chat).");
