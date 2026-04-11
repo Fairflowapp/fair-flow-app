@@ -2912,7 +2912,7 @@ function showRequestDetails(requestId) {
     const docAlertBtnDone = `${docAlertBtnBase}background:#7c3aed;color:#fff;border:none;cursor:pointer;`;
     const sid = ffDocAlertStaffId(request);
     const openStaffBtn = sid && typeof window.openStaffMembersModal === 'function'
-      ? `<button type="button" onclick="openDocumentAlertStaffMember(${JSON.stringify(sid)})" style="${docAlertBtnOutline}">
+      ? `<button type="button" data-ff-doc-alert-open-staff="${encodeURIComponent(sid)}" style="${docAlertBtnOutline}">
           ${ffDocAlertIsHebrewUI() ? 'פתח עובד' : 'Open Staff Member'}
         </button>`
       : '';
@@ -2926,9 +2926,13 @@ function showRequestDetails(requestId) {
       staffId: renewPayload.staffId,
       documentId: renewPayload.documentId,
     };
-    const chatBtn =
+    const chatPayloadAttr =
       renewPayload.staffId && renewPayload.documentId
-        ? `<button type="button" onclick="ffDocAlertSendChatReminder(${JSON.stringify(chatPayload).replace(/</g, '\\u003c')})" style="${docAlertBtnChat}" title="${ffDocAlertIsHebrewUI() ? 'שליחת תזכורת בצ׳אט לעובד' : 'Send this staff member a chat reminder'}">
+        ? encodeURIComponent(JSON.stringify(chatPayload))
+        : '';
+    const chatBtn =
+      chatPayloadAttr
+        ? `<button type="button" data-ff-doc-alert-chat="1" data-payload="${chatPayloadAttr}" style="${docAlertBtnChat}" title="${ffDocAlertIsHebrewUI() ? 'שליחת תזכורת בצ׳אט לעובד' : 'Send this staff member a chat reminder'}">
           ${ffDocAlertIsHebrewUI() ? 'שלח תזכורת בצ׳אט' : 'Send chat reminder'}
         </button>`
         : '';
@@ -3017,6 +3021,35 @@ function showRequestDetails(requestId) {
   }
   
   content.innerHTML = detailsHTML;
+  try {
+    const openStaffEl = content.querySelector('[data-ff-doc-alert-open-staff]');
+    if (openStaffEl) {
+      openStaffEl.addEventListener('click', () => {
+        const raw = openStaffEl.getAttribute('data-ff-doc-alert-open-staff') || '';
+        const id = decodeURIComponent(raw);
+        if (typeof window.openDocumentAlertStaffMember === 'function') {
+          window.openDocumentAlertStaffMember(id);
+        }
+      });
+    }
+    const chatEl = content.querySelector('[data-ff-doc-alert-chat]');
+    if (chatEl) {
+      chatEl.addEventListener('click', () => {
+        const raw = chatEl.getAttribute('data-payload');
+        if (!raw) return;
+        try {
+          const payload = JSON.parse(decodeURIComponent(raw));
+          if (typeof window.ffDocAlertSendChatReminder === 'function') {
+            void window.ffDocAlertSendChatReminder(payload);
+          }
+        } catch (err) {
+          console.warn('[Inbox] doc alert chat payload', err);
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('[Inbox] doc alert action wiring', e);
+  }
   modal.appendChild(content);
   document.body.appendChild(modal);
   
