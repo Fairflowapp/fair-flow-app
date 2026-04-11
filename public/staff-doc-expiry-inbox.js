@@ -247,7 +247,8 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
         if (expMs == null) continue;
 
         const diffDays = salonCalendarDaysUntilExpiry(expMs, ty, tm, td, tz);
-        if (diffDays !== 30) continue;
+        /* Match Cloud Function: first alert while 1…30 calendar days remain (not only exactly 30). */
+        if (diffDays <= 0 || diffDays > 30) continue;
 
         const documentTitle = trimStr(data.title || data.type) || "Document";
         const documentType = trimStr(data.type) || "Document";
@@ -255,7 +256,7 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
           subjectStaffName,
           documentTitle,
           documentType,
-          diffDays: 30,
+          diffDays,
         });
 
         const expTs = Timestamp.fromMillis(expMs);
@@ -269,7 +270,7 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
           message,
           subjectStaffName,
           automated: true,
-          daysUntilExpiry: 30,
+          daysUntilExpiry: diffDays,
         };
 
         const docRef = doc(db, `salons/${salonId}/staff/${staffId}/documents`, documentId);
@@ -284,7 +285,7 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
             if (fd.thirtyDayReminderSentAt) return 0;
 
             const d2 = salonCalendarDaysUntilExpiry(expirationToMillis(fd.expirationDate), ty, tm, td, tz);
-            if (d2 !== 30) return 0;
+            if (d2 <= 0 || d2 > 30) return 0;
 
             const planned = managersAndAdmins.map((rec) => {
               const forUid = rec.uid;

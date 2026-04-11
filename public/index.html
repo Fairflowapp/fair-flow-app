@@ -2176,7 +2176,7 @@ dialog footer button, .code-dialog footer button {
             </div>
             <div style="padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
               <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Staff document expiry (Inbox)</div>
-              <div style="font-size:11px;color:#6b7280;margin-bottom:6px;line-height:1.4;">When a <strong>licensed / approved</strong> staff document reaches <strong>exactly 30 calendar days</strong> before its expiration date (by <strong>salon timezone</strong>), each owner / admin / manager gets an automatic <strong>Inbox → Team → Open</strong> row — same idea as birthday reminders. Runs about every 5 minutes while the app is open; a daily server job also backs this up.</div>
+              <div style="font-size:11px;color:#6b7280;margin-bottom:6px;line-height:1.4;">When a <strong>licensed / approved</strong> staff document is <strong>within 30 calendar days</strong> of expiration (by <strong>salon timezone</strong>), each owner / admin / manager gets one automatic <strong>Inbox → Team → Open</strong> row — same idea as birthday reminders. Runs about every 5 minutes while the app is open (also shortly after you approve a document request), plus a daily server backup.</div>
               <div style="font-size:11px;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:6px 8px;line-height:1.4;">Deduped per document: once sent, it won’t repeat until the document is replaced or the flag is cleared in Firestore.</div>
             </div>
             <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px;">
@@ -34562,7 +34562,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-ui.js?v=20260412_app_js_unify"></script>
-  <script type="module" src="/inbox.js?v=20260408_doc_renewal_inbox"></script>
+  <script type="module" src="/inbox.js?v=20260411_expiry_window_after_approve"></script>
   <script type="module" src="/chat.js?v=20260416_chat_hide_media"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-documents.js?v=20260411_members_uid_fallback"></script>
