@@ -46,16 +46,24 @@ if (!window.__ff_authedStaffId) {
   window.__ff_authedStaffId = localStorage.getItem("ff_authedStaffId_v1") || null;
 }
 
+/** Parse JSON from localStorage or other untrusted strings without throwing (avoids SyntaxError on corrupt/empty data). */
+function ffSafeParseJSON(str, fallback) {
+  try {
+    if (str == null || str === "") return fallback;
+    if (typeof str !== "string") return fallback;
+    const parsed = JSON.parse(str);
+    return parsed !== null && parsed !== undefined ? parsed : fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
 // Migration: Move yearly done entries from old key to standard key
 (function migrateYearlyDoneStorage() {
   function parseTaskArray(raw) {
     if (raw == null || raw === "") return [];
-    try {
-      const v = JSON.parse(raw);
-      return Array.isArray(v) ? v : [];
-    } catch (_) {
-      return [];
-    }
+    const v = ffSafeParseJSON(raw, []);
+    return Array.isArray(v) ? v : [];
   }
   try {
     const oldKey = 'ff_tasks_yearly_done_v1';
@@ -98,29 +106,33 @@ if (!window.__ff_authedStaffId) {
 })();
 
 // =====================
-// Global Error Logging
+// Global Error Logging (once — avoids duplicate lines if two app.js URLs load from cache)
 // =====================
-window.addEventListener("error", (e) => {
-  try {
-    const msg = e && e.message;
-    const err = e && e.error;
-    const stack = err && err.stack;
-    console.error("GLOBAL ERROR:", msg, err);
-    if (stack) console.error("Error stack:", stack);
-  } catch (_) {
-    /* avoid throwing from the error logger */
-  }
-});
-window.addEventListener("unhandledrejection", (e) => {
-  try {
-    const reason = e && e.reason;
-    const stack = reason && reason.stack;
-    console.error("PROMISE REJECTION:", reason);
-    if (stack) console.error("Rejection stack:", stack);
-  } catch (_) {
-    /* avoid throwing from the rejection logger */
-  }
-});
+(function installFfGlobalErrorHooks() {
+  if (window.__ffAppErrorHooksInstalled) return;
+  window.__ffAppErrorHooksInstalled = true;
+  window.addEventListener("error", (e) => {
+    try {
+      const msg = e && e.message;
+      const err = e && e.error;
+      const stack = err && err.stack;
+      console.error("GLOBAL ERROR:", msg, err);
+      if (stack) console.error("Error stack:", stack);
+    } catch (_) {
+      /* avoid throwing from the error logger */
+    }
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    try {
+      const reason = e && e.reason;
+      const stack = reason && reason.stack;
+      console.error("PROMISE REJECTION:", reason);
+      if (stack) console.error("Rejection stack:", stack);
+    } catch (_) {
+      /* avoid throwing from the rejection logger */
+    }
+  });
+})();
 
 // =====================
 // Firebase config
@@ -2077,7 +2089,7 @@ function enforceHistoryRetention() {
     const MAX_DAYS = 90;
     const MAX_ENTRIES = 10000;
 
-    const raw = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+    const raw = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
     if (!Array.isArray(raw)) return;
 
     const now = Date.now();
@@ -2108,11 +2120,11 @@ window.enforceHistoryRetention = enforceHistoryRetention;
 // Helper function to load users from localStorage (prefer ffv24_users, else ff_users_v1)
 function ffGetUsers() {
   try {
-    const ffv24Users = JSON.parse(localStorage.getItem('ffv24_users') || '[]');
+    const ffv24Users = ffSafeParseJSON(localStorage.getItem('ffv24_users'), []);
     if (Array.isArray(ffv24Users) && ffv24Users.length > 0) {
       return ffv24Users;
     }
-    const ffUsers = JSON.parse(localStorage.getItem('ff_users_v1') || '[]');
+    const ffUsers = ffSafeParseJSON(localStorage.getItem('ff_users_v1'), []);
     return Array.isArray(ffUsers) ? ffUsers : [];
   } catch (e) {
     console.error('[ffGetUsers] Error loading users:', e);
@@ -2143,7 +2155,7 @@ function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, perform
     if (typeof addHistoryEntry === 'function') {
       addHistoryEntry(entry.action, entry.role, entry.performedBy, entry.worker, entry.source);
       // Extend the last entry with task-specific fields
-      const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+      const logArr = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
       if (logArr.length > 0) {
         const lastEntry = logArr[logArr.length - 1];
         lastEntry.taskId = entry.taskId;
@@ -2157,7 +2169,7 @@ function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, perform
       enforceHistoryRetention();
     } else {
       // Fallback: write directly to ffv24_log
-      const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+      const logArr = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
       const historyEntry = {
         date: now.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }),
         time: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
@@ -2195,7 +2207,7 @@ function moveTaskToPending(taskId, workerName) {
         
         console.log(`[MOVE TO PENDING] Checking tab: ${tab}, activeKey: ${activeKey}, pendingKey: ${pendingKey}`);
         
-        const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+        const activeTasks = ffSafeParseJSON(localStorage.getItem(activeKey), []);
         console.log(`[MOVE TO PENDING] Active tasks count before: ${activeTasks.length}`);
         
         const taskIndex = activeTasks.findIndex(t => {
@@ -2206,7 +2218,7 @@ function moveTaskToPending(taskId, workerName) {
         if (taskIndex >= 0) {
             // Found the task in active list
             const task = activeTasks[taskIndex];
-            const pendingTasks = JSON.parse(localStorage.getItem(pendingKey) || '[]');
+            const pendingTasks = ffSafeParseJSON(localStorage.getItem(pendingKey), []);
             const existingPending = pendingTasks.find(t => {
                 const tId = t.taskId || t.id;
                 return tId && String(tId) === String(taskId);
@@ -2328,7 +2340,7 @@ function moveTaskToPending(taskId, workerName) {
                                try {
                                    const stored = localStorage.getItem("ff_tasks_catalog_v1");
                                    if (stored) {
-                                       const parsed = JSON.parse(stored);
+                                       const parsed = ffSafeParseJSON(stored, {});
                                        return parsed[tab] || [];
                                    }
                                } catch (e) {
@@ -2360,7 +2372,7 @@ function moveTaskToPending(taskId, workerName) {
                     };
                     
                     // Add to pending list (runtime state only)
-                    const pendingTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_pending_v1`) || '[]');
+                    const pendingTasks = ffSafeParseJSON(localStorage.getItem(`ff_tasks_${tab}_pending_v1`), []);
                     pendingTasks.push(taskCopy);
                     if (typeof writeTasksList === 'function') {
                       writeTasksList(tab, 'pending', pendingTasks);
@@ -2424,7 +2436,7 @@ function markTaskDone(taskId, workerName) {
     console.log(`[MARK DONE] Using tab: ${tab}, pendingKey: ${pendingKey}, activeKey: ${activeKey}`);
     
     // 1) Remove from pending and get task data
-    const pendingTasks = JSON.parse(localStorage.getItem(pendingKey) || '[]');
+    const pendingTasks = ffSafeParseJSON(localStorage.getItem(pendingKey), []);
     const pendingBeforeLength = pendingTasks.length;
     console.log(`[MARK DONE] Pending tasks count before: ${pendingBeforeLength}`);
     
@@ -2476,7 +2488,7 @@ function markTaskDone(taskId, workerName) {
     console.log(`[MARK DONE] Normalized keyId: ${keyId}`);
     
     // 2) Update or create in ACTIVE list
-    const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+    const activeTasks = ffSafeParseJSON(localStorage.getItem(activeKey), []);
     const activeBeforeLength = activeTasks.length;
     console.log(`[MARK DONE] Active tasks count before: ${activeBeforeLength}`);
     
@@ -2494,7 +2506,7 @@ function markTaskDone(taskId, workerName) {
         const doneKey = (typeof getTabStorageKey === 'function') 
             ? getTabStorageKey(tab, 'done')
             : `ff_tasks_${tab}_done_v1`;
-        const doneList = JSON.parse(localStorage.getItem(doneKey) || '[]');
+        const doneList = ffSafeParseJSON(localStorage.getItem(doneKey), []);
         const currentYear = new Date().getFullYear();
         
         // Get task data to extract scheduleYear
@@ -2612,7 +2624,7 @@ function markTaskDone(taskId, workerName) {
     console.log(`[MARK DONE] Saved ACTIVE list: ${activeKey}, length: ${activeTasks.length}`);
     
     // Verify completion
-    const verifyActive = JSON.parse(localStorage.getItem(activeKey) || '[]');
+    const verifyActive = ffSafeParseJSON(localStorage.getItem(activeKey), []);
     const completedCount = verifyActive.filter(t => t.status === 'done' || t.completedAt).length;
     console.log(`[MARK DONE] Active saved: ${completedCount} completed task(s) in ACTIVE list`);
     
@@ -3200,9 +3212,9 @@ function loadTasksForTab(tab) {
     console.log(`Loading tasks for tab: ${tab}`);
     
     // Load tasks from localStorage (they will be empty after reset)
-    const activeTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_active_v1`) || '[]');
-    const pendingTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_pending_v1`) || '[]');
-    const doneTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_done_v1`) || '[]');
+    const activeTasks = ffSafeParseJSON(localStorage.getItem(`ff_tasks_${tab}_active_v1`), []);
+    const pendingTasks = ffSafeParseJSON(localStorage.getItem(`ff_tasks_${tab}_pending_v1`), []);
+    const doneTasks = ffSafeParseJSON(localStorage.getItem(`ff_tasks_${tab}_done_v1`), []);
     
     console.log(`Loaded tasks - Active: ${activeTasks.length}, Pending: ${pendingTasks.length}, Done: ${doneTasks.length}`);
     
@@ -3226,7 +3238,7 @@ async function validateResetPin(pin) {
         } else {
             // Fallback: check against settings from localStorage
             try {
-                const settings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+                const settings = ffSafeParseJSON(localStorage.getItem("ffv24_settings"), {});
                 return (settings.adminCode || "").toString() === pin.toString();
             } catch (e) {
                 console.error("RESET: Error checking PIN", e);
@@ -3251,7 +3263,7 @@ async function validateResetPin(pin) {
                 isValidPin = window.isAdminCode(pin);
             } else {
                 try {
-                    const settings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+                    const settings = ffSafeParseJSON(localStorage.getItem("ffv24_settings"), {});
                     isValidPin = (settings.adminCode || "").toString() === pin.toString();
                 } catch (e) {
                     console.error("RESET: Error checking PIN", e);
@@ -3389,7 +3401,7 @@ window.doResetCurrentTab = function doResetCurrentTab() {
         try {
             const raw = localStorage.getItem("ff_tasks_catalog_v1");
             if (raw) {
-                catalogObj = JSON.parse(raw);
+                catalogObj = ffSafeParseJSON(raw, {});
             }
         } catch (e) {
             console.warn("RESET: Error parsing catalog from localStorage:", e);
@@ -3405,7 +3417,7 @@ window.doResetCurrentTab = function doResetCurrentTab() {
         try {
             const activeRaw = localStorage.getItem(activeKey);
             if (activeRaw) {
-                activeTasks = JSON.parse(activeRaw) || [];
+                activeTasks = ffSafeParseJSON(activeRaw, []);
             }
         } catch (e) {
             console.warn("RESET: Error parsing active list:", e);
@@ -3674,16 +3686,6 @@ window.auth = auth;
 // Tasks Tab Badge Helpers
 // =====================
 
-function ffSafeParseJSON(str, fallback) {
-  try {
-    if (!str || typeof str !== 'string') return fallback;
-    const parsed = JSON.parse(str);
-    return parsed !== null && parsed !== undefined ? parsed : fallback;
-  } catch (e) {
-    return fallback;
-  }
-}
-
 function ffIsTaskCompleted(task) {
   if (!task || typeof task !== 'object') return false;
   
@@ -3715,13 +3717,7 @@ function ffIsTaskCompleted(task) {
 
 // Safe JSON parse with fallback
 function safeParse(json, fallback = null) {
-  try {
-    if (!json) return fallback;
-    return JSON.parse(json);
-  } catch (e) {
-    console.warn('[Catalog] Error parsing JSON:', e);
-    return fallback;
-  }
+  return ffSafeParseJSON(json, fallback);
 }
 
 // Get raw catalog object (could be array or object)
@@ -4027,7 +4023,7 @@ function getFilteredMyListTasksForTab(tab) {
       try {
         const stored = localStorage.getItem(activeKey);
         if (stored) {
-          activeTasks = JSON.parse(stored) || [];
+          activeTasks = ffSafeParseJSON(stored, []);
         }
       } catch (e) {
         console.warn('[Badge] Error reading active tasks:', e);
@@ -4107,7 +4103,7 @@ function ffIsAlertsActiveForTab(tab, nowDate) {
     const now = nowDate || new Date();
     
     // Load alert window settings
-    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
     const tabConfig = alertWindows[tab];
     
     // Handle opening/closing (time-based)
@@ -4273,7 +4269,7 @@ function ffUpdateHomeTasksBadge() {
     if (!badge) return;
     
     // Load alert window settings
-    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
     const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
     const now = new Date();
     
@@ -4418,7 +4414,7 @@ function readYearlySource() {
     const activeKey = 'ff_tasks_yearly_active_v1';
     const activeRaw = localStorage.getItem(activeKey);
     if (activeRaw) {
-      const activeList = JSON.parse(activeRaw);
+      const activeList = ffSafeParseJSON(activeRaw, []);
       if (Array.isArray(activeList) && activeList.length > 0) {
         return activeList;
       }
@@ -4428,7 +4424,7 @@ function readYearlySource() {
     const pendingKey = 'ff_tasks_yearly_pending_v1';
     const pendingRaw = localStorage.getItem(pendingKey);
     if (pendingRaw) {
-      const pendingList = JSON.parse(pendingRaw);
+      const pendingList = ffSafeParseJSON(pendingRaw, []);
       if (Array.isArray(pendingList)) {
         return pendingList;
       }
@@ -4450,7 +4446,7 @@ function readYearlyDone() {
       return [];
     }
     
-    const doneList = JSON.parse(doneRaw);
+    const doneList = ffSafeParseJSON(doneRaw, []);
     if (Array.isArray(doneList)) {
       return doneList;
     }
@@ -4576,7 +4572,7 @@ function ffIsYearlyTaskActive(task, nowDate) {
       const doneKey = (typeof getTabStorageKey === 'function')
         ? getTabStorageKey('yearly', 'done')
         : 'ff_tasks_yearly_done_v1';
-      const doneList = JSON.parse(localStorage.getItem(doneKey) || '[]');
+      const doneList = ffSafeParseJSON(localStorage.getItem(doneKey), []);
       const completedForYear = doneList.some(doneTask => {
         const doneTaskId = doneTask.taskId || doneTask.id;
         if (String(doneTaskId).trim() !== String(taskId).trim()) return false;
@@ -4803,7 +4799,7 @@ function ffGetAutoResetConfig(tab) {
   if (tab !== 'opening' && tab !== 'closing' && tab !== 'weekly' && tab !== 'monthly' && tab !== 'yearly') return null;
   
   try {
-    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
     const tabConfig = alertWindows[tab] || {};
     
     return {
@@ -4824,7 +4820,7 @@ function ffGetAutoResetState(tab) {
   if (tab !== 'opening' && tab !== 'closing' && tab !== 'weekly' && tab !== 'monthly' && tab !== 'yearly') return null;
   
   try {
-    const state = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+    const state = ffSafeParseJSON(localStorage.getItem('ff_tasks_auto_reset_state_v1'), {});
     return state[tab] || {};
   } catch (e) {
     console.warn('[Auto-Reset] Error loading state:', e);
@@ -4837,7 +4833,7 @@ function ffSetAutoResetLastRun(tab, todayISO) {
   if (tab !== 'opening' && tab !== 'closing' && tab !== 'weekly' && tab !== 'monthly' && tab !== 'yearly') return;
   
   try {
-    const state = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+    const state = ffSafeParseJSON(localStorage.getItem('ff_tasks_auto_reset_state_v1'), {});
     if (!state[tab]) {
       state[tab] = {};
     }
@@ -4979,7 +4975,7 @@ function ffHasWeeklyTasksScheduledToday(nowDate) {
     const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
     if (!catalogRaw) return false;
     
-    const catalogObj = JSON.parse(catalogRaw);
+    const catalogObj = ffSafeParseJSON(catalogRaw, {});
     const weeklyCatalog = catalogObj.weekly || [];
     
     // Check if at least one task is scheduled for today
@@ -5015,7 +5011,7 @@ function ffHasWeeklyTasksScheduledToday(nowDate) {
 // Prevents auto-reset firing on days when no tasks appear (count=0 != "all done").
 window.ffHasTodayTasksForTab = function ffHasTodayTasksForTab(tab, now) {
   try {
-    const active = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_active_v1') || '[]');
+    const active = ffSafeParseJSON(localStorage.getItem('ff_tasks_' + tab + '_active_v1'), []);
     if (active.length === 0) return false;
     return active.some(function(task) {
       if (!task || typeof task !== 'object') return false;

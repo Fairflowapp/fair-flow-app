@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- FF_BUILD_STAMP: staff-nav-documents+staff-documents-js:20260409 — View Source on production to confirm this deploy matched your local file. -->
 
 <html lang="en">
 
@@ -3009,7 +3010,19 @@ document.addEventListener('DOMContentLoaded', function() {
 // Safe fallback for ffIsHoldModalOpen to prevent runtime crashes
 window.ffIsHoldModalOpen = window.ffIsHoldModalOpen || (() => false);
 
-const ls=(k,v)=>v===undefined?JSON.parse(localStorage.getItem(k)||"null"):localStorage.setItem(k,JSON.stringify(v));
+/** Same idea as app.js ffSafeParseJSON — never throws on corrupt localStorage. */
+function ffSafeParseJSON(str, fallback) {
+  try {
+    if (str == null || str === "") return fallback;
+    if (typeof str !== "string") return fallback;
+    const parsed = JSON.parse(str);
+    return parsed !== null && parsed !== undefined ? parsed : fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+const ls=(k,v)=>v===undefined?ffSafeParseJSON(localStorage.getItem(k),null):localStorage.setItem(k,JSON.stringify(v));
 
 const $=s=>document.querySelector(s); const $$=s=>Array.from(document.querySelectorAll(s));
 
@@ -34367,7 +34380,7 @@ function hookSettingsGuard_DISABLED(){
           <!-- Profile layout: sub-nav (left) | content (right) -->
           <div style="display:flex;gap:20px;align-items:flex-start;margin-top:20px;">
             <!-- Left sub-navigation column -->
-            <div id="staffDetailsNav" style="width:180px;flex-shrink:0;background:#f9fafb;border:1px solid var(--border);border-radius:12px;padding:6px;display:flex;flex-direction:column;gap:2px;"></div>
+            <div id="staffDetailsNav" style="width:180px;flex-shrink:0;background:#f9fafb;border:1px solid var(--border);border-radius:12px;padding:6px;display:flex;flex-direction:column;gap:2px;max-height:min(420px,70vh);overflow-y:auto;"></div>
             <!-- Right content column -->
             <div style="flex:1;min-width:0;">
               <div id="staffDetailsTabContent"></div>
@@ -34538,7 +34551,7 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260409_jsonparse_fix"></script>
+  <script type="module" src="/app.js?v=20260409_index_safejson"></script>
   <script type="module" src="/schedule-helpers.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
@@ -34547,7 +34560,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/inbox.js?v=20260408_doc_renewal_inbox"></script>
   <script type="module" src="/chat.js?v=20260416_chat_hide_media"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/staff-documents.js?v=20260408_expiry_chat_clickfix"></script>
+  <script type="module" src="/staff-documents.js?v=20260409_docs_nav_cachefix"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260312_staffcall11"></script>
   <script type="module" src="/settings-cloud.js?v=20260412_app_js_unify"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>

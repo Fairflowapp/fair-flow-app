@@ -25,7 +25,7 @@ import {
   getDownloadURL,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
-import { db, auth, storage } from "./app.js?v=20260412_imports_first";
+import { db, auth, storage } from "./app.js?v=20260409_index_safejson";
 
 // --- Phase 2: Inbox → staff /documents sync (approve / reject) ---
 
@@ -887,6 +887,9 @@ async function ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId })
     trimStr(userSnap.data()?.name || userSnap.data()?.displayName) || "Manager";
   const senderRole = trimStr(userSnap.data()?.role) || "";
 
+  // Same shape as chat.js template sends — Firestore rules allow templateId+title (and message body).
+  const STAFF_DOC_EXPIRY_TEMPLATE_ID = "ff_staff_doc_expiry_reminder";
+
   const convId = [senderUid, recipientUid].sort().join("__");
   const convRef = doc(db, `salons/${sid}/conversations`, convId);
   await setDoc(
@@ -898,15 +901,16 @@ async function ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId })
   const msgRef = doc(collection(db, `salons/${sid}/conversations/${convId}/messages`));
   const batch = writeBatch(db);
   batch.set(msgRef, {
+    templateId: STAFF_DOC_EXPIRY_TEMPLATE_ID,
     senderUid,
-    senderName,
-    senderRole,
+    senderName: String(senderName),
+    senderRole: String(senderRole),
     recipientUid,
-    recipientName,
+    recipientName: String(recipientName),
     sentAt: serverTimestamp(),
     readBy: [senderUid],
-    title,
-    message,
+    title: String(title),
+    message: String(message),
   });
   batch.set(
     convRef,
