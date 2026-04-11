@@ -10,6 +10,8 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
+  query,
   setDoc,
   updateDoc,
   onSnapshot,
@@ -17,6 +19,7 @@ import {
   Timestamp,
   deleteField,
   increment,
+  where,
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import {
@@ -362,6 +365,9 @@ export async function ffSyncStaffDocumentOnInboxReject(dbConn, params) {
 let _unsub = null;
 let _mountedKey = "";
 let _mountCtx = { salonId: "", staffId: "" };
+/** After a successful send, ignore duplicate sends for the same doc briefly (double-click / dual handlers). */
+let _ffExpiryNotifyDedupe = { key: "", at: 0 };
+let _ffExpiryNotifyInFlight = false;
 let _ffBoundContainer = null;
 let _onDocActionClick = null;
 /** @type {Array<Record<string, unknown>> | null} */
@@ -412,11 +418,68 @@ export function ffComputeLifecycleFromExpiration(expirationRaw) {
 }
 
 function ffToast(msg, kind) {
-  if (typeof window.showToast === "function") {
-    window.showToast(msg, kind === "error" ? "error" : "success");
-  } else {
-    console.log("[staff-documents]", msg);
+  const text = String(msg ?? "");
+  const isErr = kind === "error";
+  const isInfo = kind === "info";
+  const ch = typeof document !== "undefined" ? document.getElementById("chatToastContainer") : null;
+  const pushToastEl = (t) => {
+    if (isErr) {
+      t.style.borderColor = "#fecaca";
+      t.style.background = "#fef2f2";
+    } else if (isInfo) {
+      t.style.borderColor = "#bfdbfe";
+      t.style.background = "#eff6ff";
+    }
+    const header = document.createElement("div");
+    header.className = "chat-toast-header";
+    const sender = document.createElement("div");
+    sender.className = "chat-toast-sender";
+    sender.textContent = "Documents";
+    header.appendChild(sender);
+    const preview = document.createElement("div");
+    preview.className = "chat-toast-preview";
+    preview.textContent = text;
+    t.appendChild(header);
+    t.appendChild(preview);
+  };
+
+  if (ch) {
+    const t = document.createElement("div");
+    t.className = "chat-toast";
+    pushToastEl(t);
+    ch.appendChild(t);
+    setTimeout(() => {
+      try {
+        t.remove();
+      } catch (_) {}
+    }, isInfo ? 3500 : 6000);
+  } else if (typeof document !== "undefined" && document.body) {
+    const fb = document.createElement("div");
+    fb.setAttribute("data-ff-staffdoc-toast", "1");
+    fb.style.cssText =
+      "position:fixed;left:50%;top:24px;transform:translateX(-50%);z-index:2147483647;max-width:min(92vw,420px);padding:12px 16px;border-radius:12px;font:600 14px system-ui,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,0.2);pointer-events:none;border:1px solid " +
+      (isErr ? "#fecaca" : isInfo ? "#bfdbfe" : "#a7f3d0") +
+      ";background:" +
+      (isErr ? "#fef2f2" : isInfo ? "#eff6ff" : "#ecfdf5") +
+      ";color:" +
+      (isErr ? "#991b1b" : isInfo ? "#1e3a8a" : "#065f46") +
+      ";";
+    fb.textContent = text;
+    try {
+      document.body.appendChild(fb);
+    } catch (_) {}
+    setTimeout(() => {
+      try {
+        fb.remove();
+      } catch (_) {}
+    }, isInfo ? 3500 : 6000);
+  } else if (typeof window.showToast === "function") {
+    try {
+      window.showToast(text, isErr ? 5500 : 4000);
+    } catch (_) {}
   }
+  if (isErr) console.warn("[staff-documents]", text);
+  else console.log("[staff-documents]", text);
 }
 
 /**
@@ -670,7 +733,10 @@ async function ffHandleStaffDocumentActionClick(e) {
   const action = btn.getAttribute("data-ff-doc-action");
   const docId = btn.getAttribute("data-doc-id");
   const { salonId, staffId } = _mountCtx;
-  if (!salonId || !staffId || !docId) return;
+  if (!salonId || !staffId || !docId) {
+    ffToast("Missing context. Refresh the page.", "error");
+    return;
+  }
 
   const ref = doc(db, "salons", salonId, "staff", staffId, "documents", docId);
 
@@ -816,16 +882,59 @@ async function ffHandleStaffDocumentActionClick(e) {
   }
 
   if (action === "expiry_chat_notify") {
-    if (!auth.currentUser) {
-      ffToast("Sign in required.", "error");
-      return;
-    }
     try {
-      await ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId });
-    } catch (err) {
-      console.warn("[staff-documents] expiry_chat_notify", err);
-      ffToast(String(err?.message || err || "Could not send chat message."), "error");
+      await ffRunExpiryChatNotify(docId);
+    } catch (_) {
+      /* errors already surfaced via ffToast + console */
     }
+    return;
+  }
+}
+
+/** Align with media-upload / schedule: managers, assistant managers, front desk, admins, owners. */
+function ffUserCanSendExpiryChatReminder(roleLc) {
+  return ["manager", "admin", "owner", "front_desk", "assistant_manager"].includes(roleLc);
+}
+
+function ffStaffDocAbortWithToast(msg) {
+  ffToast(msg, "error");
+  const e = new Error(String(msg));
+  e.ffToastShown = true;
+  return e;
+}
+
+/**
+ * Firebase uid for chat: staff row may omit firebaseUid while salons/{sid}/members/{uid}
+ * has staffId (written when the user opens Inbox / profile).
+ */
+async function ffResolveRecipientUidForChat(dbConn, salonId, staffFirestoreId, srow) {
+  let uid = trimStr(srow.firebaseUid || srow.firebaseAuthUid || srow.authUid);
+  if (uid) return uid;
+  const sid = trimStr(salonId);
+  const stid = trimStr(staffFirestoreId);
+  if (!sid || !stid) return "";
+  try {
+    const q = query(
+      collection(dbConn, "salons", sid, "members"),
+      where("staffId", "==", stid),
+      limit(3),
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) return "";
+    if (snap.docs.length === 1) return trimStr(snap.docs[0].id);
+    const byEmail = trimStr(srow.email || "").toLowerCase();
+    if (byEmail) {
+      for (const d of snap.docs) {
+        const em = String(d.data()?.email || "")
+          .trim()
+          .toLowerCase();
+        if (em && em === byEmail) return trimStr(d.id);
+      }
+    }
+    return trimStr(snap.docs[0].id);
+  } catch (e) {
+    console.warn("[staff-documents] members lookup for recipient uid", e);
+    return "";
   }
 }
 
@@ -839,41 +948,35 @@ async function ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId })
   const did = trimStr(docId);
   const senderUid = auth.currentUser?.uid;
   if (!sid || !stid || !did || !senderUid) {
-    ffToast("Missing context.", "error");
-    return;
+    throw ffStaffDocAbortWithToast("Missing context.");
   }
 
   const userSnap = await getDoc(doc(db, "users", senderUid));
   const role = String(userSnap.data()?.role || "").toLowerCase();
-  if (!["manager", "admin", "owner"].includes(role)) {
-    ffToast("Only managers can send this reminder.", "error");
-    return;
+  if (!ffUserCanSendExpiryChatReminder(role)) {
+    throw ffStaffDocAbortWithToast("Only managers can send this reminder.");
   }
 
   const staffSnap = await getDoc(doc(db, "salons", sid, "staff", stid));
   if (!staffSnap.exists()) {
-    ffToast("Staff member not found.", "error");
-    return;
+    throw ffStaffDocAbortWithToast("Staff member not found.");
   }
   const srow = staffSnap.data() || {};
-  const recipientUid = trimStr(srow.firebaseUid || srow.firebaseAuthUid || srow.authUid);
+  let recipientUid = await ffResolveRecipientUidForChat(db, sid, stid, srow);
+  recipientUid = trimStr(recipientUid);
   const recipientName = trimStr(srow.name) || "Staff";
   if (!recipientUid) {
-    ffToast(
+    throw ffStaffDocAbortWithToast(
       "This person has not linked their login yet. They must sign in once before you can message them in chat.",
-      "error",
     );
-    return;
   }
   if (recipientUid === senderUid) {
-    ffToast("You cannot send this reminder to yourself.", "error");
-    return;
+    throw ffStaffDocAbortWithToast("You cannot send this reminder to yourself.");
   }
 
   const docSnap = await getDoc(doc(db, "salons", sid, "staff", stid, "documents", did));
   if (!docSnap.exists()) {
-    ffToast("Document not found.", "error");
-    return;
+    throw ffStaffDocAbortWithToast("Document not found.");
   }
   const d = docSnap.data() || {};
   const docType = trimStr(d.type) || "document";
@@ -892,13 +995,17 @@ async function ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId })
 
   const convId = [senderUid, recipientUid].sort().join("__");
   const convRef = doc(db, `salons/${sid}/conversations`, convId);
+  const msgRef = doc(collection(db, `salons/${sid}/conversations/${convId}/messages`));
+
+  // Security rules evaluate each batch op against DB state *before* the batch runs.
+  // Message create uses get(conversation).participants — so the conversation doc must
+  // exist in a prior committed write, not in the same batch as the first message.
   await setDoc(
     convRef,
     { participants: [senderUid, recipientUid].sort(), createdAt: serverTimestamp() },
     { merge: true },
   );
 
-  const msgRef = doc(collection(db, `salons/${sid}/conversations/${convId}/messages`));
   const batch = writeBatch(db);
   batch.set(msgRef, {
     templateId: STAFF_DOC_EXPIRY_TEMPLATE_ID,
@@ -930,6 +1037,51 @@ async function ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId })
   );
   await batch.commit();
   ffToast("Chat reminder sent.", "success");
+}
+
+async function ffRunExpiryChatNotify(docId) {
+  const did = trimStr(docId);
+  const { salonId: sid0, staffId: st0 } = _mountCtx;
+  const dk = `${sid0}|${st0}|${did}`;
+  const now0 = Date.now();
+  if (dk === _ffExpiryNotifyDedupe.key && now0 - _ffExpiryNotifyDedupe.at < 1500) {
+    ffToast("Reminder just sent. Try again in a moment.", "info");
+    return;
+  }
+  if (_ffExpiryNotifyInFlight) {
+    ffToast("Still sending the previous reminder…", "info");
+    return;
+  }
+
+  ffToast("Sending reminder…", "info");
+  if (!auth.currentUser) {
+    ffToast("Sign in required.", "error");
+    return;
+  }
+  const { salonId, staffId } = _mountCtx;
+  if (!salonId || !staffId || !did) {
+    ffToast("Missing context. Refresh the page.", "error");
+    return;
+  }
+
+  _ffExpiryNotifyInFlight = true;
+  try {
+    await ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId: did });
+    _ffExpiryNotifyDedupe = { key: dk, at: Date.now() };
+    console.log("[staff-documents] Chat reminder flow finished (check toast + Chat).");
+  } catch (err) {
+    console.warn("[staff-documents] expiry_chat_notify", err);
+    if (!err?.ffToastShown) {
+      const code = String(err?.code || "");
+      const hint =
+        code === "permission-denied"
+          ? "Permission denied (chat). If this persists after refresh, contact support."
+          : String(err?.message || err || "Could not send chat message.");
+      ffToast(hint, "error");
+    }
+  } finally {
+    _ffExpiryNotifyInFlight = false;
+  }
 }
 
 function escapeHtml(s) {
@@ -1328,6 +1480,18 @@ function ensureStaffDocSearchListeners(container) {
   container.addEventListener("input", _onStaffDocSearchInput);
 }
 
+/** Direct handler on the button — does not rely on bubbling to the documents container. */
+function wireStaffDocExpiryChatButtons(container) {
+  if (!container || !container.querySelectorAll) return;
+  container.querySelectorAll('button[data-ff-doc-action="expiry_chat_notify"]').forEach((btn) => {
+    btn.onclick = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void ffRunExpiryChatNotify(btn.getAttribute("data-doc-id"));
+    };
+  });
+}
+
 function renderListIntoContainer(container, list) {
   if (!container) return;
   const active = document.activeElement;
@@ -1350,6 +1514,7 @@ function renderListIntoContainer(container, list) {
   }
   const body = renderListContentBody(list);
   container.innerHTML = `<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">${body}</div>`;
+  wireStaffDocExpiryChatButtons(container);
 
   if (wasSearch) {
     const inp = container.querySelector("input[data-ff-doc-search]");
@@ -1493,7 +1658,7 @@ function renderDocumentCard(doc) {
     ? `<button type="button" data-ff-doc-action="replace" data-doc-id="${escapeHtml(doc.id)}" title="Replace file on this document (same record)" style="${btnBase}cursor:pointer;border:1px dashed #7c3aed;background:#faf5ff;color:#6d28d9;">Upload New Version</button>`
     : "";
   const expiringSoonChatBtn = showExpiringSoonChat
-    ? `<button type="button" data-doc-id="${escapeHtml(doc.id)}" title="Send this staff member a chat reminder" onclick="event.preventDefault();event.stopPropagation();if(typeof window.ffStaffDocSendExpiryChatReminder==='function')window.ffStaffDocSendExpiryChatReminder(this.getAttribute('data-doc-id'));" style="${btnBase}cursor:pointer;border:1px solid #7c3aed;background:#ede9fe;color:#5b21b6;pointer-events:auto;position:relative;z-index:2;touch-action:manipulation;">Send chat reminder</button>`
+    ? `<button type="button" data-ff-doc-action="expiry_chat_notify" data-doc-id="${escapeHtml(doc.id)}" title="Send this staff member a chat reminder" style="${btnBase}cursor:pointer;border:1px solid #7c3aed;background:#ede9fe;color:#5b21b6;pointer-events:auto !important;position:relative;z-index:2;touch-action:manipulation;">Send chat reminder</button>`
     : "";
 
   const actionsRow = `
@@ -1649,21 +1814,22 @@ if (typeof window !== "undefined") {
   window.ffStaffDocumentsUnmount = ffStaffDocumentsUnmount;
   window.ffMountStaffDocuments = ffMountStaffDocuments;
   window.ffMountStaffDocumentsSummaryStrip = ffMountStaffDocumentsSummaryStrip;
-  /** Direct click path for "Send chat reminder" (avoids delegation / TextNode issues in some browsers). */
+  window.ffStaffDocToast = ffToast;
+  /** For console debugging: run `ffStaffDocDebugContext()` while Staff → Documents is open. */
+  window.ffStaffDocDebugContext = function () {
+    return {
+      mountCtx: { salonId: _mountCtx.salonId, staffId: _mountCtx.staffId },
+      mountedKey: _mountedKey,
+      signedIn: !!auth.currentUser,
+      uid: auth.currentUser?.uid || null,
+    };
+  };
+  window.ffStaffDocSendExpiryChatReminderFromEl = function (el) {
+    const id = el && el.getAttribute && trimStr(el.getAttribute("data-doc-id"));
+    return ffRunExpiryChatNotify(id);
+  };
+  /** Returns a Promise so the console can `await` or `.then/.catch` and see failures. */
   window.ffStaffDocSendExpiryChatReminder = function (docId) {
-    const id = trimStr(docId);
-    const { salonId, staffId } = _mountCtx;
-    if (!salonId || !staffId || !id) {
-      ffToast("Missing context.", "error");
-      return;
-    }
-    if (!auth.currentUser) {
-      ffToast("Sign in required.", "error");
-      return;
-    }
-    ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId: id }).catch((err) => {
-      console.warn("[staff-documents] ffStaffDocSendExpiryChatReminder", err);
-      ffToast(String(err?.message || err || "Could not send chat message."), "error");
-    });
+    return ffRunExpiryChatNotify(docId);
   };
 }
