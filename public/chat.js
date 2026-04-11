@@ -947,6 +947,8 @@ export function subscribeToChatBadge(uid, salonId) {
 
 // ─── Toast Notifications ───────────────────────────────────────────────────────
 const CHAT_TOAST_DURATION_MS = 5000;
+/** Per-conversation last lastMessageAtMs we already surfaced — avoids duplicate toasts when Firestore emits the same update twice (e.g. two commits on one send). */
+const _lastChatToastLastMsgMsByConv = new Map();
 
 function isChatScreenVisible() {
   const cs = document.getElementById('chatScreen');
@@ -1001,9 +1003,13 @@ export function subscribeToChatToastNotifications(myUid, salonId) {
         if (change.type !== 'modified') return;
         const data = change.doc.data() || {};
         const convId = change.doc.id;
+        const lastMs = Number(data.lastMessageAtMs) || 0;
+        const prevShown = _lastChatToastLastMsgMsByConv.get(convId);
+        if (lastMs && prevShown !== undefined && lastMs <= prevShown) return;
         const lastSenderUid = data.lastSenderUid;
         if (!lastSenderUid || lastSenderUid === myUid) return;
         if (currentConvId === convId && isChatScreenVisible()) return;
+        if (lastMs) _lastChatToastLastMsgMsByConv.set(convId, lastMs);
         showChatToast({
           senderName: data.lastSenderName || 'Someone',
           role: data.lastSenderRole || '',
@@ -1571,6 +1577,7 @@ onAuthStateChanged(auth, async user => {
   } else {
     if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
     if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
+    _lastChatToastLastMsgMsByConv.clear();
     const badge = document.getElementById('chatNavBadge');
     if (badge) badge.style.display = 'none';
   }

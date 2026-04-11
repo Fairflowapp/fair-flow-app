@@ -1020,11 +1020,14 @@ async function ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId })
   // Security rules evaluate each batch op against DB state *before* the batch runs.
   // Message create uses get(conversation).participants — so the conversation doc must
   // exist in a prior committed write, not in the same batch as the first message.
-  await setDoc(
-    convRef,
-    { participants: [senderUid, recipientUid].sort(), createdAt: serverTimestamp() },
-    { merge: true },
-  );
+  const convSnap = await getDoc(convRef);
+  if (!convSnap.exists()) {
+    await setDoc(
+      convRef,
+      { participants: [senderUid, recipientUid].sort(), createdAt: serverTimestamp() },
+      { merge: true },
+    );
+  }
 
   const batch = writeBatch(db);
   batch.set(msgRef, {
