@@ -151,38 +151,38 @@ function filterAssignmentsByCoverageTargets(candidates, dateKey, scheduleRules, 
 
   const runDayLevelPick = () => {
     const eff = getEffectiveScheduleRulesForDate(dateKey, scheduleRules, coverageRules, { businessHours, dayShiftSegments });
-    const taken = new Set();
-    const picked = [];
+  const taken = new Set();
+  const picked = [];
 
-    const takeUpTo = (list, n) => {
-      let remaining = n;
-      for (const a of list) {
-        if (remaining <= 0) break;
-        const k = assignmentStaffKey(a);
-        if (!k || taken.has(k)) continue;
-        picked.push(a);
-        taken.add(k);
-        remaining -= 1;
-      }
-    };
-
-    const fullManagers = sorted.filter(isFullManagerAssignment);
-    const assistantManagers = sorted.filter(isAssistantManagerAssignment);
-    const technicians = sorted.filter((a) => a.role === "technician");
-
-    takeUpTo(fullManagers, eff.minManagersPerShift);
-    takeUpTo(assistantManagers, eff.minFrontDeskPerDay);
-    takeUpTo(technicians, eff.minTechniciansPerDay);
-
-    for (const a of sorted) {
-      if (picked.length >= eff.minTotalStaffPerDay) break;
+  const takeUpTo = (list, n) => {
+    let remaining = n;
+    for (const a of list) {
+      if (remaining <= 0) break;
       const k = assignmentStaffKey(a);
       if (!k || taken.has(k)) continue;
       picked.push(a);
       taken.add(k);
+      remaining -= 1;
     }
+  };
 
-    return picked.sort(compareAssignmentsByTime);
+  const fullManagers = sorted.filter(isFullManagerAssignment);
+    const assistantManagers = sorted.filter(isAssistantManagerAssignment);
+  const technicians = sorted.filter((a) => a.role === "technician");
+
+  takeUpTo(fullManagers, eff.minManagersPerShift);
+    takeUpTo(assistantManagers, eff.minFrontDeskPerDay);
+  takeUpTo(technicians, eff.minTechniciansPerDay);
+
+  for (const a of sorted) {
+    if (picked.length >= eff.minTotalStaffPerDay) break;
+    const k = assignmentStaffKey(a);
+    if (!k || taken.has(k)) continue;
+    picked.push(a);
+    taken.add(k);
+  }
+
+  return picked.sort(compareAssignmentsByTime);
   };
 
   if (!customSegForDay.length || !dayName || !businessHours) {

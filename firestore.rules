@@ -296,7 +296,8 @@ service cloud.firestore {
               'lastActivityAt',
               'updatedAt',
               'unreadForManagers',
-              'priority'
+              'priority',
+              'staffDocumentId'
             ])
           )
           ||
@@ -340,6 +341,17 @@ service cloud.firestore {
       allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
       allow create, update, delete: if belongsToSalon(salonId)
         && isManager(salonId);
+
+      // Staff documents (Inbox approve → staff doc sync; Staff Member > Documents tab)
+      match /documents/{documentId} {
+        allow read: if belongsToSalon(salonId)
+          && (
+            isManager(salonId)
+            || (isTechnician(salonId) && userStaffId() == staffId)
+          );
+        allow create, update: if belongsToSalon(salonId) && isManager(salonId);
+        allow delete: if false;
+      }
     }
 
     // ===== CHAT / STRUCTURED MESSAGES SYSTEM =====
@@ -414,6 +426,9 @@ service cloud.firestore {
                 && request.resource.data.flowId is string
                 && request.resource.data.flowTitle is string
                 && request.resource.data.renderedText is string)
+            || (request.resource.data.keys().hasAll(['title', 'message'])
+                && request.resource.data.title is string
+                && request.resource.data.message is string)
           );
 
         // Allow updating only readBy field (mark as read)

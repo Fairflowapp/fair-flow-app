@@ -18,7 +18,7 @@ import {
   onSnapshot, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js";
+import { db, auth } from "./app.js?v=20260412_imports_first";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let chatUserProfile    = null;

@@ -1,68 +1,4 @@
-console.log("[CLIENT BOOT] app.js v=20260205_3 loaded");
-console.log("FF APP.JS LOADED", new Date().toISOString(), "search=", location.search);
-console.log('[BUILD MARKER] app.js loaded', new Date().toISOString());
-
-if (!window.__ff_authedStaffId) {
-  window.__ff_authedStaffId = localStorage.getItem("ff_authedStaffId_v1") || null;
-}
-
-// Migration: Move yearly done entries from old key to standard key
-(function migrateYearlyDoneStorage() {
-  try {
-    const oldKey = 'ff_tasks_yearly_done_v1';
-    const standardKey = (typeof getTabStorageKey === 'function')
-      ? getTabStorageKey('yearly', 'done')
-      : 'ff_tasks_yearly_done_v1';
-    
-    // Only migrate if keys are different and old key exists
-    if (oldKey !== standardKey) {
-      const oldData = localStorage.getItem(oldKey);
-      const standardData = localStorage.getItem(standardKey);
-      
-      if (oldData && (!standardData || JSON.parse(standardData || '[]').length === 0)) {
-        // Move/merge entries from old key to standard key
-        const oldList = JSON.parse(oldData);
-        const standardList = JSON.parse(standardData || '[]');
-        
-        // Merge: add entries from old list that don't exist in standard list
-        const standardIds = new Set(standardList.map(t => String(t.taskId || t.id || '').trim()));
-        oldList.forEach(oldTask => {
-          const oldId = String(oldTask.taskId || oldTask.id || '').trim();
-          if (oldId && !standardIds.has(oldId)) {
-            standardList.push(oldTask);
-            standardIds.add(oldId);
-          }
-        });
-        
-        // Save to standard key
-        localStorage.setItem(standardKey, JSON.stringify(standardList));
-        console.log('[Migration] Moved yearly done entries from', oldKey, 'to', standardKey, `(${standardList.length} entries)`);
-        
-        // Delete old key
-        localStorage.removeItem(oldKey);
-        console.log('[Migration] Deleted old yearly done key:', oldKey);
-      }
-    }
-  } catch (e) {
-    console.warn('[Migration] Error migrating yearly done storage:', e);
-  }
-})();
-
-// =====================
-// Global Error Logging
-// =====================
-window.addEventListener("error", (e) => {
-  console.error("GLOBAL ERROR:", e.message, e.error);
-  console.error("Error stack:", e.error?.stack);
-});
-window.addEventListener("unhandledrejection", (e) => {
-  console.error("PROMISE REJECTION:", e.reason);
-  console.error("Rejection stack:", e.reason?.stack);
-});
-
-// =====================
-// Firebase imports
-// =====================
+// Static imports must be first in ES modules (avoids SyntaxError / "Unexpected end of input" in some browsers).
 import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
 import {
   getAuth,
@@ -102,6 +38,90 @@ import {
   httpsCallable
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
 
+console.log("[CLIENT BOOT] app.js v=20260205_3 loaded");
+console.log("FF APP.JS LOADED", new Date().toISOString(), "search=", location.search);
+console.log('[BUILD MARKER] app.js loaded', new Date().toISOString());
+
+if (!window.__ff_authedStaffId) {
+  window.__ff_authedStaffId = localStorage.getItem("ff_authedStaffId_v1") || null;
+}
+
+// Migration: Move yearly done entries from old key to standard key
+(function migrateYearlyDoneStorage() {
+  function parseTaskArray(raw) {
+    if (raw == null || raw === "") return [];
+    try {
+      const v = JSON.parse(raw);
+      return Array.isArray(v) ? v : [];
+    } catch (_) {
+      return [];
+    }
+  }
+  try {
+    const oldKey = 'ff_tasks_yearly_done_v1';
+    const standardKey = (typeof getTabStorageKey === 'function')
+      ? getTabStorageKey('yearly', 'done')
+      : 'ff_tasks_yearly_done_v1';
+    
+    // Only migrate if keys are different and old key exists
+    if (oldKey !== standardKey) {
+      const oldData = localStorage.getItem(oldKey);
+      const standardData = localStorage.getItem(standardKey);
+      const standardPreview = parseTaskArray(standardData);
+      if (oldData && (!standardData || standardPreview.length === 0)) {
+        // Move/merge entries from old key to standard key
+        const oldList = parseTaskArray(oldData);
+        const standardList = parseTaskArray(standardData || '[]');
+        
+        // Merge: add entries from old list that don't exist in standard list
+        const standardIds = new Set(standardList.map(t => String(t.taskId || t.id || '').trim()));
+        oldList.forEach(oldTask => {
+          const oldId = String(oldTask.taskId || oldTask.id || '').trim();
+          if (oldId && !standardIds.has(oldId)) {
+            standardList.push(oldTask);
+            standardIds.add(oldId);
+          }
+        });
+        
+        // Save to standard key
+        localStorage.setItem(standardKey, JSON.stringify(standardList));
+        console.log('[Migration] Moved yearly done entries from', oldKey, 'to', standardKey, `(${standardList.length} entries)`);
+        
+        // Delete old key
+        localStorage.removeItem(oldKey);
+        console.log('[Migration] Deleted old yearly done key:', oldKey);
+      }
+    }
+  } catch (e) {
+    console.warn('[Migration] Error migrating yearly done storage:', e);
+  }
+})();
+
+// =====================
+// Global Error Logging
+// =====================
+window.addEventListener("error", (e) => {
+  try {
+    const msg = e && e.message;
+    const err = e && e.error;
+    const stack = err && err.stack;
+    console.error("GLOBAL ERROR:", msg, err);
+    if (stack) console.error("Error stack:", stack);
+  } catch (_) {
+    /* avoid throwing from the error logger */
+  }
+});
+window.addEventListener("unhandledrejection", (e) => {
+  try {
+    const reason = e && e.reason;
+    const stack = reason && reason.stack;
+    console.error("PROMISE REJECTION:", reason);
+    if (stack) console.error("Rejection stack:", stack);
+  } catch (_) {
+    /* avoid throwing from the rejection logger */
+  }
+});
+
 // =====================
 // Firebase config
 // =====================
@@ -121,7 +141,7 @@ const firebaseConfig = {
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 window.__ffAuth = auth;
-window.__ffGetUid = () => auth.currentUser?.uid || null;
+window.__ffGetUid = () => (auth.currentUser && auth.currentUser.uid) || null;
 export const db = getFirestore(app);
 window.ffDb = db;   // expose for non-module scripts (staff cloud sync)
 

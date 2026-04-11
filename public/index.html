@@ -22688,6 +22688,9 @@ function initializeAppsPanel() {
       const detailsContainer = document.getElementById('staffDetailsContainer');
       
       if (!selectedStaffId) {
+        if (typeof window.ffStaffDocumentsUnmount === 'function') {
+          window.ffStaffDocumentsUnmount();
+        }
         if (placeholder) placeholder.style.display = 'block';
         if (detailsContainer) detailsContainer.style.display = 'none';
         return;
@@ -22700,6 +22703,9 @@ function initializeAppsPanel() {
       const staff = staffData.staff.find(s => s.id === selectedStaffId);
       
       if (!staff) {
+        if (typeof window.ffStaffDocumentsUnmount === 'function') {
+          window.ffStaffDocumentsUnmount();
+        }
         if (placeholder) placeholder.style.display = 'block';
         if (detailsContainer) detailsContainer.style.display = 'none';
         return;
@@ -22870,8 +22876,8 @@ function initializeAppsPanel() {
       // Render right-side navigation
       const navEl = document.getElementById('staffDetailsNav');
       if (navEl) {
-        const tabs = ['details', 'schedule', 'locations', 'notifications', 'permissions'];
-        const labels = ['Details', 'Schedule', 'Locations', 'Notifications', 'Permissions'];
+        const tabs = ['details', 'schedule', 'locations', 'notifications', 'permissions', 'documents'];
+        const labels = ['Details', 'Schedule', 'Locations', 'Notifications', 'Permissions', 'Documents'];
         navEl.innerHTML = tabs.map(function(tab, idx) {
           const isActive = currentTab === tab;
           return `<button type="button" class="staff-nav-item${isActive ? ' is-active' : ''}" data-tab="${tab}" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;transition:background 0.15s ease,color 0.15s ease;">${labels[idx]}</button>`;
@@ -22885,7 +22891,7 @@ function initializeAppsPanel() {
         });
       }
       
-      const validTabs = ['details', 'schedule', 'locations', 'notifications', 'permissions'];
+      const validTabs = ['details', 'schedule', 'locations', 'notifications', 'permissions', 'documents'];
       if (!validTabs.includes(currentTab)) currentTab = 'details';
       switchTab(currentTab);
       
@@ -22898,7 +22904,7 @@ function initializeAppsPanel() {
   let currentTab = 'details';
   function switchTab(tab) {
     currentTab = tab;
-    
+
     // Update navigation items
     const navEl = document.getElementById('staffDetailsNav');
     if (navEl) {
@@ -22932,7 +22938,8 @@ function initializeAppsPanel() {
     const locationsContent = panel('staffLocationsTabContent');
     const notificationsContent = panel('staffNotificationsTabContent');
     const permissionsContent = panel('staffPermissionsTabContent');
-    
+    const documentsContent = panel('staffDocumentsTabContent');
+
     if (detailsContent) detailsContent.style.display = tab === 'details' ? 'block' : 'none';
     if (scheduleContent) scheduleContent.style.display = tab === 'schedule' ? 'block' : 'none';
     if (locationsContent) locationsContent.style.display = tab === 'locations' ? 'block' : 'none';
@@ -22959,7 +22966,20 @@ function initializeAppsPanel() {
         }
       }
     }
+    if (documentsContent) {
+      documentsContent.style.display = tab === 'documents' ? 'block' : 'none';
+      if (tab === 'documents' && selectedStaffId && typeof window.ffMountStaffDocuments === 'function') {
+        var salonIdDocs = (typeof window.currentSalonId !== 'undefined' && window.currentSalonId) ? String(window.currentSalonId).trim() : '';
+        if (salonIdDocs) {
+          window.ffMountStaffDocuments(documentsContent, salonIdDocs, selectedStaffId);
+        } else {
+          documentsContent.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#b91c1c;">Salon not loaded yet.</p></div>';
+        }
+      }
+    }
   }
+
+  window.ffSwitchStaffDetailsTab = switchTab;
   
   // Edit mode state
   let isEditingStaffDetails = false;
@@ -24110,7 +24130,7 @@ function initializeAppsPanel() {
       updateArchiveToggleUI();
 
       if (jumpToStaffId) {
-        currentTab = ['details', 'schedule', 'locations', 'notifications', 'permissions'].indexOf(jumpToTab) >= 0 ? jumpToTab : 'schedule';
+        currentTab = ['details', 'schedule', 'locations', 'notifications', 'permissions', 'documents'].indexOf(jumpToTab) >= 0 ? jumpToTab : 'schedule';
       }
 
       const afterStaffListReady = function() {
@@ -24323,6 +24343,9 @@ function initializeAppsPanel() {
   }
   
   function closeStaffMembersModal() {
+    if (typeof window.ffStaffDocumentsUnmount === 'function') {
+      window.ffStaffDocumentsUnmount();
+    }
     if (staffMembersModal) {
       staffMembersModal.style.display = 'none';
       // Reset form state when closing
@@ -34358,6 +34381,7 @@ function hookSettingsGuard_DISABLED(){
               <div id="staffPermissionsTabContent" style="display:none;padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
                 <p style="color:#6b7280;font-size:13px;margin:0;">Coming soon.</p>
               </div>
+              <div id="staffDocumentsTabContent" style="display:none;min-width:0;"></div>
             </div>
           </div>
         </div>
@@ -34514,21 +34538,22 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260409_en_ui_strings"></script>
+  <script type="module" src="/app.js?v=20260409_jsonparse_fix"></script>
   <script type="module" src="/schedule-helpers.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
-  <script type="module" src="/schedule-ui.js?v=20260409_schedule_settings_normal_layout"></script>
-  <script type="module" src="/inbox.js?v=20260417_inbox_title_far_side"></script>
+  <script type="module" src="/schedule-ui.js?v=20260412_app_js_unify"></script>
+  <script type="module" src="/inbox.js?v=20260408_doc_renewal_inbox"></script>
   <script type="module" src="/chat.js?v=20260416_chat_hide_media"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
+  <script type="module" src="/staff-documents.js?v=20260408_expiry_chat_clickfix"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260312_staffcall11"></script>
-  <script type="module" src="/settings-cloud.js?v=20260409_segment_save_toast"></script>
+  <script type="module" src="/settings-cloud.js?v=20260412_app_js_unify"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tickets.js?v=20260402_tickets_boot_cover"></script>
-  <script type="module" src="/media-upload.js?v=20260409_en_ui_strings"></script>
+  <script type="module" src="/media-upload.js?v=20260412_app_js_unify"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -35481,9 +35506,6 @@ function hookSettingsGuard_DISABLED(){
   <div id="inboxViewSwitcher" class="inbox-view-switcher" style="display:none;align-items:center;gap:0;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;pointer-events:auto;">
     <button type="button" id="inboxViewMine" class="inbox-view-btn" data-inbox-view="mine" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('mine')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;pointer-events:auto;">My Requests</button>
     <button type="button" id="inboxViewToHandle" class="inbox-view-btn active" data-inbox-view="to_handle" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('to_handle')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;pointer-events:auto;">To handle</button>
-    <div style="display:flex;gap:10px;align-items:center;margin-left:auto;">
-      <button id="inboxCreateRequestBtn" onclick="openCreateRequestModal()" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;">+ New Request</button>
-    </div>
     <div id="inboxFilterRow" style="display:none;align-items:center;gap:8px;flex-wrap:nowrap;margin-left:auto;">
       <label class="inbox-staff-filter-label" style="font-size:13px;color:#6b7280;white-space:nowrap;">Filter by staff</label>
       <div id="inboxStaffFilterWrap" style="position:relative;">
@@ -35512,12 +35534,11 @@ function hookSettingsGuard_DISABLED(){
   <!-- Content area (fades in when ready to avoid flash of empty state) -->
   <div id="inboxContent" style="flex:1;padding:24px;overflow-y:auto;background:#f9fafb;transition:opacity 0.2s ease;">
     <div id="inboxContentContainer" style="max-width:900px;margin:0 auto;">
-      <!-- Header: title + filter (managers only) + New Request -->
-      <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
-        <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;width:100%;justify-content:flex-end;">
-          <h3 id="inboxListTitle" style="margin:0;text-align:right;font-size:16px;font-weight:600;color:#374151;">My Requests</h3>
-        </div>
-        <div style="display:flex;gap:10px;align-items:center;">
+      <!-- Header: title + New Request (button must stay outside #inboxViewSwitcher so technicians still see it when switcher is hidden) -->
+      <div id="inboxContentHeaderRow" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;width:100%;">
+        <h3 id="inboxListTitle" style="margin:0;font-size:16px;font-weight:600;color:#374151;flex:1;min-width:0;text-align:right;">My Requests</h3>
+        <div style="display:flex;gap:10px;align-items:center;flex-shrink:0;">
+          <button id="inboxCreateRequestBtn" type="button" onclick="openCreateRequestModal()" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;white-space:nowrap;">+ New Request</button>
           <button id="btnManageRequestTypes" onclick="openManageRequestTypesModal()" style="display:none;padding:10px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;color:#6b7280;">Manage request types</button>
         </div>
       </div>

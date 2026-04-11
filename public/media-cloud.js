@@ -26,7 +26,7 @@ import {
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
-import { db, auth, storage } from "./app.js?v=20260412_storage_bucket_explicit";
+import { db, auth, storage } from "./app.js?v=20260412_imports_first";
 
 // =====================
 // Paths

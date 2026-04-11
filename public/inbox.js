@@ -26,7 +26,11 @@ import {
 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth, storage } from "./app.js";
+import { db, auth, storage } from "./app.js?v=20260412_imports_first";
+import {
+  ffSyncStaffDocumentOnInboxApprove,
+  ffSyncStaffDocumentOnInboxReject,
+} from "./staff-documents.js";
 
 // Category order for display (Schedule → Payments → Operations → Documents → Other at end)
 const REQUEST_CATEGORY_ORDER = ['schedule', 'payments', 'operations', 'documents', 'other'];
@@ -59,7 +63,16 @@ const BUILTIN_TYPES = [
   { id: 'staff_birthday_reminder', icon: '🎂', label: 'Staff birthday reminder', description: 'Automated — upcoming staff birthday (management only)', category: 'operations' },
   // Documents
   { id: 'document_request', icon: '📄', label: 'Request a Document', description: 'Request a document from management (1099, employment letter, contract, etc.)', category: 'documents' },
+  {
+    id: 'document_renewal_request',
+    icon: '📩',
+    label: 'Request a new document (from staff)',
+    description: 'Ask a service provider to upload a renewed document (e.g. insurance or license before it expires).',
+    category: 'documents',
+  },
   { id: 'document_upload', icon: '📤', label: 'Upload a Document', description: 'Upload a document to the business (license, insurance, certification)', category: 'documents' },
+  { id: 'document_expiring_soon', icon: '⏳', label: 'Document expiring soon', description: 'Automated — staff document expires within 30 days (management only)', category: 'documents' },
+  { id: 'document_expired', icon: '⚠️', label: 'Document expired', description: 'Automated — staff document past expiration (management only)', category: 'documents' },
   // Other (always last)
   { id: 'other', icon: '📝', label: 'Other', description: 'Other request', category: 'other' }
 ];
@@ -96,6 +109,29 @@ let currentInboxTab = 'open';
 let inboxViewMode = 'to_handle'; // 'mine' | 'to_handle' — only for admin/manager
 let inboxUnsubscribe = null;
 let currentUserProfile = null;
+/** Technicians: merge outgoing (createdByUid) + incoming (forUid) inbox queries. */
+let _techInboxOutgoing = [];
+let _techInboxIncoming = [];
+
+function inboxItemActivityMs(r) {
+  const la = r && r.lastActivityAt;
+  const ca = r && r.createdAt;
+  if (la && typeof la.toMillis === 'function') return la.toMillis();
+  if (ca && typeof ca.toMillis === 'function') return ca.toMillis();
+  return 0;
+}
+
+function applyTechInboxMerge(loadingEl) {
+  const map = new Map();
+  _techInboxOutgoing.forEach((row) => map.set(row.id, row));
+  _techInboxIncoming.forEach((row) => map.set(row.id, row));
+  currentRequests = Array.from(map.values()).sort((a, b) => inboxItemActivityMs(b) - inboxItemActivityMs(a));
+  if (loadingEl) loadingEl.style.display = 'none';
+  console.log('[Inbox] Loaded (technician merged)', currentRequests.length, 'requests');
+  updateInboxStaffFilterOptions();
+  updateInboxBadges();
+  renderInboxList();
+}
 
 function inboxUserRoleLc() {
   return String((currentUserProfile && currentUserProfile.role) || "").toLowerCase();
@@ -280,11 +316,18 @@ function getAllRequestTypes() {
     category: 'custom',
     fields: Array.isArray(t.fields) ? t.fields : []
   }));
+  const automatedInboxTypes = new Set(['staff_birthday_reminder', 'document_expiring_soon', 'document_expired']);
+  const managerOnlyNewRequestTypes = new Set(['document_renewal_request']);
+  const hideRenewalForStaff = inboxUserRoleLc() === 'technician';
   const withoutOther = BUILTIN_TYPES.filter(
-    (t) => t.category !== 'other' && !hidden.has(t.id) && t.id !== 'staff_birthday_reminder'
+    (t) =>
+      t.category !== 'other' &&
+      !hidden.has(t.id) &&
+      !automatedInboxTypes.has(t.id) &&
+      !(hideRenewalForStaff && managerOnlyNewRequestTypes.has(t.id))
   );
   const otherOnly = BUILTIN_TYPES.filter(
-    (t) => t.category === 'other' && !hidden.has(t.id) && t.id !== 'staff_birthday_reminder'
+    (t) => t.category === 'other' && !hidden.has(t.id) && !automatedInboxTypes.has(t.id)
   );
   const customVisible = custom.filter(t => !hidden.has(t.id));
   return [...withoutOther, ...customVisible, ...otherOnly];
@@ -352,8 +395,9 @@ function setupInboxUI() {
 
   const role = inboxUserRoleLc();
 
-  // "New Request" — header button is #inboxCreateRequestBtn (inside #inboxViewSwitcher), NOT inside #inboxContentContainer
+  // "New Request" — #inboxCreateRequestBtn lives in #inboxContentHeaderRow (visible for technicians; switcher is hidden for them)
   const headerNewBtn = document.getElementById('inboxCreateRequestBtn');
+  const headerRow = document.getElementById('inboxContentHeaderRow');
   const emptyStateBtn  = document.getElementById('emptyStateNewRequestBtn');
   const emptyStateMsg  = document.getElementById('emptyStateMessage');
   const inboxTabs      = document.getElementById('inboxTabs');
@@ -400,6 +444,7 @@ function setupInboxUI() {
     // Technicians see their own requests only — hide status tabs and view switcher
     const viewSwitcher = document.getElementById('inboxViewSwitcher');
     if (viewSwitcher) viewSwitcher.style.display = 'none';
+    if (headerRow) headerRow.style.display = '';
     if (inboxTabs) inboxTabs.classList.add('hidden');
     if (listTitle) listTitle.textContent = 'My Requests';
     currentInboxTab = 'my_requests';
@@ -413,6 +458,7 @@ function setupInboxUI() {
     if (filterRow) filterRow.style.display = inboxViewMode === 'mine' ? 'none' : 'flex';
     if (listTitle) listTitle.style.display = inboxViewMode === 'mine' ? '' : 'none';
     if (listTitle) listTitle.textContent = 'My Requests';
+    if (headerRow) headerRow.style.display = inboxViewMode === 'mine' ? '' : 'none';
     // In "My Requests": hide status tabs (Open/Needs Info/etc) and center New Request button
     if (inboxViewMode === 'mine') {
       if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
@@ -442,8 +488,10 @@ window.setInboxViewMode = function(mode) {
   const inboxTabs = document.getElementById('inboxTabs');
   const emptyStateBtn = document.getElementById('emptyStateNewRequestBtn');
   const headerNewBtn = document.getElementById('inboxCreateRequestBtn');
+  const headerRow = document.getElementById('inboxContentHeaderRow');
   if (listTitle) listTitle.style.display = mode === 'mine' ? '' : 'none';
   if (listTitle) listTitle.textContent = 'My Requests';
+  if (headerRow) headerRow.style.display = mode === 'mine' ? '' : 'none';
   if (filterRow) filterRow.style.display = mode === 'mine' ? 'none' : 'flex';
   if (mode === 'mine') {
     if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
@@ -519,13 +567,70 @@ async function loadInboxItems() {
     let q;
     
     if (role === 'technician') {
-      // Technicians see requests they created (sent to a manager)
-      q = query(
+      // Technicians: outgoing (to managers) + incoming (e.g. document renewal directed to them)
+      _techInboxOutgoing = [];
+      _techInboxIncoming = [];
+      const qOut = query(
         collection(db, `salons/${salonId}/inboxItems`),
         where('createdByUid', '==', uid),
         orderBy('createdAt', 'desc'),
         limit(50)
       );
+      const qIn = query(
+        collection(db, `salons/${salonId}/inboxItems`),
+        where('forUid', '==', uid),
+        orderBy('lastActivityAt', 'desc'),
+        limit(50)
+      );
+      const unsubOut = onSnapshot(
+        qOut,
+        (snapshot) => {
+          _techInboxOutgoing = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          applyTechInboxMerge(loadingEl);
+        },
+        (error) => {
+          console.error('[Inbox] Technician outgoing query error', error);
+          if (loadingEl) loadingEl.style.display = 'none';
+          currentRequests = [];
+          if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach((el) => el.remove());
+          if (emptyEl) {
+            emptyEl.style.display = 'block';
+            emptyEl.innerHTML = `
+          <div style="color:#ef4444;">
+            <div style="font-size:16px;font-weight:500;margin-bottom:8px;">Error loading requests</div>
+            <div style="font-size:14px;">${error.message || 'Please try again'}</div>
+          </div>
+        `;
+          }
+        }
+      );
+      const unsubIn = onSnapshot(
+        qIn,
+        (snapshot) => {
+          _techInboxIncoming = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          applyTechInboxMerge(loadingEl);
+        },
+        (error) => {
+          console.error('[Inbox] Technician incoming query error', error);
+          if (loadingEl) loadingEl.style.display = 'none';
+          currentRequests = [];
+          if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach((el) => el.remove());
+          if (emptyEl) {
+            emptyEl.style.display = 'block';
+            emptyEl.innerHTML = `
+          <div style="color:#ef4444;">
+            <div style="font-size:16px;font-weight:500;margin-bottom:8px;">Error loading requests</div>
+            <div style="font-size:14px;">${error.message || 'Please try again'}</div>
+          </div>
+        `;
+          }
+        }
+      );
+      inboxUnsubscribe = () => {
+        unsubOut();
+        unsubIn();
+      };
+      return;
     } else if (inboxViewMode === 'mine') {
       // Admin/Manager "My Requests": ordered by createdAt (stable — doesn't reorder when status changes)
       q = query(
@@ -768,7 +873,7 @@ function renderInboxList() {
     'vacation','day_off','time_off','late_start','early_leave','schedule_change','extra_shift','swap_shift','break_change',
     'commission_review','tip_adjustment','payment_issue',
     'supplies','maintenance','client_issue','staff_birthday_reminder',
-    'document_request','document_upload',
+    'document_request','document_renewal_request','document_upload','document_expiring_soon','document_expired',
     'other'
   ];
   const sortedKeys = Object.keys(groups).sort((a, b) => {
@@ -834,17 +939,48 @@ function createRequestCard(request) {
   const card = document.createElement('div');
   card.className = 'inbox-item-card';
   card.onclick = () => showRequestDetails(request.id);
-  
-  // Type icon & label
+
   const typeInfo = getRequestTypeInfo(request.type);
-  
-  // Status badge
   const statusClass = `inbox-status-${request.status.replace('_', '-')}`;
-  
-  // Format date
   const createdDate = request.createdAt?.toDate ? request.createdAt.toDate() : new Date();
   const dateStr = formatRelativeDate(createdDate);
-  
+
+  if (request.type === 'document_expiring_soon' || request.type === 'document_expired') {
+    const isSoon = request.type === 'document_expiring_soon';
+    const he = ffDocAlertIsHebrewUI();
+    const badgeLabel = isSoon ? (he ? 'יפוג בקרוב' : 'Expiring soon') : (he ? 'פג תוקף' : 'Expired');
+    const boxStyle = isSoon
+      ? 'border-left:4px solid #d97706;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;'
+      : 'border-left:4px solid #b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:12px 14px;';
+    const badgeBg = isSoon ? '#fef3c7' : '#fee2e2';
+    const badgeColor = isSoon ? '#92400e' : '#991b1b';
+    const msg = (request.message || request.data?.message || '').trim();
+    card.innerHTML = `
+      <div style="${boxStyle}">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          <div style="font-size:26px;line-height:1;">${typeInfo.icon}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+              <span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;background:${badgeBg};color:${badgeColor};">${escapeHtml(badgeLabel)}</span>
+              <span class="inbox-status-badge ${statusClass}">${request.status.replace('_', ' ')}</span>
+            </div>
+            <div style="font-size:14px;font-weight:600;color:#111827;line-height:1.45;margin-bottom:6px;">
+              ${escapeHtml(ffDocAlertHumanSummary(request))}
+            </div>
+            <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px;color:#4b5563;">
+              <span style="color:#9ca3af;">${he ? 'עובד' : 'Employee'}</span><span style="font-weight:500;">${escapeHtml(ffDocAlertStaffName(request))}</span>
+              <span style="color:#9ca3af;">${he ? 'מסמך' : 'Document'}</span><span style="font-weight:500;word-break:break-word;">${escapeHtml(ffDocAlertDocTitle(request))}</span>
+              <span style="color:#9ca3af;">${he ? 'תפוגה' : 'Expires'}</span><span>${escapeHtml(ffDocAlertExpFormattedLong(request) || '—')}</span>
+            </div>
+            ${msg ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.06);font-size:12px;color:#374151;line-height:1.4;">${escapeHtml(msg)}</div>` : ''}
+            <div style="margin-top:8px;font-size:11px;color:#9ca3af;">${he ? 'נוצר' : 'Logged'} · ${escapeHtml(dateStr)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+    return card;
+  }
+
   card.innerHTML = `
     <div style="display:flex;align-items:flex-start;gap:12px;">
       <div style="font-size:24px;">${typeInfo.icon}</div>
@@ -865,7 +1001,7 @@ function createRequestCard(request) {
       </div>
     </div>
   `;
-  
+
   return card;
 }
 
@@ -883,6 +1019,94 @@ function escapeHtml(s) {
   const div = document.createElement('div');
   div.textContent = s;
   return div.innerHTML;
+}
+
+// --- Staff document Inbox alerts (document_expiring_soon / document_expired) — Phase 4 UI ---
+
+function ffDocAlertIsHebrewUI() {
+  if (typeof document === 'undefined') return false;
+  const lang = (document.documentElement.getAttribute('lang') || '').toLowerCase();
+  return lang.startsWith('he');
+}
+
+function ffDocAlertStaffName(request) {
+  const rd = request.data || {};
+  const s = (rd.subjectStaffName || '').trim();
+  if (s) return s;
+  return ffDocAlertIsHebrewUI() ? 'עובד לא ידוע' : 'Unknown employee';
+}
+
+function ffDocAlertDocTitle(request) {
+  const rd = request.data || {};
+  const s = (request.documentTitle || rd.documentTitle || '').trim();
+  if (s) return s;
+  return ffDocAlertIsHebrewUI() ? 'מסמך ללא שם' : 'Untitled document';
+}
+
+function ffDocAlertDocType(request) {
+  const rd = request.data || {};
+  const s = (request.documentType || rd.documentType || '').trim();
+  if (s) return s;
+  return '—';
+}
+
+function ffDocAlertExpirationDate(request) {
+  const rd = request.data || {};
+  const ex = request.expirationDate || rd.expirationDate;
+  try {
+    if (ex && typeof ex.toDate === 'function') return ex.toDate();
+  } catch (_) {}
+  return null;
+}
+
+function ffDocAlertExpFormattedLong(request) {
+  const d = ffDocAlertExpirationDate(request);
+  if (!d) return '';
+  const locale = ffDocAlertIsHebrewUI() ? 'he-IL' : undefined;
+  try {
+    return d.toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' });
+  } catch (_) {
+    return d.toLocaleDateString();
+  }
+}
+
+function ffDocAlertHumanSummary(request) {
+  const kind = request.type === 'document_expired' ? 'expired' : 'soon';
+  const staff = ffDocAlertStaffName(request);
+  const docName = ffDocAlertDocTitle(request);
+  const expStr = ffDocAlertExpFormattedLong(request);
+  const he = ffDocAlertIsHebrewUI();
+  if (kind === 'expired') {
+    return he
+      ? `מסמך "${docName}" של ${staff} פג תוקף${expStr ? ` בתאריך ${expStr}` : ''}.`
+      : `Document "${docName}" for ${staff} expired${expStr ? ` on ${expStr}` : ''}.`;
+  }
+  return he
+    ? `המסמך "${docName}" של ${staff} יפוג${expStr ? ` בתאריך ${expStr}` : ''}.`
+    : `Document "${docName}" for ${staff} expires${expStr ? ` on ${expStr}` : ''}.`;
+}
+
+function ffDocAlertStaffId(request) {
+  const rd = request.data || {};
+  return String(request.staffId || rd.staffId || '').trim();
+}
+
+function ffDocAlertWhatToDoLine() {
+  return ffDocAlertIsHebrewUI()
+    ? 'בדקו את המסמך בפרופיל העובד, ועדכנו או חדשו לפי הצורך.'
+    : 'Review the document on the staff profile, then renew or update as needed.';
+}
+
+function ffDocAlertModalFooterIds(request) {
+  const rd = request.data || {};
+  const did = String(request.documentId || rd.documentId || '').trim();
+  const sid = ffDocAlertStaffId(request);
+  if (!did && !sid) return '';
+  const he = ffDocAlertIsHebrewUI();
+  const parts = [];
+  if (sid) parts.push(`${he ? 'עובד' : 'Staff'} ID: ${escapeHtml(sid)}`);
+  if (did) parts.push(`${he ? 'מסמך' : 'Document'} ID: ${escapeHtml(did)}`);
+  return `<div style="font-size:11px;color:#9ca3af;line-height:1.45;">${parts.join(' · ')}</div>`;
 }
 
 /** Returns Promise<boolean> - true if confirmed, false if cancelled */
@@ -1019,8 +1243,13 @@ function getRequestSummary(request) {
       return data.details || `${data.subjectStaffName || 'Staff'} · ${data.birthdayDisplay || ''}`;
     case 'document_request':
       return `${data.documentType || 'Document'} – ${(data.reason || '').substring(0, 40)}`;
+    case 'document_renewal_request':
+      return `${data.documentType || 'Document'} – ${(data.message || '').substring(0, 40)}`;
     case 'document_upload':
       return `${data.documentType || 'Document'}${data.expirationDate ? ` · Expires ${data.expirationDate}` : ''}`;
+    case 'document_expiring_soon':
+    case 'document_expired':
+      return ffDocAlertHumanSummary(request);
     case 'other':
       return data.subject || data.details?.substring(0, 60) || 'Request details';
     default:
@@ -1398,6 +1627,74 @@ window.backToTypeSelection = function() {
   document.getElementById('stepRequestForm').style.display = 'none';
 };
 
+/**
+ * Match `salons/{salonId}/staff/{docId}` by firebaseUid or email (same id as Staff modal).
+ * Kept in inbox.js so a stale cached staff-documents.js cannot break the whole app.
+ */
+async function ffResolveStaffFirestoreIdByScanInbox(salonId, uid, emailHint) {
+  const sid = String(salonId || "").trim();
+  const u = String(uid || "").trim();
+  if (!sid || !u) return "";
+  let em = String(emailHint || "").trim().toLowerCase();
+  if (!em) {
+    try {
+      const uSnap = await getDoc(doc(db, "users", u));
+      if (uSnap.exists()) em = String(uSnap.data()?.email || "").trim().toLowerCase();
+    } catch (e) {
+      console.warn("[Inbox] scan: users email", e);
+    }
+  }
+  try {
+    const snap = await getDocs(collection(db, `salons/${sid}/staff`));
+    for (const d of snap.docs) {
+      const row = d.data() || {};
+      const fid = String(row.firebaseUid || row.firebaseAuthUid || row.authUid || "").trim();
+      if (fid && fid === u) return d.id;
+    }
+    if (em) {
+      for (const d of snap.docs) {
+        const row = d.data() || {};
+        const mail = String(row.email || "").trim().toLowerCase();
+        if (mail && mail === em) return d.id;
+      }
+    }
+  } catch (e) {
+    console.warn("[Inbox] scan staff collection", e);
+  }
+  return "";
+}
+
+/** Firestore staff doc id for the signed-in uploader (scan uid/email first, then profile/members/users). */
+async function resolveSubmittingStaffIdForDocumentUpload(salonId) {
+  const sid = String(salonId || "").trim();
+  const uid = String(auth?.currentUser?.uid || currentUserProfile?.uid || "").trim();
+  if (!sid || !uid) return "";
+  const emailHint = String(currentUserProfile?.email || "").trim();
+  const scanned = await ffResolveStaffFirestoreIdByScanInbox(sid, uid, emailHint);
+  if (scanned) return scanned;
+  let id = String(currentUserProfile?.staffId || "").trim();
+  if (id) return id;
+  try {
+    const mSnap = await getDoc(doc(db, "salons", sid, "members", uid));
+    if (mSnap.exists()) {
+      const ms = String(mSnap.data()?.staffId || "").trim();
+      if (ms) return ms;
+    }
+  } catch (e) {
+    console.warn("[Inbox] uploader members", e);
+  }
+  try {
+    const uSnap = await getDoc(doc(db, "users", uid));
+    if (uSnap.exists()) {
+      const us = String(uSnap.data()?.staffId || "").trim();
+      if (us) return us;
+    }
+  } catch (e) {
+    console.warn("[Inbox] uploader users", e);
+  }
+  return "";
+}
+
 window.selectRequestType = async function(type) {
   console.log('[Inbox] Selected type:', type);
   
@@ -1418,6 +1715,26 @@ window.selectRequestType = async function(type) {
     const emailEl = document.getElementById('doc_req_email');
     if (emailEl && auth.currentUser?.email) emailEl.value = auth.currentUser.email;
   }
+  if (type === 'document_renewal_request') {
+    const p = window.__ffDocRenewalPrefill;
+    if (p && (p.staffId || p.documentType || p.documentId)) {
+      if (p.staffId) {
+        const sel = document.getElementById('doc_renew_staff');
+        if (sel) {
+          const opt = Array.from(sel.options).find((o) => (o.getAttribute('data-staff-id') || '') === p.staffId);
+          if (opt) sel.value = opt.value;
+        }
+      }
+      const dt = document.getElementById('doc_renew_type');
+      if (dt && p.documentType) {
+        const val = p.documentType;
+        if (Array.from(dt.options).some((o) => o.value === val)) dt.value = val;
+      }
+      const hid = document.getElementById('doc_renew_related_document_id');
+      if (hid && p.documentId) hid.value = p.documentId;
+    }
+    window.__ffDocRenewalPrefill = null;
+  }
 };
 
 function createRequestForm(type) {
@@ -1428,7 +1745,29 @@ function createRequestForm(type) {
   const instructionsHtml = (typeInfo.description && typeInfo.description.trim())
     ? `<p style="margin:8px 0 0;font-size:13px;color:#6b7280;text-align:center;max-width:400px;margin-left:auto;margin-right:auto;">${esc(typeInfo.description.trim())}</p>`
     : '';
-  const sendToRowHtml = recipientsList.length === 0
+  const isRenewal = type === 'document_renewal_request';
+  const technicians = isRenewal ? (_inboxUsersCache || []).filter((u) => u.role === 'technician') : [];
+  const renewalStaffHtml =
+    technicians.length === 0
+      ? `<div style="margin-bottom:16px;padding:10px 12px;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#b91c1c;">No service providers in the directory. Staff must sign in once so they appear under members.</div>`
+      : `
+    <div style="margin-bottom:16px;">
+      <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Who should upload the document?</label>
+      <select id="doc_renew_staff" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;">
+        <option value="">Select staff member…</option>
+        ${technicians.map((u) => {
+          const id = esc(u.uid || '');
+          const sid = esc(u.staffId || '');
+          const nm = esc(u.name || '');
+          return `<option value="${id}" data-uid="${id}" data-staff-id="${sid}" data-name="${nm}">${nm}</option>`;
+        }).join('')}
+      </select>
+      <input type="hidden" id="doc_renew_related_document_id" value="" />
+    </div>
+  `;
+  const sendToRowHtml = isRenewal
+    ? renewalStaffHtml
+    : recipientsList.length === 0
     ? `<div style="margin-bottom:16px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#6b7280;">Send to: No managers or admins in list.</div>`
     : `
     <div id="sendToFilterRow" role="button" tabindex="0" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;background:#f9fafb;font-size:13px;">
@@ -1457,7 +1796,7 @@ function createRequestForm(type) {
     </div>
   `;
   
-  if (recipientsList.length > 0) {
+  if (!isRenewal && recipientsList.length > 0) {
     const row = form.querySelector('#sendToFilterRow');
     const panel = form.querySelector('#sendToPanel');
     const summary = form.querySelector('#sendToSummary');
@@ -1625,6 +1964,28 @@ function createRequestForm(type) {
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Details</label>
         <textarea id="${type}_details" rows="4" required placeholder="Explain your request" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+    `;
+  } else if (type === 'document_renewal_request') {
+    fieldsContainer.innerHTML = `
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Document type</label>
+        <select id="doc_renew_type" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+          <option value="">Select...</option>
+          <option value="License">License</option>
+          <option value="Insurance">Insurance</option>
+          <option value="Certification">Certification</option>
+          <option value="1099">1099</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Message to staff</label>
+        <textarea id="doc_renew_message" rows="3" required placeholder="e.g. Please upload a renewed certificate before the current one expires." style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Due date (optional)</label>
+        <input type="date" id="doc_renew_due" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
       </div>
     `;
   } else if (type === 'document_request') {
@@ -1979,6 +2340,17 @@ async function submitRequest(type) {
       if (!details) { showToast('Please enter details', 'error'); return; }
       data = { subject, details };
 
+    } else if (type === 'document_renewal_request') {
+      const documentType = document.getElementById('doc_renew_type')?.value;
+      const message = document.getElementById('doc_renew_message')?.value?.trim();
+      const dueDate = document.getElementById('doc_renew_due')?.value || null;
+      const relatedDocumentId = (document.getElementById('doc_renew_related_document_id')?.value || '').trim();
+      if (!documentType || !message) {
+        showToast('Please select document type and enter a message', 'error');
+        return;
+      }
+      data = { documentType, message, dueDate, relatedDocumentId: relatedDocumentId || null, promptKind: 'renewal' };
+
     } else if (type === 'document_request') {
       const documentType = document.getElementById('doc_req_type')?.value;
       const reason = document.getElementById('doc_req_reason')?.value?.trim();
@@ -1993,22 +2365,36 @@ async function submitRequest(type) {
       const expirationDate = document.getElementById('doc_up_expiry')?.value || null;
       const fileInput = document.getElementById('doc_up_file');
       const notes = document.getElementById('doc_up_notes')?.value?.trim() || null;
+      const salonId = currentUserProfile.salonId;
+      const ownerStaffId = await resolveSubmittingStaffIdForDocumentUpload(salonId);
+      if (!ownerStaffId) {
+        showToast(
+          'Your login is not linked to a staff profile in this salon. Ask a manager to link your account, then try again.',
+          'error'
+        );
+        return;
+      }
       if (!documentType || !fileInput?.files?.length) { showToast('Please select document type and choose a file', 'error'); return; }
       const file = fileInput.files[0];
       const maxSize = 10 * 1024 * 1024;
       if (file.size > maxSize) { showToast('File must be under 10 MB', 'error'); return; }
-      const salonId = currentUserProfile.salonId;
-      const staffId = auth.currentUser?.uid || currentUserProfile.uid;
       const yyyyMm = new Date().toISOString().slice(0, 7);
       const fileId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const safeName = (file.name || 'file').replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 80);
-      const ext = (file.name && file.name.includes('.')) ? file.name.split('.').pop().toLowerCase() : 'pdf';
-      const path = `salons/${salonId}/staff/${staffId}/documents/${documentType}/${yyyyMm}/${fileId}_${safeName}`;
+      const path = `salons/${salonId}/staff/${ownerStaffId}/documents/${documentType}/${yyyyMm}/${fileId}_${safeName}`;
       showToast('Uploading file...', 'info');
       const fileRef = storageRef(storage, path);
       await uploadBytes(fileRef, file);
       const fileUrl = await getDownloadURL(fileRef);
-      data = { documentType, expirationDate, filePath: path, fileUrl, fileName: file.name, notes };
+      data = {
+        documentType,
+        expirationDate,
+        filePath: path,
+        fileUrl,
+        fileName: file.name,
+        notes,
+        documentOwnerStaffId: ownerStaffId,
+      };
       
     } else if (type === 'supplies') {
       const rows = document.querySelectorAll('.supplies-item-row');
@@ -2082,14 +2468,37 @@ async function submitRequest(type) {
       }
     }
     
-    const { uids: sentToUids, staffIds: sentToStaffIds, names: sentToNames } = getCreateRequestSelectedRecipients();
+    let sentToUids = [];
+    let sentToStaffIds = [];
+    let sentToNames = [];
+
+    if (type === 'document_renewal_request') {
+      const sel = document.getElementById('doc_renew_staff');
+      const opt = sel?.selectedOptions?.[0];
+      const uid = opt?.getAttribute('data-uid') || '';
+      const sid = opt?.getAttribute('data-staff-id') || '';
+      const nm = (opt?.getAttribute('data-name') || '').trim() || (opt?.textContent || '').trim();
+      if (!uid) {
+        showToast('Please select a staff member', 'error');
+        return;
+      }
+      sentToUids = [uid];
+      sentToStaffIds = [sid];
+      sentToNames = [nm];
+    } else {
+      const sel = getCreateRequestSelectedRecipients();
+      sentToUids = sel.uids;
+      sentToStaffIds = sel.staffIds;
+      sentToNames = sel.names;
+    }
+
     const hasAnySelected = (sentToUids && sentToUids.length > 0) || (sentToNames && sentToNames.length > 0);
     const hasValidUid = sentToUids && sentToUids.some(u => u && u.trim());
-    if (getInboxRecipientsList().length > 0 && !hasAnySelected) {
+    if (type !== 'document_renewal_request' && getInboxRecipientsList().length > 0 && !hasAnySelected) {
       showToast('Please choose who receives this request', 'error');
       return;
     }
-    if (hasAnySelected && !hasValidUid) {
+    if (type !== 'document_renewal_request' && hasAnySelected && !hasValidUid) {
       // Recipient selected but uid not known — try one more time to load from members
       await loadSalonUsersForRecipients();
       const recipName = sentToNames[0] || '';
@@ -2106,6 +2515,11 @@ async function submitRequest(type) {
     }
     
     const salonId = currentUserProfile.salonId;
+
+    const docUploadOwnerExtra =
+      type === 'document_upload' && data && data.documentOwnerStaffId
+        ? { documentOwnerStaffId: String(data.documentOwnerStaffId).trim() }
+        : {};
 
     const baseDoc = {
       tenantId: salonId,
@@ -2124,7 +2538,8 @@ async function submitRequest(type) {
       needsInfoQuestion: null,
       staffReply: null,
       visibility: 'managers_only',
-      unreadForManagers: true
+      unreadForManagers: true,
+      ...docUploadOwnerExtra,
     };
     
     const hasRecipients = sentToUids && sentToUids.some(u => u && u.trim());
@@ -2306,12 +2721,43 @@ function showRequestDetails(requestId) {
   const statusClass = `inbox-status-${request.status.replace('_', '-')}`;
   const createdDate = request.createdAt?.toDate ? request.createdAt.toDate() : new Date();
   const rd = request.data || {};
-  
+  const isDocAlert = request.type === 'document_expiring_soon' || request.type === 'document_expired';
+
   // Role checks
   const isManager = currentUserProfile && ["manager", "admin", "owner"].includes(inboxUserRoleLc());
   const isTechnician = currentUserProfile && inboxUserRoleLc() === "technician";
   const isMyRequest = currentUserProfile && request.forUid === currentUserProfile.uid;
-  
+
+  let docAlertPanelHtml = '';
+  if (isDocAlert) {
+    const isSoon = request.type === 'document_expiring_soon';
+    const he = ffDocAlertIsHebrewUI();
+    const badgeLabel = isSoon ? (he ? 'יפוג בקרוב' : 'Expiring soon') : (he ? 'פג תוקף' : 'Expired');
+    const panelStyle = isSoon
+      ? 'border-left:4px solid #d97706;background:linear-gradient(180deg,#fffbeb 0%,#ffffff 100%);border:1px solid #fde68a;border-radius:12px;padding:18px 18px 16px;margin-bottom:20px;'
+      : 'border-left:4px solid #b91c1c;background:linear-gradient(180deg,#fef2f2 0%,#ffffff 100%);border:1px solid #fecaca;border-radius:12px;padding:18px 18px 16px;margin-bottom:20px;';
+    const badgeBg = isSoon ? '#fef3c7' : '#fee2e2';
+    const badgeColor = isSoon ? '#92400e' : '#991b1b';
+    const msg = (request.message || rd.message || '').trim();
+    docAlertPanelHtml = `
+    <div style="${panelStyle}">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <span style="display:inline-block;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;background:${badgeBg};color:${badgeColor};">${escapeHtml(badgeLabel)}</span>
+        <span style="font-size:11px;color:#6b7280;">${he ? 'העובד לא קיבל התראה · נראה למנהלים בלבד' : 'Employee not notified · managers only'}</span>
+      </div>
+      <p style="margin:0 0 12px;font-size:15px;font-weight:600;color:#111827;line-height:1.45;">${escapeHtml(ffDocAlertHumanSummary(request))}</p>
+      <p style="margin:0 0 14px;font-size:13px;color:#4b5563;line-height:1.5;">${escapeHtml(ffDocAlertWhatToDoLine())}</p>
+      <div style="display:grid;gap:10px;font-size:13px;color:#374151;margin-bottom:8px;">
+        <div style="display:flex;gap:8px;align-items:flex-start;"><span style="min-width:108px;color:#9ca3af;flex-shrink:0;">${he ? 'שם העובד' : 'Employee'}</span><strong style="font-weight:600;">${escapeHtml(ffDocAlertStaffName(request))}</strong></div>
+        <div style="display:flex;gap:8px;align-items:flex-start;"><span style="min-width:108px;color:#9ca3af;flex-shrink:0;">${he ? 'שם המסמך' : 'Document name'}</span><span style="word-break:break-word;">${escapeHtml(ffDocAlertDocTitle(request))}</span></div>
+        <div style="display:flex;gap:8px;align-items:flex-start;"><span style="min-width:108px;color:#9ca3af;flex-shrink:0;">${he ? 'סוג המסמך' : 'Document type'}</span><span>${escapeHtml(ffDocAlertDocType(request))}</span></div>
+        <div style="display:flex;gap:8px;align-items:flex-start;"><span style="min-width:108px;color:#9ca3af;flex-shrink:0;">${he ? 'תאריך תפוגה' : 'Expiration date'}</span><span>${escapeHtml(ffDocAlertExpFormattedLong(request) || '—')}</span></div>
+        ${msg ? `<div style="display:flex;gap:8px;align-items:flex-start;"><span style="min-width:108px;color:#9ca3af;flex-shrink:0;">${he ? 'הודעה' : 'Message'}</span><span style="flex:1;line-height:1.45;">${escapeHtml(msg)}</span></div>` : ''}
+      </div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:4px;">${he ? 'מקור' : 'Source'}: ${escapeHtml(rd.source || request.source || 'staff_documents')} · ${he ? 'נוצר' : 'Logged'} ${escapeHtml(createdDate.toLocaleString())}</div>
+    </div>`;
+  }
+
   const birthdayMeta =
     request.type === 'staff_birthday_reminder'
       ? `
@@ -2327,6 +2773,26 @@ function showRequestDetails(requestId) {
         </div>
       </div>
     </div>`
+      : request.type === 'document_renewal_request'
+      ? `
+    <div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:20px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
+        <div>
+          <div style="color:#6b7280;margin-bottom:4px;">From</div>
+          <div style="font-weight:500;">${escapeHtml(request.createdByName || '')}</div>
+        </div>
+        <div>
+          <div style="color:#6b7280;margin-bottom:4px;">Asked to upload</div>
+          <div style="font-weight:500;">${escapeHtml(request.forStaffName || '')}</div>
+        </div>
+        <div>
+          <div style="color:#6b7280;margin-bottom:4px;">Created</div>
+          <div style="font-weight:500;">${createdDate.toLocaleDateString()} ${createdDate.toLocaleTimeString()}</div>
+        </div>
+      </div>
+    </div>`
+      : isDocAlert
+      ? docAlertPanelHtml
       : `
     <div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:20px;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
@@ -2362,8 +2828,8 @@ function showRequestDetails(requestId) {
     ${birthdayMeta}
     
     <div style="margin-bottom:20px;">
-      <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">${request.type === 'staff_birthday_reminder' ? 'Summary' : 'Request Details'}</h3>
-      ${renderRequestData(request)}
+      ${isDocAlert ? '' : `<h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">${request.type === 'staff_birthday_reminder' ? 'Summary' : 'Request Details'}</h3>`}
+      ${isDocAlert ? ffDocAlertModalFooterIds(request) : renderRequestData(request)}
     </div>
     
     ${request.needsInfoQuestion ? `
@@ -2393,6 +2859,36 @@ function showRequestDetails(requestId) {
       </div>
     `;
   }
+
+  if (isTechnician && isMyRequest && request.type === 'document_renewal_request' && request.status === 'open') {
+    detailsHTML += `
+      <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Your action</h3>
+        <p style="font-size:13px;color:#6b7280;margin-bottom:12px;">Upload a renewed document for management to review.</p>
+        <button type="button" onclick="closeRequestDetailsModal(); openCreateRequestModal(); selectRequestType('document_upload');" style="width:100%;padding:12px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
+          📤 Upload a Document
+        </button>
+      </div>
+    `;
+  }
+
+  const isRenewalCreator =
+    isManager &&
+    currentUserProfile &&
+    request.createdByUid === currentUserProfile.uid &&
+    request.type === 'document_renewal_request' &&
+    request.createdByUid !== request.forUid;
+  if (isRenewalCreator && (request.status === 'open' || request.status === 'needs_info')) {
+    detailsHTML += `
+      <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Follow-up</h3>
+        <p style="font-size:13px;color:#6b7280;margin-bottom:12px;">Archive this when the staff member has uploaded or you no longer need the reminder.</p>
+        <button type="button" onclick="archiveRequest('${requestId}')" style="width:100%;padding:10px;border:1px solid #9ca3af;background:#fff;color:#374151;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500;">
+          📦 Archive
+        </button>
+      </div>
+    `;
+  }
   
   // Manager actions — only for the RECIPIENT (who the request was sent TO), not the creator
   const isRecipient = currentUserProfile && request.forUid === currentUserProfile.uid;
@@ -2402,6 +2898,35 @@ function showRequestDetails(requestId) {
         <button type="button" onclick="markBirthdayReminderDone('${requestId}')" style="width:100%;padding:12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
           ✓ Mark done &amp; archive
         </button>
+      </div>
+    `;
+  } else if (isManager && isRecipient && request.status === 'open' && isDocAlert) {
+    const sid = ffDocAlertStaffId(request);
+    const openStaffBtn = sid && typeof window.openStaffMembersModal === 'function'
+      ? `<button type="button" onclick="openDocumentAlertStaffMember(${JSON.stringify(sid)})" style="flex:1;min-width:0;padding:12px 14px;background:#fff;color:#111827;border:1px solid #d1d5db;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
+          ${ffDocAlertIsHebrewUI() ? 'פתח עובד' : 'Open Staff Member'}
+        </button>`
+      : '';
+    const renewPayload = {
+      staffId: ffDocAlertStaffId(request),
+      documentType: (rd.documentType || request.documentType || '').trim(),
+      documentId: (rd.documentId || request.documentId || '').trim(),
+    };
+    const renewBtn = renewPayload.staffId
+      ? `<button type="button" onclick="ffOpenDocumentRenewalFromAlert(${JSON.stringify(renewPayload).replace(/</g, '\\u003c')})" style="flex:1;min-width:0;padding:12px 14px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
+          ${ffDocAlertIsHebrewUI() ? 'בקש מסמך חדש' : 'Request new document'}
+        </button>`
+      : '';
+    detailsHTML += `
+      <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">${ffDocAlertIsHebrewUI() ? 'פעולות' : 'Actions'}</h3>
+        <div style="display:flex;align-items:stretch;gap:10px;flex-wrap:wrap;">
+          ${openStaffBtn}
+          ${renewBtn}
+          <button type="button" onclick="markBirthdayReminderDone('${requestId}')" style="flex:1;min-width:0;padding:12px 14px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
+            ✓ ${ffDocAlertIsHebrewUI() ? 'סמן כבוצע וארכב' : 'Mark done &amp; archive'}
+          </button>
+        </div>
       </div>
     `;
   } else if (isManager && isRecipient && request.status === 'open') {
@@ -2491,6 +3016,55 @@ function showRequestDetails(requestId) {
 window.closeRequestDetailsModal = function() {
   const modal = document.getElementById('requestDetailsModal');
   if (modal) modal.remove();
+};
+
+/**
+ * Files live in Firebase Storage; the UI must use a download URL (link). The stored `fileName`
+ * sometimes matches the storage basename (`{generatedId}_{sanitizedOriginal}`) — strip a long
+ * generated first segment so the link label looks like the real filename.
+ */
+function inboxDisplayUploadedFileLinkLabel(data) {
+  const d = data || {};
+  let name = d.fileName != null ? String(d.fileName).trim() : "";
+  const base = (d.filePath || "").split("/").filter(Boolean).pop() || "";
+  if (!name) name = base;
+  if (name) {
+    const parts = name.split("_");
+    if (parts.length >= 2) {
+      const first = parts[0];
+      if (first.length >= 12 && /^[a-zA-Z0-9.-]+$/.test(first)) {
+        name = parts.slice(1).join("_");
+      }
+    }
+  }
+  if (!name) name = "View file";
+  if (name.length > 72) name = `${name.slice(0, 69)}…`;
+  return name;
+}
+
+/** True when filename/path/url suggests an image (thumbnail + lightbox in inbox). */
+function inboxUploadedFileLooksLikeImage(data) {
+  const d = data || {};
+  const hint = `${d.fileName || ""} ${d.fileUrl || ""} ${d.filePath || ""}`.toLowerCase();
+  return /\.(jpg|jpeg|png|gif|webp|heic|heif)(\?|#|$)/i.test(hint);
+}
+
+window.ffInboxOverlayPreviewImage = function (url) {
+  try {
+    const safe = String(url || "").trim();
+    if (!/^https?:\/\//i.test(safe)) return;
+    const wrap = document.createElement("div");
+    wrap.style.cssText =
+      "position:fixed;inset:0;z-index:1000000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out;";
+    const img = document.createElement("img");
+    img.src = safe;
+    img.alt = "";
+    img.style.cssText =
+      "max-width:96vw;max-height:92vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.45);cursor:default;";
+    wrap.appendChild(img);
+    wrap.onclick = () => wrap.remove();
+    document.body.appendChild(wrap);
+  } catch (_) {}
 };
 
 function renderRequestData(request) {
@@ -2650,7 +3224,32 @@ function renderRequestData(request) {
         </div>
       `;
 
-    case 'document_request':
+    case 'document_renewal_request':
+      return `
+        <div style="display:grid;gap:12px;font-size:13px;">
+          <div><span style="color:#6b7280;">Document type:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.documentType || 'N/A')}</span></div>
+          <div><span style="color:#6b7280;">Message:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.message || 'N/A')}</div></div>
+          ${data.dueDate ? `<div><span style="color:#6b7280;">Due date:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.dueDate)}</span></div>` : ''}
+          ${data.relatedDocumentId ? `<div><span style="color:#6b7280;">Related document ID:</span><span style="font-weight:500;margin-left:8px;word-break:break-all;">${escapeHtml(String(data.relatedDocumentId))}</span></div>` : ''}
+        </div>
+      `;
+
+    case 'document_request': {
+      const respThumb = (() => {
+        const u = data.responseFileUrl;
+        if (!u) return "";
+        const faux = { fileUrl: u, fileName: data.responseFileName, filePath: data.responseFilePath };
+        if (!inboxUploadedFileLooksLikeImage(faux)) return "";
+        const esc = escapeHtml(u);
+        const jsEsc = JSON.stringify(u);
+        return `
+        <div style="margin-top:4px;">
+          <div style="font-size:12px;color:#6b7280;margin-bottom:6px;">Preview</div>
+          <button type="button" onclick="window.ffInboxOverlayPreviewImage(${jsEsc})" style="padding:0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff;cursor:zoom-in;max-width:min(240px,100%);display:block;">
+            <img src="${esc}" alt="" style="display:block;width:100%;max-height:200px;object-fit:contain;background:#f9fafb;" loading="lazy" />
+          </button>
+        </div>`;
+      })();
       return `
         <div style="display:grid;gap:12px;font-size:13px;">
           <div><span style="color:#6b7280;">Document type:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.documentType || 'N/A')}</span></div>
@@ -2658,19 +3257,34 @@ function renderRequestData(request) {
           ${data.dueDate ? `<div><span style="color:#6b7280;">Due date:</span><span style="font-weight:500;margin-left:8px;">${data.dueDate}</span></div>` : ''}
           <div><span style="color:#6b7280;">Delivery:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.deliveryMethod || 'Email')}</span></div>
           ${data.contactEmail ? `<div><span style="color:#6b7280;">Contact email:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.contactEmail)}</span></div>` : ''}
-          ${data.responseFileUrl ? `<div><span style="color:#6b7280;">Response file:</span> <a href="${escapeHtml(data.responseFileUrl)}" target="_blank" rel="noopener" style="color:#2563eb;">Download</a></div>` : ''}
+          ${data.responseFileUrl ? `<div><span style="color:#6b7280;">Response file:</span> <a href="${escapeHtml(data.responseFileUrl)}" target="_blank" rel="noopener" style="color:#2563eb;">Download</a></div>${respThumb}` : ''}
         </div>
       `;
+    }
 
-    case 'document_upload':
+    case 'document_upload': {
+      const uploadThumb = (() => {
+        const u = data.fileUrl;
+        if (!u || !inboxUploadedFileLooksLikeImage(data)) return "";
+        const esc = escapeHtml(u);
+        const jsEsc = JSON.stringify(u);
+        return `
+        <div style="margin-top:4px;">
+          <div style="font-size:12px;color:#6b7280;margin-bottom:6px;">Preview</div>
+          <button type="button" onclick="window.ffInboxOverlayPreviewImage(${jsEsc})" style="padding:0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff;cursor:zoom-in;max-width:min(240px,100%);display:block;">
+            <img src="${esc}" alt="" style="display:block;width:100%;max-height:200px;object-fit:contain;background:#f9fafb;" loading="lazy" />
+          </button>
+        </div>`;
+      })();
       return `
         <div style="display:grid;gap:12px;font-size:13px;">
           <div><span style="color:#6b7280;">Document type:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.documentType || 'N/A')}</span></div>
           ${data.expirationDate ? `<div><span style="color:#6b7280;">Expiration date:</span><span style="font-weight:500;margin-left:8px;">${data.expirationDate}</span></div>` : ''}
           ${data.notes ? `<div><span style="color:#6b7280;">Notes:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.notes)}</div></div>` : ''}
-          ${data.fileUrl ? `<div><span style="color:#6b7280;">Uploaded file:</span> <a href="${escapeHtml(data.fileUrl)}" target="_blank" rel="noopener" style="color:#2563eb;">${escapeHtml(data.fileName || 'Download')}</a></div>` : ''}
+          ${data.fileUrl ? `<div><span style="color:#6b7280;">Uploaded file:</span> <a href="${escapeHtml(data.fileUrl)}" target="_blank" rel="noopener" title="${escapeHtml(String(data.fileName || data.filePath || '').trim() || 'Open in new tab')}" style="color:#2563eb;">${escapeHtml(inboxDisplayUploadedFileLinkLabel(data))}</a></div>${uploadThumb}` : ''}
         </div>
       `;
+    }
 
     case 'staff_birthday_reminder':
       return `
@@ -2678,6 +3292,10 @@ function renderRequestData(request) {
           ${data.details ? `<div style="padding:10px;background:#f9fafb;border-radius:8px;">${escapeHtml(data.details)}</div>` : '<div style="color:#9ca3af;">—</div>'}
         </div>
       `;
+
+    case 'document_expiring_soon':
+    case 'document_expired':
+      return `<div style="font-size:13px;color:#374151;line-height:1.5;">${escapeHtml(ffDocAlertHumanSummary(request))}</div>`;
       
     default:
       if (data.details) {
@@ -2817,6 +3435,30 @@ window.markBirthdayReminderDone = async function(requestId) {
   }
 };
 
+/** Opens Staff Members modal on the given staff id (Documents tab). Uses global openStaffMembersModal from index.html. */
+window.openDocumentAlertStaffMember = function(staffId) {
+  const id = String(staffId || '').trim();
+  if (!id) return;
+  if (typeof window.closeRequestDetailsModal === 'function') window.closeRequestDetailsModal();
+  if (typeof window.openStaffMembersModal === 'function') {
+    window.openStaffMembersModal({ jumpToStaffId: id, jumpToTab: 'documents' });
+  }
+};
+
+/** Opens New Request → "Request a new document (from staff)" with staff / type / related doc prefilled (e.g. from expiry alert). */
+window.ffOpenDocumentRenewalFromAlert = function (opts) {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  window.__ffDocRenewalPrefill = {
+    staffId: String(o.staffId || '').trim(),
+    documentType: String(o.documentType || '').trim(),
+    documentId: String(o.documentId || '').trim(),
+  };
+  if (typeof window.closeRequestDetailsModal === 'function') window.closeRequestDetailsModal();
+  if (typeof window.closeCreateRequestModal === 'function') window.closeCreateRequestModal();
+  if (typeof window.openCreateRequestModal === 'function') window.openCreateRequestModal();
+  if (typeof window.selectRequestType === 'function') window.selectRequestType('document_renewal_request');
+};
+
 window.approveRequest = async function(requestId) {
   const confirmed = await showConfirmModal({
     title: 'Approve request?',
@@ -2834,14 +3476,50 @@ window.approveRequest = async function(requestId) {
 
   try {
     const salonId = currentUserProfile.salonId;
-    await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
+    const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
+    const snap = await getDoc(inboxRef);
+    if (!snap.exists()) {
+      showToast('Request not found.', 'error');
+      loadInboxItems();
+      return;
+    }
+    const item = snap.data();
+    if (String(item.status || '').trim() === 'approved') {
+      showToast('Already approved.', 'info');
+      loadInboxItems();
+      return;
+    }
+
+    let staffDocumentId = null;
+    if (item.type === 'document_upload' || item.type === 'document_request') {
+      staffDocumentId = await ffSyncStaffDocumentOnInboxApprove(db, {
+        salonId,
+        inboxItemId: requestId,
+        inboxItem: { id: requestId, ...item },
+        approverUid: currentUserProfile.uid,
+      });
+      if (!staffDocumentId) {
+        console.warn('[Inbox] Approve sync returned no staff document id', requestId, item.type, item.data);
+        showToast(
+          'Could not attach this file to a staff profile (missing staff link). Open the request details and check Document belongs to / staff fields, or contact support.',
+          'error'
+        );
+        loadInboxItems();
+        return;
+      }
+    }
+
+    const approvePayload = {
       status: 'approved',
       decidedBy: currentUserProfile.uid,
       decidedAt: serverTimestamp(),
       lastActivityAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      unreadForManagers: false
-    });
+      unreadForManagers: false,
+    };
+    if (staffDocumentId) approvePayload.staffDocumentId = staffDocumentId;
+
+    await updateDoc(inboxRef, approvePayload);
     showToast('Request approved!', 'success');
   } catch (error) {
     console.error('[Inbox] approve error', error);
@@ -2877,7 +3555,19 @@ window.denyRequest = async function(requestId) {
 
   try {
     const salonId = currentUserProfile.salonId;
-    await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
+    const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
+    const snap = await getDoc(inboxRef);
+    if (!snap.exists()) {
+      showToast('Request not found.', 'error');
+      loadInboxItems();
+      return;
+    }
+    const item = snap.data();
+    if (item.type === 'document_upload' || item.type === 'document_request') {
+      await ffSyncStaffDocumentOnInboxReject(db, { salonId, inboxItem: item });
+    }
+
+    await updateDoc(inboxRef, {
       status: 'denied',
       decidedBy: currentUserProfile.uid,
       decidedAt: serverTimestamp(),
