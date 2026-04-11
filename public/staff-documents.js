@@ -258,7 +258,7 @@ function buildPayloadFromInbox(inboxItem, inboxItemId, approverUid, existingStaf
     title = [docType, fn].filter(Boolean).join(" — ") || docType || "Uploaded document";
     fileName = fn || null;
     storagePath = data.filePath || data.storagePath || null;
-    expirationDate = data.expirationDate || data.expiryDate || null;
+    expirationDate = data.expirationDate || data.expiryDate || data.dueDate || null;
   } else if (reqType === "document_request") {
     const reason = trimStr(data.reason);
     const shortReason = reason.length > 120 ? `${reason.slice(0, 117)}…` : reason;
@@ -292,7 +292,10 @@ function buildPayloadFromInbox(inboxItem, inboxItemId, approverUid, existingStaf
     lifecycleStatus,
     updatedAt: serverTimestamp(),
   };
-  if (expirationDate) base.expirationDate = expirationDate;
+  if (expirationDate) {
+    const parsed = parseExpirationForStaffDoc(expirationDate);
+    base.expirationDate = parsed != null ? parsed : expirationDate;
+  }
 
   return stripUndefined(base);
 }
@@ -329,6 +332,23 @@ export async function ffSyncStaffDocumentOnInboxApprove(dbConn, params) {
     payload.createdAt = serverTimestamp();
   }
   await setDoc(ref, stripUndefined(payload), { merge: true });
+
+  try {
+    const runExpiryInbox = () =>
+      import("./staff-doc-expiry-inbox.js?v=20260411_trigger_sync")
+        .then((m) => {
+          if (typeof m.runStaffDocExpiryInboxRemindersOnce === "function") {
+            return m.runStaffDocExpiryInboxRemindersOnce();
+          }
+          return undefined;
+        })
+        .catch((e) => console.warn("[staff-documents] doc expiry inbox after approve", e));
+    if (typeof window !== "undefined") {
+      setTimeout(runExpiryInbox, 300);
+      setTimeout(runExpiryInbox, 2200);
+    }
+  } catch (_) {}
+
   return documentId;
 }
 

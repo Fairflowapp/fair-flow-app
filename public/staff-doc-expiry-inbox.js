@@ -213,8 +213,23 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
 
     let inboxItemsCreated = 0;
     let docsChecked = 0;
+    let docsInExpiryWindow = 0;
 
-    const staffColSnap = await getDocs(collection(db, `salons/${salonId}/staff`));
+    let staffColSnap;
+    try {
+      staffColSnap = await getDocs(collection(db, `salons/${salonId}/staff`));
+    } catch (e) {
+      console.warn("[StaffDocExpiry Inbox] cannot list staff (role / rules?)", e);
+      if (typeof window !== "undefined") {
+        window.ffLastStaffDocExpiryInboxRun = {
+          at: Date.now(),
+          salonId,
+          error: String(e?.code || e?.message || e),
+          hint: "Listing salon/staff failed — owner/admin/manager required to scan all staff documents.",
+        };
+      }
+      return;
+    }
     for (const staffDoc of staffColSnap.docs) {
       const staffId = staffDoc.id;
       const stRow = staffDoc.data() || {};
@@ -249,6 +264,7 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
         const diffDays = salonCalendarDaysUntilExpiry(expMs, ty, tm, td, tz);
         /* Match Cloud Function: first alert while 1…30 calendar days remain (not only exactly 30). */
         if (diffDays <= 0 || diffDays > 30) continue;
+        docsInExpiryWindow += 1;
 
         const documentTitle = trimStr(data.title || data.type) || "Document";
         const documentType = trimStr(data.type) || "Document";
@@ -383,7 +399,14 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
         salonTimeZone: tz,
         salonDate: `${ty}-${String(tm).padStart(2, "0")}-${String(td).padStart(2, "0")}`,
         docsChecked,
+        docsInExpiryWindow1to30: docsInExpiryWindow,
         inboxRowsCreated: inboxItemsCreated,
+        hint:
+          inboxItemsCreated === 0 && docsInExpiryWindow > 0
+            ? "Docs in window but no new rows (dedupe / transaction) — check console."
+            : inboxItemsCreated === 0 && docsInExpiryWindow === 0
+              ? "No approved staff documents with expiration in 1–30 days. Set expiry on upload or wait until inside 30 days."
+              : undefined,
       };
     }
 

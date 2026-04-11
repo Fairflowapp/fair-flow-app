@@ -3521,19 +3521,6 @@ window.approveRequest = async function(requestId) {
 
     await updateDoc(inboxRef, approvePayload);
     showToast('Request approved!', 'success');
-    try {
-      if (staffDocumentId && typeof window.ffRunStaffDocExpiryInboxRemindersSoon === 'function') {
-        setTimeout(function () {
-          try {
-            window.ffRunStaffDocExpiryInboxRemindersSoon();
-          } catch (e2) {
-            console.warn('[Inbox] ffRunStaffDocExpiryInboxRemindersSoon', e2);
-          }
-        }, 600);
-      }
-    } catch (e) {
-      /* non-fatal */
-    }
   } catch (error) {
     console.error('[Inbox] approve error', error);
     showToast(`Error: ${error.message}`, 'error');
