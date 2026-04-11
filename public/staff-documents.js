@@ -1432,11 +1432,11 @@ function renderFilteredSingleSection(docs, chip) {
 }
 
 const STAFF_DOC_FILTER_CHIPS = [
-  { id: "all", label: "All" },
-  { id: "expired", label: "Expired" },
-  { id: "expiring_soon", label: "Expiring Soon" },
   { id: "active", label: "Active" },
+  { id: "expiring_soon", label: "Expiring Soon" },
+  { id: "expired", label: "Expired" },
   { id: "archived", label: "Archived" },
+  { id: "all", label: "All" },
 ];
 
 function renderFilterChipsHtml(currentFilter, list) {
