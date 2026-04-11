@@ -151,6 +151,92 @@ function inboxUserRoleLc() {
   return String((currentUserProfile && currentUserProfile.role) || "").toLowerCase();
 }
 
+/** Roles that historically had full inbox access before per-staff permission flags. */
+function inboxLegacyDeskRoleLc(roleLc) {
+  return ["manager", "admin", "owner", "front_desk", "assistant_manager"].includes(roleLc);
+}
+
+/** Merge salons/{salonId}/staff/{staffId} (permissions, managerType) into a user profile object. */
+async function mergeSalonStaffIntoUserProfile(profile) {
+  if (!profile?.salonId) return profile;
+  const sid = String(profile.staffId || "").trim();
+  if (!sid) return profile;
+  try {
+    const snap = await getDoc(doc(db, `salons/${profile.salonId}/staff`, sid));
+    if (snap.exists()) {
+      const st = snap.data() || {};
+      profile.permissions = { ...(profile.permissions || {}), ...(st.permissions || {}) };
+      if (st.managerType) profile.managerType = st.managerType;
+    }
+  } catch (e) {
+    console.warn("[Inbox] merge salon staff", e.message);
+  }
+  return profile;
+}
+
+function inboxCanViewInboxEval(profile) {
+  if (!profile) return false;
+  const role = String(profile.role || "").toLowerCase();
+  if (role === "technician") return true;
+  const p = profile.permissions || {};
+  if (p.inbox_view === false) return false;
+  if (p.inbox_manage === true || p.inbox_send === true || p.inbox_view === true) return true;
+  return inboxLegacyDeskRoleLc(role);
+}
+
+function inboxCanManageInboxEval(profile) {
+  if (!profile) return false;
+  const role = String(profile.role || "").toLowerCase();
+  const p = profile.permissions || {};
+  if (p.inbox_manage === false) return false;
+  if (p.inbox_manage === true) return true;
+  return inboxLegacyDeskRoleLc(role);
+}
+
+function inboxCanSendRequestsEval(profile) {
+  if (!profile) return false;
+  const role = String(profile.role || "").toLowerCase();
+  if (role === "technician") return true;
+  const p = profile.permissions || {};
+  if (inboxCanManageInboxEval(profile)) return true;
+  if (p.inbox_send === false) return false;
+  if (p.inbox_send === true) return true;
+  if (p.inbox_manage === false) return false;
+  return inboxLegacyDeskRoleLc(role);
+}
+
+function inboxCanViewInbox() {
+  return inboxCanViewInboxEval(currentUserProfile);
+}
+
+function inboxCanManageInbox() {
+  return inboxCanManageInboxEval(currentUserProfile);
+}
+
+function inboxCanSendRequests() {
+  return inboxCanSendRequestsEval(currentUserProfile);
+}
+
+/** Hide INBOX nav when the signed-in user has no inbox access (uses users + staff permissions). */
+export async function ffRefreshInboxNavVisibility() {
+  const user = auth.currentUser;
+  const btn = document.getElementById("inboxBtn");
+  if (!btn) return;
+  if (!user) {
+    btn.style.display = "";
+    return;
+  }
+  try {
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    if (!userDoc.exists()) return;
+    let profile = { uid: user.uid, ...userDoc.data() };
+    profile = await mergeSalonStaffIntoUserProfile(profile);
+    btn.style.display = inboxCanViewInboxEval(profile) ? "" : "none";
+  } catch (e) {
+    console.warn("[Inbox] ffRefreshInboxNavVisibility", e.message);
+  }
+}
+
 let currentRequests = [];
 let customRequestTypes = [];
 let inboxStaffFilterUid = '';
@@ -271,6 +357,20 @@ export function goToInbox(onReady) {
   if (inboxBtn) inboxBtn.classList.add('active');
   
   loadCurrentUserProfile().then(() => {
+    if (!inboxCanViewInbox()) {
+      if (typeof showToast === "function") {
+        showToast("You do not have permission to open Inbox.", "error");
+      } else {
+        console.warn("[Inbox] Blocked: no inbox_view / send / manage");
+      }
+      if (inboxScreen) inboxScreen.style.display = "none";
+      if (inboxContent) inboxContent.style.opacity = "1";
+      if (inboxBtn) inboxBtn.classList.remove("active");
+      return;
+    }
+    if (!inboxCanManageInbox() && inboxCanSendRequests()) {
+      inboxViewMode = "mine";
+    }
     loadCustomTypes().then(() => {
       loadInboxSettings().then(() => {
         setupInboxUI();
@@ -374,7 +474,8 @@ async function loadCurrentUserProfile() {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (userDoc.exists()) {
       currentUserProfile = { uid: user.uid, ...userDoc.data() };
-      console.log('[Inbox] User profile loaded', { role: currentUserProfile.role });
+      await mergeSalonStaffIntoUserProfile(currentUserProfile);
+      console.log('[Inbox] User profile loaded', { role: currentUserProfile.role, permissions: currentUserProfile.permissions });
       // Register in members directory so others can find this user in "Send to"
       if (currentUserProfile.salonId) {
         const memberData = {
@@ -415,6 +516,9 @@ function setupInboxUI() {
   if (!currentUserProfile) return;
 
   const role = inboxUserRoleLc();
+  const canManageInbox = inboxCanManageInbox();
+  const canSend = inboxCanSendRequests();
+  const sendOnlyDesk = !canManageInbox && canSend && role !== 'technician';
 
   // "New Request" — #inboxCreateRequestBtn lives in #inboxContentHeaderRow (visible for technicians; switcher is hidden for them)
   const headerNewBtn = document.getElementById('inboxCreateRequestBtn');
@@ -424,20 +528,22 @@ function setupInboxUI() {
   const inboxTabs      = document.getElementById('inboxTabs');
   const listTitle      = document.getElementById('inboxListTitle');
 
-  const canCreateRequests = ['technician', 'manager', 'admin', 'owner'].includes(role);
+  const canCreateRequests = role === 'technician' || canSend;
   const isAdminOrOwner = (role === 'admin' || role === 'owner');
   const manageTypesBtn = document.getElementById('btnManageRequestTypes');
   const settingsBtn = document.getElementById('inboxSettingsBtn');
 
   // New Request: show only in "My Requests" (managers) or any time for technician; hide in "To handle"
-  const showNewRequest = canCreateRequests && (role === 'technician' || inboxViewMode === 'mine');
+  const showNewRequest =
+    canCreateRequests &&
+    (role === 'technician' || sendOnlyDesk || inboxViewMode === 'mine');
   if (headerNewBtn) headerNewBtn.style.display = showNewRequest ? '' : 'none';
   // Hide empty-state New Request — only the header button is used
   if (emptyStateBtn) emptyStateBtn.style.display = 'none';
   if (manageTypesBtn) manageTypesBtn.style.display = 'none'; // use gear only
-  // Gear settings button — ONLY for admin/owner, after Archived tab
+  // Gear settings button — ONLY for admin/owner with manage inbox, after Archived tab
   if (settingsBtn) {
-    settingsBtn.style.display = isAdminOrOwner ? 'flex' : 'none';
+    settingsBtn.style.display = isAdminOrOwner && canManageInbox ? 'flex' : 'none';
     settingsBtn.onclick = () => window.openInboxSettingsModal();
   }
 
@@ -469,7 +575,24 @@ function setupInboxUI() {
     if (inboxTabs) inboxTabs.classList.add('hidden');
     if (listTitle) listTitle.textContent = 'My Requests';
     currentInboxTab = 'my_requests';
-  } else {
+  } else if (sendOnlyDesk) {
+    inboxViewMode = 'mine';
+    const viewSwitcher = document.getElementById('inboxViewSwitcher');
+    if (viewSwitcher) viewSwitcher.style.display = 'none';
+    if (filterRow) filterRow.style.display = 'none';
+    if (headerRow) headerRow.style.display = '';
+    if (listTitle) {
+      listTitle.style.display = '';
+      listTitle.textContent = 'My Requests';
+    }
+    if (inboxTabs) {
+      inboxTabs.classList.add('hidden');
+      inboxTabs.style.display = 'none';
+    }
+    if (emptyStateBtn) emptyStateBtn.style.display = 'none';
+    currentInboxTab = 'my_requests';
+    if (emptyStateMsg) emptyStateMsg.textContent = 'No requests yet';
+  } else if (canManageInbox) {
     // Manager / Admin / Owner — show view switcher (My Requests | To handle)
     const viewSwitcher = document.getElementById('inboxViewSwitcher');
     if (viewSwitcher) viewSwitcher.style.display = 'flex';
@@ -492,6 +615,22 @@ function setupInboxUI() {
     document.querySelectorAll('.inbox-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.inboxTab === currentInboxTab);
     });
+  } else {
+    // View inbox without send/manage — minimal UI
+    const viewSwitcher = document.getElementById('inboxViewSwitcher');
+    if (viewSwitcher) viewSwitcher.style.display = 'none';
+    if (filterRow) filterRow.style.display = 'none';
+    if (headerRow) headerRow.style.display = 'none';
+    if (inboxTabs) {
+      inboxTabs.classList.add('hidden');
+      inboxTabs.style.display = 'none';
+    }
+    if (listTitle) {
+      listTitle.style.display = '';
+      listTitle.textContent = 'Inbox';
+    }
+    if (emptyStateBtn) emptyStateBtn.style.display = 'none';
+    if (emptyStateMsg) emptyStateMsg.textContent = 'No access to requests for this account';
   }
 }
 
@@ -500,6 +639,7 @@ function setupInboxUI() {
 // =====================
 window.setInboxViewMode = function(mode) {
   if (!currentUserProfile || inboxUserRoleLc() === "technician") return;
+  if (mode === "to_handle" && !inboxCanManageInbox()) return;
   inboxViewMode = mode;
   document.querySelectorAll('.inbox-view-btn').forEach(b => {
     b.classList.toggle('active', (b.dataset.inboxView || '') === mode);
@@ -520,7 +660,7 @@ window.setInboxViewMode = function(mode) {
     if (inboxTabs) { inboxTabs.classList.remove('hidden'); inboxTabs.style.display = ''; }
   }
   if (emptyStateBtn) emptyStateBtn.style.display = 'none';
-  if (headerNewBtn) headerNewBtn.style.display = mode === 'mine' ? '' : 'none';
+  if (headerNewBtn) headerNewBtn.style.display = mode === 'mine' && inboxCanSendRequests() ? '' : 'none';
   loadInboxItems();
 };
 
@@ -652,8 +792,15 @@ async function loadInboxItems() {
         unsubIn();
       };
       return;
-    } else if (inboxViewMode === 'mine') {
-      // Admin/Manager "My Requests": ordered by createdAt (stable — doesn't reorder when status changes)
+    } else if (role !== "technician" && !inboxCanManageInbox() && !inboxCanSendRequests()) {
+      if (loadingEl) loadingEl.style.display = "none";
+      currentRequests = [];
+      updateInboxStaffFilterOptions();
+      updateInboxBadges();
+      renderInboxList();
+      return;
+    } else if (inboxViewMode === "mine" || !inboxCanManageInbox()) {
+      // "My Requests" (created by me) — send-only staff use this path only
       q = query(
         collection(db, `salons/${salonId}/inboxItems`),
         where('createdByUid', '==', uid),
@@ -661,7 +808,7 @@ async function loadInboxItems() {
         limit(50)
       );
     } else {
-      // Admin/Manager "To handle": only requests sent TO me (forUid)
+      // "To handle" — full inbox managers only
       if (currentInboxTab === 'open') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
@@ -752,9 +899,7 @@ async function loadInboxItems() {
 /** Update red badges: Open tab + INBOX nav button */
 /** Update unread badges on tabs and nav INBOX button. */
 function updateInboxBadges() {
-  const role = inboxUserRoleLc();
-  const isManager = ["manager", "admin", "owner"].includes(role);
-  if (!isManager) return;
+  if (!inboxCanManageInbox()) return;
 
   const uid = currentUserProfile.uid;
 
@@ -883,7 +1028,7 @@ function renderInboxList() {
   if (emptyEl) emptyEl.style.display = 'none';
   if (loadingEl) loadingEl.style.display = 'none';
 
-  const isManager = currentUserProfile && ["manager", "admin", "owner"].includes(inboxUserRoleLc());
+  const showMgrUnread = inboxCanManageInbox();
 
   // Group requests by type (use filtered list)
   const groups = {};
@@ -913,7 +1058,7 @@ function renderInboxList() {
   sortedKeys.forEach(type => {
     const requests = groups[type];
     const typeInfo = getRequestTypeInfo(type);
-    const unreadCount = isManager ? requests.filter(r => r.unreadForManagers === true).length : 0;
+    const unreadCount = showMgrUnread ? requests.filter(r => r.unreadForManagers === true).length : 0;
     const hasUnread = unreadCount > 0;
 
     // Left: icon + label. Right: (total) grey, unread count red when > 0, then arrow
@@ -1305,6 +1450,10 @@ function formatRelativeDate(date) {
 // Create Request Modal
 // =====================
 window.openCreateRequestModal = function() {
+  if (!inboxCanSendRequests()) {
+    if (typeof showToast === "function") showToast("You do not have permission to create requests.", "error");
+    return;
+  }
   console.log('[Inbox] Opening create request modal');
   
   // Create modal
@@ -2707,7 +2856,7 @@ function showRequestDetails(requestId) {
   console.log('[Inbox] Showing request details', requestId);
 
   // Mark as read only if the current user IS the recipient (forUid), not the sender
-  const isManagerRole = currentUserProfile && ["manager", "admin", "owner"].includes(inboxUserRoleLc());
+  const isManagerRole = inboxCanManageInbox();
   const isRecipientViewing = isManagerRole && request.forUid === currentUserProfile.uid;
   if (isRecipientViewing && request.unreadForManagers === true && currentUserProfile.salonId) {
     // Optimistic: update local state immediately
@@ -2754,7 +2903,7 @@ function showRequestDetails(requestId) {
   const isDocAlert = request.type === 'document_expiring_soon' || request.type === 'document_expired';
 
   // Role checks
-  const isManager = currentUserProfile && ["manager", "admin", "owner"].includes(inboxUserRoleLc());
+  const isManager = inboxCanManageInbox();
   const isTechnician = currentUserProfile && inboxUserRoleLc() === "technician";
   const isMyRequest = currentUserProfile && request.forUid === currentUserProfile.uid;
 
@@ -2906,7 +3055,7 @@ function showRequestDetails(requestId) {
   }
 
   const isRenewalCreator =
-    isManager &&
+    inboxCanSendRequests() &&
     currentUserProfile &&
     request.createdByUid === currentUserProfile.uid &&
     request.type === 'document_renewal_request' &&
@@ -3449,6 +3598,10 @@ window.submitStaffReply = async function(requestId) {
 };
 
 window.needsMoreInfo = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to update requests.", "error");
+    return;
+  }
   const question = await showPromptModal({
     title: 'Request More Info',
     message: 'What information do you need from the staff member?',
@@ -3481,6 +3634,10 @@ window.needsMoreInfo = async function(requestId) {
 };
 
 window.uploadDocumentResponse = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to upload a response.", "error");
+    return;
+  }
   const request = currentRequests.find(r => r.id === requestId);
   if (!request || request.type !== 'document_request') return;
   const fileInput = document.getElementById('docResponseFile_' + requestId);
@@ -3524,6 +3681,10 @@ window.uploadDocumentResponse = async function(requestId) {
 };
 
 window.markBirthdayReminderDone = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to archive this item.", "error");
+    return;
+  }
   closeRequestDetailsModal();
   currentRequests = currentRequests.filter(r => r.id !== requestId);
   renderInboxList();
@@ -3590,6 +3751,10 @@ window.ffOpenDocumentRenewalFromAlert = function (opts) {
  * Manager: edit document type / expiration on inbox item before approving (document_upload / document_request).
  */
 window.ffInboxOpenDocumentMetadataEdit = async function (requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to edit this request.", "error");
+    return;
+  }
   const rid = String(requestId || "").trim();
   if (!rid || !currentUserProfile?.salonId) return;
   const salonId = currentUserProfile.salonId;
@@ -3720,6 +3885,10 @@ window.ffInboxOpenDocumentMetadataEdit = async function (requestId) {
 };
 
 window.approveRequest = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to approve requests.", "error");
+    return;
+  }
   const confirmed = await showConfirmModal({
     title: 'Approve request?',
     message: 'This will mark the request as approved.',
@@ -3789,6 +3958,10 @@ window.approveRequest = async function(requestId) {
 };
 
 window.denyRequest = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to deny requests.", "error");
+    return;
+  }
   const confirmed = await showConfirmModal({
     title: 'Deny request?',
     message: 'This will mark the request as denied. You can add a note below.',
@@ -3845,6 +4018,10 @@ window.denyRequest = async function(requestId) {
 };
 
 window.archiveRequest = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to archive requests.", "error");
+    return;
+  }
   const confirmed = await showConfirmModal({
     title: 'Move to Archive?',
     message: 'This request will be moved to the archive. You can delete it later from there.',
@@ -3878,6 +4055,10 @@ window.archiveRequest = async function(requestId) {
 };
 
 window.deleteArchivedRequest = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to delete requests.", "error");
+    return;
+  }
   const confirmed = await showConfirmModal({
     title: 'Delete permanently?',
     message: 'This request will be deleted and cannot be recovered.',
@@ -3980,6 +4161,8 @@ export function initInbox() {
     }
   }, true); // Capture phase to run before other handlers
   
+  window.ffRefreshInboxNavVisibility = ffRefreshInboxNavVisibility;
+
   console.log('[Inbox] Initialized');
 }
 
@@ -4021,15 +4204,20 @@ function startBgBadgeListener(uid, salonId) {
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     if (_bgBadgeUnsubscribe) { _bgBadgeUnsubscribe(); _bgBadgeUnsubscribe = null; }
+    void ffRefreshInboxNavVisibility();
     return;
   }
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (!userDoc.exists()) return;
-    const data = userDoc.data() || {};
-    const role = (data.role || '').toLowerCase();
-    if (['manager', 'admin', 'owner'].includes(role) && data.salonId) {
-      startBgBadgeListener(user.uid, data.salonId);
+    let profile = { uid: user.uid, ...userDoc.data() };
+    profile = await mergeSalonStaffIntoUserProfile(profile);
+    void ffRefreshInboxNavVisibility();
+    if (inboxCanManageInboxEval(profile) && profile.salonId) {
+      startBgBadgeListener(user.uid, profile.salonId);
+    } else if (_bgBadgeUnsubscribe) {
+      _bgBadgeUnsubscribe();
+      _bgBadgeUnsubscribe = null;
     }
   } catch (e) {
     console.warn('[Inbox] bg badge listener error', e.message);

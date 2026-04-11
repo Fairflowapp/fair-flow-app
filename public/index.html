@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- FF_BUILD_STAMP: 20260411-jsonsafe+chat-reminder-inline-fix — View Source on production. -->
+<!-- FF_BUILD_STAMP: 20260414-fair-flow-app-branding — View Source on production. -->
 
 <html lang="en">
 
@@ -48,7 +48,13 @@
 
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 
-<title>FIRST FLOW ALMOST READY</title>
+<title>Fair Flow App</title>
+<meta name="application-name" content="Fair Flow App"/>
+<meta name="apple-mobile-web-app-title" content="Fair Flow App"/>
+<meta name="theme-color" content="#7c3aed"/>
+<!-- Tab/address-bar icon size is chosen by the browser/OS (not enlargeable from HTML). Use a sharp square PNG. Bump ?v= when replacing the file. -->
+<link rel="icon" href="/fairflow-logo.png?v=5" type="image/png" sizes="any"/>
+<link rel="apple-touch-icon" sizes="180x180" href="/fairflow-logo.png?v=5"/>
 
 <style>
 
@@ -126,6 +132,14 @@ body.ff-invite-mode #reset-admin-pin-section {
   height: 36px;
   display: block;
   object-fit: contain;
+  object-position: center;
+  border-radius: 0;
+  background: transparent;
+  filter: none;
+}
+/* Wordmark hidden in header (logo only); tab title stays "Fair Flow App" */
+.header .ff-app-title {
+  display: none;
 }
 
 .title{display:flex;flex-direction:column}
@@ -133,9 +147,9 @@ body.ff-invite-mode #reset-admin-pin-section {
 .appname{font-size:12px;font-weight:900;letter-spacing:.3px}
 .ff-app-title {
   font-size: 13.5px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
   color: #6B7280;
 }
 
@@ -730,7 +744,7 @@ select,input[type="password"],input[type="text"]{height:42px;padding:0 16px;bord
 
 .col{background:var(--muted);border:1px solid var(--border);border-radius:14px;padding:14px;min-height:240px}
 
-.col h2{margin:2px 0 10px;font-size:15px;color:var(--sub);letter-spacing:.4px}
+.col h2{margin:2px 0 10px;font-size:15px;color:var(--sub);letter-spacing:.02em;font-weight:600;text-transform:none}
 
 .list{max-height:58vh;overflow:auto}
 
@@ -739,6 +753,59 @@ select,input[type="password"],input[type="text"]{height:42px;padding:0 16px;bord
     overflow-y: auto;
     overflow-x: hidden;
     padding-right: 6px;
+}
+
+#queueList > li.ff-queue-empty-state,
+#serviceList > li.ff-queue-empty-state {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+.ff-queue-empty-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px 20px;
+  min-height: 220px;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.ff-queue-empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  color: #9ca3af;
+}
+.ff-queue-empty-icon svg {
+  width: 28px;
+  height: 28px;
+  stroke: currentColor;
+  fill: none;
+}
+.ff-queue-empty-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #374151;
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+}
+.ff-queue-empty-sub {
+  font-size: 13px;
+  color: #9ca3af;
+  line-height: 1.45;
+  max-width: 300px;
 }
 
 ul{list-style:none;padding:0;margin:0}
@@ -1810,11 +1877,11 @@ dialog footer button, .code-dialog footer button {
 
       <div class="brandbox">
 
-        <img id="brandLogo" class="logo" alt="Fair Flow App" src="fairflow-logo.png">
+        <img id="brandLogo" class="logo" alt="Fair Flow App" src="fairflow-logo.png?v=5">
 
         <div class="title">
 
-          <div class="appname ff-app-title">FAIR FLOW APP</div>
+          <div class="appname ff-app-title">Fair Flow App</div>
 
           <div class="owner owner-row" id="salonName"></div>
 
@@ -2427,7 +2494,7 @@ dialog footer button, .code-dialog footer button {
 
     <div id="joinBar" class="joinbar">
 
-      <label>JOIN</label>
+      <label>Join</label>
 
       <select id="nameSelect" class="grow" style="cursor:pointer;font-size:12px;"></select>
 
@@ -2470,7 +2537,7 @@ dialog footer button, .code-dialog footer button {
 
       <div class="col">
 
-        <h2>AVAILABLE</h2>
+        <h2>Available</h2>
 
         <div id="reorderHeader" style="display:none;background:#f3fbff;border:1px solid #60a5fa;border-radius:14px;padding:16px 12px;margin-bottom:10px;text-align:center;">
 
@@ -2484,7 +2551,7 @@ dialog footer button, .code-dialog footer button {
 
       <div class="col">
 
-        <h2>IN SERVICE</h2>
+        <h2>In service</h2>
 
         <div class="list inservice-list"><ul id="serviceList"></ul></div>
 
@@ -4557,7 +4624,7 @@ function renderBrand(){
     salonName.innerHTML = displayName ? ("<strong>"+escapeHtml(displayName)+"</strong>") : "";
   }
   if (brandLogo) {
-    brandLogo.src = "fairflow-logo.png";
+    brandLogo.src = "fairflow-logo.png?v=5";
     brandLogo.style.visibility="visible";
   }
 }
@@ -4788,31 +4855,32 @@ function renderSelect(){
     return;
   }
 
-  // Check if owner-view is visible
-  const ownerView = document.getElementById("owner-view");
-  if (ownerView && ownerView.style.display === 'none') {
-    console.log('[renderSelect] owner-view is hidden, will retry when visible');
-    // Retry when view becomes visible
-    setTimeout(renderSelect, 1000);
-    return;
-  }
-
   // Load staff from ff_staff_v1 (new primary source) - direct localStorage read
   let technicians = [];
   try {
     const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
     const staffList = Array.isArray(store.staff) ? store.staff : [];
-    // Filter to only active Technicians (role-based)
-    technicians = staffList.filter(s => 
-      s.isArchived !== true && 
-      s.name && 
-      s.name.trim() &&
-      typeof s.role === 'string' &&
-      s.role.trim().toLowerCase() === 'technician'
-    );
+    // Service providers for JOIN: same idea as Staff list — technicians, not admins/managers
+    technicians = staffList.filter(s => {
+      if (!s || s.isArchived === true) return false;
+      const name = String(s.name || '').trim();
+      if (!name) return false;
+      if (s.isAdmin === true || s.isManager === true) return false;
+      const r = String(s.role || '').trim().toLowerCase();
+      if (r === 'admin' || r === 'manager' || r === 'owner') return false;
+      return r === 'technician' || r === '' || r === 'staff' || r === 'tech';
+    });
     console.log('[renderSelect] Loaded', technicians.length, 'active technicians from ff_staff_v1');
   } catch (e) {
     console.error('[renderSelect] Error loading from ff_staff_v1:', e);
+  }
+  if (technicians.length === 0) {
+    try {
+      technicians = loadTechniciansFromSettings();
+      console.log('[renderSelect] Fallback: loadTechniciansFromSettings →', technicians.length);
+    } catch (e2) {
+      console.warn('[renderSelect] Fallback technicians failed:', e2);
+    }
   }
 
   const techniciansDeduped = ffDeduplicateTechniciansByName(technicians);
@@ -4830,16 +4898,20 @@ function renderSelect(){
 
   if (techniciansDeduped.length === 0) {
     console.warn('[renderSelect] No technicians found in ff_staff_v1');
-    // Add a placeholder option
+    // Placeholder only — keep select enabled so the row does not look "locked"
     const placeholder = document.createElement("option");
     placeholder.value = "";
-    placeholder.textContent = "No technicians available - Add in Settings";
+    // UI says «service provider»; data comes from staff with role technician (see filter below).
+    placeholder.textContent = "No service providers yet — add technicians in Staff Members";
     placeholder.disabled = true;
     placeholder.selected = true;
     selectEl.appendChild(placeholder);
-    selectEl.disabled = true;
+    selectEl.disabled = false;
+    selectEl.title = "Lists technicians (service providers) from Staff Members. Add or fix role under APPS → Staff Members.";
     return;
   }
+
+  selectEl.removeAttribute("title");
 
   // Add a default "Select technician" option
   const defaultOption = document.createElement("option");
@@ -4949,27 +5021,54 @@ function namePill(target){
 
 }
 
-function queuePresenceMeta(name){
+function queuePresenceMeta(name, opts){
+  opts = opts || {};
   const staffId = (name && typeof name === 'object' ? name.staffId : null) || resolveStaffNameToId(name && typeof name === 'object' ? name.name : name) || (name && typeof name === 'object' ? name.name : name);
   const presence = (typeof window.ffGetStaffPresenceFor === 'function')
     ? window.ffGetStaffPresenceFor(staffId)
     : null;
-  const status = (typeof window.ffGetStaffPresenceStatus === 'function')
-    ? window.ffGetStaffPresenceStatus(staffId)
-    : 'offline';
+  const diag = ffDiagExplainPresenceStatus(presence);
+  let status = diag.status;
+  // Legacy hook when presence doc is not exposed but host still exposes a coarse status.
+  if (typeof window.ffGetStaffPresenceStatus === 'function') {
+    const hook = window.ffGetStaffPresenceStatus(staffId);
+    if (hook === 'online' || hook === 'idle' || hook === 'offline') {
+      if (!presence) status = hook;
+    }
+  }
+  // Queue / In service: if they're listed here, treat as active on the queue for UI — never "Offline"
+  // (stale heartbeat / hook offline still means they're visibly in queue or in service).
+  if (opts.queueMember && status === 'offline') {
+    status = 'queue';
+  }
   return { staffId, presence, status };
 }
 
 function queuePresenceDotColor(status){
-  if (status === 'online') return '#10b981';
-  if (status === 'idle') return '#f59e0b';
-  return '#111827';
+  // "queue" = on this list without live heartbeat — still treat as active/connected for display
+  if (status === 'online' || status === 'idle' || status === 'queue') return '#10b981';
+  return '#6b7280';
+}
+
+/** Tooltip for 📞 — presence is informational; calls are always allowed when staffId exists. */
+function ffStaffCallButtonTitle(status, kind){
+  const isService = kind === 'service';
+  const ok = status === 'online' || status === 'idle' || status === 'queue';
+  if (ok) {
+    return isService ? 'Call to reception' : 'Call staff member';
+  }
+  return isService
+    ? 'Send call — may deliver when they open the app'
+    : 'Send call — may deliver when they open the app';
 }
 
 function ffHasQueueCallAccess(){
   const roleFromUser = String(window.__ff_user_role || '').toLowerCase();
-  const roleFromActor = String(window.__ff_actorRole || sessionStorage.getItem('ff_actor_role') || '').toLowerCase();
   if (roleFromUser === 'owner' || roleFromUser === 'admin' || roleFromUser === 'manager') return true;
+  // Salon account or session is a technician — never show reception "call staff" controls (queue phone).
+  if (roleFromUser === 'technician') return false;
+  if (typeof getCurrentQueueActorRole === 'function' && getCurrentQueueActorRole() === 'technician') return false;
+  const roleFromActor = String(window.__ff_actorRole || sessionStorage.getItem('ff_actor_role') || '').toLowerCase();
   if (roleFromActor === 'owner' || roleFromActor === 'admin' || roleFromActor === 'manager') return true;
   if (window.ff_is_admin_cached === true) return true;
   return typeof ffHasAdminAccess === 'function' ? ffHasAdminAccess() : false;
@@ -5208,11 +5307,31 @@ function ffRenderQueueFilterChips() {
 }
 // ─── End Queue Filter ──────────────────────────────────────────────────────
 
+function ffQueueEmptyAvailableHtml() {
+  return '<div class="ff-queue-empty-inner"><div class="ff-queue-empty-icon" aria-hidden="true">' +
+    '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>' +
+    '<div class="ff-queue-empty-title">No service providers</div>' +
+    '<div class="ff-queue-empty-sub">They will appear here when they join the queue</div></div>';
+}
+function ffQueueEmptyInServiceHtml() {
+  return '<div class="ff-queue-empty-inner"><div class="ff-queue-empty-icon" aria-hidden="true">' +
+    '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg></div>' +
+    '<div class="ff-queue-empty-title">No service providers in service</div>' +
+    '<div class="ff-queue-empty-sub">Active services will appear here</div></div>';
+}
+
 function renderQueue(){
 
   queueList.innerHTML="";
 
   const filteredQueue = filterQueue(queue, window._ffQueueFilter || 'all');
+  if (filteredQueue.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "ff-queue-empty-state";
+    empty.innerHTML = ffQueueEmptyAvailableHtml();
+    queueList.appendChild(empty);
+    return;
+  }
   filteredQueue.forEach((q,i)=>{
 
     const li=document.createElement("li"); li.className="item"; li.setAttribute("held",q.held?"true":"false");
@@ -5231,7 +5350,7 @@ function renderQueue(){
     queuePill.style.maxWidth = "100%";
     nm.appendChild(queuePill);
 
-    const presenceMeta = queuePresenceMeta(q);
+    const presenceMeta = queuePresenceMeta(q, { queueMember: true });
     const canManageCalls = ffHasQueueCallAccess();
     const presenceStatusInfo = ffDiagExplainPresenceStatus(presenceMeta.presence);
     if (canManageCalls) {
@@ -5240,11 +5359,9 @@ function renderQueue(){
       const presenceDot = document.createElement("span");
       presenceDot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${queuePresenceDotColor(presenceMeta.status)};display:inline-block;flex-shrink:0;`;
       const presenceLabel = document.createElement("span");
-      presenceLabel.textContent = presenceMeta.status === 'online'
+      presenceLabel.textContent = (presenceMeta.status === 'online' || presenceMeta.status === 'idle' || presenceMeta.status === 'queue')
         ? 'Connected'
-        : presenceMeta.status === 'idle'
-          ? 'Away'
-          : 'Offline';
+        : 'Not connected';
       presenceRow.append(presenceDot, presenceLabel);
       nm.appendChild(presenceRow);
     }
@@ -5287,7 +5404,7 @@ function renderQueue(){
       const callBtn = document.createElement("button");
       callBtn.type = "button";
       callBtn.textContent = "📞";
-      callBtn.title = presenceMeta.status === 'offline' ? "Offline" : "Call staff member";
+      callBtn.title = ffStaffCallButtonTitle(presenceMeta.status, 'queue');
       callBtn.style.cssText = [
         "border:1px solid var(--border)",
         "background:#fff",
@@ -5296,38 +5413,44 @@ function renderQueue(){
         "height:34px",
         "cursor:pointer",
         "font-size:17px",
-        "line-height:1"
+        "line-height:1",
+        "opacity:1"
       ].join(";");
+      callBtn.disabled = false;
 
-      if (presenceMeta.status === 'offline') {
-        callBtn.disabled = true;
-        callBtn.style.cursor = "not-allowed";
-        callBtn.style.opacity = "0.45";
-        console.warn('[StaffCallDiag] call icon disabled', {
-          ...diagEligibility,
-          disabledReason: 'online status is offline'
-        });
-      } else {
-        callBtn.onclick = async () => {
-          try {
-            const callTemplate = getStaffCallTemplate('available');
-            const result = await window.ffSendStaffCall?.(presenceMeta.staffId, {
-              message: callTemplate.message,
-              detail: callTemplate.detail
-            });
-            if (!result || result.ok !== true) {
-              if (result?.reason === 'offline') {
-                alert('This staff member is offline.');
-              } else {
-                alert('Call could not be sent.');
-              }
-            }
-          } catch (e) {
-            console.error('[Queue] Failed to send staff call', e);
-            alert('Call could not be sent.');
+      callBtn.onclick = async () => {
+        try {
+          if (typeof window.ffSendStaffCall !== 'function') {
+            alert('Call feature is still loading. Wait a few seconds and try again.');
+            return;
           }
-        };
-      }
+          const callTemplate = getStaffCallTemplate('available');
+          const result = await window.ffSendStaffCall(presenceMeta.staffId, {
+            message: callTemplate.message,
+            detail: callTemplate.detail,
+            allowOfflineDelivery: true,
+            presenceStatusHint: presenceMeta.status
+          });
+          if (!result || result.ok !== true) {
+            if (result?.reason === 'offline') {
+              alert('Request was queued. They may see it when they open the app.');
+            } else if (result?.reason === 'recipient_not_logged_in') {
+              alert('This staff member must log in to the app at least once before they can receive a call request.');
+            } else if (result?.reason === 'no_permission') {
+              alert('Your account cannot send staff calls. Ask an owner or manager.');
+            } else if (result?.reason === 'no_auth') {
+              alert('Please sign in again, then try the call button.');
+            } else if (result?.reason === 'not-eligible') {
+              alert('Staff must be on shift in the right queue for a call alert. Check that they joined the queue on their device.');
+            } else {
+              alert('Call could not be sent.');
+            }
+          }
+        } catch (e) {
+          console.error('[Queue] Failed to send staff call', e);
+          alert('Call could not be sent.');
+        }
+      };
 
       const callStatus = document.createElement("span");
       callStatus.textContent = callStatusLabel || "";
@@ -5451,6 +5574,13 @@ function renderService(){
   serviceList.innerHTML="";
 
   const filteredService = filterQueue(service, window._ffQueueFilter || 'all');
+  if (filteredService.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "ff-queue-empty-state";
+    empty.innerHTML = ffQueueEmptyInServiceHtml();
+    serviceList.appendChild(empty);
+    return;
+  }
   filteredService.forEach((s,i)=>{
 
     const li=document.createElement("li"); li.className="item";
@@ -5469,7 +5599,7 @@ function renderService(){
     pill.style.maxWidth = "100%";
     nm.appendChild(pill);
 
-    const presenceMeta = queuePresenceMeta(s);
+    const presenceMeta = queuePresenceMeta(s, { queueMember: true });
     const canManageCalls = ffHasQueueCallAccess();
     if (canManageCalls) {
       const presenceRow = document.createElement("div");
@@ -5477,11 +5607,9 @@ function renderService(){
       const presenceDot = document.createElement("span");
       presenceDot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${queuePresenceDotColor(presenceMeta.status)};display:inline-block;flex-shrink:0;`;
       const presenceLabel = document.createElement("span");
-      presenceLabel.textContent = presenceMeta.status === 'online'
+      presenceLabel.textContent = (presenceMeta.status === 'online' || presenceMeta.status === 'idle' || presenceMeta.status === 'queue')
         ? 'Connected'
-        : presenceMeta.status === 'idle'
-          ? 'Away'
-          : 'Offline';
+        : 'Not connected';
       presenceRow.append(presenceDot, presenceLabel);
       nm.appendChild(presenceRow);
     }
@@ -5500,7 +5628,7 @@ function renderService(){
       const callBtn = document.createElement("button");
       callBtn.type = "button";
       callBtn.textContent = "📞";
-      callBtn.title = presenceMeta.status === 'offline' ? "Offline" : "Call to reception";
+      callBtn.title = ffStaffCallButtonTitle(presenceMeta.status, 'service');
       callBtn.style.cssText = [
         "border:1px solid var(--border)",
         "background:#fff",
@@ -5509,35 +5637,45 @@ function renderService(){
         "height:34px",
         "cursor:pointer",
         "font-size:17px",
-        "line-height:1"
+        "line-height:1",
+        "opacity:1"
       ].join(";");
+      callBtn.disabled = false;
 
-      if (presenceMeta.status === 'offline') {
-        callBtn.disabled = true;
-        callBtn.style.cursor = "not-allowed";
-        callBtn.style.opacity = "0.45";
-      } else {
-        callBtn.onclick = async () => {
-          try {
-            const callTemplate = getStaffCallTemplate('inService');
-            const result = await window.ffSendStaffCall?.(presenceMeta.staffId, {
-              allowedQueueStatuses: ["in_service"],
-              message: callTemplate.message,
-              detail: callTemplate.detail
-            });
-            if (!result || result.ok !== true) {
-              if (result?.reason === 'offline') {
-                alert('This staff member is offline.');
-              } else {
-                alert('Call could not be sent.');
-              }
-            }
-          } catch (e) {
-            console.error('[Service] Failed to send reception call', e);
-            alert('Call could not be sent.');
+      callBtn.onclick = async () => {
+        try {
+          if (typeof window.ffSendStaffCall !== 'function') {
+            alert('Call feature is still loading. Wait a few seconds and try again.');
+            return;
           }
-        };
-      }
+          const callTemplate = getStaffCallTemplate('inService');
+          const result = await window.ffSendStaffCall(presenceMeta.staffId, {
+            allowedQueueStatuses: ["in_service"],
+            message: callTemplate.message,
+            detail: callTemplate.detail,
+            allowOfflineDelivery: true,
+            presenceStatusHint: presenceMeta.status
+          });
+          if (!result || result.ok !== true) {
+            if (result?.reason === 'offline') {
+              alert('Request was queued. They may see it when they open the app.');
+            } else if (result?.reason === 'recipient_not_logged_in') {
+              alert('This staff member must log in to the app at least once before they can receive a call request.');
+            } else if (result?.reason === 'no_permission') {
+              alert('Your account cannot send staff calls. Ask an owner or manager.');
+            } else if (result?.reason === 'no_auth') {
+              alert('Please sign in again, then try the call button.');
+            } else if (result?.reason === 'not-eligible') {
+              alert('Staff must be In service for this alert. Check their queue status.');
+            } else {
+              alert('Call could not be sent.');
+            }
+          }
+        } catch (e) {
+          console.error('[Service] Failed to send reception call', e);
+          alert('Call could not be sent.');
+        }
+      };
 
       const callStatus = document.createElement("span");
       const serviceCallStatusLabel = queueCallStatusLabel(presenceMeta.presence, presenceMeta.status) || "";
@@ -6750,6 +6888,10 @@ function goToQueue() {
   
   // Show/hide Queue management controls based on current role
   updateQueueManagementUiVisibility();
+
+  if (typeof renderSelect === 'function') {
+    renderSelect();
+  }
 
   // Initialize Manage Queue button handler if needed
   const manageQueueBtn = document.getElementById('manageQueueBtn');
@@ -23173,8 +23315,9 @@ function initializeAppsPanel() {
       {
         title: 'Inbox',
         permissions: [
-          { key: 'inbox_view', label: 'View inbox', desc: 'View inbox messages' },
-          { key: 'inbox_manage', label: 'Manage inbox', desc: 'Send, reply, or manage messages' }
+          { key: 'inbox_view', label: 'View inbox', desc: 'Open the Inbox section in the app' },
+          { key: 'inbox_send', label: 'Send requests (My requests)', desc: 'Create requests and see your own; use for assistants who should not handle the team queue' },
+          { key: 'inbox_manage', label: 'Manage inbox (To handle)', desc: 'See the full queue, approve/deny, filter by staff, and inbox settings' }
         ]
       },
       {
@@ -23262,6 +23405,7 @@ function initializeAppsPanel() {
         if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
         if (typeof window.updateMediaScreenTabsForRole === 'function') window.updateMediaScreenTabsForRole();
         if (typeof window.refreshMediaWorksList === 'function') window.refreshMediaWorksList();
+        if (typeof window.ffRefreshInboxNavVisibility === 'function') void window.ffRefreshInboxNavVisibility();
       };
     });
   }
@@ -31075,7 +31219,7 @@ if (!window.__uiObserver) {
     mutations.forEach((mutation) => {
       if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
         const ownerView = document.getElementById("owner-view");
-        if (ownerView && ownerView.style.display === 'block') {
+        if (ownerView && window.getComputedStyle(ownerView).display !== 'none') {
           console.log('[Observer] owner-view became visible, calling renderSelect');
           setTimeout(() => {
             if (typeof renderSelect === 'function') {
@@ -34562,11 +34706,11 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-ui.js?v=20260412_app_js_unify"></script>
-  <script type="module" src="/inbox.js?v=20260412_tech_hide_manager_inbox"></script>
+  <script type="module" src="/inbox.js?v=20260408_showtoast_queue_join"></script>
   <script type="module" src="/chat.js?v=20260408_inbox_upload_deeplink"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-documents.js?v=20260412_doc_meta_edit"></script>
-  <script type="module" src="/staff-call-cloud.js?v=20260312_staffcall11"></script>
+  <script type="module" src="/staff-call-cloud.js?v=20260412_staffcall_accept_ui"></script>
   <script type="module" src="/settings-cloud.js?v=20260412_app_js_unify"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
@@ -35521,10 +35665,12 @@ function hookSettingsGuard_DISABLED(){
 <!-- Inbox Screen (below main Top Bar: QUEUE, TASKS, INBOX, etc.) -->
 <div id="inboxScreen" class="inbox-screen">
   <!-- View switcher: My Requests | To handle (only for admin/manager) -->
-  <div id="inboxViewSwitcher" class="inbox-view-switcher" style="display:none;align-items:center;gap:0;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;pointer-events:auto;">
+  <div id="inboxViewSwitcher" class="inbox-view-switcher" style="display:none;flex-direction:column;align-items:stretch;gap:8px;padding:10px 20px;border-bottom:1px solid #e5e7eb;background:#fff;pointer-events:auto;">
+    <div class="inbox-view-switcher-btns" style="display:flex;flex-shrink:0;align-items:center;gap:0;width:100%;max-width:100%;">
     <button type="button" id="inboxViewMine" class="inbox-view-btn" data-inbox-view="mine" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('mine')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;pointer-events:auto;">My Requests</button>
     <button type="button" id="inboxViewToHandle" class="inbox-view-btn active" data-inbox-view="to_handle" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('to_handle')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;pointer-events:auto;">To handle</button>
-    <div id="inboxFilterRow" style="display:none;align-items:center;gap:8px;flex-wrap:nowrap;margin-left:auto;">
+    </div>
+    <div id="inboxFilterRow" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;width:100%;justify-content:flex-end;box-sizing:border-box;">
       <label class="inbox-staff-filter-label" style="font-size:13px;color:#6b7280;white-space:nowrap;">Filter by staff</label>
       <div id="inboxStaffFilterWrap" style="position:relative;">
         <button type="button" id="inboxStaffFilterTrigger" aria-haspopup="listbox" aria-expanded="false" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;height:40px;min-height:40px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-size:13px;min-width:200px;max-width:240px;color:#374151;cursor:pointer;text-align:left;">

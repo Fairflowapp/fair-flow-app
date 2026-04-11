@@ -43,6 +43,27 @@ service cloud.firestore {
         && userRole() in ['admin', 'owner'];
     }
 
+    function memberExists(salonId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/salons/$(salonId)/members/$(request.auth.uid));
+    }
+
+    function memberDocData(salonId) {
+      return get(/databases/$(database)/documents/salons/$(salonId)/members/$(request.auth.uid)).data;
+    }
+
+    function matchesOwnStaffId(salonId, staffId) {
+      return (
+        userExists()
+        && userDocData().staffId is string
+        && userDocData().staffId == staffId
+      ) || (
+        memberExists(salonId)
+        && memberDocData(salonId).staffId is string
+        && memberDocData(salonId).staffId == staffId
+      );
+    }
+
     // Staff /documents delete: must match archived (UI writes lowercase; tolerate casing)
     function staffDocumentLifecycleIsArchived() {
       return resource.data.lifecycleStatus is string
@@ -373,6 +394,77 @@ service cloud.firestore {
         allow delete: if belongsToSalon(salonId) && isManager(salonId)
           && staffDocumentLifecycleIsArchived();
       }
+    }
+
+    // Staff presence (heartbeat + reception call popup via currentCall) — public/staff-call-cloud.js
+    match /salons/{salonId}/staffPresence/{staffId} {
+      allow read: if belongsToSalon(salonId)
+        && (
+          isManager(salonId)
+          || matchesOwnStaffId(salonId, staffId)
+        );
+      allow create: if belongsToSalon(salonId)
+        && (
+          isManager(salonId)
+          || (
+            matchesOwnStaffId(salonId, staffId)
+            && request.resource.data.staffId == staffId
+            && (
+              request.resource.data.uid == null
+              || request.resource.data.uid == request.auth.uid
+            )
+            && (
+              request.resource.data.currentCall == null
+              || request.resource.data.currentCall.status == 'accepted'
+            )
+          )
+        );
+      allow update: if belongsToSalon(salonId)
+        && (
+          isManager(salonId)
+          || (
+            matchesOwnStaffId(salonId, staffId)
+            && request.resource.data.staffId == staffId
+            && (
+              request.resource.data.uid == null
+              || request.resource.data.uid == request.auth.uid
+              || request.resource.data.uid == resource.data.uid
+            )
+            && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+              'staffId',
+              'uid',
+              'role',
+              'name',
+              'onlineStatus',
+              'lastHeartbeatAt',
+              'lastHeartbeatMs',
+              'lastSeenAt',
+              'lastActivityMs',
+              'updatedAt',
+              'inShift',
+              'queueStatus',
+              'currentCall'
+            ])
+            && (
+              !request.resource.data.diff(resource.data).changedKeys().hasAny(['currentCall'])
+              || (
+                resource.data.currentCall is map
+                && request.resource.data.currentCall is map
+                && request.resource.data.currentCall.callId == resource.data.currentCall.callId
+                && request.resource.data.currentCall.message == resource.data.currentCall.message
+                && request.resource.data.currentCall.sentBy == resource.data.currentCall.sentBy
+                && request.resource.data.currentCall.sentAt == resource.data.currentCall.sentAt
+                && request.resource.data.currentCall.sentAtMs == resource.data.currentCall.sentAtMs
+                && request.resource.data.currentCall.expiresAt == resource.data.currentCall.expiresAt
+                && request.resource.data.currentCall.expiresAtMs == resource.data.currentCall.expiresAtMs
+                && resource.data.currentCall.status == 'sent'
+                && request.resource.data.currentCall.status == 'accepted'
+              )
+            )
+          )
+        );
+      allow delete: if belongsToSalon(salonId)
+        && isManager(salonId);
     }
 
     // ===== CHAT / STRUCTURED MESSAGES SYSTEM =====
