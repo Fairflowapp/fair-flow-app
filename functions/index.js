@@ -973,6 +973,43 @@ function _buildExpiryMessage({ subjectStaffName, documentTitle, documentType, di
   return `${who}'s ${title} expires in ${diffDays} days.`;
 }
 
+/** Same fingerprint as public/staff-doc-expiry-inbox.js — dedupe Inbox when two doc rows share one file. */
+function _fingerprintStaffDocData(data) {
+  const d = data || {};
+  const p = String(d.storagePath || d.filePath || "").trim();
+  if (p) {
+    const base = p.split("/").pop() || p;
+    return base.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+  }
+  const title = String(d.title || d.type || "doc").trim();
+  const m = title.match(/([a-f0-9]{8}-[a-f0-9-]{4,}[^.\s]*\.\w+)/i);
+  if (m) return m[1].replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+  return title.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+}
+
+function _expYmdUtcBucket(expirationMs) {
+  const d = new Date(expirationMs);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function _sanitizeInboxIdSegment(s) {
+  return String(s || "")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 200);
+}
+
+/** 30-day vs expired must use different id prefixes (same file + expiry date could otherwise collide). */
+function _buildStaffDocExpiryInboxDocId(alertType, forUid, staffId, expirationMs, docData) {
+  const expYmd = _expYmdUtcBucket(expirationMs);
+  const fp = _fingerprintStaffDocData(docData);
+  const tag = alertType === "document_expired" ? "docex" : "doc30";
+  const id = `auto_${tag}_${_sanitizeInboxIdSegment(forUid)}_${_sanitizeInboxIdSegment(staffId)}_${expYmd}_${_sanitizeInboxIdSegment(fp)}`;
+  return id.length > 1400 ? id.slice(0, 1400) : id;
+}
+
 /**
  * One batch: N inbox rows + staff document flags/lifecycle (avoids orphan inbox if doc update fails).
  */
@@ -992,6 +1029,7 @@ async function _commitStaffDocAlertBatch(docRef, salonId, payload) {
     creatorName,
     creatorRole,
     reminderField,
+    staffDocDataForFingerprint,
   } = payload;
   if (!managers || !managers.length) {
     console.warn("[staffDocExpiry] no managers for salon", salonId);
@@ -1005,8 +1043,16 @@ async function _commitStaffDocAlertBatch(docRef, salonId, payload) {
   const cName = creatorName || creator.name;
   const cRole = creatorRole || creator.role;
 
-  managers.forEach((m) => {
-    const ref = admin.firestore().collection("salons").doc(salonId).collection("inboxItems").doc();
+  const fpSource = staffDocDataForFingerprint && typeof staffDocDataForFingerprint === "object" ? staffDocDataForFingerprint : {};
+
+  for (const m of managers) {
+    const itemId = _buildStaffDocExpiryInboxDocId(alertType, m.uid, staffId, expirationMs, fpSource);
+    const ref = admin.firestore().collection("salons").doc(salonId).collection("inboxItems").doc(itemId);
+    // eslint-disable-next-line no-await-in-loop
+    const existing = await ref.get();
+    if (existing.exists) {
+      continue;
+    }
     batch.set(ref, {
       tenantId: salonId,
       locationId: null,
@@ -1053,7 +1099,7 @@ async function _commitStaffDocAlertBatch(docRef, salonId, payload) {
       lastActivityAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: null,
     });
-  });
+  }
 
   const docUpdate = {
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1130,6 +1176,7 @@ async function _processOneStaffDocument(salonId, staffId, docSnap, managersCache
         creatorStaffId: creator.staffId,
         creatorName: creator.name,
         creatorRole: creator.role,
+        staffDocDataForFingerprint: data,
       });
     } else {
       await docRef.update({
@@ -1161,6 +1208,7 @@ async function _processOneStaffDocument(salonId, staffId, docSnap, managersCache
         creatorStaffId: creator.staffId,
         creatorName: creator.name,
         creatorRole: creator.role,
+        staffDocDataForFingerprint: data,
       });
     } else {
       await docRef.update({

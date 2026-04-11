@@ -109,6 +109,41 @@ function salonCalendarDaysUntilExpiry(expMs, todayY, todayM, todayD, tz) {
   return Math.round((b - a) / 86400000);
 }
 
+/** Stable day bucket for id (UTC date of expiry instant) — matches Cloud Function. */
+function expirationYmdUtcBucket(expMs) {
+  const d = new Date(expMs);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function sanitizeInboxDocIdSegment(s) {
+  return String(s || "")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 200);
+}
+
+/**
+ * Same physical file can appear as two staff document rows (e.g. License vs Certification).
+ * Dedupe Inbox rows per manager using file path / filename fingerprint + expiry day.
+ */
+function fileFingerprintForDedupe(data) {
+  const p = trimStr(data.storagePath || data.filePath || "");
+  if (p) {
+    const base = p.split("/").pop() || p;
+    return base.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+  }
+  const title = trimStr(data.title || data.type || "doc");
+  const uuidish = title.match(/([a-f0-9]{8}-[a-f0-9-]{4,}[^.\s]*\.\w+)/i);
+  if (uuidish) return uuidish[1].replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+  return title.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+}
+
+function buildDoc30InboxDocId({ forUid, staffId, expMs, data }) {
+  const expYmd = expirationYmdUtcBucket(expMs);
+  const fp = fileFingerprintForDedupe(data);
+  const id = `auto_doc30_${sanitizeInboxDocIdSegment(forUid)}_${sanitizeInboxDocIdSegment(staffId)}_${expYmd}_${sanitizeInboxDocIdSegment(fp)}`;
+  return id.length > 1400 ? id.slice(0, 1400) : id;
+}
+
 function buildExpiryMessage({ subjectStaffName, documentTitle, documentType, diffDays }) {
   const who = subjectStaffName || "A staff member";
   const title = documentTitle || documentType || "Document";
@@ -238,32 +273,44 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
         };
 
         const docRef = doc(db, `salons/${salonId}/staff/${staffId}/documents`, documentId);
-        const inboxCol = collection(db, `salons/${salonId}/inboxItems`);
 
         try {
-          const did = await runTransaction(db, async (transaction) => {
+          const createdInTx = await runTransaction(db, async (transaction) => {
             const fresh = await transaction.get(docRef);
-            if (!fresh.exists()) return false;
+            if (!fresh.exists()) return 0;
             const fd = fresh.data() || {};
-            if (String(fd.lifecycleStatus || "").toLowerCase() === "archived") return false;
-            if (String(fd.approvalStatus || "").toLowerCase() !== "approved") return false;
-            if (fd.thirtyDayReminderSentAt) return false;
+            if (String(fd.lifecycleStatus || "").toLowerCase() === "archived") return 0;
+            if (String(fd.approvalStatus || "").toLowerCase() !== "approved") return 0;
+            if (fd.thirtyDayReminderSentAt) return 0;
 
             const d2 = salonCalendarDaysUntilExpiry(expirationToMillis(fd.expirationDate), ty, tm, td, tz);
-            if (d2 !== 30) return false;
+            if (d2 !== 30) return 0;
 
-            transaction.update(docRef, {
-              thirtyDayReminderSentAt: serverTimestamp(),
-              lifecycleStatus: "expiring_soon",
-              updatedAt: serverTimestamp(),
+            const planned = managersAndAdmins.map((rec) => {
+              const forUid = rec.uid;
+              const itemId = buildDoc30InboxDocId({
+                forUid,
+                staffId,
+                expMs,
+                data: fd,
+              });
+              const itemRef = doc(db, `salons/${salonId}/inboxItems`, itemId);
+              return { rec, itemRef, forUid };
             });
 
-            for (const rec of managersAndAdmins) {
-              const forUid = rec.uid;
+            const existingSnaps = [];
+            for (const p of planned) {
+              existingSnaps.push({ p, snap: await transaction.get(p.itemRef) });
+            }
+
+            let newRows = 0;
+            for (const { p, snap } of existingSnaps) {
+              if (snap.exists()) continue;
+              const forUid = p.forUid;
+              const rec = p.rec;
               const forStaffId = String(rec.staffId || "");
               const forStaffName = String(rec.name || "Manager").trim() || forUid;
-              const itemRef = doc(inboxCol);
-              transaction.set(itemRef, {
+              transaction.set(p.itemRef, {
                 tenantId: salonId,
                 locationId: null,
                 type: "document_expiring_soon",
@@ -299,19 +346,28 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
                 lastActivityAt: serverTimestamp(),
                 updatedAt: null,
               });
+              newRows += 1;
             }
-            return true;
+
+            transaction.update(docRef, {
+              thirtyDayReminderSentAt: serverTimestamp(),
+              lifecycleStatus: "expiring_soon",
+              updatedAt: serverTimestamp(),
+            });
+            return newRows;
           });
-          if (did) {
-            inboxItemsCreated += managersAndAdmins.length;
+          if (createdInTx > 0) {
+            inboxItemsCreated += createdInTx;
             console.info(
               "[StaffDocExpiry Inbox] Created reminder(s) for",
               subjectStaffName,
               documentTitle,
               "→",
-              managersAndAdmins.length,
-              "manager(s)",
+              createdInTx,
+              "new manager row(s) (deduped by file+expiry)",
             );
+          } else if (createdInTx === 0) {
+            /* Transaction may have returned 0 if all inbox rows already existed (duplicate doc rows for same file). */
           }
         } catch (txErr) {
           console.warn("[StaffDocExpiry Inbox] transaction failed", staffId, documentId, txErr);
