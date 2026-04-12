@@ -1,0 +1,18 @@
+{
+  "name": "fair-flow-app-2",
+  "version": "1.0.0",
+  "main": "webflow-login-code.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "sharp": "^0.34.5"
+  }
+}
