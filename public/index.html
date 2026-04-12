@@ -90,7 +90,7 @@ body.ff-invite-mode #reset-admin-pin-section {
 
 /* Sticky header with left-aligned brand + toolbar */
 
-.header{position:sticky;top:0;z-index:100003;background:#FFFFFF;
+.header{position:sticky;top:0;z-index:100003;background:#ede9fe;
 
   border-bottom:1px solid #E6E9EF;pointer-events:auto}
 #tasksScreen{top:var(--header-h,60px)}
@@ -100,17 +100,17 @@ body.ff-invite-mode #reset-admin-pin-section {
 .toolbar button{position:relative;z-index:100004;pointer-events:auto;cursor:pointer}
 
 
-.header-inner{max-width:1140px;margin:0 auto;padding:6px 24px;display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
+.header-inner{max-width:1140px;margin:0 auto;padding:3px 16px;display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center}
 
-.brandbox{display:flex;align-items:center;gap:12px}
+.brandbox{display:flex;align-items:center;gap:8px}
 
-.logo{height:70px;width:auto;margin-right:12px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.15));background:none;border:none;box-shadow:none;padding:0;border-radius:10px;object-fit:cover}
+.logo{height:32px;width:auto;margin-right:8px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.15));background:none;border:none;box-shadow:none;padding:0;border-radius:10px;object-fit:cover}
 
 /* Header logo styling - Mangomint-style subtle SaaS branding */
 .header .logo img,
 .header .logo svg {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
 }
 
 .header .logo-text {
@@ -128,8 +128,8 @@ body.ff-invite-mode #reset-admin-pin-section {
 }
 
 #brandLogo {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   display: block;
   object-fit: contain;
   object-position: center;
@@ -159,7 +159,7 @@ header .brand{display:flex;align-items:center;gap:1rem}
 .owner-row{display:none}
 .settings-row-brand{display:none}
 
-.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 
 /* User avatar dropdown */
 .user-avatar-trigger:hover .user-avatar-circle{background:#e5e7eb;border-color:#d1d5db}
@@ -183,6 +183,91 @@ header .brand{display:flex;align-items:center;gap:1rem}
   pointer-events: auto !important;
   z-index: 100002 !important;
   position: relative !important;
+}
+
+/* Slim header: avatar matches toolbar row height (inline HTML uses 32px) */
+.header .user-avatar-circle {
+  width: 28px !important;
+  height: 28px !important;
+}
+.header .user-avatar-circle svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+/* Signed-in user: name + role between avatar and chevron (subtle, not loud) */
+.header-user-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  max-width: 180px;
+  min-width: 0;
+  text-align: left;
+  line-height: 1.2;
+}
+.header-user-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #4b5563;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.header-user-role {
+  font-size: 11px;
+  font-weight: 500;
+  font-style: italic;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Profile block + divider + customer-support entry (placeholder) */
+.header-toolbar-user {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.header-toolbar-divider {
+  width: 1px;
+  height: 26px;
+  background: #d1d5db;
+  flex-shrink: 0;
+  align-self: center;
+}
+.header-customer-support-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 50%;
+  background: #fff;
+  color: #6b7280;
+  cursor: default;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.header-customer-support-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.header-customer-support-btn:not(:disabled):hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+  color: #7c3aed;
+}
+.header-customer-support-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* Fallback: disable pointer-events on header overlay when dropdown is open */
@@ -275,20 +360,20 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
 
 /* Compact top header buttons only */
 .header .btn-pill {
-  height: 28px;
-  padding: 0 8px;
-  font-size: 12px;
-  line-height: 28px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 24px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   border-radius: 999px;
   color: #000;
   opacity: 0.7;
 }
 
 .header .btn-pill .nav-icon {
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1;
   opacity: 0.6;
   display: inline-flex;
@@ -296,8 +381,8 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   justify-content: center;
 }
 .header .btn-pill .nav-icon svg {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
   display: block;
 }
 
@@ -733,6 +818,9 @@ select,input[type="password"],input[type="text"]{height:42px;padding:0 16px;bord
 }
 
 .btn-primary{border:0;background-image:linear-gradient(90deg,var(--brand1),var(--brand2));color:#fff;border-radius:999px;padding:10px 18px;font-weight:800;cursor:pointer;box-shadow:0 4px 10px rgba(0,0,0,.08)}
+
+/* Queue Join row only: slimmer pill than global .btn-primary */
+.joinbar #joinBtn{padding:8px 12px;min-width:unset}
 
 .btn-ghost{border:1px solid var(--border);background:#fff;border-radius:999px;padding:10px 18px;font-weight:800;cursor:pointer}
 
@@ -1585,6 +1673,51 @@ dialog footer button, .code-dialog footer button {
   line-height: 1.4;
 }
 
+/* TOP BAR ONLY (.header .toolbar): text links — no pill shape; active = purple text, no underline */
+.header .toolbar .btn-pill {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  border-width: 0 !important;
+}
+.header .toolbar .btn-pill .nav-icon svg {
+  stroke: currentColor !important;
+}
+
+.header .toolbar .btn-pill.active,
+.header .toolbar #queueBtn.active,
+.header .toolbar #tasksBtn.active,
+.header .toolbar #ticketsBtn.active,
+.header .toolbar #inboxBtn.active,
+.header .toolbar #mediaBtn.active,
+.header .toolbar #chatBtn.active {
+  background: transparent !important;
+  border: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  color: #7c3aed !important;
+  font-weight: 800 !important;
+  opacity: 1 !important;
+  filter: none !important;
+}
+.header .toolbar .btn-pill.active .nav-icon svg,
+.header .toolbar #queueBtn.active .nav-icon svg,
+.header .toolbar #tasksBtn.active .nav-icon svg,
+.header .toolbar #ticketsBtn.active .nav-icon svg,
+.header .toolbar #inboxBtn.active .nav-icon svg,
+.header .toolbar #mediaBtn.active .nav-icon svg,
+.header .toolbar #chatBtn.active .nav-icon svg {
+  stroke: #7c3aed !important;
+  opacity: 1 !important;
+}
+
+.header .toolbar #queueBtn.active::after,
+.header .toolbar #tasksBtn.active::after {
+  display: none !important;
+}
+
 </style>
 
 
@@ -1891,31 +2024,36 @@ dialog footer button, .code-dialog footer button {
 
       <div class="toolbar">
 
-        <button id="queueBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span>QUEUE</button>
+        <button id="queueBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span>Queue</button>
 
-        <button id="ticketsBtn" class="btn-pill" onclick="window.goToTickets && window.goToTickets()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></span>TICKETS<span id="ticketsNavBadge" class="ff-home-tasks-badge" style="display:none;"></span></button>
+        <button id="ticketsBtn" class="btn-pill" onclick="window.goToTickets && window.goToTickets()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></span>Tickets<span id="ticketsNavBadge" class="ff-home-tasks-badge" style="display:none;"></span></button>
 
-        <button id="tasksBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>TASKS<span class="ff-home-tasks-badge"></span></button>
+        <button id="tasksBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>Tasks<span class="ff-home-tasks-badge"></span></button>
 
-        <button id="chatBtn" class="btn-pill" onclick="window.goToChat && window.goToChat()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>CHAT<span id="chatNavBadge" class="ff-home-tasks-badge"></span></button>
+        <button id="chatBtn" class="btn-pill" onclick="window.goToChat && window.goToChat()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>Chat<span id="chatNavBadge" class="ff-home-tasks-badge"></span></button>
 
-        <button id="inboxBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg></span>INBOX<span class="ff-inbox-badge ff-home-tasks-badge"></span></button>
+        <button id="inboxBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg></span>Inbox<span class="ff-inbox-badge ff-home-tasks-badge"></span></button>
 
-        <button id="mediaBtn" class="btn-pill" onclick="window.goToMedia && window.goToMedia()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span>MEDIA</button>
+        <button id="mediaBtn" class="btn-pill" onclick="window.goToMedia && window.goToMedia()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span>Media</button>
 
-        <button class="btn-pill" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>INVENTORY</button>
+        <button class="btn-pill" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>Inventory</button>
 
-        <button id="appsBtn" class="btn-pill" style="position:relative;"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></span>APPS</button>
+        <button id="appsBtn" class="btn-pill" style="position:relative;"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></span>Apps</button>
 
-        <div class="user-avatar-wrapper" style="margin-left:auto;position:relative;z-index:100005;">
-          <button id="userAvatarBtn" class="user-avatar-trigger" aria-label="User menu" style="display:flex;align-items:center;gap:6px;background:none;border:none;padding:0;cursor:pointer;outline:none;">
+        <div class="header-toolbar-user">
+        <div class="user-avatar-wrapper" style="position:relative;z-index:100005;">
+          <button id="userAvatarBtn" class="user-avatar-trigger" aria-label="User menu" style="display:flex;align-items:center;gap:8px;background:none;border:none;padding:0;cursor:pointer;outline:none;">
             <div class="user-avatar-circle" style="width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:#f3f4f6;display:flex;align-items:center;justify-content:center;">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                 <circle cx="12" cy="7" r="4"></circle>
               </svg>
             </div>
-            <span style="color:#6b7280;font-size:10px;line-height:1;">▼</span>
+            <div class="header-user-identity" id="headerUserIdentity">
+              <span id="headerUserDisplayName" class="header-user-name"></span>
+              <span id="headerUserRole" class="header-user-role" style="display:none;"></span>
+            </div>
+            <span style="color:#6b7280;font-size:10px;line-height:1;flex-shrink:0;">▼</span>
           </button>
           <div id="userAvatarDropdown" class="user-avatar-dropdown" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:180px;z-index:100005;padding:4px 0;pointer-events:auto;">
             <button id="userDropdownProfileBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:flex;align-items:center;gap:8px;">
@@ -1933,6 +2071,15 @@ dialog footer button, .code-dialog footer button {
               Log out
             </button>
           </div>
+        </div>
+        <div class="header-toolbar-divider" aria-hidden="true"></div>
+        <button type="button" id="headerCustomerSupportBtn" class="header-customer-support-btn" title="Customer support — coming soon" aria-label="Customer support (coming soon)" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+            <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"></path>
+            <path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
+          </svg>
+        </button>
         </div>
 
       </div>
@@ -4616,6 +4763,53 @@ function renderHistory() {
 
 // Render
 
+function ffFormatStaffRoleLabelForHeader(staff) {
+  if (staff && typeof staff === 'object') {
+    const r = String(staff.role || '').trim().toLowerCase();
+    if (staff.isAdmin === true || r === 'admin') return r === 'owner' ? 'Owner' : 'Admin';
+    if (staff.isManager === true || r === 'manager') return 'Manager';
+    if (r === 'owner') return 'Owner';
+    if (r && r !== 'technician' && r !== 'staff' && r !== 'tech' && r !== '') {
+      return typeof toLabel === 'function' ? toLabel(r) : r;
+    }
+    return 'Service provider';
+  }
+  const sessionRole = String(
+    window.__ff_user_role ||
+    window.__ff_actorRole ||
+    (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_role') : '') ||
+    ''
+  ).trim().toLowerCase();
+  if (sessionRole === 'owner') return 'Owner';
+  if (sessionRole === 'admin') return 'Admin';
+  if (sessionRole === 'manager') return 'Manager';
+  if (sessionRole === 'technician' || sessionRole === 'tech') return 'Service provider';
+  return '';
+}
+
+function renderHeaderUserIdentity() {
+  const nameEl = document.getElementById('headerUserDisplayName');
+  const roleEl = document.getElementById('headerUserRole');
+  const btn = document.getElementById('userAvatarBtn');
+  if (!nameEl || !roleEl) return;
+  const userInfo = typeof ffGetCurrentUserInfo === 'function' ? ffGetCurrentUserInfo() : {};
+  const displayName = (userInfo.name && String(userInfo.name).trim()) ? String(userInfo.name).trim() : '';
+  nameEl.textContent = displayName || '—';
+  let staff = null;
+  try {
+    if (typeof resolveCurrentTrainingStaffRecord === 'function') staff = resolveCurrentTrainingStaffRecord();
+  } catch (_) {}
+  const roleLabel = ffFormatStaffRoleLabelForHeader(staff);
+  roleEl.textContent = roleLabel || '';
+  roleEl.style.display = roleLabel ? '' : 'none';
+  if (btn) {
+    const parts = ['User menu'];
+    if (displayName) parts.push(displayName);
+    if (roleLabel) parts.push(roleLabel);
+    btn.setAttribute('aria-label', parts.join('. '));
+  }
+}
+
 function renderBrand(){
   if (salonName) {
     // Show current user's name so each user sees their own name, fallback to business name
@@ -4627,6 +4821,7 @@ function renderBrand(){
     brandLogo.src = "fairflow-logo.png?v=8";
     brandLogo.style.visibility="visible";
   }
+  if (typeof renderHeaderUserIdentity === 'function') renderHeaderUserIdentity();
 }
 // Refresh header name when staff loads from Firestore
 if (typeof document !== 'undefined') {
@@ -4861,6 +5056,8 @@ function renderSelect(){
     const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
     const staffList = Array.isArray(store.staff) ? store.staff : [];
     // Service providers for JOIN: same idea as Staff list — technicians, not admins/managers
+    // Same rule as loadTechniciansFromSettings / Tasks (ff_staff_v1): non-management staff with a name.
+    // The old whitelist (technician/staff/tech only) hid people whose role was a specialty slug or other label.
     technicians = staffList.filter(s => {
       if (!s || s.isArchived === true) return false;
       const name = String(s.name || '').trim();
@@ -4868,7 +5065,7 @@ function renderSelect(){
       if (s.isAdmin === true || s.isManager === true) return false;
       const r = String(s.role || '').trim().toLowerCase();
       if (r === 'admin' || r === 'manager' || r === 'owner') return false;
-      return r === 'technician' || r === '' || r === 'staff' || r === 'tech';
+      return true;
     });
     console.log('[renderSelect] Loaded', technicians.length, 'active technicians from ff_staff_v1');
   } catch (e) {
@@ -35665,12 +35862,12 @@ function hookSettingsGuard_DISABLED(){
 <!-- Inbox Screen (below main Top Bar: QUEUE, TASKS, INBOX, etc.) -->
 <div id="inboxScreen" class="inbox-screen">
   <!-- View switcher: My Requests | To handle (only for admin/manager) -->
-  <div id="inboxViewSwitcher" class="inbox-view-switcher" style="display:none;flex-direction:column;align-items:stretch;gap:8px;padding:10px 20px;border-bottom:1px solid #e5e7eb;background:#fff;pointer-events:auto;">
-    <div class="inbox-view-switcher-btns" style="display:flex;flex-shrink:0;align-items:center;gap:0;width:100%;max-width:100%;">
+  <div id="inboxViewSwitcher" class="inbox-view-switcher" style="display:none;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 20px;border-bottom:1px solid #e5e7eb;background:#fff;pointer-events:auto;">
+    <div class="inbox-view-switcher-btns" style="display:flex;flex-shrink:0;align-items:center;gap:0;">
     <button type="button" id="inboxViewMine" class="inbox-view-btn" data-inbox-view="mine" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('mine')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;pointer-events:auto;">My Requests</button>
     <button type="button" id="inboxViewToHandle" class="inbox-view-btn active" data-inbox-view="to_handle" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('to_handle')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;pointer-events:auto;">To handle</button>
     </div>
-    <div id="inboxFilterRow" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;width:100%;justify-content:flex-end;box-sizing:border-box;">
+    <div id="inboxFilterRow" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0;justify-content:flex-end;box-sizing:border-box;">
       <label class="inbox-staff-filter-label" style="font-size:13px;color:#6b7280;white-space:nowrap;">Filter by staff</label>
       <div id="inboxStaffFilterWrap" style="position:relative;">
         <button type="button" id="inboxStaffFilterTrigger" aria-haspopup="listbox" aria-expanded="false" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;height:40px;min-height:40px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-size:13px;min-width:200px;max-width:240px;color:#374151;cursor:pointer;text-align:left;">
