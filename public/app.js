@@ -1235,7 +1235,7 @@ async function loadUserRoleAndShowView(user) {
             return undefined;
           })
           .catch((e) => console.warn("[Birthday reminders]", e));
-        import("./staff-doc-expiry-inbox.js?v=20260411_expiry_after_sync")
+        import("./staff-doc-expiry-inbox.js?v=20260409_created_by_subject")
           .then((m) => {
             if (typeof m.runStaffDocExpiryInboxRemindersOnce === "function") {
               return m.runStaffDocExpiryInboxRemindersOnce();

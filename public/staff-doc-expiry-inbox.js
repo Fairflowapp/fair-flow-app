@@ -266,6 +266,11 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
         if (diffDays <= 0 || diffDays > 30) continue;
         docsInExpiryWindow += 1;
 
+        const subjectMember = memberRows.find((m) => String(m.staffId || "").trim() === String(staffId).trim());
+        const rowCreatedByUid = subjectMember && subjectMember.uid ? subjectMember.uid : senderUid;
+        const rowCreatedByName = subjectMember && subjectMember.uid ? subjectStaffName : senderName;
+        const rowCreatedByStaffId = String(staffId);
+
         const documentTitle = trimStr(data.title || data.type) || "Document";
         const documentType = trimStr(data.type) || "Document";
         const message = buildExpiryMessage({
@@ -352,9 +357,9 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
                 staffReply: null,
                 visibility: "managers_only",
                 unreadForManagers: true,
-                createdByUid: senderUid,
-                createdByStaffId,
-                createdByName: senderName,
+                createdByUid: rowCreatedByUid,
+                createdByStaffId: rowCreatedByStaffId,
+                createdByName: rowCreatedByName,
                 createdByRole,
                 forUid,
                 forStaffId,

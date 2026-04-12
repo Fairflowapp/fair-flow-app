@@ -4059,7 +4059,7 @@ function bindScheduleUi() {
     });
   }
 
-  ["queueBtn", "ticketsBtn", "tasksBtn", "chatBtn", "inboxBtn", "mediaBtn", "appsBtn"].forEach((id) => {
+  ["queueBtn", "ticketsBtn", "tasksBtn", "chatBtn", "inboxBtn", "mediaBtn", "appsBtn", "trainingBtn"].forEach((id) => {
     const btn = document.getElementById(id);
     if (btn && !btn.__ffScheduleHideBound) {
       btn.__ffScheduleHideBound = true;

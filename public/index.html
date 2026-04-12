@@ -33,6 +33,7 @@
     if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
     ['tasksScreen','inboxScreen','trainingScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     var chatScreen=document.getElementById('chatScreen');if(chatScreen)chatScreen.style.display='none';
+    var scheduleScreen=document.getElementById('scheduleScreen');if(scheduleScreen)scheduleScreen.style.display='none';
     var joinBar=document.querySelector('.joinBar');if(joinBar)joinBar.style.display='none';
     var queueControls=document.getElementById('queueControls');if(queueControls)queueControls.style.display='none';
     var wrap=document.querySelector('.wrap');if(wrap)wrap.style.display='none';
@@ -54,7 +55,7 @@
 <meta name="theme-color" content="#7c3aed"/>
 <!-- Tab/address-bar icon size is chosen by the browser/OS (not enlargeable from HTML). Use a sharp square PNG. Bump ?v= when replacing the file. -->
 <link rel="icon" href="/fairflow-favicon-tab.png?v=3" type="image/png" sizes="64x64"/>
-<link rel="apple-touch-icon" sizes="180x180" href="/fairflow-logo.png?v=8"/>
+<link rel="apple-touch-icon" sizes="180x180" href="/fairflow-logo.png?v=12"/>
 
 <style>
 
@@ -90,9 +91,9 @@ body.ff-invite-mode #reset-admin-pin-section {
 
 /* Sticky header with left-aligned brand + toolbar */
 
-.header{position:sticky;top:0;z-index:100003;background:#ede9fe;
+.header{position:sticky;top:0;z-index:100003;background:#5b21b6;
 
-  border-bottom:1px solid #E6E9EF;pointer-events:auto}
+  border-bottom:1px solid rgba(0,0,0,0.12);pointer-events:auto;box-shadow:0 1px 0 rgba(255,255,255,0.06) inset}
 #tasksScreen{top:var(--header-h,60px)}
 
   
@@ -100,9 +101,13 @@ body.ff-invite-mode #reset-admin-pin-section {
 .toolbar button{position:relative;z-index:100004;pointer-events:auto;cursor:pointer}
 
 
-.header-inner{max-width:1140px;margin:0 auto;padding:3px 16px;display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center}
+.header-inner{display:flex;align-items:center;width:100%;max-width:none;box-sizing:border-box;padding:3px 25px 3px 0}
+.header-toolbar-rest{display:flex;align-items:center;flex:1;min-width:0}
+.toolbar.toolbar-nav-main{display:flex;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:22px;min-width:0;flex:1;padding-left:6px}
+.toolbar.toolbar-nav-right{display:flex;align-items:center;flex-wrap:wrap;gap:10px;flex-shrink:0;margin-left:auto;padding-left:14px;border-left:1px solid rgba(255,255,255,0.35)}
+#headerCustomerSupportBtn{flex-shrink:0}
 
-.brandbox{display:flex;align-items:center;gap:8px}
+.brandbox{display:flex;align-items:center;gap:8px;margin-left:25px}
 
 .logo{height:32px;width:auto;margin-right:8px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.15));background:none;border:none;box-shadow:none;padding:0;border-radius:10px;object-fit:cover}
 
@@ -127,7 +132,8 @@ body.ff-invite-mode #reset-admin-pin-section {
   align-items: center;
 }
 
-#brandLogo {
+/* Header logo: no CSS color filter — brightness/invert turned the asset into a flat white block */
+.header #brandLogo {
   width: 28px;
   height: 28px;
   display: block;
@@ -135,6 +141,7 @@ body.ff-invite-mode #reset-admin-pin-section {
   object-position: center;
   border-radius: 0;
   background: transparent;
+  opacity: 1;
   filter: none;
 }
 /* Wordmark hidden in header (logo only); tab title stays "Fair Flow App" */
@@ -209,7 +216,7 @@ header .brand{display:flex;align-items:center;gap:1rem}
 .header-user-name {
   font-size: 12px;
   font-weight: 500;
-  color: #4b5563;
+  color: #ffffff;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -219,25 +226,18 @@ header .brand{display:flex;align-items:center;gap:1rem}
   font-size: 11px;
   font-weight: 500;
   font-style: italic;
-  color: #6b7280;
+  color: #ffffff;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
 }
 
-/* Profile block + divider + customer-support entry (placeholder) */
-.header-toolbar-user {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
+/* Right cluster: Apps, user, media, inventory, support — divider between user and “icon” tools */
 .header-toolbar-divider {
   width: 1px;
   height: 26px;
-  background: #d1d5db;
+  background: rgba(255, 255, 255, 0.45);
   flex-shrink: 0;
   align-self: center;
 }
@@ -248,10 +248,10 @@ header .brand{display:flex;align-items:center;gap:1rem}
   width: 34px;
   height: 34px;
   padding: 0;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgba(255, 255, 255, 0.35);
   border-radius: 50%;
-  background: #fff;
-  color: #6b7280;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
   cursor: default;
   flex-shrink: 0;
   box-sizing: border-box;
@@ -261,12 +261,12 @@ header .brand{display:flex;align-items:center;gap:1rem}
   height: 18px;
 }
 .header-customer-support-btn:not(:disabled):hover {
-  background: #f9fafb;
-  border-color: #d1d5db;
-  color: #7c3aed;
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #ffffff;
 }
 .header-customer-support-btn:disabled {
-  opacity: 0.55;
+  opacity: 0.65;
   cursor: not-allowed;
 }
 
@@ -1673,16 +1673,45 @@ dialog footer button, .code-dialog footer button {
   line-height: 1.4;
 }
 
-/* TOP BAR ONLY (.header .toolbar): text links — no pill shape; active = purple text, no underline */
+/* TOP BAR (.header .toolbar): deep purple bar, pill hover/active like soft inner glow */
 .header .toolbar .btn-pill {
   background: transparent !important;
   border: none !important;
-  border-radius: 0 !important;
+  border-radius: 999px !important;
   box-shadow: none !important;
   border-width: 0 !important;
+  color: #f5f3ff !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  opacity: 1 !important;
+  height: auto !important;
+  min-height: 30px !important;
+  padding: 6px 14px !important;
+  line-height: 1.25 !important;
+  transition: background 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+}
+.header .toolbar .btn-pill .nav-icon {
+  opacity: 1 !important;
 }
 .header .toolbar .btn-pill .nav-icon svg {
   stroke: currentColor !important;
+}
+.header .toolbar .btn-pill:hover:not(:disabled) {
+  background: rgba(167, 139, 250, 0.28) !important;
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.08) !important;
+  color: #ffffff !important;
+}
+.header .toolbar .btn-pill:active:not(:disabled) {
+  background: rgba(196, 181, 253, 0.22) !important;
+  box-shadow:
+    0 1px 6px rgba(0, 0, 0, 0.2),
+    inset 0 2px 6px rgba(0, 0, 0, 0.12) !important;
+}
+.header .toolbar .btn-pill:hover .nav-icon {
+  opacity: 1 !important;
 }
 
 .header .toolbar .btn-pill.active,
@@ -1691,14 +1720,19 @@ dialog footer button, .code-dialog footer button {
 .header .toolbar #ticketsBtn.active,
 .header .toolbar #inboxBtn.active,
 .header .toolbar #mediaBtn.active,
+.header .toolbar #scheduleBtn.active,
+.header .toolbar #trainingBtn.active,
 .header .toolbar #chatBtn.active {
-  background: transparent !important;
+  background: rgba(255, 255, 255, 0.14) !important;
   border: none !important;
   border-color: transparent !important;
-  box-shadow: none !important;
-  border-radius: 0 !important;
-  color: #7c3aed !important;
-  font-weight: 800 !important;
+  border-radius: 999px !important;
+  box-shadow:
+    0 2px 14px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
   opacity: 1 !important;
   filter: none !important;
 }
@@ -1708,8 +1742,10 @@ dialog footer button, .code-dialog footer button {
 .header .toolbar #ticketsBtn.active .nav-icon svg,
 .header .toolbar #inboxBtn.active .nav-icon svg,
 .header .toolbar #mediaBtn.active .nav-icon svg,
+.header .toolbar #scheduleBtn.active .nav-icon svg,
+.header .toolbar #trainingBtn.active .nav-icon svg,
 .header .toolbar #chatBtn.active .nav-icon svg {
-  stroke: #7c3aed !important;
+  stroke: #ffffff !important;
   opacity: 1 !important;
 }
 
@@ -2010,7 +2046,7 @@ dialog footer button, .code-dialog footer button {
 
       <div class="brandbox">
 
-        <img id="brandLogo" class="logo" alt="Fair Flow App" src="fairflow-logo.png?v=8">
+        <img id="brandLogo" class="logo" alt="Fair Flow App" src="fairflow-logo.png?v=12">
 
         <div class="title">
 
@@ -2022,7 +2058,9 @@ dialog footer button, .code-dialog footer button {
 
       </div>
 
-      <div class="toolbar">
+      <div class="header-toolbar-rest">
+
+      <nav class="toolbar toolbar-nav-main" aria-label="Main navigation">
 
         <button id="queueBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span>Queue</button>
 
@@ -2038,9 +2076,16 @@ dialog footer button, .code-dialog footer button {
 
         <button class="btn-pill" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>Inventory</button>
 
-        <button id="appsBtn" class="btn-pill" style="position:relative;"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></span>Apps</button>
+        <button type="button" id="scheduleBtn" class="btn-pill" aria-label="Schedule"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></span>Schedule</button>
 
-        <div class="header-toolbar-user">
+        <button type="button" id="trainingBtn" class="btn-pill" onclick="window.goToTraining && window.goToTraining()" aria-label="Training"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg></span>Training</button>
+
+      </nav>
+
+      <div class="toolbar toolbar-nav-right" aria-label="Apps and account">
+
+        <button id="appsBtn" class="btn-pill" style="position:relative;"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></span>Apps</button>
+        <div class="header-toolbar-divider" aria-hidden="true"></div>
         <div class="user-avatar-wrapper" style="position:relative;z-index:100005;">
           <button id="userAvatarBtn" class="user-avatar-trigger" aria-label="User menu" style="display:flex;align-items:center;gap:8px;background:none;border:none;padding:0;cursor:pointer;outline:none;">
             <div class="user-avatar-circle" style="width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:#f3f4f6;display:flex;align-items:center;justify-content:center;">
@@ -2053,7 +2098,7 @@ dialog footer button, .code-dialog footer button {
               <span id="headerUserDisplayName" class="header-user-name"></span>
               <span id="headerUserRole" class="header-user-role" style="display:none;"></span>
             </div>
-            <span style="color:#6b7280;font-size:10px;line-height:1;flex-shrink:0;">▼</span>
+            <span style="color:#ffffff;font-size:10px;line-height:1;flex-shrink:0;">▼</span>
           </button>
           <div id="userAvatarDropdown" class="user-avatar-dropdown" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:180px;z-index:100005;padding:4px 0;pointer-events:auto;">
             <button id="userDropdownProfileBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:flex;align-items:center;gap:8px;">
@@ -2072,7 +2117,7 @@ dialog footer button, .code-dialog footer button {
             </button>
           </div>
         </div>
-        <div class="header-toolbar-divider" aria-hidden="true"></div>
+
         <button type="button" id="headerCustomerSupportBtn" class="header-customer-support-btn" title="Customer support — coming soon" aria-label="Customer support (coming soon)" disabled>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
@@ -2081,6 +2126,8 @@ dialog footer button, .code-dialog footer button {
           </svg>
         </button>
         </div>
+
+      </div>
 
       </div>
 
@@ -4818,7 +4865,7 @@ function renderBrand(){
     salonName.innerHTML = displayName ? ("<strong>"+escapeHtml(displayName)+"</strong>") : "";
   }
   if (brandLogo) {
-    brandLogo.src = "fairflow-logo.png?v=8";
+    brandLogo.src = "fairflow-logo.png?v=12";
     brandLogo.style.visibility="visible";
   }
   if (typeof renderHeaderUserIdentity === 'function') renderHeaderUserIdentity();
@@ -10090,6 +10137,10 @@ async function goToTraining() {
   const inboxScreen = document.getElementById('inboxScreen');
   const chatScreen = document.getElementById('chatScreen');
   const mediaScreen = document.getElementById('mediaScreen');
+  const ticketsScreen = document.getElementById('ticketsScreen');
+  const scheduleScreen = document.getElementById('scheduleScreen');
+  const userProfileScreen = document.getElementById('userProfileScreen');
+  const manageQueueScreen = document.getElementById('manageQueueScreen');
   const ownerView = document.getElementById('owner-view');
   const joinBar = document.getElementById('joinBar');
   const queueControls = document.getElementById('queueControls');
@@ -10100,6 +10151,10 @@ async function goToTraining() {
   if (inboxScreen) inboxScreen.style.display = 'none';
   if (chatScreen) chatScreen.style.display = 'none';
   if (mediaScreen) mediaScreen.style.display = 'none';
+  if (ticketsScreen) ticketsScreen.style.display = 'none';
+  if (scheduleScreen) scheduleScreen.style.display = 'none';
+  if (userProfileScreen) userProfileScreen.style.display = 'none';
+  if (manageQueueScreen) manageQueueScreen.style.display = 'none';
   if (ownerView) ownerView.style.display = 'none';
   if (joinBar) joinBar.style.display = 'none';
   if (queueControls) queueControls.style.display = 'none';
@@ -10107,6 +10162,8 @@ async function goToTraining() {
   if (trainingScreen) trainingScreen.style.display = 'flex';
 
   document.querySelectorAll('.btn-pill').forEach((b) => b.classList.remove('active'));
+  const trainingBtn = document.getElementById('trainingBtn');
+  if (trainingBtn) trainingBtn.classList.add('active');
   const canManage = canManageTraining();
   trainingViewMode = canManage ? 'all' : 'my';
   if (!canSeeTrainingTabs()) trainingViewMode = 'my';
@@ -34903,7 +34960,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-ui.js?v=20260412_app_js_unify"></script>
-  <script type="module" src="/inbox.js?v=20260408_showtoast_queue_join"></script>
+  <script type="module" src="/inbox.js?v=20260409_inbox_mine_filters"></script>
   <script type="module" src="/chat.js?v=20260408_inbox_upload_deeplink"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-documents.js?v=20260412_doc_meta_edit"></script>

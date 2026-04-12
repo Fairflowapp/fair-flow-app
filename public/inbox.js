@@ -127,6 +127,52 @@ let _techInboxIncoming = [];
 /** Automated inbox items for management ("To handle") only — never list for technicians. */
 const MANAGER_ONLY_INBOX_TYPES = new Set(["staff_birthday_reminder", "document_expiring_soon", "document_expired"]);
 
+function inboxExpiringDateToMillis(v) {
+  if (v == null) return null;
+  try {
+    if (typeof v.toMillis === "function") return v.toMillis();
+    if (typeof v.toDate === "function") return v.toDate().getTime();
+  } catch (_) {}
+  if (typeof v === "number") return v;
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === "string") {
+    const s = v.trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T12:00:00.000Z`).getTime();
+  }
+  return null;
+}
+
+/** document_expiring_soon rows past expiration → group under document_expired (To handle). */
+function inboxEffectiveTypeForGrouping(req) {
+  const t = String(req?.type || "").trim();
+  if (t !== "document_expiring_soon") return t || "other";
+  const expRaw = req?.expirationDate ?? req?.data?.expirationDate;
+  const expMs = inboxExpiringDateToMillis(expRaw);
+  if (expMs != null && Date.now() > expMs) return "document_expired";
+  return "document_expiring_soon";
+}
+
+/** True if this doc-alert row should show as "expired" in the card (type or past expiry date). */
+function inboxDocAlertIsExpiredForUi(request) {
+  const t = String(request?.type || "").trim();
+  if (t === "document_expired") return true;
+  if (t !== "document_expiring_soon") return false;
+  const expMs = inboxExpiringDateToMillis(request?.expirationDate ?? request?.data?.expirationDate);
+  return expMs != null && Date.now() > expMs;
+}
+
+/** Mistaken "Other" rows (e.g. staff-call noise) — hide from admin My Requests. */
+function ffInboxIsStaffCallOtherNoise(r) {
+  const t = String(r?.type || "").trim();
+  if (t !== "other") return false;
+  const msg = String(r?.message || "").toLowerCase();
+  const subj = String(r?.title || r?.subject || (r?.data && (r.data.subject || r.data.title)) || "").toLowerCase();
+  const d = r?.data || {};
+  if (String(d.source || "").toLowerCase() === "staff_call") return true;
+  if (msg.includes("staff call") || subj.includes("staff call")) return true;
+  return false;
+}
+
 function inboxItemActivityMs(r) {
   const la = r && r.lastActivityAt;
   const ca = r && r.createdAt;
@@ -995,6 +1041,12 @@ function renderInboxList() {
     requestsToShow = requestsToShow.filter((r) => !MANAGER_ONLY_INBOX_TYPES.has(String(r.type || "").trim()));
   }
 
+  // Admin/manager "My Requests": createdByUid query can still return automated rows (scanner uid) + staff-call noise
+  if (role !== "technician" && inboxViewMode === "mine" && inboxCanManageInbox()) {
+    requestsToShow = requestsToShow.filter((r) => !MANAGER_ONLY_INBOX_TYPES.has(String(r.type || "").trim()));
+    requestsToShow = requestsToShow.filter((r) => !ffInboxIsStaffCallOtherNoise(r));
+  }
+
   // Client-side status filter to prevent flicker when Firestore sends intermediate snapshots
   if (inboxViewMode === 'to_handle' || role === 'technician') {
     if (currentInboxTab === 'open') {
@@ -1033,7 +1085,7 @@ function renderInboxList() {
   // Group requests by type (use filtered list)
   const groups = {};
   requestsToShow.forEach(req => {
-    const key = req.type || 'other';
+    const key = inboxEffectiveTypeForGrouping(req) || 'other';
     if (!groups[key]) groups[key] = [];
     groups[key].push(req);
   });
@@ -1116,7 +1168,7 @@ function createRequestCard(request) {
   const dateStr = formatRelativeDate(createdDate);
 
   if (request.type === 'document_expiring_soon' || request.type === 'document_expired') {
-    const isSoon = request.type === 'document_expiring_soon';
+    const isSoon = !inboxDocAlertIsExpiredForUi(request);
     const he = ffDocAlertIsHebrewUI();
     const badgeLabel = isSoon ? (he ? 'יפוג בקרוב' : 'Expiring soon') : (he ? 'פג תוקף' : 'Expired');
     const boxStyle = isSoon
@@ -2909,7 +2961,7 @@ function showRequestDetails(requestId) {
 
   let docAlertPanelHtml = '';
   if (isDocAlert) {
-    const isSoon = request.type === 'document_expiring_soon';
+    const isSoon = !inboxDocAlertIsExpiredForUi(request);
     const he = ffDocAlertIsHebrewUI();
     const badgeLabel = isSoon ? (he ? 'יפוג בקרוב' : 'Expiring soon') : (he ? 'פג תוקף' : 'Expired');
     const panelStyle = isSoon

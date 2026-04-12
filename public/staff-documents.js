@@ -456,7 +456,7 @@ export async function ffSyncStaffDocumentOnInboxApprove(dbConn, params) {
 
   try {
     const runExpiryInbox = () =>
-      import("./staff-doc-expiry-inbox.js?v=20260411_trigger_sync")
+      import("./staff-doc-expiry-inbox.js?v=20260409_created_by_subject")
         .then((m) => {
           if (typeof m.runStaffDocExpiryInboxRemindersOnce === "function") {
             return m.runStaffDocExpiryInboxRemindersOnce();
