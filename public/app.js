@@ -833,19 +833,41 @@ function hideAuthScreens() {
   if (resetSection) resetSection.style.display = "none";
 }
 
+/** Full-screen routes (outside #main-app-content). Hidden on logout; inline pointer-events must not stay "none" after login. */
+const FF_FULLSCREEN_MODULE_IDS = [
+  "inboxScreen",
+  "tasksScreen",
+  "ticketsScreen",
+  "mediaScreen",
+  "chatScreen",
+  "trainingScreen",
+  "scheduleScreen",
+];
+
 function showLoginScreen() {
   const loginSection = document.getElementById("login-section");
   const signupSection = document.getElementById("signup-section");
   const resetSection = document.getElementById("reset-password-section");
   const mainApp = document.getElementById("main-app-content");
-  const inboxScreen = document.getElementById("inboxScreen");
-  const tasksScreen = document.getElementById("tasksScreen");
   if (loginSection) loginSection.style.display = "block";
   if (signupSection) signupSection.style.display = "none";
   if (resetSection) resetSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
-  if (inboxScreen) inboxScreen.style.display = "none";
-  if (tasksScreen) tasksScreen.style.display = "none";
+  document.body.classList.add("ff-logged-out");
+
+  /* Full-screen modules live OUTSIDE #main-app-content; hiding only main-app leaves them visible. */
+  FF_FULLSCREEN_MODULE_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = "none";
+    if (id === "chatScreen") el.classList.remove("chat-mobile-open");
+  });
+
+  try {
+    window.scrollTo(0, 0);
+  } catch (e) {
+    /* ignore */
+  }
 }
 
 function showResetPasswordScreen() {
@@ -857,6 +879,7 @@ function showResetPasswordScreen() {
   if (loginSection) loginSection.style.display = "none";
   if (signupSection) signupSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
+  document.body.classList.add("ff-logged-out");
   if (resetSection) resetSection.style.display = "block";
 
   // clear messages
@@ -878,11 +901,19 @@ function showMainAppForRole(role) {
     return;
   }
 
+  document.body.classList.remove("ff-logged-out");
+
   // hide auth
   hideAuthScreens();
 
   // show wrapper
   mainApp.style.display = "block";
+
+  /* Logout used to set pointer-events:none on these nodes; without reset, toolbars work but scroll/content areas stay dead. */
+  FF_FULLSCREEN_MODULE_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.pointerEvents = "";
+  });
 
   // hide all role views first
   if (ownerView) ownerView.style.display = "none";
@@ -1227,7 +1258,7 @@ async function loadUserRoleAndShowView(user) {
     // Managers need this too: reminders are written to Inbox by whoever is signed in (rules allow isManager).
     if (["owner", "admin", "manager"].includes(rl) && currentSalonId) {
       function ffRunBirthdayChatRemindersOnce() {
-        import("./birthday-reminders.js?v=20260412_inbox_explain")
+        import("./birthday-reminders.js?v=20260413_sender_recipient")
           .then((m) => {
             if (typeof m.runBirthdayChatRemindersOnce === "function") {
               return m.runBirthdayChatRemindersOnce();
@@ -1280,7 +1311,7 @@ async function loadUserRoleAndShowView(user) {
 if (typeof window !== "undefined") {
   window.ffDebugBirthdayReminders = async () => {
     try {
-      const m = await import("./birthday-reminders.js?v=20260412_inbox_explain");
+      const m = await import("./birthday-reminders.js?v=20260413_sender_recipient");
       if (typeof m.ffDebugBirthdayReminders === "function") {
         return await m.ffDebugBirthdayReminders();
       }
@@ -1290,12 +1321,12 @@ if (typeof window !== "undefined") {
     }
   };
   window.ffSendTestBirthdayInbox = async () => {
-    const m = await import("./birthday-reminders.js?v=20260412_inbox_explain");
+    const m = await import("./birthday-reminders.js?v=20260413_sender_recipient");
     if (typeof m.sendBirthdayInboxTestPing !== "function") throw new Error("sendBirthdayInboxTestPing missing");
     return m.sendBirthdayInboxTestPing();
   };
   window.ffClearBirthdaySentFlags = async () => {
-    const m = await import("./birthday-reminders.js?v=20260412_inbox_explain");
+    const m = await import("./birthday-reminders.js?v=20260413_sender_recipient");
     if (typeof m.clearBirthdayReminderSentFlagsForSalon !== "function") {
       throw new Error("clearBirthdayReminderSentFlagsForSalon missing");
     }

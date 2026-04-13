@@ -364,6 +364,7 @@ function subscribeTickets(options) {
   if (!salonId) {
     console.warn('[Tickets] No salonId. Retrying in 1s...');
     setTimeout(() => subscribeTickets(options), 1000);
+    renderTicketsList();
     return;
   }
   if (ticketsUnsubscribe) ticketsUnsubscribe();
@@ -426,6 +427,13 @@ function updateTicketsNavBadge() {
   badge.textContent = readyUnread.length > 0 ? String(readyUnread.length) : '';
 }
 
+function getTicketCustomerPriceApprovedFromForm() {
+  const wrap = document.getElementById('ticketCustomerPriceApprovedWrap');
+  const el = document.getElementById('ticketCustomerPriceApproved');
+  if (!el || !wrap || wrap.style.display === 'none') return false;
+  return !!el.checked;
+}
+
 async function createTicket(payload) {
   const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
   if (!salonId) throw new Error('No salon - ensure your account has salonId');
@@ -434,6 +442,7 @@ async function createTicket(payload) {
     status,
     asIs: payload.asIs === true,
     asIsMessage: payload.asIs === true ? (payload.asIsMessage || 'Service matches system billing') : null,
+    customerApprovedPrice: payload.customerApprovedPrice === true,
     customerName: String(payload.customerName || '').trim(),
     appointmentId: payload.appointmentId || null,
     appointmentData: payload.appointmentData || null,
@@ -541,6 +550,201 @@ function formatDate(ts) {
   return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Submitted time for list + date filter (uses createdAt). */
+function ticketSubmittedAtDate(t) {
+  const ts = t?.createdAt;
+  if (!ts) return null;
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function passesTicketsDateFilter(t, fromStr, toStr) {
+  if (!fromStr && !toStr) return true;
+  const d = ticketSubmittedAtDate(t);
+  if (!d) return false;
+  const tMs = d.getTime();
+  if (fromStr) {
+    const p = fromStr.split('-').map(Number);
+    if (p.length === 3) {
+      const from = new Date(p[0], p[1] - 1, p[2], 0, 0, 0, 0);
+      if (tMs < from.getTime()) return false;
+    }
+  }
+  if (toStr) {
+    const p = toStr.split('-').map(Number);
+    if (p.length === 3) {
+      const toEnd = new Date(p[0], p[1] - 1, p[2], 23, 59, 59, 999);
+      if (tMs > toEnd.getTime()) return false;
+    }
+  }
+  return true;
+}
+
+function _fmtYmdLocal(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/** Week starts Sunday (matches common US calendar UI). */
+function _ticketsStartOfWeekSunday(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - x.getDay());
+  return x;
+}
+
+function computeRangeForPreset(preset) {
+  const now = new Date();
+  const fmt = _fmtYmdLocal;
+  if (preset === 'all') return { from: '', to: '' };
+  if (preset === 'today') {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return { from: fmt(d), to: fmt(d) };
+  }
+  if (preset === 'yesterday') {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    return { from: fmt(d), to: fmt(d) };
+  }
+  if (preset === 'this_week') {
+    const start = _ticketsStartOfWeekSunday(now);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    return { from: fmt(start), to: fmt(end) };
+  }
+  if (preset === 'last_week') {
+    const thisStart = _ticketsStartOfWeekSunday(now);
+    const end = new Date(thisStart);
+    end.setDate(end.getDate() - 1);
+    const start = new Date(end);
+    start.setDate(start.getDate() - 6);
+    return { from: fmt(start), to: fmt(end) };
+  }
+  if (preset === 'last_two_weeks') {
+    const thisStart = _ticketsStartOfWeekSunday(now);
+    const end = new Date(thisStart);
+    end.setDate(end.getDate() - 1);
+    const start = new Date(end);
+    start.setDate(start.getDate() - 13);
+    return { from: fmt(start), to: fmt(end) };
+  }
+  return { from: '', to: '' };
+}
+
+function _ticketsFmtMonthDay(d) {
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function _ticketsRangeLabelMd(fromStr, toStr) {
+  if (!fromStr || !toStr) return '';
+  const a = new Date(fromStr + 'T12:00:00');
+  const b = new Date(toStr + 'T12:00:00');
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return '';
+  return `${_ticketsFmtMonthDay(a)} - ${_ticketsFmtMonthDay(b)}`;
+}
+
+function ticketMatchesEmployeeFilter(t, staffId) {
+  if (!staffId || staffId === 'all') return true;
+  if (t.technicianStaffId && String(t.technicianStaffId) === String(staffId)) return true;
+  const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
+  const staff = store?.staff?.find(s => String(s.id) === String(staffId));
+  if (!staff) return false;
+  const tn = normalizeTicketTechName(t.technicianName || '');
+  const n1 = normalizeTicketTechName(staff.name || '');
+  const n2 = normalizeTicketTechName(staff.email || '');
+  if (tn && n1 && tn === n1) return true;
+  if (tn && n2 && tn === n2) return true;
+  if (tn && n1 && (tn.includes(n1) || n1.includes(tn))) return true;
+  return false;
+}
+
+function populateTicketsEmployeeSelect() {
+  const sel = document.getElementById('ticketsEmployeeSelect');
+  if (!sel) return;
+  const prev = sel.value;
+  const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
+  const staffList = Array.isArray(store?.staff) ? [...store.staff] : [];
+  staffList.sort((a, b) => String(a.name || a.email || '').localeCompare(String(b.name || b.email || ''), undefined, { sensitivity: 'base' }));
+  sel.innerHTML = '';
+  const optAll = document.createElement('option');
+  optAll.value = 'all';
+  optAll.textContent = 'ALL EMPLOYEES';
+  sel.appendChild(optAll);
+  for (const s of staffList) {
+    if (!s || s.id == null || s.id === '') continue;
+    const o = document.createElement('option');
+    o.value = String(s.id);
+    o.textContent = (s.name || s.email || 'Staff').trim();
+    sel.appendChild(o);
+  }
+  const ok = [...sel.options].some(o => o.value === prev);
+  sel.value = ok ? prev : 'all';
+}
+
+function syncTicketsTimePeriodSelectOptions() {
+  const sel = document.getElementById('ticketsTimePeriodSelect');
+  if (!sel) return;
+  const setLabel = (val, text) => {
+    const o = sel.querySelector(`option[value="${val}"]`);
+    if (o) o.textContent = text;
+  };
+  const now = new Date();
+  const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dY = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  setLabel('all', 'ALL DATES');
+  setLabel('today', `Today (${_ticketsFmtMonthDay(d0)})`);
+  setLabel('yesterday', `Yesterday (${_ticketsFmtMonthDay(dY)})`);
+  const tw = computeRangeForPreset('this_week');
+  setLabel('this_week', `This Week (${_ticketsRangeLabelMd(tw.from, tw.to)})`);
+  const lw = computeRangeForPreset('last_week');
+  setLabel('last_week', `Last Week (${_ticketsRangeLabelMd(lw.from, lw.to)})`);
+  const l2 = computeRangeForPreset('last_two_weeks');
+  setLabel('last_two_weeks', `Last Two Weeks (${_ticketsRangeLabelMd(l2.from, l2.to)})`);
+  setLabel('custom', 'Custom time period');
+}
+
+function applyTicketsTimePeriodFromSelect() {
+  const sel = document.getElementById('ticketsTimePeriodSelect');
+  const customWrap = document.getElementById('ticketsTimePeriodCustomWrap');
+  const fromEl = document.getElementById('ticketsFilterDateFrom');
+  const toEl = document.getElementById('ticketsFilterDateTo');
+  if (!sel || !fromEl || !toEl) return;
+  const v = sel.value;
+  if (v === 'custom') {
+    if (customWrap) customWrap.style.display = 'inline-flex';
+    if (!fromEl.value && !toEl.value) {
+      const d = computeRangeForPreset('last_week');
+      fromEl.value = d.from;
+      toEl.value = d.to;
+    }
+    renderTicketsList();
+    return;
+  }
+  if (customWrap) customWrap.style.display = 'none';
+  const r = computeRangeForPreset(v);
+  fromEl.value = r.from;
+  toEl.value = r.to;
+  renderTicketsList();
+}
+
+let _ticketsDateFiltersWired = false;
+function setupTicketsDateFilters() {
+  if (_ticketsDateFiltersWired) return;
+  _ticketsDateFiltersWired = true;
+  const sel = document.getElementById('ticketsTimePeriodSelect');
+  const fromEl = document.getElementById('ticketsFilterDateFrom');
+  const toEl = document.getElementById('ticketsFilterDateTo');
+  const onDatesChange = () => renderTicketsList();
+  if (sel) sel.addEventListener('change', () => applyTicketsTimePeriodFromSelect());
+  if (fromEl) {
+    fromEl.addEventListener('change', onDatesChange);
+    fromEl.addEventListener('input', onDatesChange);
+  }
+  if (toEl) {
+    toEl.addEventListener('change', onDatesChange);
+    toEl.addEventListener('input', onDatesChange);
+  }
+  const empSel = document.getElementById('ticketsEmployeeSelect');
+  if (empSel) empSel.addEventListener('change', onDatesChange);
+}
+
 /** Align the gear icon precisely under the user avatar circle — works on any screen/DPI */
 function _alignGearToAvatar() {
   const gear = document.getElementById('ticketsManageServicesBtn');
@@ -548,7 +752,7 @@ function _alignGearToAvatar() {
   const avatarCircle = document.querySelector('.user-avatar-circle') || document.getElementById('userAvatarBtn');
   if (!gear || !avatarCircle || gear.style.display === 'none') return;
   const circleRect = avatarCircle.getBoundingClientRect();
-  const tabsRow = gear.parentElement;
+  const tabsRow = gear.closest('.tickets-tabs');
   if (!tabsRow) return;
   const tabsRect = tabsRow.getBoundingClientRect();
   // Center gear under the circle center
@@ -616,7 +820,7 @@ function ticketConfirm(message, title = 'Confirm') {
       overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300000;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
       const card = document.createElement('div');
       card.style.cssText = 'background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.2);max-width:400px;width:100%;padding:24px;';
-      card.innerHTML = '<h3 id="ff-confirm-title" style="margin:0 0 12px;font-size:18px;font-weight:600;color:#111;"></h3><p id="ff-confirm-msg" style="margin:0 0 24px;font-size:14px;color:#374151;line-height:1.5;"></p><div style="display:flex;justify-content:flex-end;gap:10px;"><button type="button" id="ff-confirm-cancel" style="padding:10px 20px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:14px;color:#374151;">Cancel</button><button type="button" id="ff-confirm-ok" style="padding:10px 20px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">OK</button></div>';
+      card.innerHTML = '<h3 id="ff-confirm-title" style="margin:0 0 12px;font-size:18px;font-weight:600;color:#111;"></h3><p id="ff-confirm-msg" style="margin:0 0 24px;font-size:14px;color:#374151;line-height:1.5;"></p><div style="display:flex;justify-content:flex-end;gap:10px;"><button type="button" id="ff-confirm-cancel" style="padding:10px 20px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:14px;color:#374151;">Cancel</button><button type="button" id="ff-confirm-ok" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">OK</button></div>';
       overlay.appendChild(card);
       document.body.appendChild(overlay);
       overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.style.display = 'none'; if (window._ffConfirmResolve) { window._ffConfirmResolve(false); window._ffConfirmResolve = null; } } });
@@ -666,17 +870,6 @@ function getInitial(name) {
   return (parts[0][0] || '?').toUpperCase();
 }
 
-/** After first real list paint, remove boot cover (profile + toolbar + snapshot ready). */
-function endTicketsBootCover() {
-  const screen = document.getElementById('ticketsScreen');
-  if (!screen || !screen.classList.contains('ff-tickets-boot')) return;
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      screen.classList.remove('ff-tickets-boot');
-    });
-  });
-}
-
 function renderTicketsList() {
   const listEl = document.getElementById('ticketsList');
   const loadingEl = document.getElementById('ticketsLoading');
@@ -698,8 +891,44 @@ function renderTicketsList() {
     : currentTickets.filter(t => t.status === statusFilter);
   toShow = toShow.filter(t => canSeeTicket(t));
 
+  const timePeriodWrap = document.getElementById('ticketsTimePeriodWrap');
+  const showDateFilters = currentTicketsTab === 'closed' || currentTicketsTab === 'archived';
+  if (timePeriodWrap) timePeriodWrap.style.display = showDateFilters ? 'flex' : 'none';
+  if (showDateFilters) syncTicketsTimePeriodSelectOptions();
+  const periodSel = document.getElementById('ticketsTimePeriodSelect');
+  const customWrap = document.getElementById('ticketsTimePeriodCustomWrap');
+  if (showDateFilters && periodSel && customWrap) {
+    customWrap.style.display = periodSel.value === 'custom' ? 'inline-flex' : 'none';
+  }
+
+  const fromEl = document.getElementById('ticketsFilterDateFrom');
+  const toEl = document.getElementById('ticketsFilterDateTo');
+  const fromStr = showDateFilters && fromEl ? (fromEl.value || '').trim() : '';
+  const toStr = showDateFilters && toEl ? (toEl.value || '').trim() : '';
+  const hasDateFilter = showDateFilters && (fromStr || toStr);
+  const countAfterStatus = toShow.length;
+  if (hasDateFilter) {
+    toShow = toShow.filter(t => passesTicketsDateFilter(t, fromStr, toStr));
+  }
+  if (showDateFilters) populateTicketsEmployeeSelect();
+  const empEl = document.getElementById('ticketsEmployeeSelect');
+  const employeeId = showDateFilters && empEl ? (empEl.value || 'all') : 'all';
+  const hasEmployeeFilter = showDateFilters && employeeId !== 'all';
+  if (hasEmployeeFilter) {
+    toShow = toShow.filter(t => ticketMatchesEmployeeFilter(t, employeeId));
+  }
+
   if (loadingEl) loadingEl.style.display = 'none';
-  if (emptyEl) emptyEl.style.display = toShow.length === 0 ? 'block' : 'none';
+  if (emptyEl) {
+    emptyEl.style.display = toShow.length === 0 ? 'block' : 'none';
+    if (toShow.length === 0) {
+      if (countAfterStatus > 0 && (hasDateFilter || hasEmployeeFilter)) {
+        emptyEl.textContent = 'No tickets match this filter.';
+      } else {
+        emptyEl.textContent = 'No tickets here yet.';
+      }
+    }
+  }
 
   const archivedTab = document.getElementById('ticketsArchivedTab');
   if (archivedTab) {
@@ -752,6 +981,9 @@ function renderTicketsList() {
     const isReady = sk === 'ready';
     const showEdited = canSeeEditedFlag && isReady && !!t.editedAfterFinalize;
     const editedBadgeHtml = showEdited ? '<span class="ticket-edited-badge">Edited</span>' : '';
+    const customerApprovedBadgeHtml = (t.customerApprovedPrice === true)
+      ? '<span class="ticket-customer-approved-badge" title="Customer approved the price">Approved</span>'
+      : '';
     const technicianAvatarUrl = getTicketTechnicianAvatarUrl(t);
     const avatarHtml = technicianAvatarUrl
       ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex-shrink:0;"><img src="${String(technicianAvatarUrl).replace(/"/g,'&quot;')}" alt="" style="width:100%;height:100%;object-fit:cover;"></div>`
@@ -785,6 +1017,7 @@ function renderTicketsList() {
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
           <span class="ticket-status-badge ${sk}">${statusLabel}</span>
+          ${customerApprovedBadgeHtml}
           ${editedBadgeHtml}
         </div>
       </div>
@@ -819,8 +1052,6 @@ function renderTicketsList() {
       }
     };
   });
-
-  endTicketsBootCover();
 }
 
 function statusBg(s) {
@@ -985,6 +1216,32 @@ function openAdminTicketView(t) {
   if (totalBlock) totalBlock.style.display = lines.length > 0 ? 'block' : 'none';
   if (totalAmt)   totalAmt.textContent = '$' + total.toFixed(2);
 
+  const priceApprovedWrap = document.getElementById('ticketCustomerPriceApprovedWrap');
+  if (priceApprovedWrap) priceApprovedWrap.style.display = 'none';
+
+  const adminAprBlock = document.getElementById('ticketAdminPriceApprovalBlock');
+  if (adminAprBlock) {
+    if (t.customerApprovedPrice === true) {
+      adminAprBlock.innerHTML = '<strong>Customer approved the price</strong> ✓';
+      adminAprBlock.style.display = 'block';
+      adminAprBlock.style.padding = '12px 14px';
+      adminAprBlock.style.borderRadius = '8px';
+      adminAprBlock.style.fontSize = '14px';
+      adminAprBlock.style.color = '#5b21b6';
+      adminAprBlock.style.background = '#f5f3ff';
+      adminAprBlock.style.border = '1px solid #e9d5ff';
+    } else {
+      adminAprBlock.innerHTML = 'Technician did <strong>not</strong> confirm that the customer approved the final price.';
+      adminAprBlock.style.display = 'block';
+      adminAprBlock.style.padding = '12px 14px';
+      adminAprBlock.style.borderRadius = '8px';
+      adminAprBlock.style.fontSize = '14px';
+      adminAprBlock.style.color = '#92400e';
+      adminAprBlock.style.background = '#fffbeb';
+      adminAprBlock.style.border = '1px solid #fde68a';
+    }
+  }
+
   // Hide all action buttons except Close
   ['ticketSendNewBtn','ticketSaveBtn','ticketFinalizeBtn','ticketArchiveBtn',
    'ticketDeleteBtn','ticketAsIsBtn'].forEach(id => {
@@ -1001,6 +1258,8 @@ function openAdminTicketView(t) {
     closeBtn.style.fontSize = '16px';
     closeBtn.style.fontWeight = '700';
     closeBtn.style.borderRadius = '10px';
+    closeBtn.style.background = '#7c3aed';
+    closeBtn.style.color = '#fff';
     closeBtn.onclick = () => doCloseTicket(t.id);
   }
 
@@ -1096,7 +1355,7 @@ function openTicketDetailsModal(t) {
   if (t.status === 'ARCHIVED' && isAdminOrOwner) {
     actionsHtml += `<button type="button" id="ticketDetailsDeleteBtn" style="padding:8px 16px;border:1px solid #ef4444;border-radius:6px;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:14px;">Delete</button>`;
   }
-  actionsHtml += `<button type="button" id="ticketDetailsCloseBtn" style="padding:8px 16px;border:none;border-radius:6px;background:#111;color:#fff;cursor:pointer;font-size:14px;">Close</button>`;
+  actionsHtml += `<button type="button" id="ticketDetailsCloseBtn" style="padding:8px 16px;border:none;border-radius:6px;background:#7c3aed;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">Close</button>`;
   actionsEl.innerHTML = actionsHtml;
   const archiveBtn = document.getElementById('ticketDetailsArchiveBtn');
   const deleteBtn = document.getElementById('ticketDetailsDeleteBtn');
@@ -1130,6 +1389,8 @@ function resetTicketForm() {
   const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
   if (asIsMsgBlock) asIsMsgBlock.style.display = 'none';
   if (asIsClearBtn) asIsClearBtn.style.display = 'none';
+  set('ticketCustomerPriceApproved', el => { el.checked = false; });
+  set('ticketAdminPriceApprovalBlock', el => { el.style.display = 'none'; el.innerHTML = ''; });
   const finalizeBtn = document.getElementById('ticketFinalizeBtn');
   const closeBtn = document.getElementById('ticketCloseBtn');
   const sendNewBtn = document.getElementById('ticketSendNewBtn');
@@ -1153,6 +1414,7 @@ function resetTicketForm() {
     picker.querySelectorAll('.ticket-category-body').forEach((body) => { body.style.display = 'none'; });
     picker.querySelectorAll('.ticket-cat-arrow').forEach((arrow) => { arrow.textContent = '▶'; });
   }
+  updateTicketDiff();
   setupTicketFormToggles();
 }
 
@@ -1162,6 +1424,15 @@ function populateTicketForm(t) {
     closeTicketModal();
     openTicketDetailsModal(t);
     return;
+  }
+  const sendNewBtnEarly = document.getElementById('ticketSendNewBtn');
+  if (sendNewBtnEarly) sendNewBtnEarly.style.display = 'none';
+  const priceWrapEarly = document.getElementById('ticketCustomerPriceApprovedWrap');
+  if (priceWrapEarly) priceWrapEarly.style.display = 'none';
+  const adminAprEarly = document.getElementById('ticketAdminPriceApprovalBlock');
+  if (adminAprEarly) {
+    adminAprEarly.style.display = 'none';
+    adminAprEarly.innerHTML = '';
   }
   const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
   set('ticketCustomerName', el => { el.value = t.customerName || ''; });
@@ -1394,6 +1665,17 @@ function updateTicketTotal(lines) {
   const amountEl = document.getElementById('ticketTotalAmount');
   if (block) block.style.display = arr.length > 0 ? 'block' : 'none';
   if (amountEl) amountEl.textContent = '$' + total.toFixed(2);
+  const sendNewBtn = document.getElementById('ticketSendNewBtn');
+  const priceWrap = document.getElementById('ticketCustomerPriceApprovedWrap');
+  if (priceWrap && sendNewBtn) {
+    const isNewTicketFlow = sendNewBtn.style.display !== 'none';
+    const showApproval = isNewTicketFlow && (arr.length > 0 || ticketFormAsIsMode);
+    priceWrap.style.display = showApproval ? 'block' : 'none';
+    if (!showApproval) {
+      const cb = document.getElementById('ticketCustomerPriceApproved');
+      if (cb) cb.checked = false;
+    }
+  }
 }
 
 async function saveTicket() {
@@ -1479,7 +1761,8 @@ async function doSendAsIsTicket(appointmentData = null, customerName = '') {
       status: 'READY_FOR_CHECKOUT',
       asIs: true,
       appointmentId,
-      appointmentData: appointmentData || null
+      appointmentData: appointmentData || null,
+      customerApprovedPrice: getTicketCustomerPriceApprovedFromForm()
     });
     showToast('AS IS ticket sent to Front Desk', 'success');
     return true;
@@ -1512,7 +1795,8 @@ async function doSendNewTicket() {
       total,
       forUids,
       forNames,
-      status: 'READY_FOR_CHECKOUT'
+      status: 'READY_FOR_CHECKOUT',
+      customerApprovedPrice: getTicketCustomerPriceApprovedFromForm()
     });
     showToast('Ticket sent to Front Desk', 'success');
     closeTicketModal();
@@ -1772,6 +2056,11 @@ async function saveServiceFromForm() {
 // Navigation
 // =====================
 export function goToTickets() {
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try {
+      window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
   if (typeof window.closeStaffMembersModal === 'function') {
     window.closeStaffMembersModal();
   }
@@ -1801,7 +2090,7 @@ export function goToTickets() {
 
   if (ticketsScreen) {
     ticketsScreen.style.display = 'flex';
-    ticketsScreen.classList.add('ff-tickets-boot');
+    ticketsScreen.style.setProperty('pointer-events', 'auto', 'important');
   }
 
   // When any other nav button is clicked:
@@ -1833,11 +2122,12 @@ export function goToTickets() {
 
   if (_ticketsDataReady && currentUserProfile) {
     // Data already cached — skip Firestore fetches, just re-subscribe and render
-    ticketsScreen.classList.remove('ff-tickets-boot');
     setupTicketsUI().then(() => {
       subscribeTickets({ resetLoading: true });
       renderTicketsList();
       updateTicketsNavBadge();
+    }).catch((err) => {
+      console.error('[Tickets] setupTicketsUI failed', err);
     });
   } else {
     loadCurrentUserProfile().then(async () => {
@@ -1846,8 +2136,11 @@ export function goToTickets() {
       await setupTicketsUI();
       _ticketsDataReady = true;
       subscribeTickets({ resetLoading: true });
+      renderTicketsList();
       loadTicketsMembersForAvatars().then(() => renderTicketsList());
       updateTicketsNavBadge();
+    }).catch((err) => {
+      console.error('[Tickets] goToTickets init failed', err);
     });
   }
 }
@@ -1871,9 +2164,11 @@ function doAsIsSelect() {
         ticketFormAsIsMode = false;
         asIsMsgBlock.style.display = 'none';
         asIsClearBtn.style.display = 'none';
+        updateTicketDiff();
       };
     }
   }
+  updateTicketDiff();
 }
 
 function doServiceSelect(svc) {
@@ -1951,6 +2246,7 @@ async function setupTicketsUI() {
 // Init
 // =====================
 export function initTickets() {
+  setupTicketsDateFilters();
   document.querySelectorAll('.tickets-tab').forEach(btn => {
     btn.onclick = () => setTicketsTab(btn.getAttribute('data-tab'));
   });

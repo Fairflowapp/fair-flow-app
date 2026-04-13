@@ -89,6 +89,59 @@ body.ff-invite-mode #reset-admin-pin-section {
   display: none !important;
 }
 
+/* Signed out: hide app + any full-screen module that is a sibling of #main-app-content (otherwise queue / tickets stay visible behind login). */
+body.ff-logged-out #main-app-content {
+  display: none !important;
+}
+body.ff-logged-out #ticketsScreen,
+body.ff-logged-out #mediaScreen,
+body.ff-logged-out #chatScreen,
+body.ff-logged-out #inboxScreen,
+body.ff-logged-out #tasksScreen,
+body.ff-logged-out #trainingScreen,
+body.ff-logged-out #scheduleScreen {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+/* Signed out: gray backdrop + centered card; no extra vertical margin (40px top+bottom was causing ~1px overflow scroll). */
+body.ff-logged-out {
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 16px;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+html:has(body.ff-logged-out) {
+  overflow: hidden;
+}
+body.ff-logged-out::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 199999;
+  background: #f3f4f6;
+  pointer-events: none;
+}
+body.ff-logged-out #login-section,
+body.ff-logged-out #signup-section,
+body.ff-logged-out #reset-password-section {
+  position: relative;
+  z-index: 200000 !important;
+  margin: 0 auto !important;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100svh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+
 /* Sticky header with left-aligned brand + toolbar */
 
 .header{position:sticky;top:0;z-index:100003;background:#5b21b6;
@@ -449,6 +502,79 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   height: calc(100vh - 56px);
   overflow: hidden;
   background: #f9fafb;
+}
+/* Chat top toolbar — match Inbox / Media / Tickets thin bar (2px 20px, min-height 40px) */
+#chatTopBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 20px;
+  min-height: 40px;
+  box-sizing: border-box;
+  gap: 12px;
+  flex-wrap: nowrap;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+@media (max-width: 900px) {
+  #chatTopBar { flex-wrap: wrap; }
+}
+#chatTopBar .chat-topbar-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+#chatTopBar .chat-topbar-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.2;
+}
+#chatTopBar #chatSettingsGearBtn {
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #e5e7eb;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  padding: 0;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+#chatTopBar #chatSettingsGearBtn:hover { background: #f3f4f6; }
+#chatTopBar .chat-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#chatTopBar #chatSendBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  height: 36px;
+  padding: 8px 14px;
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  box-sizing: border-box;
+  line-height: 1.2;
+}
+#chatTopBar #chatSendBtn svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
 }
 .chat-event-card {
   background: #fff;
@@ -1754,6 +1880,27 @@ dialog footer button, .code-dialog footer button {
   display: none !important;
 }
 
+/* Top bar: progressive hide on narrow viewports (nav items only) */
+.core-nav {
+  display: inline-flex !important;
+}
+
+@media (max-width: 1500px) {
+  .hide-1 { display: none !important; }
+}
+
+@media (max-width: 1380px) {
+  .hide-2 { display: none !important; }
+}
+
+@media (max-width: 1260px) {
+  .hide-3 { display: none !important; }
+}
+
+@media (max-width: 1160px) {
+  .hide-4 { display: none !important; }
+}
+
 </style>
 
 
@@ -2062,23 +2209,23 @@ dialog footer button, .code-dialog footer button {
 
       <nav class="toolbar toolbar-nav-main" aria-label="Main navigation">
 
-        <button id="queueBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span>Queue</button>
+        <button id="queueBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span>Queue</button>
 
-        <button id="ticketsBtn" class="btn-pill" onclick="window.goToTickets && window.goToTickets()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></span>Tickets<span id="ticketsNavBadge" class="ff-home-tasks-badge" style="display:none;"></span></button>
+        <button id="ticketsBtn" class="btn-pill nav-item core-nav" onclick="window.goToTickets && window.goToTickets()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></span>Tickets<span id="ticketsNavBadge" class="ff-home-tasks-badge" style="display:none;"></span></button>
 
-        <button id="tasksBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>Tasks<span class="ff-home-tasks-badge"></span></button>
+        <button id="tasksBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>Tasks<span class="ff-home-tasks-badge"></span></button>
 
-        <button id="chatBtn" class="btn-pill" onclick="window.goToChat && window.goToChat()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>Chat<span id="chatNavBadge" class="ff-home-tasks-badge"></span></button>
+        <button id="chatBtn" class="btn-pill nav-item core-nav" onclick="window.goToChat && window.goToChat()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>Chat<span id="chatNavBadge" class="ff-home-tasks-badge"></span></button>
 
-        <button id="inboxBtn" class="btn-pill"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg></span>Inbox<span class="ff-inbox-badge ff-home-tasks-badge"></span></button>
+        <button id="inboxBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg></span>Inbox<span class="ff-inbox-badge ff-home-tasks-badge"></span></button>
 
-        <button id="mediaBtn" class="btn-pill" onclick="window.goToMedia && window.goToMedia()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span>Media</button>
+        <button id="mediaBtn" class="btn-pill nav-item hide-4" onclick="window.goToMedia && window.goToMedia()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span>Media</button>
 
-        <button class="btn-pill" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>Inventory</button>
+        <button class="btn-pill nav-item hide-3" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>Inventory</button>
 
-        <button type="button" id="scheduleBtn" class="btn-pill" aria-label="Schedule"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></span>Schedule</button>
+        <button type="button" id="scheduleBtn" class="btn-pill nav-item hide-2" aria-label="Schedule"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></span>Schedule</button>
 
-        <button type="button" id="trainingBtn" class="btn-pill" onclick="window.goToTraining && window.goToTraining()" aria-label="Training"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg></span>Training</button>
+        <button type="button" id="trainingBtn" class="btn-pill nav-item hide-1" onclick="window.goToTraining && window.goToTraining()" aria-label="Training"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg></span>Training</button>
 
       </nav>
 
@@ -3172,8 +3319,9 @@ async function initFirebaseAuth() {
           }
         }
         
-        // User is active - allow access
-        if (mainContent) mainContent.style.display = '';
+        // User is active - allow access (never use display '' — it clears inline and can leave the shell visible incorrectly)
+        document.body.classList.remove('ff-logged-out');
+        if (mainContent) mainContent.style.display = 'block';
         if (authBanner) authBanner.style.display = 'none';
         if (loginSection) loginSection.style.display = 'none';
         if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
@@ -3207,31 +3355,28 @@ async function initFirebaseAuth() {
         // Update header to show current user's name
         if (typeof renderBrand === 'function') renderBrand();
       } else {
-        // Signed out – show login only; do not show debug banner
+        // Signed out – hide app shell completely (sync with app.js showLoginScreen + overlays)
         console.log('[AUTH] signed out');
+        document.body.classList.add('ff-logged-out');
         if (mainContent) mainContent.style.display = 'none';
         if (authBanner) authBanner.style.display = 'none';
         if (loginSection) loginSection.style.display = 'block';
         if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
         if (typeof stopTrainingNotificationsSubscription === 'function') stopTrainingNotificationsSubscription();
+        if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
       }
     });
     
     console.log('[AUTH] init ok');
   } catch (error) {
     console.error('[AUTH] initialization error:', error);
-    // Fallback: show app content if auth fails (backward compatibility)
+    // Do not expose queue / main app when auth init fails — keep signed-out shell only
+    document.body.classList.add('ff-logged-out');
     const mainContent = document.getElementById('main-app-content');
-    if (mainContent) mainContent.style.display = '';
-    // Initialize Queue screen on fallback (ensures gear icon appears even if auth check fails)
-    if (typeof goToQueue === 'function') {
-      goToQueue();
-    }
-    if (typeof initManageQueueButtons === 'function') {
-      setTimeout(function() {
-        initManageQueueButtons();
-      }, 0);
-    }
+    if (mainContent) mainContent.style.display = 'none';
+    const loginSection = document.getElementById('login-section');
+    if (loginSection) loginSection.style.display = 'block';
+    if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
   }
 }
 
@@ -5145,13 +5290,13 @@ function renderSelect(){
     // Placeholder only — keep select enabled so the row does not look "locked"
     const placeholder = document.createElement("option");
     placeholder.value = "";
-    // UI says «service provider»; data comes from staff with role technician (see filter below).
-    placeholder.textContent = "No service providers yet — add technicians in Staff Members";
+    // UI: service provider; data = non-admin staff rows in ff_staff_v1 (internal code often says "technician").
+    placeholder.textContent = "No service providers yet — add them in Staff Members";
     placeholder.disabled = true;
     placeholder.selected = true;
     selectEl.appendChild(placeholder);
     selectEl.disabled = false;
-    selectEl.title = "Lists technicians (service providers) from Staff Members. Add or fix role under APPS → Staff Members.";
+    selectEl.title = "Lists service providers from Staff Members. Add or fix role under APPS → Staff Members.";
     return;
   }
 
@@ -5562,6 +5707,20 @@ function ffQueueEmptyInServiceHtml() {
     '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg></div>' +
     '<div class="ff-queue-empty-title">No service providers in service</div>' +
     '<div class="ff-queue-empty-sub">Active services will appear here</div></div>';
+}
+
+/** Tasks MY LIST / PENDING — same markup + classes as Queue empty state (ff-queue-empty-inner). */
+function ffTasksEmptyMyListHtml() {
+  return '<div class="ff-queue-empty-inner"><div class="ff-queue-empty-icon" aria-hidden="true">' +
+    '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>' +
+    '<div class="ff-queue-empty-title">No tasks yet</div>' +
+    '<div class="ff-queue-empty-sub">Tasks will appear here once they are assigned to you</div></div>';
+}
+function ffTasksEmptyPendingHtml() {
+  return '<div class="ff-queue-empty-inner"><div class="ff-queue-empty-icon" aria-hidden="true">' +
+    '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg></div>' +
+    '<div class="ff-queue-empty-title">No pending tasks</div>' +
+    '<div class="ff-queue-empty-sub">Select tasks from your list to start working on them</div></div>';
 }
 
 function renderQueue(){
@@ -6102,10 +6261,10 @@ async function handleJoin(){
   // Validate that both name and PIN are provided
   if (!selectedTechnicianId || !selectedTechnicianName || selectedTechnicianName === 'Select service provider...') {
     if (joinErrorEl) {
-      joinErrorEl.textContent = 'Please select a technician';
+      joinErrorEl.textContent = 'Please select a service provider';
       joinErrorEl.style.display = 'block';
     } else {
-      alert('Please select a technician');
+      alert('Please select a service provider');
     }
     return;
   }
@@ -6148,10 +6307,10 @@ async function handleJoin(){
   if (!technician) {
     console.error('[handleJoin] Technician not found in ff_staff_v1 or settings.workers:', selectedTechnicianName);
     if (joinErrorEl) {
-      joinErrorEl.textContent = 'Technician not found';
+      joinErrorEl.textContent = 'Service provider not found';
       joinErrorEl.style.display = 'block';
     } else {
-      alert('Technician not found');
+      alert('Service provider not found');
     }
     return;
   }
@@ -6189,10 +6348,10 @@ async function handleJoin(){
   // Check if technician is already in queue or service
   if (isTechnicianAlreadyActive()) {
     if (joinErrorEl) {
-      joinErrorEl.textContent = 'This technician is already active';
+      joinErrorEl.textContent = 'This service provider is already active';
       joinErrorEl.style.display = 'block';
     } else {
-      alert('This technician is already active');
+      alert('This service provider is already active');
     }
     return;
   }
@@ -6216,10 +6375,10 @@ async function handleJoin(){
   // Re-check after async validation to avoid race conditions on fast double-clicks.
   if (isTechnicianAlreadyActive()) {
     if (joinErrorEl) {
-      joinErrorEl.textContent = 'This technician is already active';
+      joinErrorEl.textContent = 'This service provider is already active';
       joinErrorEl.style.display = 'block';
     } else {
-      alert('This technician is already active');
+      alert('This service provider is already active');
     }
     return;
   }
@@ -7042,6 +7201,11 @@ window.openSettingsSecure = openSettingsSecure;
 
 // Navigation function to return to Queue view
 function goToQueue() {
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try {
+      window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
   // Close inbox screen if open
   const inboxScreen = document.getElementById('inboxScreen');
   if (inboxScreen) inboxScreen.style.display = 'none';
@@ -7112,6 +7276,14 @@ function goToQueue() {
   if (typeof closeStaffMembersModal === 'function') {
     closeStaffMembersModal();
   }
+
+  // Close Apps panel overlay — same z-index issue as Inbox (backdrop can block main UI)
+  try {
+    var _appsBd = document.getElementById('appsOverlayBackdrop');
+    var _appsPn = document.getElementById('appsPanel');
+    if (_appsBd) _appsBd.style.display = 'none';
+    if (_appsPn) _appsPn.style.display = 'none';
+  } catch (e) {}
   
   // ALWAYS show owner-view (main queue view) - regardless of current state
   const ownerView = document.getElementById('owner-view');
@@ -10133,6 +10305,11 @@ window.openReportTrainingDetails = openReportTrainingDetails;
 window.backFromReportTrainingDetails = backFromReportTrainingDetails;
 
 async function goToTraining() {
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try {
+      window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
   const tasksScreen = document.getElementById('tasksScreen');
   const inboxScreen = document.getElementById('inboxScreen');
   const chatScreen = document.getElementById('chatScreen');
@@ -13770,6 +13947,13 @@ function removeBlockingOverlays() {
   try {
     console.log('[Overlay Audit] Scanning for blocking overlays...');
     
+    // Full-screen app panels — never force pointer-events:none (breaks Tickets/Tasks/Inbox when hidden then shown).
+    const APP_SCREEN_IDS = new Set([
+      'ticketsScreen', 'tasksScreen', 'inboxScreen', 'mediaScreen', 'chatScreen',
+      'scheduleScreen', 'trainingScreen'
+    ]);
+    const SKIP_POINTER_EVENTS_FIX_IDS = new Set(['appsOverlayBackdrop', 'appsPanel']);
+    
     // List of known modal/overlay IDs that should be hidden
     const knownOverlayIds = [
       'codePromptOverlay',
@@ -13780,8 +13964,7 @@ function removeBlockingOverlays() {
       'tasksFinishModal',
       'tasksSelectModal',
       'tasksEditModal',
-      'tasksInstructionsModal',
-      'tasksScreen'
+      'tasksInstructionsModal'
     ];
     
     // Check known overlays
@@ -13812,6 +13995,8 @@ function removeBlockingOverlays() {
     let blockingCount = 0;
     
     allElements.forEach(el => {
+      if (APP_SCREEN_IDS.has(el.id)) return;
+      if (SKIP_POINTER_EVENTS_FIX_IDS.has(el.id)) return;
       const computedStyle = window.getComputedStyle(el);
       const zIndex = parseInt(computedStyle.zIndex) || 0;
       const position = computedStyle.position;
@@ -13868,10 +14053,14 @@ function removeBlockingOverlays() {
     // Ensure toolbar buttons are clickable
     const toolbarButtons = document.querySelectorAll('.toolbar button');
     toolbarButtons.forEach(btn => {
-      btn.style.zIndex = '100001';
+      btn.style.zIndex = '100004';
       btn.style.pointerEvents = 'auto';
       btn.style.cursor = 'pointer';
     });
+
+    if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+      window.ffCloseGlobalBlockingOverlays();
+    }
     
   } catch (e) {
     console.error('[Overlay Audit] Error scanning for blocking overlays:', e);
@@ -15930,6 +16119,9 @@ function writeTasksList(tab, kind, arr) {
 
 function openTasks() {
   try {
+    if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+      window.ffCloseGlobalBlockingOverlays();
+    }
     // Close inbox screen if open
     const inboxScreen = document.getElementById('inboxScreen');
     if (inboxScreen) inboxScreen.style.display = 'none';
@@ -16301,15 +16493,15 @@ function setTasksTab(tabName) {
     // Render two-column layout
     contentContainer.innerHTML = `
       <div class="tasks-col">
-        <h2>MY LIST</h2>
+        <h2>My list</h2>
         <div class="tasks-list">
-          <div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">No tasks yet</div>
+          ${ffTasksEmptyMyListHtml()}
         </div>
       </div>
       <div class="tasks-col">
-        <h2>PENDING</h2>
+        <h2>Pending</h2>
         <div class="tasks-list">
-          <div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">Pending (coming soon)</div>
+          ${ffTasksEmptyPendingHtml()}
         </div>
       </div>
     `;
@@ -18087,16 +18279,17 @@ function renderTasksList(tab, opts) {
     const mainListContainer = document.querySelector('#tasksContentContainer .tasks-col:first-child .tasks-list');
     if (mainListContainer && !isTasksSettingsOpen) {
       // Ensure admin filter visibility when rendering (handles timing when admin status resolves late)
+      const tasksStaffFilterWrap = document.getElementById('tasksStaffTypeFilterWrap');
       const filterEl = document.getElementById('tasksAdminFilter');
       if (filterEl) {
         if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) {
-          filterEl.style.display = 'inline-block';
+          if (tasksStaffFilterWrap) tasksStaffFilterWrap.style.display = 'inline-flex';
           if (!filterEl.__adminFilterPopulated && typeof populateTasksAdminFilter === 'function') {
             filterEl.__adminFilterPopulated = true;
             populateTasksAdminFilter(filterEl);
           }
         } else {
-          filterEl.style.display = 'none';
+          if (tasksStaffFilterWrap) tasksStaffFilterWrap.style.display = 'none';
           filterEl.__adminFilterPopulated = false;
         }
       }
@@ -18404,7 +18597,7 @@ function renderTasksList(tab, opts) {
         if (!hasStaffId && !isAdmin && typeof window.openTasksIdentifyModal === 'function') {
           mainListContainer.innerHTML = '<div style="padding:24px;text-align:center;"><p style="margin:0 0 16px;color:#6b7280;font-size:14px;">Enter your PIN to see your tasks</p><button type="button" onclick="window.openTasksIdentifyModal()" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">Enter PIN</button></div>';
         } else {
-          mainListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">No tasks yet</div>';
+          mainListContainer.innerHTML = ffTasksEmptyMyListHtml();
         }
       } else {
         // Split tasks into incomplete and completed groups
@@ -18651,7 +18844,7 @@ function renderTasksList(tab, opts) {
       }
       
       if (pendingTasks.length === 0) {
-        pendingListContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">Pending (coming soon)</div>';
+        pendingListContainer.innerHTML = ffTasksEmptyPendingHtml();
       } else {
         // Show newest first (reverse array)
         const pendingReversed = [...pendingTasks].reverse();
@@ -18922,6 +19115,113 @@ function handleTaskInfoEsc(e) {
     closeTaskInfoModal();
   }
 }
+
+/**
+ * Dismiss full-screen overlays/modals that sit above #inboxScreen (z-index) and block clicks.
+ * Call when navigating to Inbox (and optionally from other main-nav targets).
+ */
+window.ffCloseGlobalBlockingOverlays = function () {
+  try {
+    document.querySelectorAll('.chat-modal-overlay').forEach(function (el) {
+      el.style.display = 'none';
+    });
+  } catch (e) {}
+  try {
+    if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
+  } catch (e) {}
+  try {
+    document.body.classList.remove('ff-avatar-dropdown-open');
+    var uad = document.getElementById('userAvatarDropdown');
+    if (uad) uad.style.display = 'none';
+  } catch (e) {}
+  try {
+    var settingsDlg = document.getElementById('settingsDlg');
+    if (settingsDlg && settingsDlg.open) settingsDlg.close();
+  } catch (e) {}
+  try {
+    var historyModal = document.getElementById('historyModal');
+    if (historyModal) {
+      historyModal.classList.add('hidden');
+      historyModal.style.display = 'none';
+    }
+  } catch (e) {}
+  try {
+    var tasksModal = document.querySelector('#tasksModal, .tasks-modal');
+    if (tasksModal) {
+      if (tasksModal.close && typeof tasksModal.close === 'function') tasksModal.close();
+      else {
+        tasksModal.classList.add('hidden');
+        tasksModal.style.display = 'none';
+      }
+    }
+  } catch (e) {}
+  try {
+    var tr = document.getElementById('tasksResetConfirmModal');
+    if (tr) {
+      tr.style.display = 'none';
+      tr.style.pointerEvents = 'none';
+    }
+  } catch (e) {}
+  try {
+    var up = document.getElementById('userProfilePasswordModal');
+    if (up) up.style.display = 'none';
+  } catch (e) {}
+  try {
+    ['staffArchiveConfirmModal', 'staffDeleteConfirmModal'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  } catch (e) {}
+  try {
+    ['uploadWorkModal', 'workDetailsModal', 'markPostedModal', 'createTrainingModal', 'addTechnicianTypeModal'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  } catch (e) {}
+  try {
+    var bd = document.getElementById('appsOverlayBackdrop');
+    var ap = document.getElementById('appsPanel');
+    if (bd) {
+      bd.style.display = 'none';
+      bd.style.pointerEvents = '';
+    }
+    if (ap) ap.style.display = 'none';
+  } catch (e) {}
+  try {
+    if (typeof closeTaskInfoModal === 'function') closeTaskInfoModal();
+    else {
+      var tir = document.getElementById('taskInfoModalRoot');
+      if (tir) tir.remove();
+    }
+  } catch (e) {}
+  try {
+    ['inboxConfirmModal', 'inboxPromptModal'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.remove();
+    });
+  } catch (e) {}
+  try {
+    if (typeof window.closeRequestDetailsModal === 'function') window.closeRequestDetailsModal();
+  } catch (e) {}
+  try {
+    var crm = document.getElementById('createRequestModal');
+    if (crm) crm.remove();
+  } catch (e) {}
+  try {
+    ['codePromptOverlay', 'holdCodeOverlay', 'resetConfirmOverlay'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  } catch (e) {}
+  try {
+    document.body.style.overflow = '';
+  } catch (e) {}
+};
+
+/** Recovery hook: same as ffCloseGlobalBlockingOverlays (e.g. stuck chat z-index 200000). */
+window.ffUnstickAppUI = function () {
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') window.ffCloseGlobalBlockingOverlays();
+};
 
 function escapeHtmlDraft(text) {
   if (!text) return '';
@@ -21167,7 +21467,7 @@ function initializeResetButton() {
 function populateTasksAdminFilter(filterEl) {
   if (!filterEl) return;
   const currentVal = filterEl.value || 'all';
-  filterEl.innerHTML = '<option value="all">All tasks</option><option value="manager">Managers only</option><option value="technicians">All service providers</option>';
+  filterEl.innerHTML = '<option value="all">All staff types</option><option value="manager">Managers only</option><option value="technicians">All service providers</option>';
   if (typeof window.ffGetTechnicianTypes === 'function') {
     window.ffGetTechnicianTypes().then(types => {
       if (!types || !Array.isArray(types)) return;
@@ -21210,9 +21510,10 @@ function initializeTasksScreenButtons() {
           settingsBtn.style.display = ffHasAdminAccess() ? '' : 'none';
         }
         // Show/hide admin filter (only for admin)
+        const tasksStaffFilterWrap = document.getElementById('tasksStaffTypeFilterWrap');
         const filterEl = document.getElementById('tasksAdminFilter');
         if (filterEl) {
-          filterEl.style.display = ffHasAdminAccess() ? '' : 'none';
+          if (tasksStaffFilterWrap) tasksStaffFilterWrap.style.display = ffHasAdminAccess() ? 'inline-flex' : 'none';
           if (ffHasAdminAccess()) populateTasksAdminFilter(filterEl);
         }
       };
@@ -21663,7 +21964,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260408_inbox_upload_deeplink');
+            const m = await import('/chat.js?v=20260412_chat_toolbar_inbox_sizing');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -21990,6 +22291,7 @@ function initializeAppsPanel() {
   // Open panel
   function openAppsPanel() {
     appsOverlayBackdrop.style.display = 'block';
+    appsOverlayBackdrop.style.pointerEvents = 'auto';
     appsPanel.style.display = 'flex';
     lockBodyScroll();
     if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
@@ -22010,6 +22312,7 @@ function initializeAppsPanel() {
   function closeAppsPanel() {
     appsPanel.style.display = 'none';
     appsOverlayBackdrop.style.display = 'none';
+    appsOverlayBackdrop.style.pointerEvents = '';
     unlockBodyScroll();
   }
   
@@ -24435,6 +24738,9 @@ function initializeAppsPanel() {
       // Get optional fields from form
       const email = document.getElementById('staffEmail')?.value.trim() || '';
       const phone = document.getElementById('staffPhone')?.value.trim() || '';
+      const birthdayAdd = document.getElementById('staffAddBirthday')
+        ? String(document.getElementById('staffAddBirthday').value || '').trim()
+        : '';
       
       const managerType = getSelectedManagerTypeValue('staffManagerType');
       const roleFields = buildStaffRoleFields(role, managerType);
@@ -24484,6 +24790,10 @@ function initializeAppsPanel() {
             }
       };
       
+      if (birthdayAdd) {
+        newStaffMember.birthday = birthdayAdd;
+      }
+      
       // Add to staff store and save
       staffStore.staff.push(newStaffMember);
       ffSaveStaffStore(staffStore);
@@ -24496,6 +24806,7 @@ function initializeAppsPanel() {
       if (document.getElementById('staffRole')) document.getElementById('staffRole').value = '';
       if (document.getElementById('staffManagerType')) document.getElementById('staffManagerType').value = 'manager';
       if (document.getElementById('staffPin')) document.getElementById('staffPin').value = '';
+      if (document.getElementById('staffAddBirthday')) document.getElementById('staffAddBirthday').value = '';
       toggleStaffRoleSections('');
       
       // Re-render left sidebar list immediately
@@ -33802,46 +34113,151 @@ function hookSettingsGuard_DISABLED(){
     }
     
     
-    /* Tasks gear icon - round button matching CHAT/INBOX (same component) */
-    #btnTasksSettings {
+    /* Tasks tab row — match Tickets / Inbox / Media thin toolbar */
+    #tasksScreen .tasks-tabbar {
+      display: flex;
+      align-items: stretch;
+      justify-content: space-between;
+      padding: 2px 20px 0;
+      min-height: 40px;
+      box-sizing: border-box;
+      gap: 12px;
+      flex-wrap: nowrap;
+      border-bottom: 1px solid #e5e7eb;
+      background: #fff;
+      pointer-events: auto;
+      z-index: 301;
+      flex-shrink: 0;
+    }
+    @media (max-width: 900px) {
+      #tasksScreen .tasks-tabbar {
+        flex-wrap: wrap;
+      }
+    }
+    #tasksScreen .tasks-tabs-left {
+      display: flex;
+      gap: 0;
+      flex: 1;
+      align-items: stretch;
+      min-width: 0;
+      flex-wrap: nowrap;
+    }
+    @media (max-width: 900px) {
+      #tasksScreen .tasks-tabs-left {
+        flex-wrap: wrap;
+      }
+    }
+    #tasksScreen .tasks-tabs-right {
+      display: flex;
+      gap: 8px;
+      margin-left: auto;
+      flex-shrink: 0;
+      align-items: center;
+      align-self: center;
+    }
+    /* Staff type filter — label on the left, select on the right (same rhythm as Tickets TIME PERIOD) */
+    #tasksScreen .tasks-staff-type-filter-wrap {
+      display: none;
+      flex-direction: row;
+      align-items: center;
+      justify-content: flex-start;
+      flex-wrap: nowrap;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    #tasksScreen .tasks-staff-type-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748b;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      margin: 0;
+      line-height: 1.2;
+    }
+    /* Native select — same footprint as Inbox / Tickets filters */
+    #tasksScreen #tasksAdminFilter {
+      font-size: 10px !important;
+      color: #374151 !important;
+      background: #fff !important;
+      border: 1px solid #e5e7eb !important;
+      border-radius: 8px !important;
+      padding: 8px 12px 8px 10px !important;
+      min-height: 36px !important;
+      height: 36px !important;
+      box-sizing: border-box !important;
+      min-width: 140px;
+      max-width: min(200px, 36vw) !important;
+      cursor: pointer !important;
+      line-height: 1.2 !important;
+      appearance: auto !important;
+      pointer-events: auto;
+      z-index: 301;
+    }
+    /* Gear + reset — 36px circles, hovers in CSS */
+    #tasksScreen #btnTasksSettings {
+      display: flex;
+      align-items: center;
+      justify-content: center;
       width: 36px;
       height: 36px;
       min-width: 36px;
       min-height: 36px;
       padding: 0;
+      border: 1px solid #e5e7eb;
       border-radius: 50%;
-    }
-    
-    #btnTasksSettings:hover {
-      transform: none;
-    }
-    
-    /* Tasks tab row layout */
-    .tasks-tabbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    
-    .tasks-tabs-left {
-      display: flex;
-      gap: 18px;
-      flex: 1;
-    }
-    
-    .tasks-tabs-right {
-      display: flex;
-      gap: 10px;
-      margin-left: 16px;
-      margin-right: 12px;
+      background: #fff;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 301;
       flex-shrink: 0;
     }
-    
-    /* Tasks tabs styling - inactive tabs */
-    .tasks-tab {
+    #tasksScreen #btnTasksSettings:hover {
+      background: #f3f4f6 !important;
+      transform: none;
+    }
+    #tasksScreen #reset-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      min-width: 36px;
+      min-height: 36px;
+      border: 1px solid rgba(180, 0, 0, 0.45);
+      border-radius: 50%;
+      background: #fff;
+      cursor: pointer;
+      padding: 0;
+      pointer-events: auto;
+      z-index: 301;
+      flex-shrink: 0;
+    }
+    #tasksScreen #reset-btn:hover {
+      background: #fff5f5 !important;
+    }
+    /* Tasks tabs — same rhythm as #ticketsScreen .tickets-tab */
+    #tasksScreen .tasks-tab {
+      flex: 1;
+      padding: 8px 14px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
       color: #374151 !important;
-      font-weight: 500 !important;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      pointer-events: auto;
+      z-index: 0;
       opacity: 1 !important;
+      box-sizing: border-box;
+      min-height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      position: relative;
     }
     
     /* Tasks tabs badges stay readable on all tabs */
@@ -33855,6 +34271,7 @@ function hookSettingsGuard_DISABLED(){
       color: #7c3aed !important;
       font-weight: 500 !important;
       opacity: 1 !important;
+      z-index: 1 !important;
     }
     
     /* Tasks tabs active - keep badge numbers white */
@@ -34183,6 +34600,21 @@ function hookSettingsGuard_DISABLED(){
       font-weight: 400;
       color: #374151;
     }
+    /* MY LIST / PENDING empty state: same classes as Queue (.ff-queue-empty-*) — #tasksScreen div { font-size:10px } was shrinking title/sub; match Queue exactly */
+    #tasksScreen .ff-queue-empty-title {
+      font-size: 15px !important;
+      font-weight: 700 !important;
+      color: #374151 !important;
+      margin-bottom: 8px !important;
+      letter-spacing: 0.02em !important;
+    }
+    #tasksScreen .ff-queue-empty-sub {
+      font-size: 13px !important;
+      font-weight: 400 !important;
+      color: #9ca3af !important;
+      line-height: 1.45 !important;
+      max-width: 300px;
+    }
     
     #tasksScreen .tasks-modal-header {
       display: flex;
@@ -34304,11 +34736,14 @@ function hookSettingsGuard_DISABLED(){
       min-height: 240px;
     }
     
+    /* Match Queue column headers (.wrap .grid .col h2 — Available / In service) */
     #tasksScreen .tasks-col h2 {
       margin: 2px 0 10px;
       font-size: 15px;
-      color: #6b7280;
-      letter-spacing: 0.4px;
+      color: var(--sub);
+      letter-spacing: 0.02em;
+      font-weight: 600;
+      text-transform: none;
     }
     
     #tasksScreen .tasks-list {
@@ -34393,25 +34828,28 @@ function hookSettingsGuard_DISABLED(){
       <button id="btnTasksBack" class="btn-pill" style="pointer-events:auto;z-index:301;">BACK</button>
     </div>
     
-    <!-- Tab row -->
-    <div class="tasks-tabbar" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e5e7eb;background:#f9fafb;pointer-events:auto;z-index:301;">
-      <div class="tasks-tabs-left" style="display:flex;gap:18px;flex:1;">
-        <button class="tasks-tab" data-tab="opening" onclick="console.log('TAB CLICKED:', 'opening'); setTasksTab('opening')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Opening<span class="ff-tab-badge" data-ff-badge="opening"></span></button>
-        <button class="tasks-tab" data-tab="closing" onclick="console.log('TAB CLICKED:', 'closing'); setTasksTab('closing')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Closing<span class="ff-tab-badge" data-ff-badge="closing"></span></button>
-        <button class="tasks-tab" data-tab="weekly" onclick="console.log('TAB CLICKED:', 'weekly'); setTasksTab('weekly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Weekly<span class="ff-tab-badge" data-ff-badge="weekly"></span></button>
-        <button class="tasks-tab" data-tab="monthly" onclick="console.log('TAB CLICKED:', 'monthly'); setTasksTab('monthly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Monthly<span class="ff-tab-badge" data-ff-badge="monthly"></span></button>
-        <button class="tasks-tab" data-tab="yearly" onclick="console.log('TAB CLICKED:', 'yearly'); setTasksTab('yearly')" style="flex:1;padding:12px 16px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;pointer-events:auto;z-index:302;">Yearly<span class="ff-tab-badge" data-ff-badge="yearly"></span></button>
+    <!-- Tab row (thin toolbar — same footprint as Tickets / Inbox / Media) -->
+    <div class="tasks-tabbar">
+      <div class="tasks-tabs-left">
+        <button type="button" class="tasks-tab" data-tab="opening" onclick="console.log('TAB CLICKED:', 'opening'); setTasksTab('opening')">Opening<span class="ff-tab-badge" data-ff-badge="opening"></span></button>
+        <button type="button" class="tasks-tab" data-tab="closing" onclick="console.log('TAB CLICKED:', 'closing'); setTasksTab('closing')">Closing<span class="ff-tab-badge" data-ff-badge="closing"></span></button>
+        <button type="button" class="tasks-tab" data-tab="weekly" onclick="console.log('TAB CLICKED:', 'weekly'); setTasksTab('weekly')">Weekly<span class="ff-tab-badge" data-ff-badge="weekly"></span></button>
+        <button type="button" class="tasks-tab" data-tab="monthly" onclick="console.log('TAB CLICKED:', 'monthly'); setTasksTab('monthly')">Monthly<span class="ff-tab-badge" data-ff-badge="monthly"></span></button>
+        <button type="button" class="tasks-tab" data-tab="yearly" onclick="console.log('TAB CLICKED:', 'yearly'); setTasksTab('yearly')">Yearly<span class="ff-tab-badge" data-ff-badge="yearly"></span></button>
       </div>
-      <div class="tasks-tabs-right" style="display:flex;gap:10px;margin-left:16px;flex-shrink:0;align-items:center;">
-        <select id="tasksAdminFilter" title="Filter tasks by assignee" style="display:none;padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-size:10px;color:#374151;cursor:pointer;min-width:140px;pointer-events:auto;z-index:301;">
-          <option value="all">All tasks</option>
-          <option value="manager">Managers only</option>
-          <option value="technicians">All service providers</option>
-        </select>
-        <button id="btnTasksSettings" aria-label="Manage Tasks" title="Manage Tasks" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;pointer-events:auto;z-index:301;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      <div class="tasks-tabs-right">
+        <div id="tasksStaffTypeFilterWrap" class="tasks-staff-type-filter-wrap" style="display:none;">
+          <span class="tasks-staff-type-label">STAFF TYPE</span>
+          <select id="tasksAdminFilter" title="Filter by staff type" aria-label="Staff type filter">
+            <option value="all">All staff types</option>
+            <option value="manager">Managers only</option>
+            <option value="technicians">All service providers</option>
+          </select>
+        </div>
+        <button type="button" id="btnTasksSettings" aria-label="Manage Tasks" title="Manage Tasks">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         </button>
-        <button id="reset-btn" onclick="resetTasksForCurrentTab()" title="Reset Tasks" style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;border:1px solid rgba(180,0,0,0.45);border-radius:50%;background:#fff;cursor:pointer;padding:0;pointer-events:auto;z-index:301;" onmouseover="this.style.background='#fff5f5'" onmouseout="this.style.background='#fff'"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(140,0,0,1)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>
+        <button type="button" id="reset-btn" onclick="resetTasksForCurrentTab()" title="Reset Tasks"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(140,0,0,1)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>
       </div>
     </div>
     
@@ -34834,6 +35272,12 @@ function hookSettingsGuard_DISABLED(){
               <input type="tel" id="staffPhone" placeholder="Phone number" style="width:100%;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
             </div>
             
+            <!-- Birthday (same YYYY-MM-DD format as Staff → Details edit) -->
+            <div>
+              <label style="display:block;margin-bottom:3px;font-size:11px;font-weight:500;color:#374151;">Birthday</label>
+              <input type="date" id="staffAddBirthday" style="width:100%;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
+            </div>
+            
             <!-- Role -->
             <div>
               <label style="display:block;margin-bottom:3px;font-size:11px;font-weight:500;color:#374151;">Role</label>
@@ -34954,21 +35398,21 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260412_inbox_rules_fix"></script>
+  <script type="module" src="/app.js?v=20260408_fullscreen_pointer_reset"></script>
   <script type="module" src="/schedule-helpers.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-ui.js?v=20260412_app_js_unify"></script>
-  <script type="module" src="/inbox.js?v=20260409_inbox_mine_filters"></script>
-  <script type="module" src="/chat.js?v=20260408_inbox_upload_deeplink"></script>
+  <script type="module" src="/inbox.js?v=20260408_inbox_pointer_events_reset"></script>
+  <script type="module" src="/chat.js?v=20260412_chat_toolbar_inbox_sizing"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-documents.js?v=20260412_doc_meta_edit"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260412_staffcall_accept_ui"></script>
   <script type="module" src="/settings-cloud.js?v=20260412_app_js_unify"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/tickets.js?v=20260402_tickets_boot_cover"></script>
+  <script type="module" src="/tickets.js?v=20260412_ticket_details_close_purple"></script>
   <script type="module" src="/media-upload.js?v=20260412_app_js_unify"></script>
 
   <!-- PIN Modal -->
@@ -35018,12 +35462,13 @@ function hookSettingsGuard_DISABLED(){
     .inbox-screen {
       display: none;
       position: fixed;
-      top: 50px;
+      top: var(--header-h, 60px);
       left: 0;
       right: 0;
       bottom: 0;
       background: #fff;
-      z-index: 100;
+      /* Above Media/Training modals (~100020), password modal (100000), task-info overlay (99999), Apps (100002) */
+      z-index: 100200;
       flex-direction: column;
       pointer-events: auto;
     }
@@ -35033,6 +35478,13 @@ function hookSettingsGuard_DISABLED(){
       display: flex;
       align-items: center;
     }
+    /* Flush tab underline to the row divider (same as Tickets / Tasks) */
+    #inboxScreen #inboxTabs.inbox-tabbar-inner {
+      align-items: stretch !important;
+    }
+    #inboxScreen #inboxSettingsBtn {
+      align-self: center !important;
+    }
     /* Hide tabs for technician view */
     .inbox-tabbar.hidden {
       display: none !important;
@@ -35041,8 +35493,58 @@ function hookSettingsGuard_DISABLED(){
     .inbox-view-switcher {
       /* display controlled by JS: flex for manager/admin, none for technician */
     }
-    .inbox-view-btn {
-      transition: background 0.2s, color 0.2s;
+    /* Match Tickets / Media toolbar row: thin bar */
+    #inboxScreen .inbox-view-switcher-toolbar {
+      padding: 2px 20px !important;
+      gap: 12px !important;
+      align-items: center !important;
+    }
+    #inboxScreen .inbox-view-btn-toolbar {
+      padding: 8px 14px !important;
+      font-size: 13px !important;
+      font-weight: 500 !important;
+      min-height: 36px !important;
+      height: 36px !important;
+      box-sizing: border-box !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+    }
+    #inboxScreen .inbox-filter-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748b;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      margin: 0;
+      flex-shrink: 0;
+    }
+    /* Native select — same footprint as Tickets TIME PERIOD / EMPLOYEE */
+    #inboxScreen #inboxStaffFilterSelect {
+      font-size: 10px !important;
+      color: #374151 !important;
+      background: #fff !important;
+      border: 1px solid #e5e7eb !important;
+      border-radius: 8px !important;
+      padding: 8px 12px 8px 10px !important;
+      min-height: 36px !important;
+      height: 36px !important;
+      box-sizing: border-box !important;
+      max-width: min(200px, 36vw) !important;
+      cursor: pointer !important;
+      line-height: 1.2 !important;
+      appearance: auto !important;
+    }
+    #inboxScreen .inbox-tabbar-inner {
+      background: #fff !important;
+      padding: 2px 20px 0 !important;
+      border-bottom: 1px solid #e5e7eb !important;
+    }
+    @media (max-width: 900px) {
+      #inboxScreen #inboxViewSwitcher.inbox-view-switcher-toolbar {
+        flex-wrap: wrap !important;
+      }
     }
     .inbox-view-btn.active {
       background: #7c3aed !important;
@@ -35060,20 +35562,28 @@ function hookSettingsGuard_DISABLED(){
 
     .inbox-tab {
       flex: 1;
-      padding: 12px 16px;
+      padding: 8px 14px;
       border: none;
       background: transparent;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 500;
-      color: #666;
+      color: #374151;
       border-bottom: 2px solid transparent;
-      transition: all 0.2s;
+      margin-bottom: -1px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      position: relative;
+      z-index: 0;
+      transition: color 0.2s, border-color 0.2s;
     }
     
     .inbox-tab.active {
       color: #7c3aed;
       border-bottom-color: #7c3aed;
+      z-index: 1;
     }
     
     .inbox-tab:hover:not(.active) {
@@ -35111,37 +35621,76 @@ function hookSettingsGuard_DISABLED(){
 </style>
 
 <!-- Tickets Screen -->
-<div id="ticketsScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f5f5f5;z-index:300;flex-direction:column;overflow:hidden;">
+<div id="ticketsScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f5f5f5;z-index:9850;flex-direction:column;overflow:hidden;pointer-events:auto;">
   <style>
-    /* Full-screen cover while profile + services + first Firestore snapshot load (avoids tab bar / list layout jumps). */
-    #ticketsBootCover {
-      display: none;
-      position: absolute;
-      inset: 0;
-      z-index: 20;
-      align-items: center;
-      justify-content: center;
-      background: #f5f5f5;
-      color: #9ca3af;
-      font-size: 15px;
-      pointer-events: none;
+    /* Full-screen app panel: must stay above stray overlays (below header 100003 and below modals 9999+). */
+    #ticketsScreen {
+      pointer-events: auto !important;
     }
-    #ticketsScreen.ff-tickets-boot #ticketsBootCover { display: flex; }
-    #ticketsScreen.ff-tickets-boot .tickets-tabs,
-    #ticketsScreen.ff-tickets-boot .tickets-body {
-      visibility: hidden;
-    }
-    /* ── Tickets Screen Layout ─────────────────────────────── */
+    /* ── Tickets Screen Layout (match Media toolbar row: thin bar, filters right) ── */
     #ticketsScreen .tickets-tabs {
-      display:flex; background:#fff; flex-shrink:0;
-      border-bottom:2px solid #e5e7eb; padding:0 16px;
+      display:flex; align-items:stretch; justify-content:flex-start;
+      flex-wrap:wrap; background:#fff; flex-shrink:0;
+      border-bottom:1px solid #e5e7eb; padding:2px 20px 0; gap:12px;
+      position: relative;
+      z-index: 2;
+    }
+    #ticketsScreen #ticketsTabsNav {
+      display:flex; align-items:stretch; flex-shrink:0; gap:0;
+    }
+    #ticketsScreen #ticketsToolbarRight {
+      display:flex; align-items:center; gap:8px; margin-left:auto;
+      flex-wrap:nowrap; min-width:0; flex:1; justify-content:flex-end;
+      align-self:center;
+    }
+    #ticketsScreen #ticketsTimePeriodWrap {
+      display:none;
+      align-items:center;
+      flex-shrink:1;
+      min-width:0;
+    }
+    #ticketsScreen .tickets-time-period-row {
+      display:flex; align-items:center; flex-wrap:nowrap; gap:6px 8px;
+      min-width:0;
+    }
+    #ticketsScreen .tickets-time-period-label {
+      font-size:10px; font-weight:600; color:#64748b;
+      letter-spacing:0.06em;
+      text-transform:uppercase;
+      white-space:nowrap;
+      margin:0;
+      flex-shrink:0;
+    }
+    #ticketsScreen #ticketsTimePeriodSelect,
+    #ticketsScreen #ticketsEmployeeSelect {
+      font-size:10px; color:#374151; background:#fff;
+      border:1px solid #e5e7eb; border-radius:8px;
+      padding:8px 12px 8px 10px; max-width:min(200px, 28vw);
+      min-height:36px; height:36px; box-sizing:border-box;
+      cursor:pointer; line-height:1.2;
+      appearance:auto;
+    }
+    #ticketsScreen #ticketsEmployeeSelect {
+      max-width:min(180px, 26vw);
+    }
+    #ticketsScreen .tickets-filters-sep {
+      width:1px; height:22px; background:#e5e7eb; flex-shrink:0; margin:0 2px;
+    }
+    #ticketsScreen #ticketsTimePeriodCustomWrap {
+      display:none; align-items:center; gap:4px; flex-wrap:nowrap;
+    }
+    #ticketsScreen #ticketsTimePeriodCustomWrap input[type="date"] {
+      font-size:10px; padding:6px 8px; border:1px solid #e5e7eb; border-radius:8px;
+      color:#374151; max-width:112px; min-height:36px; height:36px; box-sizing:border-box;
     }
     #ticketsScreen .tickets-tab {
-      padding:10px 16px; border:none; background:none; cursor:pointer;
+      padding:8px 14px; border:none; background:none; cursor:pointer;
       font-size:13px; font-weight:500; color:#374151;
-      border-bottom:2px solid transparent; margin-bottom:-2px;
+      border-bottom:2px solid transparent; margin-bottom:-1px;
+      display:flex; align-items:center; justify-content:center;
+      box-sizing:border-box; position:relative; z-index:0;
     }
-    #ticketsScreen .tickets-tab.active { color:#7c3aed; border-bottom-color:#7c3aed; font-weight:500; font-size:13px; }
+    #ticketsScreen .tickets-tab.active { color:#7c3aed; border-bottom-color:#7c3aed; font-weight:500; font-size:13px; z-index:1; }
     #ticketsScreen .tickets-body {
       flex:1; overflow-y:auto; padding:16px 12px;
       display:flex; flex-direction:column; align-items:center;
@@ -35196,6 +35745,12 @@ function hookSettingsGuard_DISABLED(){
     #ticketsScreen .ticket-edited-badge {
       display:inline-block; padding:2px 9px; border-radius:20px;
       font-size:10px; font-weight:700; background:#d97706; color:#fff;
+      letter-spacing:0.3px; text-transform:uppercase;
+    }
+    /* Customer approved price — shown under READY (same rhythm as Edited) */
+    #ticketsScreen .ticket-customer-approved-badge {
+      display:inline-block; padding:2px 9px; border-radius:20px;
+      font-size:10px; font-weight:700; background:#059669; color:#fff;
       letter-spacing:0.3px; text-transform:uppercase;
     }
 
@@ -35258,19 +35813,45 @@ function hookSettingsGuard_DISABLED(){
     }
   </style>
 
-  <div id="ticketsBootCover" aria-hidden="true">Loading…</div>
+  <!-- Tabs (left) | Filters + New + gear (right) — same bar rhythm as Media -->
+  <div class="tickets-tabs">
+    <div id="ticketsTabsNav">
+      <button class="tickets-tab active" data-tab="ready">Ready</button>
+      <button class="tickets-tab" data-tab="closed">Closed</button>
+      <button id="ticketsArchivedTab" class="tickets-tab" data-tab="archived" style="display:none;">Archived</button>
+    </div>
+    <div id="ticketsToolbarRight">
+    <div id="ticketsTimePeriodWrap">
+      <div class="tickets-time-period-row">
+        <span class="tickets-time-period-label">TIME PERIOD</span>
+          <select id="ticketsTimePeriodSelect" aria-label="Time period">
+            <option value="all">ALL DATES</option>
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="this_week">This week</option>
+            <option value="last_week">Last week</option>
+            <option value="last_two_weeks">Last two weeks</option>
+            <option value="custom">Custom time period</option>
+          </select>
+          <span id="ticketsTimePeriodCustomWrap">
+            <input type="date" id="ticketsFilterDateFrom" title="From">
+            <span style="color:#cbd5e1;font-size:10px;">–</span>
+            <input type="date" id="ticketsFilterDateTo" title="To">
+          </span>
+          <span class="tickets-filters-sep" aria-hidden="true"></span>
+          <span class="tickets-time-period-label">EMPLOYEE</span>
+          <select id="ticketsEmployeeSelect" aria-label="Employee">
+            <option value="all">ALL EMPLOYEES</option>
+          </select>
+      </div>
+    </div>
 
-  <!-- Tabs + actions row -->
-  <div class="tickets-tabs" style="gap:12px;">
-    <button class="tickets-tab active" data-tab="ready">Ready</button>
-    <button class="tickets-tab" data-tab="closed">Closed</button>
-    <button id="ticketsArchivedTab" class="tickets-tab" data-tab="archived" style="display:none;">Archived</button>
+    <button id="ticketsNewBtn" onclick="window.openTicketModal && window.openTicketModal()" style="padding:8px 18px;background:#7c3aed;color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(124,58,237,0.25);white-space:nowrap;min-height:36px;box-sizing:border-box;display:inline-flex;align-items:center;">+ New Ticket</button>
 
-    <button id="ticketsNewBtn" onclick="window.openTicketModal && window.openTicketModal()" style="padding:6px 16px;background:#7c3aed;color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(124,58,237,0.35);white-space:nowrap;margin-left:auto;margin-right:125px;">+ New Ticket</button>
-
-      <button id="ticketsManageServicesBtn" title="Manage Services" style="display:none;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;margin-left:auto;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
+      <button id="ticketsManageServicesBtn" title="Manage Services" style="display:none;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;flex-shrink:0;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l-.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
+    </div>
   </div>
 
   <!-- Body -->
@@ -35317,13 +35898,20 @@ function hookSettingsGuard_DISABLED(){
     <div id="ticketTotalBlock" style="display:none;margin-bottom:16px;padding:12px 16px;background:#166534;color:#fff;border-radius:8px;font-size:16px;font-weight:700;text-align:center;">
       Total: <span id="ticketTotalAmount">$0.00</span>
     </div>
+    <div id="ticketCustomerPriceApprovedWrap" style="display:none;margin-bottom:14px;padding:10px 12px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;">
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;color:#374151;cursor:pointer;margin:0;">
+        <input type="checkbox" id="ticketCustomerPriceApproved" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;flex-shrink:0;">
+        <span>Customer approved the price</span>
+      </label>
+    </div>
+    <div id="ticketAdminPriceApprovalBlock" style="display:none;margin-bottom:14px;"></div>
     <!-- Actions -->
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
       <button id="ticketAsIsBtn" style="display:none;padding:10px 16px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;" onclick="window.doSendAsIsFromModal && window.doSendAsIsFromModal()">AS IS</button>
-      <button id="ticketSendNewBtn" style="padding:10px 20px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Send to Front Desk</button>
-      <button id="ticketSaveBtn" style="display:none;padding:10px 20px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;" onclick="window.saveTicket && window.saveTicket()">Save</button>
+      <button id="ticketSendNewBtn" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Send to Front Desk</button>
+      <button id="ticketSaveBtn" style="display:none;padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;" onclick="window.saveTicket && window.saveTicket()">Save</button>
       <button id="ticketFinalizeBtn" style="display:none;padding:10px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Send to Front Desk</button>
-      <button id="ticketCloseBtn" style="display:none;padding:10px 16px;background:#059669;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Close Ticket</button>
+      <button id="ticketCloseBtn" style="display:none;padding:10px 16px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Close Ticket</button>
       <button id="ticketArchiveBtn" style="display:none;padding:10px 16px;border:1px solid #9ca3af;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;">Archive</button>
       <button id="ticketDeleteBtn" style="display:none;padding:10px 16px;border:1px solid #ef4444;border-radius:8px;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:14px;">Delete</button>
     </div>
@@ -35394,22 +35982,20 @@ function hookSettingsGuard_DISABLED(){
     }
   </style>
 
-  <!-- ── Top Bar (Thread List header) ─────────────────────────── -->
-  <div id="chatTopBar" style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:#fff;border-bottom:1px solid #e5e7eb;flex-shrink:0;">
-    <div style="display:flex;align-items:center;gap:10px;">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-      <h3 style="margin:0;font-size:16px;font-weight:700;color:#111827;">Chat</h3>
+  <!-- ── Top Bar (Thread List header) — same footprint as Inbox/Media/Tickets toolbars ── -->
+  <div id="chatTopBar">
+    <div class="chat-topbar-title-wrap">
+      <svg class="chat-topbar-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+      <h3 class="chat-topbar-title">Chat</h3>
     </div>
-    <div style="display:flex;align-items:center;gap:10px;">
-      <button id="chatSettingsGearBtn" onclick="window.openChatTemplatesSettings && window.openChatTemplatesSettings()"
+    <div class="chat-topbar-actions">
+      <button id="chatSettingsGearBtn" type="button" onclick="window.openChatTemplatesSettings && window.openChatTemplatesSettings()"
         title="Manage Chat Messages (Admin only)"
-        style="display:none;align-items:center;justify-content:center;width:36px;height:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;"
-        onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        style="display:none;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </button>
-      <button id="chatSendBtn" onclick="window.openSendMessageModal && window.openSendMessageModal()"
-        style="display:flex;align-items:center;gap:7px;padding:8px 18px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+      <button id="chatSendBtn" type="button" onclick="window.openSendMessageModal && window.openSendMessageModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         New Message
       </button>
     </div>
@@ -35919,26 +36505,20 @@ function hookSettingsGuard_DISABLED(){
 <!-- Inbox Screen (below main Top Bar: QUEUE, TASKS, INBOX, etc.) -->
 <div id="inboxScreen" class="inbox-screen">
   <!-- View switcher: My Requests | To handle (only for admin/manager) -->
-  <div id="inboxViewSwitcher" class="inbox-view-switcher" style="display:none;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 20px;border-bottom:1px solid #e5e7eb;background:#fff;pointer-events:auto;">
+  <div id="inboxViewSwitcher" class="inbox-view-switcher inbox-view-switcher-toolbar" style="display:none;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;flex-wrap:nowrap;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;pointer-events:auto;min-height:40px;box-sizing:border-box;">
     <div class="inbox-view-switcher-btns" style="display:flex;flex-shrink:0;align-items:center;gap:0;">
-    <button type="button" id="inboxViewMine" class="inbox-view-btn" data-inbox-view="mine" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('mine')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;pointer-events:auto;">My Requests</button>
-    <button type="button" id="inboxViewToHandle" class="inbox-view-btn active" data-inbox-view="to_handle" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('to_handle')" style="padding:10px 20px;font-size:13px;font-weight:500;border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;pointer-events:auto;">To handle</button>
+    <button type="button" id="inboxViewMine" class="inbox-view-btn inbox-view-btn-toolbar" data-inbox-view="mine" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('mine')" style="border:1px solid #e5e7eb;border-right:0;border-radius:8px 0 0 8px;background:#f9fafb;color:#6b7280;cursor:pointer;pointer-events:auto;">My Requests</button>
+    <button type="button" id="inboxViewToHandle" class="inbox-view-btn inbox-view-btn-toolbar active" data-inbox-view="to_handle" onclick="typeof setInboxViewMode==='function'&&setInboxViewMode('to_handle')" style="border:1px solid #e5e7eb;border-radius:0 8px 8px 0;background:#7c3aed;color:#fff;cursor:pointer;pointer-events:auto;">To handle</button>
     </div>
-    <div id="inboxFilterRow" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0;justify-content:flex-end;box-sizing:border-box;">
-      <label class="inbox-staff-filter-label" style="font-size:13px;color:#6b7280;white-space:nowrap;">Filter by staff</label>
-      <div id="inboxStaffFilterWrap" style="position:relative;">
-        <button type="button" id="inboxStaffFilterTrigger" aria-haspopup="listbox" aria-expanded="false" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;height:40px;min-height:40px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-size:13px;min-width:200px;max-width:240px;color:#374151;cursor:pointer;text-align:left;">
-          <span id="inboxStaffFilterLabel">All staff</span>
-          <span style="margin-left:8px;opacity:0.7;">▼</span>
-        </button>
-        <div id="inboxStaffFilterPanel" role="listbox" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:1000;max-height:240px;overflow-y:auto;">
-          <!-- options filled by JS -->
-        </div>
-      </div>
+    <div id="inboxFilterRow" style="display:none;align-items:center;gap:8px;flex-wrap:nowrap;flex-shrink:1;min-width:0;justify-content:flex-end;box-sizing:border-box;">
+      <span class="inbox-filter-label">FILTER BY STAFF</span>
+      <select id="inboxStaffFilterSelect" aria-label="Filter by staff">
+        <option value="">ALL STAFF</option>
+      </select>
     </div>
   </div>
   <!-- Tabs (only for managers/admins) — hidden by default, shown in setupInboxUI for manager/admin -->
-  <div id="inboxTabs" class="inbox-tabbar hidden" style="border-bottom:1px solid #e5e7eb;background:#f9fafb;padding:0 20px;">
+  <div id="inboxTabs" class="inbox-tabbar inbox-tabbar-inner hidden" style="border-bottom:1px solid #e5e7eb;background:#fff;padding:2px 20px 0;">
     <button class="inbox-tab active" data-inbox-tab="open" onclick="setInboxTab('open')">Open<span id="inboxOpenBadge" class="ff-home-tasks-badge"></span></button>
     <button class="inbox-tab" data-inbox-tab="needs_info" onclick="setInboxTab('needs_info')">Needs Info<span id="inboxNeedsInfoBadge" class="ff-home-tasks-badge"></span></button>
     <button class="inbox-tab" data-inbox-tab="approved" onclick="setInboxTab('approved')">Approved</button>

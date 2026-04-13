@@ -359,13 +359,15 @@ export async function diagnoseBirthdayReminders() {
       }
 
       const birthdayStaffIdStr = String(staff.id || "");
+      const senderIsBirthdayStaff =
+        createdByStaffId !== "" && birthdayStaffIdStr === createdByStaffId;
       let hasRecipient =
         memberRows.some(
           (m) =>
             ["admin", "owner", "manager"].includes(String(m.role || "").toLowerCase()) &&
             String(m.staffId || "") !== birthdayStaffIdStr
         ) ||
-        (["admin", "owner", "manager"].includes(role) && birthdayStaffIdStr !== createdByStaffId);
+        (["admin", "owner", "manager"].includes(role) && !senderIsBirthdayStaff);
 
       if (!hasRecipient) {
         row.skipReason = "no_inbox_recipient (you are the only manager / birthday staff)";
@@ -578,6 +580,25 @@ export async function runBirthdayChatRemindersOnce() {
         seenRecipientUids.add(u);
         return true;
       });
+      // Signed-in owner/admin/manager must get a "To handle" row when they are not the birthday
+      // staff member — even if they are missing from salons/{id}/members (only other admins listed).
+      const rlSender = String(role).toLowerCase();
+      const senderIsBirthdayStaff =
+        createdByStaffId !== "" && birthdayStaffIdStr === createdByStaffId;
+      if (
+        ["admin", "owner", "manager"].includes(rlSender) &&
+        !senderIsBirthdayStaff &&
+        senderUid &&
+        !seenRecipientUids.has(senderUid)
+      ) {
+        recipients.push({
+          uid: senderUid,
+          staffId: createdByStaffId,
+          name: senderName,
+          role: rlSender,
+        });
+        seenRecipientUids.add(senderUid);
+      }
       if (recipients.length === 0) {
         const rl = String(role).toLowerCase();
         if (["admin", "owner", "manager"].includes(rl) && birthdayStaffIdStr !== createdByStaffId) {

@@ -8358,13 +8358,13 @@ function setTasksTab(tabName) {
     // Render two-column layout
     contentContainer.innerHTML = `
       <div class="tasks-col">
-        <h2>MY LIST</h2>
+        <h2>My list</h2>
         <div class="tasks-list">
           <div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">No tasks yet</div>
         </div>
       </div>
       <div class="tasks-col">
-        <h2>PENDING</h2>
+        <h2>Pending</h2>
         <div class="tasks-list">
           <div style="padding:20px;text-align:center;color:#6b7280;font-size:14px;">Pending (coming soon)</div>
         </div>
@@ -24033,11 +24033,14 @@ function hookSettingsGuard_DISABLED(){
       min-height: 240px;
     }
     
+    /* Match Queue column headers (.wrap .grid .col h2 — Available / In service) */
     #tasksScreen .tasks-col h2 {
       margin: 2px 0 10px;
       font-size: 15px;
-      color: #6b7280;
-      letter-spacing: 0.4px;
+      color: var(--sub);
+      letter-spacing: 0.02em;
+      font-weight: 600;
+      text-transform: none;
     }
     
     #tasksScreen .tasks-list {

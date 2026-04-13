@@ -1545,6 +1545,11 @@ async function saveMarkPosted() {
 // =====================
 
 export async function goToMedia() {
+  if (typeof window.ffCloseGlobalBlockingOverlays === "function") {
+    try {
+      window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
   const tasksScreen = document.getElementById("tasksScreen");
   const inboxScreen = document.getElementById("inboxScreen");
   const chatScreen = document.getElementById("chatScreen");

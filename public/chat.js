@@ -107,6 +107,11 @@ function renderChatHeaderForRole(role) {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 async function goToChat() {
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try {
+      window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
   if (typeof window.closeStaffMembersModal === 'function') {
     window.closeStaffMembersModal();
   }

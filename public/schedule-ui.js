@@ -3958,6 +3958,11 @@ export async function goToSchedule() {
     return;
   }
 
+  if (typeof window.ffCloseGlobalBlockingOverlays === "function") {
+    try {
+      window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
   if (typeof window.closeStaffMembersModal === "function") {
     window.closeStaffMembersModal();
   }

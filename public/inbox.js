@@ -365,7 +365,18 @@ export function goToInbox(onReady) {
   if (typeof window.closeStaffMembersModal === 'function') {
     window.closeStaffMembersModal();
   }
-  
+  // Close Settings, History, Tasks info, Media upload, password modal, Apps, orphaned inbox modals, etc.
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    window.ffCloseGlobalBlockingOverlays();
+  } else {
+    try {
+      const appsBd = document.getElementById('appsOverlayBackdrop');
+      const appsPn = document.getElementById('appsPanel');
+      if (appsBd) appsBd.style.display = 'none';
+      if (appsPn) appsPn.style.display = 'none';
+    } catch (_) {}
+  }
+
   const tasksScreen = document.getElementById('tasksScreen');
   const ownerView = document.getElementById('owner-view');
   const joinBar = document.querySelector('.joinBar');
@@ -393,9 +404,17 @@ export function goToInbox(onReady) {
   if (mediaScreen) mediaScreen.style.display = 'none';
   const trainingScreen = document.getElementById('trainingScreen');
   if (trainingScreen) trainingScreen.style.display = 'none';
+  const ticketsScreenNav = document.getElementById('ticketsScreen');
+  if (ticketsScreenNav) ticketsScreenNav.style.display = 'none';
+  const scheduleScreenNav = document.getElementById('scheduleScreen');
+  if (scheduleScreenNav) scheduleScreenNav.style.display = 'none';
   
   // Show inbox shell but hide content until ready (avoids flash of empty "My Requests")
-  if (inboxScreen) inboxScreen.style.display = 'flex';
+  if (inboxScreen) {
+    inboxScreen.style.display = 'flex';
+    /* Undo stuck inline pointer-events:none from logout (app.js); without this, toolbars work but list area does not. */
+    inboxScreen.style.pointerEvents = '';
+  }
   if (inboxContent) inboxContent.style.opacity = '0';
   
   document.querySelectorAll('.btn-pill').forEach(btn => btn.classList.remove('active'));
@@ -594,23 +613,13 @@ function setupInboxUI() {
   }
 
   const filterRow = document.getElementById('inboxFilterRow');
-  const staffFilterTrigger = document.getElementById('inboxStaffFilterTrigger');
-  const staffFilterPanel = document.getElementById('inboxStaffFilterPanel');
+  const staffFilterSelect = document.getElementById('inboxStaffFilterSelect');
   if (filterRow) filterRow.style.display = (role === 'technician') ? 'none' : 'flex';
-  if (staffFilterTrigger && staffFilterPanel) {
-    staffFilterTrigger.onclick = (e) => {
-      e.stopPropagation();
-      const open = staffFilterPanel.style.display === 'block';
-      staffFilterPanel.style.display = open ? 'none' : 'block';
-      staffFilterTrigger.setAttribute('aria-expanded', !open);
+  if (staffFilterSelect) {
+    staffFilterSelect.onchange = () => {
+      inboxStaffFilterUid = staffFilterSelect.value || '';
+      renderInboxList();
     };
-    document.addEventListener('click', function closeStaffFilterPanel(e) {
-      const wrap = document.getElementById('inboxStaffFilterWrap');
-      if (staffFilterPanel.style.display === 'block' && wrap && !wrap.contains(e.target)) {
-        staffFilterPanel.style.display = 'none';
-        staffFilterTrigger.setAttribute('aria-expanded', 'false');
-      }
-    });
   }
 
   if (role === 'technician') {
@@ -975,10 +984,8 @@ function updateInboxBadges() {
 }
 
 function updateInboxStaffFilterOptions() {
-  const trigger = document.getElementById('inboxStaffFilterTrigger');
-  const labelEl = document.getElementById('inboxStaffFilterLabel');
-  const panel = document.getElementById('inboxStaffFilterPanel');
-  if (!trigger || !labelEl || !panel) return;
+  const sel = document.getElementById('inboxStaffFilterSelect');
+  if (!sel) return;
   const role = inboxUserRoleLc();
   if (role === "technician") return;
 
@@ -988,33 +995,32 @@ function updateInboxStaffFilterOptions() {
     const name = (req.forStaffName || req.createdByName || '').trim() || uid || 'Unknown';
     if (uid && !seen.has(uid)) seen.set(uid, name);
   });
-  const options = [['', 'All staff']];
+  const options = [['', 'ALL STAFF']];
   seen.forEach((name, uid) => options.push([uid, name]));
   const current = inboxStaffFilterUid;
   if (!options.some(([v]) => v === current)) inboxStaffFilterUid = '';
 
-  const currentLabel = options.find(([v]) => v === inboxStaffFilterUid)?.[1] || 'All staff';
-  labelEl.textContent = currentLabel;
-
-  panel.innerHTML = options.map(([val, lab]) => {
-    const isSelected = val === inboxStaffFilterUid;
-    const style = 'padding:10px 14px;cursor:pointer;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;' + (isSelected ? 'background:#f9fafb;font-weight:500;' : '');
-    return `<div role="option" data-value="${escapeHtml(val)}" aria-selected="${isSelected}" style="${style}">${isSelected ? '✓ ' : ''}${escapeHtml(lab)}</div>`;
-  }).join('');
-
-  panel.querySelectorAll('[role="option"]').forEach(opt => {
-    opt.onclick = (e) => {
-      e.stopPropagation();
-      inboxStaffFilterUid = opt.dataset.value || '';
-      labelEl.textContent = opt.textContent.replace(/^✓\s*/, '').trim();
-      panel.style.display = 'none';
-      trigger.setAttribute('aria-expanded', 'false');
-      renderInboxList();
-    };
-  });
+  sel.innerHTML = '';
+  for (const [val, lab] of options) {
+    const o = document.createElement('option');
+    o.value = val;
+    o.textContent = lab;
+    sel.appendChild(o);
+  }
+  sel.value = inboxStaffFilterUid;
 }
 
 function renderInboxList() {
+  try {
+    _renderInboxListInner();
+  } catch (e) {
+    console.error('[Inbox] renderInboxList failed', e);
+    const loadingEl = document.getElementById('inboxLoading');
+    if (loadingEl) loadingEl.style.display = 'none';
+  }
+}
+
+function _renderInboxListInner() {
   const listEl = document.getElementById('inboxList');
   if (!listEl) return;
 
@@ -1136,7 +1142,7 @@ function renderInboxList() {
     // Group body — collapsed by default
     const body = document.createElement('div');
     body.className = 'inbox-group-body';
-    body.style.cssText = 'display:none; margin-bottom:8px; display:flex; flex-direction:column; gap:8px;';
+    body.style.cssText = 'flex-direction:column;gap:8px;margin-bottom:8px;';
     body.style.display = 'none';
 
     requests.forEach(req => {
@@ -1163,7 +1169,8 @@ function createRequestCard(request) {
   card.onclick = () => showRequestDetails(request.id);
 
   const typeInfo = getRequestTypeInfo(request.type);
-  const statusClass = `inbox-status-${request.status.replace('_', '-')}`;
+  const statusStr = String(request.status != null ? request.status : 'open');
+  const statusClass = `inbox-status-${statusStr.replace(/_/g, '-')}`;
   const createdDate = request.createdAt?.toDate ? request.createdAt.toDate() : new Date();
   const dateStr = formatRelativeDate(createdDate);
 
@@ -1184,7 +1191,7 @@ function createRequestCard(request) {
           <div style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
               <span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;background:${badgeBg};color:${badgeColor};">${escapeHtml(badgeLabel)}</span>
-              <span class="inbox-status-badge ${statusClass}">${request.status.replace('_', ' ')}</span>
+              <span class="inbox-status-badge ${statusClass}">${statusStr.replace(/_/g, ' ')}</span>
             </div>
             <div style="font-size:14px;font-weight:600;color:#111827;line-height:1.45;margin-bottom:6px;">
               ${escapeHtml(ffDocAlertHumanSummary(request))}
@@ -1209,7 +1216,7 @@ function createRequestCard(request) {
       <div style="flex:1;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
           <span style="font-weight:600;font-size:14px;color:#111;">${typeInfo.label}</span>
-          <span class="inbox-status-badge ${statusClass}">${request.status.replace('_', ' ')}</span>
+          <span class="inbox-status-badge ${statusClass}">${statusStr.replace(/_/g, ' ')}</span>
           ${request.priority === 'urgent' ? '<span style="color:#ef4444;font-size:12px;">🔥 Urgent</span>' : ''}
         </div>
         <div style="font-size:13px;color:#6b7280;margin-bottom:8px;">
@@ -2949,7 +2956,8 @@ function showRequestDetails(requestId) {
   `;
   
   const typeInfo = getRequestTypeInfo(request.type);
-  const statusClass = `inbox-status-${request.status.replace('_', '-')}`;
+  const statusStrModal = String(request.status != null ? request.status : 'open');
+  const statusClass = `inbox-status-${statusStrModal.replace(/_/g, '-')}`;
   const createdDate = request.createdAt?.toDate ? request.createdAt.toDate() : new Date();
   const rd = request.data || {};
   const isDocAlert = request.type === 'document_expiring_soon' || request.type === 'document_expired';
@@ -3053,7 +3061,7 @@ function showRequestDetails(requestId) {
         <span style="font-size:28px;">${typeInfo.icon}</span>
         <div>
           <h2 style="margin:0;font-size:18px;font-weight:600;">${typeInfo.label}</h2>
-          <span class="inbox-status-badge ${statusClass}">${request.status.replace('_', ' ')}</span>
+          <span class="inbox-status-badge ${statusClass}">${statusStrModal.replace(/_/g, ' ')}</span>
         </div>
       </div>
       <button onclick="closeRequestDetailsModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#9ca3af;">&times;</button>
