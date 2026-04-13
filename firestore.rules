@@ -43,6 +43,12 @@ service cloud.firestore {
         && userRole() in ['admin', 'owner'];
     }
 
+    /** Ticket summary rows on close: same users doc roles the Tickets UI treats as staff/tech (not only manager/admin/owner). */
+    function canCreateTicketSummary(salonId) {
+      return belongsToSalon(salonId)
+        && userRole() in ['manager', 'admin', 'owner', 'technician', 'tech', 'staff'];
+    }
+
     function memberExists(salonId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/salons/$(salonId)/members/$(request.auth.uid));
@@ -587,6 +593,15 @@ service cloud.firestore {
         );
       allow delete: if belongsToSalon(salonId)
         && isAdminOrOwner(salonId);
+    }
+
+    // Historical rows when a ticket is closed (Summary layer; not deleted when live ticket is removed)
+    match /salons/{salonId}/ticketSummaries/{summaryId} {
+      allow read: if belongsToSalon(salonId);
+      allow create: if canCreateTicketSummary(salonId);
+      // Admin/owner may set source-deleted markers when permanently deleting the live ticket (same role as ticket delete)
+      allow update: if belongsToSalon(salonId) && isAdminOrOwner(salonId);
+      allow delete: if false;
     }
 
     // ===== SERVICE CATALOG =====

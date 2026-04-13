@@ -23831,42 +23831,26 @@ function initializeAppsPanel() {
         ]
       },
       {
+        title: 'Tickets',
+        permissions: [
+          {
+            key: 'tickets_summary',
+            label: 'Show Summary tab',
+            desc: 'Allow the Tickets Summary tab (aggregates). Owner and Admin always see it. Managers and other staff need this on (per staff profile).'
+          },
+          {
+            key: 'tickets_archived',
+            label: 'Show Archived tab',
+            desc: 'Allow the Archived tab for this staff member. Owner and Admin always see it; Managers and other staff need this on (per staff profile).'
+          }
+        ]
+      },
+      {
         title: 'Tasks',
         permissions: [
           { key: 'tasks_view', label: 'View tasks', desc: 'View task lists and schedules' },
           { key: 'tasks_use', label: 'Use tasks', desc: 'Select, complete, and work with tasks' },
           { key: 'tasks_manage', label: 'Manage tasks (templates)', desc: 'Edit task templates and schedules' }
-        ]
-      },
-      {
-        title: 'Schedule',
-        permissions: [
-          { key: 'schedule_edit', label: 'Edit schedule', desc: 'Add shifts, mark days OFF, drag shifts, and change hours on the team schedule board.' },
-          { key: 'schedule_view_all', label: 'View all schedules (read-only)', desc: 'See everyone’s shifts without editing. Use when “Edit schedule” is off.' },
-          { key: 'schedule_view_own', label: 'View own schedule only', desc: 'See only your own row on the board (read-only). Narrowest access.' }
-        ]
-      },
-      {
-        title: 'Staff',
-        permissions: [
-          { key: 'staff_view', label: 'View staff list', desc: 'View staff members' },
-          { key: 'staff_manage', label: 'Add/Edit/Archive/Re-activate staff', desc: 'Manage staff members' },
-          { key: 'staff_permissions_manage', label: 'Edit staff permissions', desc: 'Change permissions for other staff' }
-        ]
-      },
-      {
-        title: 'History',
-        permissions: [
-          { key: 'history_view', label: 'View history', desc: 'View activity history and logs' },
-          { key: 'history_export', label: 'Export history', desc: 'Export history data to a file' },
-          { key: 'history_clear', label: 'Clear history', desc: 'Clear all history entries' }
-        ]
-      },
-      {
-        title: 'Inventory',
-        permissions: [
-          { key: 'inventory_view', label: 'View inventory', desc: 'View inventory items' },
-          { key: 'inventory_manage', label: 'Manage inventory', desc: 'Add, edit, or remove inventory items' }
         ]
       },
       {
@@ -23908,9 +23892,40 @@ function initializeAppsPanel() {
         ]
       },
       {
+        title: 'Inventory',
+        permissions: [
+          { key: 'inventory_view', label: 'View inventory', desc: 'View inventory items' },
+          { key: 'inventory_manage', label: 'Manage inventory', desc: 'Add, edit, or remove inventory items' }
+        ]
+      },
+      {
+        title: 'Schedule',
+        permissions: [
+          { key: 'schedule_edit', label: 'Edit schedule', desc: 'Add shifts, mark days OFF, drag shifts, and change hours on the team schedule board.' },
+          { key: 'schedule_view_all', label: 'View all schedules (read-only)', desc: 'See everyone’s shifts without editing. Use when “Edit schedule” is off.' },
+          { key: 'schedule_view_own', label: 'View own schedule only', desc: 'See only your own row on the board (read-only). Narrowest access.' }
+        ]
+      },
+      {
         title: 'Settings',
         permissions: [
           { key: 'settings_manage', label: 'Manage general settings', desc: 'Edit app-wide settings and preferences' }
+        ]
+      },
+      {
+        title: 'Staff',
+        permissions: [
+          { key: 'staff_view', label: 'View staff list', desc: 'View staff members' },
+          { key: 'staff_manage', label: 'Add/Edit/Archive/Re-activate staff', desc: 'Manage staff members' },
+          { key: 'staff_permissions_manage', label: 'Edit staff permissions', desc: 'Change permissions for other staff' }
+        ]
+      },
+      {
+        title: 'History',
+        permissions: [
+          { key: 'history_view', label: 'View history', desc: 'View activity history and logs' },
+          { key: 'history_export', label: 'Export history', desc: 'Export history data to a file' },
+          { key: 'history_clear', label: 'Clear history', desc: 'Clear all history entries' }
         ]
       }
     ];
@@ -23963,6 +23978,7 @@ function initializeAppsPanel() {
         if (typeof window.updateMediaScreenTabsForRole === 'function') window.updateMediaScreenTabsForRole();
         if (typeof window.refreshMediaWorksList === 'function') window.refreshMediaWorksList();
         if (typeof window.ffRefreshInboxNavVisibility === 'function') void window.ffRefreshInboxNavVisibility();
+        if (typeof window.ffRefreshTicketsTabVisibility === 'function') window.ffRefreshTicketsTabVisibility();
       };
     });
   }
@@ -35412,7 +35428,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/settings-cloud.js?v=20260412_app_js_unify"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/tickets.js?v=20260412_ticket_details_close_purple"></script>
+  <script type="module" src="/tickets.js?v=20260420_tickets_load_more"></script>
   <script type="module" src="/media-upload.js?v=20260412_app_js_unify"></script>
 
   <!-- PIN Modal -->
@@ -35646,12 +35662,12 @@ function hookSettingsGuard_DISABLED(){
     #ticketsScreen #ticketsTimePeriodWrap {
       display:none;
       align-items:center;
-      flex-shrink:1;
-      min-width:0;
+      flex-shrink:0;
+      min-width:auto;
     }
     #ticketsScreen .tickets-time-period-row {
       display:flex; align-items:center; flex-wrap:nowrap; gap:6px 8px;
-      min-width:0;
+      min-width:auto;
     }
     #ticketsScreen .tickets-time-period-label {
       font-size:10px; font-weight:600; color:#64748b;
@@ -35682,6 +35698,95 @@ function hookSettingsGuard_DISABLED(){
     #ticketsScreen #ticketsTimePeriodCustomWrap input[type="date"] {
       font-size:10px; padding:6px 8px; border:1px solid #e5e7eb; border-radius:8px;
       color:#374151; max-width:112px; min-height:36px; height:36px; box-sizing:border-box;
+    }
+    #ticketsScreen #ticketsSummaryPanel {
+      width: 100%;
+      max-width: 1100px;
+      margin: 0 auto;
+      box-sizing: border-box;
+      align-self: stretch;
+    }
+    #ticketsScreen #ticketsSummaryEmpty.tickets-summary-state {
+      text-align: center;
+      padding: 48px 20px;
+      font-size: 15px;
+      line-height: 1.5;
+      max-width: 420px;
+      margin-left: auto;
+      margin-right: auto;
+      box-sizing: border-box;
+    }
+    #ticketsScreen #ticketsSummaryEmpty.tickets-summary-state--loading {
+      color: #64748b;
+    }
+    #ticketsScreen #ticketsSummaryEmpty.tickets-summary-state--empty {
+      color: #9ca3af;
+    }
+    #ticketsScreen .tickets-summary-table-wrap {
+      width: 100%;
+      max-width: 100%;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04);
+      overflow-x: auto;
+      overflow-y: visible;
+      -webkit-overflow-scrolling: touch;
+    }
+    #ticketsScreen .tickets-summary-table {
+      width: 100%;
+      min-width: 280px;
+      border-collapse: collapse;
+      font-size: 14px;
+      color: #374151;
+    }
+    #ticketsScreen .tickets-summary-table thead th {
+      text-align: left;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #64748b;
+      background: #f9fafb;
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      white-space: nowrap;
+    }
+    #ticketsScreen .tickets-summary-table thead th.tickets-summary-col-num {
+      text-align: right;
+    }
+    #ticketsScreen .tickets-summary-table tbody td {
+      padding: 14px 16px;
+      border-bottom: 1px solid #f3f4f6;
+      vertical-align: middle;
+    }
+    #ticketsScreen .tickets-summary-table tbody td:first-child {
+      text-align: left;
+      font-weight: 500;
+      color: #111827;
+    }
+    #ticketsScreen .tickets-summary-table tbody td.tickets-summary-col-num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #111827;
+    }
+    #ticketsScreen .tickets-summary-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+    #ticketsScreen .tickets-summary-table tfoot tr.tickets-summary-total-row td {
+      padding: 14px 16px;
+      font-weight: 700;
+      font-size: 14px;
+      color: #111827;
+      background: #f5f3ff;
+      border-top: 2px solid #e9d5ff;
+    }
+    #ticketsScreen .tickets-summary-table tfoot tr.tickets-summary-total-row td:first-child {
+      text-align: left;
+      color: #5b21b6;
+    }
+    #ticketsScreen .tickets-summary-table tfoot tr.tickets-summary-total-row td.tickets-summary-col-num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
     }
     #ticketsScreen .tickets-tab {
       padding:8px 14px; border:none; background:none; cursor:pointer;
@@ -35819,6 +35924,7 @@ function hookSettingsGuard_DISABLED(){
       <button class="tickets-tab active" data-tab="ready">Ready</button>
       <button class="tickets-tab" data-tab="closed">Closed</button>
       <button id="ticketsArchivedTab" class="tickets-tab" data-tab="archived" style="display:none;">Archived</button>
+      <button id="ticketsSummaryTab" class="tickets-tab" data-tab="summary">Summary</button>
     </div>
     <div id="ticketsToolbarRight">
     <div id="ticketsTimePeriodWrap">
@@ -35858,7 +35964,27 @@ function hookSettingsGuard_DISABLED(){
   <div class="tickets-body">
     <div id="ticketsLoading" style="text-align:center;padding:40px;color:#9ca3af;">Loading…</div>
     <div id="ticketsEmpty" style="display:none;text-align:center;padding:40px;color:#9ca3af;font-size:15px;">No tickets here yet.</div>
+    <div id="ticketsSummaryPanel" style="display:none;padding:16px 12px 24px;">
+      <div id="ticketsSummaryEmpty" class="tickets-summary-state" style="display:none;" aria-live="polite"></div>
+      <div class="tickets-summary-table-wrap">
+        <table class="tickets-summary-table" role="table" aria-label="Tickets summary">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col" class="tickets-summary-col-num">Tickets</th>
+              <th scope="col" class="tickets-summary-col-num">Services</th>
+              <th scope="col" class="tickets-summary-col-num">Total</th>
+            </tr>
+          </thead>
+          <tbody id="ticketsSummaryTableBody"></tbody>
+          <tfoot id="ticketsSummaryTableFoot"></tfoot>
+        </table>
+      </div>
+    </div>
     <div id="ticketsList"></div>
+    <div id="ticketsLoadMoreWrap" style="display:none;text-align:center;padding:12px 16px 20px;">
+      <button type="button" id="ticketsLoadMoreBtn" style="padding:10px 22px;background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;min-height:40px;box-sizing:border-box;">Load more</button>
+    </div>
   </div>
 </div>
 
