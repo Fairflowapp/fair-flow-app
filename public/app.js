@@ -1234,6 +1234,9 @@ async function loadUserRoleAndShowView(user) {
               joinBtn.style.pointerEvents = 'auto';
               joinBtn.disabled = false;
               joinBtn.removeAttribute('disabled');
+              if (typeof window.ffApplyQueueReadOnlyMode === "function") {
+                window.ffApplyQueueReadOnlyMode();
+              }
               console.log("[Auth] JOIN button reinitialized after owner view shown");
             }
           }
@@ -2247,6 +2250,9 @@ function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, perform
 
 // Safely move a task into the Pending list (tab-specific storage)
 function moveTaskToPending(taskId, workerName) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     console.log(`%c[MOVE TO PENDING] START`, 'color:blue;font-weight:bold', { taskId, workerName });
     const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
     
@@ -2470,6 +2476,9 @@ window.moveTaskToPending = moveTaskToPending;
 
 // Mark task as done (tab-specific storage)
 function markTaskDone(taskId, workerName) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     console.log(`%c[MARK DONE] START`, 'color:orange;font-weight:bold', { taskId, workerName });
     
     // Determine current tab
@@ -2745,6 +2754,9 @@ let __pendingTaskId = null;
 let pinModalDoneTaskId = null;
 
 function openPinModal(taskId) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     __pendingTaskId = taskId;
     pinModalDoneTaskId = null;
     window.__ff_pin_identify_only = false;
@@ -2760,6 +2772,9 @@ function openPinModal(taskId) {
 }
 
 function openPinModalForDone(taskId) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     pinModalDoneTaskId = taskId;
     __pendingTaskId = null;
     window.__ff_pin_identify_only = false;
@@ -2858,6 +2873,10 @@ async function validatePinAndMove() {
     }
     
     if (__pendingTaskId) {
+        if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+            closePinModal();
+            return;
+        }
         moveTaskToPending(__pendingTaskId, matchedName);
     }
 
@@ -3327,6 +3346,9 @@ async function validateResetPin(pin) {
 // Perform the actual reset (called after PIN validation)
 // STATE ONLY: Clears progress/state, does NOT touch catalog or rebuild tasks
 window.doResetCurrentTab = function doResetCurrentTab() {
+    if (typeof window.ffCurrentUserHasTasksResetPermission === 'function' && !window.ffCurrentUserHasTasksResetPermission()) {
+        return;
+    }
     console.log("RESET: Performing STATE-ONLY reset for current tab");
 
     // 1) Resolve tab from window.currentTasksTab
@@ -3640,6 +3662,9 @@ window.doResetCurrentTab = function doResetCurrentTab() {
 
 // Reset tasks for current active tab - opens modals
 function resetTasksForCurrentTab() {
+    if (typeof window.ffCurrentUserHasTasksResetPermission === 'function' && !window.ffCurrentUserHasTasksResetPermission()) {
+        return;
+    }
     console.log("RESET: Opening confirmation modal");
 
     // Get current tab
