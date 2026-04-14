@@ -2909,6 +2909,10 @@ async function saveServiceFromForm() {
 // Navigation
 // =====================
 export function goToTickets() {
+  if (typeof window.ffCurrentUserHasTicketsViewPermission === 'function' && !window.ffCurrentUserHasTicketsViewPermission()) {
+    if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+    return;
+  }
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
     try {
       window.ffCloseGlobalBlockingOverlays();
@@ -2971,7 +2975,10 @@ export function goToTickets() {
 
   document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
   const ticketsBtn = document.getElementById('ticketsBtn');
-  if (ticketsBtn) ticketsBtn.classList.add('active');
+  if (ticketsBtn && typeof window.ffCurrentUserHasTicketsViewPermission === 'function' && window.ffCurrentUserHasTicketsViewPermission()) {
+    ticketsBtn.classList.add('active');
+  }
+  if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
 
   if (_ticketsDataReady && currentUserProfile) {
     enrichTicketsProfileFromMemberDoc()

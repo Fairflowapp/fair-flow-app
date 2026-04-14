@@ -222,12 +222,8 @@ async function mergeSalonStaffIntoUserProfile(profile) {
 
 function inboxCanViewInboxEval(profile) {
   if (!profile) return false;
-  const role = String(profile.role || "").toLowerCase();
-  if (role === "technician") return true;
   const p = profile.permissions || {};
-  if (p.inbox_view === false) return false;
-  if (p.inbox_manage === true || p.inbox_send === true || p.inbox_view === true) return true;
-  return inboxLegacyDeskRoleLc(role);
+  return p.inbox_view === true;
 }
 
 function inboxCanManageInboxEval(profile) {
@@ -270,6 +266,10 @@ export async function ffRefreshInboxNavVisibility() {
   if (!btn) return;
   if (!user) {
     btn.style.display = "";
+    return;
+  }
+  if (typeof window.ffUpdateMainNavTabVisibility === "function") {
+    window.ffUpdateMainNavTabVisibility();
     return;
   }
   try {
@@ -361,6 +361,11 @@ function getCreateRequestSelectedRecipients() {
 export function goToInbox(onReady) {
   console.log('[Inbox] Opening inbox');
 
+  if (typeof window.ffCurrentUserHasInboxViewPermission === 'function' && !window.ffCurrentUserHasInboxViewPermission()) {
+    if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+    return;
+  }
+
   // Staff Members modal uses z-index above main screens — close it so the Inbox view is actually visible
   if (typeof window.closeStaffMembersModal === 'function') {
     window.closeStaffMembersModal();
@@ -419,18 +424,21 @@ export function goToInbox(onReady) {
   
   document.querySelectorAll('.btn-pill').forEach(btn => btn.classList.remove('active'));
   const inboxBtn = document.getElementById('inboxBtn');
-  if (inboxBtn) inboxBtn.classList.add('active');
-  
+  if (inboxBtn && typeof window.ffCurrentUserHasInboxViewPermission === 'function' && window.ffCurrentUserHasInboxViewPermission()) {
+    inboxBtn.classList.add('active');
+  }
+
   loadCurrentUserProfile().then(() => {
     if (!inboxCanViewInbox()) {
       if (typeof showToast === "function") {
         showToast("You do not have permission to open Inbox.", "error");
       } else {
-        console.warn("[Inbox] Blocked: no inbox_view / send / manage");
+        console.warn("[Inbox] Blocked: inbox_view is not enabled for this profile");
       }
       if (inboxScreen) inboxScreen.style.display = "none";
       if (inboxContent) inboxContent.style.opacity = "1";
       if (inboxBtn) inboxBtn.classList.remove("active");
+      if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
       return;
     }
     if (!inboxCanManageInbox() && inboxCanSendRequests()) {
@@ -442,6 +450,7 @@ export function goToInbox(onReady) {
         loadInboxItems();
         // Show content when UI is ready and loading has started
         if (inboxContent) inboxContent.style.opacity = '1';
+        if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
         if (typeof onReady === 'function') {
           try {
             onReady();
