@@ -14,16 +14,19 @@
     var cs=document.getElementById('chatScreen');if(cs){cs.style.display='flex';cs.classList.remove('chat-mobile-open');}
     document.querySelectorAll('.btn-pill').forEach(function(b){b.classList.remove('active');});
     var cb=document.getElementById('chatBtn');if(cb)cb.classList.add('active');
-    var g=document.getElementById('chatSettingsGearBtn');if(g&&typeof ffHasAdminAccess==='function')g.style.display=ffHasAdminAccess()?'flex':'none';
+    var g=document.getElementById('chatSettingsGearBtn');if(g){var cm=typeof ffCurrentUserHasChatManagePermission==='function'?ffCurrentUserHasChatManagePermission():typeof ffHasAdminAccess==='function'&&ffHasAdminAccess();g.style.display=cm?'flex':'none';}
   };
   window.openChatTemplatesSettings = window.openChatTemplatesSettings || function() {
-    if(typeof ffHasAdminAccess==='function'&&!ffHasAdminAccess())return;
+    if(typeof ffCurrentUserHasChatManagePermission==='function'&&!ffCurrentUserHasChatManagePermission())return;
+    if(typeof ffCurrentUserHasChatManagePermission!=='function'&&typeof ffHasAdminAccess==='function'&&!ffHasAdminAccess())return;
     var m=document.getElementById('chatTemplatesModal');if(m)m.style.display='flex';
   };
   window.closeChatTemplatesModal = window.closeChatTemplatesModal || function() {
     var m=document.getElementById('chatTemplatesModal');if(m)m.style.display='none';
   };
   window._chatSettingsTab = window._chatSettingsTab || function(tab) {
+    if(typeof ffCurrentUserHasChatManagePermission==='function'&&!ffCurrentUserHasChatManagePermission())return;
+    if(typeof ffCurrentUserHasChatManagePermission!=='function'&&typeof ffHasAdminAccess==='function'&&!ffHasAdminAccess())return;
     document.querySelectorAll('.chat-settings-tab').forEach(function(b){b.classList.remove('active');});
     var t=document.getElementById('chatSettingsTab'+(tab==='templates'?'Templates':'Flows'));if(t)t.classList.add('active');
     var tp=document.getElementById('chatSettingsTemplatesPane');if(tp)tp.style.display=tab==='templates'?'flex':'none';
@@ -5051,6 +5054,9 @@ if (typeof document !== 'undefined') {
   document.addEventListener('ff-staff-cloud-updated', function() {
     if (typeof renderBrand === 'function') renderBrand();
     if (typeof ffApplyQueueViewGate === 'function') ffApplyQueueViewGate();
+    if (typeof window.ffScheduleRefreshPermissionChrome === 'function') window.ffScheduleRefreshPermissionChrome();
+    if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
+    if (typeof window.ffApplyHistoryActionButtonsVisibility === 'function') window.ffApplyHistoryActionButtonsVisibility();
     if (typeof ffRefreshTasksPermissionControls === 'function') ffRefreshTasksPermissionControls();
     if (typeof ffUpdateMainNavTabVisibility === 'function') ffUpdateMainNavTabVisibility();
     if (typeof updateQueueManagementUiVisibility === 'function') {
@@ -5458,6 +5464,18 @@ function ffCurrentUserHasTicketsViewPermission() {
 }
 window.ffCurrentUserHasTicketsViewPermission = ffCurrentUserHasTicketsViewPermission;
 
+/** Chat templates & flows (gear + settings modal): chat_manage === true, or admin session (ffHasAdminAccess). */
+function ffStaffHasChatManagePermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.chat_manage === true);
+}
+function ffCurrentUserHasChatManagePermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasChatManagePermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasChatManagePermission = ffCurrentUserHasChatManagePermission;
+
 /** Tasks: staff.permissions.tasks_view === true (top bar + Tasks screen). */
 function ffStaffHasTasksViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
@@ -5550,6 +5568,49 @@ function ffStaffHasHistoryViewPermission(staff) {
 function ffCurrentUserHasHistoryViewPermission() {
   return ffStaffHasHistoryViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
+window.ffCurrentUserHasHistoryViewPermission = ffCurrentUserHasHistoryViewPermission;
+
+/** History modal: Export — staff.permissions.history_export === true; admin session bypass. */
+function ffStaffHasHistoryExportPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.history_export === true);
+}
+function ffCurrentUserHasHistoryExportPermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasHistoryExportPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasHistoryExportPermission = ffCurrentUserHasHistoryExportPermission;
+
+/** History modal: Clear — staff.permissions.history_clear === true; admin session bypass. */
+function ffStaffHasHistoryClearPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.history_clear === true);
+}
+function ffCurrentUserHasHistoryClearPermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasHistoryClearPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasHistoryClearPermission = ffCurrentUserHasHistoryClearPermission;
+
+function ffApplyHistoryActionButtonsVisibility() {
+  var exp = document.getElementById('historyExportBtn');
+  var clr = document.getElementById('historyClearBtn');
+  var canEx = typeof ffCurrentUserHasHistoryExportPermission === 'function' && ffCurrentUserHasHistoryExportPermission();
+  var canCl = typeof ffCurrentUserHasHistoryClearPermission === 'function' && ffCurrentUserHasHistoryClearPermission();
+  if (exp) {
+    exp.style.display = canEx ? '' : 'none';
+    exp.disabled = !canEx;
+    exp.setAttribute('aria-hidden', canEx ? 'false' : 'true');
+  }
+  if (clr) {
+    clr.style.display = canCl ? '' : 'none';
+    clr.disabled = !canCl;
+    clr.setAttribute('aria-hidden', canCl ? 'false' : 'true');
+  }
+}
+window.ffApplyHistoryActionButtonsVisibility = ffApplyHistoryActionButtonsVisibility;
 
 /** Staff Members tile: staff.permissions.staff_view === true. */
 function ffStaffHasStaffViewPermission(staff) {
@@ -5736,6 +5797,36 @@ function ffUpdateAppsPanelPermissionVisibility() {
 window.ffUpdateMainNavTabVisibility = ffUpdateMainNavTabVisibility;
 window.ffUpdateAppsPanelPermissionVisibility = ffUpdateAppsPanelPermissionVisibility;
 
+/**
+ * True when a full-screen module is open that intentionally hides queue chrome (#joinBar + .wrap).
+ * ff-staff-cloud-updated calls ffApplyQueueViewGate(); without this check, queue UI is shown on top of Chat/Tasks/etc.
+ */
+function ffIsFullscreenModuleCoveringQueue() {
+  var ids = [
+    'chatScreen',
+    'tasksScreen',
+    'inboxScreen',
+    'mediaScreen',
+    'ticketsScreen',
+    'trainingScreen',
+    'scheduleScreen',
+    'userProfileScreen',
+    'manageQueueScreen'
+  ];
+  for (var i = 0; i < ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (!el) continue;
+    var inline = (el.style && el.style.display) ? String(el.style.display).trim() : '';
+    if (inline === 'none') continue;
+    if (inline !== '') return true;
+    try {
+      if (window.getComputedStyle(el).display !== 'none') return true;
+    } catch (e) {}
+  }
+  return false;
+}
+window.ffIsFullscreenModuleCoveringQueue = ffIsFullscreenModuleCoveringQueue;
+
 function ffApplyQueueViewGate() {
   const fullQueueView = ffCurrentUserHasQueueViewPermission();
   const joinOnlyPartial = ffCurrentUserIsQueueJoinOnlyPartialAccess();
@@ -5766,8 +5857,12 @@ function ffApplyQueueViewGate() {
     ownerView.appendChild(blocked);
   }
   if (allowed) {
-    if (joinBar) joinBar.style.display = 'flex';
-    if (wrapContent) wrapContent.style.display = 'block';
+    var deferQueueChrome =
+      typeof ffIsFullscreenModuleCoveringQueue === 'function' && ffIsFullscreenModuleCoveringQueue();
+    if (!deferQueueChrome) {
+      if (joinBar) joinBar.style.display = 'flex';
+      if (wrapContent) wrapContent.style.display = 'block';
+    }
     if (blocked) blocked.style.display = 'none';
     if (typeof updateQueueManagementUiVisibility === 'function') updateQueueManagementUiVisibility();
     if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
@@ -8071,9 +8166,13 @@ async function openSettingsSecure(){
   if (typeof window.initChatSettingsSection === 'function') {
     window.initChatSettingsSection();
   } else {
-    // Fallback: check role directly from localStorage/DOM
     const chatSection = document.getElementById('chatSettingsSection');
-    if (chatSection) chatSection.style.display = 'block';
+    if (chatSection) {
+      chatSection.style.display =
+        typeof ffCurrentUserHasChatManagePermission === 'function' && ffCurrentUserHasChatManagePermission()
+          ? 'block'
+          : 'none';
+    }
   }
   
   
@@ -15264,6 +15363,7 @@ function openHistoryModal() {
   if (workerSelect) {
     workerSelect.value = window.__historyWorkerFilter || 'all';
   }
+  if (typeof ffApplyHistoryActionButtonsVisibility === 'function') ffApplyHistoryActionButtonsVisibility();
   renderHistory();
 }
 
@@ -15331,6 +15431,10 @@ const historyClearBtn = document.getElementById('historyClearBtn');
 const historyCloseBtn2 = document.getElementById('historyCloseBtn2');
 
 function exportHistory() {
+  if (typeof ffCurrentUserHasHistoryExportPermission === 'function' && !ffCurrentUserHasHistoryExportPermission()) {
+    if (typeof showToast === 'function') showToast('You do not have permission to export history.', 'error');
+    return;
+  }
   const entries = getFilteredHistoryEntries({ syncWorkerOptions: false });
   
   const blob = new Blob([entries.map(entry => {
@@ -15351,6 +15455,10 @@ function exportHistory() {
 }
 
 function clearHistory() {
+  if (typeof ffCurrentUserHasHistoryClearPermission === 'function' && !ffCurrentUserHasHistoryClearPermission()) {
+    if (typeof showToast === 'function') showToast('You do not have permission to clear history.', 'error');
+    return;
+  }
   if (!confirm("Clear history?")) return;
   // Clear ffv24_log from localStorage
   localStorage.setItem('ffv24_log', JSON.stringify([]));
@@ -15367,6 +15475,10 @@ if (historyClearBtn) {
   historyClearBtn.addEventListener('click', () => {
     clearHistory();
   });
+}
+
+if (typeof ffApplyHistoryActionButtonsVisibility === 'function') {
+  ffApplyHistoryActionButtonsVisibility();
 }
 
 // Wire bottom Close button with guard flag
@@ -24819,6 +24931,12 @@ function initializeAppsPanel() {
         childKeys: ['inbox_send', 'inbox_manage']
       },
       {
+        groupTitle: 'Chat',
+        parentKey: 'chat_view',
+        parentMode: 'notFalse',
+        childKeys: ['chat_manage']
+      },
+      {
         groupTitle: 'Media',
         parentKey: 'media_view',
         parentMode: 'notFalse',
@@ -24923,6 +25041,11 @@ function initializeAppsPanel() {
             getValue: function (st) {
               return (st.permissions || {}).chat_view !== false;
             }
+          },
+          {
+            key: 'chat_manage',
+            label: 'Manage Chat settings',
+            desc: 'Edit message templates and guided flows (gear on Chat screen). Owner/Admin sessions always have access. Requires View Chat (tab visible).'
           }
         ]
       },
@@ -24947,7 +25070,11 @@ function initializeAppsPanel() {
             label: 'View Inbox',
             desc: 'Controls the Inbox tab in the top bar and access to the Inbox screen. When off, Inbox is hidden in navigation and inbox-related permissions below are unavailable.'
           },
-          { key: 'inbox_send', label: 'Send requests (My requests)', desc: 'Create requests and see your own; use for assistants who should not handle the team queue' },
+          {
+            key: 'inbox_send',
+            label: 'Send requests (My requests)',
+            desc: 'Create inbox requests and see your own outgoing items. Applies to Service providers (technicians) and desk staff. When off, they can still open Inbox if View Inbox is on (e.g. incoming updates) but cannot create new requests.'
+          },
           { key: 'inbox_manage', label: 'Manage inbox (To handle)', desc: 'See the full queue, approve/deny, filter by staff, and inbox settings' }
         ]
       },
@@ -25148,12 +25275,15 @@ function initializeAppsPanel() {
 
         function runPermissionVisibilitySideEffects() {
           if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
+          if (typeof window.ffScheduleRefreshPermissionChrome === 'function') window.ffScheduleRefreshPermissionChrome();
           if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
           if (typeof window.updateMediaScreenTabsForRole === 'function') window.updateMediaScreenTabsForRole();
           if (typeof window.refreshMediaWorksList === 'function') window.refreshMediaWorksList();
           if (typeof window.ffRefreshInboxNavVisibility === 'function') void window.ffRefreshInboxNavVisibility();
           if (typeof window.ffRefreshTicketsTabVisibility === 'function') window.ffRefreshTicketsTabVisibility();
           if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+          if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
+          if (typeof window.ffApplyHistoryActionButtonsVisibility === 'function') window.ffApplyHistoryActionButtonsVisibility();
         }
 
         if (parentRuleForKey) {
@@ -25169,6 +25299,12 @@ function initializeAppsPanel() {
         }
 
         if (permissionKey === 'queue_locked_view') {
+          renderPermissionsTab(staff);
+          runPermissionVisibilitySideEffects();
+          return;
+        }
+
+        if (permissionKey === 'chat_manage') {
           renderPermissionsTab(staff);
           runPermissionVisibilitySideEffects();
           return;
@@ -36677,8 +36813,8 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
-  <script type="module" src="/schedule-ui.js?v=20260412_app_js_unify"></script>
-  <script type="module" src="/inbox.js?v=20260412_inbox_view_strict"></script>
+  <script type="module" src="/schedule-ui.js?v=20260412_schedule_perm_chrome"></script>
+  <script type="module" src="/inbox.js?v=20260412_inbox_tech_staffcall_filter"></script>
   <script type="module" src="/chat.js?v=20260412_chat_toolbar_inbox_sizing"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-documents.js?v=20260412_doc_meta_edit"></script>
@@ -37374,7 +37510,7 @@ function hookSettingsGuard_DISABLED(){
     </div>
     <div class="chat-topbar-actions">
       <button id="chatSettingsGearBtn" type="button" onclick="window.openChatTemplatesSettings && window.openChatTemplatesSettings()"
-        title="Manage Chat Messages (Admin only)"
+        title="Manage Chat templates and flows"
         style="display:none;">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </button>

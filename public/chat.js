@@ -96,13 +96,22 @@ function fmtTime(ts) {
   return d.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
 }
 
-// ─── Header (gear) visibility by role ─────────────────────────────────────────
-// Uses chatUserProfile.role (Firestore). Fallback: ff_is_admin_cached from app.js (set on login).
+// ─── Header (gear): ffCurrentUserHasChatManagePermission (staff chat_manage + admin session) ───
 function renderChatHeaderForRole(role) {
   const gear = document.getElementById('chatSettingsGearBtn');
   if (!gear) return;
-  const showGear = isAdmin(role) || (role == null && window.ff_is_admin_cached === true);
+  const showGear =
+    typeof window.ffCurrentUserHasChatManagePermission === 'function'
+      ? window.ffCurrentUserHasChatManagePermission()
+      : isAdmin(role) || (role == null && window.ff_is_admin_cached === true);
   gear.style.display = showGear ? 'flex' : 'none';
+}
+
+function _chatManageAllowed() {
+  return (
+    typeof window.ffCurrentUserHasChatManagePermission === 'function' &&
+    window.ffCurrentUserHasChatManagePermission()
+  );
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
@@ -1060,8 +1069,8 @@ function _subscribeToMessages(convId) {
 
 // ─── Admin Templates + Flows Settings ───────────────────────────────────────────
 window.openChatTemplatesSettings = async function() {
+  if (!_chatManageAllowed()) return;
   if (!chatUserProfile) await loadChatUserProfile();
-  if (!isAdmin(chatUserProfile?.role)) return;
   await loadChatTemplates();
   await loadChatFlows();
   _renderTmplList();
@@ -1076,6 +1085,7 @@ window.closeChatTemplatesModal = function() {
 };
 
 window._chatSettingsTab = function(tab) {
+  if (!_chatManageAllowed()) return;
   document.querySelectorAll('.chat-settings-tab').forEach(b => { b.classList.remove('active'); });
   const t = document.getElementById('chatSettingsTab' + (tab === 'templates' ? 'Templates' : 'Flows'));
   if (t) t.classList.add('active');
@@ -1091,6 +1101,7 @@ window._chatSettingsTab = function(tab) {
 };
 
 window._chatFlowAddStep = function() {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
   if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
   if (!chatFlowDraft.steps) chatFlowDraft.steps = [];
@@ -1100,6 +1111,7 @@ window._chatFlowAddStep = function() {
 };
 
 window._chatFlowRemoveStep = function(idx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
   if (chatFlowDraft?.steps?.[idx] === undefined) return;
   chatFlowDraft.steps.splice(idx, 1);
@@ -1107,6 +1119,7 @@ window._chatFlowRemoveStep = function(idx) {
 };
 
 window._chatFlowRemoveStepById = function(stepId) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
   const idx = chatFlowDraft?.steps?.findIndex(s => s.id === stepId);
   if (idx === undefined || idx < 0) return;
@@ -1115,6 +1128,7 @@ window._chatFlowRemoveStepById = function(stepId) {
 };
 
 window._chatFlowAddOption = function(stepIdx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
   if (!chatFlowDraft?.steps?.[stepIdx]) return;
   const step = chatFlowDraft.steps[stepIdx];
@@ -1124,6 +1138,7 @@ window._chatFlowAddOption = function(stepIdx) {
 };
 
 window._chatFlowAddOptionById = function(stepId) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
   const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
   if (!step) return;
@@ -1133,6 +1148,7 @@ window._chatFlowAddOptionById = function(stepId) {
 };
 
 window._chatFlowRemoveOption = function(stepIdx, optIdx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
   if (!chatFlowDraft?.steps?.[stepIdx]?.options) return;
   chatFlowDraft.steps[stepIdx].options.splice(optIdx, 1);
@@ -1140,6 +1156,7 @@ window._chatFlowRemoveOption = function(stepIdx, optIdx) {
 };
 
 window._chatFlowRemoveOptionByIdx = function(stepId, optIdx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
   const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
   if (!step?.options) return;
@@ -1149,6 +1166,7 @@ window._chatFlowRemoveOptionByIdx = function(stepId, optIdx) {
 
 // Add a new step and link the given option to it (for branching)
 window._chatFlowAddStepAndLink = function(stepIdx, optIdx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
   if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
   if (!chatFlowDraft.steps) chatFlowDraft.steps = [];
@@ -1180,6 +1198,7 @@ window._chatFlowAddStepAndLinkById = function(stepId, optIdx) {
 };
 
 window._chatFlowUnlinkStep = function(stepId, optIdx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
   const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
   const opt = step?.options?.[optIdx];
@@ -1287,6 +1306,7 @@ function _collectFlowDraftFromUI() {
 }
 
 window.saveChatFlow = async function() {
+  if (!_chatManageAllowed()) return;
   const draft = _collectFlowDraftFromUI();
   if (!draft) { alert('Please add at least one step with options, and fill flow title.'); return; }
   const btn = document.getElementById('chatFlowSaveBtn');
@@ -1359,6 +1379,7 @@ window.cancelEditChatFlow = function() {
 };
 
 window.editChatFlow = function(id) {
+  if (!_chatManageAllowed()) return;
   const f = chatFlows.find(x => x.id === id);
   if (!f) return;
   chatEditingFlowId = id;
@@ -1389,6 +1410,7 @@ window.editChatFlow = function(id) {
 };
 
 window.deleteChatFlow = async function(id) {
+  if (!_chatManageAllowed()) return;
   if (!confirm('Delete this flow?')) return;
   try {
     const flow = chatFlows.find(x => x.id === id);
@@ -1508,6 +1530,7 @@ function _renderTmplList() {
       `).join('');
 }
 window.editChatTemplate = function(id) {
+  if (!_chatManageAllowed()) return;
   const t = chatTemplates.find(x => x.id === id);
   if (!t) return;
   chatEditingTmplId = id;
@@ -1533,6 +1556,7 @@ window.cancelEditChatTemplate = function() {
   document.getElementById('chatTmplFormLabel').textContent = 'Create Structured Message Template';
 };
 window.saveChatTemplate = async function() {
+  if (!_chatManageAllowed()) return;
   const title   = document.getElementById('chatTmplTitle')?.value.trim();
   const message = document.getElementById('chatTmplMessage')?.value.trim() || '';
   const allowedSenders = ['technician','manager','admin'].filter((_,i) => {
@@ -1561,6 +1585,7 @@ window.saveChatTemplate = async function() {
   }
 };
 window.deleteChatTemplate = async function(id) {
+  if (!_chatManageAllowed()) return;
   if (!confirm('Delete this template?')) return;
   try {
     await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, id));
@@ -1576,7 +1601,28 @@ window.deleteChatTemplate = async function(id) {
 async function initChatSettingsSection() {
   if (!chatUserProfile) await loadChatUserProfile();
   const s = document.getElementById('chatSettingsSection');
-  if (s) s.style.display = isAdmin(chatUserProfile?.role) ? 'block' : 'none';
+  if (s) {
+    const show =
+      typeof window.ffCurrentUserHasChatManagePermission === 'function'
+        ? window.ffCurrentUserHasChatManagePermission()
+        : isAdmin(chatUserProfile?.role);
+    s.style.display = show ? 'block' : 'none';
+  }
+}
+
+window.ffRefreshChatManageUi = function () {
+  try {
+    if (chatUserProfile) renderChatHeaderForRole(chatUserProfile.role);
+    else renderChatHeaderForRole(null);
+  } catch (e) {}
+  void initChatSettingsSection();
+};
+
+if (typeof document !== 'undefined' && !window.__ff_chatStaffPermListener) {
+  window.__ff_chatStaffPermListener = true;
+  document.addEventListener('ff-staff-cloud-updated', function () {
+    if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
+  });
 }
 
 // ─── Auth Listener ─────────────────────────────────────────────────────────────

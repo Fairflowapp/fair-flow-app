@@ -1342,27 +1342,32 @@ function updateSchedulePublishToggleUi() {
   const btn = document.getElementById("schedulePublishToggleBtn");
   const icon = document.getElementById("schedulePublishToggleIcon");
   const label = document.getElementById("schedulePublishToggleLabel");
-  if (!btn) return;
+  const notifyBtn = document.getElementById("scheduleNotifyChangesBtn");
+  const discardBtn = document.getElementById("scheduleDiscardSavedDraftBtn");
   const canEdit = scheduleUserCanManualEdit();
   const buildUi = !canEdit || schedulePreviewMode === "build";
-  btn.style.display = canEdit && buildUi ? "inline-flex" : "none";
-  if (!canEdit) return;
   const weekRange = getWeekRange(schedulePreviewWeekStart);
   const published = schedulePublishedMap[weekRange.startDate] === true;
-  btn.setAttribute("aria-pressed", published ? "true" : "false");
-  btn.title = published
-    ? "Published — staff can see this week. Click to hide until ready."
-    : "Draft — hidden from staff. Click to publish and notify everyone.";
-  if (icon) icon.textContent = published ? "\uD83D\uDC41\uFE0F" : "\uD83D\uDD12";
-  if (label) label.textContent = published ? "Visible to staff" : "Hidden from staff";
-  const notifyBtn = document.getElementById("scheduleNotifyChangesBtn");
+
   if (notifyBtn) {
     notifyBtn.style.display = canEdit && published && buildUi ? "inline-flex" : "none";
   }
-  const discardBtn = document.getElementById("scheduleDiscardSavedDraftBtn");
   if (discardBtn) {
     discardBtn.style.display = canEdit && buildUi ? "inline-flex" : "none";
   }
+
+  if (btn) {
+    btn.style.display = canEdit && buildUi ? "inline-flex" : "none";
+    if (canEdit) {
+      btn.setAttribute("aria-pressed", published ? "true" : "false");
+      btn.title = published
+        ? "Published — staff can see this week. Click to hide until ready."
+        : "Draft — hidden from staff. Click to publish and notify everyone.";
+      if (icon) icon.textContent = published ? "\uD83D\uDC41\uFE0F" : "\uD83D\uDD12";
+      if (label) label.textContent = published ? "Visible to staff" : "Hidden from staff";
+    }
+  }
+
   updateScheduleWeekAckStrip();
 }
 
@@ -2948,7 +2953,11 @@ async function loadApprovedScheduleRequests() {
 function renderScheduleSummary(validation, days) {
   const summaryBar = document.getElementById("scheduleSummaryBar");
   if (!summaryBar) return;
-  if (scheduleUserCanManualEdit() && schedulePreviewMode === "my_shifts") {
+  if (!scheduleUserCanManualEdit()) {
+    summaryBar.innerHTML = "";
+    return;
+  }
+  if (schedulePreviewMode === "my_shifts") {
     summaryBar.innerHTML = `<span style="font-size:12px;color:#6b7280;">Your shifts only — switch to <strong>Team view</strong> to edit the full team.</span>`;
     return;
   }
@@ -4090,6 +4099,13 @@ function bindScheduleUi() {
 }
 
 if (typeof window !== "undefined") {
+  window.ffScheduleRefreshPermissionChrome = () => {
+    updateSchedulePublishToggleUi();
+    renderScheduleSummary(
+      schedulePreviewState?.validation,
+      schedulePreviewState?.validation?.days || [],
+    );
+  };
   window.goToSchedule = goToSchedule;
   window.ffSchedulePreviewState = schedulePreviewState;
   window.refreshSchedulePreview = refreshSchedulePreview;

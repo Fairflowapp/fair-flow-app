@@ -161,16 +161,24 @@ function inboxDocAlertIsExpiredForUi(request) {
   return expMs != null && Date.now() > expMs;
 }
 
-/** Mistaken "Other" rows (e.g. staff-call noise) — hide from admin My Requests. */
+/** Mistaken "Other" rows (e.g. staff-call noise) — hide from admin My Requests and from technicians' Inbox. */
 function ffInboxIsStaffCallOtherNoise(r) {
   const t = String(r?.type || "").trim();
   if (t !== "other") return false;
-  const msg = String(r?.message || "").toLowerCase();
-  const subj = String(r?.title || r?.subject || (r?.data && (r.data.subject || r.data.title)) || "").toLowerCase();
   const d = r?.data || {};
+  const msg = String(r?.message || "").toLowerCase();
+  const subj = String(r?.title || r?.subject || d.subject || d.title || "").toLowerCase();
+  const det = String(d.details || "").toLowerCase();
   if (String(d.source || "").toLowerCase() === "staff_call") return true;
-  if (msg.includes("staff call") || subj.includes("staff call")) return true;
+  if (msg.includes("staff call") || subj.includes("staff call") || det.includes("staff call")) return true;
   return false;
+}
+
+/** Rows technicians should not see in Inbox (manager automations + misrouted staff-call "Other" items). */
+function inboxTechnicianNoiseFilter(rows) {
+  return (rows || [])
+    .filter((r) => !MANAGER_ONLY_INBOX_TYPES.has(String(r.type || "").trim()))
+    .filter((r) => !ffInboxIsStaffCallOtherNoise(r));
 }
 
 function inboxItemActivityMs(r) {
@@ -186,6 +194,7 @@ function applyTechInboxMerge(loadingEl) {
   _techInboxOutgoing.forEach((row) => map.set(row.id, row));
   _techInboxIncoming.forEach((row) => map.set(row.id, row));
   currentRequests = Array.from(map.values()).sort((a, b) => inboxItemActivityMs(b) - inboxItemActivityMs(a));
+  currentRequests = inboxTechnicianNoiseFilter(currentRequests);
   if (loadingEl) loadingEl.style.display = 'none';
   console.log('[Inbox] Loaded (technician merged)', currentRequests.length, 'requests');
   updateInboxStaffFilterOptions();
@@ -238,11 +247,13 @@ function inboxCanManageInboxEval(profile) {
 function inboxCanSendRequestsEval(profile) {
   if (!profile) return false;
   const role = String(profile.role || "").toLowerCase();
-  if (role === "technician") return true;
   const p = profile.permissions || {};
   if (inboxCanManageInboxEval(profile)) return true;
   if (p.inbox_send === false) return false;
   if (p.inbox_send === true) return true;
+  if (role === "technician") {
+    return true;
+  }
   if (p.inbox_manage === false) return false;
   return inboxLegacyDeskRoleLc(role);
 }
@@ -602,12 +613,12 @@ function setupInboxUI() {
   const inboxTabs      = document.getElementById('inboxTabs');
   const listTitle      = document.getElementById('inboxListTitle');
 
-  const canCreateRequests = role === 'technician' || canSend;
+  const canCreateRequests = canSend;
   const isAdminOrOwner = (role === 'admin' || role === 'owner');
   const manageTypesBtn = document.getElementById('btnManageRequestTypes');
   const settingsBtn = document.getElementById('inboxSettingsBtn');
 
-  // New Request: show only in "My Requests" (managers) or any time for technician; hide in "To handle"
+  // New Request: show only when inbox_send (or manage) allows; hide in "To handle"
   const showNewRequest =
     canCreateRequests &&
     (role === 'technician' || sendOnlyDesk || inboxViewMode === 'mine');
@@ -637,7 +648,8 @@ function setupInboxUI() {
     if (viewSwitcher) viewSwitcher.style.display = 'none';
     if (headerRow) headerRow.style.display = '';
     if (inboxTabs) inboxTabs.classList.add('hidden');
-    if (listTitle) listTitle.textContent = 'My Requests';
+    if (listTitle) listTitle.textContent = canSend ? 'My Requests' : 'Inbox';
+    if (emptyStateMsg) emptyStateMsg.textContent = canSend ? 'No requests yet' : 'No updates yet';
     currentInboxTab = 'my_requests';
   } else if (sendOnlyDesk) {
     inboxViewMode = 'mine';
@@ -1037,7 +1049,7 @@ function _renderInboxListInner() {
   const listTitle = document.getElementById('inboxListTitle');
   const role = inboxUserRoleLc();
   if (listTitle) {
-    if (role === "technician") listTitle.textContent = "My Requests";
+    if (role === "technician") listTitle.textContent = inboxCanSendRequests() ? "My Requests" : "Inbox";
     else {
       listTitle.style.display = inboxViewMode === 'mine' ? '' : 'none';
       listTitle.textContent = 'My Requests';
@@ -1052,8 +1064,9 @@ function _renderInboxListInner() {
 
   let requestsToShow = currentRequests;
 
+  // Technician merged list is already noise-filtered in applyTechInboxMerge; keep filter here if data came from elsewhere.
   if (role === "technician") {
-    requestsToShow = requestsToShow.filter((r) => !MANAGER_ONLY_INBOX_TYPES.has(String(r.type || "").trim()));
+    requestsToShow = inboxTechnicianNoiseFilter(requestsToShow);
   }
 
   // Admin/manager "My Requests": createdByUid query can still return automated rows (scanner uid) + staff-call noise
@@ -1939,7 +1952,12 @@ async function resolveSubmittingStaffIdForDocumentUpload(salonId) {
 
 window.selectRequestType = async function(type) {
   console.log('[Inbox] Selected type:', type);
-  
+
+  if (!inboxCanSendRequests()) {
+    if (typeof showToast === "function") showToast("You do not have permission to create requests.", "error");
+    return;
+  }
+
   document.getElementById('stepSelectType').style.display = 'none';
   document.getElementById('stepRequestForm').style.display = 'block';
   
@@ -2431,6 +2449,11 @@ async function submitRequest(type) {
   
   if (!currentUserProfile) {
     showToast('User profile not loaded', 'error');
+    return;
+  }
+
+  if (!inboxCanSendRequests()) {
+    showToast('You do not have permission to create requests.', 'error');
     return;
   }
   
@@ -3111,7 +3134,13 @@ function showRequestDetails(requestId) {
     `;
   }
 
-  if (isTechnician && isMyRequest && request.type === 'document_renewal_request' && request.status === 'open') {
+  if (
+    isTechnician &&
+    isMyRequest &&
+    request.type === 'document_renewal_request' &&
+    request.status === 'open' &&
+    inboxCanSendRequests()
+  ) {
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Your action</h3>
@@ -3804,6 +3833,10 @@ window.ffDocAlertSendChatReminder = async function (payload) {
 
 /** Opens New Request → "Request a new document (from staff)" with staff / type / related doc prefilled (e.g. from expiry alert). */
 window.ffOpenDocumentRenewalFromAlert = function (opts) {
+  if (!inboxCanSendRequests()) {
+    if (typeof showToast === 'function') showToast('You do not have permission to create requests.', 'error');
+    return;
+  }
   const o = opts && typeof opts === 'object' ? opts : {};
   window.__ffDocRenewalPrefill = {
     staffId: String(o.staffId || '').trim(),
@@ -4247,16 +4280,23 @@ if (document.readyState === 'loading') {
 // =====================
 let _bgBadgeUnsubscribe = null;
 
-function startBgBadgeListener(uid, salonId) {
+function startBgBadgeListener(uid, salonId, roleLc) {
   if (_bgBadgeUnsubscribe) { _bgBadgeUnsubscribe(); _bgBadgeUnsubscribe = null; }
   const q = query(
     collection(db, `salons/${salonId}/inboxItems`),
     where('forUid', '==', uid),
     where('unreadForManagers', '==', true)
   );
+  const isTech = String(roleLc || '').toLowerCase() === 'technician';
   _bgBadgeUnsubscribe = onSnapshot(q, (snap) => {
-    const openCount = snap.docs.filter(d => d.data().status === 'open').length;
-    const needsInfoCount = snap.docs.filter(d => d.data().status === 'needs_info').length;
+    let docs = snap.docs;
+    if (isTech) {
+      const rows = docs.map((d) => ({ id: d.id, ...d.data() }));
+      const keep = new Set(inboxTechnicianNoiseFilter(rows).map((r) => r.id));
+      docs = docs.filter((d) => keep.has(d.id));
+    }
+    const openCount = docs.filter((d) => d.data().status === 'open').length;
+    const needsInfoCount = docs.filter((d) => d.data().status === 'needs_info').length;
     const total = openCount + needsInfoCount;
 
     const navBadge = document.querySelector('#inboxBtn .ff-inbox-badge');
@@ -4282,8 +4322,12 @@ onAuthStateChanged(auth, async (user) => {
     let profile = { uid: user.uid, ...userDoc.data() };
     profile = await mergeSalonStaffIntoUserProfile(profile);
     void ffRefreshInboxNavVisibility();
-    if (inboxCanManageInboxEval(profile) && profile.salonId) {
-      startBgBadgeListener(user.uid, profile.salonId);
+    const roleLc = String(profile.role || '').toLowerCase();
+    const runBadge =
+      profile.salonId &&
+      (inboxCanManageInboxEval(profile) || roleLc === 'technician');
+    if (runBadge) {
+      startBgBadgeListener(user.uid, profile.salonId, roleLc);
     } else if (_bgBadgeUnsubscribe) {
       _bgBadgeUnsubscribe();
       _bgBadgeUnsubscribe = null;

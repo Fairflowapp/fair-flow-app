@@ -124,6 +124,14 @@ service cloud.firestore {
       );
     }
 
+    /** Inbox: technicians need inbox_send === true when the flag exists on staff doc; missing flag = legacy allow. */
+    function permInboxSendAllowed(salonId) {
+      return mySalonStaffDocData(salonId) == null
+        || !(mySalonStaffDocData(salonId).permissions is map)
+        || !mySalonStaffDocData(salonId).permissions.keys().hasAny(['inbox_send'])
+        || mySalonStaffDocData(salonId).permissions.inbox_send == true;
+    }
+
     // Legacy Media (contentWorks): PIN technicians may have staff doc but not users.salonId / members
     function isStaffInSalon(salonId) {
       return isSignedIn()
@@ -284,9 +292,11 @@ service cloud.firestore {
         && request.resource.data.staffReply == null
         && request.resource.data.visibility == 'managers_only'
         && request.resource.data.unreadForManagers == true
-        // Permission check: technician can create for self or directed to a manager; manager can create for anyone
+        // Permission check: technician can create when inbox_send allows; manager can create for anyone
         && (
-          (isTechnician(salonId) && request.resource.data.createdByUid == request.auth.uid)
+          (isTechnician(salonId)
+            && request.resource.data.createdByUid == request.auth.uid
+            && permInboxSendAllowed(salonId))
           || isManager(salonId)
         );
 
