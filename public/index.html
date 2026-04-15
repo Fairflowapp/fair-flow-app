@@ -24925,16 +24925,16 @@ function initializeAppsPanel() {
         childKeys: ['tasks_use', 'tasks_manage', 'tasks_reset']
       },
       {
-        groupTitle: 'Inbox',
-        parentKey: 'inbox_view',
-        parentMode: 'strictTrue',
-        childKeys: ['inbox_send', 'inbox_manage']
-      },
-      {
         groupTitle: 'Chat',
         parentKey: 'chat_view',
         parentMode: 'notFalse',
         childKeys: ['chat_manage']
+      },
+      {
+        groupTitle: 'Inbox',
+        parentKey: 'inbox_view',
+        parentMode: 'strictTrue',
+        childKeys: ['inbox_send', 'inbox_manage']
       },
       {
         groupTitle: 'Media',
@@ -25032,6 +25032,19 @@ function initializeAppsPanel() {
         ]
       },
       {
+        title: 'Tasks',
+        permissions: [
+          {
+            key: 'tasks_view',
+            label: 'View Tasks',
+            desc: 'Controls the Tasks tab in the top bar and access to the Tasks screen. When off, Tasks is hidden in navigation and task-related permissions below are unavailable.'
+          },
+          { key: 'tasks_use', label: 'Use tasks', desc: 'Select, complete, and work with tasks' },
+          { key: 'tasks_manage', label: 'Manage tasks (templates)', desc: 'Edit task templates and schedules' },
+          { key: 'tasks_reset', label: 'Reset tasks', desc: 'Reset done/pending progress for task tabs (PIN rules unchanged)' }
+        ]
+      },
+      {
         title: 'Chat',
         permissions: [
           {
@@ -25047,19 +25060,6 @@ function initializeAppsPanel() {
             label: 'Manage Chat settings',
             desc: 'Edit message templates and guided flows (gear on Chat screen). Owner/Admin sessions always have access. Requires View Chat (tab visible).'
           }
-        ]
-      },
-      {
-        title: 'Tasks',
-        permissions: [
-          {
-            key: 'tasks_view',
-            label: 'View Tasks',
-            desc: 'Controls the Tasks tab in the top bar and access to the Tasks screen. When off, Tasks is hidden in navigation and task-related permissions below are unavailable.'
-          },
-          { key: 'tasks_use', label: 'Use tasks', desc: 'Select, complete, and work with tasks' },
-          { key: 'tasks_manage', label: 'Manage tasks (templates)', desc: 'Edit task templates and schedules' },
-          { key: 'tasks_reset', label: 'Reset tasks', desc: 'Reset done/pending progress for task tabs (PIN rules unchanged)' }
         ]
       },
       {
