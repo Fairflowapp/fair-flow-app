@@ -23,6 +23,16 @@ service cloud.firestore {
         && userDocData().salonId == salonId;
     }
 
+    /** salons/{salonId}/settings/main ownerUid: cannot change once set (except first claim to own uid). */
+    function settingsMainOwnerUidUpdateAllowed() {
+      return !request.resource.data.diff(resource.data).changedKeys().hasAny(['ownerUid'])
+        || (
+          !resource.data.keys().hasAny(['ownerUid'])
+          && request.resource.data.ownerUid is string
+          && request.resource.data.ownerUid == request.auth.uid
+        );
+    }
+
     // Normalize role comparisons (handles Admin/OWNER/etc)
     function userRole() {
       return (userDocData().role is string) ? userDocData().role.lower() : '';
@@ -776,7 +786,19 @@ service cloud.firestore {
     // ===== UI SETTINGS (historyRange, etc.) =====
     match /salons/{salonId}/settings/{docId} {
       allow read: if belongsToSalon(salonId);
-      allow write: if belongsToSalon(salonId);
+      allow create: if belongsToSalon(salonId) && (
+        docId != 'main'
+        || !('ownerUid' in request.resource.data)
+        || (
+          request.resource.data.ownerUid is string
+          && request.resource.data.ownerUid == request.auth.uid
+        )
+      );
+      allow update: if belongsToSalon(salonId) && (
+        docId != 'main'
+        || settingsMainOwnerUidUpdateAllowed()
+      );
+      allow delete: if false;
     }
 
     // ===== QUEUE / TASKS STATE =====

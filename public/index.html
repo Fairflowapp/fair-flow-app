@@ -1027,13 +1027,13 @@ select,input[type="password"],input[type="text"]{height:42px;padding:0 16px;bord
 
 ul{list-style:none;padding:0;margin:0}
 
-.item{display:grid;grid-template-columns:50px 1fr auto;align-items:center;gap:10px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:8px 0}
+.item{display:grid;grid-template-columns:50px minmax(0,1fr) auto;align-items:center;gap:10px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:8px 0}
 
 .badge{min-width:32px;height:32px;border-radius:999px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:#374151;background:var(--badge)}
 
 .name-pill{white-space:nowrap;font-size:18px;display:inline-block;padding:7px 12px;border-radius:999px;color:#fff;font-weight:900;letter-spacing:.2px}
 
-.controls{display:flex;gap:8px;align-items:center;justify-content:flex-end}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;min-width:0}
 
 /* Buttons in rows */
 
@@ -5055,6 +5055,7 @@ if (typeof document !== 'undefined') {
     if (typeof renderBrand === 'function') renderBrand();
     if (typeof ffApplyQueueViewGate === 'function') ffApplyQueueViewGate();
     if (typeof window.ffScheduleRefreshPermissionChrome === 'function') window.ffScheduleRefreshPermissionChrome();
+    if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') window.ffSyncUserProfileBillingMenuVisibility();
     if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
     if (typeof window.ffApplyHistoryActionButtonsVisibility === 'function') window.ffApplyHistoryActionButtonsVisibility();
     if (typeof ffRefreshTasksPermissionControls === 'function') ffRefreshTasksPermissionControls();
@@ -5241,10 +5242,22 @@ function ffResolveStaffRowForQueueStationMode() {
   return primary;
 }
 
+/** When true, signed-in user is the salon owner (settings/main.ownerUid) — all nav permission checks pass. */
+function ffCurrentUserSalonOwnerPermissionBypass() {
+  try {
+    return typeof window !== 'undefined' && typeof window.ffIsOwner === 'function' && window.ffIsOwner() === true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function ffCurrentUserHasQueueViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return ffStaffHasQueueViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 window.ffCurrentUserHasQueueLockedViewPermission = function ffCurrentUserHasQueueLockedViewPermission() {
+  // Salon owner: never treat as "locked read-only" queue (bypass must not return true here).
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return false;
   return ffStaffHasQueueLockedViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 };
 
@@ -5445,6 +5458,7 @@ function ffCurrentUserIsQueueJoinOnlyPartialAccess() {
 
 /** Show Queue tab / Apps queue tile / open queue screen: full queue_view OR join-only partial OR locked read-only view. */
 function ffCurrentUserHasQueueScreenAccess() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return (
     ffCurrentUserHasQueueViewPermission() ||
     ffCurrentUserIsQueueJoinOnlyPartialAccess() ||
@@ -5460,6 +5474,7 @@ function ffStaffHasTicketsViewPermission(staff) {
 }
 
 function ffCurrentUserHasTicketsViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return ffStaffHasTicketsViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 window.ffCurrentUserHasTicketsViewPermission = ffCurrentUserHasTicketsViewPermission;
@@ -5476,6 +5491,19 @@ function ffCurrentUserHasChatManagePermission() {
 }
 window.ffCurrentUserHasChatManagePermission = ffCurrentUserHasChatManagePermission;
 
+/** Chat: allow typing a custom message (not only templates/flows). Admin session or salon owner bypass; otherwise staff.permissions.chat_free_text === true. */
+function ffStaffHasChatFreeTextPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.chat_free_text === true);
+}
+function ffCurrentUserHasChatFreeTextPermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasChatFreeTextPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasChatFreeTextPermission = ffCurrentUserHasChatFreeTextPermission;
+
 /** Tasks: staff.permissions.tasks_view === true (top bar + Tasks screen). */
 function ffStaffHasTasksViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
@@ -5484,6 +5512,7 @@ function ffStaffHasTasksViewPermission(staff) {
 }
 
 function ffCurrentUserHasTasksViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return ffStaffHasTasksViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 window.ffCurrentUserHasTasksViewPermission = ffCurrentUserHasTasksViewPermission;
@@ -5554,6 +5583,7 @@ function ffStaffHasInboxViewPermission(staff) {
 }
 
 function ffCurrentUserHasInboxViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return ffStaffHasInboxViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 window.ffCurrentUserHasInboxViewPermission = ffCurrentUserHasInboxViewPermission;
@@ -5566,6 +5596,7 @@ function ffStaffHasHistoryViewPermission(staff) {
 }
 
 function ffCurrentUserHasHistoryViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return ffStaffHasHistoryViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 window.ffCurrentUserHasHistoryViewPermission = ffCurrentUserHasHistoryViewPermission;
@@ -5620,6 +5651,7 @@ function ffStaffHasStaffViewPermission(staff) {
 }
 
 function ffCurrentUserHasStaffViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return ffStaffHasStaffViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 
@@ -5631,6 +5663,7 @@ function ffStaffHasQueueReorderPermission(staff) {
 }
 
 function ffCurrentUserHasQueueReorderPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return ffStaffHasQueueReorderPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 
@@ -5642,6 +5675,7 @@ function ffStaffHasQueueResetPermission(staff) {
 }
 
 function ffCurrentUserHasQueueResetPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return ffStaffHasQueueResetPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 
@@ -5653,6 +5687,7 @@ function ffStaffHasQueueManagePermission(staff) {
 }
 
 function ffCurrentUserHasQueueManagePermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return ffStaffHasQueueManagePermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 
@@ -5714,6 +5749,7 @@ function ffUpdateMainNavTabVisibility() {
   const tasksOk = typeof ffCurrentUserHasTasksViewPermission === 'function' && ffCurrentUserHasTasksViewPermission();
   setNavElVisible(document.getElementById('tasksBtn'), tasksOk);
   function tabUnlessExplicitOff(key) {
+    if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
     if (!staff) return true;
     return p[key] !== false;
   }
@@ -5723,7 +5759,9 @@ function ffUpdateMainNavTabVisibility() {
   setNavElVisible(document.getElementById('mediaBtn'), tabUnlessExplicitOff('media_view'));
   setNavElVisible(document.getElementById('inventoryNavBtn'), tabUnlessExplicitOff('inventory_view'));
   let scheduleOk = true;
-  if (staff && typeof ffGetSchedulePermissionContext === 'function') {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) {
+    scheduleOk = true;
+  } else if (staff && typeof ffGetSchedulePermissionContext === 'function') {
     try {
       scheduleOk = !ffGetSchedulePermissionContext().noAccess;
     } catch (e) {
@@ -5767,6 +5805,7 @@ function ffUpdateAppsPanelPermissionVisibility() {
   const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
   const p = (staff && staff.permissions) || {};
   function tabUnlessExplicitOff(key) {
+    if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
     if (!staff) return true;
     return p[key] !== false;
   }
@@ -5781,7 +5820,9 @@ function ffUpdateAppsPanelPermissionVisibility() {
   setAppsTileVisible('.apps-panel-item[data-app="inventory"]', tabUnlessExplicitOff('inventory_view'));
 
   let scheduleOk = true;
-  if (staff && typeof ffGetSchedulePermissionContext === 'function') {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) {
+    scheduleOk = true;
+  } else if (staff && typeof ffGetSchedulePermissionContext === 'function') {
     try {
       scheduleOk = !ffGetSchedulePermissionContext().noAccess;
     } catch (e) {
@@ -6225,37 +6266,53 @@ function namePill(target){
 
 function queuePresenceMeta(name, opts){
   opts = opts || {};
-  const staffId = (name && typeof name === 'object' ? name.staffId : null) || resolveStaffNameToId(name && typeof name === 'object' ? name.name : name) || (name && typeof name === 'object' ? name.name : name);
-  const presence = (typeof window.ffGetStaffPresenceFor === 'function')
-    ? window.ffGetStaffPresenceFor(staffId)
-    : null;
+  const row = name && typeof name === 'object' ? name : null;
+  const rowName = row ? String(row.name || '').trim() : String(name || '').trim();
+  const staffIdFromRow =
+    row && row.staffId != null && String(row.staffId).trim() ? String(row.staffId).trim() : null;
+  // Never use display name as a presence lookup key: staff-call-cloud resolvePresenceKey()
+  // would match any presence doc with the same name and could show green for the wrong person.
+  const staffId =
+    staffIdFromRow ||
+    (rowName && typeof resolveStaffNameToId === 'function' ? resolveStaffNameToId(rowName) : null) ||
+    null;
+  const presence =
+    staffId && typeof window.ffGetStaffPresenceFor === 'function'
+      ? window.ffGetStaffPresenceFor(staffId)
+      : null;
   const diag = ffDiagExplainPresenceStatus(presence);
   let status = diag.status;
   // Legacy hook when presence doc is not exposed but host still exposes a coarse status.
-  if (typeof window.ffGetStaffPresenceStatus === 'function') {
+  if (
+    staffId &&
+    typeof window.ffGetStaffPresenceStatus === 'function'
+  ) {
     const hook = window.ffGetStaffPresenceStatus(staffId);
     if (hook === 'online' || hook === 'idle' || hook === 'offline') {
       if (!presence) status = hook;
     }
   }
-  // Queue / In service: if they're listed here, treat as active on the queue for UI — never "Offline"
-  // (stale heartbeat / hook offline still means they're visibly in queue or in service).
-  if (opts.queueMember && status === 'offline') {
-    status = 'queue';
+  // App connection only: do not upgrade "offline" just because the row appears in queue/service.
+  var connectionHint = '';
+  if (status === 'online') {
+    connectionHint = 'Connected to the app';
+  } else if (status === 'idle') {
+    connectionHint = 'Connected to the app (idle)';
+  } else {
+    connectionHint = 'Not connected to the app';
   }
-  return { staffId, presence, status };
+  return { staffId, presence, status, connectionHint };
 }
 
 function queuePresenceDotColor(status){
-  // "queue" = on this list without live heartbeat — still treat as active/connected for display
-  if (status === 'online' || status === 'idle' || status === 'queue') return '#10b981';
-  return '#6b7280';
+  if (status === 'online' || status === 'idle') return '#10b981';
+  return '#ef4444';
 }
 
 /** Tooltip for 📞 — presence is informational; calls are always allowed when staffId exists. */
 function ffStaffCallButtonTitle(status, kind){
   const isService = kind === 'service';
-  const ok = status === 'online' || status === 'idle' || status === 'queue';
+  const ok = status === 'online' || status === 'idle';
   if (ok) {
     return isService ? 'Call to reception' : 'Call staff member';
   }
@@ -6634,28 +6691,31 @@ function renderQueue(){
     nm.style.alignItems = "center";
     nm.style.gap = "10px";
     nm.style.minWidth = "0";
-    const queuePill = namePill(q);
-    queuePill.style.fontSize = "15px";
-    queuePill.style.padding = "6px 12px";
-    queuePill.style.minWidth = "0";
-    queuePill.style.maxWidth = "100%";
-    nm.appendChild(queuePill);
-
     const presenceMeta = queuePresenceMeta(q, { queueMember: true });
     const canManageCalls = ffHasQueueCallAccess();
     const presenceStatusInfo = ffDiagExplainPresenceStatus(presenceMeta.presence);
     if (canManageCalls) {
       const presenceRow = document.createElement("div");
-      presenceRow.style.cssText = "display:flex;align-items:center;gap:6px;font-size:11px;color:#6b7280;white-space:nowrap;flex-shrink:0;";
+      presenceRow.style.cssText = "display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;white-space:nowrap;flex-shrink:0;";
+      const hint = String(presenceMeta.connectionHint || '').trim() || 'Presence';
+      presenceRow.setAttribute("title", hint);
+      presenceRow.setAttribute("aria-label", hint);
       const presenceDot = document.createElement("span");
       presenceDot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${queuePresenceDotColor(presenceMeta.status)};display:inline-block;flex-shrink:0;`;
-      const presenceLabel = document.createElement("span");
-      presenceLabel.textContent = (presenceMeta.status === 'online' || presenceMeta.status === 'idle' || presenceMeta.status === 'queue')
-        ? 'Connected'
-        : 'Not connected';
-      presenceRow.append(presenceDot, presenceLabel);
+      presenceDot.setAttribute("aria-hidden", "true");
+      presenceRow.appendChild(presenceDot);
       nm.appendChild(presenceRow);
     }
+
+    const queuePill = namePill(q);
+    queuePill.style.fontSize = "15px";
+    queuePill.style.padding = "6px 12px";
+    queuePill.style.flexShrink = "0";
+    queuePill.style.minWidth = "max-content";
+    queuePill.style.maxWidth = "min(320px, 46vw)";
+    queuePill.style.overflow = "hidden";
+    queuePill.style.textOverflow = "ellipsis";
+    nm.appendChild(queuePill);
 
     const ctrls=document.createElement("div"); ctrls.className="controls";
     ctrls.style.gap = "10px";
@@ -6747,6 +6807,8 @@ function renderQueue(){
       callStatus.textContent = callStatusLabel || "";
       callStatus.style.cssText = "font-size:10px;color:#6b7280;white-space:nowrap;";
       if (!callStatusLabel) callStatus.style.display = "none";
+      const callTip = [String(presenceMeta.connectionHint || '').trim(), callStatusLabel].filter(Boolean).join(" — ");
+      if (callTip) callStatus.setAttribute("title", callTip);
       callWrap.append(callBtn, callStatus);
       ctrls.prepend(callWrap);
     } else {
@@ -6921,27 +6983,30 @@ function renderService(){
     nm.style.alignItems = "center";
     nm.style.gap = "10px";
     nm.style.minWidth = "0";
-    const pill=namePill(s); pill.textContent=s.name;
-    pill.style.fontSize = "15px";
-    pill.style.padding = "6px 12px";
-    pill.style.minWidth = "0";
-    pill.style.maxWidth = "100%";
-    nm.appendChild(pill);
-
     const presenceMeta = queuePresenceMeta(s, { queueMember: true });
     const canManageCalls = ffHasQueueCallAccess();
     if (canManageCalls) {
       const presenceRow = document.createElement("div");
-      presenceRow.style.cssText = "display:flex;align-items:center;gap:6px;font-size:11px;color:#6b7280;white-space:nowrap;flex-shrink:0;";
+      presenceRow.style.cssText = "display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;white-space:nowrap;flex-shrink:0;";
+      const hint = String(presenceMeta.connectionHint || '').trim() || 'Presence';
+      presenceRow.setAttribute("title", hint);
+      presenceRow.setAttribute("aria-label", hint);
       const presenceDot = document.createElement("span");
       presenceDot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${queuePresenceDotColor(presenceMeta.status)};display:inline-block;flex-shrink:0;`;
-      const presenceLabel = document.createElement("span");
-      presenceLabel.textContent = (presenceMeta.status === 'online' || presenceMeta.status === 'idle' || presenceMeta.status === 'queue')
-        ? 'Connected'
-        : 'Not connected';
-      presenceRow.append(presenceDot, presenceLabel);
+      presenceDot.setAttribute("aria-hidden", "true");
+      presenceRow.appendChild(presenceDot);
       nm.appendChild(presenceRow);
     }
+
+    const pill=namePill(s); pill.textContent=s.name;
+    pill.style.fontSize = "15px";
+    pill.style.padding = "6px 12px";
+    pill.style.flexShrink = "0";
+    pill.style.minWidth = "max-content";
+    pill.style.maxWidth = "min(320px, 46vw)";
+    pill.style.overflow = "hidden";
+    pill.style.textOverflow = "ellipsis";
+    nm.appendChild(pill);
 
     const fin=btn("FINISH","finish-btn"); fin.onclick=() =>guardFinish(s.name, ()=>finish(si));
     const canViewServiceRowControls = canViewQueueRowActionControls(s);
@@ -7011,6 +7076,8 @@ function renderService(){
       callStatus.textContent = serviceCallStatusLabel;
       callStatus.style.cssText = "font-size:10px;color:#6b7280;white-space:nowrap;";
       if (!serviceCallStatusLabel) callStatus.style.display = "none";
+      const svcTip = [String(presenceMeta.connectionHint || '').trim(), serviceCallStatusLabel].filter(Boolean).join(" — ");
+      if (svcTip) callStatus.setAttribute("title", svcTip);
       callWrap.append(callBtn, callStatus);
       ctrls.append(callWrap);
       if (canViewServiceRowControls) {
@@ -11921,7 +11988,11 @@ function goToUserProfile(section) {
     userProfileScreen.classList.remove('ff-overlay-from-schedule');
   }
   userProfileScreen.style.display = 'block';
-  
+
+  if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') {
+    window.ffSyncUserProfileBillingMenuVisibility();
+  }
+
   // Load avatar from localStorage when User Profile screen is shown
   if (typeof window.loadUserProfileAvatar === 'function') {
     window.loadUserProfileAvatar();
@@ -17578,6 +17649,9 @@ window.ffDebugTaskFilterFull = function() {
 
 // Check if user has admin access (owner role OR valid admin code override)
 function ffHasAdminAccess() {
+  if (typeof window !== 'undefined' && typeof window.ffIsOwner === 'function' && window.ffIsOwner()) {
+    return true;
+  }
   // Check owner role cache
   if (window.ff_is_admin_cached === true) {
     return true;
@@ -23041,7 +23115,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260412_chat_toolbar_inbox_sizing');
+            const m = await import('/chat.js?v=20260412_chat_sender_display');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -24025,7 +24099,12 @@ function initializeAppsPanel() {
         console.error('[ffStaffArchive] Staff member not found:', staffId);
         return;
       }
-      
+      if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+        if (typeof showToast === 'function') showToast('The salon owner cannot be archived.');
+        else alert('The salon owner cannot be archived.');
+        return;
+      }
+
       // Show custom confirmation modal
       const modal = document.getElementById('staffArchiveConfirmModal');
       const bodyText = document.getElementById('staffArchiveConfirmBody');
@@ -24060,7 +24139,12 @@ function initializeAppsPanel() {
         console.error('[ffStaffArchiveConfirm] Staff member not found:', staffId);
         return;
       }
-      
+      if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+        if (typeof showToast === 'function') showToast('The salon owner cannot be archived.');
+        else alert('The salon owner cannot be archived.');
+        return;
+      }
+
       const staffIndex = staffStore.staff.findIndex(s => s.id === staffId);
       if (staffIndex === -1) return;
       
@@ -24101,6 +24185,11 @@ function initializeAppsPanel() {
         console.error('[ffStaffDelete] Staff member not found:', staffId);
         return;
       }
+      if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+        if (typeof showToast === 'function') showToast('The salon owner cannot be deleted.');
+        else alert('The salon owner cannot be deleted.');
+        return;
+      }
 
       // Safety: only allow delete after Archive
       if (staff.isArchived !== true) {
@@ -24135,6 +24224,11 @@ function initializeAppsPanel() {
       const staff = staffStore.staff.find(s => s.id === staffId);
       if (!staff) {
         console.error('[ffStaffDeleteConfirm] Staff member not found:', staffId);
+        return;
+      }
+      if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+        if (typeof showToast === 'function') showToast('The salon owner cannot be deleted.');
+        else alert('The salon owner cannot be deleted.');
         return;
       }
 
@@ -24534,7 +24628,9 @@ function initializeAppsPanel() {
         const roleLabel = getStaffRoleLabel(staff);
         const invited = staff.invited === true;
         const isArchived = staff.isArchived === true;
-        
+        const salonOwnerRow =
+          typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff);
+
         // Format date for status line
         let statusText = '';
         let statusAction = '';
@@ -24574,9 +24670,10 @@ function initializeAppsPanel() {
               <div style="position:relative;">
                 <button id="ffStaffDetailsKebabBtn" style="width:30px;height:30px;border:none;background:#f3f4f6;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;color:#6b7280;padding:0;flex-shrink:0;" title="More options">⋯</button>
                 <div id="ffStaffDetailsKebabMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:150px;z-index:1001;padding:4px 0;">
-                  ${!isArchived ? '<button id="ffStaffDetailsArchiveBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Archive</button>' : '<button id="ffStaffDetailsReactivateBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#16a34a;display:block;font-weight:500;">Re-Activate</button>'}
+                  ${!salonOwnerRow && !isArchived ? '<button id="ffStaffDetailsArchiveBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Archive</button>' : ''}
+                  ${isArchived ? '<button id="ffStaffDetailsReactivateBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#16a34a;display:block;font-weight:500;">Re-Activate</button>' : ''}
                   ${invited && !isArchived ? '<button id="ffStaffDetailsChangePasswordBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Change password</button>' : ''}
-                  ${isArchived ? '<div style="height:1px;background:var(--border);margin:4px 0;"></div><button id="ffStaffDetailsDeleteBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#dc2626;display:block;font-weight:700;">Delete permanently</button>' : ''}
+                  ${isArchived && !salonOwnerRow ? '<div style="height:1px;background:var(--border);margin:4px 0;"></div><button id="ffStaffDetailsDeleteBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#dc2626;display:block;font-weight:700;">Delete permanently</button>' : ''}
                 </div>
               </div>
             </div>
@@ -24787,6 +24884,7 @@ function initializeAppsPanel() {
   function ffGetSchedulePermissionContext() {
     /** Full access only when salon owner/admin account — avoids locking out the business account. Staff must have at least one Schedule toggle on. */
     function scheduleAccountOverrideFullAccess() {
+      if (typeof window !== 'undefined' && typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
       if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
       var r = String(window.__ff_user_role || '').toLowerCase();
       return r === 'owner' || r === 'admin';
@@ -24928,7 +25026,7 @@ function initializeAppsPanel() {
         groupTitle: 'Chat',
         parentKey: 'chat_view',
         parentMode: 'notFalse',
-        childKeys: ['chat_manage']
+        childKeys: ['chat_manage', 'chat_free_text']
       },
       {
         groupTitle: 'Inbox',
@@ -25059,6 +25157,11 @@ function initializeAppsPanel() {
             key: 'chat_manage',
             label: 'Manage Chat settings',
             desc: 'Edit message templates and guided flows (gear on Chat screen). Owner/Admin sessions always have access. Requires View Chat (tab visible).'
+          },
+          {
+            key: 'chat_free_text',
+            label: 'Free-text chat messages',
+            desc: 'Allow this person to type their own chat replies and new messages, in addition to templates and flows. When off, they only see admin-defined templates (if any). Salon owners and admin sessions can always type freely. Requires View Chat (tab visible).'
           }
         ]
       },
@@ -25182,7 +25285,10 @@ function initializeAppsPanel() {
         ]
       }
     ];
-    
+
+    var ownerRowLocked =
+      typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff);
+
     // Build permission cards
     const cards = permissionGroups.map(function(group) {
       const tabRule = ffPermRuleForGroupTitle(group.title);
@@ -25201,20 +25307,33 @@ function initializeAppsPanel() {
             rowOpts.disabled = true;
           }
         }
+        if (ownerRowLocked) {
+          rowOpts.disabled = true;
+        }
         return renderPermissionToggleRow(perm.key, perm.label, perm.desc, value, rowOpts);
       });
       return renderPermissionCard(group.title, rows);
     });
-    
+
+    var ownerBanner = ownerRowLocked
+      ? '<div style="margin-bottom:12px;padding:10px 12px;border-radius:10px;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;font-size:12px;line-height:1.45;">This person is the <strong>salon owner</strong>. Their access is full; permissions here cannot be changed.</div>'
+      : '';
+
     // Render all cards
-    permissionsContent.innerHTML = '<div style="display:flex;flex-direction:column;">' + cards.join('') + '</div>';
+    permissionsContent.innerHTML =
+      '<div style="display:flex;flex-direction:column;">' + ownerBanner + cards.join('') + '</div>';
     
     // Wire up toggle change handlers
     permissionsContent.querySelectorAll('input[data-permission-key]').forEach(function(checkbox) {
       checkbox.onchange = function() {
         const permissionKey = checkbox.getAttribute('data-permission-key');
         const newValue = checkbox.checked;
-        
+
+        if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+          checkbox.checked = !newValue;
+          return;
+        }
+
         // Get current staff from store (refresh to get latest)
         const staffStore = ffGetStaffStore();
         const staffIndex = staffStore.staff.findIndex(s => s.id === staff.id);
@@ -25276,6 +25395,7 @@ function initializeAppsPanel() {
         function runPermissionVisibilitySideEffects() {
           if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
           if (typeof window.ffScheduleRefreshPermissionChrome === 'function') window.ffScheduleRefreshPermissionChrome();
+          if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') window.ffSyncUserProfileBillingMenuVisibility();
           if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
           if (typeof window.updateMediaScreenTabsForRole === 'function') window.updateMediaScreenTabsForRole();
           if (typeof window.refreshMediaWorksList === 'function') window.refreshMediaWorksList();
@@ -25304,7 +25424,7 @@ function initializeAppsPanel() {
           return;
         }
 
-        if (permissionKey === 'chat_manage') {
+        if (permissionKey === 'chat_manage' || permissionKey === 'chat_free_text') {
           renderPermissionsTab(staff);
           runPermissionVisibilitySideEffects();
           return;
@@ -25478,7 +25598,9 @@ function initializeAppsPanel() {
       fontColorOf(staff.name) ||
       '#111111';
     const roleLabel = getStaffRoleLabel(staff);
-    
+    const salonOwnerRow =
+      typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff);
+
     if (editMode) {
       // Edit mode
       detailsContent.innerHTML = `
@@ -25497,11 +25619,15 @@ function initializeAppsPanel() {
             </div>
             <div>
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Role</label>
-              <select id="staffEditRole" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
+              ${
+                salonOwnerRow
+                  ? `<div style="width:100%;min-height:30px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:#f9fafb;font-size:12px;color:#374151;">${escapeHtml(roleLabel)} <span style="color:#9ca3af;font-size:11px;">(salon owner — fixed)</span></div><input type="hidden" id="staffEditRole" value="${escapeHtml(getStaffRoleValue(staff))}">`
+                  : `<select id="staffEditRole" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
                 <option value="admin" ${getStaffRoleValue(staff) === 'admin' ? 'selected' : ''}>Admin</option>
                 <option value="manager" ${getStaffRoleValue(staff) === 'manager' ? 'selected' : ''}>Manager</option>
                 <option value="technician" ${getStaffRoleValue(staff) === 'technician' ? 'selected' : ''}>Service Provider</option>
-              </select>
+              </select>`
+              }
             </div>
             <div id="staffEditManagerTypeSection" style="display:none;">
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Manager Type</label>
@@ -25858,9 +25984,16 @@ function initializeAppsPanel() {
       const detailManagerTypeInput = document.getElementById('staffEditManagerType');
       const newManagerType = getStaffManagerTypeValue({ managerType: scheduleManagerTypeInput?.value || detailManagerTypeInput?.value || oldStaff.managerType });
       
-      const roleFields = buildStaffRoleFields(newRole, newManagerType);
-      const newIsAdmin = roleFields.isAdmin;
-      const newIsManager = roleFields.isManager;
+      let roleFields = buildStaffRoleFields(newRole, newManagerType);
+      let newIsAdmin = roleFields.isAdmin;
+      let newIsManager = roleFields.isManager;
+      if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(oldStaff)) {
+        const lockedRole = getStaffRoleValue(oldStaff);
+        const lockedMgr = getStaffManagerTypeValue(oldStaff);
+        roleFields = buildStaffRoleFields(lockedRole, lockedMgr);
+        newIsAdmin = roleFields.isAdmin;
+        newIsManager = roleFields.isManager;
+      }
       const roleChanged = (oldStaff.isAdmin !== newIsAdmin) || (oldStaff.isManager !== newIsManager);
       
       // Safety rule: Prevent removing/demoting the last remaining Admin
@@ -27856,11 +27989,27 @@ function initializeUserProfileMenu() {
       console.error('[User Profile] Error saving preferences:', e);
     }
   }
-  
+
+  function ffSyncUserProfileBillingMenuVisibility() {
+    try {
+      const billingBtn = document.querySelector('.user-profile-menu-item[data-section="billing"]');
+      if (!billingBtn) return;
+      const show = typeof window.ffIsOwner === 'function' && window.ffIsOwner();
+      billingBtn.style.display = show ? '' : 'none';
+    } catch (e) {
+      console.warn('[User Profile] ffSyncUserProfileBillingMenuVisibility', e);
+    }
+  }
+  window.ffSyncUserProfileBillingMenuVisibility = ffSyncUserProfileBillingMenuVisibility;
+  ffSyncUserProfileBillingMenuVisibility();
+
   // Menu item click handler
   function handleMenuClick(section) {
     // Expose for external use
     window.__ff_handleMenuClick = handleMenuClick;
+    if (section === 'billing' && typeof window.ffIsOwner === 'function' && !window.ffIsOwner()) {
+      section = 'password';
+    }
     // Update menu item active states (purple tint via .user-profile-menu-item--active; see CSS)
     menuItems.forEach(item => {
       if (item.dataset.section === section) {
@@ -36808,18 +36957,18 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260408_fullscreen_pointer_reset"></script>
+  <script type="module" src="/app.js?v=20260412_salon_owner_uid"></script>
   <script type="module" src="/schedule-helpers.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-ui.js?v=20260412_schedule_perm_chrome"></script>
   <script type="module" src="/inbox.js?v=20260412_inbox_tech_staffcall_filter"></script>
-  <script type="module" src="/chat.js?v=20260412_chat_toolbar_inbox_sizing"></script>
+  <script type="module" src="/chat.js?v=20260412_chat_sender_display"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-documents.js?v=20260412_doc_meta_edit"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260412_staffcall_accept_ui"></script>
-  <script type="module" src="/settings-cloud.js?v=20260412_app_js_unify"></script>
+  <script type="module" src="/settings-cloud.js?v=20260412_owner_uid_cache"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tickets.js?v=20260420_tickets_load_more"></script>
@@ -37489,6 +37638,49 @@ function hookSettingsGuard_DISABLED(){
     #chatThreadListWrap { width:340px; flex-shrink:0; border-right:1px solid #e5e7eb; background:#f9fafb; overflow-y:auto; }
     #chatThreadListInner { padding:16px; }
     #chatConvView { display:flex; flex-direction:column; flex:1; min-width:0; overflow:hidden; background:#f9fafb; }
+    #chatConvFreeTextBar {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 16px 0;
+      background: #fff;
+      border-top: 1px solid #e5e7eb;
+      flex-shrink: 0;
+    }
+    #chatConvFreeTextBar .chat-conv-free-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+    }
+    #chatConvFreeTextBar textarea#chatConvFreeTextInput {
+      flex: 1;
+      min-width: 0;
+      min-height: 44px;
+      max-height: 160px;
+      padding: 10px 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: vertical;
+      outline: none;
+      box-sizing: border-box;
+    }
+    #chatConvFreeTextBar #chatConvFreeTextSendBtn {
+      flex-shrink: 0;
+      padding: 11px 18px;
+      background: #7c3aed;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    #chatConvFreeTextBar #chatConvFreeTextSendBtn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
     #chatConvBackBtn { display:none; }
     .chat-thread-card.is-selected { outline:2px solid rgba(124,58,237,0.22); background:#fff; }
 
@@ -37554,12 +37746,20 @@ function hookSettingsGuard_DISABLED(){
           <div style="font-size:13px;color:#9ca3af;">Choose a name from the left to view messages.</div>
         </div>
       </div>
-      <!-- Reply bar -->
+      <!-- Free-text composer (visibility from chat.js when permission + open thread) -->
+      <div id="chatConvFreeTextBar" aria-label="Free text message">
+        <label for="chatConvFreeTextInput" style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em;">Write a message</label>
+        <div class="chat-conv-free-row">
+          <textarea id="chatConvFreeTextInput" maxlength="8000" rows="2" placeholder="Type your message…"></textarea>
+          <button type="button" id="chatConvFreeTextSendBtn" onclick="window.sendChatConvFreeText && window.sendChatConvFreeText()">Send</button>
+        </div>
+      </div>
+      <!-- Reply bar (templates / flows) -->
       <div style="padding:12px 16px;background:#fff;border-top:1px solid #e5e7eb;flex-shrink:0;">
         <button id="chatConvReplyBtn" onclick="window.openThreadReply && window.openThreadReply()"
           style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;background:#7c3aed;color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
-          Reply with Template
+          Reply
         </button>
       </div>
     </div>
@@ -37578,7 +37778,7 @@ function hookSettingsGuard_DISABLED(){
     </div>
     <div class="chat-modal-body">
       <div id="chatSendToSection">
-        <div class="chat-section-label">Send To</div>
+        <div class="chat-section-label">Send to</div>
         <button type="button" id="chatRecipientPickerBtn"
           style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;cursor:pointer;color:#111827;font-size:13px;font-weight:600;">
           <span id="chatRecipientPickerLabel" style="min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Select recipients…</span>
@@ -37598,8 +37798,13 @@ function hookSettingsGuard_DISABLED(){
           <div id="chatSendRecipientList" style="max-height:260px;overflow-y:auto;padding:4px 8px 10px;"></div>
         </div>
       </div>
-      <div class="chat-section-label" style="margin-top:12px;">Choose message to send</div>
+      <div id="chatSendPickLabel" class="chat-section-label" style="margin-top:12px;">Choose message to send</div>
       <div id="chatSendMessageList" style="max-height:220px;overflow-y:auto;"></div>
+      <div id="chatSendFreeTextSection" style="display:none;margin-top:14px;">
+        <div id="chatSendFreeTextLabel" class="chat-section-label">Or type your own message</div>
+        <textarea id="chatSendFreeTextInput" maxlength="8000" rows="4" placeholder="Write your message…"
+          style="width:100%;box-sizing:border-box;margin-top:6px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-family:inherit;resize:vertical;min-height:88px;outline:none;"></textarea>
+      </div>
       <div id="chatSendFlowWizard" style="display:none;padding:16px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;"></div>
     </div>
     <div class="chat-modal-footer">

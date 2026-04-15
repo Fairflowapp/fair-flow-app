@@ -376,6 +376,7 @@ function getTicketsStaffPermissions() {
 /** Owner / Admin (Firestore role) always see the tab; Manager and others use staff permissions. */
 function canViewTicketsSummaryTab() {
   if (!currentUserProfile) return false;
+  if (typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
   const role = (currentUserProfile.role || '').toLowerCase();
   if (role === 'owner' || role === 'admin') return true;
   return getTicketsStaffPermissions().tickets_summary === true;
@@ -384,6 +385,7 @@ function canViewTicketsSummaryTab() {
 /** Owner / Admin (Firestore role) always see the tab; Manager and others use staff permissions (tickets_archived). */
 function canViewTicketsArchivedTab() {
   if (!currentUserProfile) return false;
+  if (typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
   const role = (currentUserProfile.role || '').toLowerCase();
   if (role === 'owner' || role === 'admin') return true;
   return getTicketsStaffPermissions().tickets_archived === true;

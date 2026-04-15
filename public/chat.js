@@ -1,7 +1,8 @@
 /**
  * Chat Module — Structured Messages System
  * WhatsApp-style Thread List → Conversation View
- * Messages sent via Admin-defined templates only (no free text).
+ * Messages are normally sent via admin-defined templates/flows; staff with
+ * permissions.chat_free_text (or owner/admin session) may type freely.
  *
  * Firestore:
  *   salons/{salonId}/chatTemplates/{templateId}
@@ -37,13 +38,42 @@ let chatReplyContext   = null;   // { uid, name, conversationId }
 let allConversations   = [];     // kept in sync by onSnapshot
 let currentMessages    = [];     // kept in sync by onSnapshot for open conversation
 let currentConvId      = null;   // currently open thread
-let chatSendMode       = 'template';
+let chatSendMode       = 'template'; // 'template' | 'flow' (free text uses textarea, not this flag)
 let chatSelectedFlow   = null;
 let chatFlowAnswers    = [];     // during wizard: [{ stepId, prompt, optionId, label }]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const isAdmin   = r => ['admin','owner'].includes((r||'').toLowerCase());
 const isMgrPlus = r => ['manager','admin','owner'].includes((r||'').toLowerCase());
+
+/**
+ * Match users/{uid}.role to chat template/flow allowedSenders (checkbox values are
+ * technician | manager | admin). Owners are excluded unless we map owner↔admin.
+ */
+function _chatNormalizeUserRoleForSenders(role) {
+  const r = (role || '').toLowerCase();
+  if (r === 'staff') return 'technician';
+  return r;
+}
+
+function _chatExpandedRolesForAllowedToken(token) {
+  const t = String(token || '').toLowerCase().trim();
+  const set = new Set([t]);
+  if (t === 'owner') set.add('admin');
+  if (t === 'admin') set.add('owner');
+  if (t === 'manager') {
+    set.add('front_desk');
+    set.add('assistant_manager');
+  }
+  if (t === 'front_desk' || t === 'assistant_manager') set.add('manager');
+  return set;
+}
+
+function _chatUserMatchesAllowedSenders(userRole, allowedSenders) {
+  if (!Array.isArray(allowedSenders) || allowedSenders.length === 0) return true;
+  const ur = _chatNormalizeUserRoleForSenders(userRole);
+  return allowedSenders.some(tok => _chatExpandedRolesForAllowedToken(tok).has(ur));
+}
 const escHtml   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const escapeAttr = s => String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 /** Plain text with https URLs → safe HTML with clickable links (expiry reminders, etc.). */
@@ -114,6 +144,19 @@ function _chatManageAllowed() {
   );
 }
 
+function _chatFreeTextAllowed() {
+  return (
+    typeof window.ffCurrentUserHasChatFreeTextPermission === 'function' &&
+    window.ffCurrentUserHasChatFreeTextPermission()
+  );
+}
+
+function _getChatFreeTextTrimmed() {
+  if (!_chatFreeTextAllowed()) return '';
+  const el = document.getElementById('chatSendFreeTextInput');
+  return el ? String(el.value || '').trim() : '';
+}
+
 // ─── Navigation ───────────────────────────────────────────────────────────────
 async function goToChat() {
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
@@ -156,6 +199,8 @@ async function initChatScreen() {
   if (_chatInitialized && chatUserProfile) {
     renderChatHeaderForRole(chatUserProfile.role);
     if (!chatConvsUnsub) subscribeToConversationList();
+    _bindChatConvFreeTextComposer();
+    _syncChatConvFreeTextComposer();
     return;
   }
   await loadChatUserProfile();
@@ -167,6 +212,8 @@ async function initChatScreen() {
   await Promise.all([loadChatSalonUsers(), loadChatTemplates(), loadChatFlows()]);
   renderChatHeaderForRole(chatUserProfile.role);
   subscribeToConversationList();
+  _bindChatConvFreeTextComposer();
+  _syncChatConvFreeTextComposer();
   _chatInitialized = true;
 }
 
@@ -209,7 +256,18 @@ async function loadChatTemplates() {
       orderBy('order','asc')
     ));
     chatTemplates = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch(e) { chatTemplates = []; }
+  } catch (e) {
+    console.warn('[Chat] loadChatTemplates orderBy failed, retrying without order', e?.code, e?.message);
+    try {
+      const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`));
+      chatTemplates = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+    } catch (e2) {
+      console.error('[Chat] loadChatTemplates error', e2);
+      chatTemplates = [];
+    }
+  }
 }
 
 async function loadChatFlows() {
@@ -351,6 +409,7 @@ window.closeConversation = function() {
   document.getElementById('chatScreen')?.classList.remove('chat-mobile-open');
   renderThreadList();
   _renderEmptyConversation();
+  _syncChatConvFreeTextComposer();
 };
 
 // ─── Conversation View (bubbles) ───────────────────────────────────────────────
@@ -367,13 +426,22 @@ function renderConversation(convId) {
     return;
   }
 
+  const conv = allConversations.find(c => c.id === convId);
+  const otherUid = _otherUidFromParticipants(conv?.participants, uid);
+  const otherName = _nameForUid(otherUid);
+  const replyBtn = document.getElementById('chatConvReplyBtn');
+  if (replyBtn) {
+    replyBtn.setAttribute('data-other-uid', otherUid);
+    replyBtn.setAttribute('data-other-name', otherName);
+    replyBtn.setAttribute('data-conv-id', convId);
+  }
+
   if (msgs.length === 0) {
     container.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">No messages yet.</div>';
+    _syncChatConvFreeTextComposer();
     return;
   }
 
-  const conv = allConversations.find(c => c.id === convId);
-  const otherUid = _otherUidFromParticipants(conv?.participants, uid);
   const otherAvatarUrl = _avatarUrlForUid(otherUid);
 
   container.innerHTML = msgs.map(ev => {
@@ -400,14 +468,7 @@ function renderConversation(convId) {
   // Scroll to bottom
   setTimeout(() => { container.scrollTop = container.scrollHeight; }, 50);
 
-  // Store other participant for reply (conv, otherUid already declared above)
-  const otherName = _nameForUid(otherUid);
-  const replyBtn  = document.getElementById('chatConvReplyBtn');
-  if (replyBtn) {
-    replyBtn.setAttribute('data-other-uid',  otherUid);
-    replyBtn.setAttribute('data-other-name', otherName);
-    replyBtn.setAttribute('data-conv-id',    convId);
-  }
+  _syncChatConvFreeTextComposer();
 }
 
 function _setConversationHeader(convId) {
@@ -433,14 +494,166 @@ function _renderEmptyConversation() {
       <div style="font-size:13px;color:#9ca3af;">Choose a name from the left to view messages.</div>
     </div>
   `;
+  _syncChatConvFreeTextComposer();
 }
+
+/** Show inline free-text row only with permission and an open 1:1 thread. */
+function _syncChatConvFreeTextComposer() {
+  const bar = document.getElementById('chatConvFreeTextBar');
+  if (!bar) return;
+  const allowed = _chatFreeTextAllowed();
+  const open = !!currentConvId;
+  bar.style.display = allowed && open ? 'flex' : 'none';
+  if (!allowed || !open) {
+    const ta = document.getElementById('chatConvFreeTextInput');
+    if (ta) ta.value = '';
+  }
+}
+
+function _bindChatConvFreeTextComposer() {
+  const ta = document.getElementById('chatConvFreeTextInput');
+  if (!ta || ta.__ffChatConvFreeBound) return;
+  ta.__ffChatConvFreeBound = true;
+  ta.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (typeof window.sendChatConvFreeText === 'function') window.sendChatConvFreeText();
+    }
+  });
+}
+
+/**
+ * Send one free-text chat message (title + message only). Used by inline composer and modal.
+ * @param {string|null} conversationIdOverride - when set (reply), use this conv id instead of deriving from uids.
+ */
+async function _sendFreeTextDirect(recipientUid, recipientName, conversationIdOverride, bodyTrimmed) {
+  if (!chatUserProfile?.salonId || !recipientUid) throw new Error('missing_context');
+  const trimmed = String(bodyTrimmed || '').trim();
+  if (!trimmed) throw new Error('empty_message');
+  const maxFree = 8000;
+  if (trimmed.length > maxFree) throw new Error('message_too_long');
+
+  const lines = trimmed.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const title = (lines[0] || 'Message').slice(0, 120);
+  const message = trimmed;
+
+  const salonId = chatUserProfile.salonId;
+  const senderUid = chatUserProfile.uid;
+  const senderName =
+    chatUserProfile.name ||
+    chatUserProfile.displayName ||
+    (auth.currentUser && (auth.currentUser.displayName || auth.currentUser.email)) ||
+    '';
+  const senderRole = chatUserProfile.role || '';
+  const rUid = recipientUid;
+  const rName = recipientName || _nameForUid(rUid) || rUid;
+  const convId = conversationIdOverride || buildConvId(senderUid, rUid);
+
+  const convRef = doc(db, `salons/${salonId}/conversations`, convId);
+  await setDoc(
+    convRef,
+    { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp() },
+    { merge: true }
+  );
+
+  const msgRef = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
+  const batch = writeBatch(db);
+  const msgData = {
+    senderUid,
+    senderName,
+    senderRole,
+    recipientUid: rUid,
+    recipientName: rName,
+    sentAt: serverTimestamp(),
+    readBy: [senderUid],
+    title,
+    message
+  };
+  batch.set(msgRef, msgData);
+  batch.set(
+    convRef,
+    {
+      lastMessageAt: serverTimestamp(),
+      lastMessageAtMs: Date.now(),
+      lastTitle: title,
+      lastMessage: message,
+      lastSenderUid: senderUid,
+      lastSenderName: senderName,
+      lastSenderRole: senderRole,
+      updatedAt: serverTimestamp(),
+      updatedAtMs: Date.now(),
+      unreadFor: { [rUid]: increment(1) }
+    },
+    { merge: true }
+  );
+  await batch.commit();
+}
+
+window.sendChatConvFreeText = async function() {
+  if (!_chatFreeTextAllowed() || !chatUserProfile) return;
+  const ta = document.getElementById('chatConvFreeTextInput');
+  const body = String(ta?.value || '').trim();
+  if (!body) {
+    alert('Please type a message.');
+    return;
+  }
+  if (!currentConvId) {
+    alert('Select a conversation first.');
+    return;
+  }
+  const replyBtn = document.getElementById('chatConvReplyBtn');
+  const otherUid = replyBtn?.getAttribute('data-other-uid') || '';
+  if (!otherUid) {
+    alert('Select a conversation first.');
+    return;
+  }
+  const otherName = replyBtn?.getAttribute('data-other-name') || _nameForUid(otherUid) || otherUid;
+  const sendBtn = document.getElementById('chatConvFreeTextSendBtn');
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending…';
+  }
+  try {
+    await _sendFreeTextDirect(otherUid, otherName, currentConvId, body);
+    if (ta) ta.value = '';
+    renderConversation(currentConvId);
+  } catch (e) {
+    if (e && e.message === 'message_too_long') {
+      alert('Message is too long (max 8000 characters).');
+    } else {
+      console.error('[Chat] inline free-text send', e);
+      alert('Failed to send: ' + (e?.code || e?.message || 'unknown'));
+    }
+  } finally {
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+    }
+  }
+};
 
 // ─── Reply from inside thread ──────────────────────────────────────────────────
 window.openThreadReply = async function() {
-  const btn      = document.getElementById('chatConvReplyBtn');
-  const otherUid = btn?.getAttribute('data-other-uid')  || '';
-  const otherName= btn?.getAttribute('data-other-name') || '';
-  const convId   = btn?.getAttribute('data-conv-id')    || currentConvId;
+  const btn = document.getElementById('chatConvReplyBtn');
+  const otherUid = btn?.getAttribute('data-other-uid') || '';
+  const otherName = btn?.getAttribute('data-other-name') || '';
+  const convId = btn?.getAttribute('data-conv-id') || currentConvId;
+  if (!otherUid || !chatUserProfile) return;
+
+  await loadChatTemplates();
+  await loadChatFlows();
+  const sendableTemplates = chatTemplates.filter(t =>
+    _chatUserMatchesAllowedSenders(chatUserProfile.role, t.allowedSenders)
+  );
+  const sendableFlows = chatFlows.filter(f =>
+    _chatUserMatchesAllowedSenders(chatUserProfile.role, f.allowedSenders)
+  );
+  const templateFlowCount = sendableTemplates.length + sendableFlows.length;
+
+  if (_chatFreeTextAllowed() && templateFlowCount === 0) {
+    document.getElementById('chatConvFreeTextInput')?.focus();
+    return;
+  }
 
   chatReplyContext = { uid: otherUid, name: otherName, conversationId: convId };
   await _openChatModal({ title: `↩ Reply to ${otherName || otherUid}`, showSendTo: false });
@@ -494,17 +707,12 @@ async function _openChatModal({ title, showSendTo }) {
   chatSelectedFlow = null;
   chatFlowAnswers = [];
 
-  const role = (chatUserProfile.role || '').toLowerCase();
-  const roleForFilter = role === 'staff' ? 'technician' : role;
-
-  const sendableTemplates = chatTemplates.filter(t => {
-    if (!Array.isArray(t.allowedSenders) || t.allowedSenders.length === 0) return true;
-    return t.allowedSenders.some(s => s.toLowerCase() === roleForFilter);
-  });
-  const sendableFlows = chatFlows.filter(f => {
-    if (!Array.isArray(f.allowedSenders) || f.allowedSenders.length === 0) return true;
-    return f.allowedSenders.some(s => s.toLowerCase() === roleForFilter);
-  });
+  const sendableTemplates = chatTemplates.filter(t =>
+    _chatUserMatchesAllowedSenders(chatUserProfile.role, t.allowedSenders)
+  );
+  const sendableFlows = chatFlows.filter(f =>
+    _chatUserMatchesAllowedSenders(chatUserProfile.role, f.allowedSenders)
+  );
 
   const modal         = document.getElementById('chatSendModal');
   const messageList   = document.getElementById('chatSendMessageList');
@@ -529,8 +737,69 @@ async function _openChatModal({ title, showSendTo }) {
     preview: f.steps?.[0]?.prompt || ''
   }));
 
+  const freeAllowed = _chatFreeTextAllowed();
+  const hideModalFreeComposer = !!(freeAllowed && chatReplyContext);
+  const pickLabel = document.getElementById('chatSendPickLabel');
+  const freeSec = document.getElementById('chatSendFreeTextSection');
+  const freeIn = document.getElementById('chatSendFreeTextInput');
+  const freeLbl = document.getElementById('chatSendFreeTextLabel');
+  if (freeSec && freeIn) {
+    if (freeAllowed && !hideModalFreeComposer) {
+      freeSec.style.display = 'block';
+      freeIn.value = '';
+      if (!freeIn.__ffChatFreeBound) {
+        freeIn.__ffChatFreeBound = true;
+        freeIn.addEventListener('input', () => {
+          const v = String(freeIn.value || '').trim();
+          if (v) {
+            document.querySelectorAll('input[name="chatMessageRadio"]').forEach(r => {
+              r.checked = false;
+            });
+            chatSendMode = 'template';
+            chatSelectedFlow = null;
+            chatFlowAnswers = [];
+            document.querySelectorAll('.chat-message-option-block .chat-flow-accordion').forEach(acc => {
+              acc.style.display = 'none';
+              acc.innerHTML = '';
+            });
+            document.querySelectorAll('.chat-option-caret').forEach(c => {
+              c.textContent = '▼';
+            });
+          }
+          _updateChatSendBtn();
+        });
+      }
+      if (pickLabel) {
+        pickLabel.textContent = items.length ? 'Templates & guided flows' : 'Message';
+        pickLabel.style.display = items.length ? 'block' : 'none';
+      }
+      if (freeLbl) freeLbl.textContent = items.length ? 'Or type your own message' : 'Write your message';
+    } else if (freeAllowed && hideModalFreeComposer) {
+      freeSec.style.display = 'none';
+      freeIn.value = '';
+      if (pickLabel) {
+        pickLabel.style.display = 'block';
+        pickLabel.textContent = items.length ? 'Templates & guided flows' : 'Choose message to send';
+      }
+      if (freeLbl) freeLbl.textContent = items.length ? 'Or type your own message' : 'Write your message';
+    } else {
+      freeSec.style.display = 'none';
+      freeIn.value = '';
+      if (pickLabel) {
+        pickLabel.style.display = 'block';
+        pickLabel.textContent = 'Choose message to send';
+      }
+    }
+  }
+
   if (items.length === 0) {
-    messageList.innerHTML = '<div style="padding:16px;color:#6b7280;text-align:center;font-size:14px;">No messages available.<br>Ask an Admin to add messages.</div>';
+    if (freeAllowed) {
+      messageList.innerHTML =
+        '<div style="padding:12px 4px;color:#6b7280;font-size:13px;line-height:1.5;text-align:left;">No templates or guided flows are set up for your role. Use the box below to write your own message.</div>';
+    } else {
+      messageList.innerHTML =
+        '<div style="padding:16px;color:#6b7280;text-align:center;font-size:14px;">No messages available.<br>Ask an Admin to add templates, or ask the owner to turn on <b>Free-text chat messages</b> for your account.</div>';
+    }
   } else {
     messageList.innerHTML = items.map(it => {
       const isFlow = it.type === 'flow';
@@ -554,6 +823,8 @@ async function _openChatModal({ title, showSendTo }) {
 
     messageList.querySelectorAll('input[name="chatMessageRadio"]').forEach(r => {
       r.addEventListener('change', () => {
+        const ft = document.getElementById('chatSendFreeTextInput');
+        if (ft) ft.value = '';
         const v = r.value;
         const [type, id] = v.includes(':') ? v.split(/:(.+)/).slice(0, 2) : ['template', v];
         const block = r.closest('.chat-message-option-block');
@@ -766,8 +1037,12 @@ window._chatToggleAllRecipients = function(checked) {
 
 function _updateChatSendBtn() {
   let ready = false;
+  const freeRaw = _getChatFreeTextTrimmed();
+  if (freeRaw) {
+    ready = true;
+  }
   const radio = document.querySelector('input[name="chatMessageRadio"]:checked');
-  if (chatSendMode === 'flow') {
+  if (!ready && chatSendMode === 'flow') {
     if (chatSelectedFlow && chatFlowAnswers.length) {
       const flow = chatSelectedFlow;
       const steps = flow.steps || [];
@@ -782,7 +1057,7 @@ function _updateChatSendBtn() {
       }
       ready = !stepId;
     }
-  } else {
+  } else if (!ready) {
     ready = !!(radio && String(radio.value || '').startsWith('template:'));
   }
   let rcpt = true;
@@ -803,6 +1078,8 @@ window.closeSendMessageModal = function() {
   if (modal) modal.style.display = 'none';
   const panel = document.getElementById('chatRecipientPanel');
   if (panel) panel.style.display = 'none';
+  const freeIn = document.getElementById('chatSendFreeTextInput');
+  if (freeIn) freeIn.value = '';
   chatReplyContext = null;
 };
 
@@ -831,7 +1108,18 @@ window.confirmSendChatMessage = async function() {
   if (!chatUserProfile) return;
   let title, message, templateId = null, flowId = null, flowTitle = null, flowAnswers = null, renderedText = null;
 
-  if (chatSendMode === 'flow' && chatSelectedFlow && chatFlowAnswers?.length) {
+  const freeAllowed = _chatFreeTextAllowed();
+  const freeRaw = freeAllowed ? _getChatFreeTextTrimmed() : '';
+  if (freeRaw) {
+    const maxFree = 8000;
+    if (freeRaw.length > maxFree) {
+      alert(`Message is too long (max ${maxFree} characters).`);
+      return;
+    }
+    const lines = freeRaw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    title = (lines[0] || 'Message').slice(0, 120);
+    message = freeRaw;
+  } else if (chatSendMode === 'flow' && chatSelectedFlow && chatFlowAnswers?.length) {
     const flow = chatSelectedFlow;
     const steps = flow.steps || [];
     const findStep = id => steps.find(s => String(s.id) === String(id));
@@ -886,55 +1174,80 @@ window.confirmSendChatMessage = async function() {
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
 
   try {
-    const salonId = chatUserProfile.salonId;
-    const senderUid  = chatUserProfile.uid;
-    const senderName = chatUserProfile.name || chatUserProfile.displayName || '';
-    const senderRole = chatUserProfile.role || '';
-
-    for (let i = 0; i < recipientUids.length; i++) {
-      const rUid  = recipientUids[i];
-      const rName = recipientNames[i] || _nameForUid(rUid) || rUid;
-      const convId = chatReplyContext?.conversationId || buildConvId(senderUid, rUid);
-
-      const convRef = doc(db, `salons/${salonId}/conversations`, convId);
-      // IMPORTANT: security rules for messages verify participants by reading the
-      // conversation doc. So we must ensure the conversation exists BEFORE writing messages.
-      await setDoc(
-        convRef,
-        { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp() },
-        { merge: true }
-      );
-
-      const msgRef  = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
-      const batch   = writeBatch(db);
-
-      const msgData = {
-        senderUid, senderName, senderRole, recipientUid: rUid, recipientName: rName,
-        sentAt: serverTimestamp(), readBy: [senderUid]
-      };
-      if (flowId) {
-        msgData.flowId = flowId; msgData.flowTitle = flowTitle; msgData.renderedText = renderedText;
-        msgData.flowAnswers = flowAnswers; msgData.title = title; msgData.message = renderedText;
-      } else {
-        msgData.templateId = templateId; msgData.title = title; msgData.message = message;
+    if (freeRaw) {
+      const convOverride = chatReplyContext?.conversationId || null;
+      for (let i = 0; i < recipientUids.length; i++) {
+        const rUid = recipientUids[i];
+        const rName = recipientNames[i] || _nameForUid(rUid) || rUid;
+        await _sendFreeTextDirect(rUid, rName, convOverride, freeRaw);
       }
-      batch.set(msgRef, msgData);
+    } else {
+      const salonId = chatUserProfile.salonId;
+      const senderUid = chatUserProfile.uid;
+      const senderName =
+        chatUserProfile.name ||
+        chatUserProfile.displayName ||
+        (auth.currentUser && (auth.currentUser.displayName || auth.currentUser.email)) ||
+        '';
+      const senderRole = chatUserProfile.role || '';
 
-      // Update conversation summary + unread count for recipient (merge-safe)
-      batch.set(convRef, {
-        lastMessageAt: serverTimestamp(),
-        lastMessageAtMs: Date.now(),
-        lastTitle: title,
-        lastMessage: message || renderedText,
-        lastSenderUid: senderUid,
-        lastSenderName: senderName,
-        lastSenderRole: senderRole,
-        updatedAt: serverTimestamp(),
-        updatedAtMs: Date.now(),
-        unreadFor: { [rUid]: increment(1) }
-      }, { merge: true });
+      for (let i = 0; i < recipientUids.length; i++) {
+        const rUid = recipientUids[i];
+        const rName = recipientNames[i] || _nameForUid(rUid) || rUid;
+        const convId = chatReplyContext?.conversationId || buildConvId(senderUid, rUid);
 
-      await batch.commit();
+        const convRef = doc(db, `salons/${salonId}/conversations`, convId);
+        await setDoc(
+          convRef,
+          { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp() },
+          { merge: true }
+        );
+
+        const msgRef = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
+        const batch = writeBatch(db);
+
+        const msgData = {
+          senderUid,
+          senderName,
+          senderRole,
+          recipientUid: rUid,
+          recipientName: rName,
+          sentAt: serverTimestamp(),
+          readBy: [senderUid]
+        };
+        if (flowId) {
+          msgData.flowId = flowId;
+          msgData.flowTitle = flowTitle;
+          msgData.renderedText = renderedText;
+          msgData.flowAnswers = flowAnswers;
+          msgData.title = title;
+          msgData.message = renderedText;
+        } else {
+          msgData.templateId = templateId;
+          msgData.title = title;
+          msgData.message = message;
+        }
+        batch.set(msgRef, msgData);
+
+        batch.set(
+          convRef,
+          {
+            lastMessageAt: serverTimestamp(),
+            lastMessageAtMs: Date.now(),
+            lastTitle: title,
+            lastMessage: message || renderedText,
+            lastSenderUid: senderUid,
+            lastSenderName: senderName,
+            lastSenderRole: senderRole,
+            updatedAt: serverTimestamp(),
+            updatedAtMs: Date.now(),
+            unreadFor: { [rUid]: increment(1) }
+          },
+          { merge: true }
+        );
+
+        await batch.commit();
+      }
     }
 
     window.closeSendMessageModal();
