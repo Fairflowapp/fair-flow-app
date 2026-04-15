@@ -1326,11 +1326,21 @@ async function ffPingStaffLastActiveAt(user, userDocDataOptional) {
       staffRefPath: resolved.staffRef ? resolved.staffRef.path : null,
     });
     if (resolved.staffId && resolved.staffRef && resolved.resolution !== "unresolved") {
-      if (resolved.staffId !== staffIdFromUser && typeof window !== "undefined") {
+      // Only fill missing users.staffId — never replace a non-empty users.staffId with scan result
+      // (wrong row breaks Queue permissions + staff UI via ffResolveCurrentStaffRowFromFfStaffV1).
+      if (
+        (staffIdFromUser == null || String(staffIdFromUser).trim() === "") &&
+        resolved.staffId &&
+        typeof window !== "undefined"
+      ) {
         window.__ff_authedStaffId = resolved.staffId;
         try {
           localStorage.setItem("ff_authedStaffId_v1", resolved.staffId);
         } catch (e) {}
+        console.log(`[Auth] ${tag}: __ff_authedStaffId set (users.staffId was empty)`, {
+          resolvedStaffId: resolved.staffId,
+          resolution: resolved.resolution,
+        });
       }
       await updateDoc(resolved.staffRef, { lastActiveAt: serverTimestamp() });
       console.log(`[Auth] ${tag}: updateDoc OK`, resolved.staffRef.path);
