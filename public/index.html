@@ -23940,22 +23940,22 @@ function initializeAppsPanel() {
       const entry = normalizedSchedule[option.value] || { enabled: false, startTime: null, endTime: null };
       if (readOnly) {
         return `
-          <div data-schedule-day="${option.value}" style="display:grid;grid-template-columns:44px 76px 1fr;gap:6px;align-items:center;padding:6px 8px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:8px;box-sizing:border-box;">
-            <div style="font-size:11px;font-weight:600;color:#111827;">${option.label}</div>
-            <div style="font-size:10px;font-weight:600;color:${entry.enabled ? '#166534' : '#6b7280'};">${entry.enabled ? 'Enabled' : 'Off'}</div>
-            <div style="font-size:11px;color:#111827;">${entry.enabled ? `${entry.startTime || '—'} - ${entry.endTime || '—'}` : 'Not scheduled'}</div>
+          <div data-schedule-day="${option.value}" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:8px;box-sizing:border-box;">
+            <div style="font-size:11px;font-weight:600;color:#111827;flex:0 0 40px;">${option.label}</div>
+            <div style="font-size:10px;font-weight:600;color:${entry.enabled ? '#166534' : '#6b7280'};flex:0 0 auto;">${entry.enabled ? 'Enabled' : 'Off'}</div>
+            <div style="font-size:11px;color:#111827;flex:0 1 auto;min-width:0;">${entry.enabled ? `${entry.startTime || '—'} - ${entry.endTime || '—'}` : 'Not scheduled'}</div>
           </div>
         `;
       }
       return `
-        <div data-schedule-day="${option.value}" style="display:grid;grid-template-columns:44px 64px minmax(0,1fr) minmax(0,1fr);gap:6px;align-items:center;padding:6px 8px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:8px;box-sizing:border-box;">
+        <div data-schedule-day="${option.value}" style="display:grid;grid-template-columns:44px 72px minmax(110px,160px) minmax(110px,160px);gap:6px;align-items:center;padding:6px 8px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:8px;box-sizing:border-box;justify-content:start;">
           <div style="font-size:11px;font-weight:600;color:#111827;">${option.label}</div>
           <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:10px;color:#374151;min-width:0;">
             <input type="checkbox" data-field="enabled" ${entry.enabled ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;accent-color:#7c3aed;">
             <span>On</span>
           </label>
-          <input type="time" data-field="startTime" value="${entry.startTime || ''}" style="width:100%;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
-          <input type="time" data-field="endTime" value="${entry.endTime || ''}" style="width:100%;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
+          <input type="time" data-field="startTime" value="${entry.startTime || ''}" style="width:100%;max-width:160px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
+          <input type="time" data-field="endTime" value="${entry.endTime || ''}" style="width:100%;max-width:160px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
         </div>
       `;
     }).join('');
@@ -25452,7 +25452,7 @@ function initializeAppsPanel() {
 
     if (editMode) {
       scheduleContent.innerHTML = `
-        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;max-width:100%;box-sizing:border-box;">
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;max-width:min(420px,100%);width:100%;margin:0;box-sizing:border-box;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;">
             <h3 style="margin:0;font-size:14px;font-weight:600;color:#111827;">Schedule</h3>
             <div style="display:flex;gap:6px;">
@@ -25464,7 +25464,7 @@ function initializeAppsPanel() {
           <div style="display:grid;gap:10px;">
             <section style="padding:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
               <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:8px;">Work profile</div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,220px));justify-content:start;gap:8px;">
                 <div>
                   <label style="display:block;margin-bottom:4px;font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Employment type</label>
                   <select id="staffScheduleEmploymentType" style="width:100%;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;cursor:pointer;">
@@ -25520,14 +25520,14 @@ function initializeAppsPanel() {
     }
 
     scheduleContent.innerHTML = `
-      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;max-width:100%;box-sizing:border-box;">
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;max-width:min(420px,100%);width:100%;margin:0;box-sizing:border-box;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;">
           <h3 style="margin:0;font-size:14px;font-weight:600;color:#111827;">Schedule</h3>
           <button id="staffScheduleEditBtn" style="padding:5px 10px;background:#f3f4f6;border:1px solid var(--border);border-radius:8px;color:#374151;font-size:11px;font-weight:600;cursor:pointer;">Edit</button>
         </div>
 
         <div style="display:grid;gap:10px;">
-          <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;">
+          <section style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,220px));justify-content:start;gap:8px;">
             <div style="padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
               <div style="font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Employment type</div>
               <div style="font-size:12px;font-weight:600;color:#111827;">${escapeHtml(getStaffEmploymentTypeLabel(staff))}</div>
@@ -25551,7 +25551,7 @@ function initializeAppsPanel() {
 
           <section style="padding:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
             <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:8px;">Scheduling constraints</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,220px));justify-content:start;gap:8px;">
               <div>
                 <div style="font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Requires manager</div>
                 <div style="font-size:12px;color:#111827;font-weight:600;">${normalizedConstraints.requiresManager ? 'Yes' : 'No'}</div>
