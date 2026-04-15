@@ -14,16 +14,19 @@
     var cs=document.getElementById('chatScreen');if(cs){cs.style.display='flex';cs.classList.remove('chat-mobile-open');}
     document.querySelectorAll('.btn-pill').forEach(function(b){b.classList.remove('active');});
     var cb=document.getElementById('chatBtn');if(cb)cb.classList.add('active');
-    var g=document.getElementById('chatSettingsGearBtn');if(g&&typeof ffHasAdminAccess==='function')g.style.display=ffHasAdminAccess()?'flex':'none';
+    var g=document.getElementById('chatSettingsGearBtn');if(g){var cm=typeof ffCurrentUserHasChatManagePermission==='function'?ffCurrentUserHasChatManagePermission():typeof ffHasAdminAccess==='function'&&ffHasAdminAccess();g.style.display=cm?'flex':'none';}
   };
   window.openChatTemplatesSettings = window.openChatTemplatesSettings || function() {
-    if(typeof ffHasAdminAccess==='function'&&!ffHasAdminAccess())return;
+    if(typeof ffCurrentUserHasChatManagePermission==='function'&&!ffCurrentUserHasChatManagePermission())return;
+    if(typeof ffCurrentUserHasChatManagePermission!=='function'&&typeof ffHasAdminAccess==='function'&&!ffHasAdminAccess())return;
     var m=document.getElementById('chatTemplatesModal');if(m)m.style.display='flex';
   };
   window.closeChatTemplatesModal = window.closeChatTemplatesModal || function() {
     var m=document.getElementById('chatTemplatesModal');if(m)m.style.display='none';
   };
   window._chatSettingsTab = window._chatSettingsTab || function(tab) {
+    if(typeof ffCurrentUserHasChatManagePermission==='function'&&!ffCurrentUserHasChatManagePermission())return;
+    if(typeof ffCurrentUserHasChatManagePermission!=='function'&&typeof ffHasAdminAccess==='function'&&!ffHasAdminAccess())return;
     document.querySelectorAll('.chat-settings-tab').forEach(function(b){b.classList.remove('active');});
     var t=document.getElementById('chatSettingsTab'+(tab==='templates'?'Templates':'Flows'));if(t)t.classList.add('active');
     var tp=document.getElementById('chatSettingsTemplatesPane');if(tp)tp.style.display=tab==='templates'?'flex':'none';
@@ -1024,13 +1027,13 @@ select,input[type="password"],input[type="text"]{height:42px;padding:0 16px;bord
 
 ul{list-style:none;padding:0;margin:0}
 
-.item{display:grid;grid-template-columns:50px 1fr auto;align-items:center;gap:10px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:8px 0}
+.item{display:grid;grid-template-columns:50px minmax(0,1fr) auto;align-items:center;gap:10px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:8px 0}
 
 .badge{min-width:32px;height:32px;border-radius:999px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:#374151;background:var(--badge)}
 
 .name-pill{white-space:nowrap;font-size:18px;display:inline-block;padding:7px 12px;border-radius:999px;color:#fff;font-weight:900;letter-spacing:.2px}
 
-.controls{display:flex;gap:8px;align-items:center;justify-content:flex-end}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;min-width:0}
 
 /* Buttons in rows */
 
@@ -1780,6 +1783,14 @@ dialog footer button, .code-dialog footer button {
   border-bottom: none;
 }
 
+.staff-permission-row--disabled {
+  opacity: 0.55;
+}
+
+.staff-permission-row--disabled .staff-permission-toggle {
+  cursor: not-allowed;
+}
+
 .staff-permission-label {
   flex: 1;
   min-width: 0;
@@ -1899,6 +1910,24 @@ dialog footer button, .code-dialog footer button {
 
 @media (max-width: 1160px) {
   .hide-4 { display: none !important; }
+}
+
+/* Main nav hidden by permission (beats .core-nav and #mediaBtn display:inline-flex !important).
+   NOTE: nav uses class="toolbar toolbar-nav-main" on ONE element — must use .toolbar.toolbar-nav-main
+   (no space), otherwise the rule never matches and tabs stay visible. */
+.header .toolbar.toolbar-nav-main .nav-item.core-nav.ff-nav-tab-hidden,
+.header .toolbar.toolbar-nav-main button.nav-item.ff-nav-tab-hidden,
+.header .toolbar.toolbar-nav-main #queueBtn.ff-nav-tab-hidden,
+.header .toolbar.toolbar-nav-main #ticketsBtn.ff-nav-tab-hidden,
+.header .toolbar.toolbar-nav-main #tasksBtn.ff-nav-tab-hidden,
+.header .toolbar.toolbar-nav-main #inboxBtn.ff-nav-tab-hidden,
+.header .toolbar #mediaBtn.ff-nav-tab-hidden {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+#settingsBtn.ff-nav-tab-hidden {
+  display: none !important;
 }
 
 </style>
@@ -2221,7 +2250,7 @@ dialog footer button, .code-dialog footer button {
 
         <button id="mediaBtn" class="btn-pill nav-item hide-4" onclick="window.goToMedia && window.goToMedia()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span>Media</button>
 
-        <button class="btn-pill nav-item hide-3" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>Inventory</button>
+        <button type="button" id="inventoryNavBtn" class="btn-pill nav-item core-nav hide-3" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>Inventory</button>
 
         <button type="button" id="scheduleBtn" class="btn-pill nav-item hide-2" aria-label="Schedule"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></span>Schedule</button>
 
@@ -2864,6 +2893,10 @@ dialog footer button, .code-dialog footer button {
     </div>
 
     <div id="joinError" style="max-width:1140px;margin:0 auto;padding:0 24px;color:red;font-size:13px;margin-top:6px;min-height:18px;display:none;"></div>
+
+    <div id="ffQueueLockedViewBanner" role="status" aria-live="polite" style="display:none;max-width:1140px;margin:8px auto 0;padding:8px 14px;border:1px solid #c4b5fd;border-radius:10px;background:#f5f3ff;color:#5b21b6;font-size:12px;font-weight:600;text-align:center;box-sizing:border-box;">
+      Locked View — Queue is read only
+    </div>
 
   </div>
 
@@ -4439,6 +4472,7 @@ function showQueueGeoFenceNotice({ title, message, confirmLabel, cancelLabel, sh
 }
 
 async function handleSetQueueSalonLocation() {
+  if (!ffCurrentUserHasQueueManagePermission()) return false;
   while (true) {
     try {
       const position = await requestCurrentBrowserLocation();
@@ -5019,12 +5053,21 @@ function renderBrand(){
 if (typeof document !== 'undefined') {
   document.addEventListener('ff-staff-cloud-updated', function() {
     if (typeof renderBrand === 'function') renderBrand();
+    if (typeof ffApplyQueueViewGate === 'function') ffApplyQueueViewGate();
+    if (typeof window.ffScheduleRefreshPermissionChrome === 'function') window.ffScheduleRefreshPermissionChrome();
+    if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') window.ffSyncUserProfileBillingMenuVisibility();
+    if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
+    if (typeof window.ffApplyHistoryActionButtonsVisibility === 'function') window.ffApplyHistoryActionButtonsVisibility();
+    if (typeof ffRefreshTasksPermissionControls === 'function') ffRefreshTasksPermissionControls();
+    if (typeof ffUpdateMainNavTabVisibility === 'function') ffUpdateMainNavTabVisibility();
     if (typeof updateQueueManagementUiVisibility === 'function') {
       updateQueueManagementUiVisibility();
     }
     if (typeof ffNormalizeQueuePersonReferences === 'function' && ffNormalizeQueuePersonReferences() && typeof save === 'function') {
       save();
     }
+    if (typeof renderSelect === 'function') renderSelect();
+    if (typeof ffRenderQueueFilterChips === 'function') ffRenderQueueFilterChips();
     if (typeof renderQueue === 'function') renderQueue();
     if (typeof renderService === 'function') renderService();
     if (typeof ensureTrainingItemsSubscription === 'function') {
@@ -5052,21 +5095,837 @@ function ffGetStaffList() {
   return settings.workers;
 }
 
-function loadTechniciansFromSettings() {
-  // Load technicians from the centralized staff list
-  console.log('[loadTechniciansFromSettings] Loading technicians from ffGetStaffList');
-  const allStaff = ffGetStaffList();
-  // Filter to exclude Admins and Managers (only show Technicians)
-  // Note: Old settings.workers format may not have isAdmin/isManager flags, so undefined will pass through
-  const technicians = allStaff.filter(w => 
-    w && 
-    w.name && 
-    w.name.trim() && 
-    w.isAdmin !== true && 
-    w.isManager !== true
+/** Join dropdown: staff row must have permissions.queue_join === true (same key as Permissions tab). */
+function ffStaffHasQueueJoinPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.queue_join === true);
+}
+
+/**
+ * Join only: skip geo-fence when the profile has queue_join + queue_bypass_location (queue_view not required).
+ * PIN validation is unchanged and always required in handleJoin.
+ */
+function ffStaffMayBypassQueueLocationForJoin(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  if (!ffStaffHasQueueJoinPermission(staff)) return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.queue_bypass_location === true);
+}
+
+/** One-time URL: ?ffQueueJoinKiosk=1 enables join-only Queue tab on this browser; =0 clears. Persists in localStorage. */
+function ffApplyQueueJoinKioskFromUrl() {
+  try {
+    var qs =
+      typeof window !== 'undefined' && window.location && typeof window.location.search === 'string'
+        ? window.location.search
+        : '';
+    var params = new URLSearchParams(qs);
+    var v = params.get('ffQueueJoinKiosk');
+    if (v === '1' || String(v).toLowerCase() === 'true') {
+      localStorage.setItem('ff_queue_join_kiosk_v1', '1');
+    } else if (v === '0' || String(v).toLowerCase() === 'false') {
+      localStorage.removeItem('ff_queue_join_kiosk_v1');
+    }
+  } catch (e) {}
+}
+ffApplyQueueJoinKioskFromUrl();
+
+function ffQueueJoinKioskDeviceEnabled() {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('ff_queue_join_kiosk_v1') === '1';
+  } catch (e2) {
+    return false;
+  }
+}
+
+/**
+ * Shared Queue station: logged-in ff_staff_v1 row has queue_join + queue_bypass_location (same as bypass-for-join; queue_view not required).
+ * Join: full queue_join list, per-target PIN, geo skipped. Queue UI: same row controls as manager view (filter All / START / HOLD / FINISH; ✖ leave uses row PIN or station PIN rules in selfRemoveFromQueue / HOLD modal).
+ */
+function ffCurrentUserIsQueueSharedStationJoin() {
+  return ffStaffMayBypassQueueLocationForJoin(ffResolveStaffRowForQueueStationMode());
+}
+
+/** Queue screen: staff row must have permissions.queue_view === true (same key as Permissions tab). */
+function ffStaffHasQueueViewPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.queue_view === true);
+}
+
+/** Read-only queue: lists/filters read-only; join bar disabled on this device. queue_join still allows join from kiosk / bypass station. */
+function ffStaffHasQueueLockedViewPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.queue_locked_view === true);
+}
+
+function ffResolveCurrentStaffRowFromFfStaffV1() {
+  try {
+    const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    const u = window.auth && window.auth.currentUser;
+    if (u) {
+      const uid = String(u.uid || '').trim();
+      const email = u.email ? String(u.email).toLowerCase().trim() : '';
+      if (uid) {
+        const byUid = staffList.find(
+          (s) =>
+            s != null &&
+            ((s.uid != null && String(s.uid).trim() === uid) ||
+              (s.firebaseUid != null && String(s.firebaseUid).trim() === uid))
+        );
+        if (byUid) return byUid;
+      }
+      if (email) {
+        const byEmail = staffList.find(
+          (s) => s && s.email && String(s.email).toLowerCase().trim() === email
+        );
+        if (byEmail) return byEmail;
+      }
+    }
+    let sid = '';
+    try {
+      sid = String(localStorage.getItem('ff_authedStaffId_v1') || '').trim();
+    } catch (e2) {}
+    if (sid) {
+      const byStaffId = staffList.find((s) => s && String(s.id || '').trim() === sid);
+      if (byStaffId) return byStaffId;
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Row used for shared-queue-station + bypass checks: prefer ffResolveCurrentStaffRowFromFfStaffV1,
+ * but if that row does not have bypass+join while the session is technician-like, fall back to
+ * the staff doc id from presence / users.staffId (fixes uid/email matching a different row than Permissions).
+ */
+function ffResolveStaffRowForQueueStationMode() {
+  const primary = ffResolveCurrentStaffRowFromFfStaffV1();
+  if (ffStaffMayBypassQueueLocationForJoin(primary)) {
+    return primary;
+  }
+  const sessionRole = String(
+    window.__ff_user_role || window.__ff_actorRole || sessionStorage.getItem('ff_actor_role') || ''
+  )
+    .toLowerCase()
+    .trim();
+  const isTechSession =
+    sessionRole === 'technician' || sessionRole === 'tech' || sessionRole === 'staff';
+  let cid = '';
+  try {
+    const liveDiag =
+      typeof window.ffStaffCallDiagSnapshot === 'function' ? window.ffStaffCallDiagSnapshot() : null;
+    cid = String(liveDiag?.ownStaffId || '').trim();
+  } catch (e) {}
+  if (!cid) cid = String(window.__ff_authedStaffId || '').trim();
+  if (!cid) {
+    try {
+      cid = String(localStorage.getItem('ff_authedStaffId_v1') || '').trim();
+    } catch (e2) {}
+  }
+  if (!isTechSession || !cid) {
+    return primary;
+  }
+  try {
+    const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    const byId = staffList.find((s) => s && String(s.id || '').trim() === cid);
+    if (byId && ffStaffMayBypassQueueLocationForJoin(byId)) {
+      return byId;
+    }
+  } catch (e3) {}
+  return primary;
+}
+
+/** When true, signed-in user is the salon owner (settings/main.ownerUid) — all nav permission checks pass. */
+function ffCurrentUserSalonOwnerPermissionBypass() {
+  try {
+    return typeof window !== 'undefined' && typeof window.ffIsOwner === 'function' && window.ffIsOwner() === true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function ffCurrentUserHasQueueViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasQueueViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasQueueLockedViewPermission = function ffCurrentUserHasQueueLockedViewPermission() {
+  // Salon owner: never treat as "locked read-only" queue (bypass must not return true here).
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return false;
+  return ffStaffHasQueueLockedViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+};
+
+var __ff_queue_locked_toast_timer = null;
+var __ff_queue_locked_toast_hide_timer = null;
+function ffQueueLockedViewToast() {
+  var msg = 'Locked view — actions are disabled';
+
+  var el = document.getElementById('ff-queue-locked-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ff-queue-locked-toast';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.style.cssText = [
+      'position:fixed',
+      'left:50%',
+      'bottom:max(24px, env(safe-area-inset-bottom, 0px))',
+      'transform:translateX(-50%) translateY(10px)',
+      'max-width:min(440px,calc(100vw - 28px))',
+      'padding:12px 18px',
+      'border-radius:12px',
+      'border:1px solid #c4b5fd',
+      'background:linear-gradient(180deg,#faf5ff 0%,#f3e8ff 100%)',
+      'color:#5b21b6',
+      'font-size:13px',
+      'font-weight:600',
+      'line-height:1.45',
+      'text-align:center',
+      'box-shadow:0 10px 40px rgba(91,33,182,0.18),0 2px 8px rgba(0,0,0,0.06)',
+      'z-index:100085',
+      'pointer-events:none',
+      'opacity:0',
+      'transition:opacity 0.22s ease, transform 0.22s ease',
+      'font-family:inherit',
+      'display:none'
+    ].join(';');
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  if (__ff_queue_locked_toast_timer) clearTimeout(__ff_queue_locked_toast_timer);
+  if (__ff_queue_locked_toast_hide_timer) clearTimeout(__ff_queue_locked_toast_hide_timer);
+  el.style.display = 'block';
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      el.style.opacity = '1';
+      el.style.transform = 'translateX(-50%) translateY(0)';
+    });
+  });
+  __ff_queue_locked_toast_timer = setTimeout(function () {
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(-50%) translateY(10px)';
+    __ff_queue_locked_toast_hide_timer = setTimeout(function () {
+      el.style.display = 'none';
+    }, 240);
+  }, 3200);
+}
+
+function ffApplyQueueJoinBarLockedState() {
+  var locked =
+    typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission();
+  var disableJoinBar = !!locked;
+  var joinBtn = document.getElementById('joinBtn');
+  var nameSelect = document.getElementById('nameSelect');
+  var pinInput = document.getElementById('pinInput');
+  var togglePin = document.getElementById('togglePin');
+  [joinBtn, nameSelect, pinInput].forEach(function (el) {
+    if (!el) return;
+    el.disabled = !!disableJoinBar;
+    el.style.opacity = disableJoinBar ? '0.55' : '';
+    el.style.pointerEvents = disableJoinBar ? 'none' : '';
+    if (disableJoinBar) el.setAttribute('aria-disabled', 'true');
+    else el.removeAttribute('aria-disabled');
+  });
+  if (togglePin) {
+    togglePin.style.opacity = disableJoinBar ? '0.5' : '';
+    togglePin.style.pointerEvents = disableJoinBar ? 'none' : '';
+  }
+}
+
+var __ff_queue_ro_toast_until = 0;
+function ffQueueLockedViewToastDebounced() {
+  var now = Date.now();
+  if (now < __ff_queue_ro_toast_until) return;
+  __ff_queue_ro_toast_until = now + 700;
+  ffQueueLockedViewToast();
+}
+
+function ffIsQueueScreenDomVisible() {
+  var wrap = document.querySelector('.wrap');
+  var ov = document.getElementById('owner-view');
+  if (!wrap || !ov) return false;
+  try {
+    if (wrap.style.display === 'none' || ov.style.display === 'none') return false;
+    if (window.getComputedStyle(wrap).display === 'none') return false;
+    if (window.getComputedStyle(ov).display === 'none') return false;
+  } catch (e) {
+    return false;
+  }
+  return true;
+}
+
+function ffQueueReadOnlyPointerBlock(e) {
+  if (!window.__ff_queue_locked_view) return;
+  if (!ffIsQueueScreenDomVisible()) return;
+  var t = e.target;
+  if (!t || typeof t.closest !== 'function') return;
+  if (t.closest('#ffQueueLockedViewBanner')) return;
+  var inScope =
+    t.closest('#owner-view') ||
+    t.closest('.wrap') ||
+    t.closest('#manageQueueScreen');
+  if (!inScope) return;
+  var tag = (t.tagName || '').toLowerCase();
+  var labelFor = tag === 'label' && t.getAttribute('for');
+  var interactive =
+    tag === 'button' ||
+    tag === 'input' ||
+    tag === 'select' ||
+    tag === 'textarea' ||
+    tag === 'a' ||
+    labelFor ||
+    (t.closest && t.closest('.eye')) ||
+    (t.getAttribute && t.getAttribute('role') === 'button');
+  if (!interactive) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  ffQueueLockedViewToastDebounced();
+}
+
+function ffQueueReadOnlyKeydownBlock(e) {
+  if (!window.__ff_queue_locked_view) return;
+  if (!ffIsQueueScreenDomVisible()) return;
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  var t = e.target;
+  if (!t || typeof t.closest !== 'function') return;
+  var inScope = t.closest('#owner-view') || t.closest('.wrap') || t.closest('#manageQueueScreen');
+  if (!inScope) return;
+  var interactive = t.closest('button, a, input, select, textarea, [role="button"]');
+  if (!interactive) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  ffQueueLockedViewToastDebounced();
+}
+
+function ffInstallQueueReadOnlyCaptureListenersOnce() {
+  if (window.__ff_queue_readonly_capture_ok) return;
+  window.__ff_queue_readonly_capture_ok = true;
+  document.addEventListener('pointerdown', ffQueueReadOnlyPointerBlock, { capture: true, passive: false });
+  document.addEventListener('keydown', ffQueueReadOnlyKeydownBlock, { capture: true, passive: false });
+}
+
+/** Banner, join bar, filter/add-tech controls, and capture-phase blocking for true read-only Queue. */
+function ffApplyQueueReadOnlyMode() {
+  ffApplyQueueJoinBarLockedState();
+  ffInstallQueueReadOnlyCaptureListenersOnce();
+  var locked =
+    typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission();
+  var banner = document.getElementById('ffQueueLockedViewBanner');
+  if (banner) {
+    banner.style.display = locked && ffIsQueueScreenDomVisible() ? 'block' : 'none';
+  }
+  var addTech = document.getElementById('addTechBtn');
+  if (addTech) {
+    if (locked) {
+      addTech.disabled = true;
+      addTech.setAttribute('aria-disabled', 'true');
+      addTech.style.opacity = '0.55';
+      addTech.style.pointerEvents = 'none';
+      addTech.style.cursor = 'not-allowed';
+    } else {
+      addTech.disabled = false;
+      addTech.removeAttribute('aria-disabled');
+      addTech.style.opacity = '';
+      addTech.style.pointerEvents = '';
+      addTech.style.cursor = '';
+    }
+  }
+}
+window.ffApplyQueueReadOnlyMode = ffApplyQueueReadOnlyMode;
+
+/**
+ * Join-only partial Queue: queue_join without queue_view, only on a kiosk/wall browser or a bypass "station" profile.
+ * Personal staff phones stay clean (no Queue tab); managers still see joined people when they join from the kiosk.
+ */
+function ffCurrentUserIsQueueJoinOnlyPartialAccess() {
+  const row = ffResolveCurrentStaffRowFromFfStaffV1();
+  if (!row) return false;
+  if (ffStaffHasQueueLockedViewPermission(row)) return false;
+  if (ffStaffHasQueueViewPermission(row)) return false;
+  if (!ffStaffHasQueueJoinPermission(row)) return false;
+  if (ffQueueJoinKioskDeviceEnabled()) return true;
+  if (typeof ffCurrentUserIsQueueSharedStationJoin === 'function' && ffCurrentUserIsQueueSharedStationJoin()) return true;
+  return false;
+}
+
+/** Show Queue tab / Apps queue tile / open queue screen: full queue_view OR join-only partial OR locked read-only view. */
+function ffCurrentUserHasQueueScreenAccess() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return (
+    ffCurrentUserHasQueueViewPermission() ||
+    ffCurrentUserIsQueueJoinOnlyPartialAccess() ||
+    (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission())
   );
-  console.log('[loadTechniciansFromSettings] Found', technicians.length, 'technicians (filtered from', allStaff.length, 'total staff)');
-  console.log('[loadTechniciansFromSettings] Technicians:', technicians.map(w => ({ name: w.name, hasPin: !!w.pin })));
+}
+
+/** Tickets: staff.permissions.tickets_view === true (top bar + Tickets screen). */
+function ffStaffHasTicketsViewPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.tickets_view === true);
+}
+
+function ffCurrentUserHasTicketsViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasTicketsViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasTicketsViewPermission = ffCurrentUserHasTicketsViewPermission;
+
+/** Chat templates & flows (gear + settings modal): chat_manage === true, or admin session (ffHasAdminAccess). */
+function ffStaffHasChatManagePermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.chat_manage === true);
+}
+function ffCurrentUserHasChatManagePermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasChatManagePermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasChatManagePermission = ffCurrentUserHasChatManagePermission;
+
+/** Chat: allow typing a custom message (not only templates/flows). Admin session or salon owner bypass; otherwise staff.permissions.chat_free_text === true. */
+function ffStaffHasChatFreeTextPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.chat_free_text === true);
+}
+function ffCurrentUserHasChatFreeTextPermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasChatFreeTextPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasChatFreeTextPermission = ffCurrentUserHasChatFreeTextPermission;
+
+/** Tasks: staff.permissions.tasks_view === true (top bar + Tasks screen). */
+function ffStaffHasTasksViewPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.tasks_view === true);
+}
+
+function ffCurrentUserHasTasksViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasTasksViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasTasksViewPermission = ffCurrentUserHasTasksViewPermission;
+
+/** Use tasks (select, mark done, pending actions): tasks_use === true, or legacy when tasks_view is on and tasks_use is not explicitly false. Owners/admins bypass via ffHasAdminAccess. */
+function ffStaffHasTasksUsePermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  if (!p || typeof p !== 'object') return false;
+  if (p.tasks_use === true) return true;
+  if (p.tasks_view === true && p.tasks_use !== false) return true;
+  return false;
+}
+function ffCurrentUserHasTasksUsePermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasTasksUsePermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasTasksUsePermission = ffCurrentUserHasTasksUsePermission;
+
+/** Manage task templates / settings modal: tasks_manage === true, or app owner/admin session. */
+function ffStaffHasTasksManagePermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.tasks_manage === true);
+}
+function ffCurrentUserHasTasksManagePermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasTasksManagePermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasTasksManagePermission = ffCurrentUserHasTasksManagePermission;
+
+/** Reset tasks tab progress: tasks_reset === true, or app owner/admin session. */
+function ffStaffHasTasksResetPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.tasks_reset === true);
+}
+function ffCurrentUserHasTasksResetPermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasTasksResetPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasTasksResetPermission = ffCurrentUserHasTasksResetPermission;
+
+function ffRefreshTasksPermissionControls() {
+  try {
+    const settingsBtn = document.getElementById('btnTasksSettings');
+    if (settingsBtn) {
+      settingsBtn.style.display =
+        typeof ffCurrentUserHasTasksManagePermission === 'function' && ffCurrentUserHasTasksManagePermission()
+          ? ''
+          : 'none';
+    }
+    if (typeof showResetBtnIfAllowed === 'function') showResetBtnIfAllowed();
+    if (typeof window.renderTasksList === 'function' && window.currentTasksTab) {
+      window.renderTasksList(window.currentTasksTab, { force: true });
+    }
+  } catch (e) {
+    console.warn('[Tasks] ffRefreshTasksPermissionControls', e);
+  }
+}
+window.ffRefreshTasksPermissionControls = ffRefreshTasksPermissionControls;
+
+/** Inbox: staff.permissions.inbox_view === true (top bar + Inbox screen). */
+function ffStaffHasInboxViewPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.inbox_view === true);
+}
+
+function ffCurrentUserHasInboxViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasInboxViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasInboxViewPermission = ffCurrentUserHasInboxViewPermission;
+
+/** History: staff.permissions.history_view === true (Apps launcher tile). */
+function ffStaffHasHistoryViewPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.history_view === true);
+}
+
+function ffCurrentUserHasHistoryViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasHistoryViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasHistoryViewPermission = ffCurrentUserHasHistoryViewPermission;
+
+/** History modal: Export — staff.permissions.history_export === true; admin session bypass. */
+function ffStaffHasHistoryExportPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.history_export === true);
+}
+function ffCurrentUserHasHistoryExportPermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasHistoryExportPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasHistoryExportPermission = ffCurrentUserHasHistoryExportPermission;
+
+/** History modal: Clear — staff.permissions.history_clear === true; admin session bypass. */
+function ffStaffHasHistoryClearPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.history_clear === true);
+}
+function ffCurrentUserHasHistoryClearPermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasHistoryClearPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasHistoryClearPermission = ffCurrentUserHasHistoryClearPermission;
+
+function ffApplyHistoryActionButtonsVisibility() {
+  var exp = document.getElementById('historyExportBtn');
+  var clr = document.getElementById('historyClearBtn');
+  var canEx = typeof ffCurrentUserHasHistoryExportPermission === 'function' && ffCurrentUserHasHistoryExportPermission();
+  var canCl = typeof ffCurrentUserHasHistoryClearPermission === 'function' && ffCurrentUserHasHistoryClearPermission();
+  if (exp) {
+    exp.style.display = canEx ? '' : 'none';
+    exp.disabled = !canEx;
+    exp.setAttribute('aria-hidden', canEx ? 'false' : 'true');
+  }
+  if (clr) {
+    clr.style.display = canCl ? '' : 'none';
+    clr.disabled = !canCl;
+    clr.setAttribute('aria-hidden', canCl ? 'false' : 'true');
+  }
+}
+window.ffApplyHistoryActionButtonsVisibility = ffApplyHistoryActionButtonsVisibility;
+
+/** Staff Members tile: staff.permissions.staff_view === true. */
+function ffStaffHasStaffViewPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.staff_view === true);
+}
+
+function ffCurrentUserHasStaffViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasStaffViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+
+/** Reorder control: staff.permissions.queue_reorder === true (Permissions tab: Show Reorder). */
+function ffStaffHasQueueReorderPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.queue_reorder === true);
+}
+
+function ffCurrentUserHasQueueReorderPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasQueueReorderPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+
+/** Reset Queue control: staff.permissions.queue_reset === true (Permissions tab: Reset queue). */
+function ffStaffHasQueueResetPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.queue_reset === true);
+}
+
+function ffCurrentUserHasQueueResetPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasQueueResetPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+
+/** Manage Queue / queue settings: staff.permissions.queue_manage === true (Permissions tab: Manage queue). */
+function ffStaffHasQueueManagePermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.queue_manage === true);
+}
+
+function ffCurrentUserHasQueueManagePermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasQueueManagePermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+
+/**
+ * Top bar + user menu: show/hide main nav tabs from staff.permissions (ff_staff_v1).
+ * Queue (#queueBtn): queue_view OR join-only on kiosk / bypass station (see ffCurrentUserIsQueueJoinOnlyPartialAccess).
+ * Tickets (#ticketsBtn): permissions.tickets_view === true.
+ * Tasks (#tasksBtn): permissions.tasks_view === true.
+ * Inbox (#inboxBtn): permissions.inbox_view === true.
+ * Other tab keys use !== false so existing staff keep tabs until revoked.
+ */
+function ffUpdateMainNavTabVisibility() {
+  function setNavElVisible(el, visible) {
+    if (!el) return;
+    if (visible) {
+      el.classList.remove('ff-nav-tab-hidden');
+      el.removeAttribute('aria-hidden');
+      el.style.display = '';
+    } else {
+      el.classList.add('ff-nav-tab-hidden');
+      el.setAttribute('aria-hidden', 'true');
+    }
+  }
+  const authed = !!(window.auth && window.auth.currentUser);
+  const navIds = [
+    'queueBtn',
+    'ticketsBtn',
+    'tasksBtn',
+    'chatBtn',
+    'inboxBtn',
+    'mediaBtn',
+    'inventoryNavBtn',
+    'scheduleBtn',
+    'trainingBtn',
+    'settingsBtn'
+  ];
+  if (!authed) {
+    navIds.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) {
+        el.classList.remove('ff-nav-tab-hidden');
+        el.removeAttribute('aria-hidden');
+        el.style.display = '';
+      }
+    });
+    setNavElVisible(document.getElementById('queueBtn'), false);
+    setNavElVisible(document.getElementById('ticketsBtn'), false);
+    setNavElVisible(document.getElementById('tasksBtn'), false);
+    setNavElVisible(document.getElementById('inboxBtn'), false);
+    ffUpdateAppsPanelPermissionVisibility();
+    return;
+  }
+  const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+  const p = (staff && staff.permissions) || {};
+  const queueOk = typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess();
+  setNavElVisible(document.getElementById('queueBtn'), queueOk);
+  const ticketsOk = typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission();
+  setNavElVisible(document.getElementById('ticketsBtn'), ticketsOk);
+  const tasksOk = typeof ffCurrentUserHasTasksViewPermission === 'function' && ffCurrentUserHasTasksViewPermission();
+  setNavElVisible(document.getElementById('tasksBtn'), tasksOk);
+  function tabUnlessExplicitOff(key) {
+    if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+    if (!staff) return true;
+    return p[key] !== false;
+  }
+  setNavElVisible(document.getElementById('chatBtn'), tabUnlessExplicitOff('chat_view'));
+  const inboxOk = typeof ffCurrentUserHasInboxViewPermission === 'function' && ffCurrentUserHasInboxViewPermission();
+  setNavElVisible(document.getElementById('inboxBtn'), inboxOk);
+  setNavElVisible(document.getElementById('mediaBtn'), tabUnlessExplicitOff('media_view'));
+  setNavElVisible(document.getElementById('inventoryNavBtn'), tabUnlessExplicitOff('inventory_view'));
+  let scheduleOk = true;
+  if (ffCurrentUserSalonOwnerPermissionBypass()) {
+    scheduleOk = true;
+  } else if (staff && typeof ffGetSchedulePermissionContext === 'function') {
+    try {
+      scheduleOk = !ffGetSchedulePermissionContext().noAccess;
+    } catch (e) {
+      scheduleOk = false;
+    }
+  }
+  setNavElVisible(document.getElementById('scheduleBtn'), scheduleOk);
+  setNavElVisible(document.getElementById('trainingBtn'), tabUnlessExplicitOff('training_view'));
+  setNavElVisible(document.getElementById('settingsBtn'), tabUnlessExplicitOff('settings_view'));
+  ffUpdateAppsPanelPermissionVisibility();
+}
+
+/**
+ * Apps launcher tiles: same permission rules as the top bar (plus history_view, staff_view for tiles without nav buttons).
+ */
+function ffUpdateAppsPanelPermissionVisibility() {
+  const appsPanel = document.getElementById('appsPanel');
+  if (!appsPanel) return;
+
+  function setAppsTileVisible(selector, visible) {
+    const el = appsPanel.querySelector(selector);
+    if (!el) return;
+    if (visible) {
+      el.classList.remove('ff-apps-item-hidden');
+      el.style.display = '';
+    } else {
+      el.classList.add('ff-apps-item-hidden');
+      el.style.display = 'none';
+    }
+  }
+
+  const authed = !!(window.auth && window.auth.currentUser);
+  if (!authed) {
+    appsPanel.querySelectorAll('.apps-panel-item').forEach(function (tile) {
+      tile.classList.add('ff-apps-item-hidden');
+      tile.style.display = 'none';
+    });
+    return;
+  }
+
+  const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+  const p = (staff && staff.permissions) || {};
+  function tabUnlessExplicitOff(key) {
+    if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+    if (!staff) return true;
+    return p[key] !== false;
+  }
+
+  setAppsTileVisible('.apps-panel-item[data-app="queue"]', typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess());
+  setAppsTileVisible('.apps-panel-item[data-app="tasks"]', typeof ffCurrentUserHasTasksViewPermission === 'function' && ffCurrentUserHasTasksViewPermission());
+  setAppsTileVisible('.apps-panel-item[data-app="tickets"]', typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission());
+  setAppsTileVisible('.apps-panel-item[data-app="inbox"]', typeof ffCurrentUserHasInboxViewPermission === 'function' && ffCurrentUserHasInboxViewPermission());
+  setAppsTileVisible('.apps-panel-item[data-app="chat"]', tabUnlessExplicitOff('chat_view'));
+  setAppsTileVisible('.apps-panel-item[data-app="media"]', tabUnlessExplicitOff('media_view'));
+  setAppsTileVisible('.apps-panel-item[data-app="training"]', tabUnlessExplicitOff('training_view'));
+  setAppsTileVisible('.apps-panel-item[data-app="inventory"]', tabUnlessExplicitOff('inventory_view'));
+
+  let scheduleOk = true;
+  if (ffCurrentUserSalonOwnerPermissionBypass()) {
+    scheduleOk = true;
+  } else if (staff && typeof ffGetSchedulePermissionContext === 'function') {
+    try {
+      scheduleOk = !ffGetSchedulePermissionContext().noAccess;
+    } catch (e) {
+      scheduleOk = false;
+    }
+  }
+  setAppsTileVisible('.apps-panel-item[data-app="schedule"]', scheduleOk);
+
+  setAppsTileVisible('.apps-panel-item[data-app="settings"]:not([data-staff])', tabUnlessExplicitOff('settings_view'));
+  setAppsTileVisible('.apps-panel-item[data-app="settings"][data-staff="true"]', typeof ffCurrentUserHasStaffViewPermission === 'function' && ffCurrentUserHasStaffViewPermission());
+  setAppsTileVisible('.apps-panel-item[data-app="history"]', typeof ffCurrentUserHasHistoryViewPermission === 'function' && ffCurrentUserHasHistoryViewPermission());
+}
+window.ffUpdateMainNavTabVisibility = ffUpdateMainNavTabVisibility;
+window.ffUpdateAppsPanelPermissionVisibility = ffUpdateAppsPanelPermissionVisibility;
+
+/**
+ * True when a full-screen module is open that intentionally hides queue chrome (#joinBar + .wrap).
+ * ff-staff-cloud-updated calls ffApplyQueueViewGate(); without this check, queue UI is shown on top of Chat/Tasks/etc.
+ */
+function ffIsFullscreenModuleCoveringQueue() {
+  var ids = [
+    'chatScreen',
+    'tasksScreen',
+    'inboxScreen',
+    'mediaScreen',
+    'ticketsScreen',
+    'trainingScreen',
+    'scheduleScreen',
+    'userProfileScreen',
+    'manageQueueScreen'
+  ];
+  for (var i = 0; i < ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (!el) continue;
+    var inline = (el.style && el.style.display) ? String(el.style.display).trim() : '';
+    if (inline === 'none') continue;
+    if (inline !== '') return true;
+    try {
+      if (window.getComputedStyle(el).display !== 'none') return true;
+    } catch (e) {}
+  }
+  return false;
+}
+window.ffIsFullscreenModuleCoveringQueue = ffIsFullscreenModuleCoveringQueue;
+
+function ffApplyQueueViewGate() {
+  const fullQueueView = ffCurrentUserHasQueueViewPermission();
+  const joinOnlyPartial = ffCurrentUserIsQueueJoinOnlyPartialAccess();
+  const lockedView =
+    typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission();
+  const allowed = fullQueueView || joinOnlyPartial || lockedView;
+  try {
+    window.__ff_queue_join_only_ui = !!(joinOnlyPartial && allowed && !lockedView);
+    window.__ff_queue_locked_view = !!lockedView;
+  } catch (e) {
+    window.__ff_queue_join_only_ui = false;
+    try {
+      window.__ff_queue_locked_view = false;
+    } catch (e2) {}
+  }
+  const ownerView = document.getElementById('owner-view');
+  const joinBar = document.getElementById('joinBar');
+  const wrapContent = document.querySelector('.wrap');
+  let blocked = document.getElementById('queueViewBlocked');
+  if (!blocked && ownerView) {
+    blocked = document.createElement('div');
+    blocked.id = 'queueViewBlocked';
+    blocked.setAttribute('role', 'status');
+    blocked.style.cssText =
+      'display:none;max-width:560px;margin:24px auto;padding:20px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#f9fafb;color:#374151;font-size:14px;line-height:1.5;text-align:center;';
+    blocked.textContent =
+      'You don\'t have permission to open the queue screen here. Ask an administrator to enable "View queue", or use the salon queue kiosk / wall device (join-only mode).';
+    ownerView.appendChild(blocked);
+  }
+  if (allowed) {
+    var deferQueueChrome =
+      typeof ffIsFullscreenModuleCoveringQueue === 'function' && ffIsFullscreenModuleCoveringQueue();
+    if (!deferQueueChrome) {
+      if (joinBar) joinBar.style.display = 'flex';
+      if (wrapContent) wrapContent.style.display = 'block';
+    }
+    if (blocked) blocked.style.display = 'none';
+    if (typeof updateQueueManagementUiVisibility === 'function') updateQueueManagementUiVisibility();
+    if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
+  } else {
+    try {
+      window.__ff_queue_join_only_ui = false;
+      window.__ff_queue_locked_view = false;
+    } catch (e2) {}
+    if (joinBar) joinBar.style.display = 'none';
+    if (wrapContent) wrapContent.style.display = 'none';
+    if (blocked) blocked.style.display = 'block';
+    if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
+  }
+  if (typeof ffUpdateMainNavTabVisibility === 'function') ffUpdateMainNavTabVisibility();
+}
+
+function loadTechniciansFromSettings() {
+  console.log('[loadTechniciansFromSettings] Loading staff with queue_join from ffGetStaffList');
+  const allStaff = ffGetStaffList();
+  const technicians = allStaff.filter((w) => w && w.name && String(w.name).trim() && ffStaffHasQueueJoinPermission(w));
+  console.log('[loadTechniciansFromSettings] Found', technicians.length, 'with queue_join (of', allStaff.length, 'staff)');
+  console.log('[loadTechniciansFromSettings] Staff:', technicians.map((w) => ({ name: w.name, hasPin: !!w.pin })));
   return technicians;
 }
 
@@ -5247,17 +6106,12 @@ function renderSelect(){
   try {
     const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
     const staffList = Array.isArray(store.staff) ? store.staff : [];
-    // Service providers for JOIN: same idea as Staff list — technicians, not admins/managers
-    // Same rule as loadTechniciansFromSettings / Tasks (ff_staff_v1): non-management staff with a name.
-    // The old whitelist (technician/staff/tech only) hid people whose role was a specialty slug or other label.
-    technicians = staffList.filter(s => {
+    // All non-archived staff with queue_join (shared station uses full list; personal technician join overrides selection in handleJoin unless ffCurrentUserIsQueueSharedStationJoin).
+    technicians = staffList.filter((s) => {
       if (!s || s.isArchived === true) return false;
       const name = String(s.name || '').trim();
       if (!name) return false;
-      if (s.isAdmin === true || s.isManager === true) return false;
-      const r = String(s.role || '').trim().toLowerCase();
-      if (r === 'admin' || r === 'manager' || r === 'owner') return false;
-      return true;
+      return ffStaffHasQueueJoinPermission(s);
     });
     console.log('[renderSelect] Loaded', technicians.length, 'active technicians from ff_staff_v1');
   } catch (e) {
@@ -5412,37 +6266,53 @@ function namePill(target){
 
 function queuePresenceMeta(name, opts){
   opts = opts || {};
-  const staffId = (name && typeof name === 'object' ? name.staffId : null) || resolveStaffNameToId(name && typeof name === 'object' ? name.name : name) || (name && typeof name === 'object' ? name.name : name);
-  const presence = (typeof window.ffGetStaffPresenceFor === 'function')
-    ? window.ffGetStaffPresenceFor(staffId)
-    : null;
+  const row = name && typeof name === 'object' ? name : null;
+  const rowName = row ? String(row.name || '').trim() : String(name || '').trim();
+  const staffIdFromRow =
+    row && row.staffId != null && String(row.staffId).trim() ? String(row.staffId).trim() : null;
+  // Never use display name as a presence lookup key: staff-call-cloud resolvePresenceKey()
+  // would match any presence doc with the same name and could show green for the wrong person.
+  const staffId =
+    staffIdFromRow ||
+    (rowName && typeof resolveStaffNameToId === 'function' ? resolveStaffNameToId(rowName) : null) ||
+    null;
+  const presence =
+    staffId && typeof window.ffGetStaffPresenceFor === 'function'
+      ? window.ffGetStaffPresenceFor(staffId)
+      : null;
   const diag = ffDiagExplainPresenceStatus(presence);
   let status = diag.status;
   // Legacy hook when presence doc is not exposed but host still exposes a coarse status.
-  if (typeof window.ffGetStaffPresenceStatus === 'function') {
+  if (
+    staffId &&
+    typeof window.ffGetStaffPresenceStatus === 'function'
+  ) {
     const hook = window.ffGetStaffPresenceStatus(staffId);
     if (hook === 'online' || hook === 'idle' || hook === 'offline') {
       if (!presence) status = hook;
     }
   }
-  // Queue / In service: if they're listed here, treat as active on the queue for UI — never "Offline"
-  // (stale heartbeat / hook offline still means they're visibly in queue or in service).
-  if (opts.queueMember && status === 'offline') {
-    status = 'queue';
+  // App connection only: do not upgrade "offline" just because the row appears in queue/service.
+  var connectionHint = '';
+  if (status === 'online') {
+    connectionHint = 'Connected to the app';
+  } else if (status === 'idle') {
+    connectionHint = 'Connected to the app (idle)';
+  } else {
+    connectionHint = 'Not connected to the app';
   }
-  return { staffId, presence, status };
+  return { staffId, presence, status, connectionHint };
 }
 
 function queuePresenceDotColor(status){
-  // "queue" = on this list without live heartbeat — still treat as active/connected for display
-  if (status === 'online' || status === 'idle' || status === 'queue') return '#10b981';
-  return '#6b7280';
+  if (status === 'online' || status === 'idle') return '#10b981';
+  return '#ef4444';
 }
 
 /** Tooltip for 📞 — presence is informational; calls are always allowed when staffId exists. */
 function ffStaffCallButtonTitle(status, kind){
   const isService = kind === 'service';
-  const ok = status === 'online' || status === 'idle' || status === 'queue';
+  const ok = status === 'online' || status === 'idle';
   if (ok) {
     return isService ? 'Call to reception' : 'Call staff member';
   }
@@ -5495,10 +6365,36 @@ function getCurrentQueueActorRole() {
 }
 
 function updateQueueManagementUiVisibility() {
-  const role = getCurrentQueueActorRole();
-  const canViewReorder = role === 'admin' || role === 'manager';
-  const canViewReset = role === 'admin' || role === 'manager';
-  const canViewSettings = role === 'admin';
+  const queueLocked =
+    typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission();
+  if (
+    queueLocked ||
+    (typeof ffCurrentUserIsQueueJoinOnlyPartialAccess === 'function' && ffCurrentUserIsQueueJoinOnlyPartialAccess())
+  ) {
+    if (typeof reorderMode !== 'undefined' && reorderMode && typeof exitReorderMode === 'function') {
+      exitReorderMode();
+    }
+    const queueControls = document.getElementById('queueControls');
+    const reorderBtn = document.getElementById('reorderBtn');
+    const manageQueueBtn = document.getElementById('manageQueueBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    if (reorderBtn) reorderBtn.style.display = 'none';
+    if (manageQueueBtn) manageQueueBtn.style.display = 'none';
+    if (resetBtn) resetBtn.style.display = 'none';
+    if (queueControls) queueControls.style.display = 'none';
+    const mqs = document.getElementById('manageQueueScreen');
+    if (mqs && mqs.style.display === 'block' && typeof closeManageQueue === 'function') {
+      closeManageQueue();
+    }
+    if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
+    return;
+  }
+  const canViewReorder = ffCurrentUserHasQueueReorderPermission();
+  if (!canViewReorder && typeof reorderMode !== 'undefined' && reorderMode && typeof exitReorderMode === 'function') {
+    exitReorderMode();
+  }
+  const canViewReset = ffCurrentUserHasQueueResetPermission();
+  const canManageQueue = checkQueueManagePermission();
   const queueControls = document.getElementById('queueControls');
   const reorderBtn = document.getElementById('reorderBtn');
   const manageQueueBtn = document.getElementById('manageQueueBtn');
@@ -5507,14 +6403,21 @@ function updateQueueManagementUiVisibility() {
     reorderBtn.style.display = canViewReorder ? 'inline-flex' : 'none';
   }
   if (manageQueueBtn) {
-    manageQueueBtn.style.display = canViewSettings && checkQueueManagePermission() ? 'flex' : 'none';
+    manageQueueBtn.style.display = canManageQueue ? 'flex' : 'none';
   }
   if (resetBtn) {
     resetBtn.style.display = canViewReset ? 'inline-flex' : 'none';
   }
   if (queueControls) {
-    queueControls.style.display = (canViewReorder || (canViewSettings && checkQueueManagePermission()) || canViewReset) ? 'flex' : 'none';
+    queueControls.style.display = (canViewReorder || canManageQueue || canViewReset) ? 'flex' : 'none';
   }
+  if (!canManageQueue) {
+    const mqs = document.getElementById('manageQueueScreen');
+    if (mqs && mqs.style.display === 'block' && typeof closeManageQueue === 'function') {
+      closeManageQueue();
+    }
+  }
+  if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
 }
 
 function canTechnicianSelfCheckoutQueueRow(row) {
@@ -5533,6 +6436,15 @@ function canTechnicianSelfCheckoutQueueRow(row) {
 }
 
 function canViewQueueRowActionControls(row) {
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    return false;
+  }
+  if (typeof ffCurrentUserIsQueueSharedStationJoin === 'function' && ffCurrentUserIsQueueSharedStationJoin()) {
+    return true;
+  }
+  if (typeof ffCurrentUserIsQueueJoinOnlyPartialAccess === 'function' && ffCurrentUserIsQueueJoinOnlyPartialAccess()) {
+    return false;
+  }
   const role = getCurrentQueueActorRole();
   if (role === 'admin' || role === 'manager') return true;
   if (role === 'technician') return canTechnicianSelfCheckoutQueueRow(row);
@@ -5673,26 +6585,43 @@ window.ffHideQueueFilterBar = ffHideQueueFilterBar;
 function ffRenderQueueFilterChips() {
   const bar = document.getElementById('ffQueueFilterBar');
   if (!bar) return;
+  if (typeof ffCurrentUserIsQueueJoinOnlyPartialAccess === 'function' && ffCurrentUserIsQueueJoinOnlyPartialAccess()) {
+    ffHideQueueFilterBar();
+    return;
+  }
+  const filterReadOnly =
+    typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission();
   const types = ffGetAllQueueTechTypes();
-  if (types.length === 0) { bar.style.display = 'none'; return; }
+  const sharedStation =
+    typeof ffCurrentUserIsQueueSharedStationJoin === 'function' && ffCurrentUserIsQueueSharedStationJoin();
+  if (types.length === 0 && !sharedStation) {
+    bar.style.display = 'none';
+    return;
+  }
   bar.style.display = 'flex';
   bar.innerHTML = '';
-  const allChips = ['all', ...types];
+  const allChips = types.length === 0 ? ['all'] : ['all', ...types];
   allChips.forEach(type => {
     const chip = document.createElement('button');
     chip.type = 'button';
     const label = type === 'all' ? 'All' : type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     chip.textContent = label;
     const isActive = window._ffQueueFilter === type;
-    chip.style.cssText = `padding:4px 12px;border-radius:999px;border:1px solid ${isActive ? '#7c3aed' : '#e5e7eb'};background:${isActive ? '#7c3aed' : '#fff'};color:${isActive ? '#fff' : '#374151'};font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;white-space:nowrap;`;
-    chip.addEventListener('click', function() {
-      window._ffQueueFilter = type;
-      ffRenderQueueFilterChips();
-      renderQueue();
-      renderService();
-    });
+    chip.style.cssText = `padding:4px 12px;border-radius:999px;border:1px solid ${isActive ? '#7c3aed' : '#e5e7eb'};background:${isActive ? '#7c3aed' : '#fff'};color:${isActive ? '#fff' : '#374151'};font-size:12px;font-weight:500;cursor:${filterReadOnly ? 'not-allowed' : 'pointer'};transition:all 0.15s;white-space:nowrap;opacity:${filterReadOnly ? '0.9' : '1'};`;
+    if (!filterReadOnly) {
+      chip.addEventListener('click', function() {
+        window._ffQueueFilter = type;
+        ffRenderQueueFilterChips();
+        renderQueue();
+        renderService();
+      });
+    } else {
+      chip.disabled = true;
+      chip.setAttribute('aria-disabled', 'true');
+    }
     bar.appendChild(chip);
   });
+  if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
 }
 // ─── End Queue Filter ──────────────────────────────────────────────────────
 
@@ -5727,15 +6656,31 @@ function renderQueue(){
 
   queueList.innerHTML="";
 
+  if (!ffCurrentUserHasQueueScreenAccess()) {
+    return;
+  }
+
   const filteredQueue = filterQueue(queue, window._ffQueueFilter || 'all');
   if (filteredQueue.length === 0) {
     const empty = document.createElement("li");
     empty.className = "ff-queue-empty-state";
     empty.innerHTML = ffQueueEmptyAvailableHtml();
     queueList.appendChild(empty);
+    if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
     return;
   }
+  const queueLocked =
+    typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission();
   filteredQueue.forEach((q,i)=>{
+    let qi = queue.indexOf(q);
+    if (qi < 0) {
+      qi = queue.findIndex(
+        (row) =>
+          row &&
+          String(row.name || '').trim() === String(q.name || '').trim() &&
+          String(row.staffId || '') === String(q.staffId || '')
+      );
+    }
 
     const li=document.createElement("li"); li.className="item"; li.setAttribute("held",q.held?"true":"false");
 
@@ -5746,28 +6691,31 @@ function renderQueue(){
     nm.style.alignItems = "center";
     nm.style.gap = "10px";
     nm.style.minWidth = "0";
-    const queuePill = namePill(q);
-    queuePill.style.fontSize = "15px";
-    queuePill.style.padding = "6px 12px";
-    queuePill.style.minWidth = "0";
-    queuePill.style.maxWidth = "100%";
-    nm.appendChild(queuePill);
-
     const presenceMeta = queuePresenceMeta(q, { queueMember: true });
     const canManageCalls = ffHasQueueCallAccess();
     const presenceStatusInfo = ffDiagExplainPresenceStatus(presenceMeta.presence);
     if (canManageCalls) {
       const presenceRow = document.createElement("div");
-      presenceRow.style.cssText = "display:flex;align-items:center;gap:6px;font-size:11px;color:#6b7280;white-space:nowrap;flex-shrink:0;";
+      presenceRow.style.cssText = "display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;white-space:nowrap;flex-shrink:0;";
+      const hint = String(presenceMeta.connectionHint || '').trim() || 'Presence';
+      presenceRow.setAttribute("title", hint);
+      presenceRow.setAttribute("aria-label", hint);
       const presenceDot = document.createElement("span");
       presenceDot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${queuePresenceDotColor(presenceMeta.status)};display:inline-block;flex-shrink:0;`;
-      const presenceLabel = document.createElement("span");
-      presenceLabel.textContent = (presenceMeta.status === 'online' || presenceMeta.status === 'idle' || presenceMeta.status === 'queue')
-        ? 'Connected'
-        : 'Not connected';
-      presenceRow.append(presenceDot, presenceLabel);
+      presenceDot.setAttribute("aria-hidden", "true");
+      presenceRow.appendChild(presenceDot);
       nm.appendChild(presenceRow);
     }
+
+    const queuePill = namePill(q);
+    queuePill.style.fontSize = "15px";
+    queuePill.style.padding = "6px 12px";
+    queuePill.style.flexShrink = "0";
+    queuePill.style.minWidth = "max-content";
+    queuePill.style.maxWidth = "min(320px, 46vw)";
+    queuePill.style.overflow = "hidden";
+    queuePill.style.textOverflow = "ellipsis";
+    nm.appendChild(queuePill);
 
     const ctrls=document.createElement("div"); ctrls.className="controls";
     ctrls.style.gap = "10px";
@@ -5776,9 +6724,9 @@ function renderQueue(){
 
     const hold=btn(q.held?"RELEASE":"HOLD","hold-btn");
 
-    start.onclick=() =>guardStart(q.name, i, ()=>startSpecific(i));
+    start.onclick=() =>guardStart(q.name, qi, ()=>startSpecific(qi));
 
-    hold.onclick=() =>{ window.__ff_holdTargetName = q.name; window.__ff_holdWasHeld = !!q.held; guardHold(()=>toggleHold(i)); };
+    hold.onclick=() =>{ window.__ff_holdTargetName = q.name; window.__ff_holdWasHeld = !!q.held; guardHold(()=>toggleHold(qi)); };
 
     // Show call icon when we have staffId and row not held (match In Service behavior).
     const canCall = !q.held && !!presenceMeta.staffId;
@@ -5800,7 +6748,7 @@ function renderQueue(){
       }
     };
     console.log('[StaffCallDiag] queue row presence', diagEligibility);
-    if (canCall && canManageCalls) {
+    if (canCall && canManageCalls && !queueLocked) {
       const callWrap = document.createElement("div");
       callWrap.style.cssText = "display:flex;align-items:center;gap:4px;white-space:nowrap;";
 
@@ -5859,6 +6807,8 @@ function renderQueue(){
       callStatus.textContent = callStatusLabel || "";
       callStatus.style.cssText = "font-size:10px;color:#6b7280;white-space:nowrap;";
       if (!callStatusLabel) callStatus.style.display = "none";
+      const callTip = [String(presenceMeta.connectionHint || '').trim(), callStatusLabel].filter(Boolean).join(" — ");
+      if (callTip) callStatus.setAttribute("title", callTip);
       callWrap.append(callBtn, callStatus);
       ctrls.prepend(callWrap);
     } else {
@@ -5872,7 +6822,11 @@ function renderQueue(){
       });
     }
 
-    if (canTechnicianSelfCheckoutQueueRow(q)) {
+    if (
+      !queueLocked &&
+      (canTechnicianSelfCheckoutQueueRow(q) ||
+        (typeof ffCurrentUserIsQueueSharedStationJoin === 'function' && ffCurrentUserIsQueueSharedStationJoin()))
+    ) {
       const selfLeaveBtn = document.createElement("button");
       selfLeaveBtn.type = "button";
       selfLeaveBtn.textContent = "✖";
@@ -5889,7 +6843,7 @@ function renderQueue(){
         "line-height:1",
         "flex-shrink:0"
       ].join(";");
-      selfLeaveBtn.onclick = () => selfRemoveFromQueue(i);
+      selfLeaveBtn.onclick = () => selfRemoveFromQueue(qi);
       ctrls.prepend(selfLeaveBtn);
     }
 
@@ -5897,19 +6851,26 @@ function renderQueue(){
       ctrls.append(hold,start);
     }
 
-    if(reorderMode){ const up=btn("↑","start-btn"), down=btn("↓","start-btn"); up.onclick=() =>move(i,-1); down.onclick=() =>move(i,1); const del=btn("✖","finish-btn"); del.title="Remove from queue"; del.onclick=()=>guardHold(()=>removeFromQueue(i)); ctrls.prepend(up); ctrls.append(down); ctrls.append(del); }
+    if(reorderMode && !queueLocked){ const up=btn("↑","start-btn"), down=btn("↓","start-btn"); up.onclick=() =>move(qi,-1); down.onclick=() =>move(qi,1); const del=btn("✖","finish-btn"); del.title="Remove from queue"; del.onclick=()=>guardHold(()=>removeFromQueue(qi)); ctrls.prepend(up); ctrls.append(down); ctrls.append(del); }
 
     li.append(badge,nm,ctrls); queueList.appendChild(li);
 
   });
+
+  if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
 
 }
 
 
 
 function removeFromQueue(i){
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
 
   if(i<0 || i>=queue.length) return;
+  if (!ffCurrentUserHasQueueReorderPermission()) return;
 
   const rem = queue.splice(i,1)[0];
 
@@ -5944,21 +6905,32 @@ function removeFromQueue(i){
 }
 
 async function selfRemoveFromQueue(i) {
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
   if (i < 0 || i >= queue.length) return;
   const target = queue[i];
-  if (!canTechnicianSelfCheckoutQueueRow(target)) return;
+  const sharedStation =
+    typeof ffCurrentUserIsQueueSharedStationJoin === 'function' && ffCurrentUserIsQueueSharedStationJoin();
+  if (!canTechnicianSelfCheckoutQueueRow(target) && !sharedStation) return;
   const currentStaffId = String(window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || target.staffId || '').trim();
-  const pinRef = currentStaffId || target.name;
+  const pinRef = sharedStation
+    ? (String(target.staffId || '').trim() || String(target.name || '').trim())
+    : (currentStaffId || target.name);
   const modalResult = await showQueueSelfCheckoutModal((pin) => {
     const storedPin = getCurrentStaffPin(pinRef);
     return !!storedPin && String(storedPin) === String(pin);
   });
   if (modalResult == null) return;
-  const geoFenceCheck = await verifyQueueGeoFenceForAction({
-    action: 'leave',
-    staffId: currentStaffId || target.staffId || '',
-    staffName: target.name || window.__ff_authedStaffName || 'Technician'
-  });
+  let geoFenceCheck = { allowed: true };
+  if (!sharedStation) {
+    geoFenceCheck = await verifyQueueGeoFenceForAction({
+      action: 'leave',
+      staffId: currentStaffId || target.staffId || '',
+      staffName: target.name || window.__ff_authedStaffName || 'Technician'
+    });
+  }
   if (!geoFenceCheck.allowed) return;
   const rem = queue.splice(i, 1)[0];
   addQueueCheckoutHistoryRecord({
@@ -5976,15 +6948,31 @@ function renderService(){
 
   serviceList.innerHTML="";
 
+  if (!ffCurrentUserHasQueueScreenAccess()) {
+    return;
+  }
+
   const filteredService = filterQueue(service, window._ffQueueFilter || 'all');
   if (filteredService.length === 0) {
     const empty = document.createElement("li");
     empty.className = "ff-queue-empty-state";
     empty.innerHTML = ffQueueEmptyInServiceHtml();
     serviceList.appendChild(empty);
+    if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
     return;
   }
+  const queueLockedSvc =
+    typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission();
   filteredService.forEach((s,i)=>{
+    let si = service.indexOf(s);
+    if (si < 0) {
+      si = service.findIndex(
+        (row) =>
+          row &&
+          String(row.name || '').trim() === String(s.name || '').trim() &&
+          String(row.staffId || '') === String(s.staffId || '')
+      );
+    }
 
     const li=document.createElement("li"); li.className="item";
 
@@ -5995,36 +6983,39 @@ function renderService(){
     nm.style.alignItems = "center";
     nm.style.gap = "10px";
     nm.style.minWidth = "0";
-    const pill=namePill(s); pill.textContent=s.name;
-    pill.style.fontSize = "15px";
-    pill.style.padding = "6px 12px";
-    pill.style.minWidth = "0";
-    pill.style.maxWidth = "100%";
-    nm.appendChild(pill);
-
     const presenceMeta = queuePresenceMeta(s, { queueMember: true });
     const canManageCalls = ffHasQueueCallAccess();
     if (canManageCalls) {
       const presenceRow = document.createElement("div");
-      presenceRow.style.cssText = "display:flex;align-items:center;gap:6px;font-size:11px;color:#6b7280;white-space:nowrap;flex-shrink:0;";
+      presenceRow.style.cssText = "display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;white-space:nowrap;flex-shrink:0;";
+      const hint = String(presenceMeta.connectionHint || '').trim() || 'Presence';
+      presenceRow.setAttribute("title", hint);
+      presenceRow.setAttribute("aria-label", hint);
       const presenceDot = document.createElement("span");
       presenceDot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${queuePresenceDotColor(presenceMeta.status)};display:inline-block;flex-shrink:0;`;
-      const presenceLabel = document.createElement("span");
-      presenceLabel.textContent = (presenceMeta.status === 'online' || presenceMeta.status === 'idle' || presenceMeta.status === 'queue')
-        ? 'Connected'
-        : 'Not connected';
-      presenceRow.append(presenceDot, presenceLabel);
+      presenceDot.setAttribute("aria-hidden", "true");
+      presenceRow.appendChild(presenceDot);
       nm.appendChild(presenceRow);
     }
 
-    const fin=btn("FINISH","finish-btn"); fin.onclick=() =>guardFinish(s.name, ()=>finish(i));
+    const pill=namePill(s); pill.textContent=s.name;
+    pill.style.fontSize = "15px";
+    pill.style.padding = "6px 12px";
+    pill.style.flexShrink = "0";
+    pill.style.minWidth = "max-content";
+    pill.style.maxWidth = "min(320px, 46vw)";
+    pill.style.overflow = "hidden";
+    pill.style.textOverflow = "ellipsis";
+    nm.appendChild(pill);
+
+    const fin=btn("FINISH","finish-btn"); fin.onclick=() =>guardFinish(s.name, ()=>finish(si));
     const canViewServiceRowControls = canViewQueueRowActionControls(s);
     const ctrls=document.createElement("div"); ctrls.className="controls";
     ctrls.style.gap = "10px";
 
     // A row that is already in the local IN SERVICE list should show the phone immediately,
     // even before the async presence write round-trips through Firestore.
-    if (canManageCalls && presenceMeta.staffId) {
+    if (canManageCalls && presenceMeta.staffId && !queueLockedSvc) {
       const callWrap = document.createElement("div");
       callWrap.style.cssText = "display:flex;align-items:center;gap:4px;white-space:nowrap;";
 
@@ -6085,6 +7076,8 @@ function renderService(){
       callStatus.textContent = serviceCallStatusLabel;
       callStatus.style.cssText = "font-size:10px;color:#6b7280;white-space:nowrap;";
       if (!serviceCallStatusLabel) callStatus.style.display = "none";
+      const svcTip = [String(presenceMeta.connectionHint || '').trim(), serviceCallStatusLabel].filter(Boolean).join(" — ");
+      if (svcTip) callStatus.setAttribute("title", svcTip);
       callWrap.append(callBtn, callStatus);
       ctrls.append(callWrap);
       if (canViewServiceRowControls) {
@@ -6100,6 +7093,8 @@ function renderService(){
     li.append(badge,nm,ctrls); serviceList.appendChild(li);
 
   });
+
+  if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
 
 }
 
@@ -6215,6 +7210,11 @@ async function handleJoin(){
     joinErrorEl.style.display = 'none';
   }
 
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
+
   // Get elements fresh to ensure they exist
   const nameSelectEl = document.getElementById("nameSelect");
   const pinInputEl = document.getElementById("pinInput");
@@ -6245,7 +7245,9 @@ async function handleJoin(){
   const isTechnicianSession = sessionRole === 'technician' || sessionRole === 'tech' || sessionRole === 'staff';
   const ownCloudStaffId = String(liveDiag?.ownStaffId || '').trim();
   const ownCloudPresenceName = String(liveDiag?.presence?.name || '').trim();
-  if (isTechnicianSession && ownCloudStaffId) {
+  const sharedStationJoin =
+    typeof ffCurrentUserIsQueueSharedStationJoin === 'function' && ffCurrentUserIsQueueSharedStationJoin();
+  if (!sharedStationJoin && isTechnicianSession && ownCloudStaffId) {
     selectedTechnicianId = ownCloudStaffId;
     if (ownCloudPresenceName) selectedTechnicianName = ownCloudPresenceName;
     console.log('[handleJoin] Overriding JOIN selection with logged-in technician identity', {
@@ -6315,6 +7317,16 @@ async function handleJoin(){
     return;
   }
 
+  if (!ffStaffHasQueueJoinPermission(technician)) {
+    if (joinErrorEl) {
+      joinErrorEl.textContent = 'Join queue is not enabled for this profile';
+      joinErrorEl.style.display = 'block';
+    } else {
+      alert('Join queue is not enabled for this profile');
+    }
+    return;
+  }
+
   console.log('[handleJoin] Found technician:', technician.name, 'Stored PIN:', technician.pin);
 
   // Resolve name to staffId for stable identifier-based lookup
@@ -6356,11 +7368,14 @@ async function handleJoin(){
     return;
   }
 
-  const geoFenceCheck = await verifyQueueGeoFenceForAction({
-    action: 'join',
-    staffId: currentStaffId,
-    staffName: selectedTechnicianName
-  });
+  let geoFenceCheck = { allowed: true };
+  if (!sharedStationJoin && !ffStaffMayBypassQueueLocationForJoin(technician)) {
+    geoFenceCheck = await verifyQueueGeoFenceForAction({
+      action: 'join',
+      staffId: currentStaffId,
+      staffName: selectedTechnicianName
+    });
+  }
   if (!geoFenceCheck.allowed) {
     if (joinErrorEl) {
       let message = 'Location access is required to join the queue';
@@ -6437,11 +7452,14 @@ async function handleJoin(){
     }
   } finally {
     window.__ff_joinInProgress = false;
-    const joinBtnEl = document.getElementById('joinBtn');
-    if (joinBtnEl) {
-      joinBtnEl.disabled = false;
-      joinBtnEl.style.opacity = '';
-      joinBtnEl.style.cursor = 'pointer';
+    if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
+    else {
+      const joinBtnEl = document.getElementById('joinBtn');
+      if (joinBtnEl) {
+        joinBtnEl.disabled = false;
+        joinBtnEl.style.opacity = '';
+        joinBtnEl.style.cursor = 'pointer';
+      }
     }
   }
 }
@@ -6452,6 +7470,10 @@ function join() {
 }
 
 function startSpecific(idx){
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
 
   const [it]=queue.splice(idx,1); service.push({name:it.name, staffId: it.staffId || resolveStaffNameToId(it.name)});
 
@@ -6478,7 +7500,12 @@ function startSpecific(idx){
 
 }
 
-function toggleHold(i){ queue[i].held=!queue[i].held; save(); renderQueue(); 
+function toggleHold(i){
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
+  queue[i].held=!queue[i].held; save(); renderQueue(); 
 
   // Actor info is already set by guardHold (manager/admin code)
   const lastCode = window.__ff_lastValidatedCode;
@@ -6500,6 +7527,10 @@ function toggleHold(i){ queue[i].held=!queue[i].held; save(); renderQueue();
 }
 
 function finish(i){
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
 
   const [it]=service.splice(i,1);
 
@@ -6521,7 +7552,13 @@ function finish(i){
 
 }
 
-function move(i,d){ const j=i+d; if(j<0||j>=queue.length) return; const t=queue[j]; queue[j]=queue[i]; queue[i]=t; save(); renderQueue(); 
+function move(i,d){
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
+  if (reorderMode && !ffCurrentUserHasQueueReorderPermission()) return;
+  const j=i+d; if(j<0||j>=queue.length) return; const t=queue[j]; queue[j]=queue[i]; queue[i]=t; save(); renderQueue(); 
 
   // Reorder is done in reorder mode which requires manager/admin code
   const lastValidated = window.__ff_lastValidatedCode;
@@ -6547,6 +7584,14 @@ function move(i,d){ const j=i+d; if(j<0||j>=queue.length) return; const t=queue[
 }
 
 async function resetDay(){
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
+  if (!ffCurrentUserHasQueueResetPermission()) {
+    alert("You don't have permission to reset the queue.");
+    return;
+  }
   // Check if user is owner/admin - block if not
   if (typeof window.isCurrentUserOwner === 'function') {
     try {
@@ -6573,33 +7618,23 @@ async function resetDay(){
     return; // User cancelled or invalid code (error already shown)
   }
   
-  // Set actor info from staff-based PIN validation
-  if (window.ffAuthByPin) {
-    const authResult = window.ffAuthByPin(code);
-    if (authResult.ok && authResult.staff) {
-      const staff = authResult.staff;
-      const role = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Tech');
-      const name = staff.name || 'Unknown';
-      window.__ff_lastValidatedCode = { role: role, name: name };
-      window.__ff_actorRole = role;
-      window.__ff_actorName = name;
-    } else {
-      // Fallback if staff lookup fails
-      const role = 'Admin';
-      const name = 'Admin';
-      window.__ff_lastValidatedCode = { role: role, name: name };
-      window.__ff_actorRole = role;
-      window.__ff_actorName = name;
-    }
-  } else {
-    // Fallback if ffAuthByPin not available
-    const role = 'Admin';
-    const name = 'Admin';
-    window.__ff_lastValidatedCode = { role: role, name: name };
-    window.__ff_actorRole = role;
-    window.__ff_actorName = name;
+  // Set actor info from staff-based PIN validation (must have Reset queue permission)
+  if (!window.ffAuthByPin) {
+    alert('Not authorized to reset the queue.');
+    return;
   }
-  
+  const authResult = window.ffAuthByPin(code);
+  if (!authResult.ok || !authResult.staff || !ffStaffHasQueueResetPermission(authResult.staff)) {
+    alert('Not authorized to reset the queue.');
+    return;
+  }
+  const staff = authResult.staff;
+  const role = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Tech');
+  const name = staff.name || 'Unknown';
+  window.__ff_lastValidatedCode = { role: role, name: name };
+  window.__ff_actorRole = role;
+  window.__ff_actorName = name;
+
   // Proceed with reset - use resetQueueState function
   resetQueueState({ force: true, source: 'manual' });
 }
@@ -7044,6 +8079,10 @@ function gateManager(){ const code=prompt("Manager code"); if(code===null) retur
 function workerGate(name){ const staffId = resolveStaffNameToId(name); const currentStaffId = staffId || name; const storedPin = getCurrentStaffPin(currentStaffId); if(!storedPin) return false; const code=prompt(`PIN for ${name}`); if(code===null) return false; return code.toString()===storedPin; }
 
 async function guardHold(fn){
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
   // Store pending action and open modal
   window.__ff_holdPendingAction = fn;
   
@@ -7059,6 +8098,10 @@ async function guardHold(fn){
 }
 
 async function guardStart(workerName, idx, fn){
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
 
   const entry = window.securePromptOnce ? await window.securePromptOnce('Enter PIN to START') : prompt('Enter PIN to START');
 
@@ -7117,6 +8160,10 @@ async function guardStart(workerName, idx, fn){
 }
 
 async function guardFinish(workerName, fn){
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
 
   const entry = window.securePromptOnce ? await window.securePromptOnce('Enter PIN to FINISH') : prompt('Enter PIN to FINISH');
 
@@ -7186,9 +8233,13 @@ async function openSettingsSecure(){
   if (typeof window.initChatSettingsSection === 'function') {
     window.initChatSettingsSection();
   } else {
-    // Fallback: check role directly from localStorage/DOM
     const chatSection = document.getElementById('chatSettingsSection');
-    if (chatSection) chatSection.style.display = 'block';
+    if (chatSection) {
+      chatSection.style.display =
+        typeof ffCurrentUserHasChatManagePermission === 'function' && ffCurrentUserHasChatManagePermission()
+          ? 'block'
+          : 'none';
+    }
   }
   
   
@@ -7285,24 +8336,14 @@ function goToQueue() {
     if (_appsPn) _appsPn.style.display = 'none';
   } catch (e) {}
   
-  // ALWAYS show owner-view (main queue view) - regardless of current state
+  // ALWAYS show owner-view shell; queue lists + join row gated by queue_view or join-only partial
   const ownerView = document.getElementById('owner-view');
-  const joinBar = document.getElementById('joinBar');
-  const mainContent = document.querySelector('#owner-view .wrap');
-  const wrapContent = document.querySelector('.wrap'); // .wrap is a sibling of owner-view, not inside it
   if (ownerView) {
     ownerView.style.display = '';
-    // Show Queue-specific controls (joinBar) when on QUEUE page
-    if (joinBar) joinBar.style.display = 'flex';
-    // Show main content (if inside owner-view)
-    if (mainContent) mainContent.style.display = 'block';
   }
-  // Show .wrap content (AVAILABLE / IN SERVICE lists) - it's a sibling of owner-view
-  if (wrapContent) {
-    wrapContent.style.display = 'block';
-  }
-  
-  // Show/hide Queue management controls based on current role
+  ffApplyQueueViewGate();
+
+  // Show/hide Queue management controls (ffApplyQueueViewGate already calls this when allowed; repeat for consistency)
   updateQueueManagementUiVisibility();
 
   if (typeof renderSelect === 'function') {
@@ -7331,10 +8372,13 @@ function goToQueue() {
     };
   }
   
-  // Update active state for navigation tabs
-  // Set active tab (clear all first)
+  // Update active state for navigation tabs (highlight Queue if full or join-only queue access)
   document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
-  if (queueBtn) queueBtn.classList.add('active');
+  var queueNavEl = document.getElementById('queueBtn');
+  if (queueNavEl && typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess()) {
+    queueNavEl.classList.add('active');
+  }
+  if (typeof ffUpdateMainNavTabVisibility === 'function') ffUpdateMainNavTabVisibility();
 
   // Show queue filter bar
   if (typeof ffRenderQueueFilterChips === 'function') ffRenderQueueFilterChips();
@@ -10398,12 +11442,8 @@ window.addTrainingBlock = addTrainingBlock;
 window.addTrainingQuizQuestion = addTrainingQuizQuestion;
 
 // Manage Queue Screen Functions
-// Placeholder permission check - to be connected to actual permission system
 function checkQueueManagePermission() {
-  // TODO: Implement actual permission check
-  // TEMPORARY: return true to make gear icon visible for testing
-  // This should check if current user has queue_manage permission
-  return true;
+  return ffCurrentUserHasQueueManagePermission();
 }
 
 // Helper functions for queues structure (ff_queues_v1)
@@ -10504,6 +11544,7 @@ function clearQueueLastAutoResetDate() {
 }
 
 function saveQueueAutoResetSettings(autoReset) {
+  if (!ffCurrentUserHasQueueManagePermission()) return;
   const queues = getQueuesData();
   if (!queues.default) queues.default = {};
   if (!queues.default.settings) queues.default.settings = {};
@@ -10547,6 +11588,7 @@ function getQueueGeoFenceSettings() {
 }
 
 function saveQueueGeoFenceSettings(queueGeoFence) {
+  if (!ffCurrentUserHasQueueManagePermission()) return;
   const queues = getQueuesData();
   if (!queues.default) queues.default = {};
   if (!queues.default.settings) queues.default.settings = {};
@@ -10603,6 +11645,11 @@ function renderManageQueueGeoFenceSettings() {
 }
 
 function openManageQueue() {
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
+  if (!ffCurrentUserHasQueueManagePermission()) return;
   // Hide Queue view
   const ownerView = document.getElementById('owner-view');
   const joinBar = document.getElementById('joinBar');
@@ -10941,7 +11988,11 @@ function goToUserProfile(section) {
     userProfileScreen.classList.remove('ff-overlay-from-schedule');
   }
   userProfileScreen.style.display = 'block';
-  
+
+  if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') {
+    window.ffSyncUserProfileBillingMenuVisibility();
+  }
+
   // Load avatar from localStorage when User Profile screen is shown
   if (typeof window.loadUserProfileAvatar === 'function') {
     window.loadUserProfileAvatar();
@@ -11006,6 +12057,13 @@ function goBackFromUserProfile() {
   
   // Restore previous view - use the same navigation functions as the top tabs
   if (previousView === 'tasks') {
+    if (typeof window.ffCurrentUserHasTasksViewPermission === 'function' && !window.ffCurrentUserHasTasksViewPermission()) {
+      const tasksScreenBlocked = document.getElementById('tasksScreen');
+      if (tasksScreenBlocked) tasksScreenBlocked.style.display = 'none';
+      if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+      goToQueue();
+      return;
+    }
     // If coming from Tasks, restore Tasks screen
     const tasksScreen = document.getElementById('tasksScreen');
     if (tasksScreen) {
@@ -11025,6 +12083,7 @@ function goBackFromUserProfile() {
     const tasksBtn = document.getElementById('tasksBtn');
     if (tasksBtn) tasksBtn.classList.add('active');
     if (queueBtn) queueBtn.classList.remove('active');
+    if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
   } else if (previousView === 'chat') {
     // Return to Chat if user came from Chat
     if (typeof window.goToChat === 'function') {
@@ -11037,8 +12096,17 @@ function goBackFromUserProfile() {
     }
   } else if (previousView === 'media' && typeof window.goToMedia === 'function') {
     window.goToMedia();
-  } else if (previousView === 'inbox' && typeof window.goToInbox === 'function') {
-    window.goToInbox();
+  } else if (previousView === 'inbox') {
+    if (typeof window.ffCurrentUserHasInboxViewPermission === 'function' && !window.ffCurrentUserHasInboxViewPermission()) {
+      const inboxScreenBlocked = document.getElementById('inboxScreen');
+      if (inboxScreenBlocked) inboxScreenBlocked.style.display = 'none';
+      if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+      goToQueue();
+      return;
+    }
+    if (typeof window.goToInbox === 'function') {
+      window.goToInbox();
+    }
   } else if (previousView === 'tickets' && typeof window.goToTickets === 'function') {
     window.goToTickets();
   } else if (previousView === 'schedule' && typeof window.goToSchedule === 'function') {
@@ -11053,10 +12121,10 @@ function goBackFromUserProfile() {
 // Wire up QUEUE button
 if (queueBtn) {
   queueBtn.onclick = goToQueue;
-  // Set Queue button as active by default when owner-view is visible
   const ownerView = document.getElementById('owner-view');
-  if (ownerView && ownerView.style.display !== 'none') {
-    queueBtn.classList.add('active');
+  const qn = document.getElementById('queueBtn');
+  if (ownerView && ownerView.style.display !== 'none' && qn && typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess()) {
+    qn.classList.add('active');
   }
 }
 
@@ -13890,6 +14958,7 @@ function initializeJoinButton() {
           freshJoinBtn.style.zIndex = '100';
           freshJoinBtn.disabled = false;
           freshJoinBtn.removeAttribute('disabled');
+          if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
           console.log('[Init] JOIN button handler connected successfully');
           return true;
 } else {
@@ -14175,7 +15244,16 @@ function exitReorderMode() {
 async function handleReorderClick() {
   try {
   console.log('Reorder clicked');
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
   ensureTasksScreenHidden();
+
+  if (!reorderMode && !ffCurrentUserHasQueueReorderPermission()) {
+    alert("You don't have permission to reorder the queue.");
+    return;
+  }
 
   if (reorderMode) {
     // Currently in reorder mode - exiting without auth
@@ -14197,7 +15275,11 @@ async function handleReorderClick() {
 
     // Use staff-based auth instead of legacy admin PIN
     authResult = ffAuthByPin(code);
-    ok = authResult.ok && authResult.staff && (authResult.staff.isAdmin === true || authResult.staff.isManager === true);
+    ok = authResult.ok && authResult.staff && (
+      authResult.staff.isAdmin === true ||
+      authResult.staff.isManager === true ||
+      ffStaffHasQueueReorderPermission(authResult.staff)
+    );
 
   } else {
 
@@ -14209,12 +15291,17 @@ async function handleReorderClick() {
 
     // Use staff-based auth instead of legacy admin PIN
     authResult = ffAuthByPin(code);
-    ok = authResult.ok && authResult.staff && (authResult.staff.isAdmin === true || authResult.staff.isManager === true);
+    ok = authResult.ok && authResult.staff && (
+      authResult.staff.isAdmin === true ||
+      authResult.staff.isManager === true ||
+      ffStaffHasQueueReorderPermission(authResult.staff)
+    );
     
     // If using prompt, set actor info manually
     if (ok && authResult.staff) {
-      const role = authResult.staff.isAdmin === true ? 'Admin' : 'Manager';
-      const name = authResult.staff.name || '';
+      const s = authResult.staff;
+      const role = s.isAdmin === true ? 'Admin' : (s.isManager === true ? 'Manager' : 'Tech');
+      const name = s.name || '';
       window.__ff_actorRole = role;
       window.__ff_actorName = name;
     }
@@ -14224,7 +15311,7 @@ async function handleReorderClick() {
   if (ok) {
     // Store the validated staff info for later use in addHistoryEntry
     const staff = authResult.staff;
-    const role = staff.isAdmin === true ? 'Admin' : 'Manager';
+    const role = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Tech');
     window.__ff_lastValidatedCode = { role: role, name: staff.name || '' };
 
     // Check current state and toggle accordingly
@@ -14347,6 +15434,7 @@ function openHistoryModal() {
   if (workerSelect) {
     workerSelect.value = window.__historyWorkerFilter || 'all';
   }
+  if (typeof ffApplyHistoryActionButtonsVisibility === 'function') ffApplyHistoryActionButtonsVisibility();
   renderHistory();
 }
 
@@ -14414,6 +15502,10 @@ const historyClearBtn = document.getElementById('historyClearBtn');
 const historyCloseBtn2 = document.getElementById('historyCloseBtn2');
 
 function exportHistory() {
+  if (typeof ffCurrentUserHasHistoryExportPermission === 'function' && !ffCurrentUserHasHistoryExportPermission()) {
+    if (typeof showToast === 'function') showToast('You do not have permission to export history.', 'error');
+    return;
+  }
   const entries = getFilteredHistoryEntries({ syncWorkerOptions: false });
   
   const blob = new Blob([entries.map(entry => {
@@ -14434,6 +15526,10 @@ function exportHistory() {
 }
 
 function clearHistory() {
+  if (typeof ffCurrentUserHasHistoryClearPermission === 'function' && !ffCurrentUserHasHistoryClearPermission()) {
+    if (typeof showToast === 'function') showToast('You do not have permission to clear history.', 'error');
+    return;
+  }
   if (!confirm("Clear history?")) return;
   // Clear ffv24_log from localStorage
   localStorage.setItem('ffv24_log', JSON.stringify([]));
@@ -14450,6 +15546,10 @@ if (historyClearBtn) {
   historyClearBtn.addEventListener('click', () => {
     clearHistory();
   });
+}
+
+if (typeof ffApplyHistoryActionButtonsVisibility === 'function') {
+  ffApplyHistoryActionButtonsVisibility();
 }
 
 // Wire bottom Close button with guard flag
@@ -14560,16 +15660,7 @@ function ensureTasksScreenHidden() {
       return;
     }
     
-    // Tasks feature removed - just ensure main content is visible
-    const mainContent = document.querySelector('#owner-view .wrap');
-    const joinBar = document.getElementById('joinBar');
-    
-    if (mainContent && mainContent.style.display === 'none') {
-      mainContent.style.display = 'block';
-    }
-    if (joinBar && joinBar.style.display === 'none') {
-      joinBar.style.display = 'flex';
-    }
+    if (typeof ffApplyQueueViewGate === 'function') ffApplyQueueViewGate();
   } catch (e) {
     console.warn('[Navigation] Error in ensureTasksScreenHidden:', e);
   }
@@ -15294,7 +16385,10 @@ function renderSettingsTaskList(tabKey) {
         item.addEventListener('drop', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          
+          if (typeof ffCurrentUserHasTasksManagePermission === 'function' && !ffCurrentUserHasTasksManagePermission()) {
+            return;
+          }
+
           if (!draggedKey) return;
           
           const isOrphanTarget = item.dataset.isOrphan === 'true';
@@ -16119,6 +17213,10 @@ function writeTasksList(tab, kind, arr) {
 
 function openTasks() {
   try {
+    if (typeof window.ffCurrentUserHasTasksViewPermission === 'function' && !window.ffCurrentUserHasTasksViewPermission()) {
+      if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+      return;
+    }
     if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
       window.ffCloseGlobalBlockingOverlays();
     }
@@ -16399,8 +17497,11 @@ function openTasks() {
     // Update active state for navigation tabs
     const tasksBtn = document.getElementById('tasksBtn');
     document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
-    if (tasksBtn) tasksBtn.classList.add('active');
-    
+    if (tasksBtn && typeof window.ffCurrentUserHasTasksViewPermission === 'function' && window.ffCurrentUserHasTasksViewPermission()) {
+      tasksBtn.classList.add('active');
+    }
+    if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+
     console.log('[Tasks] Tasks screen opened');
   } catch (e) {
     console.error('[Tasks] Error opening Tasks screen:', e);
@@ -16410,9 +17511,6 @@ function openTasks() {
 function closeTasks() {
   try {
     const tasksScreen = document.getElementById('tasksScreen');
-    const mainContent = document.querySelector('#owner-view .wrap');
-    const joinBar = document.getElementById('joinBar');
-    const queueControls = document.getElementById('queueControls');
     
     if (!tasksScreen) {
       console.error('[Tasks] tasksScreen element not found');
@@ -16435,13 +17533,8 @@ function closeTasks() {
       return;
     }
     
-    // Show main content and Queue-specific controls (joinBar and queueControls)
-    // Header remains visible (it's now outside owner-view and always sticky)
-    if (mainContent) mainContent.style.display = 'block';
-    if (joinBar) joinBar.style.display = 'flex';
-    // Show Queue-only controls (Reorder, RESET) when returning to Queue
-    if (queueControls) queueControls.style.display = 'flex';
-    
+    if (typeof ffApplyQueueViewGate === 'function') ffApplyQueueViewGate();
+
     console.log('[Tasks] Tasks screen closed');
   } catch (e) {
     console.error('[Tasks] Error closing Tasks screen:', e);
@@ -16556,6 +17649,9 @@ window.ffDebugTaskFilterFull = function() {
 
 // Check if user has admin access (owner role OR valid admin code override)
 function ffHasAdminAccess() {
+  if (typeof window !== 'undefined' && typeof window.ffIsOwner === 'function' && window.ffIsOwner()) {
+    return true;
+  }
   // Check owner role cache
   if (window.ff_is_admin_cached === true) {
     return true;
@@ -17528,6 +18624,9 @@ function setSettingsModalTab(tabName, options) {
 
 function saveTasksToStorage() {
   try {
+    if (typeof ffCurrentUserHasTasksManagePermission === 'function' && !ffCurrentUserHasTasksManagePermission()) {
+      return false;
+    }
     // Get current tab (Settings modal tab)
     const tab = getCurrentTasksTab();
     const currentTabTasks = tasksModalDraft[tab] || [];
@@ -18278,6 +19377,7 @@ function renderTasksList(tab, opts) {
     // Render main screen MY LIST (active tasks) - only if main screen is visible and Settings modal is NOT open
     const mainListContainer = document.querySelector('#tasksContentContainer .tasks-col:first-child .tasks-list');
     if (mainListContainer && !isTasksSettingsOpen) {
+      const tasksUseOk = typeof ffCurrentUserHasTasksUsePermission === 'function' && ffCurrentUserHasTasksUsePermission();
       // Ensure admin filter visibility when rendering (handles timing when admin status resolves late)
       const tasksStaffFilterWrap = document.getElementById('tasksStaffTypeFilterWrap');
       const filterEl = document.getElementById('tasksAdminFilter');
@@ -18752,7 +19852,11 @@ function renderTasksList(tab, opts) {
                 }
               }
             }
-            
+            if (!tasksUseOk) {
+              selectButtonDisabled = true;
+              selectButtonTitle = selectButtonTitle || 'No permission to use tasks';
+            }
+
             const selectButtonDisabledAttr = selectButtonDisabled ? ' disabled' : '';
             const selectButtonTitleAttr = selectButtonTitle ? ` title="${escapeHtmlAttr(selectButtonTitle)}"` : '';
             const selectButtonStyle = selectButtonDisabled ? 'flex-shrink:0;opacity:0.6;cursor:not-allowed;' : 'flex-shrink:0;';
@@ -18783,6 +19887,9 @@ function renderTasksList(tab, opts) {
           btn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+              return;
+            }
             const taskItem = btn.closest('.tasks-main-list-item');
             if (taskItem && taskItem.dataset.taskId) {
               // Guard: don't allow selection of completed tasks
@@ -18815,6 +19922,7 @@ function renderTasksList(tab, opts) {
     // Render PENDING column (pending tasks) - only if main screen is visible and Settings modal is NOT open
     const pendingListContainer = document.querySelector('#tasksContentContainer .tasks-col:last-child .tasks-list');
     if (pendingListContainer && !isTasksSettingsOpen) {
+      const tasksUseOk = typeof ffCurrentUserHasTasksUsePermission === 'function' && ffCurrentUserHasTasksUsePermission();
       // Get current tab for main Tasks screen
       const mainTab = currentTasksTab || 'opening';
       const allPendingTasks = getTabTasks(mainTab, 'pending');
@@ -18867,6 +19975,7 @@ function renderTasksList(tab, opts) {
           
           const taskIdAttr = keyId ? ` data-task-id="${escapeHtmlAttr(keyId)}"` : '';
           const assignedToHtml = task.assignedTo ? `<div class="task-worker">Taken by: ${escapeHtmlDraft(task.assignedTo)}</div>` : '';
+          const useDis = !tasksUseOk ? ' disabled style="opacity:0.45;cursor:not-allowed;"' : '';
           return `
             <div class="tasks-main-list-item"${taskIdAttr} style="display:flex;align-items:flex-start;justify-content:space-between;padding:12px;margin-bottom:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;">
               <div style="flex:1;">
@@ -18875,8 +19984,8 @@ function renderTasksList(tab, opts) {
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 ${infoButtonHtml}
-                <button type="button" class="task-return-arrow" data-task-id="${keyId || ''}">↺</button>
-                <button type="button" class="task-done-btn" data-task-id="${keyId || ''}">MARK DONE</button>
+                <button type="button" class="task-return-arrow" data-task-id="${keyId || ''}"${useDis}>↺</button>
+                <button type="button" class="task-done-btn" data-task-id="${keyId || ''}"${useDis}>MARK DONE</button>
               </div>
             </div>
           `;
@@ -18904,6 +20013,9 @@ function renderTasksList(tab, opts) {
           btn.addEventListener("click", async (e) => {
             e.preventDefault();
             e.stopPropagation();
+            if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+              return;
+            }
             btn.style.color = 'red';
             const taskId = btn.getAttribute("data-task-id");
             const code = await showReturnPinPrompt();
@@ -18954,6 +20066,9 @@ function renderTasksList(tab, opts) {
           btn.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();
+            if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+              return;
+            }
             const taskId = btn.getAttribute("data-task-id");
             if (window.openPinModalForDone) {
               window.openPinModalForDone(taskId);
@@ -19243,6 +20358,9 @@ function escapeHtmlAttr(text) {
 
 function addTaskToDraft() {
   try {
+    if (typeof ffCurrentUserHasTasksManagePermission === 'function' && !ffCurrentUserHasTasksManagePermission()) {
+      return;
+    }
     const modal = tasksSettingsModalContainer;
     if (!modal) {
       console.error('[Tasks] Modal container not found');
@@ -19457,6 +20575,9 @@ function cancelTasksModalForm() {
 
 function removeTaskFromDraft(index) {
   try {
+    if (typeof ffCurrentUserHasTasksManagePermission === 'function' && !ffCurrentUserHasTasksManagePermission()) {
+      return;
+    }
     const tab = getCurrentTasksTab();
     const tasks = tasksModalDraft[tab] || [];
     if (index >= 0 && index < tasks.length) {
@@ -19600,6 +20721,9 @@ function removeTaskFromDraft(index) {
 // Remove task by taskId (handles both catalog tasks and orphan tasks)
 function removeTaskFromDraftByTaskId(taskId, isOrphan, settingsTab) {
   try {
+    if (typeof ffCurrentUserHasTasksManagePermission === 'function' && !ffCurrentUserHasTasksManagePermission()) {
+      return;
+    }
     // Use Settings tab if provided (when called from Settings modal), otherwise use current tab
     const tab = settingsTab || getCurrentTasksTab();
     
@@ -19793,6 +20917,9 @@ function removeTaskFromDraftByTaskId(taskId, isOrphan, settingsTab) {
 
 function startEditTask(taskId) {
   try {
+    if (typeof ffCurrentUserHasTasksManagePermission === 'function' && !ffCurrentUserHasTasksManagePermission()) {
+      return;
+    }
     // Set editing state
     editingTaskId = taskId;
     
@@ -19817,6 +20944,9 @@ function startEditTask(taskId) {
 
 function saveEditTask(taskId) {
   try {
+    if (typeof ffCurrentUserHasTasksManagePermission === 'function' && !ffCurrentUserHasTasksManagePermission()) {
+      return;
+    }
     const tab = getCurrentTasksTab();
     const tasks = tasksModalDraft[tab] || [];
     
@@ -19910,6 +21040,9 @@ function resetAddFormScheduleFields() {
 
 function toggleTasksModalForm() {
   try {
+    if (typeof ffCurrentUserHasTasksManagePermission === 'function' && !ffCurrentUserHasTasksManagePermission()) {
+      return;
+    }
     const formWrap = document.getElementById('tasksAddFormWrap');
     if (!formWrap) return;
     
@@ -19973,6 +21106,9 @@ function toggleTasksModalForm() {
 
 function saveTasksModal() {
   try {
+    if (typeof ffCurrentUserHasTasksManagePermission === 'function' && !ffCurrentUserHasTasksManagePermission()) {
+      return;
+    }
     if (saveTasksToStorage()) {
       // Store the tab that was saved (Settings tab, which should match main Tasks tab)
       const savedTab = getCurrentTasksTab();
@@ -20022,6 +21158,11 @@ function openTasksSettings(options) {
     window.__ffTasksSettingsOpening = true;
     
     const skipAuth = options && options.skipAuth === true;
+
+    if (typeof ffCurrentUserHasTasksManagePermission === 'function' && !ffCurrentUserHasTasksManagePermission()) {
+      window.__ffTasksSettingsOpening = false;
+      return;
+    }
     
     // Check admin access (owner role OR admin code override)
     if (!skipAuth && !ffHasAdminAccess()) {
@@ -20299,32 +21440,21 @@ window.loadTasks = loadTasks;
 // Tasks Reset Functions
 function showResetBtnIfAllowed() {
   try {
-    // Read settings from localStorage
-    const settings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
-    
-    // Get role: first from current user's worker entry, then from settings.role
-    let role = settings.workers?.find(w => w.name === settings.currentUser)?.role?.toLowerCase() 
-             || settings.role?.toLowerCase() 
-             || "";
-    
-    // If role is missing, set default to admin and save back to localStorage
-    if (!role) {
-      settings.role = "admin";
-      localStorage.setItem("ffv24_settings", JSON.stringify(settings));
-      role = "admin";
-    }
-    
-    // Show button only if role is admin or manager
-    const isAuthorized = role === "admin" || role === "manager";
-    
+    const isAuthorized =
+      typeof ffCurrentUserHasTasksResetPermission === 'function' && ffCurrentUserHasTasksResetPermission();
+
     const resetBtn = document.getElementById('tasksResetBtn');
     if (resetBtn) {
       resetBtn.style.display = isAuthorized ? 'block' : 'none';
     }
-    
+    const resetBtnMain = document.getElementById('reset-btn');
+    if (resetBtnMain) {
+      resetBtnMain.style.display = isAuthorized ? '' : 'none';
+    }
+
     return isAuthorized;
   } catch (e) {
-    console.error('[Tasks] Error checking user role:', e);
+    console.error('[Tasks] Error checking reset permission:', e);
     return false;
   }
 }
@@ -20397,6 +21527,9 @@ function closeResetPinModal() {
 
 // Validate PIN and execute reset
 async function validateResetPinAndExecute() {
+  if (typeof ffCurrentUserHasTasksResetPermission === 'function' && !ffCurrentUserHasTasksResetPermission()) {
+    return;
+  }
   const modal = document.getElementById("resetPinModal");
   const pinInput = document.getElementById("resetPinInput");
   const errorMsg = document.getElementById("resetPinError");
@@ -20449,6 +21582,9 @@ window.openResetPinModal = openResetPinModal;
 window.closeResetPinModal = closeResetPinModal;
 
 window.openResetTasksModal = function () {
+  if (typeof ffCurrentUserHasTasksResetPermission === 'function' && !ffCurrentUserHasTasksResetPermission()) {
+    return;
+  }
   const modal = document.getElementById("tasksResetConfirmModal");
   if (!modal) { console.error("RESET modal missing"); return; }
 
@@ -20482,6 +21618,9 @@ function reloadTasksForTab(tab) {
 }
 
 function resetTasksForCurrentTab() {
+    if (typeof ffCurrentUserHasTasksResetPermission === 'function' && !ffCurrentUserHasTasksResetPermission()) {
+      return;
+    }
     const tab = window.currentTasksTab;
     console.log("[RESET] Running for tab:", tab);
     console.log("[RESET] Start:", window.currentTasksTab);
@@ -21346,6 +22485,9 @@ function initializeResetButton() {
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
       console.log("RESET CLICKED");
+      if (typeof ffCurrentUserHasTasksResetPermission === 'function' && !ffCurrentUserHasTasksResetPermission()) {
+        return;
+      }
       if (window.resetTasksForCurrentTab) {
         window.resetTasksForCurrentTab();
       }
@@ -21504,10 +22646,13 @@ function initializeTasksScreenButtons() {
         openTasksSettings({ skipAuth: true });
       };
       
-      // Update button visibility based on admin access
+      // Update button visibility based on tasks_manage (owners/admins always allowed)
       const updateButtonVisibility = () => {
         if (settingsBtn) {
-          settingsBtn.style.display = ffHasAdminAccess() ? '' : 'none';
+          settingsBtn.style.display =
+            typeof ffCurrentUserHasTasksManagePermission === 'function' && ffCurrentUserHasTasksManagePermission()
+              ? ''
+              : 'none';
         }
         // Show/hide admin filter (only for admin)
         const tasksStaffFilterWrap = document.getElementById('tasksStaffTypeFilterWrap');
@@ -21589,6 +22734,7 @@ function initializeNavigation() {
     } else {
       console.warn('[Navigation] Missing element: .header');
     }
+    if (typeof ffUpdateMainNavTabVisibility === 'function') ffUpdateMainNavTabVisibility();
   } catch (e) {
     console.error('[Navigation] initializeNavigation failed', e);
   }
@@ -21621,6 +22767,11 @@ if (document.readyState === 'loading') {
     const target = e.target;
     const btn = target && target.closest ? target.closest('#btnTasksSettings, #tasksSettingsBtn') : null;
     if (!btn) return;
+    if (typeof ffCurrentUserHasTasksManagePermission === 'function' && !ffCurrentUserHasTasksManagePermission()) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     console.log("[MT] clicked");
     console.trace("[MT] click trace");
     if (typeof window.openTasksSettings === 'function') {
@@ -21964,7 +23115,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260412_chat_toolbar_inbox_sizing');
+            const m = await import('/chat.js?v=20260412_chat_sender_display');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -22294,6 +23445,7 @@ function initializeAppsPanel() {
     appsOverlayBackdrop.style.pointerEvents = 'auto';
     appsPanel.style.display = 'flex';
     lockBodyScroll();
+    if (typeof ffUpdateAppsPanelPermissionVisibility === 'function') ffUpdateAppsPanelPermissionVisibility();
     if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
     if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
     if (typeof window.ensureTrainingItemsSubscription === 'function') {
@@ -22456,6 +23608,7 @@ function initializeAppsPanel() {
     }
   });
   
+  if (typeof ffUpdateAppsPanelPermissionVisibility === 'function') ffUpdateAppsPanelPermissionVisibility();
   if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
   if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
   
@@ -22946,7 +24099,12 @@ function initializeAppsPanel() {
         console.error('[ffStaffArchive] Staff member not found:', staffId);
         return;
       }
-      
+      if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+        if (typeof showToast === 'function') showToast('The salon owner cannot be archived.');
+        else alert('The salon owner cannot be archived.');
+        return;
+      }
+
       // Show custom confirmation modal
       const modal = document.getElementById('staffArchiveConfirmModal');
       const bodyText = document.getElementById('staffArchiveConfirmBody');
@@ -22981,7 +24139,12 @@ function initializeAppsPanel() {
         console.error('[ffStaffArchiveConfirm] Staff member not found:', staffId);
         return;
       }
-      
+      if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+        if (typeof showToast === 'function') showToast('The salon owner cannot be archived.');
+        else alert('The salon owner cannot be archived.');
+        return;
+      }
+
       const staffIndex = staffStore.staff.findIndex(s => s.id === staffId);
       if (staffIndex === -1) return;
       
@@ -23022,6 +24185,11 @@ function initializeAppsPanel() {
         console.error('[ffStaffDelete] Staff member not found:', staffId);
         return;
       }
+      if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+        if (typeof showToast === 'function') showToast('The salon owner cannot be deleted.');
+        else alert('The salon owner cannot be deleted.');
+        return;
+      }
 
       // Safety: only allow delete after Archive
       if (staff.isArchived !== true) {
@@ -23056,6 +24224,11 @@ function initializeAppsPanel() {
       const staff = staffStore.staff.find(s => s.id === staffId);
       if (!staff) {
         console.error('[ffStaffDeleteConfirm] Staff member not found:', staffId);
+        return;
+      }
+      if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+        if (typeof showToast === 'function') showToast('The salon owner cannot be deleted.');
+        else alert('The salon owner cannot be deleted.');
         return;
       }
 
@@ -23455,7 +24628,9 @@ function initializeAppsPanel() {
         const roleLabel = getStaffRoleLabel(staff);
         const invited = staff.invited === true;
         const isArchived = staff.isArchived === true;
-        
+        const salonOwnerRow =
+          typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff);
+
         // Format date for status line
         let statusText = '';
         let statusAction = '';
@@ -23495,9 +24670,10 @@ function initializeAppsPanel() {
               <div style="position:relative;">
                 <button id="ffStaffDetailsKebabBtn" style="width:30px;height:30px;border:none;background:#f3f4f6;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;color:#6b7280;padding:0;flex-shrink:0;" title="More options">⋯</button>
                 <div id="ffStaffDetailsKebabMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:150px;z-index:1001;padding:4px 0;">
-                  ${!isArchived ? '<button id="ffStaffDetailsArchiveBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Archive</button>' : '<button id="ffStaffDetailsReactivateBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#16a34a;display:block;font-weight:500;">Re-Activate</button>'}
+                  ${!salonOwnerRow && !isArchived ? '<button id="ffStaffDetailsArchiveBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Archive</button>' : ''}
+                  ${isArchived ? '<button id="ffStaffDetailsReactivateBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#16a34a;display:block;font-weight:500;">Re-Activate</button>' : ''}
                   ${invited && !isArchived ? '<button id="ffStaffDetailsChangePasswordBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Change password</button>' : ''}
-                  ${isArchived ? '<div style="height:1px;background:var(--border);margin:4px 0;"></div><button id="ffStaffDetailsDeleteBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#dc2626;display:block;font-weight:700;">Delete permanently</button>' : ''}
+                  ${isArchived && !salonOwnerRow ? '<div style="height:1px;background:var(--border);margin:4px 0;"></div><button id="ffStaffDetailsDeleteBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#dc2626;display:block;font-weight:700;">Delete permanently</button>' : ''}
                 </div>
               </div>
             </div>
@@ -23708,6 +24884,7 @@ function initializeAppsPanel() {
   function ffGetSchedulePermissionContext() {
     /** Full access only when salon owner/admin account — avoids locking out the business account. Staff must have at least one Schedule toggle on. */
     function scheduleAccountOverrideFullAccess() {
+      if (typeof window !== 'undefined' && typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
       if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
       var r = String(window.__ff_user_role || '').toLowerCase();
       return r === 'owner' || r === 'admin';
@@ -23759,16 +24936,20 @@ function initializeAppsPanel() {
   }
   window.ffUpdateScheduleAppVisibility = ffUpdateScheduleAppVisibility;
   
-  // Render permission toggle row
-  function renderPermissionToggleRow(permissionKey, label, description, value) {
+  // Render permission toggle row (optional options.disabled for parent-gated children)
+  function renderPermissionToggleRow(permissionKey, label, description, value, options) {
+    options = options || {};
+    const disabled = options.disabled === true;
     const checked = value === true ? 'checked' : '';
+    const disabledAttr = disabled ? ' disabled' : '';
+    const rowClass = 'staff-permission-row' + (disabled ? ' staff-permission-row--disabled' : '');
     const descBlock = String(description || '').trim()
       ? `<div class="staff-permission-label-desc">${escapeHtml(description)}</div>`
       : '';
     return `
-      <div class="staff-permission-row">
-        <label class="staff-permission-toggle">
-          <input type="checkbox" data-permission-key="${escapeHtml(permissionKey)}" ${checked}>
+      <div class="${rowClass}">
+        <label class="staff-permission-toggle"${disabled ? ' style="cursor:not-allowed"' : ''}>
+          <input type="checkbox" data-permission-key="${escapeHtml(permissionKey)}" ${checked}${disabledAttr}>
           <span class="staff-permission-toggle-slider"></span>
         </label>
         <div class="staff-permission-label">
@@ -23815,71 +24996,202 @@ function initializeAppsPanel() {
         console.log('[renderPermissionsTab] Migrated tasks_mark_done -> tasks_use for staff:', staff.id);
       }
     }
-    
+
     console.log('[renderPermissionsTab] Loading permissions for staff:', staff.id, permissions);
+
+    /**
+     * Parent/child gates in Permissions UI only. strictTrue: parent on only when === true.
+     * notFalse: parent on when !== false (matches *View toggles that default on when unset).
+     */
+    const ffPermissionTabParentRules = [
+      {
+        groupTitle: 'Queue',
+        parentKey: 'queue_view',
+        parentMode: 'strictTrue',
+        childKeys: ['queue_locked_view', 'queue_reorder', 'queue_reset', 'queue_manage']
+      },
+      {
+        groupTitle: 'Tickets',
+        parentKey: 'tickets_view',
+        parentMode: 'strictTrue',
+        childKeys: ['tickets_summary', 'tickets_archived']
+      },
+      {
+        groupTitle: 'Tasks',
+        parentKey: 'tasks_view',
+        parentMode: 'strictTrue',
+        childKeys: ['tasks_use', 'tasks_manage', 'tasks_reset']
+      },
+      {
+        groupTitle: 'Chat',
+        parentKey: 'chat_view',
+        parentMode: 'notFalse',
+        childKeys: ['chat_manage', 'chat_free_text']
+      },
+      {
+        groupTitle: 'Inbox',
+        parentKey: 'inbox_view',
+        parentMode: 'strictTrue',
+        childKeys: ['inbox_send', 'inbox_manage']
+      },
+      {
+        groupTitle: 'Media',
+        parentKey: 'media_view',
+        parentMode: 'notFalse',
+        childKeys: ['media_upload', 'media_handle']
+      },
+      {
+        groupTitle: 'Inventory',
+        parentKey: 'inventory_view',
+        parentMode: 'notFalse',
+        childKeys: ['inventory_manage']
+      },
+      {
+        groupTitle: 'Settings',
+        parentKey: 'settings_view',
+        parentMode: 'notFalse',
+        childKeys: ['settings_manage']
+      },
+      {
+        groupTitle: 'Staff',
+        parentKey: 'staff_view',
+        parentMode: 'strictTrue',
+        childKeys: ['staff_manage', 'staff_permissions_manage']
+      },
+      {
+        groupTitle: 'History',
+        parentKey: 'history_view',
+        parentMode: 'strictTrue',
+        childKeys: ['history_export', 'history_clear']
+      }
+    ];
+
+    function ffPermRuleParentIsOn(rule, perms) {
+      if (!rule) return true;
+      if (rule.parentMode === 'notFalse') return perms[rule.parentKey] !== false;
+      return perms[rule.parentKey] === true;
+    }
+
+    function ffPermRuleForGroupTitle(title) {
+      for (var i = 0; i < ffPermissionTabParentRules.length; i++) {
+        if (ffPermissionTabParentRules[i].groupTitle === title) return ffPermissionTabParentRules[i];
+      }
+      return null;
+    }
     
     // Define all permissions grouped by category
     const permissionGroups = [
       {
         title: 'Queue',
         permissions: [
-          { key: 'queue_view', label: 'View queue', desc: 'View the queue and active services' },
-          { key: 'queue_join', label: 'Join queue', desc: 'Join yourself to the queue' },
+          {
+            key: 'queue_view',
+            label: 'View queue',
+            desc: 'Full queue screen on this device: lists, filters, and management actions you allow below. When off, personal logins hide the Queue tab even if Join queue is on; join still works from a wall/kiosk device.'
+          },
+          {
+            key: 'queue_locked_view',
+            label: 'Locked queue view',
+            desc: 'See the Queue screen and lists read-only: call, remove, reorder, reset, filters, and the Join row on this device are disabled. With Join queue on, they can still be added to the queue from the salon kiosk/wall or a bypass station (not from this phone). Requires View queue.'
+          },
+          {
+            key: 'queue_join',
+            label: 'Join queue',
+            desc: 'Allows joining with PIN where the app allows it: on a kiosk/wall browser, or a station with Join + Bypass location, or when View queue is on without Locked view. If Locked queue view is on, this phone cannot use the Join row here—use the salon join screen instead.'
+          },
+          {
+            key: 'queue_bypass_location',
+            label: 'Bypass location for join',
+            desc: 'When salon location check is enabled, skip location for join. PIN still required. Requires Join queue on; View queue is not required.'
+          },
           { key: 'queue_reorder', label: 'Show Reorder', desc: 'Show the Reorder button on the Queue screen' },
           { key: 'queue_reset', label: 'Reset queue', desc: 'Reset/clear the queue' },
           { key: 'queue_manage', label: 'Manage queue', desc: 'Access queue settings such as auto-reset and queue rules.' }
         ]
       },
       {
+        title: 'Tickets',
+        permissions: [
+          {
+            key: 'tickets_view',
+            label: 'View Tickets',
+            desc: 'Controls the Tickets tab in the top bar and access to the Tickets screen. When off, Tickets is hidden in navigation and internal ticket permissions are unavailable.'
+          },
+          {
+            key: 'tickets_summary',
+            label: 'Show Summary tab',
+            desc: 'Allow the Tickets Summary tab (aggregates). Owner and Admin always see it. Managers and other staff need this on (per staff profile).'
+          },
+          {
+            key: 'tickets_archived',
+            label: 'Show Archived tab',
+            desc: 'Allow the Archived tab for this staff member. Owner and Admin always see it; Managers and other staff need this on (per staff profile).'
+          }
+        ]
+      },
+      {
         title: 'Tasks',
         permissions: [
-          { key: 'tasks_view', label: 'View tasks', desc: 'View task lists and schedules' },
+          {
+            key: 'tasks_view',
+            label: 'View Tasks',
+            desc: 'Controls the Tasks tab in the top bar and access to the Tasks screen. When off, Tasks is hidden in navigation and task-related permissions below are unavailable.'
+          },
           { key: 'tasks_use', label: 'Use tasks', desc: 'Select, complete, and work with tasks' },
-          { key: 'tasks_manage', label: 'Manage tasks (templates)', desc: 'Edit task templates and schedules' }
+          { key: 'tasks_manage', label: 'Manage tasks (templates)', desc: 'Edit task templates and schedules' },
+          { key: 'tasks_reset', label: 'Reset tasks', desc: 'Reset done/pending progress for task tabs (PIN rules unchanged)' }
         ]
       },
       {
-        title: 'Schedule',
+        title: 'Chat',
         permissions: [
-          { key: 'schedule_edit', label: 'Edit schedule', desc: 'Add shifts, mark days OFF, drag shifts, and change hours on the team schedule board.' },
-          { key: 'schedule_view_all', label: 'View all schedules (read-only)', desc: 'See everyone’s shifts without editing. Use when “Edit schedule” is off.' },
-          { key: 'schedule_view_own', label: 'View own schedule only', desc: 'See only your own row on the board (read-only). Narrowest access.' }
-        ]
-      },
-      {
-        title: 'Staff',
-        permissions: [
-          { key: 'staff_view', label: 'View staff list', desc: 'View staff members' },
-          { key: 'staff_manage', label: 'Add/Edit/Archive/Re-activate staff', desc: 'Manage staff members' },
-          { key: 'staff_permissions_manage', label: 'Edit staff permissions', desc: 'Change permissions for other staff' }
-        ]
-      },
-      {
-        title: 'History',
-        permissions: [
-          { key: 'history_view', label: 'View history', desc: 'View activity history and logs' },
-          { key: 'history_export', label: 'Export history', desc: 'Export history data to a file' },
-          { key: 'history_clear', label: 'Clear history', desc: 'Clear all history entries' }
-        ]
-      },
-      {
-        title: 'Inventory',
-        permissions: [
-          { key: 'inventory_view', label: 'View inventory', desc: 'View inventory items' },
-          { key: 'inventory_manage', label: 'Manage inventory', desc: 'Add, edit, or remove inventory items' }
+          {
+            key: 'chat_view',
+            label: 'View Chat (top bar)',
+            desc: 'Show the Chat tab in the main navigation. Turn off to hide it completely.',
+            getValue: function (st) {
+              return (st.permissions || {}).chat_view !== false;
+            }
+          },
+          {
+            key: 'chat_manage',
+            label: 'Manage Chat settings',
+            desc: 'Edit message templates and guided flows (gear on Chat screen). Owner/Admin sessions always have access. Requires View Chat (tab visible).'
+          },
+          {
+            key: 'chat_free_text',
+            label: 'Free-text chat messages',
+            desc: 'Allow this person to type their own chat replies and new messages, in addition to templates and flows. When off, they only see admin-defined templates (if any). Salon owners and admin sessions can always type freely. Requires View Chat (tab visible).'
+          }
         ]
       },
       {
         title: 'Inbox',
         permissions: [
-          { key: 'inbox_view', label: 'View inbox', desc: 'Open the Inbox section in the app' },
-          { key: 'inbox_send', label: 'Send requests (My requests)', desc: 'Create requests and see your own; use for assistants who should not handle the team queue' },
+          {
+            key: 'inbox_view',
+            label: 'View Inbox',
+            desc: 'Controls the Inbox tab in the top bar and access to the Inbox screen. When off, Inbox is hidden in navigation and inbox-related permissions below are unavailable.'
+          },
+          {
+            key: 'inbox_send',
+            label: 'Send requests (My requests)',
+            desc: 'Create inbox requests and see your own outgoing items. Applies to Service providers (technicians) and desk staff. When off, they can still open Inbox if View Inbox is on (e.g. incoming updates) but cannot create new requests.'
+          },
           { key: 'inbox_manage', label: 'Manage inbox (To handle)', desc: 'See the full queue, approve/deny, filter by staff, and inbox settings' }
         ]
       },
       {
         title: 'Media',
         permissions: [
+          {
+            key: 'media_view',
+            label: 'View Media (top bar)',
+            desc: 'Show the Media tab in the main navigation. Turn off to hide it completely.',
+            getValue: function (st) {
+              return (st.permissions || {}).media_view !== false;
+            }
+          },
           {
             key: 'media_upload',
             label: 'Upload (My Uploads)',
@@ -23908,31 +25220,120 @@ function initializeAppsPanel() {
         ]
       },
       {
+        title: 'Training',
+        permissions: [
+          {
+            key: 'training_view',
+            label: 'View Training (top bar)',
+            desc: 'Show the Training tab in the main navigation. Turn off to hide it completely.',
+            getValue: function (st) {
+              return (st.permissions || {}).training_view !== false;
+            }
+          }
+        ]
+      },
+      {
+        title: 'Inventory',
+        permissions: [
+          {
+            key: 'inventory_view',
+            label: 'View inventory',
+            desc: 'View inventory items; top bar Inventory entry is hidden if this is off.',
+            getValue: function (st) {
+              return (st.permissions || {}).inventory_view !== false;
+            }
+          },
+          { key: 'inventory_manage', label: 'Manage inventory', desc: 'Add, edit, or remove inventory items' }
+        ]
+      },
+      {
+        title: 'Schedule',
+        permissions: [
+          { key: 'schedule_edit', label: 'Edit schedule', desc: 'Add shifts, mark days OFF, drag shifts, and change hours on the team schedule board.' },
+          { key: 'schedule_view_all', label: 'View all schedules (read-only)', desc: 'See everyone’s shifts without editing. Use when “Edit schedule” is off.' },
+          { key: 'schedule_view_own', label: 'View own schedule only', desc: 'See only your own row on the board (read-only). Narrowest access.' }
+        ]
+      },
+      {
         title: 'Settings',
         permissions: [
+          {
+            key: 'settings_view',
+            label: 'View Settings (user menu)',
+            desc: 'Show Settings in the user avatar menu. Turn off to hide it completely.',
+            getValue: function (st) {
+              return (st.permissions || {}).settings_view !== false;
+            }
+          },
           { key: 'settings_manage', label: 'Manage general settings', desc: 'Edit app-wide settings and preferences' }
+        ]
+      },
+      {
+        title: 'Staff',
+        permissions: [
+          { key: 'staff_view', label: 'View staff list', desc: 'View staff members' },
+          { key: 'staff_manage', label: 'Add/Edit/Archive/Re-activate staff', desc: 'Manage staff members' },
+          { key: 'staff_permissions_manage', label: 'Edit staff permissions', desc: 'Change permissions for other staff' }
+        ]
+      },
+      {
+        title: 'History',
+        permissions: [
+          { key: 'history_view', label: 'View history', desc: 'View activity history and logs' },
+          { key: 'history_export', label: 'Export history', desc: 'Export history data to a file' },
+          { key: 'history_clear', label: 'Clear history', desc: 'Clear all history entries' }
         ]
       }
     ];
-    
+
+    var ownerRowLocked =
+      typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff);
+
     // Build permission cards
     const cards = permissionGroups.map(function(group) {
+      const tabRule = ffPermRuleForGroupTitle(group.title);
       const rows = group.permissions.map(function(perm) {
         var value = typeof perm.getValue === 'function' ? perm.getValue(staff) : permissions[perm.key] === true;
-        return renderPermissionToggleRow(perm.key, perm.label, perm.desc, value);
+        var rowOpts = {};
+        if (tabRule && tabRule.childKeys.indexOf(perm.key) !== -1) {
+          if (!ffPermRuleParentIsOn(tabRule, permissions)) {
+            value = false;
+            rowOpts.disabled = true;
+          }
+        }
+        if (group.title === 'Queue' && perm.key === 'queue_bypass_location') {
+          if (permissions.queue_join !== true) {
+            value = false;
+            rowOpts.disabled = true;
+          }
+        }
+        if (ownerRowLocked) {
+          rowOpts.disabled = true;
+        }
+        return renderPermissionToggleRow(perm.key, perm.label, perm.desc, value, rowOpts);
       });
       return renderPermissionCard(group.title, rows);
     });
-    
+
+    var ownerBanner = ownerRowLocked
+      ? '<div style="margin-bottom:12px;padding:10px 12px;border-radius:10px;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;font-size:12px;line-height:1.45;">This person is the <strong>salon owner</strong>. Their access is full; permissions here cannot be changed.</div>'
+      : '';
+
     // Render all cards
-    permissionsContent.innerHTML = '<div style="display:flex;flex-direction:column;">' + cards.join('') + '</div>';
+    permissionsContent.innerHTML =
+      '<div style="display:flex;flex-direction:column;">' + ownerBanner + cards.join('') + '</div>';
     
     // Wire up toggle change handlers
     permissionsContent.querySelectorAll('input[data-permission-key]').forEach(function(checkbox) {
       checkbox.onchange = function() {
         const permissionKey = checkbox.getAttribute('data-permission-key');
         const newValue = checkbox.checked;
-        
+
+        if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+          checkbox.checked = !newValue;
+          return;
+        }
+
         // Get current staff from store (refresh to get latest)
         const staffStore = ffGetStaffStore();
         const staffIndex = staffStore.staff.findIndex(s => s.id === staff.id);
@@ -23942,27 +25343,94 @@ function initializeAppsPanel() {
           return;
         }
         
-        // Update permissions in store
         if (!staffStore.staff[staffIndex].permissions) {
           staffStore.staff[staffIndex].permissions = {};
         }
-        staffStore.staff[staffIndex].permissions[permissionKey] = newValue;
+        const permsRef = staffStore.staff[staffIndex].permissions;
+
+        var childRuleForKey = null;
+        for (var ri = 0; ri < ffPermissionTabParentRules.length; ri++) {
+          if (ffPermissionTabParentRules[ri].childKeys.indexOf(permissionKey) !== -1) {
+            childRuleForKey = ffPermissionTabParentRules[ri];
+            break;
+          }
+        }
+        if (childRuleForKey && !ffPermRuleParentIsOn(childRuleForKey, permsRef)) {
+          checkbox.checked = false;
+          return;
+        }
+
+        if (permissionKey === 'queue_bypass_location' && permsRef.queue_join !== true) {
+          checkbox.checked = false;
+          return;
+        }
+
+        var parentRuleForKey = null;
+        for (var rj = 0; rj < ffPermissionTabParentRules.length; rj++) {
+          if (ffPermissionTabParentRules[rj].parentKey === permissionKey) {
+            parentRuleForKey = ffPermissionTabParentRules[rj];
+            break;
+          }
+        }
+        if (parentRuleForKey && newValue === false) {
+          parentRuleForKey.childKeys.forEach(function (k) {
+            permsRef[k] = false;
+          });
+        }
+
+        if (permissionKey === 'queue_join' && newValue === false) {
+          permsRef.queue_bypass_location = false;
+        }
+
+        permsRef[permissionKey] = newValue;
         
         console.log('[renderPermissionsTab] Permission toggled:', permissionKey, newValue);
-        console.log('[renderPermissionsTab] Updated permissions:', staffStore.staff[staffIndex].permissions);
+        console.log('[renderPermissionsTab] Updated permissions:', permsRef);
         
-        // Auto-save permissions immediately
         ffSaveStaffStore(staffStore);
-        
-        // Update local staff object reference
-        staff.permissions = staffStore.staff[staffIndex].permissions;
+        staff.permissions = permsRef;
         
         console.log('[renderPermissionsTab] Saved permissions for staff:', staff.id);
-        if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
-        if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
-        if (typeof window.updateMediaScreenTabsForRole === 'function') window.updateMediaScreenTabsForRole();
-        if (typeof window.refreshMediaWorksList === 'function') window.refreshMediaWorksList();
-        if (typeof window.ffRefreshInboxNavVisibility === 'function') void window.ffRefreshInboxNavVisibility();
+
+        function runPermissionVisibilitySideEffects() {
+          if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
+          if (typeof window.ffScheduleRefreshPermissionChrome === 'function') window.ffScheduleRefreshPermissionChrome();
+          if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') window.ffSyncUserProfileBillingMenuVisibility();
+          if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
+          if (typeof window.updateMediaScreenTabsForRole === 'function') window.updateMediaScreenTabsForRole();
+          if (typeof window.refreshMediaWorksList === 'function') window.refreshMediaWorksList();
+          if (typeof window.ffRefreshInboxNavVisibility === 'function') void window.ffRefreshInboxNavVisibility();
+          if (typeof window.ffRefreshTicketsTabVisibility === 'function') window.ffRefreshTicketsTabVisibility();
+          if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+          if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
+          if (typeof window.ffApplyHistoryActionButtonsVisibility === 'function') window.ffApplyHistoryActionButtonsVisibility();
+        }
+
+        if (parentRuleForKey) {
+          renderPermissionsTab(staff);
+          runPermissionVisibilitySideEffects();
+          return;
+        }
+
+        if (permissionKey === 'queue_join') {
+          renderPermissionsTab(staff);
+          runPermissionVisibilitySideEffects();
+          return;
+        }
+
+        if (permissionKey === 'queue_locked_view') {
+          renderPermissionsTab(staff);
+          runPermissionVisibilitySideEffects();
+          return;
+        }
+
+        if (permissionKey === 'chat_manage' || permissionKey === 'chat_free_text') {
+          renderPermissionsTab(staff);
+          runPermissionVisibilitySideEffects();
+          return;
+        }
+
+        runPermissionVisibilitySideEffects();
       };
     });
   }
@@ -24130,7 +25598,9 @@ function initializeAppsPanel() {
       fontColorOf(staff.name) ||
       '#111111';
     const roleLabel = getStaffRoleLabel(staff);
-    
+    const salonOwnerRow =
+      typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff);
+
     if (editMode) {
       // Edit mode
       detailsContent.innerHTML = `
@@ -24149,11 +25619,15 @@ function initializeAppsPanel() {
             </div>
             <div>
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Role</label>
-              <select id="staffEditRole" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
+              ${
+                salonOwnerRow
+                  ? `<div style="width:100%;min-height:30px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:#f9fafb;font-size:12px;color:#374151;">${escapeHtml(roleLabel)} <span style="color:#9ca3af;font-size:11px;">(salon owner — fixed)</span></div><input type="hidden" id="staffEditRole" value="${escapeHtml(getStaffRoleValue(staff))}">`
+                  : `<select id="staffEditRole" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
                 <option value="admin" ${getStaffRoleValue(staff) === 'admin' ? 'selected' : ''}>Admin</option>
                 <option value="manager" ${getStaffRoleValue(staff) === 'manager' ? 'selected' : ''}>Manager</option>
                 <option value="technician" ${getStaffRoleValue(staff) === 'technician' ? 'selected' : ''}>Service Provider</option>
-              </select>
+              </select>`
+              }
             </div>
             <div id="staffEditManagerTypeSection" style="display:none;">
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Manager Type</label>
@@ -24510,9 +25984,16 @@ function initializeAppsPanel() {
       const detailManagerTypeInput = document.getElementById('staffEditManagerType');
       const newManagerType = getStaffManagerTypeValue({ managerType: scheduleManagerTypeInput?.value || detailManagerTypeInput?.value || oldStaff.managerType });
       
-      const roleFields = buildStaffRoleFields(newRole, newManagerType);
-      const newIsAdmin = roleFields.isAdmin;
-      const newIsManager = roleFields.isManager;
+      let roleFields = buildStaffRoleFields(newRole, newManagerType);
+      let newIsAdmin = roleFields.isAdmin;
+      let newIsManager = roleFields.isManager;
+      if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(oldStaff)) {
+        const lockedRole = getStaffRoleValue(oldStaff);
+        const lockedMgr = getStaffManagerTypeValue(oldStaff);
+        roleFields = buildStaffRoleFields(lockedRole, lockedMgr);
+        newIsAdmin = roleFields.isAdmin;
+        newIsManager = roleFields.isManager;
+      }
       const roleChanged = (oldStaff.isAdmin !== newIsAdmin) || (oldStaff.isManager !== newIsManager);
       
       // Safety rule: Prevent removing/demoting the last remaining Admin
@@ -26508,11 +27989,27 @@ function initializeUserProfileMenu() {
       console.error('[User Profile] Error saving preferences:', e);
     }
   }
-  
+
+  function ffSyncUserProfileBillingMenuVisibility() {
+    try {
+      const billingBtn = document.querySelector('.user-profile-menu-item[data-section="billing"]');
+      if (!billingBtn) return;
+      const show = typeof window.ffIsOwner === 'function' && window.ffIsOwner();
+      billingBtn.style.display = show ? '' : 'none';
+    } catch (e) {
+      console.warn('[User Profile] ffSyncUserProfileBillingMenuVisibility', e);
+    }
+  }
+  window.ffSyncUserProfileBillingMenuVisibility = ffSyncUserProfileBillingMenuVisibility;
+  ffSyncUserProfileBillingMenuVisibility();
+
   // Menu item click handler
   function handleMenuClick(section) {
     // Expose for external use
     window.__ff_handleMenuClick = handleMenuClick;
+    if (section === 'billing' && typeof window.ffIsOwner === 'function' && !window.ffIsOwner()) {
+      section = 'password';
+    }
     // Update menu item active states (purple tint via .user-profile-menu-item--active; see CSS)
     menuItems.forEach(item => {
       if (item.dataset.section === section) {
@@ -28319,6 +29816,9 @@ function renderTasks() {
 
 // Mark task as done (simplified version without PIN requirement)
 function markTaskAsDone(category, taskName) {
+  if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+    return;
+  }
   if (!category || !taskName) {
     console.warn('[Tasks] markTaskAsDone: Missing category or taskName');
     return;
@@ -28366,6 +29866,9 @@ function markTaskAsDone(category, taskName) {
 
 // Add task to pending list
 function addTaskToPending(category, taskName, assignedToName, assignedToStaffId) {
+  if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+    return;
+  }
   // Prevent adding done tasks to pending list
   if (isTaskCompletedToday(category, taskName)) {
     return; // Task is done, cannot be added to pending
@@ -28634,6 +30137,9 @@ let currentSelectTask = { category: null, taskName: null };
 let taskStaffCode = ''; // State for staff code in Select Task modal
 
 function openSelectTaskModal(category, taskName) {
+  if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+    return;
+  }
   // ENFORCE SELECT guard: block clicks if enforceSelect is enabled and this is not the first incomplete task
   // Convert category (capitalized) to tab name (lowercase) for enforceSelect check
   const tabForEnforce = (category || '').toLowerCase();
@@ -29418,6 +30924,10 @@ function confirmSelectTask() {
     const error = document.getElementById('tasksSelectPinError');
     
     const isIdentifyOnly = currentSelectTask && currentSelectTask.category === '__identify__';
+    if (!isIdentifyOnly && typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+      if (error) error.textContent = 'No permission to use tasks';
+      return false;
+    }
     if (!input) {
       console.warn('[Tasks] confirmSelectTask: Missing input');
       return;
@@ -29576,6 +31086,9 @@ function confirmSelectTask() {
 }
 
 function openFinishTaskModal(category, taskName) {
+  if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+    return;
+  }
   currentFinishTask = { category, taskName };
   const modal = document.getElementById('tasksFinishModal');
   const input = document.getElementById('tasksFinishPinInput');
@@ -29655,6 +31168,9 @@ function closeFinishTaskModal() {
 
 // Validate PIN and mark task as done
 async function confirmFinishTask() {
+  if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+    return false;
+  }
   const input = document.getElementById('tasksFinishPinInput');
   const error = document.getElementById('tasksFinishPinError');
   
@@ -29905,6 +31421,9 @@ function renderPendingTasks() {
       returnBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+          return;
+        }
         console.log("[TASK_RETURN_UI_CLICK]", { taskId });
       });
       rightDiv.appendChild(returnBtn);
@@ -29926,6 +31445,9 @@ function renderPendingTasks() {
       markDoneBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+          return;
+        }
         console.log('[RUNTIME TASK HANDLER HIT]', { handlerName: 'markDoneBtn_click', task: { category, taskName } });
         console.log('[Tasks] Mark Done button clicked directly:', { category, taskName });
         if (typeof openFinishTaskModal === 'function') {
@@ -30700,6 +32222,9 @@ function initTasksFunctionality() {
         if (markDoneBtn) {
           e.preventDefault();
           e.stopPropagation();
+          if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
+            return;
+          }
           const category = markDoneBtn.getAttribute('data-category');
           const taskName = markDoneBtn.getAttribute('data-task-name');
           
@@ -31045,6 +32570,11 @@ function initTasksFunctionality() {
 // Add Technician dialog functions
 
 function openAddTechDialog(){
+  if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+    ffQueueLockedViewToast();
+    return;
+  }
+  if (reorderMode && !ffCurrentUserHasQueueReorderPermission()) return;
   if (reorderMode) {
     console.log("Add technician clicked in reorder mode");
   } else {
@@ -31061,7 +32591,7 @@ function openAddTechDialog(){
 
   
 
-  // Clear and populate select with technicians not already in queue
+  // Clear and populate select: staff with queue_join permission, not already in queue
 
   addTechSelect.innerHTML = '<option value="">-- Select service provider --</option>';
 
@@ -31085,8 +32615,7 @@ function openAddTechDialog(){
       w.name &&
       w.name.trim() &&
       w.isArchived !== true &&
-      typeof w.role === 'string' &&
-      w.role.trim().toLowerCase() === 'technician' &&
+      ffStaffHasQueueJoinPermission(w) &&
       !availableNames.has(w.name)
     ) {
       const opt = document.createElement('option');
@@ -31097,8 +32626,7 @@ function openAddTechDialog(){
     }
   });
 
-  // Log technician options for debugging
-  console.log("technician options", options);
+  console.log('[AddTech] queue_join eligible options', options);
 
   
 
@@ -32236,6 +33764,11 @@ function hookSettingsGuard_DISABLED(){
     if (callback) {
       currentHoldCallback = callback;
     }
+    if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+      ffQueueLockedViewToast();
+      window.__ff_holdPendingAction = null;
+      return;
+    }
     
     const overlay = document.getElementById('holdCodeOverlay');
     if (!overlay) {
@@ -32387,7 +33920,28 @@ function hookSettingsGuard_DISABLED(){
             }
           }
           
-          const isAuthorized = isReleaseAction ? (isAdminOrManager || isSelfRelease) : isAdminOrManager;
+          let stationOperatorPinOk = false;
+          try {
+            if (
+              typeof ffCurrentUserIsQueueSharedStationJoin === 'function' &&
+              ffCurrentUserIsQueueSharedStationJoin() &&
+              typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+            ) {
+              const stationRow = ffResolveCurrentStaffRowFromFfStaffV1();
+              if (
+                stationRow &&
+                staff &&
+                staff.id != null &&
+                stationRow.id != null &&
+                String(staff.id) === String(stationRow.id)
+              ) {
+                stationOperatorPinOk = true;
+              }
+            }
+          } catch (e) {}
+          const isAuthorized = isReleaseAction
+            ? isAdminOrManager || isSelfRelease || stationOperatorPinOk
+            : isAdminOrManager || stationOperatorPinOk;
           if (!isAuthorized) {
             auth = { ok: false, reason: "not_authorized", enteredPin: enteredPin };
           } else {
@@ -33251,6 +34805,11 @@ function hookSettingsGuard_DISABLED(){
       try{
 
         if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+
+        if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
+          ffQueueLockedViewToast();
+          return false;
+        }
 
         // Ask for admin or manager code with hidden password + single eye
 
@@ -35398,21 +36957,21 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260408_fullscreen_pointer_reset"></script>
+  <script type="module" src="/app.js?v=20260412_salon_owner_uid"></script>
   <script type="module" src="/schedule-helpers.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
-  <script type="module" src="/schedule-ui.js?v=20260412_app_js_unify"></script>
-  <script type="module" src="/inbox.js?v=20260408_inbox_pointer_events_reset"></script>
-  <script type="module" src="/chat.js?v=20260412_chat_toolbar_inbox_sizing"></script>
+  <script type="module" src="/schedule-ui.js?v=20260412_schedule_perm_chrome"></script>
+  <script type="module" src="/inbox.js?v=20260412_inbox_tech_staffcall_filter"></script>
+  <script type="module" src="/chat.js?v=20260412_chat_sender_display"></script>
   <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/staff-documents.js?v=20260412_doc_meta_edit"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260412_staffcall_accept_ui"></script>
-  <script type="module" src="/settings-cloud.js?v=20260412_app_js_unify"></script>
+  <script type="module" src="/settings-cloud.js?v=20260412_owner_uid_cache"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/tickets.js?v=20260412_ticket_details_close_purple"></script>
+  <script type="module" src="/tickets.js?v=20260420_tickets_load_more"></script>
   <script type="module" src="/media-upload.js?v=20260412_app_js_unify"></script>
 
   <!-- PIN Modal -->
@@ -35646,12 +37205,12 @@ function hookSettingsGuard_DISABLED(){
     #ticketsScreen #ticketsTimePeriodWrap {
       display:none;
       align-items:center;
-      flex-shrink:1;
-      min-width:0;
+      flex-shrink:0;
+      min-width:auto;
     }
     #ticketsScreen .tickets-time-period-row {
       display:flex; align-items:center; flex-wrap:nowrap; gap:6px 8px;
-      min-width:0;
+      min-width:auto;
     }
     #ticketsScreen .tickets-time-period-label {
       font-size:10px; font-weight:600; color:#64748b;
@@ -35682,6 +37241,95 @@ function hookSettingsGuard_DISABLED(){
     #ticketsScreen #ticketsTimePeriodCustomWrap input[type="date"] {
       font-size:10px; padding:6px 8px; border:1px solid #e5e7eb; border-radius:8px;
       color:#374151; max-width:112px; min-height:36px; height:36px; box-sizing:border-box;
+    }
+    #ticketsScreen #ticketsSummaryPanel {
+      width: 100%;
+      max-width: 1100px;
+      margin: 0 auto;
+      box-sizing: border-box;
+      align-self: stretch;
+    }
+    #ticketsScreen #ticketsSummaryEmpty.tickets-summary-state {
+      text-align: center;
+      padding: 48px 20px;
+      font-size: 15px;
+      line-height: 1.5;
+      max-width: 420px;
+      margin-left: auto;
+      margin-right: auto;
+      box-sizing: border-box;
+    }
+    #ticketsScreen #ticketsSummaryEmpty.tickets-summary-state--loading {
+      color: #64748b;
+    }
+    #ticketsScreen #ticketsSummaryEmpty.tickets-summary-state--empty {
+      color: #9ca3af;
+    }
+    #ticketsScreen .tickets-summary-table-wrap {
+      width: 100%;
+      max-width: 100%;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04);
+      overflow-x: auto;
+      overflow-y: visible;
+      -webkit-overflow-scrolling: touch;
+    }
+    #ticketsScreen .tickets-summary-table {
+      width: 100%;
+      min-width: 280px;
+      border-collapse: collapse;
+      font-size: 14px;
+      color: #374151;
+    }
+    #ticketsScreen .tickets-summary-table thead th {
+      text-align: left;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #64748b;
+      background: #f9fafb;
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      white-space: nowrap;
+    }
+    #ticketsScreen .tickets-summary-table thead th.tickets-summary-col-num {
+      text-align: right;
+    }
+    #ticketsScreen .tickets-summary-table tbody td {
+      padding: 14px 16px;
+      border-bottom: 1px solid #f3f4f6;
+      vertical-align: middle;
+    }
+    #ticketsScreen .tickets-summary-table tbody td:first-child {
+      text-align: left;
+      font-weight: 500;
+      color: #111827;
+    }
+    #ticketsScreen .tickets-summary-table tbody td.tickets-summary-col-num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #111827;
+    }
+    #ticketsScreen .tickets-summary-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+    #ticketsScreen .tickets-summary-table tfoot tr.tickets-summary-total-row td {
+      padding: 14px 16px;
+      font-weight: 700;
+      font-size: 14px;
+      color: #111827;
+      background: #f5f3ff;
+      border-top: 2px solid #e9d5ff;
+    }
+    #ticketsScreen .tickets-summary-table tfoot tr.tickets-summary-total-row td:first-child {
+      text-align: left;
+      color: #5b21b6;
+    }
+    #ticketsScreen .tickets-summary-table tfoot tr.tickets-summary-total-row td.tickets-summary-col-num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
     }
     #ticketsScreen .tickets-tab {
       padding:8px 14px; border:none; background:none; cursor:pointer;
@@ -35819,6 +37467,7 @@ function hookSettingsGuard_DISABLED(){
       <button class="tickets-tab active" data-tab="ready">Ready</button>
       <button class="tickets-tab" data-tab="closed">Closed</button>
       <button id="ticketsArchivedTab" class="tickets-tab" data-tab="archived" style="display:none;">Archived</button>
+      <button id="ticketsSummaryTab" class="tickets-tab" data-tab="summary">Summary</button>
     </div>
     <div id="ticketsToolbarRight">
     <div id="ticketsTimePeriodWrap">
@@ -35858,7 +37507,27 @@ function hookSettingsGuard_DISABLED(){
   <div class="tickets-body">
     <div id="ticketsLoading" style="text-align:center;padding:40px;color:#9ca3af;">Loading…</div>
     <div id="ticketsEmpty" style="display:none;text-align:center;padding:40px;color:#9ca3af;font-size:15px;">No tickets here yet.</div>
+    <div id="ticketsSummaryPanel" style="display:none;padding:16px 12px 24px;">
+      <div id="ticketsSummaryEmpty" class="tickets-summary-state" style="display:none;" aria-live="polite"></div>
+      <div class="tickets-summary-table-wrap">
+        <table class="tickets-summary-table" role="table" aria-label="Tickets summary">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col" class="tickets-summary-col-num">Tickets</th>
+              <th scope="col" class="tickets-summary-col-num">Services</th>
+              <th scope="col" class="tickets-summary-col-num">Total</th>
+            </tr>
+          </thead>
+          <tbody id="ticketsSummaryTableBody"></tbody>
+          <tfoot id="ticketsSummaryTableFoot"></tfoot>
+        </table>
+      </div>
+    </div>
     <div id="ticketsList"></div>
+    <div id="ticketsLoadMoreWrap" style="display:none;text-align:center;padding:12px 16px 20px;">
+      <button type="button" id="ticketsLoadMoreBtn" style="padding:10px 22px;background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;min-height:40px;box-sizing:border-box;">Load more</button>
+    </div>
   </div>
 </div>
 
@@ -35969,6 +37638,49 @@ function hookSettingsGuard_DISABLED(){
     #chatThreadListWrap { width:340px; flex-shrink:0; border-right:1px solid #e5e7eb; background:#f9fafb; overflow-y:auto; }
     #chatThreadListInner { padding:16px; }
     #chatConvView { display:flex; flex-direction:column; flex:1; min-width:0; overflow:hidden; background:#f9fafb; }
+    #chatConvFreeTextBar {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 16px 0;
+      background: #fff;
+      border-top: 1px solid #e5e7eb;
+      flex-shrink: 0;
+    }
+    #chatConvFreeTextBar .chat-conv-free-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+    }
+    #chatConvFreeTextBar textarea#chatConvFreeTextInput {
+      flex: 1;
+      min-width: 0;
+      min-height: 44px;
+      max-height: 160px;
+      padding: 10px 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: vertical;
+      outline: none;
+      box-sizing: border-box;
+    }
+    #chatConvFreeTextBar #chatConvFreeTextSendBtn {
+      flex-shrink: 0;
+      padding: 11px 18px;
+      background: #7c3aed;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    #chatConvFreeTextBar #chatConvFreeTextSendBtn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
     #chatConvBackBtn { display:none; }
     .chat-thread-card.is-selected { outline:2px solid rgba(124,58,237,0.22); background:#fff; }
 
@@ -35990,7 +37702,7 @@ function hookSettingsGuard_DISABLED(){
     </div>
     <div class="chat-topbar-actions">
       <button id="chatSettingsGearBtn" type="button" onclick="window.openChatTemplatesSettings && window.openChatTemplatesSettings()"
-        title="Manage Chat Messages (Admin only)"
+        title="Manage Chat templates and flows"
         style="display:none;">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </button>
@@ -36034,12 +37746,20 @@ function hookSettingsGuard_DISABLED(){
           <div style="font-size:13px;color:#9ca3af;">Choose a name from the left to view messages.</div>
         </div>
       </div>
-      <!-- Reply bar -->
+      <!-- Free-text composer (visibility from chat.js when permission + open thread) -->
+      <div id="chatConvFreeTextBar" aria-label="Free text message">
+        <label for="chatConvFreeTextInput" style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em;">Write a message</label>
+        <div class="chat-conv-free-row">
+          <textarea id="chatConvFreeTextInput" maxlength="8000" rows="2" placeholder="Type your message…"></textarea>
+          <button type="button" id="chatConvFreeTextSendBtn" onclick="window.sendChatConvFreeText && window.sendChatConvFreeText()">Send</button>
+        </div>
+      </div>
+      <!-- Reply bar (templates / flows) -->
       <div style="padding:12px 16px;background:#fff;border-top:1px solid #e5e7eb;flex-shrink:0;">
         <button id="chatConvReplyBtn" onclick="window.openThreadReply && window.openThreadReply()"
           style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;background:#7c3aed;color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
-          Reply with Template
+          Reply
         </button>
       </div>
     </div>
@@ -36058,7 +37778,7 @@ function hookSettingsGuard_DISABLED(){
     </div>
     <div class="chat-modal-body">
       <div id="chatSendToSection">
-        <div class="chat-section-label">Send To</div>
+        <div class="chat-section-label">Send to</div>
         <button type="button" id="chatRecipientPickerBtn"
           style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;cursor:pointer;color:#111827;font-size:13px;font-weight:600;">
           <span id="chatRecipientPickerLabel" style="min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Select recipients…</span>
@@ -36078,8 +37798,13 @@ function hookSettingsGuard_DISABLED(){
           <div id="chatSendRecipientList" style="max-height:260px;overflow-y:auto;padding:4px 8px 10px;"></div>
         </div>
       </div>
-      <div class="chat-section-label" style="margin-top:12px;">Choose message to send</div>
+      <div id="chatSendPickLabel" class="chat-section-label" style="margin-top:12px;">Choose message to send</div>
       <div id="chatSendMessageList" style="max-height:220px;overflow-y:auto;"></div>
+      <div id="chatSendFreeTextSection" style="display:none;margin-top:14px;">
+        <div id="chatSendFreeTextLabel" class="chat-section-label">Or type your own message</div>
+        <textarea id="chatSendFreeTextInput" maxlength="8000" rows="4" placeholder="Write your message…"
+          style="width:100%;box-sizing:border-box;margin-top:6px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-family:inherit;resize:vertical;min-height:88px;outline:none;"></textarea>
+      </div>
       <div id="chatSendFlowWizard" style="display:none;padding:16px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;"></div>
     </div>
     <div class="chat-modal-footer">
