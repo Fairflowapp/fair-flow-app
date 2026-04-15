@@ -10,11 +10,11 @@ if (-not (Test-Path $index)) {
 }
 
 $html = Get-Content $index -Raw -Encoding UTF8
-if (-not $html.Contains("Permissions', 'Documents")) {
+if (-not $html.Contains('Permissions'', ''Documents')) {
   Write-Error "public\index.html is missing the Staff 'Documents' tab (old file?). Fix or deploy from the correct folder. Root: $root"
 }
 
-if ($html -match "JSON\.parse\(localStorage\.getItem") {
+if ($html -match 'JSON\.parse\(localStorage\.getItem') {
   Write-Error "public\index.html still has JSON.parse(localStorage...) — run scripts/replace-index-localstorage-json.mjs before deploy. Root: $root"
 }
 

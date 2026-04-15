@@ -8,7 +8,7 @@
  */
 
 import {
-  collection, query, where, orderBy, limit,
+  collection, query, where, orderBy, limit, startAfter, documentId,
   addDoc, updateDoc, setDoc, doc, getDoc, getDocFromServer, getDocs, deleteDoc, onSnapshot,
   serverTimestamp, Timestamp
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
@@ -22,6 +22,13 @@ let currentUserProfile = null;
 let salonServices = [];
 let serviceCategories = [];
 let currentTickets = [];
+/** Real-time first page (newest). Older pages appended via Load more (not live-updated). */
+const TICKETS_PAGE_SIZE = 200;
+let _ticketsFirstPageTickets = [];
+let _ticketsExtraTickets = [];
+let _ticketsNextPageCursor = null;
+let _ticketsHasMoreOlder = false;
+let _ticketsLoadingMore = false;
 let ticketsUnsubscribe = null;
 let _ticketsDataReady = false; // cache flag — skip Firestore re-fetch on repeat visits
 let currentTicketsTab = 'ready';
@@ -65,6 +72,22 @@ async function loadCurrentUserProfile() {
     console.error('[Tickets] Failed to load user profile', err);
   }
   return null;
+}
+
+/** If users/{uid} lacks staffId, copy from salons/{salonId}/members/{uid} so staff-store permission match works. */
+async function enrichTicketsProfileFromMemberDoc() {
+  if (!currentUserProfile?.uid) return;
+  const salonId = currentUserProfile.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  if (!salonId) return;
+  if (currentUserProfile.staffId != null && String(currentUserProfile.staffId).trim() !== '') return;
+  try {
+    const ms = await getDoc(doc(db, `salons/${salonId}/members`, currentUserProfile.uid));
+    if (!ms.exists()) return;
+    const sid = (ms.data() || {}).staffId;
+    if (sid != null && String(sid).trim() !== '') {
+      currentUserProfile.staffId = String(sid).trim();
+    }
+  } catch (_) {}
 }
 
 /** Load members with avatarUrl for ticket list avatars. */
@@ -262,8 +285,7 @@ async function loadFrontDeskRecipients() {
         const staffId = u.staffId || '';
         const memberEmail = (u.email || '').toLowerCase();
         const staff = staffList.find(s => s.id === staffId) || staffList.find(s => memberEmail && (s.email || '').toLowerCase() === memberEmail);
-        const hasReceivesTickets = staff?.permissions?.tickets_receives === true;
-        const isFrontDesk = ['admin', 'owner', 'manager'].includes(role) || hasReceivesTickets;
+        const isFrontDesk = ['admin', 'owner', 'manager'].includes(role);
         if (!isFrontDesk) return null;
         return {
           uid: d.id,
@@ -302,20 +324,16 @@ async function getAutoFrontDeskRecipients() {
       const staffId = u.staffId || '';
       const memberEmail = (u.email || '').toLowerCase();
       const staff = staffList.find(s => s.id === staffId) || staffList.find(s => memberEmail && (s.email || '').toLowerCase() === memberEmail);
-      const hasReceivesTickets = staff?.permissions?.tickets_receives === true;
       const isManagerOrAbove = ['owner', 'admin', 'manager'].includes(role);
-      const isRecipient = isManagerOrAbove || hasReceivesTickets;
+      const isRecipient = isManagerOrAbove;
       if (isRecipient) add(d.id, (u.name || '').trim());
     });
   } catch (_) {}
   return { uids, names };
 }
 
-/** Returns { isPrimaryAdmin, hasReceivesTickets } for current user.
- *  ONLY uses PIN Actor system — whoever entered their PIN right now.
- *  Never falls back to Firebase Auth owner role. */
+/** Returns { isPrimaryAdmin } for current user (PIN actor — who entered PIN). */
 function getTicketVisibility() {
-  // Use PIN Actor role exclusively
   const actorRole = window.__ff_actorRole
     || window.lastActorRole
     || (typeof getCurrentActorRole === 'function' ? getCurrentActorRole() : null)
@@ -323,18 +341,127 @@ function getTicketVisibility() {
 
   const isPrimaryAdmin = actorRole === 'Admin' || actorRole === 'Manager';
 
-  let hasReceivesTickets = false;
+  return { isPrimaryAdmin };
+}
+
+/** Current signed-in user’s row in ff staff store (for permissions.tickets_*). */
+function _ticketsCurrentStaffRow() {
   try {
     const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
     const staffList = store?.staff || [];
-    const staff = staffList.find(s =>
-      (currentUserProfile?.staffId && s.id === currentUserProfile.staffId) ||
-      (currentUserProfile?.email && s.email && String(s.email).toLowerCase() === String(currentUserProfile.email).toLowerCase())
+    const uid = currentUserProfile?.uid ? String(currentUserProfile.uid).trim() : '';
+    const sid = currentUserProfile?.staffId != null ? String(currentUserProfile.staffId).trim() : '';
+    const email = currentUserProfile?.email ? String(currentUserProfile.email).toLowerCase().trim() : '';
+    return (
+      staffList.find((s) => {
+        if (sid && String(s.id || '').trim() === sid) return true;
+        if (uid && s.uid != null && String(s.uid).trim() === uid) return true;
+        if (email && s.email && String(s.email).toLowerCase().trim() === email) return true;
+        return false;
+      }) || null
     );
-    hasReceivesTickets = staff?.permissions?.tickets_receives === true;
-  } catch (_) {}
+  } catch (_) {
+    return null;
+  }
+}
 
-  return { isPrimaryAdmin, hasReceivesTickets };
+function getTicketsStaffPermissions() {
+  const row = _ticketsCurrentStaffRow();
+  if (row?.permissions && typeof row.permissions === 'object') return row.permissions;
+  const p = currentUserProfile?.permissions;
+  if (p && typeof p === 'object') return p;
+  return {};
+}
+
+/** Owner / Admin (Firestore role) always see the tab; Manager and others use staff permissions. */
+function canViewTicketsSummaryTab() {
+  if (!currentUserProfile) return false;
+  if (typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
+  const role = (currentUserProfile.role || '').toLowerCase();
+  if (role === 'owner' || role === 'admin') return true;
+  return getTicketsStaffPermissions().tickets_summary === true;
+}
+
+/** Owner / Admin (Firestore role) always see the tab; Manager and others use staff permissions (tickets_archived). */
+function canViewTicketsArchivedTab() {
+  if (!currentUserProfile) return false;
+  if (typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
+  const role = (currentUserProfile.role || '').toLowerCase();
+  if (role === 'owner' || role === 'admin') return true;
+  return getTicketsStaffPermissions().tickets_archived === true;
+}
+
+function updateTicketsTabsVisibility() {
+  const archivedTab = document.getElementById('ticketsArchivedTab');
+  const summaryTab = document.getElementById('ticketsSummaryTab');
+  const showArchived = canViewTicketsArchivedTab();
+  const showSummary = canViewTicketsSummaryTab();
+  if (archivedTab) archivedTab.style.display = showArchived ? 'inline-block' : 'none';
+  if (summaryTab) summaryTab.style.display = showSummary ? 'inline-block' : 'none';
+}
+
+/** Staff row flags manager/admin even when Firestore profile role is still technician-like. */
+function isStaffRecordManagerOrAdmin() {
+  try {
+    const staff = _ticketsCurrentStaffRow();
+    return !!(staff && (staff.isManager === true || staff.isAdmin === true));
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Firestore salon profile: technician-like roles see only their own tickets in this module. */
+function isTicketsTechnicianRestrictedRole() {
+  const r = (currentUserProfile?.role || '').toLowerCase().trim();
+  return r === 'technician' || r === 'tech' || r === 'staff';
+}
+
+/** Matches ticket.technicianStaffId to staff doc id, falling back to auth uid (same as new tickets). */
+function getTicketsSelfEmployeeFilterId() {
+  if (!currentUserProfile) return 'all';
+  if (currentUserProfile.staffId != null && String(currentUserProfile.staffId).trim() !== '') {
+    return String(currentUserProfile.staffId).trim();
+  }
+  return String(currentUserProfile.uid);
+}
+
+/** Only tickets assigned to this technician: technicianStaffId === staffId or auth uid; if missing id, exact name/email vs their staff row (no substring match). */
+function ticketBelongsToTicketsTechnician(ticket) {
+  if (!currentUserProfile || !ticket) return false;
+  const techRaw = ticket.technicianStaffId;
+  const techId =
+    techRaw != null && String(techRaw).trim() !== '' ? String(techRaw).trim() : '';
+  if (techId) {
+    const uid = String(currentUserProfile.uid || '').trim();
+    const sid =
+      currentUserProfile.staffId != null && String(currentUserProfile.staffId).trim() !== ''
+        ? String(currentUserProfile.staffId).trim()
+        : '';
+    if (sid && techId === sid) return true;
+    if (uid && techId === uid) return true;
+    return false;
+  }
+  const staff = _ticketsCurrentStaffRow();
+  if (!staff) return false;
+  const tn = normalizeTicketTechName(ticket.technicianName || '');
+  if (!tn) return false;
+  const n1 = normalizeTicketTechName(staff.name || '');
+  const n2 = normalizeTicketTechName(staff.email || '');
+  if (n1 && tn === n1) return true;
+  if (n2 && tn === n2) return true;
+  return false;
+}
+
+function updateTicketsEmployeeFilterVisibility() {
+  const sel = document.getElementById('ticketsEmployeeSelect');
+  if (!sel) return;
+  const show = !(isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin());
+  const disp = show ? '' : 'none';
+  sel.style.display = disp;
+  const label = sel.previousElementSibling;
+  const sep = label?.previousElementSibling;
+  if (label && label.classList.contains('tickets-time-period-label')) label.style.display = disp;
+  if (sep && sep.classList.contains('tickets-filters-sep')) sep.style.display = disp;
 }
 
 /** Returns true if current user can see this ticket.
@@ -345,17 +472,80 @@ function canSeeTicket(ticket) {
   // Firestore role: admin/owner/manager always see all tickets
   const profileRole = (currentUserProfile.role || '').toLowerCase();
   if (['owner', 'admin', 'manager'].includes(profileRole)) return true;
-  // Technician: can see their own tickets
+  if (isStaffRecordManagerOrAdmin()) return true;
+  if (isTicketsTechnicianRestrictedRole()) {
+    return ticketBelongsToTicketsTechnician(ticket);
+  }
   if (ticket.createdByUid === currentUserProfile.uid) return true;
-  // Staff with receives-tickets permission
-  const { hasReceivesTickets } = getTicketVisibility();
-  if (hasReceivesTickets) return true;
   return false;
 }
 
 // =====================
 // Tickets CRUD
 // =====================
+function _rebuildCurrentTicketsMerged() {
+  const byId = new Map();
+  for (const t of _ticketsExtraTickets) {
+    if (t && t.id) byId.set(t.id, t);
+  }
+  for (const t of _ticketsFirstPageTickets) {
+    if (t && t.id) byId.set(t.id, t);
+  }
+  currentTickets = Array.from(byId.values()).sort((a, b) => {
+    const da = ticketSubmittedAtDate(a);
+    const db = ticketSubmittedAtDate(b);
+    const ma = da ? da.getTime() : 0;
+    const mb = db ? db.getTime() : 0;
+    return mb - ma;
+  });
+}
+
+function updateTicketsLoadMoreUi() {
+  const wrap = document.getElementById('ticketsLoadMoreWrap');
+  const btn = document.getElementById('ticketsLoadMoreBtn');
+  if (!wrap || !btn) return;
+  const onListTab = currentTicketsTab !== 'summary';
+  const show = onListTab && _ticketsHasMoreOlder;
+  wrap.style.display = show ? 'block' : 'none';
+  btn.disabled = _ticketsLoadingMore;
+  btn.textContent = _ticketsLoadingMore ? 'Loading…' : 'Load more';
+}
+
+async function loadMoreTicketsOlder() {
+  if (_ticketsLoadingMore || !_ticketsHasMoreOlder || !_ticketsNextPageCursor) return;
+  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  if (!salonId) return;
+  _ticketsLoadingMore = true;
+  updateTicketsLoadMoreUi();
+  try {
+    const qMore = query(
+      collection(db, `salons/${salonId}/tickets`),
+      orderBy('createdAt', 'desc'),
+      startAfter(_ticketsNextPageCursor),
+      limit(TICKETS_PAGE_SIZE)
+    );
+    const batch = await getDocs(qMore);
+    const newRows = batch.docs.map((d) => ({ id: d.id, ...d.data() }));
+    _ticketsExtraTickets.push(...newRows);
+    if (batch.docs.length < TICKETS_PAGE_SIZE) {
+      _ticketsHasMoreOlder = false;
+      _ticketsNextPageCursor = null;
+    } else {
+      _ticketsHasMoreOlder = true;
+      _ticketsNextPageCursor = batch.docs[batch.docs.length - 1];
+    }
+    _rebuildCurrentTicketsMerged();
+    renderTicketsList();
+    updateTicketsNavBadge();
+  } catch (e) {
+    console.error('[Tickets] load more failed', e);
+    showToast(e?.message || 'Could not load more tickets', 'error');
+  } finally {
+    _ticketsLoadingMore = false;
+    updateTicketsLoadMoreUi();
+  }
+}
+
 function subscribeTickets(options) {
   const resetLoading = !!(options && options.resetLoading);
   const salonId = currentUserProfile?.salonId
@@ -370,6 +560,12 @@ function subscribeTickets(options) {
   if (ticketsUnsubscribe) ticketsUnsubscribe();
   if (resetLoading) {
     _ticketsListSnapshotReady = false;
+    _ticketsFirstPageTickets = [];
+    _ticketsExtraTickets = [];
+    _ticketsNextPageCursor = null;
+    _ticketsHasMoreOlder = false;
+    _ticketsLoadingMore = false;
+    _rebuildCurrentTicketsMerged();
     const loadEl = document.getElementById('ticketsLoading');
     const listEl = document.getElementById('ticketsList');
     const emptyEl = document.getElementById('ticketsEmpty');
@@ -380,13 +576,19 @@ function subscribeTickets(options) {
   const q = query(
     collection(db, `salons/${salonId}/tickets`),
     orderBy('createdAt', 'desc'),
-    limit(200)
+    limit(TICKETS_PAGE_SIZE)
   );
   ticketsUnsubscribe = onSnapshot(q, (snap) => {
-    currentTickets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _ticketsFirstPageTickets = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (_ticketsExtraTickets.length === 0) {
+      _ticketsNextPageCursor =
+        snap.docs.length >= TICKETS_PAGE_SIZE ? snap.docs[snap.docs.length - 1] : null;
+      _ticketsHasMoreOlder = snap.docs.length === TICKETS_PAGE_SIZE;
+    }
+    _rebuildCurrentTicketsMerged();
     _ticketsListSnapshotReady = true;
     if (editingTicketId) {
-      const t = currentTickets.find(x => x.id === editingTicketId);
+      const t = currentTickets.find((x) => x.id === editingTicketId);
       const s = t ? (t.status || '').toUpperCase() : '';
       if (t && (s === 'CLOSED' || s === 'VOID' || s === 'ARCHIVED')) {
         const ticketModal = document.getElementById('ticketModal');
@@ -506,14 +708,122 @@ async function finalizeTicket(ticketId, forUids, forNames) {
   await updateTicket(ticketId, updates);
 }
 
+/** Append-only history for Tickets Summary (not read by UI yet). */
+async function appendTicketSummaryOnClose(salonId, ticketId) {
+  console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: enter', {
+    salonId: salonId || '(missing)',
+    ticketId: ticketId || '(missing)',
+    profileRole: currentUserProfile?.role ?? '(no profile)'
+  });
+  if (!salonId || !ticketId) {
+    console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: abort — missing salonId or ticketId');
+    return;
+  }
+  try {
+    const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
+    let snap;
+    try {
+      snap = await getDocFromServer(ticketRef);
+    } catch (e) {
+      console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: getDocFromServer failed, fallback getDoc', e);
+      snap = await getDoc(ticketRef);
+    }
+    console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: after ticket read', {
+      exists: snap.exists(),
+      status: snap.exists() ? String((snap.data() || {}).status || '') : '(n/a)'
+    });
+    if (!snap.exists()) {
+      console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: abort — ticket doc missing');
+      return;
+    }
+    const t = snap.data() || {};
+    if (String(t.status || '').toUpperCase() !== 'CLOSED') {
+      console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: abort — status not CLOSED', {
+        status: t.status ?? '(empty)'
+      });
+      return;
+    }
+
+    const performedLines = Array.isArray(t.performedLines) ? t.performedLines : [];
+    const servicesCount = performedLines.length;
+    const rawTotal = Number(t.total);
+    const totalAmount = Number.isFinite(rawTotal) ? rawTotal : null;
+
+    const tsid = t.technicianStaffId;
+    const employeeId = tsid != null && String(tsid).trim() !== '' ? String(tsid).trim() : null;
+    const tn = t.technicianName;
+    const employeeName = tn != null && String(tn).trim() !== '' ? String(tn).trim() : null;
+
+    const dupQ = query(
+      collection(db, `salons/${salonId}/ticketSummaries`),
+      where('ticketId', '==', ticketId),
+      limit(1)
+    );
+    const dupSnap = await getDocs(dupQ);
+    if (!dupSnap.empty) {
+      console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: abort — duplicate summary exists for ticketId');
+      return;
+    }
+
+    const now = new Date();
+    const closedDateKey = _fmtYmdLocal(now);
+
+    const payload = {
+      ticketId,
+      salonId,
+      employeeId,
+      employeeName,
+      closedAt: serverTimestamp(),
+      closedDateKey,
+      ticketsCount: 1,
+      servicesCount,
+      totalAmount,
+      status: 'closed',
+      source: 'ticket_close'
+    };
+    console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: before addDoc ticketSummaries', {
+      path: `salons/${salonId}/ticketSummaries`,
+      closedDateKey,
+      payloadPreview: {
+        ticketId,
+        salonId,
+        employeeId,
+        employeeName,
+        servicesCount,
+        totalAmount
+      }
+    });
+    const ref = await addDoc(collection(db, `salons/${salonId}/ticketSummaries`), payload);
+    console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: addDoc OK', { newDocId: ref.id });
+  } catch (e) {
+    console.error('[Tickets Summary DEBUG] appendTicketSummaryOnClose: catch', {
+      message: e?.message,
+      code: e?.code,
+      stack: e?.stack,
+      profileRole: currentUserProfile?.role ?? '(no profile)',
+      salonId,
+      ticketId
+    });
+    console.warn('[Tickets] ticketSummaries write failed', e);
+  }
+}
+
 async function closeTicket(ticketId) {
+  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
   const closedByName = currentUserProfile?.name || currentUserProfile?.email || 'Manager';
+  console.log('[Tickets Summary DEBUG] closeTicket: before update + append', {
+    salonId: salonId || '(missing)',
+    ticketId: ticketId || '(missing)',
+    profileRole: currentUserProfile?.role ?? '(no profile)',
+    uid: currentUserProfile?.uid ?? '(no uid)'
+  });
   await updateTicket(ticketId, {
     status: 'CLOSED',
     closedByUid: currentUserProfile.uid,
     closedByName,
     _action: 'closed'
   });
+  await appendTicketSummaryOnClose(salonId, ticketId);
 }
 
 async function voidTicket(ticketId) {
@@ -524,11 +834,42 @@ async function archiveTicket(ticketId) {
   await updateTicket(ticketId, { status: 'ARCHIVED', archivedByUid: currentUserProfile.uid, _action: 'archived' });
 }
 
+/** Does not remove ticketSummaries; marks matching rows when the live ticket is permanently deleted. */
+async function markTicketSummariesSourceDeleted(salonId, ticketId) {
+  if (!salonId || !ticketId) return;
+  const uid = currentUserProfile?.uid ?? null;
+  const byName =
+    currentUserProfile?.name || currentUserProfile?.email || null;
+  try {
+    const q = query(
+      collection(db, `salons/${salonId}/ticketSummaries`),
+      where('ticketId', '==', ticketId)
+    );
+    const snap = await getDocs(q);
+    await Promise.all(
+      snap.docs.map((d) =>
+        updateDoc(d.ref, {
+          sourceTicketDeleted: true,
+          sourceTicketDeletedAt: serverTimestamp(),
+          sourceTicketDeletedByUid: uid,
+          sourceTicketDeletedByName: byName
+        })
+      )
+    );
+  } catch (e) {
+    console.warn('[Tickets] ticketSummaries source-deleted markers failed', e);
+  }
+}
+
 async function deleteTicketPermanently(ticketId) {
   const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
   if (!salonId || !ticketId) return;
+  await markTicketSummariesSourceDeleted(salonId, ticketId);
   const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
   await deleteDoc(ticketRef);
+  _ticketsExtraTickets = _ticketsExtraTickets.filter((t) => t.id !== ticketId);
+  _ticketsFirstPageTickets = _ticketsFirstPageTickets.filter((t) => t.id !== ticketId);
+  _rebuildCurrentTicketsMerged();
 }
 
 /** Mark ticket as seen/acknowledged by Front Desk (removes "Edited" indicator). Call when FD opens the ticket. */
@@ -653,6 +994,454 @@ function ticketMatchesEmployeeFilter(t, staffId) {
   if (tn && n2 && tn === n2) return true;
   if (tn && n1 && (tn.includes(n1) || n1.includes(tn))) return true;
   return false;
+}
+
+function formatSummaryMoney(n) {
+  const x = n == null || n === '' ? NaN : Number(n);
+  const v = Number.isFinite(x) ? x : 0;
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(v);
+  } catch (_) {
+    return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  }
+}
+
+function formatSummaryInt(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x) || x < 0) return '0';
+  return String(Math.round(x));
+}
+
+function getSummaryFilterDateRangeFromDom() {
+  const periodSel = document.getElementById('ticketsTimePeriodSelect');
+  if (periodSel && periodSel.value === 'all') {
+    return { fromStr: '', toStr: '' };
+  }
+  const fromEl = document.getElementById('ticketsFilterDateFrom');
+  const toEl = document.getElementById('ticketsFilterDateTo');
+  return {
+    fromStr: fromEl ? (fromEl.value || '').trim() : '',
+    toStr: toEl ? (toEl.value || '').trim() : ''
+  };
+}
+
+function summaryDocMatchesEmployee(d, staffId) {
+  const techSelfOnly =
+    isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin();
+  if (techSelfOnly) {
+    return ticketBelongsToTicketsTechnician({
+      technicianStaffId: d.employeeId,
+      technicianName: d.employeeName || ''
+    });
+  }
+  return ticketMatchesEmployeeFilter(
+    { technicianStaffId: d.employeeId, technicianName: d.employeeName || '' },
+    staffId
+  );
+}
+
+function summaryDocClosedDateKeyString(d) {
+  const k = d.closedDateKey;
+  if (k == null) return null;
+  if (typeof k === 'object' && typeof k.toDate === 'function') {
+    const dt = k.toDate();
+    if (isNaN(dt.getTime())) return null;
+    return _fmtYmdLocal(dt);
+  }
+  const s = String(k).trim();
+  return s !== '' ? s : null;
+}
+
+/** Date filter for ticketSummaries: closedDateKey (string) or closedAt timestamp. */
+function passesSummaryDocDateFilter(d, fromStr, toStr) {
+  if (!fromStr && !toStr) return true;
+  const ks = summaryDocClosedDateKeyString(d);
+  if (ks != null) {
+    if (fromStr && ks < fromStr) return false;
+    if (toStr && ks > toStr) return false;
+    return true;
+  }
+  const ca = d.closedAt;
+  if (ca && typeof ca.toDate === 'function') {
+    const dt = ca.toDate();
+    if (isNaN(dt.getTime())) return false;
+    const tMs = dt.getTime();
+    if (fromStr) {
+      const p = fromStr.split('-').map(Number);
+      if (p.length === 3) {
+        const from = new Date(p[0], p[1] - 1, p[2], 0, 0, 0, 0);
+        if (tMs < from.getTime()) return false;
+      }
+    }
+    if (toStr) {
+      const p = toStr.split('-').map(Number);
+      if (p.length === 3) {
+        const toEnd = new Date(p[0], p[1] - 1, p[2], 23, 59, 59, 999);
+        if (tMs > toEnd.getTime()) return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+function buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId) {
+  const techSelfOnly =
+    isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin();
+  const filtered = (currentTickets || []).filter((t) => {
+    if (!canSeeTicket(t)) return false;
+    if (String(t.status || '').toUpperCase() !== 'CLOSED') return false;
+    if (!passesTicketsDateFilter(t, fromStr, toStr)) return false;
+    if (techSelfOnly) return ticketBelongsToTicketsTechnician(t);
+    return ticketMatchesEmployeeFilter(t, employeeId);
+  });
+  const groups = new Map();
+  for (const t of filtered) {
+    const idPart =
+      t.technicianStaffId != null && String(t.technicianStaffId).trim() !== ''
+        ? String(t.technicianStaffId).trim()
+        : '';
+    const nk = normalizeTicketTechName(t.technicianName || '');
+    const gkey = idPart ? `id:${idPart}` : `name:${nk || 'unknown'}`;
+    if (!groups.has(gkey)) {
+      groups.set(gkey, { name: 'Unknown', tickets: 0, services: 0, total: 0 });
+    }
+    const g = groups.get(gkey);
+    const nm =
+      t.technicianName != null && String(t.technicianName).trim() !== ''
+        ? String(t.technicianName).trim()
+        : '';
+    if (nm && g.name === 'Unknown') g.name = nm;
+    g.tickets += 1;
+    const lines = Array.isArray(t.performedLines) ? t.performedLines : [];
+    g.services += lines.length;
+    const raw = Number(t.total);
+    g.total += Number.isFinite(raw)
+      ? raw
+      : lines.reduce((s, l) => s + (Number(l?.ticketPrice) || 0), 0);
+  }
+  const sorted = [...groups.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+  );
+  let totalTickets = 0;
+  let totalServices = 0;
+  let totalRevenue = 0;
+  sorted.forEach((r) => {
+    totalTickets += r.tickets;
+    totalServices += r.services;
+    totalRevenue += r.total;
+  });
+  const summaryRows = sorted.map((r) => ({
+    name: !r.name || !String(r.name).trim() ? 'Unknown' : r.name.trim(),
+    tickets: r.tickets,
+    services: r.services,
+    total: r.total
+  }));
+  return { summaryRows, totalTickets, totalServices, totalRevenue };
+}
+
+function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totalTickets, totalServices, totalRevenue) {
+  if (!summaryRows || summaryRows.length === 0) {
+    wrap.style.display = 'none';
+    if (emptyMsg) {
+      emptyMsg.style.display = 'block';
+      emptyMsg.className = 'tickets-summary-state tickets-summary-state--empty';
+      emptyMsg.textContent = 'No summary data found for the selected filters.';
+    }
+    return false;
+  }
+  tbody.innerHTML = summaryRows
+    .map(
+      (r) => `<tr>
+      <td>${escapeHtml(r.name)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryInt(r.tickets)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryInt(r.services)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(r.total)}</td>
+    </tr>`
+    )
+    .join('');
+  tfoot.innerHTML = `<tr class="tickets-summary-total-row">
+      <td>Total</td>
+      <td class="tickets-summary-col-num">${formatSummaryInt(totalTickets)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryInt(totalServices)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(totalRevenue)}</td>
+    </tr>`;
+  if (emptyMsg) {
+    emptyMsg.style.display = 'none';
+    emptyMsg.className = 'tickets-summary-state';
+  }
+  wrap.style.display = '';
+  return true;
+}
+
+let _ticketsSummaryFetchSeq = 0;
+
+const _ticketSummaryPageSize = 500;
+
+/** Load every ticketSummaries doc for the query (no arbitrary cap like limit(5000)). */
+async function fetchAllTicketSummaryDocs(colRef, fromStr, toStr) {
+  const out = [];
+  const PAGE = _ticketSummaryPageSize;
+  if (!fromStr && !toStr) {
+    let lastDoc = null;
+    for (;;) {
+      const q = lastDoc
+        ? query(colRef, orderBy(documentId()), startAfter(lastDoc), limit(PAGE))
+        : query(colRef, orderBy(documentId()), limit(PAGE));
+      const snap = await getDocs(q);
+      if (snap.empty) break;
+      out.push(...snap.docs);
+      if (snap.size < PAGE) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+    }
+    return out;
+  }
+  if (fromStr && toStr) {
+    let lastDoc = null;
+    for (;;) {
+      const q = lastDoc
+        ? query(
+            colRef,
+            where('closedDateKey', '>=', fromStr),
+            where('closedDateKey', '<=', toStr),
+            orderBy('closedDateKey'),
+            startAfter(lastDoc),
+            limit(PAGE)
+          )
+        : query(
+            colRef,
+            where('closedDateKey', '>=', fromStr),
+            where('closedDateKey', '<=', toStr),
+            orderBy('closedDateKey'),
+            limit(PAGE)
+          );
+      const snap = await getDocs(q);
+      if (snap.empty) break;
+      out.push(...snap.docs);
+      if (snap.size < PAGE) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+    }
+    return out;
+  }
+  if (fromStr) {
+    let lastDoc = null;
+    for (;;) {
+      const q = lastDoc
+        ? query(
+            colRef,
+            where('closedDateKey', '>=', fromStr),
+            orderBy('closedDateKey'),
+            startAfter(lastDoc),
+            limit(PAGE)
+          )
+        : query(colRef, where('closedDateKey', '>=', fromStr), orderBy('closedDateKey'), limit(PAGE));
+      const snap = await getDocs(q);
+      if (snap.empty) break;
+      out.push(...snap.docs);
+      if (snap.size < PAGE) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+    }
+    return out;
+  }
+  let lastDoc = null;
+  for (;;) {
+    const q = lastDoc
+      ? query(
+          colRef,
+          where('closedDateKey', '<=', toStr),
+          orderBy('closedDateKey', 'desc'),
+          startAfter(lastDoc),
+          limit(PAGE)
+        )
+      : query(colRef, where('closedDateKey', '<=', toStr), orderBy('closedDateKey', 'desc'), limit(PAGE));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    out.push(...snap.docs);
+    if (snap.size < PAGE) break;
+    lastDoc = snap.docs[snap.docs.length - 1];
+  }
+  return out;
+}
+
+/**
+ * Summary tab: aggregate from salons/{salonId}/ticketSummaries (not live tickets).
+ * summaryRows: [{ name, tickets, services, total }, ...]
+ */
+async function loadAndRenderTicketsSummary() {
+  const seq = ++_ticketsSummaryFetchSeq;
+  const panel = document.getElementById('ticketsSummaryPanel');
+  const wrap = panel?.querySelector('.tickets-summary-table-wrap');
+  const emptyMsg = document.getElementById('ticketsSummaryEmpty');
+  const tbody = document.getElementById('ticketsSummaryTableBody');
+  const tfoot = document.getElementById('ticketsSummaryTableFoot');
+  if (!panel || !wrap || !tbody || !tfoot) return;
+
+  wrap.style.display = 'none';
+  if (emptyMsg) {
+    emptyMsg.style.display = 'block';
+    emptyMsg.className = 'tickets-summary-state tickets-summary-state--loading';
+    emptyMsg.textContent = 'Loading summary...';
+  }
+  tbody.innerHTML = '';
+  tfoot.innerHTML = '';
+
+  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  if (!salonId) {
+    if (seq !== _ticketsSummaryFetchSeq) return;
+    if (emptyMsg) {
+      emptyMsg.className = 'tickets-summary-state tickets-summary-state--empty';
+      emptyMsg.textContent = 'No summary data found for the selected filters.';
+    }
+    return;
+  }
+
+  const { fromStr, toStr } = getSummaryFilterDateRangeFromDom();
+  const empEl = document.getElementById('ticketsEmployeeSelect');
+  let employeeId = empEl ? (empEl.value || 'all') : 'all';
+  if (isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin()) {
+    employeeId = getTicketsSelfEmployeeFilterId();
+  }
+
+  console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: start', {
+    salonId,
+    fromStr: fromStr || '(empty)',
+    toStr: toStr || '(empty)',
+    employeeId,
+    profileRole: currentUserProfile?.role ?? '(no profile)',
+    techRestricted: isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin()
+  });
+
+  try {
+    const col = collection(db, `salons/${salonId}/ticketSummaries`);
+    const rawDocs = await fetchAllTicketSummaryDocs(col, fromStr, toStr);
+
+    if (seq !== _ticketsSummaryFetchSeq) return;
+
+    console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: fetched summary docs (all pages)', rawDocs.length);
+
+    let rows = rawDocs.map((x) => ({ id: x.id, ...x.data() }));
+    const nMapped = rows.length;
+    const rowsAfterDate = rows.filter((d) => passesSummaryDocDateFilter(d, fromStr, toStr));
+    const nAfterDate = rowsAfterDate.length;
+    rows = rowsAfterDate.filter((d) => summaryDocMatchesEmployee(d, employeeId));
+    const nAfterEmployee = rows.length;
+    console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: after filters', {
+      mappedRows: nMapped,
+      afterDateFilter: nAfterDate,
+      afterEmployeeFilter: nAfterEmployee
+    });
+
+    const groups = new Map();
+    for (const d of rows) {
+      const idPart =
+        d.employeeId != null && String(d.employeeId).trim() !== '' ? String(d.employeeId).trim() : '';
+      const nk = normalizeTicketTechName(d.employeeName || '');
+      const gkey = idPart ? `id:${idPart}` : `name:${nk || 'unknown'}`;
+      if (!groups.has(gkey)) {
+        groups.set(gkey, { name: 'Unknown', tickets: 0, services: 0, total: 0 });
+      }
+      const g = groups.get(gkey);
+      const nm =
+        d.employeeName != null && String(d.employeeName).trim() !== ''
+          ? String(d.employeeName).trim()
+          : '';
+      if (nm && g.name === 'Unknown') g.name = nm;
+      const tc = Number(d.ticketsCount);
+      g.tickets += Number.isFinite(tc) ? tc : 0;
+      const sc = Number(d.servicesCount);
+      g.services += Number.isFinite(sc) ? sc : 0;
+      const ta = Number(d.totalAmount);
+      g.total += Number.isFinite(ta) ? ta : 0;
+    }
+
+    const sorted = [...groups.values()].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+    );
+
+    let totalTickets = 0;
+    let totalServices = 0;
+    let totalRevenue = 0;
+    sorted.forEach((r) => {
+      totalTickets += r.tickets;
+      totalServices += r.services;
+      totalRevenue += r.total;
+    });
+
+    const summaryRows = sorted.map((r) => ({
+      name: !r.name || !String(r.name).trim() ? 'Unknown' : r.name.trim(),
+      tickets: r.tickets,
+      services: r.services,
+      total: r.total
+    }));
+
+    console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: grouped summaryRows', summaryRows.length);
+
+    if (seq !== _ticketsSummaryFetchSeq) return;
+
+    const noDateFilter = !fromStr && !toStr;
+    if (
+      summaryRows.length === 0 &&
+      noDateFilter &&
+      rawDocs.length === 0 &&
+      _ticketsListSnapshotReady
+    ) {
+      const fb = buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId);
+      if (
+        paintTicketsSummaryTable(
+          wrap,
+          tbody,
+          tfoot,
+          emptyMsg,
+          fb.summaryRows,
+          fb.totalTickets,
+          fb.totalServices,
+          fb.totalRevenue
+        )
+      ) {
+        return;
+      }
+    }
+
+    paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totalTickets, totalServices, totalRevenue);
+  } catch (e) {
+    console.error('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: catch', {
+      message: e?.message,
+      code: e?.code,
+      stack: e?.stack,
+      salonId,
+      profileRole: currentUserProfile?.role ?? '(no profile)'
+    });
+    console.warn('[Tickets] Summary load failed', e);
+    if (seq !== _ticketsSummaryFetchSeq) return;
+    if (_ticketsListSnapshotReady) {
+      const fb = buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId);
+      if (
+        paintTicketsSummaryTable(
+          wrap,
+          tbody,
+          tfoot,
+          emptyMsg,
+          fb.summaryRows,
+          fb.totalTickets,
+          fb.totalServices,
+          fb.totalRevenue
+        )
+      ) {
+        return;
+      }
+    }
+    wrap.style.display = 'none';
+    if (emptyMsg) {
+      emptyMsg.style.display = 'block';
+      emptyMsg.className = 'tickets-summary-state tickets-summary-state--empty';
+      emptyMsg.textContent = 'No summary data found for the selected filters.';
+    }
+  }
 }
 
 function populateTicketsEmployeeSelect() {
@@ -874,12 +1663,49 @@ function renderTicketsList() {
   const listEl = document.getElementById('ticketsList');
   const loadingEl = document.getElementById('ticketsLoading');
   const emptyEl = document.getElementById('ticketsEmpty');
+  const summaryPanel = document.getElementById('ticketsSummaryPanel');
   if (!listEl) return;
+
+  updateTicketsTabsVisibility();
+  if (currentTicketsTab === 'summary' && !canViewTicketsSummaryTab()) {
+    currentTicketsTab = 'ready';
+    document.querySelectorAll('.tickets-tab').forEach(b => b.classList.remove('active'));
+    const rb = document.querySelector('.tickets-tab[data-tab="ready"]');
+    if (rb) rb.classList.add('active');
+  } else if (currentTicketsTab === 'archived' && !canViewTicketsArchivedTab()) {
+    currentTicketsTab = 'ready';
+    document.querySelectorAll('.tickets-tab').forEach(b => b.classList.remove('active'));
+    const rb = document.querySelector('.tickets-tab[data-tab="ready"]');
+    if (rb) rb.classList.add('active');
+  }
+
+  if (currentTicketsTab === 'summary') {
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (summaryPanel) summaryPanel.style.display = 'block';
+    listEl.innerHTML = '';
+    listEl.classList.remove('tickets-list--closed', 'tickets-list--archived');
+    const timePeriodWrap = document.getElementById('ticketsTimePeriodWrap');
+    if (timePeriodWrap) timePeriodWrap.style.display = 'flex';
+    syncTicketsTimePeriodSelectOptions();
+    const periodSel = document.getElementById('ticketsTimePeriodSelect');
+    const customWrap = document.getElementById('ticketsTimePeriodCustomWrap');
+    if (periodSel && customWrap) {
+      customWrap.style.display = periodSel.value === 'custom' ? 'inline-flex' : 'none';
+    }
+    populateTicketsEmployeeSelect();
+    updateTicketsEmployeeFilterVisibility();
+    void loadAndRenderTicketsSummary();
+    updateTicketsLoadMoreUi();
+    return;
+  }
+  if (summaryPanel) summaryPanel.style.display = 'none';
 
   if (!_ticketsListSnapshotReady) {
     if (loadingEl) loadingEl.style.display = 'block';
     if (emptyEl) emptyEl.style.display = 'none';
     listEl.innerHTML = '';
+    updateTicketsLoadMoreUi();
     return;
   }
 
@@ -911,11 +1737,19 @@ function renderTicketsList() {
     toShow = toShow.filter(t => passesTicketsDateFilter(t, fromStr, toStr));
   }
   if (showDateFilters) populateTicketsEmployeeSelect();
+  updateTicketsEmployeeFilterVisibility();
   const empEl = document.getElementById('ticketsEmployeeSelect');
-  const employeeId = showDateFilters && empEl ? (empEl.value || 'all') : 'all';
+  let employeeId = showDateFilters && empEl ? (empEl.value || 'all') : 'all';
+  if (showDateFilters && isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin()) {
+    employeeId = getTicketsSelfEmployeeFilterId();
+  }
   const hasEmployeeFilter = showDateFilters && employeeId !== 'all';
   if (hasEmployeeFilter) {
-    toShow = toShow.filter(t => ticketMatchesEmployeeFilter(t, employeeId));
+    const techSelfOnly =
+      isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin();
+    toShow = toShow.filter((t) =>
+      techSelfOnly ? ticketBelongsToTicketsTechnician(t) : ticketMatchesEmployeeFilter(t, employeeId)
+    );
   }
 
   if (loadingEl) loadingEl.style.display = 'none';
@@ -928,12 +1762,6 @@ function renderTicketsList() {
         emptyEl.textContent = 'No tickets here yet.';
       }
     }
-  }
-
-  const archivedTab = document.getElementById('ticketsArchivedTab');
-  if (archivedTab) {
-    const role = (currentUserProfile?.role || '').toLowerCase();
-    archivedTab.style.display = (role === 'owner' || role === 'admin') ? 'inline-block' : 'none';
   }
 
   listEl.classList.toggle('tickets-list--closed', currentTicketsTab === 'closed');
@@ -975,9 +1803,8 @@ function renderTicketsList() {
     const editBtnHtml = canEdit
       ? `<button type="button" class="ticket-edit-btn" data-ticket-id="${t.id}" title="Edit ticket" style="padding:6px;background:none;border:none;cursor:pointer;flex-shrink:0;color:#9ca3af;line-height:0;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
       : '';
-    const { hasReceivesTickets } = getTicketVisibility();
     const isAdminOrManager = currentUserProfile && ['owner', 'admin', 'manager'].includes((currentUserProfile.role || '').toLowerCase());
-    const canSeeEditedFlag = isAdminOrManager || hasReceivesTickets;
+    const canSeeEditedFlag = isAdminOrManager;
     const isReady = sk === 'ready';
     const showEdited = canSeeEditedFlag && isReady && !!t.editedAfterFinalize;
     const editedBadgeHtml = showEdited ? '<span class="ticket-edited-badge">Edited</span>' : '';
@@ -1052,6 +1879,8 @@ function renderTicketsList() {
       }
     };
   });
+
+  updateTicketsLoadMoreUi();
 }
 
 function statusBg(s) {
@@ -1079,9 +1908,12 @@ function escapeHtml(s) {
 // UI: Tabs
 // =====================
 function setTicketsTab(tab) {
-  currentTicketsTab = tab;
+  let t = tab;
+  if (t === 'summary' && !canViewTicketsSummaryTab()) t = 'ready';
+  if (t === 'archived' && !canViewTicketsArchivedTab()) t = 'ready';
+  currentTicketsTab = t;
   document.querySelectorAll('.tickets-tab').forEach(b => b.classList.remove('active'));
-  const btn = document.querySelector(`.tickets-tab[data-tab="${tab}"]`);
+  const btn = document.querySelector(`.tickets-tab[data-tab="${t}"]`);
   if (btn) btn.classList.add('active');
   renderTicketsList();
 }
@@ -1099,6 +1931,10 @@ function openTicketModal(ticketId, appointmentData = null) {
   if (editingTicketId) {
     const t = currentTickets.find(x => x.id === editingTicketId);
     if (!t) return;
+    if (!canSeeTicket(t)) {
+      showToast('You cannot view this ticket.', 'error');
+      return;
+    }
     const s = (t.status || '').toUpperCase();
     if (s === 'CLOSED' || s === 'VOID' || s === 'ARCHIVED') {
       if (_justClosedTicketId === editingTicketId) {
@@ -1304,6 +2140,10 @@ function closeTicketModal() {
 }
 
 function openTicketDetailsModal(t) {
+  if (!t || !canSeeTicket(t)) {
+    if (t) showToast('You cannot view this ticket.', 'error');
+    return;
+  }
   const modal = document.getElementById('ticketDetailsModal');
   const contentEl = document.getElementById('ticketDetailsContent');
   const actionsEl = document.getElementById('ticketDetailsActions');
@@ -1325,6 +2165,17 @@ function openTicketDetailsModal(t) {
     const notePart = l.note ? ` <span style="color:#6b7280;font-size:12px;">— ${escapeHtml(l.note)}</span>` : '';
     return `<div style="padding:10px;background:#f9fafb;border-radius:8px;margin-bottom:8px;font-size:14px;">${escapeHtml(l.serviceName)} — ${priceText}${notePart}</div>`;
   }).join('');
+  const sumFromLines = lines.reduce((s, l) => s + (Number(l.ticketPrice) || 0), 0);
+  const storedTotal = Number(t.total);
+  const ticketTotalAmount =
+    lines.length > 0 ? sumFromLines : Number.isFinite(storedTotal) ? storedTotal : sumFromLines;
+  const showTicketTotal = lines.length > 0 || Number.isFinite(storedTotal);
+  const totalHtml = showTicketTotal
+    ? `<div style="margin-top:12px;padding:12px 14px;background:#f3f4f6;border-radius:8px;display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:600;color:#111827;border:1px solid #e5e7eb;">
+        <span>Total</span>
+        <span>$${ticketTotalAmount.toFixed(2)}</span>
+      </div>`
+    : '';
   let diffHtml = '';
   if (hasDiff) {
     const parts = [];
@@ -1343,7 +2194,7 @@ function openTicketDetailsModal(t) {
         <div><div style="color:#6b7280;margin-bottom:4px;">Customer</div><div style="font-weight:500;">${escapeHtml(t.customerName || '—')}</div></div>
       </div>
     </div>
-    <div style="margin-bottom:16px;"><h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#374151;">Performed services</h3>${performedHtml || '<div style="color:#9ca3af;font-size:13px;">None</div>'}</div>
+    <div style="margin-bottom:16px;"><h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#374151;">Performed services</h3>${performedHtml || '<div style="color:#9ca3af;font-size:13px;">None</div>'}${totalHtml}</div>
     ${diffHtml}
     ${asIsHtml}
   `;
@@ -1419,6 +2270,10 @@ function resetTicketForm() {
 }
 
 function populateTicketForm(t) {
+  if (!canSeeTicket(t)) {
+    showToast('You cannot view this ticket.', 'error');
+    return;
+  }
   const s = (t.status || '').toUpperCase();
   if (s === 'CLOSED' || s === 'VOID' || s === 'ARCHIVED') {
     closeTicketModal();
@@ -1700,8 +2555,8 @@ async function saveTicket() {
         _ticketsOpenedThisSession.add(editingTicketId);
         t.seenByFrontDeskAt = true;
         updateTicketsNavBadge();
-        const { isPrimaryAdmin, hasReceivesTickets } = getTicketVisibility();
-        if (isPrimaryAdmin || hasReceivesTickets) markTicketSeenByFrontDesk(editingTicketId).catch(() => {});
+        const { isPrimaryAdmin } = getTicketVisibility();
+        if (isPrimaryAdmin) markTicketSeenByFrontDesk(editingTicketId).catch(() => {});
       }
       showToast('Ticket updated', 'success');
     } else {
@@ -2056,6 +2911,10 @@ async function saveServiceFromForm() {
 // Navigation
 // =====================
 export function goToTickets() {
+  if (typeof window.ffCurrentUserHasTicketsViewPermission === 'function' && !window.ffCurrentUserHasTicketsViewPermission()) {
+    if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+    return;
+  }
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
     try {
       window.ffCloseGlobalBlockingOverlays();
@@ -2118,19 +2977,25 @@ export function goToTickets() {
 
   document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
   const ticketsBtn = document.getElementById('ticketsBtn');
-  if (ticketsBtn) ticketsBtn.classList.add('active');
+  if (ticketsBtn && typeof window.ffCurrentUserHasTicketsViewPermission === 'function' && window.ffCurrentUserHasTicketsViewPermission()) {
+    ticketsBtn.classList.add('active');
+  }
+  if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
 
   if (_ticketsDataReady && currentUserProfile) {
-    // Data already cached — skip Firestore fetches, just re-subscribe and render
-    setupTicketsUI().then(() => {
-      subscribeTickets({ resetLoading: true });
-      renderTicketsList();
-      updateTicketsNavBadge();
-    }).catch((err) => {
-      console.error('[Tickets] setupTicketsUI failed', err);
-    });
+    enrichTicketsProfileFromMemberDoc()
+      .then(() => setupTicketsUI())
+      .then(() => {
+        subscribeTickets({ resetLoading: true });
+        renderTicketsList();
+        updateTicketsNavBadge();
+      })
+      .catch((err) => {
+        console.error('[Tickets] setupTicketsUI failed', err);
+      });
   } else {
     loadCurrentUserProfile().then(async () => {
+      await enrichTicketsProfileFromMemberDoc();
       await loadServiceCategories();
       await loadServices();
       await setupTicketsUI();
@@ -2226,12 +3091,7 @@ async function setupTicketsUI() {
       requestAnimationFrame(() => _alignGearToAvatar());
     }
   }
-  const archivedTab = document.getElementById('ticketsArchivedTab');
-  if (archivedTab) {
-    const role = (currentUserProfile?.role || '').toLowerCase();
-    const isAdminOrOwner = currentUserProfile && (role === 'owner' || role === 'admin');
-    archivedTab.style.display = isAdminOrOwner ? 'inline-block' : 'none';
-  }
+  updateTicketsTabsVisibility();
   const newTicketBtn = document.getElementById('ticketsNewBtn');
   if (newTicketBtn) {
     // Hide for admin/manager/owner based on FIRESTORE profile role
@@ -2262,6 +3122,19 @@ export function initTickets() {
   window.saveServiceFromForm = saveServiceFromForm;
   window.addServiceCategory = addServiceCategory;
   window.updateTicketsNavBadge = updateTicketsNavBadge;
+  window.ffRefreshTicketsTabVisibility = () => {
+    updateTicketsTabsVisibility();
+    const ts = document.getElementById('ticketsScreen');
+    if (ts && ts.style.display !== 'none' && ts.style.display !== '') {
+      renderTicketsList();
+    }
+  };
+
+  const loadMoreBtn = document.getElementById('ticketsLoadMoreBtn');
+  if (loadMoreBtn && !loadMoreBtn._ffTicketsLoadMoreWired) {
+    loadMoreBtn._ffTicketsLoadMoreWired = true;
+    loadMoreBtn.onclick = () => void loadMoreTicketsOlder();
+  }
 
   // Background subscription for badge — ONLY for admin/manager/owner (Firestore role)
   // This shows the badge in real-time even when not on the Tickets screen

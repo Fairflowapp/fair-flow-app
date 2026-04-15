@@ -157,6 +157,45 @@ window.__ffGetUid = () => (auth.currentUser && auth.currentUser.uid) || null;
 export const db = getFirestore(app);
 window.ffDb = db;   // expose for non-module scripts (staff cloud sync)
 
+/**
+ * Salon account owner: Auth uid matches salons/{salonId}/settings/main.ownerUid.
+ * If ownerUid is not on settings/main yet, falls back to session role owner (users doc).
+ */
+function ffIsOwner() {
+  try {
+    const u = auth.currentUser;
+    if (!u || !u.uid) return false;
+    const ou =
+      typeof window !== "undefined" && typeof window.__ff_salon_owner_uid === "string"
+        ? String(window.__ff_salon_owner_uid).trim()
+        : "";
+    if (ou) return String(u.uid) === ou;
+    return String(typeof window !== "undefined" ? window.__ff_user_role || "" : "")
+      .toLowerCase() === "owner";
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Staff row is the salon owner account (uid matches settings/main.ownerUid). */
+function ffStaffRowIsSalonOwner(staff) {
+  try {
+    if (!staff || typeof staff !== "object") return false;
+    const ou =
+      typeof window !== "undefined" && typeof window.__ff_salon_owner_uid === "string"
+        ? String(window.__ff_salon_owner_uid).trim()
+        : "";
+    if (!ou) return false;
+    const sid = String(staff.uid || staff.firebaseUid || "").trim();
+    return sid !== "" && sid === ou;
+  } catch (_) {
+    return false;
+  }
+}
+
+window.ffIsOwner = ffIsOwner;
+window.ffStaffRowIsSalonOwner = ffStaffRowIsSalonOwner;
+
 // Set currentSalonId globally when user logs in (used by staff invite + staff cloud sync)
 onAuthStateChanged(auth, async user => {
   if (!user) { window.currentSalonId = null; return; }
@@ -1167,6 +1206,26 @@ async function loadUserRoleAndShowView(user) {
       window.currentSalonId = currentSalonId;
     }
 
+    // One-time: persist salon owner uid on settings/main (immutable thereafter via rules).
+    if (currentSalonId && user && role === 'owner') {
+      try {
+        const mainRef = doc(db, 'salons', currentSalonId, 'settings', 'main');
+        const mainSnap = await getDoc(mainRef);
+        const existingOu =
+          mainSnap.exists() && mainSnap.data().ownerUid
+            ? String(mainSnap.data().ownerUid).trim()
+            : '';
+        if (!existingOu) {
+          await setDoc(mainRef, { ownerUid: user.uid, updatedAt: serverTimestamp() }, { merge: true });
+        }
+        if (typeof window !== 'undefined') {
+          window.__ff_salon_owner_uid = existingOu || user.uid;
+        }
+      } catch (ouErr) {
+        console.warn('[Auth] ownerUid bootstrap on settings/main failed', ouErr);
+      }
+    }
+
     // Set ff_authedStaffId from user doc so avatar upload works for managers/technicians (not just PIN flow)
     const staffIdFromUser = data.staffId || null;
     if (staffIdFromUser && typeof window !== 'undefined') {
@@ -1234,6 +1293,9 @@ async function loadUserRoleAndShowView(user) {
               joinBtn.style.pointerEvents = 'auto';
               joinBtn.disabled = false;
               joinBtn.removeAttribute('disabled');
+              if (typeof window.ffApplyQueueReadOnlyMode === "function") {
+                window.ffApplyQueueReadOnlyMode();
+              }
               console.log("[Auth] JOIN button reinitialized after owner view shown");
             }
           }
@@ -1345,6 +1407,7 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) {
     console.log("[Auth] No user, showing login screen");
     if (typeof window !== "undefined") {
+      window.__ff_salon_owner_uid = "";
       window.ff_is_admin_cached = null;
       if (window.__ffBirthdayInterval) {
         clearInterval(window.__ffBirthdayInterval);
@@ -2247,6 +2310,9 @@ function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, perform
 
 // Safely move a task into the Pending list (tab-specific storage)
 function moveTaskToPending(taskId, workerName) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     console.log(`%c[MOVE TO PENDING] START`, 'color:blue;font-weight:bold', { taskId, workerName });
     const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
     
@@ -2470,6 +2536,9 @@ window.moveTaskToPending = moveTaskToPending;
 
 // Mark task as done (tab-specific storage)
 function markTaskDone(taskId, workerName) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     console.log(`%c[MARK DONE] START`, 'color:orange;font-weight:bold', { taskId, workerName });
     
     // Determine current tab
@@ -2745,6 +2814,9 @@ let __pendingTaskId = null;
 let pinModalDoneTaskId = null;
 
 function openPinModal(taskId) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     __pendingTaskId = taskId;
     pinModalDoneTaskId = null;
     window.__ff_pin_identify_only = false;
@@ -2760,6 +2832,9 @@ function openPinModal(taskId) {
 }
 
 function openPinModalForDone(taskId) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     pinModalDoneTaskId = taskId;
     __pendingTaskId = null;
     window.__ff_pin_identify_only = false;
@@ -2858,6 +2933,10 @@ async function validatePinAndMove() {
     }
     
     if (__pendingTaskId) {
+        if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+            closePinModal();
+            return;
+        }
         moveTaskToPending(__pendingTaskId, matchedName);
     }
 
@@ -3113,7 +3192,10 @@ async function isCurrentUserOwner() {
   try {
     const user = auth.currentUser;
     if (!user) return false;
-    
+    if (typeof window !== 'undefined' && typeof window.ffIsOwner === 'function' && window.ffIsOwner()) {
+      return true;
+    }
+
     const userDocRef = doc(db, "users", user.uid);
     const snap = await getDoc(userDocRef);
     
@@ -3327,6 +3409,9 @@ async function validateResetPin(pin) {
 // Perform the actual reset (called after PIN validation)
 // STATE ONLY: Clears progress/state, does NOT touch catalog or rebuild tasks
 window.doResetCurrentTab = function doResetCurrentTab() {
+    if (typeof window.ffCurrentUserHasTasksResetPermission === 'function' && !window.ffCurrentUserHasTasksResetPermission()) {
+        return;
+    }
     console.log("RESET: Performing STATE-ONLY reset for current tab");
 
     // 1) Resolve tab from window.currentTasksTab
@@ -3640,6 +3725,9 @@ window.doResetCurrentTab = function doResetCurrentTab() {
 
 // Reset tasks for current active tab - opens modals
 function resetTasksForCurrentTab() {
+    if (typeof window.ffCurrentUserHasTasksResetPermission === 'function' && !window.ffCurrentUserHasTasksResetPermission()) {
+        return;
+    }
     console.log("RESET: Opening confirmation modal");
 
     // Get current tab

@@ -23,6 +23,16 @@ service cloud.firestore {
         && userDocData().salonId == salonId;
     }
 
+    /** salons/{salonId}/settings/main ownerUid: cannot change once set (except first claim to own uid). */
+    function settingsMainOwnerUidUpdateAllowed() {
+      return !request.resource.data.diff(resource.data).changedKeys().hasAny(['ownerUid'])
+        || (
+          !resource.data.keys().hasAny(['ownerUid'])
+          && request.resource.data.ownerUid is string
+          && request.resource.data.ownerUid == request.auth.uid
+        );
+    }
+
     // Normalize role comparisons (handles Admin/OWNER/etc)
     function userRole() {
       return (userDocData().role is string) ? userDocData().role.lower() : '';
@@ -41,6 +51,12 @@ service cloud.firestore {
     function isAdminOrOwner(salonId) {
       return belongsToSalon(salonId)
         && userRole() in ['admin', 'owner'];
+    }
+
+    /** Ticket summary rows on close: same users doc roles the Tickets UI treats as staff/tech (not only manager/admin/owner). */
+    function canCreateTicketSummary(salonId) {
+      return belongsToSalon(salonId)
+        && userRole() in ['manager', 'admin', 'owner', 'technician', 'tech', 'staff'];
     }
 
     function memberExists(salonId) {
@@ -116,6 +132,14 @@ service cloud.firestore {
         ? mySalonStaffDocData(salonId).permissions.media_upload == true
         : true
       );
+    }
+
+    /** Inbox: technicians need inbox_send === true when the flag exists on staff doc; missing flag = legacy allow. */
+    function permInboxSendAllowed(salonId) {
+      return mySalonStaffDocData(salonId) == null
+        || !(mySalonStaffDocData(salonId).permissions is map)
+        || !mySalonStaffDocData(salonId).permissions.keys().hasAny(['inbox_send'])
+        || mySalonStaffDocData(salonId).permissions.inbox_send == true;
     }
 
     // Legacy Media (contentWorks): PIN technicians may have staff doc but not users.salonId / members
@@ -278,9 +302,11 @@ service cloud.firestore {
         && request.resource.data.staffReply == null
         && request.resource.data.visibility == 'managers_only'
         && request.resource.data.unreadForManagers == true
-        // Permission check: technician can create for self or directed to a manager; manager can create for anyone
+        // Permission check: technician can create when inbox_send allows; manager can create for anyone
         && (
-          (isTechnician(salonId) && request.resource.data.createdByUid == request.auth.uid)
+          (isTechnician(salonId)
+            && request.resource.data.createdByUid == request.auth.uid
+            && permInboxSendAllowed(salonId))
           || isManager(salonId)
         );
 
@@ -589,6 +615,15 @@ service cloud.firestore {
         && isAdminOrOwner(salonId);
     }
 
+    // Historical rows when a ticket is closed (Summary layer; not deleted when live ticket is removed)
+    match /salons/{salonId}/ticketSummaries/{summaryId} {
+      allow read: if belongsToSalon(salonId);
+      allow create: if canCreateTicketSummary(salonId);
+      // Admin/owner may set source-deleted markers when permanently deleting the live ticket (same role as ticket delete)
+      allow update: if belongsToSalon(salonId) && isAdminOrOwner(salonId);
+      allow delete: if false;
+    }
+
     // ===== SERVICE CATALOG =====
     // All salon members can read; Manager/Admin/Owner can CRUD
     match /salons/{salonId}/services/{serviceId} {
@@ -751,7 +786,19 @@ service cloud.firestore {
     // ===== UI SETTINGS (historyRange, etc.) =====
     match /salons/{salonId}/settings/{docId} {
       allow read: if belongsToSalon(salonId);
-      allow write: if belongsToSalon(salonId);
+      allow create: if belongsToSalon(salonId) && (
+        docId != 'main'
+        || !('ownerUid' in request.resource.data)
+        || (
+          request.resource.data.ownerUid is string
+          && request.resource.data.ownerUid == request.auth.uid
+        )
+      );
+      allow update: if belongsToSalon(salonId) && (
+        docId != 'main'
+        || settingsMainOwnerUidUpdateAllowed()
+      );
+      allow delete: if false;
     }
 
     // ===== QUEUE / TASKS STATE =====

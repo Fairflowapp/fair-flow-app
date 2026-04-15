@@ -3,7 +3,8 @@
  *
  * Firestore docs:
  *   salons/{salonId}/settings/ui   → { historyRange, updatedAt }
- *   salons/{salonId}/settings/main → { adminPin (existing), brandName, brandPalette, managers,
+ *   salons/{salonId}/settings/main → { ownerUid (Firebase Auth uid of salon owner; immutable after set),
+ *                                      adminPin (existing), brandName, brandPalette, managers,
  *                                      staffCallTemplates,
  *                                      taskSettings: { taskReminders, taskNotes, showIncompleteTasksBadge },
  *                                      updatedAt }
@@ -11,7 +12,7 @@
 
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, getDocs, addDoc, updateDoc, deleteDoc, deleteField } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260411_chat_reminder_attrfix";
+import { db, auth } from "./app.js?v=20260412_salon_owner_uid";
 import {
   cloneDefaultBusinessHours,
   cloneDefaultDayShiftSegments,
@@ -116,6 +117,10 @@ function subscribeMain(salonId) {
   if (_unsubMain) { _unsubMain(); _unsubMain = null; }
   _unsubMain = onSnapshot(settingsMainRef(salonId), (snap) => {
     const data = snap.exists() ? snap.data() : {};
+    if (typeof window !== "undefined") {
+      const ou = data.ownerUid != null ? String(data.ownerUid).trim() : "";
+      window.__ff_salon_owner_uid = ou;
+    }
     // Apply to global settings object
     if (typeof window.settings !== 'object' || !window.settings) return;
     let changed = false;
