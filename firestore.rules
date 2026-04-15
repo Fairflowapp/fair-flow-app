@@ -93,7 +93,8 @@ service cloud.firestore {
         'pin',
         'birthday',
         'birthdayReminderSentForYear',
-        'updatedAt'
+        'updatedAt',
+        'lastActiveAt'
       ]);
     }
 
@@ -101,6 +102,17 @@ service cloud.firestore {
       return matchesOwnStaffId(salonId, staffId)
         && (belongsToSalon(salonId) || isStaffInSalon(salonId))
         && staffSelfProfileChangedKeysAllowed();
+    }
+
+    /**
+     * Invite finalize sets staff.uid = auth uid. If users.staffId is missing or wrong,
+     * matchesOwnStaffId would deny — still allow lastActiveAt only on the row that lists this uid.
+     */
+    function staffLastActiveByStaffDocUid(salonId, staffId) {
+      return belongsToSalon(salonId)
+        && exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId))
+        && get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.uid == request.auth.uid
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastActiveAt']);
     }
 
     // Staff /documents delete: must match archived (UI writes lowercase; tolerate casing)
@@ -431,7 +443,8 @@ service cloud.firestore {
       allow create, delete: if belongsToSalon(salonId)
         && isManager(salonId);
       allow update: if (belongsToSalon(salonId) && isManager(salonId))
-        || staffSelfProfileUpdateAllowed(salonId, staffId);
+        || staffSelfProfileUpdateAllowed(salonId, staffId)
+        || staffLastActiveByStaffDocUid(salonId, staffId);
 
       // Staff documents (Inbox approve → staff doc sync; Staff Member > Documents tab)
       match /documents/{documentId} {

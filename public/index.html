@@ -24847,6 +24847,25 @@ function initializeAppsPanel() {
           return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         }
       }
+      // After JSON.parse(localStorage) Firestore Timestamps become plain { seconds, nanoseconds }
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        var sec =
+          typeof val.seconds === 'number'
+            ? val.seconds
+            : typeof val._seconds === 'number'
+              ? val._seconds
+              : typeof val.seconds === 'string'
+                ? Number(val.seconds)
+                : typeof val._seconds === 'string'
+                  ? Number(val._seconds)
+                  : NaN;
+        if (Number.isFinite(sec)) {
+          const d = new Date(sec * 1000);
+          if (!isNaN(d.getTime())) {
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          }
+        }
+      }
       if (val instanceof Date && !isNaN(val.getTime())) {
         return val.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
       }
@@ -24868,18 +24887,23 @@ function initializeAppsPanel() {
     if (!staff || typeof staff !== 'object') {
       return { type: 'not_invited', text: 'Not invited yet' };
     }
+    // Logged in at least once (updated on each successful login)
     var la = staff.lastActiveAt;
     if (la != null && la !== '') {
       var fdActive = formatStaffStatusDate(la);
-      return { type: 'active', text: fdActive ? 'Last active ' + fdActive : 'Active' };
+      return {
+        type: 'active',
+        text: fdActive ? 'Last active ' + fdActive : 'Last active',
+      };
     }
+    // Invited but no login timestamp yet — show when the invite was sent
     var invitedWhen = staff.invitedOn || staff.invitedAt;
     if (invitedWhen || staff.invited === true) {
-      var fdPending = formatStaffStatusDate(invitedWhen);
-      if (fdPending) {
-        return { type: 'pending', text: 'Invite pending • Sent ' + fdPending };
+      var fdInv = formatStaffStatusDate(invitedWhen);
+      if (fdInv) {
+        return { type: 'pending', text: 'Invited • Sent ' + fdInv };
       }
-      return { type: 'pending', text: 'Invite pending' };
+      return { type: 'pending', text: 'Invited' };
     }
     return { type: 'not_invited', text: 'Not invited yet' };
   }

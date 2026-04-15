@@ -1185,6 +1185,173 @@ async function handleGoogleLogin() {
   }
 }
 
+/**
+ * Resolve which salons/{salonId}/staff/{staffId} belongs to this login.
+ * users.staffId is sometimes missing; or points at a row whose uid/email does not match (stale id).
+ */
+async function ffResolveStaffDocumentIdForLogin(dbConn, salonId, uid, email, staffIdFromUsers) {
+  const sid = salonId && String(salonId).trim();
+  const u = uid && String(uid).trim();
+  if (!sid || !u) {
+    return { staffId: null, staffRef: null, resolution: "missing_salon_or_uid" };
+  }
+  const emailLower = (email || "").trim().toLowerCase();
+
+  function rowLinkedUid(row) {
+    if (!row || typeof row !== "object") return "";
+    return String(row.uid || row.firebaseUid || row.firebaseAuthUid || row.authUid || "").trim();
+  }
+
+  function rowMatchesAuth(row) {
+    const linked = rowLinkedUid(row);
+    if (!linked) return true;
+    return linked === u;
+  }
+
+  const guess = staffIdFromUsers != null && String(staffIdFromUsers).trim() !== ""
+    ? String(staffIdFromUsers).trim()
+    : "";
+
+  if (guess) {
+    try {
+      const sRef = doc(dbConn, "salons", sid, "staff", guess);
+      const sSnap = await getDoc(sRef);
+      if (sSnap.exists()) {
+        const sd = sSnap.data() || {};
+        if (rowMatchesAuth(sd)) {
+          return { staffId: guess, staffRef: sRef, resolution: "users.staffId" };
+        }
+        console.warn("[Auth] ffResolveStaffDocumentIdForLogin: users.staffId row does not match auth uid", {
+          usersStaffId: guess,
+          staffDocUid: rowLinkedUid(sd) || "(empty)",
+          authUid: u,
+        });
+      } else {
+        console.warn("[Auth] ffResolveStaffDocumentIdForLogin: users.staffId doc missing", { usersStaffId: guess });
+      }
+    } catch (e) {
+      console.warn("[Auth] ffResolveStaffDocumentIdForLogin: users.staffId read failed", e);
+    }
+  }
+
+  try {
+    const mSnap = await getDoc(doc(dbConn, "salons", sid, "members", u));
+    if (mSnap.exists()) {
+      const midRaw = (mSnap.data() || {}).staffId;
+      const midStr = midRaw != null && String(midRaw).trim() !== "" ? String(midRaw).trim() : "";
+      if (midStr) {
+        const sRef = doc(dbConn, "salons", sid, "staff", midStr);
+        const sSnap = await getDoc(sRef);
+        if (sSnap.exists()) {
+          const sd = sSnap.data() || {};
+          if (rowMatchesAuth(sd)) {
+            return { staffId: midStr, staffRef: sRef, resolution: "members.staffId" };
+          }
+          console.warn("[Auth] ffResolveStaffDocumentIdForLogin: members.staffId row uid mismatch", {
+            membersStaffId: midStr,
+            staffDocUid: rowLinkedUid(sd) || "(empty)",
+            authUid: u,
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[Auth] ffResolveStaffDocumentIdForLogin: members read failed", e);
+  }
+
+  try {
+    const colSnap = await getDocs(collection(dbConn, "salons", sid, "staff"));
+    for (const d of colSnap.docs) {
+      const row = d.data() || {};
+      const fid = row.firebaseUid || row.firebaseAuthUid || row.authUid || row.uid || "";
+      if (fid && String(fid) === u) {
+        return {
+          staffId: d.id,
+          staffRef: doc(dbConn, "salons", sid, "staff", d.id),
+          resolution: "scan.staffDocUid",
+        };
+      }
+    }
+    if (emailLower) {
+      for (const d of colSnap.docs) {
+        const row = d.data() || {};
+        const em = String(row.email || "").trim().toLowerCase();
+        if (em && em === emailLower) {
+          return {
+            staffId: d.id,
+            staffRef: doc(dbConn, "salons", sid, "staff", d.id),
+            resolution: "scan.staffDocEmail",
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[Auth] ffResolveStaffDocumentIdForLogin: staff collection scan failed", e);
+  }
+
+  return { staffId: null, staffRef: null, resolution: "unresolved" };
+}
+
+/**
+ * Writes salons/.../staff/... lastActiveAt. Retries use fresh users/{uid} read (heals post-invite race).
+ */
+async function ffPingStaffLastActiveAt(user, userDocDataOptional) {
+  if (!user || !user.uid) return;
+  try {
+    let data = userDocDataOptional;
+    if (!data) {
+      const snap = await getDoc(doc(db, "users", user.uid));
+      if (!snap.exists()) return;
+      data = snap.data();
+    }
+    const salonId = data.salonId || null;
+    if (!salonId) return;
+    const staffIdFromUser =
+      data.staffId != null && String(data.staffId).trim() !== "" ? String(data.staffId).trim() : null;
+    const emailForLogs = (user.email || data.email || "").trim() || null;
+    const resolved = await ffResolveStaffDocumentIdForLogin(
+      db,
+      salonId,
+      user.uid,
+      emailForLogs || "",
+      staffIdFromUser
+    );
+    const tag = userDocDataOptional ? "lastActiveAt" : "lastActiveAt (retry)";
+    console.log(`[Auth] ${tag}: resolve`, {
+      authUid: user.uid,
+      email: emailForLogs,
+      usersDocStaffId: staffIdFromUser,
+      resolvedStaffId: resolved.staffId,
+      resolution: resolved.resolution,
+      staffRefPath: resolved.staffRef ? resolved.staffRef.path : null,
+    });
+    if (resolved.staffId && resolved.staffRef && resolved.resolution !== "unresolved") {
+      if (resolved.staffId !== staffIdFromUser && typeof window !== "undefined") {
+        window.__ff_authedStaffId = resolved.staffId;
+        try {
+          localStorage.setItem("ff_authedStaffId_v1", resolved.staffId);
+        } catch (e) {}
+      }
+      await updateDoc(resolved.staffRef, { lastActiveAt: serverTimestamp() });
+      console.log(`[Auth] ${tag}: updateDoc OK`, resolved.staffRef.path);
+    } else {
+      console.warn(`[Auth] ${tag}: no staff doc resolved — skip update`, {
+        authUid: user.uid,
+        email: emailForLogs,
+        salonId,
+        usersDocStaffId: staffIdFromUser,
+        resolution: resolved.resolution,
+      });
+    }
+  } catch (e) {
+    console.error("[Auth] ffPingStaffLastActiveAt FAILED", {
+      code: e?.code,
+      message: e?.message,
+      authUid: user?.uid,
+    });
+  }
+}
+
 // =====================
 // Load user role and show view
 // =====================
@@ -1247,23 +1414,36 @@ async function loadUserRoleAndShowView(user) {
     }
 
     // Set ff_authedStaffId from user doc so avatar upload works for managers/technicians (not just PIN flow)
-    const staffIdFromUser = data.staffId || null;
-    if (staffIdFromUser && typeof window !== 'undefined') {
+    const staffIdFromUser =
+      data.staffId != null && String(data.staffId).trim() !== "" ? String(data.staffId).trim() : null;
+    if (staffIdFromUser && typeof window !== "undefined") {
       window.__ff_authedStaffId = staffIdFromUser;
-      try { localStorage.setItem("ff_authedStaffId_v1", staffIdFromUser); } catch (e) {}
+      try {
+        localStorage.setItem("ff_authedStaffId_v1", staffIdFromUser);
+      } catch (e) {}
     }
 
-    // Staff status (UI): refresh lastActiveAt on every successful login when staff doc exists
-    if (currentSalonId && staffIdFromUser) {
-      try {
-        const staffRef = doc(db, "salons", currentSalonId, "staff", staffIdFromUser);
-        const staffSnap = await getDoc(staffRef);
-        if (staffSnap.exists()) {
-          await updateDoc(staffRef, { lastActiveAt: serverTimestamp() });
-        }
-      } catch (e) {
-        console.warn("[Auth] staff lastActiveAt skipped", e?.code || e?.message);
+    // Staff status (UI): lastActiveAt on correct staff doc (retry after ~2.5s heals post-invite / slow users doc)
+    if (currentSalonId && user && user.uid) {
+      await ffPingStaffLastActiveAt(user, data);
+      const roleLower = (role || "").toLowerCase();
+      if (roleLower !== "owner") {
+        const uidRetry = user.uid;
+        setTimeout(() => {
+          try {
+            const u = auth.currentUser;
+            if (u && u.uid === uidRetry) {
+              ffPingStaffLastActiveAt(u, null).catch(() => {});
+            }
+          } catch (_) {}
+        }, 2500);
       }
+    } else {
+      console.log("[Auth] lastActiveAt: skipped (missing salonId or uid)", {
+        authUid: user && user.uid,
+        currentSalonId,
+        usersDocStaffId: staffIdFromUser,
+      });
     }
 
     // If owner, load salon document and update admin PIN
