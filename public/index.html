@@ -133,6 +133,16 @@ body.ff-logged-out::before {
   background: #f3f4f6;
   pointer-events: none;
 }
+/* Until boot completes (ffMarkUiReady → .ff-queue-ui-visible), never paint queue chrome (Available / In service / join bar). */
+body:not(.ff-queue-ui-visible) #owner-view,
+body:not(.ff-queue-ui-visible) .wrap {
+  visibility: hidden !important;
+}
+body.ff-queue-ui-visible #owner-view,
+body.ff-queue-ui-visible .wrap {
+  visibility: visible !important;
+}
+
 body.ff-logged-out #login-section,
 body.ff-logged-out #signup-section,
 body.ff-logged-out #reset-password-section {
@@ -341,6 +351,31 @@ body.ff-staff-editing .header-inner {
 body.ff-staff-editing .toolbar button {
   pointer-events: auto; /* Keep toolbar buttons clickable */
 }
+
+/* Staff details header: invite actions (black text; Send invite keeps accent via modifier) */
+.ff-staff-status-invite-btn {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  color: #111;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 8px;
+  margin-left: 8px;
+}
+.ff-staff-status-invite-btn:hover {
+  background: #f3f4f6;
+  color: #111;
+}
+.ff-staff-status-invite-btn--send {
+  color: #4f46e5;
+}
+.ff-staff-status-invite-btn--send:hover {
+  background: #eef2ff;
+  color: #4338ca;
+}
+
 body.ff-avatar-dropdown-open #userAvatarDropdown * {
   pointer-events: auto !important;
 }
@@ -1992,6 +2027,98 @@ dialog footer button, .code-dialog footer button {
   cursor:pointer !important;
   flex-shrink:0 !important;
 }
+
+/* My Profile — same field metrics as Staff Members modal → Details (staffEditName / Phone / Birthday): 30px row, 12px text, 4px radius */
+#myProfileScreen .ff-myp-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+#myProfileScreen .ff-myp-title {
+  margin: 0 0 4px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+#myProfileScreen .ff-myp-sub {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #6b7280;
+}
+#myProfileScreen .ff-myp-field {
+  margin-bottom: 4px;
+}
+#myProfileScreen .ff-myp-label {
+  display: block;
+  margin-bottom: 1px;
+  font-size: 9px;
+  font-weight: 400;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+#myProfileScreen .ff-myp-input {
+  width: 100%;
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 400;
+  font-family: inherit;
+  color: #111827;
+  line-height: 1.25;
+  outline: none;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+#myProfileScreen .ff-myp-input::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+#myProfileScreen .ff-myp-input::-webkit-calendar-picker-indicator {
+  margin: 0 0 0 4px;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.75;
+}
+#myProfileScreen .ff-myp-input:focus {
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.2);
+}
+#myProfileScreen input[type="date"].ff-myp-input {
+  line-height: 28px;
+}
+#myProfileScreen .ff-myp-input--narrow {
+  max-width: 220px;
+}
+#myProfileScreen .ff-myp-actions {
+  margin-top: 10px;
+}
+#myProfileScreen .ff-myp-btn {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  background: #7c3aed;
+  border: 1px solid #7c3aed;
+  color: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.2;
+}
+#myProfileScreen .ff-myp-btn:hover {
+  filter: brightness(1.03);
+}
+#myProfileScreen .ff-myp-stack {
+  margin-bottom: 14px;
+}
 </style>
 
   <!-- Firebase SDK (modular) -->
@@ -2056,7 +2183,7 @@ dialog footer button, .code-dialog footer button {
   </script>
 </head>
 
-<body>
+<body class="ff-app-loading">
 
   <!-- LOGIN SECTION -->
   <section id="login-section" style="position:relative;z-index:2;max-width:400px;margin:40px auto;padding:32px;background:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.08);pointer-events:auto;">
@@ -2279,7 +2406,7 @@ dialog footer button, .code-dialog footer button {
           <div id="userAvatarDropdown" class="user-avatar-dropdown" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:180px;z-index:100005;padding:4px 0;pointer-events:auto;">
             <button id="userDropdownProfileBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:flex;align-items:center;gap:8px;">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              User Profile
+              My Profile
             </button>
             <button id="settingsBtn" class="user-dropdown-item" data-action="settings" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:flex;align-items:center;gap:8px;position:relative;z-index:100002;pointer-events:auto !important;">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l-.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -2493,6 +2620,105 @@ dialog footer button, .code-dialog footer button {
                   <div>Staff Members</div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- My Profile (self-service: staff doc subset only; layout aligned with Settings / User Profile) -->
+  <div id="myProfileScreen" style="display:none;max-width:800px;margin:12px auto 40px;padding:0 24px;">
+    <p id="myProfileBanner" style="display:none;margin:0 0 12px 0;padding:10px 12px;border-radius:8px;font-size:13px;"></p>
+
+    <div style="display:flex;align-items:center;gap:20px;margin-bottom:20px;flex-wrap:wrap;">
+      <span style="font-size:13px;font-weight:600;color:#6b7280;letter-spacing:0.02em;flex-shrink:0;padding-top:4px;">My Profile</span>
+      <div id="myProfileAvatarWrap" style="position:relative;flex-shrink:0;width:80px;height:80px;">
+        <div style="width:80px;height:80px;border-radius:50%;border:2px solid var(--border);background:#f3f4f6;overflow:hidden;position:relative;box-sizing:border-box;">
+          <img id="myProfileAvatarImg" alt="" style="width:100%;height:100%;object-fit:cover;display:none;">
+          <div id="myProfileAvatarPlaceholder" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;background:#f3f4f6;">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+          </div>
+        </div>
+        <button type="button" id="myProfileAvatarEditBtn" style="position:absolute;bottom:0;right:0;width:28px;height:28px;border-radius:50%;background:#fff;border:2px solid var(--border);box-shadow:0 2px 4px rgba(0,0,0,0.1);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;outline:none;z-index:2;" title="Upload avatar">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-8"></path>
+            <polyline points="18 2 22 6 12 16 8 16 8 12 18 2"></polyline>
+          </svg>
+        </button>
+        <input type="file" id="myProfileAvatarInput" accept="image/*" style="display:none;">
+      </div>
+      <div style="flex:1;min-width:0;">
+        <h2 id="myProfileHeaderName" style="margin:0 0 4px 0;font-size:16px;font-weight:600;color:#111827;">—</h2>
+        <p id="myProfileHeaderEmail" style="margin:0;font-size:12px;color:#6b7280;">—</p>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:20px;align-items:flex-start;min-width:0;">
+      <div style="flex-shrink:0;width:160px;">
+        <nav style="display:flex;flex-direction:column;gap:4px;">
+          <button type="button" class="my-profile-tab-btn user-profile-menu-item user-profile-menu-item--active" data-my-profile-tab="details" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Details</button>
+          <button type="button" class="my-profile-tab-btn user-profile-menu-item" data-my-profile-tab="password" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Password</button>
+        </nav>
+      </div>
+      <div style="flex:1;min-width:0;">
+        <div id="myProfilePanelDetails" class="my-profile-panel">
+          <div class="ff-myp-card">
+            <h3 class="ff-myp-title">Details</h3>
+            <p class="ff-myp-sub">Same fields as Staff Member → Details. Photo and email are above.</p>
+            <div class="ff-myp-field">
+              <label class="ff-myp-label" for="myProfileDisplayName">Display name</label>
+              <input type="text" id="myProfileDisplayName" class="ff-myp-input" autocomplete="name">
+            </div>
+            <div class="ff-myp-field">
+              <label class="ff-myp-label" for="myProfilePhone">Phone</label>
+              <input type="tel" id="myProfilePhone" class="ff-myp-input" autocomplete="tel">
+            </div>
+            <div class="ff-myp-field">
+              <label class="ff-myp-label" for="myProfileBirthday">Birthday</label>
+              <input type="date" id="myProfileBirthday" class="ff-myp-input">
+            </div>
+            <div class="ff-myp-actions">
+              <button type="button" id="myProfileSaveDetailsBtn" class="ff-myp-btn">Save</button>
+            </div>
+          </div>
+        </div>
+        <div id="myProfilePanelPassword" style="display:none;">
+          <div class="ff-myp-card ff-myp-stack">
+            <h3 class="ff-myp-title">Account password</h3>
+            <p class="ff-myp-sub">Uses your Firebase sign-in email.</p>
+            <div class="ff-myp-field">
+              <label class="ff-myp-label" for="myProfileCurPwd">Current password</label>
+              <input type="password" id="myProfileCurPwd" class="ff-myp-input" autocomplete="current-password">
+            </div>
+            <div class="ff-myp-field">
+              <label class="ff-myp-label" for="myProfileNewPwd">New password</label>
+              <input type="password" id="myProfileNewPwd" class="ff-myp-input" autocomplete="new-password">
+            </div>
+            <div class="ff-myp-field">
+              <label class="ff-myp-label" for="myProfileNewPwd2">Confirm new password</label>
+              <input type="password" id="myProfileNewPwd2" class="ff-myp-input" autocomplete="new-password">
+            </div>
+            <div class="ff-myp-actions">
+              <button type="button" id="myProfileChangePasswordSubmitBtn" class="ff-myp-btn">Update password</button>
+            </div>
+          </div>
+          <div class="ff-myp-card">
+            <h3 class="ff-myp-title">Salon PIN</h3>
+            <p class="ff-myp-sub">4–6 digits for in-app PIN flows.</p>
+            <div class="ff-myp-field">
+              <label class="ff-myp-label" for="myProfileNewPin">New PIN</label>
+              <input type="password" id="myProfileNewPin" class="ff-myp-input ff-myp-input--narrow" inputmode="numeric" maxlength="6" autocomplete="off">
+            </div>
+            <div class="ff-myp-field">
+              <label class="ff-myp-label" for="myProfileNewPin2">Confirm PIN</label>
+              <input type="password" id="myProfileNewPin2" class="ff-myp-input ff-myp-input--narrow" inputmode="numeric" maxlength="6" autocomplete="off">
+            </div>
+            <div class="ff-myp-actions">
+              <button type="button" id="myProfileChangePinBtn" class="ff-myp-btn">Update PIN</button>
             </div>
           </div>
         </div>
@@ -2858,7 +3084,7 @@ dialog footer button, .code-dialog footer button {
   </div>
 
   <!-- Owner View (contains existing Fair Flow app) -->
-  <div id="owner-view" style="display:none;">
+  <div id="owner-view" style="display:none;visibility:hidden;">
 
     <!-- Join row (Queue-specific controls - only visible on QUEUE page) -->
 
@@ -2902,7 +3128,7 @@ dialog footer button, .code-dialog footer button {
 
 
 
-  <div class="wrap">
+  <div class="wrap" style="visibility:hidden;">
 
     <!-- Queue Filter Bar — lives inside .wrap so it hides/shows with the queue automatically -->
     <div id="ffQueueFilterBar" style="padding:0 0 10px;display:none;align-items:center;gap:8px;flex-wrap:wrap;"></div>
@@ -3261,6 +3487,8 @@ dialog footer button, .code-dialog footer button {
 
 
 
+<script src="/ff-toast.js?v=20260415"></script>
+
 <script>
 
 console.log('[BUILD MARKER] app.js logic loaded at', new Date().toISOString());
@@ -3314,12 +3542,15 @@ async function initFirebaseAuth() {
     
     // Set up auth state listener
     onAuthStateChanged(ffAuth, (user) => {
+      document.body.classList.remove('ff-app-loading');
       ffCurrentUser = user;
       window.ffCurrentUser = user;
       
       const mainContent = document.getElementById('main-app-content');
       const authBanner = document.getElementById('authBanner');
       const loginSection = document.getElementById('login-section');
+      const signupSection = document.getElementById('signup-section');
+      const resetPasswordSection = document.getElementById('reset-password-section');
       const archivedBlockScreen = document.getElementById('archivedUserBlockScreen');
       
       if (user) {
@@ -3329,8 +3560,11 @@ async function initFirebaseAuth() {
         // Check access guard: block archived users
         if (typeof checkArchivedUserAccessGuard === 'function') {
           const isBlocked = checkArchivedUserAccessGuard(user.email);
-          if (isBlocked) {
+            if (isBlocked) {
             console.log('[AUTH] Access guard triggered: User is archived:', user.email);
+            try {
+              document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
+            } catch (eArch) {}
             // Show blocking screen and hide app
             if (archivedBlockScreen) archivedBlockScreen.style.display = 'flex';
             if (mainContent) mainContent.style.display = 'none';
@@ -3352,11 +3586,13 @@ async function initFirebaseAuth() {
           }
         }
         
-        // User is active - allow access (never use display '' — it clears inline and can leave the shell visible incorrectly)
+        // User is active — hide auth panels before lifting signed-out shell so queue never paints behind login card margins.
+        if (loginSection) loginSection.style.display = 'none';
+        if (signupSection) signupSection.style.display = 'none';
+        if (resetPasswordSection) resetPasswordSection.style.display = 'none';
         document.body.classList.remove('ff-logged-out');
         if (mainContent) mainContent.style.display = 'block';
         if (authBanner) authBanner.style.display = 'none';
-        if (loginSection) loginSection.style.display = 'none';
         if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
         if (typeof ensureTrainingItemsSubscription === 'function') {
           setTimeout(() => {
@@ -3378,6 +3614,9 @@ async function initFirebaseAuth() {
         if (typeof goToQueue === 'function') {
           goToQueue();
         }
+        if (typeof ffMaybeQueueUiReadyAfterAuth === 'function') {
+          ffMaybeQueueUiReadyAfterAuth();
+        }
         // Initialize Manage Queue button handlers after Queue is shown
         if (typeof initManageQueueButtons === 'function') {
           // Use setTimeout to ensure DOM is ready after goToQueue()
@@ -3390,6 +3629,10 @@ async function initFirebaseAuth() {
       } else {
         // Signed out – hide app shell completely (sync with app.js showLoginScreen + overlays)
         console.log('[AUTH] signed out');
+        try {
+          window.__ffQueueGateGen = (Number(window.__ffQueueGateGen) || 0) + 1;
+        } catch (eQ) {}
+        document.body.classList.remove('ff-auth-resolving', 'ff-ui-ready', 'ff-queue-ui-visible');
         document.body.classList.add('ff-logged-out');
         if (mainContent) mainContent.style.display = 'none';
         if (authBanner) authBanner.style.display = 'none';
@@ -3404,6 +3647,7 @@ async function initFirebaseAuth() {
   } catch (error) {
     console.error('[AUTH] initialization error:', error);
     // Do not expose queue / main app when auth init fails — keep signed-out shell only
+    document.body.classList.remove('ff-app-loading', 'ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
     document.body.classList.add('ff-logged-out');
     const mainContent = document.getElementById('main-app-content');
     if (mainContent) mainContent.style.display = 'none';
@@ -5852,6 +6096,7 @@ function ffIsFullscreenModuleCoveringQueue() {
     'trainingScreen',
     'scheduleScreen',
     'userProfileScreen',
+    'myProfileScreen',
     'manageQueueScreen'
   ];
   for (var i = 0; i < ids.length; i++) {
@@ -5919,6 +6164,53 @@ function ffApplyQueueViewGate() {
   }
   if (typeof ffUpdateMainNavTabVisibility === 'function') ffUpdateMainNavTabVisibility();
 }
+
+/** Queue first-paint guard: remove after staff-backed permission state is usable (or timeout). */
+function ffMarkUiReady() {
+  try {
+    document.body.classList.remove('ff-auth-resolving');
+    document.body.classList.add('ff-ui-ready');
+    document.body.classList.add('ff-queue-ui-visible');
+  } catch (e) {}
+}
+
+/**
+ * While staff row is missing locally, queue_view / locked UI can flash wrong until ff-staff-cloud-updated.
+ * Owner or cached staff row → show immediately; else hide queue chrome until first staff sync or fallback timeout.
+ */
+function ffMaybeQueueUiReadyAfterAuth() {
+  try {
+    window.__ffQueueGateGen = (Number(window.__ffQueueGateGen) || 0) + 1;
+    var gen = window.__ffQueueGateGen;
+    if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) {
+      ffMarkUiReady();
+      return;
+    }
+    if (typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' && ffResolveCurrentStaffRowFromFfStaffV1()) {
+      ffMarkUiReady();
+      return;
+    }
+    document.body.classList.add('ff-auth-resolving');
+    document.body.classList.remove('ff-ui-ready');
+    var t = setTimeout(function () {
+      if (gen !== window.__ffQueueGateGen) return;
+      ffMarkUiReady();
+    }, 4000);
+    document.addEventListener(
+      'ff-staff-cloud-updated',
+      function ffQueueGateOnStaffOnce() {
+        if (gen !== window.__ffQueueGateGen) return;
+        clearTimeout(t);
+        ffMarkUiReady();
+      },
+      { once: true }
+    );
+  } catch (e) {
+    ffMarkUiReady();
+  }
+}
+window.ffMarkUiReady = ffMarkUiReady;
+window.ffMaybeQueueUiReadyAfterAuth = ffMaybeQueueUiReadyAfterAuth;
 
 function loadTechniciansFromSettings() {
   console.log('[loadTechniciansFromSettings] Loading staff with queue_join from ffGetStaffList');
@@ -8309,6 +8601,11 @@ function goToQueue() {
   const userProfileScreen = document.getElementById('userProfileScreen');
   if (userProfileScreen) {
     userProfileScreen.style.display = 'none';
+  }
+
+  const myProfileScreenQueue = document.getElementById('myProfileScreen');
+  if (myProfileScreenQueue) {
+    myProfileScreenQueue.style.display = 'none';
   }
   
   // Hide Media screen if visible
@@ -11804,10 +12101,13 @@ function initManageQueueButtons() {
 // Track previous view for User Profile back navigation
 let previousView = 'queue'; // Default to queue
 
-// Helper function to check if User Profile screen is currently active
+// Helper function to check if User Profile or My Profile screen is currently active
 function isUserProfileActive() {
   const userProfileScreen = document.getElementById('userProfileScreen');
-  return userProfileScreen && userProfileScreen.style.display !== 'none';
+  const myProfileScreen = document.getElementById('myProfileScreen');
+  const up = userProfileScreen && userProfileScreen.style.display !== 'none';
+  const mp = myProfileScreen && myProfileScreen.style.display !== 'none';
+  return !!(up || mp);
 }
 
 // Helper function to hide Queue UI elements when User Profile is active
@@ -11826,7 +12126,39 @@ function ensureQueueUIHiddenForUserProfile() {
   }
 }
 
+/**
+ * Technicians and anyone with settings_view === false should not see the admin User Profile
+ * (Staff Setup, Schedule, Media Categories, etc.). Send them to My Profile instead.
+ * Managers/owners still use goToUserProfile (e.g. Settings → schedule) when this returns false.
+ */
+function ffUserShouldRouteToMyProfileOnly() {
+  try {
+    if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) {
+      return false;
+    }
+    const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+    if (staff) {
+      const p = (staff.permissions) || {};
+      if (p.settings_view === false) return true;
+      const r = String(staff.role || '').toLowerCase();
+      if (r === 'technician' || r === 'tech') return true;
+    }
+    if (typeof getCurrentQueueActorRole === 'function') {
+      const sr = String(getCurrentQueueActorRole() || '').toLowerCase();
+      if (sr === 'technician' || sr === 'tech') return true;
+    }
+  } catch (e) {}
+  return false;
+}
+window.ffUserShouldRouteToMyProfileOnly = ffUserShouldRouteToMyProfileOnly;
+
 function goToUserProfile(section) {
+  if (typeof ffUserShouldRouteToMyProfileOnly === 'function' && ffUserShouldRouteToMyProfileOnly()) {
+    if (typeof goToMyProfile === 'function') {
+      goToMyProfile();
+      return;
+    }
+  }
   // Minimal instrumentation: START log with current view flags and screen existence
   const tasksScreen = document.getElementById('tasksScreen');
   const ownerView = document.getElementById('owner-view');
@@ -11852,6 +12184,11 @@ function goToUserProfile(section) {
   if (!userProfileScreen) {
     console.error('goToUserProfile RETURN: Missing #userProfileScreen in DOM');
     return;
+  }
+
+  const myProfileScreenHide = document.getElementById('myProfileScreen');
+  if (myProfileScreenHide) {
+    myProfileScreenHide.style.display = 'none';
   }
 
   document.body.classList.remove('ff-avatar-dropdown-open');
@@ -12043,11 +12380,468 @@ function goToUserProfile(section) {
 // Expose goToUserProfile on window for accessibility
 window.goToUserProfile = goToUserProfile;
 
+/**
+ * My Profile — self-service staff fields only (salons/{salonId}/staff/{staffId}).
+ * Does not open admin User Profile / Schedule defaults.
+ */
+function goToMyProfile() {
+  const myProfileScreen = document.getElementById('myProfileScreen');
+  if (!myProfileScreen) {
+    console.error('goToMyProfile: missing #myProfileScreen');
+    return;
+  }
+
+  const userProfileScreen = document.getElementById('userProfileScreen');
+  if (userProfileScreen) {
+    userProfileScreen.style.display = 'none';
+    userProfileScreen.classList.remove('ff-overlay-from-schedule');
+  }
+
+  document.body.classList.remove('ff-avatar-dropdown-open');
+  document.body.classList.remove('ff-staff-editing');
+
+  const staffMembersModal = document.getElementById('staffMembersModal');
+  if (staffMembersModal && staffMembersModal.style.display !== 'none' && typeof closeStaffMembersModal === 'function') {
+    closeStaffMembersModal();
+  }
+
+  const tasksScreen = document.getElementById('tasksScreen');
+  const ownerView = document.getElementById('owner-view');
+  const chatScreen = document.getElementById('chatScreen');
+  const mediaScreenEl = document.getElementById('mediaScreen');
+  const inboxScreenEl = document.getElementById('inboxScreen');
+  const ticketsScreenEl = document.getElementById('ticketsScreen');
+  const scheduleScreenEl = document.getElementById('scheduleScreen');
+  if (tasksScreen && tasksScreen.style.display !== 'none') {
+    previousView = 'tasks';
+  } else if (chatScreen && chatScreen.style.display !== 'none') {
+    previousView = 'chat';
+  } else if (mediaScreenEl && mediaScreenEl.style.display !== 'none') {
+    previousView = 'media';
+  } else if (inboxScreenEl && inboxScreenEl.style.display !== 'none') {
+    previousView = 'inbox';
+  } else if (ticketsScreenEl && ticketsScreenEl.style.display !== 'none') {
+    previousView = 'tickets';
+  } else if (scheduleScreenEl && scheduleScreenEl.style.display !== 'none') {
+    previousView = 'schedule';
+  } else if (ownerView && ownerView.style.display !== 'none') {
+    previousView = 'queue';
+  } else {
+    previousView = 'queue';
+  }
+
+  if (tasksScreen) {
+    tasksScreen.style.display = 'none';
+    tasksScreen.style.pointerEvents = 'none';
+  }
+  if (ownerView) ownerView.style.display = 'none';
+  if (inboxScreenEl) inboxScreenEl.style.display = 'none';
+  if (mediaScreenEl) mediaScreenEl.style.display = 'none';
+  if (ticketsScreenEl) ticketsScreenEl.style.display = 'none';
+  if (scheduleScreenEl) scheduleScreenEl.style.display = 'none';
+  const trainingScreenGo = document.getElementById('trainingScreen');
+  if (trainingScreenGo) trainingScreenGo.style.display = 'none';
+  const manageQueueGo = document.getElementById('manageQueueScreen');
+  if (manageQueueGo) manageQueueGo.style.display = 'none';
+  if (chatScreen) {
+    chatScreen.style.display = 'none';
+    chatScreen.classList.remove('chat-mobile-open');
+  }
+  const joinBar = document.getElementById('joinBar');
+  if (joinBar) joinBar.style.display = 'none';
+  const joinError = document.getElementById('joinError');
+  if (joinError) joinError.style.display = 'none';
+  const queueControls = document.getElementById('queueControls');
+  if (queueControls) queueControls.style.display = 'none';
+  const wrap = document.querySelector('.wrap');
+  if (wrap) wrap.style.display = 'none';
+
+  myProfileScreen.style.display = 'block';
+  if (typeof window.ffInitMyProfileHandlers === 'function') {
+    window.ffInitMyProfileHandlers();
+  }
+  if (typeof window.ffInitMyProfileScreen === 'function') {
+    window.ffInitMyProfileScreen();
+  } else if (typeof window.ffSwitchMyProfileTab === 'function') {
+    window.ffSwitchMyProfileTab('details');
+  }
+  ensureQueueUIHiddenForUserProfile();
+  const userAvatarDropdown = document.getElementById('userAvatarDropdown');
+  if (userAvatarDropdown) {
+    userAvatarDropdown.style.display = 'none';
+    document.body.classList.remove('ff-avatar-dropdown-open');
+  }
+}
+
+window.goToMyProfile = goToMyProfile;
+
+/** My Profile toasts — delegates to global `window.ffToast` (see ff-toast.js). */
+window.ffShowAppToast = function ffShowAppToast(message, variant, durationMs) {
+  var v = variant === 'warn' ? 'warning' : (variant || 'info');
+  if (window.ffToast && typeof window.ffToast.show === 'function') {
+    window.ffToast.show(String(message), { variant: v, durationMs: durationMs });
+    return;
+  }
+  console.warn('[ffShowAppToast]', message, v);
+};
+
+/** Show staff photo or default silhouette (same pattern as Settings user profile). */
+window.ffMyProfileSetAvatarUi = function ffMyProfileSetAvatarUi(url) {
+  const img = document.getElementById('myProfileAvatarImg');
+  const ph = document.getElementById('myProfileAvatarPlaceholder');
+  const u = (url && String(url).trim()) ? String(url).trim() : '';
+  if (img) {
+    if (u) {
+      img.src = u;
+      img.style.display = 'block';
+    } else {
+      img.removeAttribute('src');
+      img.style.display = 'none';
+    }
+  }
+  if (ph) ph.style.display = u ? 'none' : 'flex';
+};
+
+/** Keep ff_staff_v1 row in sync so Staff Member / queue see the same photo & details. */
+window.ffMyProfilePatchLocalStaffCache = function ffMyProfilePatchLocalStaffCache(patch) {
+  try {
+    if (typeof window.ffGetStaffStore !== 'function') return;
+    const sid = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '';
+    if (!sid || !patch || typeof patch !== 'object') return;
+    const store = window.ffGetStaffStore();
+    const idx = (store.staff || []).findIndex(function (s) { return s && s.id === sid; });
+    if (idx < 0) return;
+    const row = Object.assign({}, store.staff[idx]);
+    if (patch.name != null) row.name = patch.name;
+    if (patch.phone !== undefined) row.phone = patch.phone ? String(patch.phone) : undefined;
+    if ('birthday' in patch) {
+      if (patch.birthday) row.birthday = String(patch.birthday);
+      else delete row.birthday;
+    }
+    if (patch.photoURL != null && patch.photoURL !== '') {
+      row.photoURL = patch.photoURL;
+      row.photoUrl = patch.photoUrl || patch.photoURL;
+    }
+    if (patch.avatarUpdatedAtMs != null) row.avatarUpdatedAtMs = patch.avatarUpdatedAtMs;
+    store.staff[idx] = row;
+    if (typeof ffSyncLegacyWorkersFromStaffStore === 'function') {
+      ffSyncLegacyWorkersFromStaffStore(store, true);
+    }
+    localStorage.setItem('ff_staff_v1', JSON.stringify(store));
+    // Do not call ffSaveStaffStore here — it runs ffStaffSyncToCloud (batch write of all staff),
+    // which often fails for technicians and shows a misleading red toast after a successful self-update.
+    document.dispatchEvent(new CustomEvent('ff-staff-cloud-updated'));
+  } catch (e) {
+    console.warn('[MyProfile] local staff cache', e);
+  }
+};
+
+window.ffSwitchMyProfileTab = function ffSwitchMyProfileTab(tab) {
+  document.querySelectorAll('.my-profile-tab-btn').forEach(function (btn) {
+    const t = btn.getAttribute('data-my-profile-tab');
+    const active = t === tab;
+    if (active) btn.classList.add('user-profile-menu-item--active');
+    else btn.classList.remove('user-profile-menu-item--active');
+  });
+  const d = document.getElementById('myProfilePanelDetails');
+  const p = document.getElementById('myProfilePanelPassword');
+  if (d) d.style.display = tab === 'details' ? 'block' : 'none';
+  if (p) p.style.display = tab === 'password' ? 'block' : 'none';
+};
+
+window.ffInitMyProfileScreen = async function ffInitMyProfileScreen() {
+  window.ffSwitchMyProfileTab('details');
+  const staffId = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '';
+  const salonId = window.currentSalonId || '';
+  const banner = document.getElementById('myProfileBanner');
+  if (!staffId || !salonId) {
+    if (banner) {
+      banner.style.display = 'block';
+      banner.style.background = '#fef2f2';
+      banner.style.color = '#b91c1c';
+      banner.textContent = 'Staff profile is not linked to this session.';
+    }
+    return;
+  }
+  if (banner) banner.style.display = 'none';
+  try {
+    if (typeof ffEnsureSalonAvatarDirectoryLoaded === 'function') {
+      await ffEnsureSalonAvatarDirectoryLoaded(false).catch(function () {});
+    }
+    const db = getTrainingDb();
+    const { doc, getDoc } = await getTrainingFirestoreApi();
+    const ref = doc(db, 'salons', salonId, 'staff', staffId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error('Staff document not found');
+    const data = snap.data() || {};
+    const displayName = data.displayName || data.name || '';
+    const elName = document.getElementById('myProfileDisplayName');
+    const elPhone = document.getElementById('myProfilePhone');
+    const elBirth = document.getElementById('myProfileBirthday');
+    if (elName) elName.value = displayName;
+    if (elPhone) elPhone.value = data.phone || '';
+    const bday = (data.birthday != null && String(data.birthday).trim()) ? String(data.birthday).trim() : '';
+    window.__ffMyProfileLoadedBirthday = bday;
+    if (elBirth) elBirth.value = bday;
+    const authEmail = (window.auth && window.auth.currentUser && window.auth.currentUser.email) || '';
+    const emailShown = authEmail || data.email || '';
+    const hn = document.getElementById('myProfileHeaderName');
+    const he = document.getElementById('myProfileHeaderEmail');
+    if (hn) hn.textContent = displayName || '—';
+    if (he) he.textContent = emailShown || '—';
+    const staffPhotoRaw = (data.photoUrl || data.photoURL || data.avatarUrl || '').trim();
+    const avAt = data.avatarUpdatedAtMs != null ? Number(data.avatarUpdatedAtMs) : null;
+    window.__ffMyProfilePhotoDirty = false;
+    window.__ffMyProfileInitialPhotoUrl = staffPhotoRaw;
+    window.__ffMyProfilePhotoUrl = staffPhotoRaw;
+    var avatarShown = '';
+    if (typeof ffResolveUserAvatar === 'function') {
+      var r = ffResolveUserAvatar({
+        staffId: staffId,
+        photoURL: staffPhotoRaw,
+        avatarUrl: staffPhotoRaw,
+        avatarUpdatedAtMs: avAt,
+        email: emailShown,
+        name: displayName
+      });
+      avatarShown = r && r.src ? r.src : '';
+    } else {
+      avatarShown = staffPhotoRaw;
+    }
+    if (typeof window.ffMyProfileSetAvatarUi === 'function') {
+      window.ffMyProfileSetAvatarUi(avatarShown);
+    }
+  } catch (e) {
+    console.error('[MyProfile]', e);
+    if (banner) {
+      banner.style.display = 'block';
+      banner.style.background = '#fef2f2';
+      banner.style.color = '#b91c1c';
+      banner.textContent = e.message || 'Could not load profile.';
+    }
+  }
+};
+
+window.ffInitMyProfileHandlers = function ffInitMyProfileHandlers() {
+  if (window.__ffMyProfileHandlersBound) return;
+  window.__ffMyProfileHandlersBound = true;
+  document.querySelectorAll('.my-profile-tab-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const t = btn.getAttribute('data-my-profile-tab');
+      if (t) window.ffSwitchMyProfileTab(t);
+    });
+  });
+  const dnInput = document.getElementById('myProfileDisplayName');
+  if (dnInput && !dnInput.__ffMyProfileHeaderSync) {
+    dnInput.__ffMyProfileHeaderSync = true;
+    dnInput.addEventListener('input', function () {
+      const hn = document.getElementById('myProfileHeaderName');
+      if (hn) hn.textContent = (dnInput.value && dnInput.value.trim()) ? dnInput.value.trim() : '—';
+    });
+  }
+  const saveDetails = document.getElementById('myProfileSaveDetailsBtn');
+  if (saveDetails) {
+    saveDetails.onclick = async function () {
+      const staffId = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '';
+      const salonId = window.currentSalonId || '';
+      if (!staffId || !salonId) return;
+      const displayName = (document.getElementById('myProfileDisplayName') && document.getElementById('myProfileDisplayName').value.trim()) || '';
+      const phone = (document.getElementById('myProfilePhone') && document.getElementById('myProfilePhone').value.trim()) || '';
+      const birthdayEl = document.getElementById('myProfileBirthday');
+      const newBirthday = birthdayEl ? String(birthdayEl.value || '').trim() : '';
+      const prevBirthday = typeof window.__ffMyProfileLoadedBirthday === 'string' ? window.__ffMyProfileLoadedBirthday : '';
+      if (!displayName) {
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast('Display name is required.', 'warning');
+        else alert('Display name is required.');
+        return;
+      }
+      try {
+        const db = getTrainingDb();
+        const { doc, updateDoc, deleteField, serverTimestamp } = await getTrainingFirestoreApi();
+        const patch = {
+          displayName: displayName,
+          phone: phone,
+          updatedAt: serverTimestamp()
+        };
+        if (newBirthday) {
+          patch.birthday = newBirthday;
+        } else {
+          patch.birthday = deleteField();
+        }
+        if (newBirthday !== prevBirthday) {
+          patch.birthdayReminderSentForYear = deleteField();
+        }
+        const curPhoto = (typeof window.__ffMyProfilePhotoUrl === 'string') ? window.__ffMyProfilePhotoUrl.trim() : '';
+        const initPhoto = (typeof window.__ffMyProfileInitialPhotoUrl === 'string') ? window.__ffMyProfileInitialPhotoUrl.trim() : '';
+        if (window.__ffMyProfilePhotoDirty || curPhoto !== initPhoto) {
+          patch.photoUrl = curPhoto;
+          patch.photoURL = curPhoto;
+        }
+        await updateDoc(doc(db, 'salons', salonId, 'staff', staffId), patch);
+        window.__ffMyProfileLoadedBirthday = newBirthday;
+        window.__ffMyProfileInitialPhotoUrl = curPhoto;
+        window.__ffMyProfilePhotoDirty = false;
+        if (typeof window.ffMyProfilePatchLocalStaffCache === 'function') {
+          window.ffMyProfilePatchLocalStaffCache({
+            name: displayName,
+            phone: phone,
+            birthday: newBirthday,
+            photoURL: curPhoto || undefined,
+            photoUrl: curPhoto || undefined
+          });
+        }
+        const hn = document.getElementById('myProfileHeaderName');
+        if (hn) hn.textContent = displayName;
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast('Saved.', 'success');
+        else alert('Saved.');
+      } catch (e) {
+        console.error(e);
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast(e.message || 'Save failed', 'error');
+        else alert(e.message || 'Save failed');
+      }
+    };
+  }
+  const avatarInput = document.getElementById('myProfileAvatarInput');
+  const avatarBtn = document.getElementById('myProfileAvatarEditBtn');
+  if (avatarBtn && avatarInput) {
+    avatarBtn.onclick = function (e) {
+      e.preventDefault();
+      avatarInput.click();
+    };
+    avatarInput.onchange = async function (ev) {
+      const file = ev.target.files && ev.target.files[0];
+      ev.target.value = '';
+      if (!file || !file.type.startsWith('image/')) return;
+      const staffId = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '';
+      const salonId = window.currentSalonId || '';
+      if (!staffId || !salonId) return;
+      try {
+        if (!window.ffUploadStaffAvatar) throw new Error('Upload not available');
+        const { url, path } = await window.ffUploadStaffAvatar({ salonId: salonId, staffId: staffId, file: file });
+        if (typeof window.ffSaveStaffAvatarMeta === 'function') {
+          await window.ffSaveStaffAvatarMeta({ url: url, path: path || '' });
+        }
+        const db = getTrainingDb();
+        const { doc, updateDoc, serverTimestamp } = await getTrainingFirestoreApi();
+        const at = Date.now();
+        await updateDoc(doc(db, 'salons', salonId, 'staff', staffId), {
+          photoUrl: url,
+          photoURL: url,
+          avatarUpdatedAtMs: at,
+          updatedAt: serverTimestamp()
+        });
+        window.__ffMyProfilePhotoUrl = url;
+        window.__ffMyProfilePhotoDirty = true;
+        if (typeof window.ffMyProfileSetAvatarUi === 'function') {
+          var r2 = typeof ffResolveUserAvatar === 'function'
+            ? ffResolveUserAvatar({ staffId: staffId, photoURL: url, avatarUrl: url, avatarUpdatedAtMs: at })
+            : { src: url };
+          window.ffMyProfileSetAvatarUi(r2 && r2.src ? r2.src : url);
+        }
+        if (typeof window.ffApplyAvatarFromFirestore === 'function') {
+          window.ffApplyAvatarFromFirestore({
+            photoURL: url,
+            avatarUrl: url,
+            avatarUpdatedAtMs: at,
+            staffId: staffId,
+            uid: (window.auth && window.auth.currentUser && window.auth.currentUser.uid) || '',
+            email: (window.auth && window.auth.currentUser && window.auth.currentUser.email) || '',
+            name: (document.getElementById('myProfileDisplayName') && document.getElementById('myProfileDisplayName').value.trim()) || ''
+          });
+        }
+        if (typeof window.ffMyProfilePatchLocalStaffCache === 'function') {
+          window.ffMyProfilePatchLocalStaffCache({ photoURL: url, photoUrl: url, avatarUpdatedAtMs: at });
+        }
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast('Profile photo updated.', 'success');
+      } catch (err) {
+        console.error(err);
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast(err.message || 'Upload failed', 'error');
+        else alert(err.message || 'Upload failed');
+      }
+    };
+  }
+  const pwdBtn = document.getElementById('myProfileChangePasswordSubmitBtn');
+  if (pwdBtn) {
+    pwdBtn.onclick = async function () {
+      const cur = (document.getElementById('myProfileCurPwd') && document.getElementById('myProfileCurPwd').value) || '';
+      const n1 = (document.getElementById('myProfileNewPwd') && document.getElementById('myProfileNewPwd').value) || '';
+      const n2 = (document.getElementById('myProfileNewPwd2') && document.getElementById('myProfileNewPwd2').value) || '';
+      if (!cur || !n1 || n1 !== n2) {
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast('Enter current password and matching new passwords.', 'warning');
+        else alert('Enter current password and matching new passwords.');
+        return;
+      }
+      try {
+        const auth = window.auth || window.ffAuth;
+        const email = auth && auth.currentUser && auth.currentUser.email;
+        if (!email) throw new Error('No email on account');
+        const { reauthenticateWithCredential, EmailAuthProvider, updatePassword } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
+        const cred = EmailAuthProvider.credential(email, cur);
+        await reauthenticateWithCredential(auth.currentUser, cred);
+        await updatePassword(auth.currentUser, n1);
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast('Password updated.', 'success');
+        else alert('Password updated.');
+        const a = document.getElementById('myProfileCurPwd');
+        const b = document.getElementById('myProfileNewPwd');
+        const c = document.getElementById('myProfileNewPwd2');
+        if (a) a.value = '';
+        if (b) b.value = '';
+        if (c) c.value = '';
+      } catch (e) {
+        console.error(e);
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast(e.message || 'Password update failed', 'error');
+        else alert(e.message || 'Password update failed');
+      }
+    };
+  }
+  const pinBtn = document.getElementById('myProfileChangePinBtn');
+  if (pinBtn) {
+    pinBtn.onclick = async function () {
+      const a = (document.getElementById('myProfileNewPin') && document.getElementById('myProfileNewPin').value.trim()) || '';
+      const b = (document.getElementById('myProfileNewPin2') && document.getElementById('myProfileNewPin2').value.trim()) || '';
+      if (!a || a !== b) {
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast('PIN fields must match.', 'warning');
+        else alert('PIN fields must match.');
+        return;
+      }
+      if (!/^\d{4,6}$/.test(a)) {
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast('PIN must be 4–6 digits.', 'warning');
+        else alert('PIN must be 4–6 digits.');
+        return;
+      }
+      const staffId = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '';
+      const salonId = window.currentSalonId || '';
+      if (!staffId || !salonId) return;
+      try {
+        const db = getTrainingDb();
+        const { doc, updateDoc, serverTimestamp } = await getTrainingFirestoreApi();
+        await updateDoc(doc(db, 'salons', salonId, 'staff', staffId), {
+          pin: a,
+          updatedAt: serverTimestamp()
+        });
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast('PIN updated.', 'success');
+        else alert('PIN updated.');
+        const p1 = document.getElementById('myProfileNewPin');
+        const p2 = document.getElementById('myProfileNewPin2');
+        if (p1) p1.value = '';
+        if (p2) p2.value = '';
+      } catch (e) {
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast(e.message || 'PIN update failed', 'error');
+        else alert(e.message || 'PIN update failed');
+      }
+    };
+  }
+};
+
 function goBackFromUserProfile() {
   const userProfileScreen = document.getElementById('userProfileScreen');
   if (userProfileScreen) {
     userProfileScreen.style.display = 'none';
     userProfileScreen.classList.remove('ff-overlay-from-schedule');
+  }
+  const myProfileScreenEl = document.getElementById('myProfileScreen');
+  if (myProfileScreenEl) {
+    myProfileScreenEl.style.display = 'none';
   }
   const scheduleUnder = document.getElementById('scheduleScreen');
   if (scheduleUnder && scheduleUnder.getAttribute('data-ff-under-settings-overlay') === '1') {
@@ -22914,7 +23708,7 @@ if (document.readyState === 'loading') {
           relativeY: relativeY,
           dropdownHeight: dropdownHeight,
           isTopHalf: isTopHalf,
-          action: isTopHalf ? 'User Profile' : 'Logout'
+          action: isTopHalf ? 'My Profile' : 'Logout'
         });
       }
       
@@ -22925,11 +23719,10 @@ if (document.readyState === 'loading') {
       }
       
       if (isTopHalf) {
-        // User Profile: call existing navigation function
-        if (typeof goToUserProfile === 'function') {
-          goToUserProfile();
-        } else if (typeof window.goToUserProfile === 'function') {
-          window.goToUserProfile();
+        if (typeof goToMyProfile === 'function') {
+          goToMyProfile();
+        } else if (typeof window.goToMyProfile === 'function') {
+          window.goToMyProfile();
         }
       } else {
         // Logout: trigger existing logout logic
@@ -23278,7 +24071,7 @@ function initializeNavigationButtons() {
               };
             }
             
-            // Bind User Profile handler with guard flag
+            // My Profile (self-service staff subset)
             if (profileBtn && !profileBtn.__ffBound) {
               profileBtn.__ffBound = true;
               profileBtn.onclick = function(e) {
@@ -23286,17 +24079,15 @@ function initializeNavigationButtons() {
                 e.stopPropagation();
                 if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
                 
-                console.log("User Profile clicked ✅");
+                console.log("My Profile clicked ✅");
                 
-                // Close dropdown and remove body class
                 userAvatarDropdown.style.display = 'none';
                 document.body.classList.remove('ff-avatar-dropdown-open');
                 
-                // Navigate to User Profile
-                if (typeof goToUserProfile === 'function') {
-                  goToUserProfile();
-                } else if (typeof window.goToUserProfile === 'function') {
-                  window.goToUserProfile();
+                if (typeof goToMyProfile === 'function') {
+                  goToMyProfile();
+                } else if (typeof window.goToMyProfile === 'function') {
+                  window.goToMyProfile();
                 }
               };
             }
@@ -23400,6 +24191,10 @@ function initializeNavigationButtons() {
     
     // User Profile menu and cards functionality
     initializeUserProfileMenu();
+
+    if (typeof window.ffInitMyProfileHandlers === 'function') {
+      window.ffInitMyProfileHandlers();
+    }
     
     // Apps launcher panel
     initializeAppsPanel();
@@ -24041,6 +24836,53 @@ function initializeAppsPanel() {
       return undefined;
     }
   }
+
+  /** Format Firestore Timestamp, ISO string, or ms for staff status lines. */
+  function formatStaffStatusDate(val) {
+    if (val == null || val === '') return '';
+    try {
+      if (typeof val.toDate === 'function') {
+        const d = val.toDate();
+        if (d && !isNaN(d.getTime())) {
+          return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+      }
+      if (val instanceof Date && !isNaN(val.getTime())) {
+        return val.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+      if (typeof val === 'number' && isFinite(val)) {
+        const d = new Date(val);
+        if (!isNaN(d.getTime())) {
+          return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+      }
+      const d = new Date(val);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+    } catch (e) {}
+    return '';
+  }
+
+  function getStaffStatus(staff) {
+    if (!staff || typeof staff !== 'object') {
+      return { type: 'not_invited', text: 'Not invited yet' };
+    }
+    var la = staff.lastActiveAt;
+    if (la != null && la !== '') {
+      var fdActive = formatStaffStatusDate(la);
+      return { type: 'active', text: fdActive ? 'Last active ' + fdActive : 'Active' };
+    }
+    var invitedWhen = staff.invitedOn || staff.invitedAt;
+    if (invitedWhen || staff.invited === true) {
+      var fdPending = formatStaffStatusDate(invitedWhen);
+      if (fdPending) {
+        return { type: 'pending', text: 'Invite pending • Sent ' + fdPending };
+      }
+      return { type: 'pending', text: 'Invite pending' };
+    }
+    return { type: 'not_invited', text: 'Not invited yet' };
+  }
   
   // Send invite (status-only update, no email/auth)
   async function ffStaffSendInvite(staffId) {
@@ -24631,26 +25473,37 @@ function initializeAppsPanel() {
         const salonOwnerRow =
           typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff);
 
-        // Format date for status line
-        let statusText = '';
-        let statusAction = '';
-        if (!invited) {
-          statusText = 'Not invited yet';
-          statusAction = '<button type="button" data-action="send-invite" style="background:none;border:none;color:#6366f1;font-size:12px;font-weight:500;cursor:pointer;text-decoration:underline;padding:0;margin-left:8px;">Send invite</button>';
+        var staffSt = getStaffStatus(staff);
+        var statusColor =
+          staffSt.type === 'active' ? '#16a34a' : staffSt.type === 'pending' ? '#f59e0b' : '#6b7280';
+        var statusText = staffSt.text;
+        var sepPending = ' • Sent ';
+        var statusLineHtml;
+        if (staffSt.type === 'pending' && statusText.indexOf(sepPending) !== -1) {
+          var iSep = statusText.indexOf(sepPending);
+          var partPendingLabel = statusText.slice(0, iSep);
+          var partPendingSent = statusText.slice(iSep);
+          statusLineHtml =
+            '<span style="font-size:11px;font-weight:500;"><span style="color:#f59e0b;">' +
+            escapeHtml(partPendingLabel) +
+            '</span><span style="color:#111;">' +
+            escapeHtml(partPendingSent) +
+            '</span></span>';
         } else {
-          const dateToShow = staff.invitedAt;
-          if (dateToShow) {
-            try {
-              const date = new Date(dateToShow);
-              const formatted = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-              statusText = `Invited on ${formatted}`;
-            } catch (e) {
-              statusText = 'Invited';
-            }
-          } else {
-            statusText = 'Invited';
-          }
-          statusAction = '<button type="button" data-action="send-invite" style="background:none;border:none;color:#6366f1;font-size:12px;font-weight:500;cursor:pointer;text-decoration:underline;padding:0;margin-left:8px;">Send invite</button>';
+          statusLineHtml =
+            '<span style="font-size:11px;color:' +
+            statusColor +
+            ';font-weight:500;">' +
+            escapeHtml(statusText) +
+            '</span>';
+        }
+        var statusAction = '';
+        if (staffSt.type === 'pending') {
+          statusAction =
+            '<button type="button" data-action="send-invite" class="ff-staff-status-invite-btn">Resend invite</button>';
+        } else if (staffSt.type === 'not_invited') {
+          statusAction =
+            '<button type="button" data-action="send-invite" class="ff-staff-status-invite-btn ff-staff-status-invite-btn--send">Send invite</button>';
         }
         
         headerEl.innerHTML = `
@@ -24660,8 +25513,8 @@ function initializeAppsPanel() {
               <div style="flex:1;">
                 <h2 style="margin:0 0 4px 0;font-size:16px;font-weight:600;color:#111827;">${escapeHtml(staff.name)}</h2>
                 <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">${escapeHtml(roleLabel)}</p>
-                <div style="display:flex;align-items:center;margin-top:4px;">
-                  <span style="font-size:11px;color:#6b7280;">${statusText}</span>
+                <div style="display:flex;align-items:center;flex-wrap:wrap;margin-top:4px;">
+                  ${statusLineHtml}
                   ${statusAction}
                 </div>
               </div>
@@ -26158,6 +27011,381 @@ function initializeAppsPanel() {
       document.body.classList.remove('ff-staff-editing');
     }
   }
+
+  /** Default permissions for new technicians (nested — single source of truth). Flat keys are derived for ff_staff_v1. */
+  const DEFAULT_PERMISSIONS_TECHNICIAN = {
+    queue: {
+      view: true,
+      join: true,
+      lockedView: false,
+      bypassLocation: false,
+      reorder: false,
+      reset: false,
+      manage: false
+    },
+    tickets: {
+      view: true,
+      summary: true
+    },
+    tasks: {
+      view: true,
+      use: true,
+      manage: false,
+      reset: false
+    },
+    chat: {
+      view: true
+    },
+    inbox: {
+      view: true,
+      sendRequest: true
+    },
+    media: {
+      view: true,
+      upload: true,
+      manage: false
+    },
+    training: {
+      view: true
+    },
+    inventory: {
+      view: true
+    },
+    schedule: {
+      viewHomeOnly: true,
+      manage: false
+    },
+    settings: {
+      view: false,
+      manage: false
+    },
+    staff: {
+      view: false,
+      manage: false
+    },
+    history: {
+      view: false
+    }
+  };
+
+  /** Maps DEFAULT_PERMISSIONS_TECHNICIAN to flat keys used by Permissions tab / ff_staff_v1 (create-new-technician only). */
+  function ffFlatPermissionsFromDefaultTechnician() {
+    var d = structuredClone(DEFAULT_PERMISSIONS_TECHNICIAN);
+    return {
+      queue_view: d.queue.view,
+      queue_join: d.queue.join,
+      queue_locked_view: d.queue.lockedView,
+      queue_bypass_location: d.queue.bypassLocation,
+      queue_reorder: d.queue.reorder,
+      queue_reset: d.queue.reset,
+      queue_manage: d.queue.manage,
+      tickets_view: d.tickets.view,
+      tickets_summary: d.tickets.summary,
+      tickets_archived: false,
+      tasks_view: d.tasks.view,
+      tasks_use: d.tasks.use,
+      tasks_manage: d.tasks.manage,
+      tasks_reset: d.tasks.reset,
+      chat_view: d.chat.view,
+      chat_manage: false,
+      chat_free_text: false,
+      inbox_view: d.inbox.view,
+      inbox_send: d.inbox.sendRequest,
+      inbox_manage: false,
+      media_view: d.media.view,
+      media_upload: d.media.upload,
+      media_handle: d.media.manage,
+      training_view: d.training.view,
+      inventory_view: d.inventory.view,
+      inventory_manage: false,
+      schedule_edit: d.schedule.manage,
+      schedule_view_all: false,
+      schedule_view_own: d.schedule.viewHomeOnly,
+      settings_view: d.settings && d.settings.view === true,
+      settings_manage: d.settings && d.settings.manage === true,
+      staff_view: d.staff.view,
+      staff_manage: d.staff.manage,
+      staff_permissions_manage: false,
+      history_view: d.history.view,
+      history_export: false,
+      history_clear: false
+    };
+  }
+
+  /** Default permissions for new managers (nested — single source of truth). Granular training.* flags are kept for the template; UI uses training_view only today. */
+  const DEFAULT_PERMISSIONS_MANAGER = {
+    queue: {
+      view: true,
+      join: false,
+      lockedView: false,
+      bypassLocation: false,
+      reorder: true,
+      reset: true,
+      manage: false
+    },
+    tickets: {
+      view: true,
+      summary: false
+    },
+    tasks: {
+      view: true,
+      use: true,
+      manage: false,
+      reset: false
+    },
+    chat: {
+      view: true
+    },
+    inbox: {
+      view: true,
+      sendRequest: true,
+      manage: true
+    },
+    media: {
+      view: true,
+      upload: true,
+      manage: true
+    },
+    training: {
+      view: true,
+      create: true,
+      edit: true,
+      manage: true,
+      reports: true
+    },
+    inventory: {
+      view: true,
+      use: true,
+      manage: true
+    },
+    schedule: {
+      viewHomeOnly: true,
+      manage: false
+    },
+    settings: {
+      view: false,
+      manage: false
+    },
+    staff: {
+      view: false,
+      manage: false
+    },
+    history: {
+      view: false
+    }
+  };
+
+  /** Maps DEFAULT_PERMISSIONS_MANAGER to flat keys (create-new-manager only). */
+  function ffFlatPermissionsFromDefaultManager() {
+    var d = structuredClone(DEFAULT_PERMISSIONS_MANAGER);
+    var tr = d.training || {};
+    var trainingTabOn =
+      tr.view === true ||
+      tr.create === true ||
+      tr.edit === true ||
+      tr.manage === true ||
+      tr.reports === true;
+    return {
+      queue_view: d.queue.view,
+      queue_join: d.queue.join,
+      queue_locked_view: d.queue.lockedView,
+      queue_bypass_location: d.queue.bypassLocation,
+      queue_reorder: d.queue.reorder,
+      queue_reset: d.queue.reset,
+      queue_manage: d.queue.manage,
+      tickets_view: d.tickets.view,
+      tickets_summary: d.tickets.summary,
+      tickets_archived: false,
+      tasks_view: d.tasks.view,
+      tasks_use: d.tasks.use,
+      tasks_manage: d.tasks.manage,
+      tasks_reset: d.tasks.reset,
+      chat_view: d.chat.view,
+      chat_manage: false,
+      chat_free_text: false,
+      inbox_view: d.inbox.view,
+      inbox_send: d.inbox.sendRequest,
+      inbox_manage: d.inbox.manage,
+      media_view: d.media.view,
+      media_upload: d.media.upload,
+      media_handle: d.media.manage,
+      training_view: trainingTabOn,
+      inventory_view: d.inventory.view || d.inventory.use === true,
+      inventory_manage: d.inventory.manage === true,
+      schedule_edit: d.schedule.manage,
+      schedule_view_all: false,
+      schedule_view_own: d.schedule.viewHomeOnly,
+      settings_view: d.settings.view,
+      settings_manage: d.settings.manage,
+      staff_view: d.staff.view,
+      staff_manage: d.staff.manage,
+      staff_permissions_manage: false,
+      history_view: d.history.view,
+      history_export: false,
+      history_clear: false
+    };
+  }
+
+  /**
+   * Default permissions for new Admin (non-owner) staff — nested template.
+   * Owner-only protections (ffIsOwner / salon owner row) are unchanged in app code; this only seeds ff_staff_v1 on create.
+   * Granular media.* / training.* flags beyond the Permissions tab are kept for documentation; flat keys match the tab.
+   */
+  const DEFAULT_PERMISSIONS_ADMIN = {
+    queue: {
+      view: true,
+      join: false,
+      lockedView: false,
+      bypassLocation: false,
+      reorder: true,
+      reset: true,
+      manage: true
+    },
+    tickets: {
+      view: true,
+      summary: true,
+      archived: true
+    },
+    tasks: {
+      view: true,
+      use: true,
+      manage: true,
+      reset: true
+    },
+    chat: {
+      view: true,
+      manage: true,
+      freeText: true
+    },
+    inbox: {
+      view: true,
+      sendRequest: true,
+      manage: true
+    },
+    media: {
+      view: true,
+      upload: true,
+      manage: true,
+      featured: true,
+      posted: true,
+      archive: true,
+      duplicate: true,
+      delete: true,
+      edit: true,
+      share: true
+    },
+    training: {
+      view: true,
+      create: true,
+      edit: true,
+      manage: true,
+      reports: true,
+      assign: true,
+      notifications: true
+    },
+    inventory: {
+      view: true,
+      use: true,
+      manage: true
+    },
+    schedule: {
+      viewHomeOnly: true,
+      viewAll: true,
+      create: true,
+      edit: true,
+      manage: true
+    },
+    settings: {
+      view: true,
+      manage: true
+    },
+    staff: {
+      view: true,
+      create: true,
+      edit: true,
+      manage: true,
+      permissions: true
+    },
+    history: {
+      view: true,
+      manage: true
+    }
+  };
+
+  function ffFlatPermissionsFromDefaultAdmin() {
+    var d = structuredClone(DEFAULT_PERMISSIONS_ADMIN);
+    var tr = d.training || {};
+    var trainingTabOn =
+      tr.view === true ||
+      tr.create === true ||
+      tr.edit === true ||
+      tr.manage === true ||
+      tr.reports === true ||
+      tr.assign === true ||
+      tr.notifications === true;
+    var m = d.media || {};
+    var mediaGranular =
+      m.featured ||
+      m.posted ||
+      m.archive ||
+      m.duplicate ||
+      m.delete ||
+      m.edit ||
+      m.share;
+    var mediaHandle =
+      m.manage === true ||
+      mediaGranular === true;
+    var sch = d.schedule || {};
+    var scheduleEditOn = !!(sch.create || sch.edit || sch.manage);
+    var st = d.staff || {};
+    var staffManageOn = !!(st.create || st.edit || st.manage);
+    return {
+      queue_view: d.queue.view,
+      queue_join: d.queue.join,
+      queue_locked_view: d.queue.lockedView,
+      queue_bypass_location: d.queue.bypassLocation,
+      queue_reorder: d.queue.reorder,
+      queue_reset: d.queue.reset,
+      queue_manage: d.queue.manage,
+      tickets_view: d.tickets.view,
+      tickets_summary: d.tickets.summary,
+      tickets_archived: d.tickets.archived === true,
+      tasks_view: d.tasks.view,
+      tasks_use: d.tasks.use,
+      tasks_manage: d.tasks.manage,
+      tasks_reset: d.tasks.reset,
+      chat_view: d.chat.view,
+      chat_manage: d.chat.manage === true,
+      chat_free_text: d.chat.freeText === true,
+      inbox_view: d.inbox.view,
+      inbox_send: d.inbox.sendRequest,
+      inbox_manage: d.inbox.manage,
+      media_view: m.view === true,
+      media_upload: m.upload === true,
+      media_handle: mediaHandle,
+      training_view: trainingTabOn,
+      inventory_view: d.inventory.view || d.inventory.use === true,
+      inventory_manage: d.inventory.manage === true,
+      schedule_edit: scheduleEditOn,
+      schedule_view_all: sch.viewAll === true,
+      schedule_view_own: sch.viewHomeOnly === true,
+      settings_view: d.settings.view,
+      settings_manage: d.settings.manage,
+      staff_view: st.view === true,
+      staff_manage: staffManageOn,
+      staff_permissions_manage: st.permissions === true,
+      history_view: d.history.view,
+      history_export: d.history.manage === true,
+      history_clear: d.history.manage === true
+    };
+  }
+
+  function ffDefaultPermissionsForNewStaffRole(role) {
+    if (role === 'technician') return ffFlatPermissionsFromDefaultTechnician();
+    if (role === 'manager') return ffFlatPermissionsFromDefaultManager();
+    if (role === 'admin') return ffFlatPermissionsFromDefaultAdmin();
+    return {};
+  }
   
   // Save staff member function (extracted for reuse)
   function saveStaffMember() {
@@ -26247,7 +27475,7 @@ function initializeAppsPanel() {
         inviteStatus: null,
         lastActiveAt: null,
         isArchived: false,
-        permissions: {}, // Initialize empty permissions object
+        permissions: ffDefaultPermissionsForNewStaffRole(roleFields.role),
         createdAt: Date.now(),
         isAdmin: roleFields.isAdmin,
         isManager: roleFields.isManager,
@@ -36963,15 +38191,15 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-ui.js?v=20260412_schedule_perm_chrome"></script>
-  <script type="module" src="/inbox.js?v=20260412_inbox_tech_staffcall_filter"></script>
+  <script type="module" src="/inbox.js?v=20260415_ff_toast"></script>
   <script type="module" src="/chat.js?v=20260412_chat_sender_display"></script>
-  <script type="module" src="/staff-cloud.js?v=20260312_fix2"></script>
+  <script type="module" src="/staff-cloud.js?v=20260415_ff_toast"></script>
   <script type="module" src="/staff-documents.js?v=20260412_doc_meta_edit"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260412_staffcall_accept_ui"></script>
   <script type="module" src="/settings-cloud.js?v=20260412_owner_uid_cache"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/tickets.js?v=20260420_tickets_load_more"></script>
+  <script type="module" src="/tickets.js?v=20260420_tickets_load_more_ff_toast"></script>
   <script type="module" src="/media-upload.js?v=20260412_app_js_unify"></script>
 
   <!-- PIN Modal -->
@@ -37377,6 +38605,51 @@ function hookSettingsGuard_DISABLED(){
     #ticketsScreen .ticket-card:hover {
       box-shadow:0 6px 18px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
       transform:translateY(-2px);
+    }
+    #ticketsScreen .ticket-card-avatar-wrap {
+      position:relative;
+      width:40px;
+      height:40px;
+      min-width:40px;
+      min-height:40px;
+      flex-shrink:0;
+      border-radius:50%;
+      overflow:hidden;
+      aspect-ratio:1;
+      background:#f3f4f6;
+      contain:layout style;
+    }
+    #ticketsScreen .ticket-card-avatar-fallback {
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:linear-gradient(135deg,#9d68b9,#ff9580);
+      color:#fff;
+      font-size:14px;
+      font-weight:700;
+      z-index:0;
+      pointer-events:none;
+      line-height:1;
+    }
+    #ticketsScreen .ticket-card-avatar-wrap img.ticket-card-avatar-img {
+      position:absolute;
+      inset:0;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+      z-index:1;
+      opacity:0;
+      transition:opacity 0.08s ease;
+    }
+    #ticketsScreen .ticket-card-avatar-wrap[data-avatar-loaded="1"] img.ticket-card-avatar-img {
+      opacity:1;
+    }
+    #ticketsScreen .ticket-card-avatar-wrap[data-avatar-loaded="error"] img.ticket-card-avatar-img {
+      opacity:0;
+      visibility:hidden;
     }
     /* Status badge */
     #ticketsScreen .ticket-status-badge {

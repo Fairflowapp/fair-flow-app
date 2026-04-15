@@ -2883,58 +2883,17 @@ async function submitRequest(type) {
 }
 
 // =====================
-// Toast Notifications
+// Toast Notifications (global Fair Flow API — public/ff-toast.js)
 // =====================
 function showToast(message, type = 'success') {
-  const toast = document.createElement('div');
-  toast.style.cssText = `
-    position: fixed;
-    top: 80px;
-    right: 20px;
-    background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
-    color: #fff;
-    padding: 16px 24px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    z-index: 999999;
-    font-size: 14px;
-    font-weight: 500;
-    max-width: 400px;
-    animation: slideIn 0.3s ease-out;
-  `;
-  
-  const icon = type === 'success' ? '✓' : type === 'error' ? '✗' : 'ℹ';
-  toast.innerHTML = `
-    <div style="display:flex;align-items:center;gap:10px;">
-      <span style="font-size:18px;">${icon}</span>
-      <span>${message}</span>
-    </div>
-  `;
-  
-  document.body.appendChild(toast);
-  
-  // Auto-remove after 3 seconds
-  setTimeout(() => {
-    toast.style.animation = 'slideOut 0.3s ease-in';
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
-}
-
-// Add animation styles if not exists
-if (!document.getElementById('toastAnimations')) {
-  const style = document.createElement('style');
-  style.id = 'toastAnimations';
-  style.textContent = `
-    @keyframes slideIn {
-      from { transform: translateX(400px); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes slideOut {
-      from { transform: translateX(0); opacity: 1; }
-      to { transform: translateX(400px); opacity: 0; }
-    }
-  `;
-  document.head.appendChild(style);
+  if (typeof window !== 'undefined' && window.ffToast && typeof window.ffToast.show === 'function') {
+    const v =
+      type === 'success' ? 'success' : type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info';
+    const ms = type === 'error' ? 6500 : 4500;
+    window.ffToast.show(String(message), { variant: v, durationMs: ms });
+    return;
+  }
+  console.warn('[Inbox]', message, type);
 }
 
 // =====================

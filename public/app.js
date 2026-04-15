@@ -197,14 +197,32 @@ window.ffIsOwner = ffIsOwner;
 window.ffStaffRowIsSalonOwner = ffStaffRowIsSalonOwner;
 
 // Set currentSalonId globally when user logs in (used by staff invite + staff cloud sync)
+let __ffChatBadgeEarlyGen = 0;
 onAuthStateChanged(auth, async user => {
-  if (!user) { window.currentSalonId = null; return; }
+  if (!user) {
+    window.currentSalonId = null;
+    __ffChatBadgeEarlyGen++;
+    return;
+  }
   try {
     const { getDoc, doc } = await import("https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js");
     const snap = await getDoc(doc(db, 'users', user.uid));
     if (snap.exists()) {
       window.currentSalonId = snap.data().salonId || null;
       console.log('[app.js] currentSalonId set:', window.currentSalonId);
+      const uid = user.uid;
+      const sid = window.currentSalonId;
+      __ffChatBadgeEarlyGen++;
+      const gen = __ffChatBadgeEarlyGen;
+      if (sid && uid) {
+        import("/chat.js?v=20260412_chat_sender_display")
+          .then((m) => {
+            if (gen !== __ffChatBadgeEarlyGen) return;
+            if (m.subscribeToChatBadge) m.subscribeToChatBadge(uid, sid);
+            if (m.subscribeToChatToastNotifications) m.subscribeToChatToastNotifications(uid, sid);
+          })
+          .catch(() => {});
+      }
     }
   } catch(e) { console.warn('[app.js] Failed to set currentSalonId', e); }
 });
@@ -892,6 +910,7 @@ function showLoginScreen() {
   if (signupSection) signupSection.style.display = "none";
   if (resetSection) resetSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
+  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
   document.body.classList.add("ff-logged-out");
 
   /* Full-screen modules live OUTSIDE #main-app-content; hiding only main-app leaves them visible. */
@@ -918,6 +937,7 @@ function showResetPasswordScreen() {
   if (loginSection) loginSection.style.display = "none";
   if (signupSection) signupSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
+  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
   document.body.classList.add("ff-logged-out");
   if (resetSection) resetSection.style.display = "block";
 
@@ -1231,6 +1251,19 @@ async function loadUserRoleAndShowView(user) {
     if (staffIdFromUser && typeof window !== 'undefined') {
       window.__ff_authedStaffId = staffIdFromUser;
       try { localStorage.setItem("ff_authedStaffId_v1", staffIdFromUser); } catch (e) {}
+    }
+
+    // Staff status (UI): refresh lastActiveAt on every successful login when staff doc exists
+    if (currentSalonId && staffIdFromUser) {
+      try {
+        const staffRef = doc(db, "salons", currentSalonId, "staff", staffIdFromUser);
+        const staffSnap = await getDoc(staffRef);
+        if (staffSnap.exists()) {
+          await updateDoc(staffRef, { lastActiveAt: serverTimestamp() });
+        }
+      } catch (e) {
+        console.warn("[Auth] staff lastActiveAt skipped", e?.code || e?.message);
+      }
     }
 
     // If owner, load salon document and update admin PIN

@@ -80,6 +80,29 @@ service cloud.firestore {
       );
     }
 
+    /** My Profile (self): only these top-level fields may change on own staff doc */
+    function staffSelfProfileChangedKeysAllowed() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+        'displayName',
+        'phone',
+        'photoUrl',
+        'photoURL',
+        'avatarUrl',
+        'avatarUpdatedAtMs',
+        'notifications',
+        'pin',
+        'birthday',
+        'birthdayReminderSentForYear',
+        'updatedAt'
+      ]);
+    }
+
+    function staffSelfProfileUpdateAllowed(salonId, staffId) {
+      return matchesOwnStaffId(salonId, staffId)
+        && (belongsToSalon(salonId) || isStaffInSalon(salonId))
+        && staffSelfProfileChangedKeysAllowed();
+    }
+
     // Staff /documents delete: must match archived (UI writes lowercase; tolerate casing)
     function staffDocumentLifecycleIsArchived() {
       return resource.data.lifecycleStatus is string
@@ -405,8 +428,10 @@ service cloud.firestore {
     // Manager/Admin/Owner: full CRUD. Salon members + PIN/staff linked via users.staffId: read (queue, schedule, etc.)
     match /salons/{salonId}/staff/{staffId} {
       allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
-      allow create, update, delete: if belongsToSalon(salonId)
+      allow create, delete: if belongsToSalon(salonId)
         && isManager(salonId);
+      allow update: if (belongsToSalon(salonId) && isManager(salonId))
+        || staffSelfProfileUpdateAllowed(salonId, staffId);
 
       // Staff documents (Inbox approve → staff doc sync; Staff Member > Documents tab)
       match /documents/{documentId} {

@@ -50,20 +50,13 @@ function _sanitize(value) {
   return undefined;
 }
 
-// ─── Toast helper ─────────────────────────────────────────────────────────────
-function _toast(msg, color) {
-  // Replace any previous toast (avoid stacking)
-  const existing = document.getElementById('ffToast');
-  if (existing) existing.remove();
-  const t = document.createElement('div');
-  t.id = 'ffToast';
-  t.textContent = msg;
-  t.style.cssText = `position:fixed;bottom:24px;right:24px;z-index:999999;
-    padding:13px 20px;border-radius:10px;background:${color};color:#fff;
-    font-size:14px;font-weight:700;box-shadow:0 6px 24px rgba(0,0,0,0.3);
-    max-width:360px;line-height:1.4;pointer-events:none;`;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 7000);
+// ─── Toast (global Fair Flow API: window.ffToast — see ff-toast.js) ─────────────
+function _toast(msg, variant = 'info') {
+  if (typeof window !== 'undefined' && window.ffToast && typeof window.ffToast.show === 'function') {
+    window.ffToast.show(msg, { variant: variant || 'info', durationMs: 7000 });
+    return;
+  }
+  console.warn('[StaffCloud]', msg);
 }
 
 // Collapse rapid consecutive saves into one write (e.g. save staff + save invite status)
@@ -129,7 +122,7 @@ function _startListener() {
       document.dispatchEvent(new CustomEvent('ff-staff-cloud-updated'));
     },
     err => {
-      _toast('❌ Firestore error: ' + (err.code || err.message), '#ef4444');
+      _toast('❌ Firestore error: ' + (err.code || err.message), 'error');
       console.error('[StaffCloud] onSnapshot error:', err.code, err.message, err);
     }
   );
@@ -146,10 +139,10 @@ async function _migrateLocalToCloud() {
   console.log('[StaffCloud] Migrating', staff.length, 'staff to Firestore...');
   try {
     await _batchWrite(staff);
-    _toast('☁️ Staff uploaded to cloud (' + staff.length + ')', '#7c3aed');
+    _toast('☁️ Staff uploaded to cloud (' + staff.length + ')', 'success');
     console.log('[StaffCloud] Migration complete');
   } catch(e) {
-    _toast('❌ Migration failed: ' + (e.code || e.message), '#ef4444');
+    _toast('❌ Migration failed: ' + (e.code || e.message), 'error');
     console.error('[StaffCloud] Migration error:', e.code, e.message, e);
     _migrated = false; // allow retry
   }
@@ -210,15 +203,15 @@ window.ffStaffSyncToCloud = async function(staffData) {
          'salonId:', _salonId, 'staff count:', staff.length);
 
     if (!_salonId) {
-      _toast('⚠️ Cloud sync skipped — salonId not ready', '#f59e0b');
+      _toast('⚠️ Cloud sync skipped — salonId not ready', 'warning');
       return;
     }
 
     try {
       await _batchWrite(staff);
-      _toast('✅ Staff saved to cloud (' + staff.length + ')', '#10b981');
+      _toast('✅ Staff saved to cloud (' + staff.length + ')', 'success');
     } catch(e) {
-      _toast('❌ Save FAILED: ' + (e.code || e.message), '#ef4444');
+      _toast('❌ Save FAILED: ' + (e.code || e.message), 'error');
       console.error('[StaffCloud] Save error:', e.code, e.message, e);
     }
   }, 450);
@@ -235,7 +228,7 @@ window.ffStaffSyncNameToFirestore = async function(email, newName) {
       updateDoc(doc(db, `salons/${_salonId}/members`, md.id), { name: newName }),
       updateDoc(doc(db, 'users', md.id), { name: newName })
     ]);
-    _toast('✅ Name updated: ' + newName, '#10b981');
+    _toast('✅ Name updated: ' + newName, 'success');
   } catch(e) {
     console.warn('[StaffCloud] Name sync error', e.code, e.message);
   }
@@ -245,5 +238,5 @@ window.ffStaffSyncNameToFirestore = async function(email, newName) {
 window.ffStaffDeleteFromCloud = async function(staffId) {
   if (!_salonId || !staffId) throw new Error('Missing salonId or staffId');
   await deleteDoc(doc(db, `salons/${_salonId}/staff`, staffId));
-  _toast('🗑️ Staff deleted', '#111827');
+  _toast('🗑️ Staff deleted', 'neutral');
 };

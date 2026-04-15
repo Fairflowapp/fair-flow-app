@@ -26,11 +26,20 @@ let chatUserProfile    = null;
 let chatTemplates      = [];
 let chatFlows          = [];     // { id, title, allowedSenders, startStepId, steps: [{id,prompt,order,options:[{id,label,nextStepId,finish}]}] }
 let chatSalonUsers     = [];
+/** Set true after first `loadChatSalonUsers` completes (success or empty). Used to show "Loading..." until members exist. */
+let _chatMembersLoaded = false;
+const CHAT_NAME_LOADING = 'Loading...';
 let chatConvsUnsub     = null;
 let _chatInitialized   = false;  // cache flag — skip re-fetching on repeat visits
 let chatMsgsUnsub      = null;
 let chatBadgeUnsub     = null;
 let chatToastUnsub     = null;
+/** Perf: Chat screen open → first thread list paint (see [ChatBadgePerf] logs). */
+let _chatBadgePerfOpenMs = 0;
+let _chatBadgePerfRenderLogged = false;
+let _chatConvFirstSnapLogged = false;
+let _chatNavBadgeFirstSnapLogged = false;
+let _chatNavBadgeRenderDoneLogged = false;
 let chatEditingTmplId  = null;
 let chatEditingFlowId  = null;
 let chatFlowDraft      = null;   // { title, allowedSenders, steps } for builder
@@ -91,11 +100,81 @@ function linkifyMessageHtml(raw) {
 const roleLabel = r => ({technician:'Service Provider',manager:'Manager',admin:'Admin',owner:'Owner'}[(r||'').toLowerCase()] || r || '');
 const buildConvId = (a, b) => [a, b].sort().join('__');
 
+function _trimStr(v) {
+  if (v == null) return '';
+  const s = String(v).trim();
+  return s;
+}
+
+/** displayName → name on a salon/members row (or similar). */
+function _memberDisplayNameFromRow(u) {
+  if (!u || typeof u !== 'object') return '';
+  const dn = _trimStr(u.displayName);
+  if (dn) return dn;
+  return _trimStr(u.name);
+}
+
+/** Staff store row: displayName / name for a Firebase uid. */
+function _staffDisplayNameForUid(uid) {
+  if (!uid) return '';
+  try {
+    const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
+    const staff = store && Array.isArray(store.staff) ? store.staff : [];
+    const row = staff.find(
+      s =>
+        s &&
+        (String(s.uid || '').trim() === uid ||
+          String(s.firebaseUid || '').trim() === uid)
+    );
+    if (!row) return '';
+    return _trimStr(row.displayName) || _trimStr(row.name);
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * Human-readable label for UI (never raw uid). While salon members are still loading, show CHAT_NAME_LOADING for others.
+ * Order: displayName → name → staff (ff_staff_v1) → email (members row only).
+ */
 function _nameForUid(uid) {
   if (!uid) return '';
-  if (uid === chatUserProfile?.uid) return chatUserProfile?.name || chatUserProfile?.displayName || '';
+  if (uid === chatUserProfile?.uid) {
+    const p = chatUserProfile;
+    const dn = _trimStr(p?.displayName);
+    if (dn) return dn;
+    const nm = _trimStr(p?.name);
+    if (nm) return nm;
+    return _trimStr(p?.email);
+  }
   const u = chatSalonUsers.find(x => x.uid === uid);
-  return (u && (u.name || u.email || u.uid)) || uid;
+  if (u) {
+    const nm = _memberDisplayNameFromRow(u);
+    if (nm) return nm;
+    const staffNm = _staffDisplayNameForUid(uid);
+    if (staffNm) return staffNm;
+    const em = _trimStr(u.email);
+    if (em) return em;
+  } else if (!_chatMembersLoaded) {
+    return CHAT_NAME_LOADING;
+  }
+  const staffOnly = _staffDisplayNameForUid(uid);
+  if (staffOnly) return staffOnly;
+  return 'Unknown';
+}
+
+/** For persisted message fields: never use uid; avoid "Loading..." when possible. */
+function _nameForUidForSend(uid) {
+  const n = _nameForUid(uid);
+  if (n && n !== CHAT_NAME_LOADING) return n;
+  const staffNm = _staffDisplayNameForUid(uid);
+  if (staffNm) return staffNm;
+  const u = chatSalonUsers.find(x => x.uid === uid);
+  if (u) {
+    const em = _trimStr(u.email);
+    if (em) return em;
+  }
+  return 'Someone';
 }
 function _avatarUrlForUid(uid) {
   if (!uid) return null;
@@ -159,6 +238,9 @@ function _getChatFreeTextTrimmed() {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 async function goToChat() {
+  console.log('[ChatBadgePerf] screen-open', performance.now(), Date.now());
+  _chatBadgePerfOpenMs = performance.now();
+  _chatBadgePerfRenderLogged = false;
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
     try {
       window.ffCloseGlobalBlockingOverlays();
@@ -209,9 +291,10 @@ async function initChatScreen() {
     renderChatHeaderForRole(null);
     return;
   }
+  subscribeToConversationList();
   await Promise.all([loadChatSalonUsers(), loadChatTemplates(), loadChatFlows()]);
   renderChatHeaderForRole(chatUserProfile.role);
-  subscribeToConversationList();
+  if (allConversations.length) renderThreadList();
   _bindChatConvFreeTextComposer();
   _syncChatConvFreeTextComposer();
   _chatInitialized = true;
@@ -240,12 +323,22 @@ async function loadChatUserProfile() {
 }
 
 async function loadChatSalonUsers() {
-  if (!chatUserProfile?.salonId) return;
+  if (!chatUserProfile?.salonId) {
+    chatSalonUsers = [];
+    _chatMembersLoaded = true;
+    return;
+  }
+  _chatMembersLoaded = false;
   try {
     const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/members`));
-    chatSalonUsers = snap.docs.map(d => ({ uid: d.id, ...d.data() }))
-                              .filter(u => u.uid !== chatUserProfile.uid);
-  } catch(e) { chatSalonUsers = []; }
+    chatSalonUsers = snap.docs
+      .map(d => ({ ...d.data(), uid: d.id }))
+      .filter(u => u.uid !== chatUserProfile.uid);
+  } catch (e) {
+    chatSalonUsers = [];
+  } finally {
+    _chatMembersLoaded = true;
+  }
 }
 
 async function loadChatTemplates() {
@@ -300,12 +393,19 @@ function subscribeToConversationList() {
 
   const uid  = chatUserProfile.uid;
 
+  console.log('[ChatBadgePerf] subscribe-start', performance.now(), Date.now());
+  _chatConvFirstSnapLogged = false;
+
   chatConvsUnsub = onSnapshot(
     query(
       collection(db, `salons/${chatUserProfile.salonId}/conversations`),
       where('participants', 'array-contains', uid)
     ),
     snap => {
+      if (!_chatConvFirstSnapLogged) {
+        _chatConvFirstSnapLogged = true;
+        console.log('[ChatBadgePerf] first-snapshot', performance.now(), Date.now());
+      }
       allConversations = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       // Sort client-side (avoid composite index requirements)
       allConversations.sort((a, b) => {
@@ -325,6 +425,10 @@ function subscribeToConversationList() {
       });
 
       renderThreadList();
+      if (!_chatBadgePerfRenderLogged && _chatBadgePerfOpenMs) {
+        _chatBadgePerfRenderLogged = true;
+        console.log('[ChatBadgePerf] render-done', performance.now(), Date.now());
+      }
       if (currentConvId) renderConversation(currentConvId);
       else _renderEmptyConversation();
     },
@@ -354,7 +458,7 @@ function renderThreadList() {
     const otherUid = _otherUidFromParticipants(conv.participants, uid);
     const otherName = _nameForUid(otherUid) || 'Unknown';
     const unread = (conv.unreadFor && conv.unreadFor[uid]) ? Number(conv.unreadFor[uid]) : 0;
-    const myInitial  = (chatUserProfile?.name || '?').charAt(0).toUpperCase();
+    const myInitial  = (_trimStr(chatUserProfile?.displayName) || _trimStr(chatUserProfile?.name) || '?').charAt(0).toUpperCase();
     const otherInitial = otherName.charAt(0).toUpperCase();
     const myAvatarUrl = _avatarUrlForUid(uid);
     const otherAvatarUrl = _avatarUrlForUid(otherUid);
@@ -428,11 +532,10 @@ function renderConversation(convId) {
 
   const conv = allConversations.find(c => c.id === convId);
   const otherUid = _otherUidFromParticipants(conv?.participants, uid);
-  const otherName = _nameForUid(otherUid);
   const replyBtn = document.getElementById('chatConvReplyBtn');
   if (replyBtn) {
     replyBtn.setAttribute('data-other-uid', otherUid);
-    replyBtn.setAttribute('data-other-name', otherName);
+    replyBtn.setAttribute('data-other-name', _nameForUidForSend(otherUid));
     replyBtn.setAttribute('data-conv-id', convId);
   }
 
@@ -540,13 +643,13 @@ async function _sendFreeTextDirect(recipientUid, recipientName, conversationIdOv
   const salonId = chatUserProfile.salonId;
   const senderUid = chatUserProfile.uid;
   const senderName =
-    chatUserProfile.name ||
-    chatUserProfile.displayName ||
-    (auth.currentUser && (auth.currentUser.displayName || auth.currentUser.email)) ||
+    _trimStr(chatUserProfile.displayName) ||
+    _trimStr(chatUserProfile.name) ||
+    (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
     '';
   const senderRole = chatUserProfile.role || '';
   const rUid = recipientUid;
-  const rName = recipientName || _nameForUid(rUid) || rUid;
+  const rName = recipientName || _nameForUidForSend(rUid);
   const convId = conversationIdOverride || buildConvId(senderUid, rUid);
 
   const convRef = doc(db, `salons/${salonId}/conversations`, convId);
@@ -607,7 +710,7 @@ window.sendChatConvFreeText = async function() {
     alert('Select a conversation first.');
     return;
   }
-  const otherName = replyBtn?.getAttribute('data-other-name') || _nameForUid(otherUid) || otherUid;
+  const otherName = replyBtn?.getAttribute('data-other-name') || _nameForUidForSend(otherUid);
   const sendBtn = document.getElementById('chatConvFreeTextSendBtn');
   if (sendBtn) {
     sendBtn.disabled = true;
@@ -636,7 +739,7 @@ window.sendChatConvFreeText = async function() {
 window.openThreadReply = async function() {
   const btn = document.getElementById('chatConvReplyBtn');
   const otherUid = btn?.getAttribute('data-other-uid') || '';
-  const otherName = btn?.getAttribute('data-other-name') || '';
+  const otherName = btn?.getAttribute('data-other-name') || _nameForUidForSend(otherUid);
   const convId = btn?.getAttribute('data-conv-id') || currentConvId;
   if (!otherUid || !chatUserProfile) return;
 
@@ -656,7 +759,10 @@ window.openThreadReply = async function() {
   }
 
   chatReplyContext = { uid: otherUid, name: otherName, conversationId: convId };
-  await _openChatModal({ title: `↩ Reply to ${otherName || otherUid}`, showSendTo: false });
+  await _openChatModal({
+    title: `↩ Reply to ${_nameForUid(otherUid) || 'Someone'}`,
+    showSendTo: false
+  });
 };
 
 // ─── Mark Thread Read ──────────────────────────────────────────────────────────
@@ -871,7 +977,11 @@ async function _openChatModal({ title, showSendTo }) {
     recipientList.innerHTML = pool.length === 0
       ? '<div style="padding:10px;color:#6b7280;font-size:13px;">No recipients available.</div>'
       : pool.map(u => {
-          const displayName = (u.name || u.email || u.uid || '').trim();
+          const displayName =
+            _memberDisplayNameFromRow(u) ||
+            _staffDisplayNameForUid(u.uid) ||
+            _trimStr(u.email) ||
+            'Unknown';
           const search = `${displayName} ${u.email || ''} ${roleLabel(u.role)}`.toLowerCase();
           const avatarUrl = _avatarUrlForUid(u.uid);
           const avatarHtml = avatarUrl
@@ -1099,7 +1209,7 @@ function _updateRecipientSummary() {
     label.textContent = 'Select recipients…';
     return;
   }
-  const firstName = checked[0].getAttribute('data-name') || checked[0].value;
+  const firstName = checked[0].getAttribute('data-name') || _nameForUidForSend(checked[0].value);
   label.textContent = checked.length === 1 ? firstName : `${firstName} +${checked.length - 1}`;
 }
 
@@ -1160,11 +1270,17 @@ window.confirmSendChatMessage = async function() {
         ? chatSalonUsers
         : chatSalonUsers.filter(u => isMgrPlus(u.role));
       recipientUids  = pool.map(u => u.uid);
-      recipientNames = pool.map(u => u.name || u.uid);
+      recipientNames = pool.map(
+        u =>
+          _memberDisplayNameFromRow(u) ||
+          _staffDisplayNameForUid(u.uid) ||
+          _trimStr(u.email) ||
+          'Someone'
+      );
     } else {
       document.querySelectorAll('input[name="chatRecipient"]:checked').forEach(cb => {
         recipientUids.push(cb.value);
-        recipientNames.push(cb.getAttribute('data-name') || cb.value);
+        recipientNames.push(cb.getAttribute('data-name') || _nameForUidForSend(cb.value));
       });
     }
     if (!recipientUids.length) { alert('Please select at least one recipient.'); return; }
@@ -1178,22 +1294,22 @@ window.confirmSendChatMessage = async function() {
       const convOverride = chatReplyContext?.conversationId || null;
       for (let i = 0; i < recipientUids.length; i++) {
         const rUid = recipientUids[i];
-        const rName = recipientNames[i] || _nameForUid(rUid) || rUid;
+        const rName = recipientNames[i] || _nameForUidForSend(rUid);
         await _sendFreeTextDirect(rUid, rName, convOverride, freeRaw);
       }
     } else {
       const salonId = chatUserProfile.salonId;
       const senderUid = chatUserProfile.uid;
       const senderName =
-        chatUserProfile.name ||
-        chatUserProfile.displayName ||
-        (auth.currentUser && (auth.currentUser.displayName || auth.currentUser.email)) ||
+        _trimStr(chatUserProfile.displayName) ||
+        _trimStr(chatUserProfile.name) ||
+        (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
         '';
       const senderRole = chatUserProfile.role || '';
 
       for (let i = 0; i < recipientUids.length; i++) {
         const rUid = recipientUids[i];
-        const rName = recipientNames[i] || _nameForUid(rUid) || rUid;
+        const rName = recipientNames[i] || _nameForUidForSend(rUid);
         const convId = chatReplyContext?.conversationId || buildConvId(senderUid, rUid);
 
         const convRef = doc(db, `salons/${salonId}/conversations`, convId);
@@ -1266,12 +1382,19 @@ window.confirmSendChatMessage = async function() {
 export function subscribeToChatBadge(uid, salonId) {
   if (!uid || !salonId) return;
   if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
+  _chatNavBadgeFirstSnapLogged = false;
+  _chatNavBadgeRenderDoneLogged = false;
+  console.log('[ChatBadgePerf] subscribe-start nav-badge', performance.now(), Date.now());
   chatBadgeUnsub = onSnapshot(
     query(
       collection(db, `salons/${salonId}/conversations`),
       where('participants', 'array-contains', uid)
     ),
     snap => {
+      if (!_chatNavBadgeFirstSnapLogged) {
+        _chatNavBadgeFirstSnapLogged = true;
+        console.log('[ChatBadgePerf] first-snapshot nav-badge', performance.now(), Date.now());
+      }
       const unread = snap.docs.reduce((sum, d) => {
         const data = d.data() || {};
         const n = (data.unreadFor && data.unreadFor[uid]) ? Number(data.unreadFor[uid]) : 0;
@@ -1281,6 +1404,10 @@ export function subscribeToChatBadge(uid, salonId) {
       if (!badge) return;
       badge.textContent = unread > 99 ? '99+' : String(unread);
       badge.style.display = unread > 0 ? 'inline-flex' : 'none';
+      if (!_chatNavBadgeRenderDoneLogged) {
+        _chatNavBadgeRenderDoneLogged = true;
+        console.log('[ChatBadgePerf] render-done nav-badge', performance.now(), Date.now());
+      }
     }
   );
 }

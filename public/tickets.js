@@ -1560,42 +1560,13 @@ if (typeof window !== 'undefined') {
 }
 
 function showToast(msg, type = 'info') {
-  // Remove existing toast
-  const existing = document.getElementById('ff-tickets-toast');
-  if (existing) existing.remove();
-
-  const colors = { success: '#059669', error: '#dc2626', info: '#2563eb', warning: '#d97706' };
-  const icons  = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
-  const bg = colors[type] || colors.info;
-  const icon = icons[type] || icons.info;
-
-  const toast = document.createElement('div');
-  toast.id = 'ff-tickets-toast';
-  toast.style.cssText = [
-    'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
-    `background:${bg}`, 'color:#fff', 'padding:12px 22px',
-    'border-radius:999px', 'font-size:14px', 'font-weight:600',
-    'z-index:999999', 'box-shadow:0 4px 20px rgba(0,0,0,0.25)',
-    'display:flex', 'align-items:center', 'gap:8px',
-    'white-space:nowrap', 'pointer-events:none',
-    'animation:ffToastIn .2s ease'
-  ].join(';');
-  toast.innerHTML = `<span style="font-size:16px;">${icon}</span><span>${String(msg).replace(/</g,'&lt;')}</span>`;
-
-  // Add animation
-  if (!document.getElementById('ff-toast-style')) {
-    const s = document.createElement('style');
-    s.id = 'ff-toast-style';
-    s.textContent = '@keyframes ffToastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}';
-    document.head.appendChild(s);
+  if (typeof window !== 'undefined' && window.ffToast && typeof window.ffToast.show === 'function') {
+    const v =
+      type === 'success' ? 'success' : type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info';
+    window.ffToast.show(String(msg), { variant: v, durationMs: type === 'error' ? 6000 : 4000 });
+    return;
   }
-
-  document.body.appendChild(toast);
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transition = 'opacity .3s';
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
+  console.warn('[Tickets]', msg, type);
 }
 
 /** Custom confirm for tickets: always use in-app modal, never browser confirm. */
@@ -1812,9 +1783,12 @@ function renderTicketsList() {
       ? '<span class="ticket-customer-approved-badge" title="Customer approved the price">Approved</span>'
       : '';
     const technicianAvatarUrl = getTicketTechnicianAvatarUrl(t);
-    const avatarHtml = technicianAvatarUrl
-      ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex-shrink:0;"><img src="${String(technicianAvatarUrl).replace(/"/g,'&quot;')}" alt="" style="width:100%;height:100%;object-fit:cover;"></div>`
-      : `<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#9d68b9,#ff9580);color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${initial}</div>`;
+    const initialEsc = escapeHtml(initial);
+    const avatarLoadedAttr = technicianAvatarUrl ? '0' : '1';
+    const imgTag = technicianAvatarUrl
+      ? `<img class="ticket-card-avatar-img" src="${String(technicianAvatarUrl).replace(/"/g, '&quot;')}" alt="" loading="lazy" decoding="async" onload="var w=this.closest('.ticket-card-avatar-wrap');if(w)w.setAttribute('data-avatar-loaded','1');" onerror="var w=this.closest('.ticket-card-avatar-wrap');if(w)w.setAttribute('data-avatar-loaded','error');" />`
+      : '';
+    const avatarHtml = `<div class="ticket-card-avatar-wrap" data-avatar-loaded="${avatarLoadedAttr}"><span class="ticket-card-avatar-fallback">${initialEsc}</span>${imgTag}</div>`;
 
     // Service lines — bullet style matching screenshot
     const linesHtml = lines.map(l => `<div style="font-size:13px;color:#374151;padding:2px 0;">${formatLineForList(l)}</div>`).join('');
@@ -1832,8 +1806,8 @@ function renderTicketsList() {
 
     return `
     <div class="ticket-card" data-ticket-id="${t.id}">
-      <!-- Header row -->
-      <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">
+      <!-- Header row: fixed min-height + center alignment avoids row jump when avatar/text resolves -->
+      <div class="ticket-card-header-row" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;min-height:44px;">
         ${editBtnHtml}
         ${avatarHtml}
         <div style="flex:1;min-width:0;">
@@ -1856,7 +1830,15 @@ function renderTicketsList() {
       ${asIsHtml}
       ${deleteBtnHtml}
     </div>
-  `}).join('');
+  `  }).join('');
+
+  listEl.querySelectorAll('.ticket-card-avatar-wrap img.ticket-card-avatar-img').forEach((img) => {
+    try {
+      if (img.complete && img.naturalHeight > 0) {
+        img.closest('.ticket-card-avatar-wrap')?.setAttribute('data-avatar-loaded', '1');
+      }
+    } catch (e) {}
+  });
 
   listEl.querySelectorAll('.ticket-card').forEach(card => {
     const ticketId = card.getAttribute('data-ticket-id');
@@ -2985,6 +2967,7 @@ export function goToTickets() {
   if (_ticketsDataReady && currentUserProfile) {
     enrichTicketsProfileFromMemberDoc()
       .then(() => setupTicketsUI())
+      .then(() => loadTicketsMembersForAvatars())
       .then(() => {
         subscribeTickets({ resetLoading: true });
         renderTicketsList();
@@ -3000,9 +2983,9 @@ export function goToTickets() {
       await loadServices();
       await setupTicketsUI();
       _ticketsDataReady = true;
+      await loadTicketsMembersForAvatars();
       subscribeTickets({ resetLoading: true });
       renderTicketsList();
-      loadTicketsMembersForAvatars().then(() => renderTicketsList());
       updateTicketsNavBadge();
     }).catch((err) => {
       console.error('[Tickets] goToTickets init failed', err);
