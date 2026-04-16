@@ -15,6 +15,17 @@ service firebase.storage {
       return doc == null ? null : doc.data;
     }
 
+    function userRoleLower() {
+      return userDoc() != null && userDoc().role is string ? userDoc().role.lower() : '';
+    }
+
+    function isManagerSalonStorage(salonId) {
+      return signedIn()
+        && userDoc() != null
+        && userDoc().salonId == salonId
+        && userRoleLower() in ['manager', 'admin', 'owner'];
+    }
+
     // User private files
     match /users/{userId}/{allFiles=**} {
       allow read, write: if signedIn() && uid() == userId;
@@ -40,6 +51,12 @@ service firebase.storage {
     // Inbox response documents (manager uploads response file for document requests)
     match /salons/{salonId}/inboxDocuments/{allPaths=**} {
       allow read, write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+    }
+
+    // Inventory order receipts / invoices (managers upload; salon members read)
+    match /salons/{salonId}/inventory-order-documents/{docId}/{fileName} {
+      allow read: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+      allow write: if isManagerSalonStorage(salonId);
     }
 
     // Legacy Media uploads (contentWorks) — files under media/{workId}/...

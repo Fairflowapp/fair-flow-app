@@ -97,6 +97,16 @@
         {"fieldPath": "featured", "order": "ASCENDING"},
         {"fieldPath": "createdAt", "order": "DESCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "inventoryItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "categoryId", "order": "ASCENDING"},
+        {"fieldPath": "subcategoryId", "order": "ASCENDING"},
+        {"fieldPath": "order", "order": "ASCENDING"},
+        {"fieldPath": "name", "order": "ASCENDING"}
+      ]
     }
   ],
   "fieldOverrides": []

@@ -21,7 +21,8 @@ import {
   deleteDoc,
   onSnapshot,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  increment,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
@@ -889,7 +890,7 @@ async function loadInboxItems() {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
           where('forUid', '==', uid),
-          where('status', '==', 'open'),
+          where('status', 'in', ['open', 'pending']),
           orderBy('lastActivityAt', 'desc'),
           limit(50)
         );
@@ -929,7 +930,7 @@ async function loadInboxItems() {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
           where('forUid', '==', uid),
-          where('status', '==', 'open'),
+          where('status', 'in', ['open', 'pending']),
           orderBy('lastActivityAt', 'desc'),
           limit(50)
         );
@@ -981,7 +982,10 @@ function updateInboxBadges() {
 
   // Open: new requests not yet seen by recipient
   const openCount = currentRequests.filter(
-    r => r.forUid === uid && r.status === 'open' && r.unreadForManagers === true
+    (r) =>
+      r.forUid === uid &&
+      (r.status === "open" || r.status === "pending") &&
+      r.unreadForManagers === true
   ).length;
 
   // Needs Info: requests where staff replied but recipient hasn't seen it yet
@@ -1078,7 +1082,7 @@ function _renderInboxListInner() {
   // Client-side status filter to prevent flicker when Firestore sends intermediate snapshots
   if (inboxViewMode === 'to_handle' || role === 'technician') {
     if (currentInboxTab === 'open') {
-      requestsToShow = requestsToShow.filter(r => r.status === 'open');
+      requestsToShow = requestsToShow.filter((r) => r.status === "open" || r.status === "pending");
     } else if (currentInboxTab === 'needs_info') {
       requestsToShow = requestsToShow.filter(r => r.status === 'needs_info');
     } else if (currentInboxTab === 'approved') {
@@ -1191,8 +1195,9 @@ function createRequestCard(request) {
   card.onclick = () => showRequestDetails(request.id);
 
   const typeInfo = getRequestTypeInfo(request.type);
-  const statusStr = String(request.status != null ? request.status : 'open');
-  const statusClass = `inbox-status-${statusStr.replace(/_/g, '-')}`;
+  const statusStr = String(request.status != null ? request.status : "open");
+  const statusDisplay = inboxSupplyStatusDisplayLabel(request) || statusStr.replace(/_/g, " ");
+  const statusClass = `inbox-status-${statusStr.replace(/_/g, "-")}`;
   const createdDate = request.createdAt?.toDate ? request.createdAt.toDate() : new Date();
   const dateStr = formatRelativeDate(createdDate);
 
@@ -1238,7 +1243,7 @@ function createRequestCard(request) {
       <div style="flex:1;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
           <span style="font-weight:600;font-size:14px;color:#111;">${typeInfo.label}</span>
-          <span class="inbox-status-badge ${statusClass}">${statusStr.replace(/_/g, ' ')}</span>
+          <span class="inbox-status-badge ${statusClass}">${statusDisplay}</span>
           ${request.priority === 'urgent' ? '<span style="color:#ef4444;font-size:12px;">🔥 Urgent</span>' : ''}
         </div>
         <div style="font-size:13px;color:#6b7280;margin-bottom:8px;">
@@ -1270,6 +1275,497 @@ function escapeHtml(s) {
   const div = document.createElement('div');
   div.textContent = s;
   return div.innerHTML;
+}
+
+/** Supply requests use pending → approved | denied; legacy supplies may still be status open. */
+function inboxSupplyRequestIsPending(request) {
+  if (!request || String(request.type || "").trim() !== "supplies") return false;
+  const s = String(request.status || "").trim();
+  return s === "pending" || s === "open";
+}
+
+/** Human-readable decision label for supply requests (modal + cards + details). */
+function inboxSupplyStatusDisplayLabel(request) {
+  if (!request || String(request.type || "").trim() !== "supplies") return null;
+  const s = String(request.status || "").trim();
+  if (s === "pending" || s === "open") return "Pending";
+  if (s === "approved") return "Approved";
+  if (s === "denied") return "Denied";
+  return s.replace(/_/g, " ");
+}
+
+const FF_INVENTORY_SUPPLY_VARIANT_KEYS = new Set(["dip", "gel", "regular"]);
+
+function parseApprovedSupplyLineQty(line) {
+  const q = line?.qty;
+  if (q == null || q === "") return null;
+  const n = typeof q === "number" ? q : Number(String(q).trim());
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
+function parseApprovedSupplyLineUnit(line) {
+  const u = line?.unit;
+  if (u == null || u === "") return null;
+  const t = String(u).trim();
+  return t === "" ? null : t.slice(0, 80);
+}
+
+/**
+ * For each line item with a valid inventory item id, increment approval metadata on that doc.
+ * When variantKey is dip|gel|regular, also updates variants.[key].approvedRequestsCount (+ timestamps / request id).
+ * When qty is a valid positive integer, accumulates approved requested qty metadata (item + variant when applicable).
+ * Does not change targetStock, currentStock, or order quantities.
+ */
+async function applyApprovedSupplyRequestToInventory(requestId, requestData) {
+  const salonId = currentUserProfile?.salonId;
+  if (!salonId) return;
+  const rid = String(requestId || "").trim();
+  if (!rid) return;
+  const items = Array.isArray(requestData?.items) ? requestData.items : [];
+  for (const line of items) {
+    const itemId = String(line?.itemId || "").trim();
+    if (!itemId) continue;
+    const vkRaw = String(line?.variantKey ?? "").trim().toLowerCase();
+    const variantKey = FF_INVENTORY_SUPPLY_VARIANT_KEYS.has(vkRaw) ? vkRaw : null;
+    const qty = parseApprovedSupplyLineQty(line);
+    const unit = parseApprovedSupplyLineUnit(line);
+
+    const ref = doc(db, `salons/${salonId}/inventoryItems`, itemId);
+    try {
+      const snap = await getDoc(ref);
+      if (!snap.exists()) continue;
+      const patch = {
+        approvedRequestsCount: increment(1),
+        lastApprovedRequestAt: serverTimestamp(),
+        lastApprovedRequestId: rid,
+        updatedAt: serverTimestamp(),
+      };
+      if (qty != null) {
+        patch.approvedRequestedQtyTotal = increment(qty);
+        patch.lastApprovedRequestedQty = qty;
+        patch.lastApprovedRequestedUnit = unit;
+      }
+      if (variantKey) {
+        patch[`variants.${variantKey}.approvedRequestsCount`] = increment(1);
+        patch[`variants.${variantKey}.lastApprovedRequestAt`] = serverTimestamp();
+        patch[`variants.${variantKey}.lastApprovedRequestId`] = rid;
+      }
+      if (variantKey && qty != null) {
+        patch[`variants.${variantKey}.approvedRequestedQtyTotal`] = increment(qty);
+        patch[`variants.${variantKey}.lastApprovedRequestedQty`] = qty;
+        patch[`variants.${variantKey}.lastApprovedRequestedUnit`] = unit;
+      }
+      await updateDoc(ref, patch);
+    } catch (e) {
+      console.warn("[Inbox] applyApprovedSupplyRequestToInventory skip", itemId, e);
+    }
+  }
+}
+
+async function approveSupplyRequest(requestId, requestData) {
+  const salonId = currentUserProfile.salonId;
+  const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
+  await applyApprovedSupplyRequestToInventory(requestId, requestData);
+  await updateDoc(inboxRef, {
+    status: "approved",
+    approvedAt: serverTimestamp(),
+    approvedBy: currentUserProfile.uid,
+    decidedAt: serverTimestamp(),
+    decidedBy: currentUserProfile.uid,
+    lastActivityAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    unreadForManagers: false,
+  });
+}
+
+async function denySupplyRequest(requestId, responseNote) {
+  const salonId = currentUserProfile.salonId;
+  const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
+  await updateDoc(inboxRef, {
+    status: "denied",
+    deniedAt: serverTimestamp(),
+    deniedBy: currentUserProfile.uid,
+    decidedAt: serverTimestamp(),
+    decidedBy: currentUserProfile.uid,
+    responseNote: responseNote != null && String(responseNote).trim() !== "" ? String(responseNote).trim() : null,
+    lastActivityAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    unreadForManagers: false,
+  });
+}
+
+// --- Supplies request form: inventory master (categories → subcategories → items) ---
+
+const SUPPLIES_VARIANT_LABELS = { dip: "Dip", gel: "Gel", regular: "Regular" };
+
+/** Heuristic: category/subcategory names suggest dip/gel/regular inventory. */
+function suppliesCategorySubcategoryVariantsRelevant(categoryName, subcategoryName) {
+  const s = `${categoryName || ""} ${subcategoryName || ""}`.toLowerCase();
+  if (!s.trim()) return false;
+  return /(dip|gel|powder|acrylic|lacquer|polish|color|nail)/.test(s);
+}
+
+function suppliesRowRequiresVariant(row) {
+  const itemSel = row.querySelector(".supplies-item-select");
+  const itemId = (itemSel?.value || "").trim();
+  if (!itemId) return false;
+  const itemOpt = itemSel?.selectedOptions?.[0];
+  const hasVariants = itemOpt?.getAttribute("data-has-variants") === "1";
+  const catOpt = row.querySelector(".supplies-cat-select")?.selectedOptions?.[0];
+  const subOpt = row.querySelector(".supplies-sub-select")?.selectedOptions?.[0];
+  const catName = catOpt?.getAttribute("data-category-name") || "";
+  const subName = subOpt?.getAttribute("data-subcategory-name") || "";
+  return hasVariants || suppliesCategorySubcategoryVariantsRelevant(catName, subName);
+}
+
+function syncSuppliesRowVariantUi(row) {
+  const itemSel = row.querySelector(".supplies-item-select");
+  const varWrap = row.querySelector(".supplies-variant-wrap");
+  const varSel = row.querySelector(".supplies-variant-select");
+  if (!varWrap || !varSel) return;
+  const itemId = (itemSel?.value || "").trim();
+  if (!itemId) {
+    varWrap.style.display = "none";
+    varSel.disabled = true;
+    varSel.value = "";
+    return;
+  }
+  const need = suppliesRowRequiresVariant(row);
+  if (need) {
+    varWrap.style.display = "block";
+    varSel.disabled = false;
+  } else {
+    varWrap.style.display = "none";
+    varSel.disabled = true;
+    varSel.value = "";
+  }
+}
+
+const SUPPLIES_ITEM_ROW_INNER_HTML = `
+  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+    <div style="flex:1;min-width:140px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Category</span>
+      <select class="supplies-cat-select" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        <option value="">Select…</option>
+      </select>
+    </div>
+    <div style="flex:1;min-width:140px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Subcategory</span>
+      <select class="supplies-sub-select" disabled style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;opacity:0.88;">
+        <option value="">Select…</option>
+      </select>
+    </div>
+    <div style="flex:1.2;min-width:180px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Item</span>
+      <select class="supplies-item-select" disabled style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;opacity:0.88;">
+        <option value="">Select…</option>
+      </select>
+    </div>
+    <div class="supplies-variant-wrap" style="display:none;min-width:108px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Variant</span>
+      <select class="supplies-variant-select" disabled style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;opacity:0.88;">
+        <option value="">Select…</option>
+        <option value="dip">Dip</option>
+        <option value="gel">Gel</option>
+        <option value="regular">Regular</option>
+      </select>
+    </div>
+    <div style="width:76px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Qty</span>
+      <input type="number" class="supplies-item-quantity" min="0" step="1" placeholder="—" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;" />
+    </div>
+    <div style="min-width:104px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Unit</span>
+      <select class="supplies-item-unit" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        <option value="pcs">pcs</option>
+        <option value="box">box</option>
+        <option value="bottle">bottle</option>
+        <option value="case">case</option>
+        <option value="roll">roll</option>
+        <option value="pack">pack</option>
+        <option value="lb">lb</option>
+        <option value="oz">oz</option>
+        <option value="ml">ml</option>
+        <option value="gal">gal</option>
+      </select>
+    </div>
+    <button type="button" class="supplies-item-remove" title="Remove line" style="padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;align-self:flex-end;">🗑️</button>
+  </div>
+`.trim();
+
+async function ffFetchInventoryCategoriesForSupplies() {
+  const salonId = currentUserProfile?.salonId;
+  if (!salonId) return [];
+  const q = query(
+    collection(db, `salons/${salonId}/inventoryCategories`),
+    orderBy("order", "asc"),
+    orderBy("name", "asc")
+  );
+  const snap = await getDocs(q);
+  const arr = [];
+  snap.forEach((d) => {
+    const data = d.data();
+    arr.push({
+      id: d.id,
+      name: String(data.name || "").trim() || "Untitled",
+    });
+  });
+  return arr;
+}
+
+async function ffFetchInventorySubcategoriesForSupplies(categoryId) {
+  const cid = String(categoryId || "").trim();
+  const salonId = currentUserProfile?.salonId;
+  if (!cid || !salonId) return [];
+  const q = query(
+    collection(db, `salons/${salonId}/inventoryCategories/${cid}/inventorySubcategories`),
+    orderBy("order", "asc"),
+    orderBy("name", "asc")
+  );
+  const snap = await getDocs(q);
+  const arr = [];
+  snap.forEach((d) => {
+    const data = d.data();
+    arr.push({
+      id: d.id,
+      name: String(data.name || "").trim() || "Untitled",
+    });
+  });
+  return arr;
+}
+
+async function ffFetchInventoryItemsForSupplies(categoryId, subcategoryId) {
+  const cid = String(categoryId || "").trim();
+  const sid = String(subcategoryId || "").trim();
+  const salonId = currentUserProfile?.salonId;
+  if (!cid || !sid || !salonId) return [];
+  const q = query(
+    collection(db, `salons/${salonId}/inventoryItems`),
+    where("categoryId", "==", cid),
+    where("subcategoryId", "==", sid),
+    orderBy("order", "asc"),
+    orderBy("name", "asc")
+  );
+  const snap = await getDocs(q);
+  const arr = [];
+  snap.forEach((d) => {
+    const data = d.data();
+    let internalNumber = null;
+    if (data.internalNumber != null && data.internalNumber !== "") {
+      const n = typeof data.internalNumber === "number" ? data.internalNumber : Number(data.internalNumber);
+      internalNumber = Number.isFinite(n) ? n : null;
+    }
+    const name = String(data.name || "").trim() || "Untitled";
+    const label = internalNumber != null ? `#${internalNumber} ${name}` : name;
+    arr.push({
+      id: d.id,
+      name,
+      label,
+      internalNumber,
+      hasVariants: data.hasVariants === true,
+      brand: data.brand != null && String(data.brand).trim() !== "" ? String(data.brand).trim() : null,
+      brandCode: data.brandCode != null && String(data.brandCode).trim() !== "" ? String(data.brandCode).trim() : null,
+    });
+  });
+  return arr;
+}
+
+function wireSuppliesItemRow(row, categories) {
+  const catSel = row.querySelector(".supplies-cat-select");
+  const subSel = row.querySelector(".supplies-sub-select");
+  const itemSel = row.querySelector(".supplies-item-select");
+  if (!catSel || !subSel || !itemSel) return;
+
+  catSel.innerHTML = "";
+  const ph = document.createElement("option");
+  ph.value = "";
+  ph.textContent = "Select…";
+  catSel.appendChild(ph);
+  for (const c of categories) {
+    const o = document.createElement("option");
+    o.value = c.id;
+    o.textContent = c.name;
+    o.setAttribute("data-category-name", c.name);
+    catSel.appendChild(o);
+  }
+
+  const onCatChange = async () => {
+    const cid = catSel.value.trim();
+    subSel.innerHTML = "";
+    const sph = document.createElement("option");
+    sph.value = "";
+    sph.textContent = "Select…";
+    subSel.appendChild(sph);
+    itemSel.innerHTML = "";
+    const iph = document.createElement("option");
+    iph.value = "";
+    iph.textContent = "Select…";
+    itemSel.appendChild(iph);
+    itemSel.disabled = true;
+    if (!cid) {
+      subSel.disabled = true;
+      syncSuppliesRowVariantUi(row);
+      return;
+    }
+    subSel.disabled = false;
+    let subs = [];
+    try {
+      subs = await ffFetchInventorySubcategoriesForSupplies(cid);
+    } catch (e) {
+      console.error("[Inbox] supplies subcategories", e);
+    }
+    for (const s of subs) {
+      const o = document.createElement("option");
+      o.value = s.id;
+      o.textContent = s.name;
+      o.setAttribute("data-subcategory-name", s.name);
+      subSel.appendChild(o);
+    }
+    syncSuppliesRowVariantUi(row);
+  };
+
+  const onSubChange = async () => {
+    const cid = catSel.value.trim();
+    const sid = subSel.value.trim();
+    itemSel.innerHTML = "";
+    const iph = document.createElement("option");
+    iph.value = "";
+    iph.textContent = "Select…";
+    itemSel.appendChild(iph);
+    if (!cid || !sid) {
+      itemSel.disabled = true;
+      syncSuppliesRowVariantUi(row);
+      return;
+    }
+    itemSel.disabled = false;
+    let items = [];
+    try {
+      items = await ffFetchInventoryItemsForSupplies(cid, sid);
+    } catch (e) {
+      console.error("[Inbox] supplies items", e);
+    }
+    for (const it of items) {
+      const o = document.createElement("option");
+      o.value = it.id;
+      o.textContent = it.label;
+      o.setAttribute("data-item-name", it.name);
+      o.setAttribute("data-has-variants", it.hasVariants ? "1" : "0");
+      if (it.internalNumber != null && it.internalNumber !== "") {
+        o.setAttribute("data-internal-number", String(it.internalNumber));
+      }
+      if (it.brand) o.setAttribute("data-brand", it.brand);
+      if (it.brandCode) o.setAttribute("data-brand-code", it.brandCode);
+      itemSel.appendChild(o);
+    }
+    syncSuppliesRowVariantUi(row);
+  };
+
+  catSel.addEventListener("change", () => {
+    void onCatChange();
+  });
+  subSel.addEventListener("change", () => {
+    void onSubChange();
+  });
+  itemSel.addEventListener("change", () => {
+    syncSuppliesRowVariantUi(row);
+  });
+
+  const rm = row.querySelector(".supplies-item-remove");
+  rm?.addEventListener("click", () => {
+    row.remove();
+  });
+
+  syncSuppliesRowVariantUi(row);
+}
+
+function classifySuppliesRow(row) {
+  const cat = (row.querySelector(".supplies-cat-select")?.value || "").trim();
+  const sub = (row.querySelector(".supplies-sub-select")?.value || "").trim();
+  const item = (row.querySelector(".supplies-item-select")?.value || "").trim();
+  if (!cat && !sub && !item) return "empty";
+  if (cat && sub && item) return "ok";
+  return "incomplete";
+}
+
+function readSuppliesRowSnapshot(row) {
+  const cat = row.querySelector(".supplies-cat-select");
+  const sub = row.querySelector(".supplies-sub-select");
+  const item = row.querySelector(".supplies-item-select");
+  const qtyIn = row.querySelector(".supplies-item-quantity");
+  const unitIn = row.querySelector(".supplies-item-unit");
+  const catOpt = cat?.selectedOptions?.[0];
+  const subOpt = sub?.selectedOptions?.[0];
+  const itemOpt = item?.selectedOptions?.[0];
+  const categoryId = (cat?.value || "").trim();
+  const subcategoryId = (sub?.value || "").trim();
+  const itemId = (item?.value || "").trim();
+  if (!categoryId || !subcategoryId || !itemId) return null;
+
+  const categoryName = catOpt?.getAttribute("data-category-name") || "";
+  const subcategoryName = subOpt?.getAttribute("data-subcategory-name") || "";
+  const itemName = itemOpt?.getAttribute("data-item-name") || "";
+  let internalNumber = null;
+  const ins = itemOpt?.getAttribute("data-internal-number");
+  if (ins != null && ins !== "") {
+    const n = Number(ins);
+    internalNumber = Number.isFinite(n) ? n : null;
+  }
+  const brandRaw = itemOpt?.getAttribute("data-brand");
+  const brandCodeRaw = itemOpt?.getAttribute("data-brand-code");
+  const brand = brandRaw ? String(brandRaw) : null;
+  const brandCode = brandCodeRaw ? String(brandCodeRaw) : null;
+
+  const qtyRaw = qtyIn?.value;
+  let qty = null;
+  if (qtyRaw != null && String(qtyRaw).trim() !== "") {
+    const q = parseInt(String(qtyRaw).trim(), 10);
+    qty = Number.isFinite(q) ? q : null;
+  }
+  const unit = (unitIn?.value ?? "").trim() || "pcs";
+
+  const varSel = row.querySelector(".supplies-variant-select");
+  const vkRaw = (varSel?.value || "").trim();
+  let variantKey = null;
+  let variantLabel = null;
+  if (vkRaw === "dip" || vkRaw === "gel" || vkRaw === "regular") {
+    variantKey = vkRaw;
+    variantLabel = SUPPLIES_VARIANT_LABELS[vkRaw] || null;
+  }
+
+  return {
+    categoryId,
+    categoryName,
+    subcategoryId,
+    subcategoryName,
+    itemId,
+    itemName,
+    internalNumber,
+    brand,
+    brandCode,
+    qty,
+    unit,
+    variantKey,
+    variantLabel,
+  };
+}
+
+async function initSuppliesRequestForm(fieldsContainer) {
+  const list = fieldsContainer.querySelector("#suppliesItemsList");
+  const hint = fieldsContainer.querySelector("#suppliesInventoryEmptyHint");
+  if (!list) return;
+  let categories = [];
+  try {
+    categories = await ffFetchInventoryCategoriesForSupplies();
+  } catch (e) {
+    console.error("[Inbox] supplies categories", e);
+    if (typeof showToast === "function") showToast("Could not load inventory categories.", "error");
+  }
+  if (typeof window !== "undefined") {
+    window._suppliesFormCategoriesCache = categories;
+  }
+  if (hint) hint.style.display = categories.length === 0 ? "block" : "none";
+  list.querySelectorAll(".supplies-item-row").forEach((row) => wireSuppliesItemRow(row, categories));
 }
 
 // --- Staff document Inbox alerts (document_expiring_soon / document_expired) — Phase 4 UI ---
@@ -1485,9 +1981,20 @@ function getRequestSummary(request) {
     case 'payment_issue':
     case 'client_issue':
       return data.subject || (data.details || 'View details').substring(0, 60);
-    case 'supplies':
-      const itemCount = data.items?.length || 0;
-      return `${itemCount} item${itemCount !== 1 ? 's' : ''} - ${data.urgency || 'routine'}`;
+    case 'supplies': {
+      const arr = data.items || [];
+      const itemCount = arr.length;
+      const first = arr[0];
+      let label = "";
+      if (first && (first.itemName || first.name)) {
+        const base = String(first.itemName || first.name).slice(0, 32);
+        const vl = first.variantLabel && String(first.variantLabel).trim();
+        label = vl ? `${base} — ${String(vl).slice(0, 14)}` : base.slice(0, 36);
+      }
+      return itemCount
+        ? `${itemCount} item${itemCount !== 1 ? "s" : ""}${label ? `: ${label}` : ""} · ${data.urgency || "routine"}`
+        : `${data.urgency || "routine"}`;
+    }
     case 'maintenance':
       return `${data.area || 'Unknown area'} - ${data.severity || 'minor'} issue`;
     case 'staff_birthday_reminder':
@@ -2314,15 +2821,14 @@ function createRequestForm(type) {
   } else if (type === 'supplies') {
     fieldsContainer.innerHTML = `
       <div>
-        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Items Needed</label>
-        <div id="suppliesItemsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;">
-          <div class="supplies-item-row" style="display:flex;gap:8px;">
-            <input type="text" placeholder="Item name" class="supplies-item-name" style="flex:2;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
-            <input type="number" placeholder="Qty" class="supplies-item-quantity" min="1" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
-            <input type="text" placeholder="Unit" class="supplies-item-unit" value="pcs" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Items needed</label>
+        <p id="suppliesInventoryEmptyHint" style="display:none;margin:0 0 8px;font-size:12px;color:#b45309;">No inventory categories yet. Add categories in Inventory.</p>
+        <div id="suppliesItemsList" style="display:flex;flex-direction:column;gap:10px;margin-bottom:8px;">
+          <div class="supplies-item-row" style="display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;">
+            ${SUPPLIES_ITEM_ROW_INNER_HTML}
           </div>
         </div>
-        <button onclick="addSuppliesItem()" type="button" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;">+ Add Item</button>
+        <button type="button" onclick="addSuppliesItem()" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;">+ Add Item</button>
       </div>
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Urgency</label>
@@ -2333,10 +2839,11 @@ function createRequestForm(type) {
         </select>
       </div>
       <div>
-        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Note (optional)</label>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Additional details</label>
         <textarea id="supplies_note" rows="2" placeholder="Additional details" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
       </div>
     `;
+    void initSuppliesRequestForm(fieldsContainer);
   } else if (type === 'maintenance') {
     fieldsContainer.innerHTML = `
       <div>
@@ -2429,19 +2936,15 @@ function createRequestForm(type) {
 }
 
 window.addSuppliesItem = function() {
-  const list = document.getElementById('suppliesItemsList');
+  const list = document.getElementById("suppliesItemsList");
   if (!list) return;
-  
-  const row = document.createElement('div');
-  row.className = 'supplies-item-row';
-  row.style.cssText = 'display:flex;gap:8px;';
-  row.innerHTML = `
-    <input type="text" placeholder="Item name" class="supplies-item-name" style="flex:2;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
-    <input type="number" placeholder="Qty" class="supplies-item-quantity" min="1" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
-    <input type="text" placeholder="Unit" class="supplies-item-unit" value="pcs" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
-    <button onclick="this.parentElement.remove()" type="button" style="padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;">🗑️</button>
-  `;
+  const categories = (typeof window !== "undefined" && window._suppliesFormCategoriesCache) || [];
+  const row = document.createElement("div");
+  row.className = "supplies-item-row";
+  row.style.cssText = "display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;";
+  row.innerHTML = SUPPLIES_ITEM_ROW_INNER_HTML;
   list.appendChild(row);
+  wireSuppliesItemRow(row, categories);
 };
 
 async function submitRequest(type) {
@@ -2667,27 +3170,31 @@ async function submitRequest(type) {
       };
       
     } else if (type === 'supplies') {
-      const rows = document.querySelectorAll('.supplies-item-row');
+      const rows = document.querySelectorAll(".supplies-item-row");
       const items = [];
-      
-      rows.forEach(row => {
-        const name = row.querySelector('.supplies-item-name')?.value?.trim();
-        const quantity = parseInt(row.querySelector('.supplies-item-quantity')?.value) || 0;
-        const unit = row.querySelector('.supplies-item-unit')?.value?.trim() || 'pcs';
-        
-        if (name && quantity > 0) {
-          items.push({ name, quantity, unit });
+      for (const row of rows) {
+        const st = classifySuppliesRow(row);
+        if (st === "empty") continue;
+        if (st === "incomplete") {
+          showToast("Each line with a selection needs category, subcategory, and item.", "error");
+          return;
         }
-      });
-      
+        if (suppliesRowRequiresVariant(row)) {
+          const vk = (row.querySelector(".supplies-variant-select")?.value || "").trim();
+          if (vk !== "dip" && vk !== "gel" && vk !== "regular") {
+            showToast("Select a variant (Dip, Gel, or Regular) for each line that uses variants.", "error");
+            return;
+          }
+        }
+        const snap = readSuppliesRowSnapshot(row);
+        if (snap) items.push(snap);
+      }
       if (items.length === 0) {
-        showToast('Please add at least one item', 'error');
+        showToast("Add at least one complete line (category, subcategory, and item).", "error");
         return;
       }
-      
-      const urgency = document.getElementById('supplies_urgency')?.value || 'routine';
-      const note = document.getElementById('supplies_note')?.value || null;
-      
+      const urgency = document.getElementById("supplies_urgency")?.value || "routine";
+      const note = document.getElementById("supplies_note")?.value || null;
       data = { items, urgency, note };
       
     } else if (type === 'maintenance') {
@@ -2795,7 +3302,7 @@ async function submitRequest(type) {
       tenantId: salonId,
       locationId: null,
       type: type,
-      status: 'open',
+      status: type === "supplies" ? "pending" : "open",
       priority: 'normal',
       assignedTo: null,
       sentToStaffIds: Array.isArray(sentToStaffIds) ? sentToStaffIds : [],
@@ -2947,8 +3454,9 @@ function showRequestDetails(requestId) {
   `;
   
   const typeInfo = getRequestTypeInfo(request.type);
-  const statusStrModal = String(request.status != null ? request.status : 'open');
-  const statusClass = `inbox-status-${statusStrModal.replace(/_/g, '-')}`;
+  const statusStrModal = String(request.status != null ? request.status : "open");
+  const statusModalDisplay = inboxSupplyStatusDisplayLabel(request) || statusStrModal.replace(/_/g, " ");
+  const statusClass = `inbox-status-${statusStrModal.replace(/_/g, "-")}`;
   const createdDate = request.createdAt?.toDate ? request.createdAt.toDate() : new Date();
   const rd = request.data || {};
   const isDocAlert = request.type === 'document_expiring_soon' || request.type === 'document_expired';
@@ -3052,7 +3560,7 @@ function showRequestDetails(requestId) {
         <span style="font-size:28px;">${typeInfo.icon}</span>
         <div>
           <h2 style="margin:0;font-size:18px;font-weight:600;">${typeInfo.label}</h2>
-          <span class="inbox-status-badge ${statusClass}">${statusStrModal.replace(/_/g, ' ')}</span>
+          <span class="inbox-status-badge ${statusClass}">${statusModalDisplay}</span>
         </div>
       </div>
       <button onclick="closeRequestDetailsModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#9ca3af;">&times;</button>
@@ -3183,7 +3691,21 @@ function showRequestDetails(requestId) {
         </div>
       </div>
     `;
-  } else if (isManager && isRecipient && request.status === 'open') {
+  } else if (isManager && isRecipient && request.type === "supplies" && inboxSupplyRequestIsPending(request)) {
+    detailsHTML += `
+      <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Manager Actions</h3>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <button type="button" onclick="approveRequest('${requestId}')" style="padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;">
+            ✓ Approve
+          </button>
+          <button type="button" onclick="denyRequest('${requestId}')" style="padding:10px;border:1px solid #ef4444;background:#ef4444;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;">
+            ✗ Deny
+          </button>
+        </div>
+      </div>
+    `;
+  } else if (isManager && isRecipient && request.status === "open") {
     const isDocRequest = request.type === 'document_request';
     const isDocMeta = request.type === 'document_upload' || request.type === 'document_request';
     const docMetaEditBtn = isDocMeta
@@ -3461,23 +3983,54 @@ function renderRequestData(request) {
         </div>
       `;
       
-    case 'supplies':
-      const itemsHTML = (data.items || []).map(item => 
-        `<li>${item.name} - ${item.quantity} ${item.unit || 'pcs'}</li>`
-      ).join('');
+    case 'supplies': {
+      const decision = escapeHtml(inboxSupplyStatusDisplayLabel(request) || "—");
+      const itemsHTML = (data.items || [])
+        .map((item) => {
+          if (item.itemId && item.itemName) {
+            const path = [item.categoryName, item.subcategoryName].filter(Boolean).join(" › ");
+            const meta = [
+              item.internalNumber != null && item.internalNumber !== "" ? `#${item.internalNumber}` : "",
+              item.brand || "",
+              item.brandCode || "",
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            const qtyDisp = item.qty != null && item.qty !== "" ? String(item.qty) : "—";
+            const unitDisp = escapeHtml(item.unit || "pcs");
+            const titleLine =
+              item.variantLabel && String(item.variantLabel).trim()
+                ? `${escapeHtml(item.itemName)} — ${escapeHtml(String(item.variantLabel).trim())}`
+                : escapeHtml(item.itemName);
+            return `<li style="margin-bottom:10px;">
+              <div style="font-weight:600;color:#111827;">${titleLine}</div>
+              ${meta ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">${escapeHtml(meta)}</div>` : ""}
+              ${path ? `<div style="font-size:12px;color:#9ca3af;margin-top:2px;">${escapeHtml(path)}</div>` : ""}
+              <div style="font-size:13px;margin-top:4px;">Qty: <strong>${escapeHtml(qtyDisp)}</strong> ${unitDisp}</div>
+            </li>`;
+          }
+          const legacyQty = item.quantity != null ? item.quantity : item.qty;
+          return `<li>${escapeHtml(item.name || "")} — ${escapeHtml(String(legacyQty ?? "—"))} ${escapeHtml(item.unit || "pcs")}</li>`;
+        })
+        .join("");
       return `
         <div style="display:grid;gap:12px;font-size:13px;">
+          <div style="padding:10px 12px;border-radius:8px;background:#f9fafb;border:1px solid #e5e7eb;">
+            <span style="color:#6b7280;font-size:12px;">Decision status</span>
+            <div style="font-weight:600;font-size:15px;margin-top:4px;color:#111827;">${decision}</div>
+          </div>
           <div>
             <span style="color:#6b7280;">Items:</span>
-            <ul style="margin:8px 0;padding-left:20px;">${itemsHTML}</ul>
+            <ul style="margin:8px 0;padding-left:20px;list-style:disc;">${itemsHTML}</ul>
           </div>
           <div>
             <span style="color:#6b7280;">Urgency:</span>
-            <span style="font-weight:500;margin-left:8px;text-transform:capitalize;">${data.urgency || 'routine'}</span>
+            <span style="font-weight:500;margin-left:8px;text-transform:capitalize;">${escapeHtml(data.urgency || "routine")}</span>
           </div>
-          ${data.note ? `<div><span style="color:#6b7280;">Note:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${data.note}</div></div>` : ''}
+          ${data.note ? `<div><span style="color:#6b7280;">Additional details:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.note)}</div></div>` : ""}
         </div>
       `;
+    }
       
     case 'maintenance':
       return `
@@ -3974,9 +4527,20 @@ window.approveRequest = async function(requestId) {
       return;
     }
     const item = snap.data();
-    if (String(item.status || '').trim() === 'approved') {
-      showToast('Already approved.', 'info');
+    if (String(item.status || "").trim() === "approved") {
+      showToast("Already approved.", "info");
       loadInboxItems();
+      return;
+    }
+
+    if (String(item.type || "").trim() === "supplies") {
+      if (!inboxSupplyRequestIsPending({ type: "supplies", status: item.status })) {
+        showToast("This supply request is no longer pending.", "info");
+        loadInboxItems();
+        return;
+      }
+      await approveSupplyRequest(requestId, item.data || {});
+      showToast("Request approved!", "success");
       return;
     }
 
@@ -4057,6 +4621,17 @@ window.denyRequest = async function(requestId) {
       return;
     }
     const item = snap.data();
+    if (String(item.type || "").trim() === "supplies") {
+      if (String(item.status || "").trim() === "denied") {
+        showToast("Already denied.", "info");
+        loadInboxItems();
+        return;
+      }
+      await denySupplyRequest(requestId, reason || null);
+      showToast("Request denied", "success");
+      return;
+    }
+
     if (item.type === 'document_upload' || item.type === 'document_request') {
       await ffSyncStaffDocumentOnInboxReject(db, { salonId, inboxItem: item });
     }
@@ -4077,6 +4652,10 @@ window.denyRequest = async function(requestId) {
     loadInboxItems(); // restore on failure
   }
 };
+
+window.applyApprovedSupplyRequestToInventory = applyApprovedSupplyRequestToInventory;
+window.approveSupplyRequest = approveSupplyRequest;
+window.denySupplyRequest = denySupplyRequest;
 
 window.archiveRequest = async function(requestId) {
   if (!inboxCanManageInbox()) {
@@ -4254,7 +4833,10 @@ function startBgBadgeListener(uid, salonId, roleLc) {
       const keep = new Set(inboxTechnicianNoiseFilter(rows).map((r) => r.id));
       docs = docs.filter((d) => keep.has(d.id));
     }
-    const openCount = docs.filter((d) => d.data().status === 'open').length;
+    const openCount = docs.filter((d) => {
+      const s = d.data().status;
+      return s === "open" || s === "pending";
+    }).length;
     const needsInfoCount = docs.filter((d) => d.data().status === 'needs_info').length;
     const total = openCount + needsInfoCount;
 

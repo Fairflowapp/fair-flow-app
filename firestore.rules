@@ -674,6 +674,33 @@ service cloud.firestore {
       allow create, update, delete: if isManager(salonId);
     }
 
+    // Inventory (categories, subcategories, flat inventoryItems master list)
+    match /salons/{salonId}/inventoryCategories/{catId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isManager(salonId);
+    }
+
+    match /salons/{salonId}/inventoryCategories/{catId}/inventorySubcategories/{subId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isManager(salonId);
+    }
+
+    match /salons/{salonId}/inventoryItems/{itemId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isManager(salonId);
+    }
+
+    // Inventory order receipts / invoices (Storage file + metadata; not tied to order entities yet)
+    match /salons/{salonId}/inventoryOrderDocuments/{docId} {
+      allow read: if belongsToSalon(salonId);
+      allow create: if isManager(salonId)
+        && request.resource.data.fileName is string
+        && request.resource.data.fileUrl is string
+        && request.resource.data.filePath is string
+        && request.resource.data.uploadedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     // Weekly schedule publish flags (which ISO week-start dates are visible to all staff)
     match /salons/{salonId}/schedulePublish/{docId} {
       allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);

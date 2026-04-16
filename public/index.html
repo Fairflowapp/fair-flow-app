@@ -44,6 +44,20 @@
     document.querySelectorAll('.btn-pill').forEach(function(b){b.classList.remove('active');});
     var mediaBtn=document.getElementById('mediaBtn');if(mediaBtn)mediaBtn.classList.add('active');
   };
+  window.goToInventory = window.goToInventory || async function ffInvMockStub() {
+    if (typeof window.goToInventory === 'function' && window.goToInventory !== ffInvMockStub) {
+      return window.goToInventory();
+    }
+    try {
+      await import('/inventory.js?v=20260415_inv_remove_modal2');
+    } catch (e) {
+      console.error('[Inventory mock] load failed', e);
+      return;
+    }
+    if (typeof window.goToInventory === 'function' && window.goToInventory !== ffInvMockStub) {
+      return window.goToInventory();
+    }
+  };
 </script>
 
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
@@ -102,7 +116,8 @@ body.ff-logged-out #chatScreen,
 body.ff-logged-out #inboxScreen,
 body.ff-logged-out #tasksScreen,
 body.ff-logged-out #trainingScreen,
-body.ff-logged-out #scheduleScreen {
+body.ff-logged-out #scheduleScreen,
+body.ff-logged-out #inventoryScreen {
   display: none !important;
   visibility: hidden !important;
   pointer-events: none !important;
@@ -1892,6 +1907,7 @@ dialog footer button, .code-dialog footer button {
 .header .toolbar #ticketsBtn.active,
 .header .toolbar #inboxBtn.active,
 .header .toolbar #mediaBtn.active,
+.header .toolbar #inventoryNavBtn.active,
 .header .toolbar #scheduleBtn.active,
 .header .toolbar #trainingBtn.active,
 .header .toolbar #chatBtn.active {
@@ -1914,6 +1930,7 @@ dialog footer button, .code-dialog footer button {
 .header .toolbar #ticketsBtn.active .nav-icon svg,
 .header .toolbar #inboxBtn.active .nav-icon svg,
 .header .toolbar #mediaBtn.active .nav-icon svg,
+.header .toolbar #inventoryNavBtn.active .nav-icon svg,
 .header .toolbar #scheduleBtn.active .nav-icon svg,
 .header .toolbar #trainingBtn.active .nav-icon svg,
 .header .toolbar #chatBtn.active .nav-icon svg {
@@ -2377,7 +2394,7 @@ dialog footer button, .code-dialog footer button {
 
         <button id="mediaBtn" class="btn-pill nav-item hide-4" onclick="window.goToMedia && window.goToMedia()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span>Media</button>
 
-        <button type="button" id="inventoryNavBtn" class="btn-pill nav-item core-nav hide-3" disabled title="Coming soon" style="opacity:0.5;cursor:not-allowed;pointer-events:none"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>Inventory</button>
+        <button type="button" id="inventoryNavBtn" class="btn-pill nav-item core-nav hide-4" onclick="window.goToInventory && window.goToInventory()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>Inventory</button>
 
         <button type="button" id="scheduleBtn" class="btn-pill nav-item hide-2" aria-label="Schedule"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></span>Schedule</button>
 
@@ -2563,14 +2580,14 @@ dialog footer button, .code-dialog footer button {
                 </div>
               </div>
             </div>
-            <div class="apps-panel-item" data-app="inventory" style="cursor:not-allowed;">
+            <div class="apps-panel-item" data-app="inventory" style="cursor:pointer;">
               <div class="apps-panel-item__content">
                 <div>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
                 </div>
                 <div>
                   <div>Inventory</div>
-                  <div>Coming soon</div>
+                  <div style="font-size:11px;color:#6b7280;">Mock preview</div>
                 </div>
               </div>
             </div>
@@ -6095,6 +6112,7 @@ function ffIsFullscreenModuleCoveringQueue() {
     'ticketsScreen',
     'trainingScreen',
     'scheduleScreen',
+    'inventoryScreen',
     'userProfileScreen',
     'myProfileScreen',
     'manageQueueScreen'
@@ -8612,6 +8630,11 @@ function goToQueue() {
   const mediaScreen = document.getElementById('mediaScreen');
   if (mediaScreen) {
     mediaScreen.style.display = 'none';
+  }
+
+  const inventoryScreenQueue = document.getElementById('inventoryScreen');
+  if (inventoryScreenQueue) {
+    inventoryScreenQueue.style.display = 'none';
   }
   
   // Hide Manage Queue screen if visible
@@ -24371,6 +24394,11 @@ function initializeAppsPanel() {
               window.goToMedia();
             }
             break;
+          case 'inventory':
+            if (typeof window.goToInventory === 'function') {
+              window.goToInventory();
+            }
+            break;
           case 'schedule':
             if (typeof window.goToSchedule === 'function') {
               window.goToSchedule();
@@ -38225,6 +38253,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tickets.js?v=20260420_tickets_load_more_ff_toast"></script>
   <script type="module" src="/media-upload.js?v=20260412_app_js_unify"></script>
+  <script type="module" src="/inventory.js?v=20260415_inv_remove_modal2"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -39305,6 +39334,8 @@ function hookSettingsGuard_DISABLED(){
 /* Ensure MEDIA button exists, but keep normal nav visual weight */
 .header #mediaBtn,.toolbar #mediaBtn{display:inline-flex!important;visibility:visible!important;}
 </style>
+<!-- Inventory mock screen (sidebar + table; content from /inventory.js) -->
+<div id="inventoryScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f8fafc;z-index:300;flex-direction:column;overflow:hidden;"></div>
 <!-- Media Module Screen (like Inbox) -->
 <div id="mediaScreen" class="media-screen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f9fafb;z-index:300;flex-direction:column;overflow:hidden;">
   <!-- Tabs (left) | Filters + Sort + Upload (right, grouped) -->
