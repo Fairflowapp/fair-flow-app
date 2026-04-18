@@ -685,6 +685,24 @@ service cloud.firestore {
       allow create, update, delete: if isManager(salonId);
     }
 
+    /** Draft / future workflow: inventory orders (UI saves drafts only for now). */
+    match /salons/{salonId}/inventoryOrders/{orderId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isManager(salonId);
+    }
+
+    /** Receipts / invoices attached to an inventory order (multiple per order). */
+    match /salons/{salonId}/inventoryOrders/{orderId}/receipts/{receiptId} {
+      allow read: if belongsToSalon(salonId);
+      allow create: if isManager(salonId)
+        && request.resource.data.keys().hasAll(['fileName', 'fileUrl', 'filePath', 'uploadedAt', 'uploadedBy'])
+        && request.resource.data.fileName is string
+        && request.resource.data.fileUrl is string
+        && request.resource.data.filePath is string
+        && request.resource.data.uploadedBy == request.auth.uid;
+      allow update, delete: if isManager(salonId);
+    }
+
     match /salons/{salonId}/inventoryItems/{itemId} {
       allow read: if belongsToSalon(salonId);
       allow create, update, delete: if isManager(salonId);

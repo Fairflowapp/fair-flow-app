@@ -59,6 +59,12 @@ service firebase.storage {
       allow write: if isManagerSalonStorage(salonId);
     }
 
+    // Per-order receipts (multiple files under each order)
+    match /salons/{salonId}/inventoryOrders/{orderId}/receipts/{receiptId}/{fileName} {
+      allow read: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+      allow write: if isManagerSalonStorage(salonId);
+    }
+
     // Legacy Media uploads (contentWorks) — files under media/{workId}/...
     match /salons/{salonId}/media/{workId}/{allPaths=**} {
       allow read, write: if signedIn();
