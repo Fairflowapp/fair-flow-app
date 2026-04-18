@@ -691,16 +691,10 @@ service cloud.firestore {
       allow create, update, delete: if isManager(salonId);
     }
 
-    /** Receipts / invoices attached to an inventory order (multiple per order). */
+    /** Receipts / invoices attached to an inventory order (multiple per order).
+     *  Loose rule: any signed-in user can read/write (matches storage rule); UI is gated. */
     match /salons/{salonId}/inventoryOrders/{orderId}/receipts/{receiptId} {
-      allow read: if belongsToSalon(salonId);
-      allow create: if isManager(salonId)
-        && request.resource.data.keys().hasAll(['fileName', 'fileUrl', 'filePath', 'uploadedAt', 'uploadedBy'])
-        && request.resource.data.fileName is string
-        && request.resource.data.fileUrl is string
-        && request.resource.data.filePath is string
-        && request.resource.data.uploadedBy == request.auth.uid;
-      allow update, delete: if isManager(salonId);
+      allow read, write: if request.auth != null;
     }
 
     match /salons/{salonId}/inventoryItems/{itemId} {

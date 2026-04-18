@@ -20,7 +20,7 @@ import {
   runTransaction,
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 
 const SALON_ID_CACHE_KEY = "ff_salonId_v1";
 
@@ -90,7 +90,7 @@ let _invTableSaveTimer = null;
 /** Row drag-reorder: row id being dragged (HTML5 DnD). */
 let _invRowDndDragId = null;
 
-const STYLE_ID = "ff-inv2-mock-styles-v74";
+const STYLE_ID = "ff-inv2-mock-styles-v87";
 
 /** One-step undo for row/group delete: delayed Firestore write + toast. */
 const INV_UNDO_MS = 5000;
@@ -123,7 +123,7 @@ let _invOrdersMarkOrderedConfirmOrderId = null;
 /** @type {{ orderId: string, draftName: string, busy: boolean } | null} */
 let _invOrdersRenameModal = null;
 /** Orders tab: status filter (display only). */
-/** @type {"all" | "draft" | "ordered" | "partially_received" | "received"} */
+/** @type {"all" | "open" | "in_progress" | "done"} */
 let _invOrdersStatusFilter = "all";
 /** Orders tab: search query (display filter only). */
 let _invOrdersSearchQuery = "";
@@ -169,6 +169,27 @@ let _invOrderBuilderCustomSubIds = new Set();
 let _invOrderBuilderPreviewLines = [];
 let _invOrderBuilderPreviewLoading = false;
 let _invOrderBuilderPreviewSeq = 0;
+/** Order Builder: locally-added manual items (not persisted until Save as Order). */
+/** @type {Array<Record<string, unknown>>} */
+let _invOrderBuilderManualLines = [];
+/** Order Builder: Add Item modal state. Optional link to an existing inventory item via tree picker. */
+/**
+ * @type {{
+ *   draftName: string,
+ *   draftQty: string,
+ *   linkedItemId: string | null,
+ *   linkedItemMeta: Record<string, unknown> | null,
+ *   picker: {
+ *     step: "category" | "subcategory" | "items",
+ *     catId: string | null,
+ *     subId: string | null,
+ *     items: Array<Record<string, unknown>> | null,
+ *     loading: boolean,
+ *     error: string | null,
+ *   },
+ * } | null}
+ */
+let _invOrderBuilderAddModal = null;
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -1063,31 +1084,46 @@ function getItemEffectiveReceivedQty(it) {
   return Math.max(cum, applied);
 }
 
-/** Derive delivery status from items: hasAnyReceived vs allFullyReceived based on effective received qty (B). */
-function computeReceiveStatusFromItems(items) {
+/** Unified order progress computed from items: open (no B yet) / in_progress (some) / done (B ≥ N for all). */
+function computeUnifiedStatusFromItems(items) {
   const arr = Array.isArray(items) ? items : [];
-  if (arr.length === 0) return "ordered";
-  let hasAnyReceived = false;
-  let allFullyReceived = true;
+  if (arr.length === 0) return "open";
+  let hasAny = false;
+  let allFull = true;
   for (const it of arr) {
     const oq = getItemOrderQty(it);
     const b = getItemEffectiveReceivedQty(it);
-    if (b > 0) hasAnyReceived = true;
+    if (b > 0) hasAny = true;
     if (oq <= 0) continue;
-    if (b < oq) allFullyReceived = false;
+    if (b < oq) allFull = false;
   }
-  if (!hasAnyReceived) return "ordered";
-  if (allFullyReceived) return "received";
-  return "partially_received";
+  if (!hasAny) return "open";
+  if (allFull) return "done";
+  return "in_progress";
 }
 
-/** Auto-computed status for an order: draft stays draft; delivery orders (ordered/partial/received) derive from items. */
+/** Back-compat shim (legacy name). Same result as computeUnifiedStatusFromItems. */
+function computeReceiveStatusFromItems(items) {
+  return computeUnifiedStatusFromItems(items);
+}
+
+/** Auto-computed status for an order: always derived from items (unified for shopping + delivery). */
 function getEffectiveInventoryOrderStatus(o) {
-  if (!o || typeof o !== "object") return "draft";
-  const raw = o.status != null ? String(o.status) : "draft";
-  if (raw === "draft") return "draft";
+  if (!o || typeof o !== "object") return "open";
   const items = Array.isArray(o.items) ? o.items : [];
-  return computeReceiveStatusFromItems(items);
+  return computeUnifiedStatusFromItems(items);
+}
+
+/** True if any item already applied to inventory (either via Confirm Purchase or Confirm Receive history). */
+function orderHasAppliedInventoryImpact(o) {
+  if (!o || typeof o !== "object") return false;
+  const items = Array.isArray(o.items) ? o.items : [];
+  for (const it of items) {
+    if (!it || typeof it !== "object") continue;
+    if (it.appliedToInventory === true) return true;
+    if (getItemReceivedCumulative(it) > 0) return true;
+  }
+  return false;
 }
 
 /** UI-only: per-line receive state for Order Details row styling. Treats applied purchases (draft → Confirm Purchase) as received progress too. */
@@ -1868,7 +1904,9 @@ function buildInventoryOrderDraftSourcePayload() {
 
 async function saveInventoryOrderDraft() {
   if (_invSaveOrderDraftBusy) return;
-  const linesRaw = Array.isArray(_invOrderBuilderPreviewLines) ? _invOrderBuilderPreviewLines : [];
+  const autoLines = Array.isArray(_invOrderBuilderPreviewLines) ? _invOrderBuilderPreviewLines : [];
+  const manualLines = Array.isArray(_invOrderBuilderManualLines) ? _invOrderBuilderManualLines : [];
+  const linesRaw = [...autoLines, ...manualLines];
   if (linesRaw.length === 0) return;
   const salonId = await getSalonId();
   if (!salonId) {
@@ -1885,24 +1923,50 @@ async function saveInventoryOrderDraft() {
   _invSaveOrderDraftBusy = true;
   mountOrRefreshMockUi();
   try {
-    const lines = linesRaw.map((L) => enrichOrderLineWithCategoryContext(L));
+    const lines = linesRaw.map((L) => (L && L.isManual ? L : enrichOrderLineWithCategoryContext(L)));
     const orderNameRaw = String(_invOrderSaveNameDraft ?? "").trim();
-    const items = lines.map((L) => ({
-      itemId: L.itemId,
-      rowNo: L.rowNo,
-      code: L.code,
-      itemName: L.itemName,
-      supplier: L.supplier,
-      url: L.url,
-      groupId: L.groupId,
-      groupName: L.groupName,
-      orderQty: L.orderQty,
-      price: L.price,
-      categoryId: L.categoryId != null ? String(L.categoryId) : null,
-      categoryName: L.categoryName != null ? String(L.categoryName) : null,
-      subcategoryId: L.subcategoryId != null ? String(L.subcategoryId) : null,
-      subcategoryName: L.subcategoryName != null ? String(L.subcategoryName) : null,
-    }));
+    const items = lines.map((L) => {
+      if (L && L.isManual) {
+        /** @type {Record<string, unknown>} */
+        const out = {
+          itemId: L.linkedInventoryItemId != null ? String(L.linkedInventoryItemId) : null,
+          rowNo: null,
+          code: L.code != null ? String(L.code) : null,
+          itemName: L.itemName != null ? String(L.itemName) : "",
+          supplier: null,
+          url: null,
+          groupId: L.groupId != null ? String(L.groupId) : null,
+          groupName: L.groupName != null ? String(L.groupName) : null,
+          orderQty: typeof L.orderQty === "number" ? L.orderQty : parseNum(L.orderQty),
+          price: null,
+          categoryId: L.categoryId != null ? String(L.categoryId) : null,
+          categoryName: L.categoryName != null ? String(L.categoryName) : null,
+          subcategoryId: L.subcategoryId != null ? String(L.subcategoryId) : null,
+          subcategoryName: L.subcategoryName != null ? String(L.subcategoryName) : null,
+          isManual: true,
+        };
+        if (L.linkedInventoryItemId != null) {
+          out.linkedInventoryItemId = String(L.linkedInventoryItemId);
+        }
+        return out;
+      }
+      return {
+        itemId: L.itemId,
+        rowNo: L.rowNo,
+        code: L.code,
+        itemName: L.itemName,
+        supplier: L.supplier,
+        url: L.url,
+        groupId: L.groupId,
+        groupName: L.groupName,
+        orderQty: L.orderQty,
+        price: L.price,
+        categoryId: L.categoryId != null ? String(L.categoryId) : null,
+        categoryName: L.categoryName != null ? String(L.categoryName) : null,
+        subcategoryId: L.subcategoryId != null ? String(L.subcategoryId) : null,
+        subcategoryName: L.subcategoryName != null ? String(L.subcategoryName) : null,
+      };
+    });
     await addDoc(collection(db, `salons/${salonId}/inventoryOrders`), {
       status: "draft",
       ...(orderNameRaw !== "" ? { orderName: orderNameRaw } : {}),
@@ -1918,6 +1982,7 @@ async function saveInventoryOrderDraft() {
       items,
     });
     _invOrderSaveNameDraft = "";
+    _invOrderBuilderManualLines = [];
     inventoryOrderDraftToast("Order saved", "success");
   } catch (e) {
     console.error("[Inventory] save order draft failed", e);
@@ -1929,7 +1994,9 @@ async function saveInventoryOrderDraft() {
 }
 
 function renderOrderListSectionHtml() {
-  const lines = Array.isArray(_invOrderBuilderPreviewLines) ? _invOrderBuilderPreviewLines : [];
+  const autoLines = Array.isArray(_invOrderBuilderPreviewLines) ? _invOrderBuilderPreviewLines : [];
+  const manualLines = Array.isArray(_invOrderBuilderManualLines) ? _invOrderBuilderManualLines : [];
+  const lines = [...autoLines, ...manualLines];
   const loading = _invOrderBuilderPreviewLoading;
   const hasRows = lines.length > 0;
   const busy = _invSaveOrderDraftBusy;
@@ -1937,6 +2004,9 @@ function renderOrderListSectionHtml() {
   const saveDisabled = busy || loading || !hasRows;
   const saveBtn = hasRows && !loading
     ? `<button type="button" class="ff-inv2-btn" id="ff-inv2-save-order-draft"${saveDisabled ? " disabled" : ""}>${busy ? "Saving…" : "Save as Order"}</button>`
+    : "";
+  const addItemBtn = !loading
+    ? `<button type="button" class="ff-inv2-btn" data-inv-ob-add-item="1"${busy ? " disabled" : ""}>+ Add Item</button>`
     : "";
   const nameInput = hasRows && !loading
     ? `<div class="ff-inv2-order-save-name-row">
@@ -1948,6 +2018,29 @@ function renderOrderListSectionHtml() {
   const rowsHtml = hasRows
     ? lines
         .map((l) => {
+          const isManual = !!(l && l.isManual);
+          if (isManual) {
+            const lidEsc = escapeHtml(String(l.id ?? ""));
+            const linkedBadge = l.linkedInventoryItemId
+              ? ` <span class="ff-inv2-ol-linked-tag" title="Linked to inventory item">🔗</span>`
+              : "";
+            const nameHtml = `<span class="ff-inv2-ol-item-name">${escapeHtml(l.itemName)}</span>${linkedBadge} <span class="ff-inv2-ol-manual-tag">Manual</span>`;
+            const removeBtn = `<button type="button" class="ff-inv2-ol-manual-remove" data-inv-ob-manual-remove="${lidEsc}" aria-label="Remove manual item" title="Remove">×</button>`;
+            const subTd = showSubCol
+              ? `<td class="ff-inv2-ol-td">${escapeHtml(l.subcategoryName != null ? String(l.subcategoryName) : "—")}</td>`
+              : "";
+            return `<tr class="ff-inv2-ol-tr ff-inv2-ol-tr--manual">
+  <td class="ff-inv2-ol-td">—</td>
+  <td class="ff-inv2-ol-td">${escapeHtml(l.code != null && String(l.code) !== "" ? String(l.code) : "—")}</td>
+  <td class="ff-inv2-ol-td">${nameHtml}</td>
+  ${subTd}
+  <td class="ff-inv2-ol-td">${escapeHtml(l.groupName != null && String(l.groupName) !== "" ? String(l.groupName) : "—")}</td>
+  <td class="ff-inv2-ol-td ff-inv2-num">${escapeHtml(formatOrderDisplay(l.orderQty))}</td>
+  <td class="ff-inv2-ol-td">—</td>
+  <td class="ff-inv2-ol-td">—</td>
+  <td class="ff-inv2-ol-td ff-inv2-ol-url-wrap">${removeBtn}</td>
+</tr>`;
+          }
           const subTd = showSubCol
             ? `<td class="ff-inv2-ol-td">${escapeHtml(l.subcategoryName != null ? String(l.subcategoryName) : "")}</td>`
             : "";
@@ -1990,11 +2083,211 @@ ${subTh}
   ${renderOrderBuilderSourceHtml()}
   <div class="ff-inv2-order-list-head">
     <h3 class="ff-inv2-order-list-title">Order list</h3>
-    ${saveBtn}
+    <div class="ff-inv2-order-list-head-actions">
+      ${addItemBtn}
+      ${saveBtn}
+    </div>
   </div>
   ${nameInput}
   ${body}
 </div>`;
+}
+
+/** Async: load items (row × group) for a subcategory for the link picker. */
+async function loadLinkPickerItemsForSub(catId, subId) {
+  if (!_invOrderBuilderAddModal) return;
+  _invOrderBuilderAddModal.picker.items = null;
+  _invOrderBuilderAddModal.picker.loading = true;
+  _invOrderBuilderAddModal.picker.error = null;
+  mountOrRefreshMockUi();
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) throw new Error("No salon");
+    const m = findCategoryAndSubForSubId(subId);
+    if (!m) throw new Error("Subcategory not found");
+    const data = await fetchSubcategoryInventoryDoc(salonId, catId, subId);
+    const { groups, rows } = data ? parseSubcategoryDocToTable(data) : { groups: [], rows: [] };
+    const items = [];
+    for (const row of rows) {
+      if (!row || !row.byGroup) continue;
+      const name = row.name != null ? String(row.name).trim() : "";
+      if (name === "") continue;
+      for (const g of groups) {
+        items.push({
+          id: `${subId}:${row.id}:${g.id}`,
+          rowId: String(row.id),
+          groupId: String(g.id),
+          itemName: name,
+          code: row.code != null ? String(row.code) : "",
+          groupName: g.label != null ? String(g.label) : "",
+          categoryId: String(catId),
+          categoryName: m.category.name != null ? String(m.category.name) : "",
+          subcategoryId: String(subId),
+          subcategoryName: m.sub.name != null ? String(m.sub.name) : "",
+        });
+      }
+    }
+    if (!_invOrderBuilderAddModal) return;
+    _invOrderBuilderAddModal.picker.items = items;
+    _invOrderBuilderAddModal.picker.loading = false;
+  } catch (e) {
+    console.error("[Inventory] link picker load failed", e);
+    if (!_invOrderBuilderAddModal) return;
+    _invOrderBuilderAddModal.picker.items = [];
+    _invOrderBuilderAddModal.picker.loading = false;
+    _invOrderBuilderAddModal.picker.error = "Could not load items.";
+  }
+  mountOrRefreshMockUi();
+}
+
+function renderOrderBuilderLinkPickerHtml(modal) {
+  const p = modal.picker;
+  const tree = getCategoryTree();
+
+  if (p.step === "category") {
+    if (!Array.isArray(tree) || tree.length === 0) {
+      return `<p class="ff-inv2-ob-link-hint">No categories yet.</p>`;
+    }
+    const items = tree
+      .map((c) => {
+        const subs = Array.isArray(c.subcategories) ? c.subcategories : [];
+        return `<button type="button" class="ff-inv2-ob-link-option" data-inv-ob-add-link-step="subcategory" data-cat-id="${escapeHtml(String(c.id))}">
+  <span class="ff-inv2-ob-link-option-name">${escapeHtml(c.name != null ? String(c.name) : "")}</span>
+  <span class="ff-inv2-ob-link-option-meta">${subs.length} subcategor${subs.length === 1 ? "y" : "ies"}</span>
+  <span class="ff-inv2-ob-link-option-chev" aria-hidden="true">›</span>
+</button>`;
+      })
+      .join("");
+    return `<div class="ff-inv2-ob-link-head"><span class="ff-inv2-ob-link-head-label">Pick a category</span></div>
+<div class="ff-inv2-ob-link-list">${items}</div>`;
+  }
+
+  if (p.step === "subcategory") {
+    const cat = tree.find((c) => String(c.id) === String(p.catId));
+    const subs = cat && Array.isArray(cat.subcategories) ? cat.subcategories : [];
+    const items = subs.length
+      ? subs
+          .map((s) => `<button type="button" class="ff-inv2-ob-link-option" data-inv-ob-add-link-step="items" data-sub-id="${escapeHtml(String(s.id))}">
+  <span class="ff-inv2-ob-link-option-name">${escapeHtml(s.name != null ? String(s.name) : "")}</span>
+  <span class="ff-inv2-ob-link-option-chev" aria-hidden="true">›</span>
+</button>`)
+          .join("")
+      : `<p class="ff-inv2-ob-link-hint">No subcategories in this category.</p>`;
+    return `<div class="ff-inv2-ob-link-head">
+  <button type="button" class="ff-inv2-ob-link-back" data-inv-ob-add-link-step="category" aria-label="Back">‹ Back</button>
+  <span class="ff-inv2-ob-link-head-label">${escapeHtml(cat && cat.name != null ? String(cat.name) : "")}</span>
+</div>
+${subs.length ? `<div class="ff-inv2-ob-link-list">${items}</div>` : items}`;
+  }
+
+  // items step
+  const cat = tree.find((c) => String(c.id) === String(p.catId));
+  const sub = cat && Array.isArray(cat.subcategories) ? cat.subcategories.find((s) => String(s.id) === String(p.subId)) : null;
+  let body;
+  if (p.loading) {
+    body = `<p class="ff-inv2-ob-link-hint">Loading items…</p>`;
+  } else if (p.error) {
+    body = `<p class="ff-inv2-ob-link-hint">${escapeHtml(p.error)}</p>`;
+  } else if (!Array.isArray(p.items) || p.items.length === 0) {
+    body = `<p class="ff-inv2-ob-link-hint">No items in this subcategory.</p>`;
+  } else {
+    const rows = p.items
+      .map((it) => {
+        const codeLabel = it.code ? `${it.code} · ` : "";
+        const grp = it.groupName ? ` (${it.groupName})` : "";
+        return `<button type="button" class="ff-inv2-ob-link-option" data-inv-ob-add-link-select="${escapeHtml(String(it.id))}">
+  <span class="ff-inv2-ob-link-option-name">${escapeHtml(it.itemName)}${escapeHtml(grp)}</span>
+  <span class="ff-inv2-ob-link-option-meta">${escapeHtml(codeLabel)}${escapeHtml(it.subcategoryName != null ? String(it.subcategoryName) : "")}</span>
+</button>`;
+      })
+      .join("");
+    body = `<div class="ff-inv2-ob-link-list">${rows}</div>`;
+  }
+  return `<div class="ff-inv2-ob-link-head">
+  <button type="button" class="ff-inv2-ob-link-back" data-inv-ob-add-link-step="subcategory" aria-label="Back">‹ Back</button>
+  <span class="ff-inv2-ob-link-head-label">${escapeHtml(cat && cat.name != null ? String(cat.name) : "")} · ${escapeHtml(sub && sub.name != null ? String(sub.name) : "")}</span>
+</div>
+${body}`;
+}
+
+function renderInventoryOrderBuilderAddItemModal() {
+  if (!_invOrderBuilderAddModal) return "";
+  const m = _invOrderBuilderAddModal;
+  const nameVal = escapeHtml(m.draftName);
+  const qtyVal = escapeHtml(m.draftQty);
+  const nameOk = String(m.draftName).trim() !== "";
+  const qtyOk = parseNum(m.draftQty) > 0;
+  const canAdd = nameOk && qtyOk;
+  const hint = !nameOk
+    ? "Enter an item name."
+    : !qtyOk
+      ? "Quantity must be greater than 0."
+      : "";
+
+  let linkBlockHtml;
+  if (m.linkedItemId && m.linkedItemMeta) {
+    const lm = m.linkedItemMeta;
+    const labelParts = [lm.itemName];
+    if (lm.groupName) labelParts.push(`(${lm.groupName})`);
+    const subLabel = lm.subcategoryName ? `${lm.categoryName || ""} · ${lm.subcategoryName}` : "";
+    linkBlockHtml = `<div class="ff-inv2-ob-link-selected">
+  <div class="ff-inv2-ob-link-selected-text">
+    <span class="ff-inv2-ob-link-selected-name">🔗 ${escapeHtml(labelParts.join(" "))}</span>
+    ${subLabel ? `<span class="ff-inv2-ob-link-selected-sub">${escapeHtml(subLabel)}</span>` : ""}
+  </div>
+  <button type="button" class="ff-inv2-ob-link-clear" data-inv-ob-add-link-clear="1" aria-label="Clear link" title="Clear">×</button>
+</div>`;
+  } else {
+    linkBlockHtml = `<div class="ff-inv2-ob-link-wrap">${renderOrderBuilderLinkPickerHtml(m)}</div>`;
+  }
+
+  return `<div class="ff-inv2-modal-backdrop" id="ff-inv-ob-add-item-backdrop" role="dialog" aria-modal="true" aria-labelledby="ff-inv-ob-add-item-title">
+  <div class="ff-inv2-modal-card ff-inv2-ob-add-card">
+    <h3 id="ff-inv-ob-add-item-title" class="ff-inv2-modal-title">Add item</h3>
+    <label class="ff-inv2-modal-field">
+      <span class="ff-inv2-modal-field-label">Item name</span>
+      <input type="text" class="ff-inv2-modal-input" data-inv-ob-add-input="name" value="${nameVal}" placeholder="e.g. Hand soap" maxlength="120" autocomplete="off" />
+    </label>
+    <label class="ff-inv2-modal-field">
+      <span class="ff-inv2-modal-field-label">Quantity</span>
+      <input type="number" class="ff-inv2-modal-input" data-inv-ob-add-input="qty" value="${qtyVal}" placeholder="0" min="0" step="any" inputmode="decimal" autocomplete="off" />
+    </label>
+    <div class="ff-inv2-modal-field">
+      <span class="ff-inv2-modal-field-label">Link to inventory item <span class="ff-inv2-modal-field-optional">(optional)</span></span>
+      ${linkBlockHtml}
+    </div>
+    ${hint ? `<p class="ff-inv2-ob-add-hint">${escapeHtml(hint)}</p>` : ""}
+    <div class="ff-inv2-modal-actions">
+      <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-cancel" data-inv-ob-add-cancel="1">Cancel</button>
+      <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-primary" data-inv-ob-add-commit="1"${canAdd ? "" : " disabled"} title="${escapeHtml(hint || "Add item")}">Add</button>
+    </div>
+  </div>
+</div>`;
+}
+
+function commitInventoryOrderBuilderAddItem() {
+  if (!_invOrderBuilderAddModal) return;
+  const m = _invOrderBuilderAddModal;
+  const name = String(m.draftName ?? "").trim();
+  const qty = parseNum(m.draftQty);
+  if (!name || !(qty > 0)) return;
+  const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  /** @type {Record<string, unknown>} */
+  const entry = { id, itemName: name, orderQty: qty, isManual: true };
+  if (m.linkedItemId && m.linkedItemMeta) {
+    const lm = m.linkedItemMeta;
+    entry.linkedInventoryItemId = m.linkedItemId;
+    if (lm.code) entry.code = lm.code;
+    if (lm.groupId) entry.groupId = lm.groupId;
+    if (lm.groupName) entry.groupName = lm.groupName;
+    if (lm.categoryId) entry.categoryId = lm.categoryId;
+    if (lm.categoryName) entry.categoryName = lm.categoryName;
+    if (lm.subcategoryId) entry.subcategoryId = lm.subcategoryId;
+    if (lm.subcategoryName) entry.subcategoryName = lm.subcategoryName;
+  }
+  _invOrderBuilderManualLines.push(entry);
+  _invOrderBuilderAddModal = null;
+  mountOrRefreshMockUi();
 }
 
 function renderInventoryTableCardHtml() {
@@ -2089,17 +2382,16 @@ function formatInventoryOrderCreatedAt(ts) {
 
 function formatInventoryOrderStatusDisplay(o) {
   const s = getEffectiveInventoryOrderStatus(o);
-  if (s === "draft") return "shopping";
-  if (s === "ordered") return "ordered";
-  if (s === "partially_received") return "partially received";
-  if (s === "received") return "received";
+  if (s === "open") return "open";
+  if (s === "in_progress") return "in progress";
+  if (s === "done") return "done";
   return s;
 }
 
 function getInventoryOrderStatusKey(o) {
   const s = getEffectiveInventoryOrderStatus(o);
-  if (s === "draft" || s === "ordered" || s === "partially_received" || s === "received") return s;
-  return "draft";
+  if (s === "open" || s === "in_progress" || s === "done") return s;
+  return "open";
 }
 
 function orderMatchesInventoryStatusFilter(o) {
@@ -2446,11 +2738,6 @@ async function confirmInventoryOrderPurchase(orderId) {
     inventoryOrderDraftToast("Order not found.", "error");
     return;
   }
-  const ost = o.status != null ? String(o.status) : "draft";
-  if (ost !== "draft") {
-    inventoryOrderDraftToast("Confirm Purchase is only for draft orders.", "error");
-    return;
-  }
   const items = Array.isArray(o.items) ? o.items : [];
   if (!shop || items.length === 0) {
     inventoryOrderDraftToast("Nothing to apply.", "error");
@@ -2472,7 +2759,6 @@ async function confirmInventoryOrderPurchase(orderId) {
       const orderSnap = await transaction.get(orderRef);
       if (!orderSnap.exists()) throw new Error("ORDER_MISSING");
       const ordData = orderSnap.data();
-      if (String(ordData.status ?? "draft") !== "draft") throw new Error("ORDER_BAD_STATUS");
 
       const itemsFromDb = Array.isArray(ordData.items) ? ordData.items : [];
       const nextItems = itemsFromDb.map((it) => (it && typeof it === "object" ? { ...it } : {}));
@@ -2765,28 +3051,56 @@ async function handleInventoryOrderReceiptFileSelected(root, orderId, file) {
     inventoryOrderDraftToast("Receipt uploaded.", "success");
   } catch (e) {
     console.error("[Inventory] receipt upload failed", e);
-    inventoryOrderDraftToast("Could not upload receipt.", "error");
+    const code = e && typeof e.code === "string" ? e.code : "";
+    const msg = e && typeof e.message === "string" ? e.message : "";
+    if (code === "storage/unauthorized" || /permission|unauthorized/i.test(msg)) {
+      inventoryOrderDraftToast(
+        "Receipt upload blocked by permissions. Make sure your user has manager/admin/owner role with a matching salonId.",
+        "error"
+      );
+    } else if (code === "permission-denied") {
+      inventoryOrderDraftToast("Permission denied saving receipt metadata.", "error");
+    } else {
+      inventoryOrderDraftToast(`Could not upload receipt${code ? ` (${code})` : ""}.`, "error");
+    }
   } finally {
     _invOrderReceiptUploadBusy = false;
     mountOrRefreshMockUi();
   }
 }
 
+/** Pick a small emoji based on file extension for quick visual cue. */
+function getReceiptFileTypeEmoji(fileName) {
+  const s = String(fileName ?? "").toLowerCase();
+  const dot = s.lastIndexOf(".");
+  const ext = dot >= 0 ? s.slice(dot + 1) : "";
+  if (ext === "pdf") return "📄";
+  if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif", "svg"].includes(ext)) return "🖼️";
+  if (["txt", "csv", "log"].includes(ext)) return "📝";
+  if (["doc", "docx", "rtf", "odt"].includes(ext)) return "📄";
+  if (["xls", "xlsx", "ods"].includes(ext)) return "📊";
+  return "📎";
+}
+
 /** Receipt list block for Receipt information modal only (uses live receipts listener). */
 function buildReceiptsListBlockHtml() {
   const loading = _invOrderReceiptsLoading;
   const list = _invOrderReceiptsList;
+  const oidEsc = escapeHtml(_invReceiptInfoModalOrderId || "");
   const rows =
     !loading && list.length
       ? list
           .map((r) => {
             const fn = r.fileName != null ? String(r.fileName) : "";
+            const emoji = getReceiptFileTypeEmoji(fn);
             const uploaded = formatInventoryOrderCreatedAt(r.uploadedAt);
             const url = r.fileUrl != null ? String(r.fileUrl) : "";
+            const rid = escapeHtml(String(r.id ?? ""));
             return `<tr class="ff-inv2-or-tr">
-  <td class="ff-inv2-or-td">${escapeHtml(fn)}</td>
+  <td class="ff-inv2-or-td"><span class="ff-inv2-or-filetype" aria-hidden="true">${emoji}</span> <span class="ff-inv2-or-filename">${escapeHtml(fn)}</span></td>
   <td class="ff-inv2-or-td ff-inv2-or-td--muted">${escapeHtml(uploaded)}</td>
-  <td class="ff-inv2-or-td"><a class="ff-inv2-or-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open</a></td>
+  <td class="ff-inv2-or-td ff-inv2-or-td--icon"><a class="ff-inv2-or-link ff-inv2-or-icon-btn" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" aria-label="Open receipt" title="Open"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7"></path><path d="M10 14 21 3"></path><path d="M21 14v7H3V3h7"></path></svg></a></td>
+  <td class="ff-inv2-or-td ff-inv2-or-td--icon"><button type="button" class="ff-inv2-or-delete ff-inv2-or-icon-btn" data-inv-order-receipt-delete="1" data-order-id="${oidEsc}" data-receipt-id="${rid}" aria-label="Delete receipt" title="Delete"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></button></td>
 </tr>`;
           })
           .join("")
@@ -2799,12 +3113,41 @@ function buildReceiptsListBlockHtml() {
   <thead><tr>
     <th class="ff-inv2-or-th">File</th>
     <th class="ff-inv2-or-th">Uploaded</th>
-    <th class="ff-inv2-or-th">Link</th>
+    <th class="ff-inv2-or-th ff-inv2-or-th--icon" aria-label="Open"></th>
+    <th class="ff-inv2-or-th ff-inv2-or-th--icon" aria-label="Delete"></th>
   </tr></thead>
   <tbody>${rows}</tbody>
 </table></div>`;
   }
   return `<p class="ff-inv2-or-empty">No receipts yet.</p>`;
+}
+
+async function deleteInventoryOrderReceipt(orderId, receiptId) {
+  if (!orderId || !receiptId) return;
+  if (!window.confirm("Delete this receipt? This cannot be undone.")) return;
+  const entry = _invOrderReceiptsList.find((x) => x.id === receiptId);
+  if (!entry) {
+    inventoryOrderDraftToast("Receipt not found.", "error");
+    return;
+  }
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) throw new Error("No salon");
+    const path = entry.filePath != null ? String(entry.filePath) : "";
+    if (path) {
+      try {
+        await deleteObject(storageRef(storage, path));
+      } catch (storageErr) {
+        console.warn("[Inventory] receipt file delete failed (continuing to remove metadata)", storageErr);
+      }
+    }
+    await deleteDoc(doc(db, "salons", salonId, "inventoryOrders", orderId, "receipts", receiptId));
+    inventoryOrderDraftToast("Receipt deleted.", "success");
+  } catch (e) {
+    console.error("[Inventory] receipt delete failed", e);
+    const code = e && typeof e.code === "string" ? e.code : "";
+    inventoryOrderDraftToast(`Could not delete receipt${code ? ` (${code})` : ""}.`, "error");
+  }
 }
 
 function renderReceiptInfoModal() {
@@ -2926,10 +3269,9 @@ function renderOrdersTabHtml() {
   const filteredRows = statusFiltered.filter(orderMatchesInventorySearchQuery);
   const statusFilterBar = `<div class="ff-inv2-orders-status-filter" role="toolbar" aria-label="Filter orders by status">
   <span class="ff-inv2-order-detail-filter-label">Status</span>
-  <button type="button" class="ff-inv2-od-filter-chip${fil === "draft" ? " ff-inv2-od-filter--active" : ""}" data-inv-orders-status-filter="draft">Shopping</button>
-  <button type="button" class="ff-inv2-od-filter-chip${fil === "ordered" ? " ff-inv2-od-filter--active" : ""}" data-inv-orders-status-filter="ordered">Ordered</button>
-  <button type="button" class="ff-inv2-od-filter-chip${fil === "partially_received" ? " ff-inv2-od-filter--active" : ""}" data-inv-orders-status-filter="partially_received">Partially received</button>
-  <button type="button" class="ff-inv2-od-filter-chip${fil === "received" ? " ff-inv2-od-filter--active" : ""}" data-inv-orders-status-filter="received">Received</button>
+  <button type="button" class="ff-inv2-od-filter-chip${fil === "open" ? " ff-inv2-od-filter--active" : ""}" data-inv-orders-status-filter="open">Open</button>
+  <button type="button" class="ff-inv2-od-filter-chip${fil === "in_progress" ? " ff-inv2-od-filter--active" : ""}" data-inv-orders-status-filter="in_progress">In progress</button>
+  <button type="button" class="ff-inv2-od-filter-chip${fil === "done" ? " ff-inv2-od-filter--active" : ""}" data-inv-orders-status-filter="done">Done</button>
   <button type="button" class="ff-inv2-od-filter-chip${fil === "all" ? " ff-inv2-od-filter--active" : ""}" data-inv-orders-status-filter="all">All</button>
 </div>`;
   const hasSearchClear = _invOrdersSearchQuery.trim() !== "";
@@ -3025,8 +3367,6 @@ function renderInventoryOrderDetailModal() {
   const orderedBy = o.orderedAt ? formatInventoryOrderOrderedByDisplay(o.orderedBy) : "";
   const n = typeof o.itemCount === "number" ? o.itemCount : Array.isArray(o.items) ? o.items.length : 0;
   const items = Array.isArray(o.items) ? o.items : [];
-  const st = o.status != null ? String(o.status) : "draft";
-  const canEnterReceive = st === "ordered" || st === "partially_received";
   const oidEsc = escapeHtml(o.id);
   ensureShoppingDraft(o.id);
   const shop = _invOrderShoppingDraft[o.id];
@@ -3045,7 +3385,7 @@ function renderInventoryOrderDetailModal() {
       ? `<div class="ff-inv2-order-detail-line-filter" role="toolbar" aria-label="Filter lines">
   <button type="button" class="ff-inv2-od-filter-chip${fil === "all" ? " ff-inv2-od-filter--active" : ""}" data-inv-order-detail-filter="all"${receiveDisabled}>All</button>
   <button type="button" class="ff-inv2-od-filter-chip${fil === "open" ? " ff-inv2-od-filter--active" : ""}" data-inv-order-detail-filter="open"${receiveDisabled}>Open</button>
-  <button type="button" class="ff-inv2-od-filter-chip${fil === "received" ? " ff-inv2-od-filter--active" : ""}" data-inv-order-detail-filter="received"${receiveDisabled}>Bought</button>
+  <button type="button" class="ff-inv2-od-filter-chip${fil === "received" ? " ff-inv2-od-filter--active" : ""}" data-inv-order-detail-filter="received"${receiveDisabled}>Done</button>
 </div>`
       : "";
   const itemRows = displayPairs
@@ -3114,19 +3454,10 @@ ${theadChecklist}
     <p class="ff-inv2-order-detail-totals-line ff-inv2-order-detail-totals-line--sub">Open ${receiveSummaryCounts.open} · Partial ${receiveSummaryCounts.partial} · Done ${receiveSummaryCounts.received} · Remaining qty ${escapeHtml(formatOrderDisplay(receiveSummaryCounts.remainingQty))}</p>
   </div>
 </details>`;
-  const shoppingHint =
-    canEnterReceive && items.length > 0
-      ? `<p class="ff-inv2-order-detail-receive-hint ff-inv2-order-detail-receive-hint--compact">Tap a row to check · enter <strong>B</strong> · Confirm receive.</p>`
-      : st === "draft" && items.length > 0
-        ? `<p class="ff-inv2-order-detail-receive-hint ff-inv2-order-detail-receive-hint--compact">Tap a row to check · enter <strong>B</strong> · <strong>Confirm Purchase</strong>.</p>`
-        : "";
+  const shoppingHint = "";
   const purchaseCommitBtn =
-    st === "draft" && items.length > 0
+    items.length > 0
       ? `<button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-primary ff-inv2-order-detail-purchase-btn" data-inv-order-detail-confirm-purchase="1" data-order-id="${oidEsc}"${receiveDisabled}>${purchaseBusy ? "Updating…" : "Confirm Purchase"}</button>`
-      : "";
-  const receiveCommitBtn =
-    canEnterReceive && items.length > 0
-      ? `<button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-primary" data-inv-order-detail-receive-commit="1" data-order-id="${oidEsc}"${receiveDisabled}>${receiveBusy ? "Saving…" : "Confirm receive"}</button>`
       : "";
   return `<div class="ff-inv2-modal-backdrop" id="ff-inv-order-detail-backdrop" role="dialog" aria-modal="true" aria-labelledby="ff-inv-order-detail-title">
   <div class="ff-inv2-modal-card ff-inv2-order-detail-card">
@@ -3148,9 +3479,8 @@ ${theadChecklist}
     <div class="ff-inv2-modal-actions ff-inv2-order-detail-footer">
       <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-cancel" data-inv-order-detail-close="1"${receiveDisabled}>Close</button>
       <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-cancel ff-inv2-order-detail-receipt-btn" data-inv-order-receipt-info="1" data-order-id="${oidEsc}"${receiveDisabled}>Receipt Information</button>
-      ${purchaseCommitBtn}
       <span class="ff-inv2-order-detail-footer-spacer" aria-hidden="true"></span>
-      ${receiveCommitBtn}
+      ${purchaseCommitBtn}
     </div>
   </div>
 </div>`;
@@ -3160,18 +3490,10 @@ function renderInventoryOrdersMenu() {
   if (!_invOrdersMenu) return "";
   const m = _invOrdersMenu;
   const oid = escapeHtml(m.orderId);
-  const o = _invOrdersList.find((x) => x.id === m.orderId);
-  const st = o ? (o.status != null ? String(o.status) : "draft") : "draft";
-  const isDraft = st === "draft";
   const editNameBtn = `<button type="button" class="ff-inv2-row-menu-item" role="menuitem" data-inv-orders-action="editName" data-order-id="${oid}">Edit name</button>`;
   const dupBtn = `<button type="button" class="ff-inv2-row-menu-item" role="menuitem" data-inv-orders-action="duplicate" data-order-id="${oid}">Duplicate</button>`;
-  const markBtn = isDraft
-    ? `<button type="button" class="ff-inv2-row-menu-item" role="menuitem" data-inv-orders-action="markOrdered" data-order-id="${oid}">Mark as Ordered</button>`
-    : "";
-  const deleteBtn = isDraft
-    ? `<button type="button" class="ff-inv2-row-menu-item ff-inv2-row-menu-item--danger" role="menuitem" data-inv-orders-action="delete" data-order-id="${oid}">Delete</button>`
-    : "";
-  const inner = `${editNameBtn}${dupBtn}${markBtn}${deleteBtn}`;
+  const deleteBtn = `<button type="button" class="ff-inv2-row-menu-item ff-inv2-row-menu-item--danger" role="menuitem" data-inv-orders-action="delete" data-order-id="${oid}">Delete</button>`;
+  const inner = `${editNameBtn}${dupBtn}${deleteBtn}`;
   return `<div class="ff-inv2-row-menu-backdrop" data-inv-orders-menu-dismiss="1" aria-hidden="true"></div>
 <div class="ff-inv2-row-menu" role="menu" style="left:${m.left}px;top:${m.top}px">
   ${inner}
@@ -3224,9 +3546,15 @@ async function renameInventoryOrderConfirmed(orderId, rawName) {
 function renderInventoryOrdersDeleteModal() {
   if (!_invOrdersDeleteConfirmOrderId) return "";
   const oid = escapeHtml(_invOrdersDeleteConfirmOrderId);
+  const o = _invOrdersList.find((x) => x.id === _invOrdersDeleteConfirmOrderId);
+  const impacted = orderHasAppliedInventoryImpact(o);
+  const warningHtml = impacted
+    ? `<p class="ff-inv2-modal-hint">This order has already updated your inventory. Deleting it will <strong>not</strong> remove those items from stock.</p>`
+    : `<p class="ff-inv2-modal-hint">This order has not touched inventory yet.</p>`;
   return `<div class="ff-inv2-modal-backdrop" id="ff-inv-orders-delete-backdrop" role="dialog" aria-modal="true" aria-labelledby="ff-inv-orders-delete-title">
   <div class="ff-inv2-modal-card">
     <h3 id="ff-inv-orders-delete-title" class="ff-inv2-modal-title">Delete this order?</h3>
+    ${warningHtml}
     <div class="ff-inv2-modal-actions">
       <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-cancel" data-inv-orders-delete-cancel="1">Cancel</button>
       <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-danger" data-inv-orders-delete-commit="1" data-order-id="${oid}">Delete</button>
@@ -3794,6 +4122,32 @@ function handleInventoryInput(ev) {
   if (!(t instanceof HTMLInputElement)) return;
   if (t.hasAttribute("data-inv-order-save-name-input")) {
     _invOrderSaveNameDraft = t.value;
+    return;
+  }
+  if (t.hasAttribute("data-inv-ob-add-input")) {
+    if (!_invOrderBuilderAddModal) return;
+    const field = t.getAttribute("data-inv-ob-add-input");
+    if (field === "name") {
+      _invOrderBuilderAddModal.draftName = t.value;
+      const root = document.getElementById("inventoryScreen");
+      const addBtn = root && root.querySelector("[data-inv-ob-add-commit]");
+      if (addBtn instanceof HTMLButtonElement) {
+        const can =
+          String(_invOrderBuilderAddModal.draftName).trim() !== "" &&
+          parseNum(_invOrderBuilderAddModal.draftQty) > 0;
+        addBtn.disabled = !can;
+      }
+    } else if (field === "qty") {
+      _invOrderBuilderAddModal.draftQty = t.value;
+      const root = document.getElementById("inventoryScreen");
+      const addBtn = root && root.querySelector("[data-inv-ob-add-commit]");
+      if (addBtn instanceof HTMLButtonElement) {
+        const can =
+          String(_invOrderBuilderAddModal.draftName).trim() !== "" &&
+          parseNum(_invOrderBuilderAddModal.draftQty) > 0;
+        addBtn.disabled = !can;
+      }
+    }
     return;
   }
   if (t.hasAttribute("data-inv-orders-rename-input")) {
@@ -5331,6 +5685,60 @@ function injectMockStylesOnce() {
 #inventoryScreen .ff-inv2-or-link:hover {
   text-decoration: underline;
 }
+#inventoryScreen .ff-inv2-or-th--icon {
+  width: 32px;
+  text-align: center;
+  padding-left: 2px;
+  padding-right: 2px;
+}
+#inventoryScreen .ff-inv2-or-td--icon {
+  width: 32px;
+  text-align: center;
+  padding-left: 2px;
+  padding-right: 2px;
+  white-space: nowrap;
+}
+#inventoryScreen .ff-inv2-or-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  text-decoration: none;
+}
+#inventoryScreen .ff-inv2-or-icon-btn svg {
+  pointer-events: none;
+}
+#inventoryScreen a.ff-inv2-or-icon-btn {
+  color: #5b21b6;
+}
+#inventoryScreen a.ff-inv2-or-icon-btn:hover {
+  background: #faf5ff;
+  border-color: #ddd6fe;
+}
+#inventoryScreen button.ff-inv2-or-delete.ff-inv2-or-icon-btn {
+  color: #b91c1c;
+}
+#inventoryScreen button.ff-inv2-or-delete.ff-inv2-or-icon-btn:hover {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+#inventoryScreen .ff-inv2-or-filetype {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 14px;
+  line-height: 1;
+  vertical-align: -1px;
+}
+#inventoryScreen .ff-inv2-or-filename {
+  word-break: break-word;
+}
 #inventoryScreen .ff-inv2-crumb {
   font-size: 13px;
   color: #64748b;
@@ -5422,6 +5830,205 @@ function injectMockStylesOnce() {
   font-size: 14px;
   font-weight: 700;
   color: #0f172a;
+}
+#inventoryScreen .ff-inv2-order-list-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+#inventoryScreen .ff-inv2-ol-tr--manual td {
+  background: #faf5ff;
+}
+#inventoryScreen .ff-inv2-ol-manual-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #5b21b6;
+  background: #ede9fe;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+#inventoryScreen .ff-inv2-ol-manual-remove {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: #94a3b8;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#inventoryScreen .ff-inv2-ol-manual-remove:hover {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+#inventoryScreen .ff-inv2-ol-linked-tag {
+  display: inline-block;
+  font-size: 10px;
+  margin-left: 2px;
+  vertical-align: middle;
+}
+#inventoryScreen .ff-inv2-ob-add-card {
+  max-width: 420px;
+}
+#inventoryScreen .ff-inv2-ob-add-hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+#inventoryScreen .ff-inv2-modal-field-optional {
+  font-weight: 400;
+  font-size: 10px;
+  color: #94a3b8;
+  text-transform: none;
+  letter-spacing: 0;
+}
+#inventoryScreen .ff-inv2-ob-link-wrap {
+  display: block;
+}
+#inventoryScreen .ff-inv2-ob-link-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 6px;
+}
+#inventoryScreen .ff-inv2-ob-link-head-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#inventoryScreen .ff-inv2-ob-link-back {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5b21b6;
+  background: transparent;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+#inventoryScreen .ff-inv2-ob-link-back:hover {
+  background: #faf5ff;
+  border-color: #ddd6fe;
+}
+#inventoryScreen .ff-inv2-ob-link-option-chev {
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 14px;
+  color: #cbd5e1;
+}
+#inventoryScreen .ff-inv2-ob-link-option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+#inventoryScreen .ff-inv2-ob-link-hint {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #94a3b8;
+  background: #f8fafc;
+  border-radius: 6px;
+}
+#inventoryScreen .ff-inv2-ob-link-list {
+  margin-top: 6px;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+#inventoryScreen .ff-inv2-ob-link-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: #fff;
+  cursor: pointer;
+  border-bottom: 1px solid #f1f5f9;
+}
+#inventoryScreen .ff-inv2-ob-link-option:last-child {
+  border-bottom: none;
+}
+#inventoryScreen .ff-inv2-ob-link-option:hover {
+  background: #faf5ff;
+}
+#inventoryScreen .ff-inv2-ob-link-option-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+#inventoryScreen .ff-inv2-ob-link-option-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: #64748b;
+}
+#inventoryScreen .ff-inv2-ob-link-selected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #ede9fe;
+  border: 1px solid #c4b5fd;
+  border-radius: 8px;
+}
+#inventoryScreen .ff-inv2-ob-link-selected-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+#inventoryScreen .ff-inv2-ob-link-selected-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #5b21b6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#inventoryScreen .ff-inv2-ob-link-selected-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: #7c3aed;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#inventoryScreen .ff-inv2-ob-link-clear {
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #6d28d9;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+#inventoryScreen .ff-inv2-ob-link-clear:hover {
+  background: #ddd6fe;
 }
 #inventoryScreen .ff-inv2-order-list-scroll {
   flex: 1;
@@ -6197,16 +6804,16 @@ function injectMockStylesOnce() {
 #inventoryScreen .ff-inv2-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 400;
+  z-index: 2147483640;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 72px 24px 24px;
   background: rgba(15, 23, 42, 0.35);
   backdrop-filter: blur(2px);
 }
 #inventoryScreen .ff-inv2-modal-backdrop--nested {
-  z-index: 450;
+  z-index: 2147483645;
   background: rgba(15, 23, 42, 0.45);
 }
 #inventoryScreen .ff-inv2-modal-card {
@@ -7353,6 +7960,16 @@ function ensureInventoryScreenDelegates(root) {
       void renameInventoryOrderConfirmed(_invOrdersRenameModal.orderId, ev.target.value);
       return;
     }
+    if (
+      ev.key === "Enter" &&
+      ev.target instanceof HTMLInputElement &&
+      ev.target.hasAttribute("data-inv-ob-add-input") &&
+      _invOrderBuilderAddModal
+    ) {
+      ev.preventDefault();
+      commitInventoryOrderBuilderAddItem();
+      return;
+    }
     if (ev.key === "Enter" && ev.target instanceof HTMLInputElement && ev.target.classList.contains("ff-inv2-cell-input--editing")) {
       ev.preventDefault();
       handleInventoryInput({ target: ev.target });
@@ -7427,6 +8044,12 @@ function ensureInventoryScreenDelegates(root) {
       mountOrRefreshMockUi();
       return;
     }
+    if (_invOrderBuilderAddModal) {
+      ev.preventDefault();
+      _invOrderBuilderAddModal = null;
+      mountOrRefreshMockUi();
+      return;
+    }
     if (_invReceiptInfoModalOrderId) {
       ev.preventDefault();
       _invReceiptInfoModalOrderId = null;
@@ -7487,11 +8110,9 @@ function ensureInventoryScreenDelegates(root) {
       ev.stopPropagation();
       const oid = ordersKebab.getAttribute("data-inv-orders-menu-trigger");
       if (oid) {
-        const o = _invOrdersList.find((x) => x.id === oid);
-        const st = o ? (o.status != null ? String(o.status) : "draft") : "draft";
         const rect = ordersKebab.getBoundingClientRect();
         const menuW = 200;
-        const menuH = st === "draft" ? 196 : 104;
+        const menuH = 152;
         let left = rect.right + 4;
         let top = rect.top;
         left = Math.min(left, window.innerWidth - menuW - 8);
@@ -7607,13 +8228,7 @@ function ensureInventoryScreenDelegates(root) {
     if (ordersStatusFilterChip && root.contains(ordersStatusFilterChip)) {
       ev.preventDefault();
       const v = ordersStatusFilterChip.getAttribute("data-inv-orders-status-filter");
-      if (
-        v === "all" ||
-        v === "draft" ||
-        v === "ordered" ||
-        v === "partially_received" ||
-        v === "received"
-      ) {
+      if (v === "all" || v === "open" || v === "in_progress" || v === "done") {
         _invOrdersStatusFilter = v;
         mountOrRefreshMockUi();
       }
@@ -7770,6 +8385,18 @@ function ensureInventoryScreenDelegates(root) {
             )
           : null;
       if (inp instanceof HTMLInputElement) inp.click();
+      return;
+    }
+
+    const receiptDeleteBtn = t.closest("[data-inv-order-receipt-delete]");
+    if (receiptDeleteBtn && root.contains(receiptDeleteBtn)) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const oid = receiptDeleteBtn.getAttribute("data-order-id");
+      const rid = receiptDeleteBtn.getAttribute("data-receipt-id");
+      if (oid && rid && oid === _invReceiptInfoModalOrderId) {
+        void deleteInventoryOrderReceipt(oid, rid);
+      }
       return;
     }
 
@@ -8204,6 +8831,136 @@ function ensureInventoryScreenDelegates(root) {
       void saveInventoryOrderDraft();
       return;
     }
+    const obAddItemBtn = t.closest("[data-inv-ob-add-item]");
+    if (obAddItemBtn && root.contains(obAddItemBtn)) {
+      ev.preventDefault();
+      if (obAddItemBtn instanceof HTMLButtonElement && obAddItemBtn.disabled) return;
+      _invOrderBuilderAddModal = {
+        draftName: "",
+        draftQty: "",
+        linkedItemId: null,
+        linkedItemMeta: null,
+        picker: {
+          step: "category",
+          catId: null,
+          subId: null,
+          items: null,
+          loading: false,
+          error: null,
+        },
+      };
+      mountOrRefreshMockUi();
+      const rootEl = document.getElementById("inventoryScreen");
+      const inp = rootEl && rootEl.querySelector('[data-inv-ob-add-input="name"]');
+      if (inp instanceof HTMLInputElement) {
+        inp.focus();
+      }
+      return;
+    }
+    const obAddCommit = t.closest("[data-inv-ob-add-commit]");
+    if (obAddCommit && root.contains(obAddCommit)) {
+      ev.preventDefault();
+      if (obAddCommit instanceof HTMLButtonElement && obAddCommit.disabled) return;
+      commitInventoryOrderBuilderAddItem();
+      return;
+    }
+    if (
+      t.closest("[data-inv-ob-add-cancel]") ||
+      t.id === "ff-inv-ob-add-item-backdrop"
+    ) {
+      ev.preventDefault();
+      _invOrderBuilderAddModal = null;
+      mountOrRefreshMockUi();
+      return;
+    }
+    const obLinkStep = t.closest("[data-inv-ob-add-link-step]");
+    if (obLinkStep && root.contains(obLinkStep) && _invOrderBuilderAddModal) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const step = obLinkStep.getAttribute("data-inv-ob-add-link-step");
+      if (step === "category") {
+        _invOrderBuilderAddModal.picker.step = "category";
+        _invOrderBuilderAddModal.picker.catId = null;
+        _invOrderBuilderAddModal.picker.subId = null;
+        _invOrderBuilderAddModal.picker.items = null;
+        _invOrderBuilderAddModal.picker.loading = false;
+        _invOrderBuilderAddModal.picker.error = null;
+        mountOrRefreshMockUi();
+      } else if (step === "subcategory") {
+        const catId = obLinkStep.getAttribute("data-cat-id") || _invOrderBuilderAddModal.picker.catId;
+        _invOrderBuilderAddModal.picker.step = "subcategory";
+        _invOrderBuilderAddModal.picker.catId = catId;
+        _invOrderBuilderAddModal.picker.subId = null;
+        _invOrderBuilderAddModal.picker.items = null;
+        _invOrderBuilderAddModal.picker.loading = false;
+        _invOrderBuilderAddModal.picker.error = null;
+        mountOrRefreshMockUi();
+      } else if (step === "items") {
+        const subId = obLinkStep.getAttribute("data-sub-id") || _invOrderBuilderAddModal.picker.subId;
+        const catId = _invOrderBuilderAddModal.picker.catId;
+        _invOrderBuilderAddModal.picker.step = "items";
+        _invOrderBuilderAddModal.picker.subId = subId;
+        mountOrRefreshMockUi();
+        if (catId && subId) void loadLinkPickerItemsForSub(catId, subId);
+      }
+      return;
+    }
+    const obLinkSelect = t.closest("[data-inv-ob-add-link-select]");
+    if (obLinkSelect && root.contains(obLinkSelect) && _invOrderBuilderAddModal) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const pickId = obLinkSelect.getAttribute("data-inv-ob-add-link-select");
+      if (pickId) {
+        const pool = Array.isArray(_invOrderBuilderAddModal.picker.items)
+          ? _invOrderBuilderAddModal.picker.items
+          : [];
+        const picked = pool.find((x) => x.id === pickId);
+        if (picked) {
+          _invOrderBuilderAddModal.linkedItemId = picked.id;
+          _invOrderBuilderAddModal.linkedItemMeta = picked;
+          if (String(_invOrderBuilderAddModal.draftName ?? "").trim() === "") {
+            _invOrderBuilderAddModal.draftName = picked.itemName;
+          }
+          if (!(parseNum(_invOrderBuilderAddModal.draftQty) > 0)) {
+            _invOrderBuilderAddModal.draftQty = "1";
+          }
+          mountOrRefreshMockUi();
+          const rootEl = document.getElementById("inventoryScreen");
+          const qtyInp = rootEl && rootEl.querySelector('[data-inv-ob-add-input="qty"]');
+          if (qtyInp instanceof HTMLInputElement) {
+            qtyInp.focus();
+            qtyInp.select();
+          }
+        }
+      }
+      return;
+    }
+    if (t.closest("[data-inv-ob-add-link-clear]") && _invOrderBuilderAddModal) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      _invOrderBuilderAddModal.linkedItemId = null;
+      _invOrderBuilderAddModal.linkedItemMeta = null;
+      if (_invOrderBuilderAddModal.picker) {
+        _invOrderBuilderAddModal.picker.step = "category";
+        _invOrderBuilderAddModal.picker.catId = null;
+        _invOrderBuilderAddModal.picker.subId = null;
+        _invOrderBuilderAddModal.picker.items = null;
+        _invOrderBuilderAddModal.picker.loading = false;
+        _invOrderBuilderAddModal.picker.error = null;
+      }
+      mountOrRefreshMockUi();
+      return;
+    }
+    const obManualRemove = t.closest("[data-inv-ob-manual-remove]");
+    if (obManualRemove && root.contains(obManualRemove)) {
+      ev.preventDefault();
+      const lid = obManualRemove.getAttribute("data-inv-ob-manual-remove");
+      if (lid) {
+        _invOrderBuilderManualLines = _invOrderBuilderManualLines.filter((x) => x.id !== lid);
+        mountOrRefreshMockUi();
+      }
+      return;
+    }
     if (t.id === "ff-inv2-add-row") {
       ev.preventDefault();
       _editCellKey = null;
@@ -8288,7 +9045,7 @@ function mountOrRefreshMockUi() {
     <div class="ff-inv2-aside-body" id="ff-inv2-aside-body">${renderSidebarHtml()}</div>
   </aside>
   <main class="ff-inv2-main" id="ff-inv2-main">
-    <div class="ff-inv2-main-head">${crumb}<span class="ff-inv2-mock-pill">Categories &amp; table · Cloud (per subcategory)</span></div>
+    <div class="ff-inv2-main-head">${crumb}</div>
     ${renderInvMainTabsHtml()}
     ${renderInvMainTabPanelsHtml()}
   </main>
@@ -8304,7 +9061,8 @@ ${renderReceiptInfoModal()}
 ${renderInventoryOrdersMenu()}
 ${renderInventoryOrdersDeleteModal()}
 ${renderInventoryOrdersMarkOrderedModal()}
-${renderInventoryOrdersRenameModal()}`;
+${renderInventoryOrdersRenameModal()}
+${renderInventoryOrderBuilderAddItemModal()}`;
 
   ensureInventoryScreenDelegates(root);
   syncInvColWidthsToDom();
