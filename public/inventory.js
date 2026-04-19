@@ -90,7 +90,7 @@ let _invTableSaveTimer = null;
 /** Row drag-reorder: row id being dragged (HTML5 DnD). */
 let _invRowDndDragId = null;
 
-const STYLE_ID = "ff-inv2-mock-styles-v91";
+const STYLE_ID = "ff-inv2-mock-styles-v96";
 
 /** One-step undo for row/group delete: delayed Firestore write + toast. */
 const INV_UNDO_MS = 5000;
@@ -162,7 +162,11 @@ let _invReceiptInfoModalOrderId = null;
 let _invOrderDetailLineViewIdx = null;
 
 /** Order Builder: scope for generated preview (not persisted). */
-let _invOrderBuilderSourceMode = "currentSub"; // "currentSub" | "currentCat" | "custom"
+/** @deprecated kept only to avoid breakage in older cached references; always "custom" now. */
+let _invOrderBuilderSourceMode = "custom";
+/** Order Builder tree: which category blocks are expanded. Default = collapsed (closed). */
+/** @type {Set<string>} */
+let _invOrderBuilderExpandedCatIds = new Set();
 /** @type {Set<string>} */
 let _invOrderBuilderCustomSubIds = new Set();
 /** @type {Array<Record<string, unknown>>} */
@@ -1724,47 +1728,39 @@ function syncOrderBuilderPreviewFromCurrentSub() {
   _invOrderBuilderPreviewLoading = false;
 }
 
+/** No auto-seeding — user starts with a clean tree and explicitly picks what to include. */
+function seedOrderBuilderSelectionIfEmpty() {
+  // intentionally empty
+}
+
+/** Make sure any category that contains a checked subcategory stays expanded so the selection is visible. */
+function expandOrderBuilderCatsForCurrentSelection() {
+  if (_invOrderBuilderCustomSubIds.size === 0) return;
+  for (const c of getCategoryTree()) {
+    const subs = c.subcategories || [];
+    if (subs.some((s) => _invOrderBuilderCustomSubIds.has(s.id))) {
+      _invOrderBuilderExpandedCatIds.add(c.id);
+    }
+  }
+}
+
 function prepareOrderBuilderPreviewForMount() {
   if (_invMainTab !== "orderBuilder") return;
-  if (_invOrderBuilderSourceMode === "currentSub") {
-    syncOrderBuilderPreviewFromCurrentSub();
-  }
 }
 
 async function refreshOrderBuilderPreviewAsync() {
   if (_invMainTab !== "orderBuilder") return;
-  const meta = getSelectedSubMeta();
-  if (!meta) {
-    _invOrderBuilderPreviewLines = [];
-    _invOrderBuilderPreviewLoading = false;
-    mountOrRefreshMockUi();
-    return;
-  }
-  if (_invOrderBuilderSourceMode === "currentSub") {
-    syncOrderBuilderPreviewFromCurrentSub();
-    return;
-  }
+  seedOrderBuilderSelectionIfEmpty();
   const seq = ++_invOrderBuilderPreviewSeq;
   _invOrderBuilderPreviewLoading = true;
   mountOrRefreshMockUi();
   try {
     const salonId = await getSalonId();
     if (!salonId) throw new Error("No salon");
+    const ids = Array.from(_invOrderBuilderCustomSubIds);
     let lines = [];
-    if (_invOrderBuilderSourceMode === "currentCat") {
-      lines = await buildOrderPreviewLinesForSubIds(
-        salonId,
-        meta.category.id,
-        meta.category.subcategories || [],
-        meta.category.name != null ? String(meta.category.name) : null
-      );
-    } else {
-      const ids = Array.from(_invOrderBuilderCustomSubIds);
-      if (ids.length === 0) {
-        lines = [];
-      } else {
-        lines = await buildOrderPreviewLinesForCustomSubIds(salonId, ids);
-      }
+    if (ids.length > 0) {
+      lines = await buildOrderPreviewLinesForCustomSubIds(salonId, ids);
     }
     sortOrderBuilderLines(lines);
     if (seq !== _invOrderBuilderPreviewSeq) return;
@@ -1773,7 +1769,7 @@ async function refreshOrderBuilderPreviewAsync() {
     console.error("[Inventory] order builder preview failed", e);
     if (seq !== _invOrderBuilderPreviewSeq) return;
     _invOrderBuilderPreviewLines = [];
-    inventoryOrderDraftToast("Could not load inventory for this source.", "error");
+    inventoryOrderDraftToast("Could not load inventory for this selection.", "error");
   } finally {
     if (seq === _invOrderBuilderPreviewSeq) {
       _invOrderBuilderPreviewLoading = false;
@@ -1790,6 +1786,9 @@ function renderOrderBuilderCustomTreeHtml() {
   const parts = [];
   for (const c of tree) {
     const subs = c.subcategories || [];
+    const isOpen = _invOrderBuilderExpandedCatIds.has(c.id);
+    const someChecked = subs.length > 0 && subs.some((s) => _invOrderBuilderCustomSubIds.has(s.id));
+    const allChecked = subs.length > 0 && subs.every((s) => _invOrderBuilderCustomSubIds.has(s.id));
     const subsHtml = subs.length
       ? subs
           .map((s) => {
@@ -1801,49 +1800,39 @@ function renderOrderBuilderCustomTreeHtml() {
           })
           .join("")
       : `<span class="ff-inv2-ob-tree-empty">No subcategories</span>`;
-    const allChecked = subs.length > 0 && subs.every((s) => _invOrderBuilderCustomSubIds.has(s.id));
-    parts.push(`<div class="ff-inv2-ob-cat-block" data-inv-ob-cat-block="${escapeHtml(c.id)}">
-  <label class="ff-inv2-ob-cat-label">
-    <input type="checkbox" data-inv-ob-cat="${escapeHtml(c.id)}"${allChecked ? " checked" : ""} />
-    <span class="ff-inv2-ob-cat-name">${escapeHtml(c.name)}</span>
-  </label>
-  <div class="ff-inv2-ob-subs">${subsHtml}</div>
+    const countLabel = subs.length
+      ? someChecked
+        ? `${subs.filter((s) => _invOrderBuilderCustomSubIds.has(s.id)).length}/${subs.length}`
+        : `${subs.length}`
+      : "0";
+    parts.push(`<div class="ff-inv2-ob-cat-block${isOpen ? " ff-inv2-ob-cat-block--open" : ""}" data-inv-ob-cat-block="${escapeHtml(c.id)}">
+  <div class="ff-inv2-ob-cat-row">
+    <button type="button" class="ff-inv2-ob-cat-toggle" data-inv-ob-cat-toggle="${escapeHtml(c.id)}" aria-expanded="${isOpen ? "true" : "false"}" aria-label="${isOpen ? "Collapse" : "Expand"} ${escapeHtml(c.name)}">
+      <span class="ff-inv2-ob-cat-chev" aria-hidden="true">${isOpen ? "▾" : "▸"}</span>
+    </button>
+    <label class="ff-inv2-ob-cat-label">
+      <input type="checkbox" data-inv-ob-cat="${escapeHtml(c.id)}"${allChecked ? " checked" : ""} />
+      <span class="ff-inv2-ob-cat-name">${escapeHtml(c.name)}</span>
+    </label>
+    <span class="ff-inv2-ob-cat-count" aria-hidden="true">${escapeHtml(countLabel)}</span>
+  </div>
+  ${isOpen ? `<div class="ff-inv2-ob-subs">${subsHtml}</div>` : ""}
 </div>`);
   }
   return `<div class="ff-inv2-ob-tree" role="group" aria-label="Subcategories">${parts.join("")}</div>`;
 }
 
 function renderOrderBuilderSourceHtml() {
-  const meta = getSelectedSubMeta();
-  const subLabel = meta && meta.sub.name != null ? String(meta.sub.name) : "—";
-  const catLabel = meta && meta.category.name != null ? String(meta.category.name) : "—";
-  const mode = _invOrderBuilderSourceMode;
-  const customBlock =
-    mode === "custom"
-      ? `<div class="ff-inv2-ob-custom">${renderOrderBuilderCustomTreeHtml()}</div>`
-      : "";
+  seedOrderBuilderSelectionIfEmpty();
+  expandOrderBuilderCatsForCurrentSelection();
   return `<div class="ff-inv2-ob-source">
-  <p class="ff-inv2-ob-source-title">Order list source</p>
-  <div class="ff-inv2-ob-source-radios" role="radiogroup" aria-label="Order list source">
-    <label class="ff-inv2-ob-radio">
-      <input type="radio" name="ff-inv2-ob-source" value="currentSub"${mode === "currentSub" ? " checked" : ""} />
-      <span>Current subcategory <span class="ff-inv2-ob-muted">(${escapeHtml(subLabel)})</span></span>
-    </label>
-    <label class="ff-inv2-ob-radio">
-      <input type="radio" name="ff-inv2-ob-source" value="currentCat"${mode === "currentCat" ? " checked" : ""} />
-      <span>Current category <span class="ff-inv2-ob-muted">(${escapeHtml(catLabel)})</span></span>
-    </label>
-    <label class="ff-inv2-ob-radio">
-      <input type="radio" name="ff-inv2-ob-source" value="custom"${mode === "custom" ? " checked" : ""} />
-      <span>Custom selection</span>
-    </label>
-  </div>
-  ${customBlock}
+  <p class="ff-inv2-ob-source-title">Build Your Order</p>
+  <p class="ff-inv2-ob-source-hint">Tap a category to expand, then pick one or more subcategories (or the whole category).</p>
+  <div class="ff-inv2-ob-custom">${renderOrderBuilderCustomTreeHtml()}</div>
 </div>`;
 }
 
 function syncOrderBuilderCategoryCheckboxIndeterminate(root) {
-  if (_invOrderBuilderSourceMode !== "custom") return;
   root.querySelectorAll("[data-inv-ob-cat-block]").forEach((block) => {
     const catId = block.getAttribute("data-inv-ob-cat-block");
     if (!catId) return;
@@ -1900,43 +1889,6 @@ function enrichOrderLineWithCategoryContext(L) {
  * @returns {{ sourceType: string, sourceSelection: object, categoryId: string | null, categoryName: string | null, subcategoryId: string | null, subcategoryName: string | null } | null}
  */
 function buildInventoryOrderDraftSourcePayload() {
-  const mode = _invOrderBuilderSourceMode;
-  const meta = getSelectedSubMeta();
-  if (mode === "currentSub") {
-    if (!meta) return null;
-    const sourceSelection = {
-      categoryId: meta.category.id,
-      categoryName: meta.category.name != null ? String(meta.category.name) : "",
-      subcategoryIds: [meta.sub.id],
-      subcategoryNames: [meta.sub.name != null ? String(meta.sub.name) : ""],
-    };
-    return {
-      sourceType: "subcategory",
-      sourceSelection,
-      categoryId: meta.category.id,
-      categoryName: meta.category.name != null ? String(meta.category.name) : null,
-      subcategoryId: meta.sub.id,
-      subcategoryName: meta.sub.name != null ? String(meta.sub.name) : null,
-    };
-  }
-  if (mode === "currentCat") {
-    if (!meta) return null;
-    const subs = meta.category.subcategories || [];
-    const sourceSelection = {
-      categoryId: meta.category.id,
-      categoryName: meta.category.name != null ? String(meta.category.name) : "",
-      subcategoryIds: subs.map((s) => s.id),
-      subcategoryNames: subs.map((s) => (s.name != null ? String(s.name) : "")),
-    };
-    return {
-      sourceType: "category",
-      sourceSelection,
-      categoryId: meta.category.id,
-      categoryName: meta.category.name != null ? String(meta.category.name) : null,
-      subcategoryId: null,
-      subcategoryName: null,
-    };
-  }
   const ids = Array.from(_invOrderBuilderCustomSubIds).sort();
   const categoryIdsSet = new Set();
   const subcategoryIds = [];
@@ -2069,7 +2021,8 @@ function renderOrderListSectionHtml() {
   const loading = _invOrderBuilderPreviewLoading;
   const hasRows = lines.length > 0;
   const busy = _invSaveOrderDraftBusy;
-  const showSubCol = _invOrderBuilderSourceMode !== "currentSub";
+  // Always show Subcategory column — selections can span multiple subs now.
+  const showSubCol = true;
   const saveDisabled = busy || loading || !hasRows;
   const saveBtn = hasRows && !loading
     ? `<button type="button" class="ff-inv2-btn" id="ff-inv2-save-order-draft"${saveDisabled ? " disabled" : ""}>${busy ? "Saving…" : "Save as Order"}</button>`
@@ -2379,6 +2332,7 @@ function renderInvMainTabsHtml() {
     { id: "inventory", label: "Inventory" },
     { id: "orderBuilder", label: "Order Builder" },
     { id: "orders", label: "Orders" },
+    { id: "insights", label: "Insights" },
   ];
   return `<div class="ff-inv2-main-tabs" role="tablist" aria-label="Inventory workspace">
 ${tabs
@@ -3307,6 +3261,195 @@ function renderOrderDetailLineViewModal() {
 </div>`;
 }
 
+// ---- Inventory Insights ----------------------------------------------------
+
+/** @type {"30d" | "60d" | "120d" | "year" | "all" | "custom"} */
+let _invInsightsRange = "30d";
+let _invInsightsCustomFrom = "";
+let _invInsightsCustomTo = "";
+let _invInsightsLoading = false;
+/** @type {Array<{ key: string, name: string, totalQty: number }>} */
+let _invInsightsRows = [];
+let _invInsightsLoadSeq = 0;
+let _invInsightsError = null;
+
+/** Convert local YYYY-MM-DD input value to a JS Date (start of day local time). */
+function ffParseDateInputStart(s) {
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0);
+}
+
+/** Convert local YYYY-MM-DD input value to end of day. */
+function ffParseDateInputEnd(s) {
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999);
+}
+
+/** Resolve the active range to absolute { from, to } JS Dates. `all` returns from=null. */
+function getInventoryInsightsDateRange() {
+  const now = new Date();
+  const to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  if (_invInsightsRange === "all") return { from: null, to: null };
+  if (_invInsightsRange === "custom") {
+    return {
+      from: ffParseDateInputStart(_invInsightsCustomFrom),
+      to: ffParseDateInputEnd(_invInsightsCustomTo) || to,
+    };
+  }
+  let days = 30;
+  if (_invInsightsRange === "60d") days = 60;
+  else if (_invInsightsRange === "120d") days = 120;
+  else if (_invInsightsRange === "year") days = 365;
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1), 0, 0, 0, 0);
+  return { from, to };
+}
+
+/** Best-effort timestamp resolution for an order item event (purchase apply / receive). */
+function ffResolveItemEventDate(it, order) {
+  const candidates = [it && it.appliedAt, it && it.lastReceivedAt, order && order.updatedAt, order && order.orderedAt, order && order.createdAt];
+  for (const ts of candidates) {
+    if (!ts) continue;
+    if (typeof ts.toDate === "function") {
+      try {
+        return ts.toDate();
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    if (typeof ts === "object" && ts && typeof ts.seconds === "number") {
+      return new Date(ts.seconds * 1000 + (typeof ts.nanoseconds === "number" ? ts.nanoseconds / 1e6 : 0));
+    }
+    if (typeof ts === "number") return new Date(ts);
+    if (typeof ts === "string") {
+      const d = new Date(ts);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+  }
+  return null;
+}
+
+async function refreshInventoryInsightsAsync() {
+  if (_invMainTab !== "insights") return;
+  const seq = ++_invInsightsLoadSeq;
+  _invInsightsLoading = true;
+  _invInsightsError = null;
+  mountOrRefreshMockUi();
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) throw new Error("No salon");
+    const snap = await getDocs(collection(db, `salons/${salonId}/inventoryOrders`));
+    if (seq !== _invInsightsLoadSeq) return;
+    const { from, to } = getInventoryInsightsDateRange();
+    /** @type {Map<string, { name: string, totalQty: number }>} */
+    const buckets = new Map();
+    snap.forEach((d) => {
+      const order = { id: d.id, ...d.data() };
+      const items = Array.isArray(order.items) ? order.items : [];
+      for (const it of items) {
+        if (!it || typeof it !== "object") continue;
+        // Purchase contribution (Confirm Purchase): only when applied + has positive qty.
+        const purchaseQty =
+          it.appliedToInventory === true ? Number(it.qtyBought) : NaN;
+        const receiveQty = Number(it.receivedCumulative);
+        const purchaseValid = Number.isFinite(purchaseQty) && purchaseQty > 0;
+        const receiveValid = Number.isFinite(receiveQty) && receiveQty > 0;
+        if (!purchaseValid && !receiveValid) continue;
+        const eventDate = ffResolveItemEventDate(it, order);
+        if (from && eventDate && eventDate < from) continue;
+        if (to && eventDate && eventDate > to) continue;
+        // If we couldn't resolve a date AND the user picked a non-"all" range, skip.
+        if ((!eventDate) && _invInsightsRange !== "all") continue;
+        const itemName = it.itemName != null ? String(it.itemName).trim() : "";
+        if (!itemName) continue;
+        const groupName = it.groupName != null ? String(it.groupName).trim() : "";
+        const key = `${itemName}__${groupName}`;
+        const displayName = groupName ? `${itemName} (${groupName})` : itemName;
+        const prev = buckets.get(key) || { name: displayName, totalQty: 0 };
+        // Use the larger of purchase vs receive to avoid double-counting when both happen on the same item.
+        // Background: the same `current` increment may show up via both flows in legacy data.
+        prev.totalQty += Math.max(purchaseValid ? purchaseQty : 0, receiveValid ? receiveQty : 0);
+        buckets.set(key, prev);
+      }
+    });
+    const rows = [];
+    for (const [key, v] of buckets) {
+      if (v.totalQty > 0) rows.push({ key, name: v.name, totalQty: v.totalQty });
+    }
+    rows.sort((a, b) => b.totalQty - a.totalQty || a.name.localeCompare(b.name));
+    if (seq !== _invInsightsLoadSeq) return;
+    _invInsightsRows = rows;
+  } catch (e) {
+    console.error("[Inventory] insights load failed", e);
+    if (seq !== _invInsightsLoadSeq) return;
+    _invInsightsRows = [];
+    _invInsightsError = "Could not load purchase data.";
+  } finally {
+    if (seq === _invInsightsLoadSeq) {
+      _invInsightsLoading = false;
+      mountOrRefreshMockUi();
+    }
+  }
+}
+
+function renderInventoryInsightsTabHtml() {
+  const ranges = [
+    { id: "30d", label: "Last 30 days" },
+    { id: "60d", label: "Last 60 days" },
+    { id: "120d", label: "Last 120 days" },
+    { id: "year", label: "Last year" },
+    { id: "all", label: "All time" },
+    { id: "custom", label: "Custom range…" },
+  ];
+  const options = ranges
+    .map((r) => {
+      const sel = _invInsightsRange === r.id ? " selected" : "";
+      return `<option value="${r.id}"${sel}>${escapeHtml(r.label)}</option>`;
+    })
+    .join("");
+  const rangeControl = `<label class="ff-inv2-insights-range-label">Range
+  <select class="ff-inv2-insights-range-select" data-inv-insights-range-select aria-label="Date range">${options}</select>
+</label>`;
+  const customRow =
+    _invInsightsRange === "custom"
+      ? `<div class="ff-inv2-insights-custom">
+  <label class="ff-inv2-insights-date-label">From <input type="date" data-inv-insights-from value="${escapeHtml(_invInsightsCustomFrom)}" /></label>
+  <label class="ff-inv2-insights-date-label">To <input type="date" data-inv-insights-to value="${escapeHtml(_invInsightsCustomTo)}" /></label>
+</div>`
+      : "";
+  let body;
+  if (_invInsightsLoading) {
+    body = `<p class="ff-inv2-insights-empty">Loading…</p>`;
+  } else if (_invInsightsError) {
+    body = `<p class="ff-inv2-insights-empty">${escapeHtml(_invInsightsError)}</p>`;
+  } else if (_invInsightsRows.length === 0) {
+    body = `<p class="ff-inv2-insights-empty">No purchases in this range.</p>`;
+  } else {
+    body = `<ol class="ff-inv2-insights-list">${_invInsightsRows
+      .map(
+        (r, i) => `<li class="ff-inv2-insights-row">
+  <span class="ff-inv2-insights-rank">${i + 1}.</span>
+  <span class="ff-inv2-insights-name">${escapeHtml(r.name)}</span>
+  <span class="ff-inv2-insights-qty">${escapeHtml(formatOrderDisplay(r.totalQty))}</span>
+</li>`
+      )
+      .join("")}</ol>`;
+  }
+  return `<div class="ff-inv2-insights-wrap">
+  <div class="ff-inv2-insights-head">
+    <div class="ff-inv2-insights-head-row">
+      <h3 class="ff-inv2-insights-title">Most Purchased</h3>
+      ${rangeControl}
+    </div>
+    ${customRow}
+  </div>
+  <div class="ff-inv2-insights-body">${body}</div>
+</div>`;
+}
+
 function renderOrdersTabHtml() {
   if (_invOrdersLoading) {
     return `<div class="ff-inv2-orders-wrap">
@@ -3657,6 +3800,9 @@ function renderInvMainTabPanelsHtml() {
   }
   if (_invMainTab === "orders") {
     return `<div class="ff-inv2-main-tab-body ff-inv2-main-tab-body--orders">${renderOrdersTabHtml()}</div>`;
+  }
+  if (_invMainTab === "insights") {
+    return `<div class="ff-inv2-main-tab-body ff-inv2-main-tab-body--insights">${renderInventoryInsightsTabHtml()}</div>`;
   }
   return `<div class="ff-inv2-main-tab-body ff-inv2-main-tab-body--inventory">${renderInventoryTableCardHtml()}</div>`;
 }
@@ -4252,6 +4398,29 @@ function handleInventoryInput(ev) {
         }
       } catch (e) {
         /* ignore */
+      }
+    }
+    return;
+  }
+  if (t.hasAttribute("data-inv-insights-from")) {
+    _invInsightsCustomFrom = t.value;
+    if (_invInsightsRange === "custom") void refreshInventoryInsightsAsync();
+    return;
+  }
+  if (t.hasAttribute("data-inv-insights-to")) {
+    _invInsightsCustomTo = t.value;
+    if (_invInsightsRange === "custom") void refreshInventoryInsightsAsync();
+    return;
+  }
+  if (t.hasAttribute("data-inv-insights-range-select")) {
+    const v = t.value;
+    const allowed = ["30d", "60d", "120d", "year", "all", "custom"];
+    if (allowed.includes(v) && _invInsightsRange !== v) {
+      _invInsightsRange = v;
+      if (v !== "custom") {
+        void refreshInventoryInsightsAsync();
+      } else {
+        mountOrRefreshMockUi();
       }
     }
     return;
@@ -6184,12 +6353,150 @@ function injectMockStylesOnce() {
   background: #fafafa;
   flex-shrink: 0;
 }
-#inventoryScreen .ff-inv2-ob-source-title {
-  margin: 0 0 8px;
-  font-size: 11px;
+#inventoryScreen .ff-inv2-main-tab-body--insights {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+#inventoryScreen .ff-inv2-insights-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+}
+#inventoryScreen .ff-inv2-insights-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#inventoryScreen .ff-inv2-insights-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+#inventoryScreen .ff-inv2-insights-title {
+  margin: 0;
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  color: #0f172a;
+}
+#inventoryScreen .ff-inv2-insights-range-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+#inventoryScreen .ff-inv2-insights-range-select {
+  padding: 6px 28px 6px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #0f172a;
+  background: #fff
+    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%2364748b' d='M5 6 0 0h10z'/%3E%3C/svg%3E")
+    no-repeat right 10px center;
+  background-size: 9px 5px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+#inventoryScreen .ff-inv2-insights-range-select:focus {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 1px;
+  border-color: #a78bfa;
+}
+#inventoryScreen .ff-inv2-insights-custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+#inventoryScreen .ff-inv2-insights-date-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+#inventoryScreen .ff-inv2-insights-date-label input[type="date"] {
+  padding: 5px 8px;
+  font-size: 13px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  color: #0f172a;
+  background: #fff;
+}
+#inventoryScreen .ff-inv2-insights-empty {
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+}
+#inventoryScreen .ff-inv2-insights-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+#inventoryScreen .ff-inv2-insights-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 4px;
+  border-bottom: 1px solid #f1f5f9;
+}
+#inventoryScreen .ff-inv2-insights-row:last-child {
+  border-bottom: none;
+}
+#inventoryScreen .ff-inv2-insights-rank {
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 12px;
+  text-align: right;
+}
+#inventoryScreen .ff-inv2-insights-name {
+  color: #0f172a;
+  font-weight: 500;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#inventoryScreen .ff-inv2-insights-qty {
+  color: #5b21b6;
+  font-weight: 700;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  background: #ede9fe;
+  border-radius: 999px;
+  padding: 2px 12px;
+  min-width: 56px;
+  text-align: center;
+}
+#inventoryScreen .ff-inv2-ob-source-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #0f172a;
+}
+#inventoryScreen .ff-inv2-ob-source-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
   color: #64748b;
 }
 #inventoryScreen .ff-inv2-ob-source-radios {
@@ -6214,22 +6521,61 @@ function injectMockStylesOnce() {
   font-weight: 400;
 }
 #inventoryScreen .ff-inv2-ob-custom {
-  margin-top: 10px;
-  max-height: min(28vh, 220px);
+  margin-top: 0;
+  max-height: min(32vh, 260px);
   overflow: auto;
-  padding: 8px 0 0;
-  border-top: 1px solid #e2e8f0;
+  padding: 0;
   -webkit-overflow-scrolling: touch;
 }
 #inventoryScreen .ff-inv2-ob-tree {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 4px;
+}
+#inventoryScreen .ff-inv2-ob-cat-block {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+#inventoryScreen .ff-inv2-ob-cat-block--open {
+  border-color: #c4b5fd;
+  background: #faf5ff;
+}
+#inventoryScreen .ff-inv2-ob-cat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+}
+#inventoryScreen .ff-inv2-ob-cat-toggle {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+#inventoryScreen .ff-inv2-ob-cat-toggle:hover {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+#inventoryScreen .ff-inv2-ob-cat-chev {
+  font-size: 12px;
+  line-height: 1;
 }
 #inventoryScreen .ff-inv2-ob-cat-label {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
   font-weight: 600;
   font-size: 13px;
   color: #1e293b;
@@ -6237,12 +6583,29 @@ function injectMockStylesOnce() {
 }
 #inventoryScreen .ff-inv2-ob-cat-name {
   line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#inventoryScreen .ff-inv2-ob-cat-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #7c3aed;
+  background: #ede9fe;
+  border-radius: 999px;
+  padding: 2px 8px;
+  min-width: 28px;
+  text-align: center;
 }
 #inventoryScreen .ff-inv2-ob-subs {
-  margin: 4px 0 0 22px;
+  margin: 0;
+  padding: 4px 12px 8px 36px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  border-top: 1px solid #e9d5ff;
+  background: #ffffff;
 }
 #inventoryScreen .ff-inv2-ob-sub-label {
   display: flex;
@@ -8084,24 +8447,6 @@ function handleOrderBuilderSourceChange(ev) {
     }
     return;
   }
-  if (t.name === "ff-inv2-ob-source") {
-    const v = t.value;
-    if (v !== "currentSub" && v !== "currentCat" && v !== "custom") return;
-    if (_invOrderBuilderSourceMode === v) return;
-    _invOrderBuilderSourceMode = v;
-    if (v === "custom" && _invOrderBuilderCustomSubIds.size === 0) {
-      const meta = getSelectedSubMeta();
-      if (meta) {
-        for (const s of meta.category.subcategories || []) {
-          _invOrderBuilderCustomSubIds.add(s.id);
-        }
-      }
-    }
-    if (v !== "currentSub") _invOrderBuilderPreviewLoading = true;
-    mountOrRefreshMockUi();
-    void refreshOrderBuilderPreviewAsync();
-    return;
-  }
   if (t.hasAttribute("data-inv-ob-cat")) {
     const catId = t.getAttribute("data-inv-ob-cat");
     if (!catId) return;
@@ -8526,7 +8871,7 @@ function ensureInventoryScreenDelegates(root) {
     if (invMainTabBtn && root.contains(invMainTabBtn)) {
       ev.preventDefault();
       const tab = invMainTabBtn.getAttribute("data-inv-main-tab");
-      if (tab === "inventory" || tab === "orderBuilder" || tab === "orders") {
+      if (tab === "inventory" || tab === "orderBuilder" || tab === "orders" || tab === "insights") {
         if (_invMainTab !== tab) {
           _invMainTab = tab;
           if (tab !== "orders") {
@@ -8538,7 +8883,7 @@ function ensureInventoryScreenDelegates(root) {
             _invOrdersMarkOrderedConfirmOrderId = null;
             _invOrdersRenameModal = null;
           }
-          if (tab === "orderBuilder" && _invOrderBuilderSourceMode !== "currentSub") {
+          if (tab === "orderBuilder") {
             _invOrderBuilderPreviewLoading = true;
           }
           mountOrRefreshMockUi();
@@ -8547,6 +8892,9 @@ function ensureInventoryScreenDelegates(root) {
           }
           if (tab === "orders") {
             void loadInventoryOrdersList();
+          }
+          if (tab === "insights") {
+            void refreshInventoryInsightsAsync();
           }
         }
       }
@@ -9303,6 +9651,17 @@ function ensureInventoryScreenDelegates(root) {
     if (t.id === "ff-inv2-save-order-draft") {
       ev.preventDefault();
       void saveInventoryOrderDraft();
+      return;
+    }
+    const obCatToggle = t.closest("[data-inv-ob-cat-toggle]");
+    if (obCatToggle && root.contains(obCatToggle)) {
+      ev.preventDefault();
+      const cid = obCatToggle.getAttribute("data-inv-ob-cat-toggle");
+      if (cid) {
+        if (_invOrderBuilderExpandedCatIds.has(cid)) _invOrderBuilderExpandedCatIds.delete(cid);
+        else _invOrderBuilderExpandedCatIds.add(cid);
+        mountOrRefreshMockUi();
+      }
       return;
     }
     const obAddItemBtn = t.closest("[data-inv-ob-add-item]");
