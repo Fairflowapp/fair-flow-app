@@ -316,7 +316,7 @@ service cloud.firestore {
         // Required fields
         && request.resource.data.tenantId == salonId
         && request.resource.data.type is string
-        && request.resource.data.status == 'open'
+        && request.resource.data.status in ['open', 'pending']
         && request.resource.data.priority is string
         // Identity
         && request.resource.data.createdByUid == request.auth.uid
@@ -385,7 +385,10 @@ service cloud.firestore {
               'updatedAt',
               'unreadForManagers',
               'priority',
-              'staffDocumentId'
+              'staffDocumentId',
+              'appliedToInventory',
+              'appliedToInventoryAt',
+              'appliedInventoryRefs'
             ])
           )
           ||

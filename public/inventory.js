@@ -90,7 +90,7 @@ let _invTableSaveTimer = null;
 /** Row drag-reorder: row id being dragged (HTML5 DnD). */
 let _invRowDndDragId = null;
 
-const STYLE_ID = "ff-inv2-mock-styles-v87";
+const STYLE_ID = "ff-inv2-mock-styles-v91";
 
 /** One-step undo for row/group delete: delayed Firestore write + toast. */
 const INV_UNDO_MS = 5000;
@@ -172,6 +172,10 @@ let _invOrderBuilderPreviewSeq = 0;
 /** Order Builder: locally-added manual items (not persisted until Save as Order). */
 /** @type {Array<Record<string, unknown>>} */
 let _invOrderBuilderManualLines = [];
+/** Inventory: Order cell breakdown modal state (long-press). */
+/** @type {{ rowId: string, groupId: string, busy: boolean } | null} */
+let _invOrderCellBreakdownModal = null;
+
 /** Order Builder: Add Item modal state. Optional link to an existing inventory item via tree picker. */
 /**
  * @type {{
@@ -654,16 +658,53 @@ function clearInventoryTableSaveTimer() {
   }
 }
 
+/** Normalize an approvedRequests[] entry from Firestore (defensive) — keeps required fields only. */
+function normalizeApprovedRequestEntry(x) {
+  if (!x || typeof x !== "object") return null;
+  const requestId = x.requestId != null ? String(x.requestId).trim() : "";
+  if (!requestId) return null;
+  const qty = typeof x.qty === "number" ? x.qty : parseNum(x.qty);
+  if (!Number.isFinite(qty) || qty === 0) return null;
+  /** @type {Record<string, unknown>} */
+  const out = { requestId, qty };
+  if (x.at) out.at = x.at;
+  if (x.by != null) out.by = String(x.by);
+  if (x.byName != null) out.byName = String(x.byName);
+  if (x.itemName != null) out.itemName = String(x.itemName);
+  if (x.note != null) out.note = String(x.note);
+  if (x.unit != null) out.unit = String(x.unit);
+  return out;
+}
+
 function normalizeRowFromFirestore(r) {
   const byGroup = {};
   const raw = r && r.byGroup && typeof r.byGroup === "object" ? r.byGroup : {};
   for (const gid of Object.keys(raw)) {
     const cell = raw[gid];
     if (!cell || typeof cell !== "object") continue;
+    const approvedRequestsRaw = Array.isArray(cell.approvedRequests) ? cell.approvedRequests : [];
+    const approvedRequests = [];
+    for (const entry of approvedRequestsRaw) {
+      const ne = normalizeApprovedRequestEntry(entry);
+      if (ne) approvedRequests.push(ne);
+    }
+    let approved =
+      typeof cell.approved === "number"
+        ? cell.approved
+        : cell.approved != null
+          ? parseNum(cell.approved)
+          : 0;
+    if (!Number.isFinite(approved)) approved = 0;
+    if (approvedRequests.length > 0) {
+      const sum = approvedRequests.reduce((acc, e) => acc + (Number(e.qty) || 0), 0);
+      if (Math.abs(sum - approved) > 0.0001) approved = sum;
+    }
     byGroup[gid] = {
       stock: typeof cell.stock === "number" ? cell.stock : parseNum(cell.stock),
       current: typeof cell.current === "number" ? cell.current : parseNum(cell.current),
       price: cell.price != null ? String(cell.price) : "",
+      approved,
+      approvedRequests,
     };
   }
   return {
@@ -683,11 +724,22 @@ function serializeInventoryRowForFirestore(r) {
   for (const gid of Object.keys(r.byGroup || {})) {
     const c = r.byGroup[gid];
     if (!c) continue;
-    byGroup[gid] = {
+    const approvedRequestsIn = Array.isArray(c.approvedRequests) ? c.approvedRequests : [];
+    const approvedRequests = [];
+    for (const entry of approvedRequestsIn) {
+      const ne = normalizeApprovedRequestEntry(entry);
+      if (ne) approvedRequests.push(ne);
+    }
+    const approved = approvedRequests.reduce((acc, e) => acc + (Number(e.qty) || 0), 0);
+    /** @type {Record<string, unknown>} */
+    const out = {
       stock: typeof c.stock === "number" ? c.stock : parseNum(c.stock),
       current: typeof c.current === "number" ? c.current : parseNum(c.current),
       price: c.price != null ? String(c.price) : "",
     };
+    if (approved > 0) out.approved = approved;
+    if (approvedRequests.length > 0) out.approvedRequests = approvedRequests;
+    byGroup[gid] = out;
   }
   return {
     id: r.id,
@@ -1489,11 +1541,27 @@ function ensureShoppingDraft(orderId) {
   _invOrderShoppingDraft[orderId] = { checked, qtyBought };
 }
 
-/** Order = max(Stock - Current, 0) */
-function computeOrder(stock, current) {
+/** Order = max(Stock - Current, 0) + max(Approved, 0). Approved is the sum of applied Supply Requests. */
+function computeOrder(stock, current, approved) {
   const s = typeof stock === "number" ? stock : parseNum(stock);
   const c = typeof current === "number" ? current : parseNum(current);
-  return Math.max(0, s - c);
+  const a = approved == null ? 0 : typeof approved === "number" ? approved : parseNum(approved);
+  return Math.max(0, s - c) + Math.max(0, a);
+}
+
+/** Extract approved qty + contributions from a normalized cell (back-compat defaults). */
+function getCellApprovedInfo(cell) {
+  if (!cell || typeof cell !== "object") return { approved: 0, approvedRequests: [] };
+  const approvedRequests = Array.isArray(cell.approvedRequests) ? cell.approvedRequests : [];
+  const approved =
+    approvedRequests.length > 0
+      ? approvedRequests.reduce((acc, e) => acc + (typeof e?.qty === "number" ? e.qty : parseNum(e?.qty)), 0)
+      : typeof cell.approved === "number"
+        ? cell.approved
+        : cell.approved != null
+          ? parseNum(cell.approved)
+          : 0;
+  return { approved: Number.isFinite(approved) ? approved : 0, approvedRequests };
 }
 
 function formatOrderDisplay(n) {
@@ -1561,7 +1629,8 @@ function buildOrderLinesFromGroupsRows(groups, rows, subId, subName, categoryId,
     for (const g of groups) {
       const cell = row.byGroup[g.id];
       if (!cell) continue;
-      const oq = computeOrder(cell.stock, cell.current);
+      const { approved } = getCellApprovedInfo(cell);
+      const oq = computeOrder(cell.stock, cell.current, approved);
       if (oq <= 0) continue;
       lines.push({
         itemId: `${subId}:${row.id}:${g.id}`,
@@ -3391,12 +3460,15 @@ function renderInventoryOrderDetailModal() {
   const itemRows = displayPairs
     .map(({ it, idx }) => {
       const vis = getOrderLineReceiveVisualState(it);
-      const ordQ = formatOrderDisplay(getItemOrderQty(it));
-      const chk = shop && shop.checked[idx] ? " checked" : "";
+      const ordQNum = getItemOrderQty(it);
+      const ordQ = formatOrderDisplay(ordQNum);
       const qb =
         shop && shop.qtyBought[idx] != null && String(shop.qtyBought[idx]).trim() !== ""
           ? String(shop.qtyBought[idx])
           : "";
+      const qbNum = parseNum(qb);
+      const derivedChecked = qbNum > 0 && (ordQNum <= 0 || qbNum >= ordQNum);
+      const chk = derivedChecked ? " checked" : "";
       const name = escapeHtml(it.itemName != null ? String(it.itemName) : "");
       const gLine = getOrderItemGroupLabel(it);
       const groupSpan =
@@ -3664,9 +3736,17 @@ function renderUrlCell(rowId, value) {
   return `<div class="ff-inv2-url-cell">${linkBlock}${pen}</div>`;
 }
 
-function renderOrderCellTd(rowId, groupId, order) {
+function renderOrderCellTd(rowId, groupId, order, approved) {
   const pos = order > 0;
-  return `<td class="ff-inv2-order-cell${pos ? " ff-inv2-order-cell--positive" : ""}" data-order-for-row="${escapeHtml(rowId)}" data-order-for-group="${escapeHtml(groupId)}"><span class="ff-inv2-order-val">${escapeHtml(formatOrderDisplay(order))}</span></td>`;
+  const hasApproved = (approved || 0) > 0;
+  const classes = [
+    "ff-inv2-order-cell",
+    pos ? "ff-inv2-order-cell--positive" : "",
+    hasApproved ? "ff-inv2-order-cell--has-approved" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return `<td class="${classes}" data-order-for-row="${escapeHtml(rowId)}" data-order-for-group="${escapeHtml(groupId)}" data-order-approved="${escapeHtml(String(approved || 0))}" title="${hasApproved ? "Includes approved supply requests — long-press for details" : ""}"><span class="ff-inv2-order-val">${escapeHtml(formatOrderDisplay(order))}</span></td>`;
 }
 
 function handleInvEditOutsideClick(ev) {
@@ -4104,7 +4184,8 @@ function updateOrderCellEl(rowId, groupId) {
   if (!gcell) return;
   const root = document.getElementById("inventoryScreen");
   if (!root) return;
-  const order = computeOrder(gcell.stock, gcell.current);
+  const { approved } = getCellApprovedInfo(gcell);
+  const order = computeOrder(gcell.stock, gcell.current, approved);
   const cells = root.querySelectorAll("td[data-order-for-row]");
   for (let i = 0; i < cells.length; i++) {
     const el = cells[i];
@@ -4112,6 +4193,8 @@ function updateOrderCellEl(rowId, groupId) {
       const span = el.querySelector(".ff-inv2-order-val");
       if (span) span.textContent = formatOrderDisplay(order);
       el.classList.toggle("ff-inv2-order-cell--positive", order > 0);
+      el.classList.toggle("ff-inv2-order-cell--has-approved", approved > 0);
+      el.setAttribute("data-order-approved", String(approved || 0));
       return;
     }
   }
@@ -4182,14 +4265,22 @@ function handleInventoryInput(ev) {
       if (!_invOrderShoppingDraft[oid].qtyBought) _invOrderShoppingDraft[oid].qtyBought = [];
       if (!_invOrderShoppingDraft[oid].checked) _invOrderShoppingDraft[oid].checked = [];
       _invOrderShoppingDraft[oid].qtyBought[idx] = t.value;
-      const shouldCheck = parseNum(t.value) > 0;
-      if (shouldCheck) _invOrderShoppingDraft[oid].checked[idx] = true;
+      // Checkbox is derived from B vs N: check only when B >= N (qty fully met).
+      const order = _invOrdersList.find((x) => x.id === oid);
+      const items = order && Array.isArray(order.items) ? order.items : [];
+      const it = items[idx];
+      const N = it ? getItemOrderQty(it) : 0;
+      const B = parseNum(t.value);
+      const derivedChecked = B > 0 && (N <= 0 || B >= N);
+      _invOrderShoppingDraft[oid].checked[idx] = derivedChecked;
       const root = document.getElementById("inventoryScreen");
-      if (root && shouldCheck) {
+      if (root) {
         const cb = root.querySelector(
           `input[data-inv-shopping-check][data-order-id="${CSS.escape(oid)}"][data-line-idx="${CSS.escape(idxStr)}"]`
         );
-        if (cb instanceof HTMLInputElement && !cb.checked) cb.checked = true;
+        if (cb instanceof HTMLInputElement && cb.checked !== derivedChecked) {
+          cb.checked = derivedChecked;
+        }
       }
     }
     return;
@@ -6789,6 +6880,116 @@ function injectMockStylesOnce() {
 #inventoryScreen .ff-inv2-order-cell--positive .ff-inv2-order-val {
   color: inherit;
 }
+#inventoryScreen .ff-inv2-order-cell--has-approved {
+  color: #0369a1;
+  background: rgba(14, 165, 233, 0.12);
+  cursor: help;
+  position: relative;
+}
+#inventoryScreen .ff-inv2-order-cell--has-approved .ff-inv2-order-val {
+  color: inherit;
+}
+#inventoryScreen .ff-inv2-order-cell--has-approved::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #0ea5e9;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-dl {
+  margin: 0 0 12px;
+  font-size: 13px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-dl dt {
+  color: #64748b;
+  font-weight: 600;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-dl dd {
+  margin: 0;
+  text-align: right;
+  color: #0f172a;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-dl dd.ff-inv2-ord-breakdown-total {
+  color: #5b21b6;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-section {
+  margin: 0 0 12px;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-section-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-entry:last-child {
+  border-bottom: none;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-entry-main {
+  flex: 1;
+  min-width: 0;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-entry-qty {
+  font-weight: 700;
+  color: #0369a1;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-entry-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #64748b;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-remove {
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #b91c1c;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-remove:hover {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+#inventoryScreen .ff-inv2-ord-breakdown-empty {
+  margin: 0;
+  padding: 10px;
+  background: #f8fafc;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: center;
+}
 #inventoryScreen .ff-inv2-mock-pill {
   display: inline-block;
   font-size: 10px;
@@ -7640,13 +7841,14 @@ function rowGroupCells(row) {
   if (_groups === null) return "";
   return _groups
     .map((g) => {
-      const v = row.byGroup[g.id] || { stock: 0, current: 0, price: "" };
-      const order = computeOrder(v.stock, v.current);
+      const v = row.byGroup[g.id] || { stock: 0, current: 0, price: "", approved: 0, approvedRequests: [] };
+      const { approved } = getCellApprovedInfo(v);
+      const order = computeOrder(v.stock, v.current, approved);
       const rid = row.id;
       const gid = g.id;
       return `<td class="ff-inv2-td-numcell">${renderEditableCell("stock", rid, v.stock, { groupId: gid, inputMode: "decimal" })}</td>
 <td class="ff-inv2-td-numcell">${renderEditableCell("current", rid, v.current, { groupId: gid, inputMode: "decimal" })}</td>
-${renderOrderCellTd(rid, gid, order)}
+${renderOrderCellTd(rid, gid, order, approved)}
 <td class="ff-inv2-td-numcell">${renderEditableCell("price", rid, v.price, { groupId: gid })}</td>`;
     })
     .join("");
@@ -7681,6 +7883,143 @@ function renderTableBodyHtml() {
     .join("");
 }
 
+function renderInventoryOrderCellBreakdownModal() {
+  if (!_invOrderCellBreakdownModal) return "";
+  const { rowId, groupId, busy } = _invOrderCellBreakdownModal;
+  const row = Array.isArray(_rows) ? _rows.find((r) => r.id === rowId) : null;
+  const group = Array.isArray(_groups) ? _groups.find((g) => g.id === groupId) : null;
+  if (!row || !group) return "";
+  const cell = row.byGroup && row.byGroup[groupId] ? row.byGroup[groupId] : null;
+  if (!cell) return "";
+  const stock = typeof cell.stock === "number" ? cell.stock : parseNum(cell.stock);
+  const current = typeof cell.current === "number" ? cell.current : parseNum(cell.current);
+  const auto = Math.max(0, stock - current);
+  const { approved, approvedRequests } = getCellApprovedInfo(cell);
+  const total = auto + Math.max(0, approved);
+  const subMeta = getSelectedSubMeta();
+  const contextParts = [];
+  if (subMeta && subMeta.category && subMeta.category.name != null) contextParts.push(String(subMeta.category.name));
+  if (subMeta && subMeta.sub && subMeta.sub.name != null) contextParts.push(String(subMeta.sub.name));
+  if (row.name) contextParts.push(String(row.name));
+  if (group.label) contextParts.push(String(group.label));
+  const contextLabel = contextParts.join(" · ");
+  const disabled = busy ? " disabled" : "";
+
+  const entries =
+    approvedRequests.length === 0
+      ? `<p class="ff-inv2-ord-breakdown-empty">No approved supply requests yet.</p>`
+      : `<div class="ff-inv2-ord-breakdown-list">${approvedRequests
+          .map((e, idx) => {
+            const qtyLabel = `+${escapeHtml(formatOrderDisplay(e.qty))}${e.unit ? ` ${escapeHtml(String(e.unit))}` : ""}`;
+            const who = e.byName ? String(e.byName) : e.by ? `UID ${String(e.by).slice(0, 6)}…` : "Manager";
+            const itemDisp = e.itemName ? String(e.itemName) : "Supply request";
+            const whenDisp =
+              e.at && typeof e.at.toDate === "function"
+                ? formatInventoryOrderCreatedAt(e.at)
+                : typeof e.at === "object" && e.at && "seconds" in e.at
+                  ? formatInventoryOrderCreatedAt(e.at)
+                  : "";
+            const noteHtml = e.note ? `<div class="ff-inv2-ord-breakdown-entry-meta">"${escapeHtml(String(e.note))}"</div>` : "";
+            return `<div class="ff-inv2-ord-breakdown-entry" data-idx="${idx}">
+  <div class="ff-inv2-ord-breakdown-entry-main">
+    <div><span class="ff-inv2-ord-breakdown-entry-qty">${qtyLabel}</span> <span style="color:#0f172a;font-weight:500;">${escapeHtml(itemDisp)}</span></div>
+    <div class="ff-inv2-ord-breakdown-entry-meta">By ${escapeHtml(who)}${whenDisp ? ` · ${escapeHtml(whenDisp)}` : ""}</div>
+    ${noteHtml}
+  </div>
+  <button type="button" class="ff-inv2-ord-breakdown-remove" data-inv-ord-breakdown-remove="${escapeHtml(String(e.requestId))}" aria-label="Remove contribution" title="Remove"${disabled}>🗑</button>
+</div>`;
+          })
+          .join("")}</div>`;
+
+  return `<div class="ff-inv2-modal-backdrop" id="ff-inv-ord-breakdown-backdrop" role="dialog" aria-modal="true" aria-labelledby="ff-inv-ord-breakdown-title">
+  <div class="ff-inv2-modal-card">
+    <h3 id="ff-inv-ord-breakdown-title" class="ff-inv2-modal-title">Order breakdown</h3>
+    ${contextLabel ? `<p class="ff-inv2-modal-hint" style="margin-bottom:12px;">${escapeHtml(contextLabel)}</p>` : ""}
+    <dl class="ff-inv2-ord-breakdown-dl">
+      <dt>Auto (Stock − Current)</dt><dd>${escapeHtml(formatOrderDisplay(auto))}</dd>
+      <dt>Approved (supply requests)</dt><dd>${escapeHtml(formatOrderDisplay(Math.max(0, approved)))}</dd>
+      <dt>Total order</dt><dd class="ff-inv2-ord-breakdown-total">${escapeHtml(formatOrderDisplay(total))}</dd>
+    </dl>
+    <div class="ff-inv2-ord-breakdown-section">
+      <p class="ff-inv2-ord-breakdown-section-title">Approved contributions</p>
+      ${entries}
+    </div>
+    <div class="ff-inv2-modal-actions">
+      <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-primary" data-inv-ord-breakdown-close="1">Close</button>
+    </div>
+  </div>
+</div>`;
+}
+
+async function removeApprovedContributionForCell(rowId, groupId, requestId) {
+  if (!rowId || !groupId || !requestId) return;
+  const subMeta = getSelectedSubMeta();
+  if (!subMeta) {
+    inventoryOrderDraftToast("No subcategory selected.", "error");
+    return;
+  }
+  const catId = String(subMeta.category.id);
+  const subId = String(subMeta.sub.id);
+  if (_invOrderCellBreakdownModal) {
+    _invOrderCellBreakdownModal = { ..._invOrderCellBreakdownModal, busy: true };
+    mountOrRefreshMockUi();
+  }
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) throw new Error("No salon");
+    const subRef = doc(db, `salons/${salonId}/inventoryCategories/${catId}/inventorySubcategories/${subId}`);
+    let touchedRequestIds = [];
+    await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(subRef);
+      if (!snap.exists()) throw new Error("SUB_MISSING");
+      const data = snap.data();
+      const rowsRaw = Array.isArray(data.rows) ? data.rows : [];
+      const rowsNorm = rowsRaw.map((r) => normalizeRowFromFirestore(r));
+      const row = rowsNorm.find((r) => r.id === rowId);
+      if (!row) throw new Error("ROW_MISSING");
+      const cell = row.byGroup && row.byGroup[groupId];
+      if (!cell) throw new Error("CELL_MISSING");
+      const before = Array.isArray(cell.approvedRequests) ? cell.approvedRequests.slice() : [];
+      cell.approvedRequests = before.filter((e) => String(e.requestId) !== String(requestId));
+      touchedRequestIds = before
+        .filter((e) => String(e.requestId) === String(requestId))
+        .map((e) => String(e.requestId));
+      if (touchedRequestIds.length === 0) return;
+      cell.approved = cell.approvedRequests.reduce((acc, e) => acc + (Number(e.qty) || 0), 0);
+      const rowsPayload = rowsNorm.map((r) => serializeInventoryRowForFirestore(r));
+      transaction.update(subRef, { rows: rowsPayload, updatedAt: serverTimestamp() });
+    });
+
+    for (const rid of touchedRequestIds) {
+      try {
+        const ref = doc(db, `salons/${salonId}/inboxItems`, rid);
+        await updateDoc(ref, { appliedToInventory: false, appliedToInventoryAt: null, updatedAt: serverTimestamp() });
+      } catch (e) {
+        console.warn("[Inventory] clear applied flag on inbox item failed", rid, e);
+      }
+    }
+
+    inventoryOrderDraftToast("Contribution removed.", "success");
+    _invOrderCellBreakdownModal = null;
+    const key = `${catId}:${subId}`;
+    if (_invTableLoadedForSubId === key) {
+      const seq = ++_invTableLoadSeq;
+      _invTableLoading = true;
+      mountOrRefreshMockUi();
+      void loadInventoryTableForSub(catId, subId, seq, key);
+    } else {
+      mountOrRefreshMockUi();
+    }
+  } catch (e) {
+    console.error("[Inventory] remove approved contribution failed", e);
+    inventoryOrderDraftToast("Could not remove contribution.", "error");
+    if (_invOrderCellBreakdownModal) {
+      _invOrderCellBreakdownModal = { ..._invOrderCellBreakdownModal, busy: false };
+      mountOrRefreshMockUi();
+    }
+  }
+}
+
 function renderInvRowMenu() {
   if (!_invRowMenu) return "";
   const m = _invRowMenu;
@@ -7693,16 +8032,34 @@ function renderInvRowMenu() {
 </div>`;
 }
 
-/** Order Details shopping checkbox: keep draft + UI in sync (used from change + pointer handler). */
-function syncShoppingDraftFromOrderDetailCheck(cb) {
-  if (!(cb instanceof HTMLInputElement) || !cb.hasAttribute("data-inv-shopping-check")) return;
-  const oid = cb.getAttribute("data-order-id");
-  const idxStr = cb.getAttribute("data-line-idx");
-  if (oid == null || idxStr == null) return;
-  const idx = Number(idxStr);
-  if (!_invOrderShoppingDraft[oid]) _invOrderShoppingDraft[oid] = { checked: [], qtyBought: [] };
-  if (!_invOrderShoppingDraft[oid].checked) _invOrderShoppingDraft[oid].checked = [];
-  _invOrderShoppingDraft[oid].checked[idx] = cb.checked;
+/**
+ * Toggle the Bought (B) quantity for a shopping row driven by its checkbox.
+ * "Got exactly what's needed" — B = 0 → N (check), B = N or complete → 0 (uncheck),
+ * partial B (0 < B < N) → complete to N.
+ */
+function toggleShoppingRowQty(oid, idx) {
+  const o = _invOrdersList.find((x) => x.id === oid);
+  if (!o) return;
+  const items = Array.isArray(o.items) ? o.items : [];
+  const it = items[idx];
+  if (!it) return;
+  const N = getItemOrderQty(it);
+  ensureShoppingDraft(oid);
+  const shop = _invOrderShoppingDraft[oid];
+  if (!shop) return;
+  if (!Array.isArray(shop.qtyBought)) shop.qtyBought = [];
+  if (!Array.isArray(shop.checked)) shop.checked = [];
+  const B = parseNum(shop.qtyBought[idx]);
+  let newB;
+  if (B === 0) {
+    newB = N > 0 ? N : 0;
+  } else if (N > 0 && B >= N) {
+    newB = 0;
+  } else {
+    newB = N > 0 ? N : 0;
+  }
+  shop.qtyBought[idx] = newB > 0 ? String(newB) : "";
+  shop.checked[idx] = newB > 0;
   mountOrRefreshMockUi();
 }
 
@@ -7711,7 +8068,11 @@ function handleOrderBuilderSourceChange(ev) {
   const t = ev.target;
   if (!(t instanceof HTMLInputElement) || !root || !root.contains(t)) return;
   if (t.hasAttribute("data-inv-shopping-check")) {
-    syncShoppingDraftFromOrderDetailCheck(t);
+    const oid = t.getAttribute("data-order-id");
+    const idxStr = t.getAttribute("data-line-idx");
+    if (oid != null && idxStr != null) {
+      toggleShoppingRowQty(oid, Number(idxStr));
+    }
     return;
   }
   if (t.hasAttribute("data-inv-order-receipt-file")) {
@@ -7858,6 +8219,84 @@ function bindOrderDetailRowLongPressOnce(root) {
   root.addEventListener("pointercancel", () => clear(), true);
 }
 
+/**
+ * Long-press (~500ms) on an inventory Order cell opens the breakdown modal.
+ * Eats the next click so short release doesn't bubble up.
+ */
+function bindInventoryOrderCellLongPressOnce(root) {
+  if (root.dataset.ffInvOrdCellLongPress === "1") return;
+  root.dataset.ffInvOrdCellLongPress = "1";
+  /** @type {{ timer: ReturnType<typeof setTimeout>, x: number, y: number } | null} */
+  let state = null;
+
+  function clear() {
+    if (state && state.timer) clearTimeout(state.timer);
+    state = null;
+  }
+
+  root.addEventListener(
+    "pointerdown",
+    (ev) => {
+      const tgt =
+        ev.target instanceof Element ? ev.target : ev.target instanceof Text ? ev.target.parentElement : null;
+      if (!tgt) return;
+      const td = tgt.closest("td.ff-inv2-order-cell");
+      if (!td || !root.contains(td)) return;
+      if (ev.button !== 0) return;
+      const rowId = td.getAttribute("data-order-for-row");
+      const groupId = td.getAttribute("data-order-for-group");
+      if (!rowId || !groupId) return;
+      clear();
+      const x = ev.clientX;
+      const y = ev.clientY;
+      const timer = window.setTimeout(() => {
+        state = null;
+        _invOrderCellBreakdownModal = { rowId, groupId, busy: false };
+        const kill = (cev) => {
+          document.removeEventListener("click", kill, true);
+          const el =
+            cev.target instanceof Element
+              ? cev.target
+              : cev.target instanceof Text
+                ? cev.target.parentElement
+                : null;
+          if (!el) return;
+          const cellAgain = el.closest("td.ff-inv2-order-cell");
+          if (
+            cellAgain &&
+            cellAgain.getAttribute("data-order-for-row") === rowId &&
+            cellAgain.getAttribute("data-order-for-group") === groupId
+          ) {
+            cev.preventDefault();
+            cev.stopPropagation();
+            cev.stopImmediatePropagation();
+          }
+        };
+        document.addEventListener("click", kill, true);
+        window.setTimeout(() => {
+          document.removeEventListener("click", kill, true);
+        }, 900);
+        mountOrRefreshMockUi();
+      }, 500);
+      state = { timer, x, y };
+    },
+    true
+  );
+
+  root.addEventListener(
+    "pointermove",
+    (ev) => {
+      if (!state) return;
+      const d = Math.hypot(ev.clientX - state.x, ev.clientY - state.y);
+      if (d > 14) clear();
+    },
+    true
+  );
+
+  root.addEventListener("pointerup", () => clear(), true);
+  root.addEventListener("pointercancel", () => clear(), true);
+}
+
 function ensureInventoryScreenDelegates(root) {
   if (root.dataset.ffInvDelegates === "1") return;
   root.dataset.ffInvDelegates = "1";
@@ -7866,6 +8305,7 @@ function ensureInventoryScreenDelegates(root) {
   bindCatManageDnDOnce(root);
   bindInvRowDnDOnce(root);
   bindOrderDetailRowLongPressOnce(root);
+  bindInventoryOrderCellLongPressOnce(root);
   /** Order Details: one reliable path for checkbox taps (iOS often fails on invisible native input). */
   root.addEventListener(
     "click",
@@ -7878,8 +8318,11 @@ function ensureInventoryScreenDelegates(root) {
       if (!(cb instanceof HTMLInputElement) || cb.disabled) return;
       ev.preventDefault();
       ev.stopPropagation();
-      cb.checked = !cb.checked;
-      cb.dispatchEvent(new Event("change", { bubbles: true }));
+      const oid = cb.getAttribute("data-order-id");
+      const idxStr = cb.getAttribute("data-line-idx");
+      if (oid != null && idxStr != null) {
+        toggleShoppingRowQty(oid, Number(idxStr));
+      }
     },
     true
   );
@@ -8047,6 +8490,12 @@ function ensureInventoryScreenDelegates(root) {
     if (_invOrderBuilderAddModal) {
       ev.preventDefault();
       _invOrderBuilderAddModal = null;
+      mountOrRefreshMockUi();
+      return;
+    }
+    if (_invOrderCellBreakdownModal && !_invOrderCellBreakdownModal.busy) {
+      ev.preventDefault();
+      _invOrderCellBreakdownModal = null;
       mountOrRefreshMockUi();
       return;
     }
@@ -8224,6 +8673,28 @@ function ensureInventoryScreenDelegates(root) {
       return;
     }
 
+    const ordBreakdownRemove = t.closest("[data-inv-ord-breakdown-remove]");
+    if (ordBreakdownRemove && root.contains(ordBreakdownRemove)) {
+      ev.preventDefault();
+      if (ordBreakdownRemove instanceof HTMLButtonElement && ordBreakdownRemove.disabled) return;
+      if (!_invOrderCellBreakdownModal) return;
+      const rid = ordBreakdownRemove.getAttribute("data-inv-ord-breakdown-remove");
+      if (!rid) return;
+      const { rowId, groupId } = _invOrderCellBreakdownModal;
+      void removeApprovedContributionForCell(rowId, groupId, rid);
+      return;
+    }
+    if (
+      t.closest("[data-inv-ord-breakdown-close]") ||
+      t.id === "ff-inv-ord-breakdown-backdrop"
+    ) {
+      ev.preventDefault();
+      if (_invOrderCellBreakdownModal && _invOrderCellBreakdownModal.busy) return;
+      _invOrderCellBreakdownModal = null;
+      mountOrRefreshMockUi();
+      return;
+    }
+
     const ordersStatusFilterChip = t.closest("[data-inv-orders-status-filter]");
     if (ordersStatusFilterChip && root.contains(ordersStatusFilterChip)) {
       ev.preventDefault();
@@ -8318,8 +8789,11 @@ function ensureInventoryScreenDelegates(root) {
       if (isInvOrderDetailCommitBusy()) return;
       const cb = shopRow.querySelector("input[data-inv-shopping-check]");
       if (cb instanceof HTMLInputElement && !cb.disabled) {
-        cb.checked = !cb.checked;
-        cb.dispatchEvent(new Event("change", { bubbles: true }));
+        const oid = cb.getAttribute("data-order-id");
+        const idxStr = cb.getAttribute("data-line-idx");
+        if (oid != null && idxStr != null) {
+          toggleShoppingRowQty(oid, Number(idxStr));
+        }
       }
       return;
     }
@@ -8975,6 +9449,31 @@ function ensureInventoryScreenDelegates(root) {
   });
 }
 
+/**
+ * External hook: force-reload a subcategory's inventory data so live changes (e.g. approved supply
+ * requests contributing to Order) appear without a manual page refresh. Safe to call with any
+ * (catId, subId); no-op if that sub isn't currently selected.
+ */
+function ffInventoryReloadSub(catId, subId) {
+  const cat = String(catId ?? "").trim();
+  const sub = String(subId ?? "").trim();
+  if (!cat || !sub) return;
+  const key = `${cat}:${sub}`;
+  if (_invTableLoadedForSubId === key) {
+    // If this sub is currently loaded, refetch from Firestore and rerender.
+    const seq = ++_invTableLoadSeq;
+    _invTableLoading = true;
+    mountOrRefreshMockUi();
+    void loadInventoryTableForSub(cat, sub, seq, key);
+    return;
+  }
+  // Otherwise invalidate cache so next navigation refetches.
+  if (!_invTableLoading) _invTableLoadedForSubId = null;
+}
+if (typeof window !== "undefined") {
+  window.ffInventoryReloadSub = ffInventoryReloadSub;
+}
+
 function mountOrRefreshMockUi() {
   const root = document.getElementById("inventoryScreen");
   if (!root) return;
@@ -9012,6 +9511,11 @@ function mountOrRefreshMockUi() {
     if (!ord || _invOrderDetailLineViewIdx < 0 || _invOrderDetailLineViewIdx >= nItems) {
       _invOrderDetailLineViewIdx = null;
     }
+  }
+  if (_invOrderCellBreakdownModal) {
+    const row = Array.isArray(_rows) ? _rows.find((r) => r.id === _invOrderCellBreakdownModal.rowId) : null;
+    const group = Array.isArray(_groups) ? _groups.find((g) => g.id === _invOrderCellBreakdownModal.groupId) : null;
+    if (!row || !group) _invOrderCellBreakdownModal = null;
   }
   injectMockStylesOnce();
   root.classList.add("ff-inv2-screen");
@@ -9062,7 +9566,8 @@ ${renderInventoryOrdersMenu()}
 ${renderInventoryOrdersDeleteModal()}
 ${renderInventoryOrdersMarkOrderedModal()}
 ${renderInventoryOrdersRenameModal()}
-${renderInventoryOrderBuilderAddItemModal()}`;
+${renderInventoryOrderBuilderAddItemModal()}
+${renderInventoryOrderCellBreakdownModal()}`;
 
   ensureInventoryScreenDelegates(root);
   syncInvColWidthsToDom();
@@ -9109,6 +9614,7 @@ ${renderInventoryOrderBuilderAddItemModal()}`;
       _invOrdersDeleteConfirmOrderId = null;
       _invOrdersMarkOrderedConfirmOrderId = null;
       _invOrdersRenameModal = null;
+      _invOrderCellBreakdownModal = null;
       mountOrRefreshMockUi();
     };
     el.addEventListener("click", go);

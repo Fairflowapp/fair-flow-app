@@ -23,6 +23,7 @@ import {
   serverTimestamp,
   Timestamp,
   increment,
+  runTransaction,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
@@ -1311,72 +1312,242 @@ function parseApprovedSupplyLineUnit(line) {
   return t === "" ? null : t.slice(0, 80);
 }
 
+/** Parse a cell's approved qty + contributions (mirrors inventory.js getCellApprovedInfo). */
+function ffGetCellApprovedInfoInbox(cell) {
+  if (!cell || typeof cell !== "object") return { approved: 0, approvedRequests: [] };
+  const list = Array.isArray(cell.approvedRequests) ? cell.approvedRequests : [];
+  const approved = list.reduce((acc, e) => acc + (typeof e?.qty === "number" ? e.qty : Number(e?.qty) || 0), 0);
+  return { approved, approvedRequests: list };
+}
+
 /**
- * For each line item with a valid inventory item id, increment approval metadata on that doc.
- * When variantKey is dip|gel|regular, also updates variants.[key].approvedRequestsCount (+ timestamps / request id).
- * When qty is a valid positive integer, accumulates approved requested qty metadata (item + variant when applicable).
- * Does not change targetStock, currentStock, or order quantities.
+ * Apply approved Supply Request to inventory (Order Quantity contribution only).
+ *
+ * Adds the requested qty to the target row × group cell's `approvedRequests[]` array inside the
+ * subcategory doc. Computes `cell.approved = sum(qty)` as a denormalized field. Idempotent via
+ * inbox doc's `appliedToInventory === true`. Does NOT touch stock or current.
  */
 async function applyApprovedSupplyRequestToInventory(requestId, requestData) {
   const salonId = currentUserProfile?.salonId;
   if (!salonId) return;
   const rid = String(requestId || "").trim();
   if (!rid) return;
-  const items = Array.isArray(requestData?.items) ? requestData.items : [];
-  for (const line of items) {
-    const itemId = String(line?.itemId || "").trim();
-    if (!itemId) continue;
-    const vkRaw = String(line?.variantKey ?? "").trim().toLowerCase();
-    const variantKey = FF_INVENTORY_SUPPLY_VARIANT_KEYS.has(vkRaw) ? vkRaw : null;
-    const qty = parseApprovedSupplyLineQty(line);
-    const unit = parseApprovedSupplyLineUnit(line);
 
-    const ref = doc(db, `salons/${salonId}/inventoryItems`, itemId);
+  // Idempotency guard — skip if request already applied.
+  try {
+    const inboxSnap = await getDoc(doc(db, `salons/${salonId}/inboxItems`, rid));
+    if (inboxSnap.exists() && inboxSnap.data()?.appliedToInventory === true) return;
+  } catch (e) {
+    console.warn("[Inbox] apply supply: idempotency check failed, proceeding", e);
+  }
+
+  const items = Array.isArray(requestData?.items) ? requestData.items : [];
+  if (items.length === 0) {
+    console.warn("[Inbox] apply supply: request has no items", rid);
+    return;
+  }
+
+  // Group items by subcategory doc so we touch each doc once.
+  /** @type {Map<string, { catId: string, subId: string, lines: Array<{rowId: string, groupId: string | null, qty: number, unit: string | null, itemName: string, note: string | null}> }>} */
+  const bySub = new Map();
+  let skippedForMissingKeys = 0;
+  for (const line of items) {
+    const catId = String(line?.categoryId || "").trim();
+    const subId = String(line?.subcategoryId || "").trim();
+    const rowId = String(line?.rowId || "").trim() || (typeof line?.itemId === "string" && line.itemId.includes(":")
+      ? line.itemId.split(":")[0]
+      : String(line?.itemId || "").trim());
+    const groupId = line?.groupId != null && String(line.groupId).trim() !== "" ? String(line.groupId).trim() : null;
+    const qty = Number(line?.qty);
+    if (!catId || !subId || !rowId || !Number.isFinite(qty) || qty <= 0) {
+      console.warn("[Inbox] apply supply: skipping line (missing key fields)", {
+        rid,
+        itemId: line?.itemId,
+        hasCat: !!catId,
+        hasSub: !!subId,
+        hasRow: !!rowId,
+        qty,
+      });
+      skippedForMissingKeys += 1;
+      continue;
+    }
+    const unit = line?.unit != null && String(line.unit).trim() !== "" ? String(line.unit).trim() : null;
+    const itemName = line?.itemName != null ? String(line.itemName) : "";
+    const noteSrc =
+      (requestData?.note != null ? String(requestData.note).trim() : "") ||
+      (line?.note != null ? String(line.note).trim() : "");
+    const note = noteSrc !== "" ? noteSrc : null;
+    const key = `${catId}:${subId}`;
+    if (!bySub.has(key)) bySub.set(key, { catId, subId, lines: [] });
+    bySub.get(key).lines.push({ rowId, groupId, qty, unit, itemName, note });
+  }
+  if (bySub.size === 0) {
+    const msg = skippedForMissingKeys > 0
+      ? `Supply request has no inventory-linked items (skipped ${skippedForMissingKeys}). The request lacks rowId/groupId — it was likely created before the inventory-link feature.`
+      : "Supply request has no inventory items to contribute.";
+    console.warn("[Inbox] apply supply:", msg, rid);
+    throw new Error(msg);
+  }
+
+  const byName =
+    currentUserProfile && currentUserProfile.name ? String(currentUserProfile.name) : "";
+  const byUid =
+    currentUserProfile && currentUserProfile.uid ? String(currentUserProfile.uid) : "";
+  /** @type {Array<{catId: string, subId: string, rowId: string, groupId: string | null}>} */
+  const appliedInventoryRefs = [];
+  /** @type {string[]} */
+  const subcategoryErrors = [];
+  let totalContributions = 0;
+  let totalSkippedUnmatched = 0;
+
+  for (const { catId, subId, lines } of bySub.values()) {
+    const subRef = doc(db, `salons/${salonId}/inventoryCategories/${catId}/inventorySubcategories/${subId}`);
     try {
-      const snap = await getDoc(ref);
-      if (!snap.exists()) continue;
-      const patch = {
-        approvedRequestsCount: increment(1),
-        lastApprovedRequestAt: serverTimestamp(),
-        lastApprovedRequestId: rid,
-        updatedAt: serverTimestamp(),
-      };
-      if (qty != null) {
-        patch.approvedRequestedQtyTotal = increment(qty);
-        patch.lastApprovedRequestedQty = qty;
-        patch.lastApprovedRequestedUnit = unit;
-      }
-      if (variantKey) {
-        patch[`variants.${variantKey}.approvedRequestsCount`] = increment(1);
-        patch[`variants.${variantKey}.lastApprovedRequestAt`] = serverTimestamp();
-        patch[`variants.${variantKey}.lastApprovedRequestId`] = rid;
-      }
-      if (variantKey && qty != null) {
-        patch[`variants.${variantKey}.approvedRequestedQtyTotal`] = increment(qty);
-        patch[`variants.${variantKey}.lastApprovedRequestedQty`] = qty;
-        patch[`variants.${variantKey}.lastApprovedRequestedUnit`] = unit;
-      }
-      await updateDoc(ref, patch);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(subRef);
+        if (!snap.exists()) {
+          subcategoryErrors.push(`Subcategory ${catId}/${subId} not found.`);
+          return;
+        }
+        const data = snap.data() || {};
+        const rows = Array.isArray(data.rows) ? data.rows.map((r) => (r && typeof r === "object" ? { ...r, byGroup: { ...(r.byGroup || {}) } } : r)) : [];
+        const groupsRaw = Array.isArray(data.groups) ? data.groups : [];
+        const singleGroupId = groupsRaw.length === 1 && groupsRaw[0]?.id ? String(groupsRaw[0].id) : null;
+        let touched = false;
+        for (const ln of lines) {
+          const row = rows.find((r) => r && r.id === ln.rowId);
+          if (!row) {
+            console.warn("[Inbox] apply supply: row not found in subcategory", {
+              catId,
+              subId,
+              wantedRowId: ln.rowId,
+              availableRowIds: rows.map((r) => r && r.id),
+            });
+            totalSkippedUnmatched += 1;
+            continue;
+          }
+          const byGroup = row.byGroup || {};
+          let gid = ln.groupId;
+          if (!gid) {
+            if (singleGroupId) gid = singleGroupId;
+            else {
+              console.warn("[Inbox] apply supply: groupId missing and multiple groups exist", {
+                catId,
+                subId,
+                rowId: ln.rowId,
+                availableGroups: groupsRaw.map((g) => g?.id),
+              });
+              totalSkippedUnmatched += 1;
+              continue;
+            }
+          }
+          const cell = byGroup[gid] && typeof byGroup[gid] === "object" ? { ...byGroup[gid] } : { stock: 0, current: 0, price: "" };
+          const list = Array.isArray(cell.approvedRequests) ? cell.approvedRequests.slice() : [];
+          // Skip if a contribution with the same requestId already exists (idempotency).
+          if (list.some((e) => String(e?.requestId) === rid)) {
+            continue;
+          }
+          /** @type {Record<string, unknown>} */
+          const entry = {
+            requestId: rid,
+            qty: ln.qty,
+            at: Timestamp.now(),
+          };
+          if (byUid) entry.by = byUid;
+          if (byName) entry.byName = byName;
+          if (ln.itemName) entry.itemName = ln.itemName;
+          if (ln.unit) entry.unit = ln.unit;
+          if (ln.note) entry.note = ln.note;
+          list.push(entry);
+          const approvedSum = list.reduce((acc, e) => acc + (typeof e?.qty === "number" ? e.qty : Number(e?.qty) || 0), 0);
+          byGroup[gid] = { ...cell, approvedRequests: list, approved: approvedSum };
+          row.byGroup = byGroup;
+          touched = true;
+          totalContributions += 1;
+          appliedInventoryRefs.push({ catId, subId, rowId: ln.rowId, groupId: gid });
+        }
+        if (!touched) return;
+        transaction.update(subRef, { rows, updatedAt: serverTimestamp() });
+      });
     } catch (e) {
-      console.warn("[Inbox] applyApprovedSupplyRequestToInventory skip", itemId, e);
+      console.error("[Inbox] apply supply: subcategory update failed", catId, subId, e);
+      const code = e && typeof e.code === "string" ? e.code : "";
+      subcategoryErrors.push(`Subcategory ${catId}/${subId} update failed${code ? ` (${code})` : ""}.`);
     }
   }
+
+  if (totalContributions > 0) {
+    // Mark the inbox request as applied so subsequent re-approves don't double up.
+    try {
+      const inboxRef = doc(db, `salons/${salonId}/inboxItems`, rid);
+      await updateDoc(inboxRef, {
+        appliedToInventory: true,
+        appliedToInventoryAt: serverTimestamp(),
+        appliedInventoryRefs,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn("[Inbox] apply supply: mark applied flag failed", e);
+    }
+    // Tell the Inventory screen to refresh each affected subcategory so the Order cell updates live
+    // without requiring a full page reload.
+    try {
+      const seen = new Set();
+      for (const r of appliedInventoryRefs) {
+        const key = `${r.catId}:${r.subId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (typeof window !== "undefined" && typeof window.ffInventoryReloadSub === "function") {
+          window.ffInventoryReloadSub(r.catId, r.subId);
+        }
+      }
+    } catch (e) {
+      console.warn("[Inbox] apply supply: inventory refresh hook failed", e);
+    }
+  }
+
+  if (totalContributions === 0) {
+    const parts = [];
+    if (totalSkippedUnmatched > 0) {
+      parts.push(`${totalSkippedUnmatched} line(s) could not be matched to a row/group in inventory`);
+    }
+    if (subcategoryErrors.length > 0) parts.push(subcategoryErrors.join(" "));
+    const msg = parts.length > 0 ? parts.join("; ") : "No inventory rows were updated.";
+    throw new Error(msg);
+  }
+
+  return { totalContributions, appliedInventoryRefs, errors: subcategoryErrors };
 }
 
 async function approveSupplyRequest(requestId, requestData) {
   const salonId = currentUserProfile.salonId;
   const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
-  await applyApprovedSupplyRequestToInventory(requestId, requestData);
+  // 1) Update inbox status first (safe, uses only allowed keys).
   await updateDoc(inboxRef, {
     status: "approved",
-    approvedAt: serverTimestamp(),
-    approvedBy: currentUserProfile.uid,
     decidedAt: serverTimestamp(),
     decidedBy: currentUserProfile.uid,
     lastActivityAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     unreadForManagers: false,
   });
+  // 2) Then contribute the approved quantity to the Order column in Inventory.
+  try {
+    const result = await applyApprovedSupplyRequestToInventory(requestId, requestData);
+    if (result && typeof showToast === "function") {
+      const n = result.totalContributions || 0;
+      showToast(
+        n === 1 ? "Approved · added 1 item to inventory Order." : `Approved · added ${n} items to inventory Order.`,
+        "success"
+      );
+    }
+  } catch (e) {
+    console.error("[Inbox] Supply approve: apply to inventory failed", e);
+    const msg = e && typeof e.message === "string" ? e.message : "";
+    if (typeof showToast === "function") {
+      showToast(`Approved, but inventory Order not updated: ${msg || "unknown error"}`, "error");
+    }
+  }
 }
 
 async function denySupplyRequest(requestId, responseNote) {
@@ -1406,40 +1577,21 @@ function suppliesCategorySubcategoryVariantsRelevant(categoryName, subcategoryNa
   return /(dip|gel|powder|acrylic|lacquer|polish|color|nail)/.test(s);
 }
 
-function suppliesRowRequiresVariant(row) {
-  const itemSel = row.querySelector(".supplies-item-select");
-  const itemId = (itemSel?.value || "").trim();
-  if (!itemId) return false;
-  const itemOpt = itemSel?.selectedOptions?.[0];
-  const hasVariants = itemOpt?.getAttribute("data-has-variants") === "1";
-  const catOpt = row.querySelector(".supplies-cat-select")?.selectedOptions?.[0];
-  const subOpt = row.querySelector(".supplies-sub-select")?.selectedOptions?.[0];
-  const catName = catOpt?.getAttribute("data-category-name") || "";
-  const subName = subOpt?.getAttribute("data-subcategory-name") || "";
-  return hasVariants || suppliesCategorySubcategoryVariantsRelevant(catName, subName);
+/**
+ * No longer needed — groups in the inventory row now act as variants, captured via the item select's
+ * composite `rowId:groupId` value. Kept as a no-op for back-compat with existing call sites.
+ */
+function suppliesRowRequiresVariant(_row) {
+  return false;
 }
 
 function syncSuppliesRowVariantUi(row) {
-  const itemSel = row.querySelector(".supplies-item-select");
   const varWrap = row.querySelector(".supplies-variant-wrap");
   const varSel = row.querySelector(".supplies-variant-select");
   if (!varWrap || !varSel) return;
-  const itemId = (itemSel?.value || "").trim();
-  if (!itemId) {
-    varWrap.style.display = "none";
-    varSel.disabled = true;
-    varSel.value = "";
-    return;
-  }
-  const need = suppliesRowRequiresVariant(row);
-  if (need) {
-    varWrap.style.display = "block";
-    varSel.disabled = false;
-  } else {
-    varWrap.style.display = "none";
-    varSel.disabled = true;
-    varSel.value = "";
-  }
+  varWrap.style.display = "none";
+  varSel.disabled = true;
+  varSel.value = "";
 }
 
 const SUPPLIES_ITEM_ROW_INNER_HTML = `
@@ -1535,39 +1687,77 @@ async function ffFetchInventorySubcategoriesForSupplies(categoryId) {
   return arr;
 }
 
+/**
+ * Inventory items live inside the subcategory doc as `rows` (items) × `groups` (variants like Gel/Dipping/Regular).
+ * We flatten to row×group options so the requester picks a precise (row, group) line; id = "rowId:groupId" keeps
+ * disambiguation between same-named items across groups.
+ */
 async function ffFetchInventoryItemsForSupplies(categoryId, subcategoryId) {
   const cid = String(categoryId || "").trim();
   const sid = String(subcategoryId || "").trim();
   const salonId = currentUserProfile?.salonId;
   if (!cid || !sid || !salonId) return [];
-  const q = query(
-    collection(db, `salons/${salonId}/inventoryItems`),
-    where("categoryId", "==", cid),
-    where("subcategoryId", "==", sid),
-    orderBy("order", "asc"),
-    orderBy("name", "asc")
-  );
-  const snap = await getDocs(q);
+  const ref = doc(db, `salons/${salonId}/inventoryCategories/${cid}/inventorySubcategories/${sid}`);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return [];
+  const data = snap.data() || {};
+  const groupsRaw = Array.isArray(data.groups) ? data.groups.slice() : [];
+  groupsRaw.sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0));
+  const groups = groupsRaw.map((g) => ({
+    id: String(g?.id ?? "").trim(),
+    name: g?.name != null ? String(g.name).trim() : "",
+  })).filter((g) => g.id !== "");
+  const rowsRaw = Array.isArray(data.rows) ? data.rows.slice() : [];
+  rowsRaw.sort((a, b) => {
+    const an = a?.rowNo != null ? Number(a.rowNo) : NaN;
+    const bn = b?.rowNo != null ? Number(b.rowNo) : NaN;
+    if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+    const as = String(a?.name ?? "").toLowerCase();
+    const bs = String(b?.name ?? "").toLowerCase();
+    return as.localeCompare(bs);
+  });
+  /** @type {Array<{id: string, rowId: string, groupId: string | null, groupName: string | null, name: string, label: string, code: string | null, internalNumber: number | null, hasVariants: false}>} */
   const arr = [];
-  snap.forEach((d) => {
-    const data = d.data();
+  for (const row of rowsRaw) {
+    const rowId = row?.id != null ? String(row.id).trim() : "";
+    const rowName = String(row?.name ?? "").trim();
+    if (!rowId || !rowName) continue;
+    const code = row?.code != null && String(row.code).trim() !== "" ? String(row.code).trim() : null;
+    const rowNoRaw = row?.rowNo;
     let internalNumber = null;
-    if (data.internalNumber != null && data.internalNumber !== "") {
-      const n = typeof data.internalNumber === "number" ? data.internalNumber : Number(data.internalNumber);
+    if (rowNoRaw != null && rowNoRaw !== "") {
+      const n = typeof rowNoRaw === "number" ? rowNoRaw : Number(rowNoRaw);
       internalNumber = Number.isFinite(n) ? n : null;
     }
-    const name = String(data.name || "").trim() || "Untitled";
-    const label = internalNumber != null ? `#${internalNumber} ${name}` : name;
-    arr.push({
-      id: d.id,
-      name,
-      label,
-      internalNumber,
-      hasVariants: data.hasVariants === true,
-      brand: data.brand != null && String(data.brand).trim() !== "" ? String(data.brand).trim() : null,
-      brandCode: data.brandCode != null && String(data.brandCode).trim() !== "" ? String(data.brandCode).trim() : null,
-    });
-  });
+    if (groups.length === 0) {
+      arr.push({
+        id: rowId,
+        rowId,
+        groupId: null,
+        groupName: null,
+        name: rowName,
+        label: internalNumber != null ? `#${internalNumber} ${rowName}` : rowName,
+        code,
+        internalNumber,
+        hasVariants: false,
+      });
+      continue;
+    }
+    for (const g of groups) {
+      const label = `${rowName}${g.name ? ` (${g.name})` : ""}`;
+      arr.push({
+        id: `${rowId}:${g.id}`,
+        rowId,
+        groupId: g.id,
+        groupName: g.name || null,
+        name: rowName,
+        label: internalNumber != null ? `#${internalNumber} ${label}` : label,
+        code,
+        internalNumber,
+        hasVariants: false,
+      });
+    }
+  }
   return arr;
 }
 
@@ -1650,12 +1840,14 @@ function wireSuppliesItemRow(row, categories) {
       o.value = it.id;
       o.textContent = it.label;
       o.setAttribute("data-item-name", it.name);
-      o.setAttribute("data-has-variants", it.hasVariants ? "1" : "0");
+      o.setAttribute("data-row-id", it.rowId);
+      if (it.groupId) o.setAttribute("data-group-id", it.groupId);
+      if (it.groupName) o.setAttribute("data-group-name", it.groupName);
+      o.setAttribute("data-has-variants", "0");
       if (it.internalNumber != null && it.internalNumber !== "") {
         o.setAttribute("data-internal-number", String(it.internalNumber));
       }
-      if (it.brand) o.setAttribute("data-brand", it.brand);
-      if (it.brandCode) o.setAttribute("data-brand-code", it.brandCode);
+      if (it.code) o.setAttribute("data-code", it.code);
       itemSel.appendChild(o);
     }
     syncSuppliesRowVariantUi(row);
@@ -1705,16 +1897,19 @@ function readSuppliesRowSnapshot(row) {
   const categoryName = catOpt?.getAttribute("data-category-name") || "";
   const subcategoryName = subOpt?.getAttribute("data-subcategory-name") || "";
   const itemName = itemOpt?.getAttribute("data-item-name") || "";
+  const rowId = itemOpt?.getAttribute("data-row-id") || (itemId.includes(":") ? itemId.split(":")[0] : itemId);
+  const groupIdRaw = itemOpt?.getAttribute("data-group-id");
+  const groupId = groupIdRaw && String(groupIdRaw).trim() !== "" ? String(groupIdRaw).trim() : null;
+  const groupNameRaw = itemOpt?.getAttribute("data-group-name");
+  const groupName = groupNameRaw && String(groupNameRaw).trim() !== "" ? String(groupNameRaw).trim() : null;
+  const codeRaw = itemOpt?.getAttribute("data-code");
+  const code = codeRaw && String(codeRaw).trim() !== "" ? String(codeRaw).trim() : null;
   let internalNumber = null;
   const ins = itemOpt?.getAttribute("data-internal-number");
   if (ins != null && ins !== "") {
     const n = Number(ins);
     internalNumber = Number.isFinite(n) ? n : null;
   }
-  const brandRaw = itemOpt?.getAttribute("data-brand");
-  const brandCodeRaw = itemOpt?.getAttribute("data-brand-code");
-  const brand = brandRaw ? String(brandRaw) : null;
-  const brandCode = brandCodeRaw ? String(brandCodeRaw) : null;
 
   const qtyRaw = qtyIn?.value;
   let qty = null;
@@ -1724,30 +1919,23 @@ function readSuppliesRowSnapshot(row) {
   }
   const unit = (unitIn?.value ?? "").trim() || "pcs";
 
-  const varSel = row.querySelector(".supplies-variant-select");
-  const vkRaw = (varSel?.value || "").trim();
-  let variantKey = null;
-  let variantLabel = null;
-  if (vkRaw === "dip" || vkRaw === "gel" || vkRaw === "regular") {
-    variantKey = vkRaw;
-    variantLabel = SUPPLIES_VARIANT_LABELS[vkRaw] || null;
-  }
-
-  return {
+  /** @type {Record<string, unknown>} */
+  const out = {
     categoryId,
     categoryName,
     subcategoryId,
     subcategoryName,
     itemId,
+    rowId,
     itemName,
     internalNumber,
-    brand,
-    brandCode,
     qty,
     unit,
-    variantKey,
-    variantLabel,
   };
+  if (groupId) out.groupId = groupId;
+  if (groupName) out.groupName = groupName;
+  if (code) out.code = code;
+  return out;
 }
 
 async function initSuppliesRequestForm(fieldsContainer) {
@@ -1988,8 +2176,12 @@ function getRequestSummary(request) {
       let label = "";
       if (first && (first.itemName || first.name)) {
         const base = String(first.itemName || first.name).slice(0, 32);
-        const vl = first.variantLabel && String(first.variantLabel).trim();
-        label = vl ? `${base} — ${String(vl).slice(0, 14)}` : base.slice(0, 36);
+        const group = first.groupName && String(first.groupName).trim()
+          ? String(first.groupName).trim()
+          : first.variantLabel && String(first.variantLabel).trim()
+            ? String(first.variantLabel).trim()
+            : "";
+        label = group ? `${base} — ${group.slice(0, 14)}` : base.slice(0, 36);
       }
       return itemCount
         ? `${itemCount} item${itemCount !== 1 ? "s" : ""}${label ? `: ${label}` : ""} · ${data.urgency || "routine"}`
@@ -3989,8 +4181,15 @@ function renderRequestData(request) {
         .map((item) => {
           if (item.itemId && item.itemName) {
             const path = [item.categoryName, item.subcategoryName].filter(Boolean).join(" › ");
+            const groupLabelRaw =
+              item.groupName && String(item.groupName).trim() !== ""
+                ? String(item.groupName).trim()
+                : item.variantLabel && String(item.variantLabel).trim() !== ""
+                  ? String(item.variantLabel).trim()
+                  : "";
             const meta = [
               item.internalNumber != null && item.internalNumber !== "" ? `#${item.internalNumber}` : "",
+              item.code ? String(item.code) : "",
               item.brand || "",
               item.brandCode || "",
             ]
@@ -3998,10 +4197,9 @@ function renderRequestData(request) {
               .join(" · ");
             const qtyDisp = item.qty != null && item.qty !== "" ? String(item.qty) : "—";
             const unitDisp = escapeHtml(item.unit || "pcs");
-            const titleLine =
-              item.variantLabel && String(item.variantLabel).trim()
-                ? `${escapeHtml(item.itemName)} — ${escapeHtml(String(item.variantLabel).trim())}`
-                : escapeHtml(item.itemName);
+            const titleLine = groupLabelRaw
+              ? `${escapeHtml(item.itemName)} <span style="color:#6d28d9;font-weight:500;">(${escapeHtml(groupLabelRaw)})</span>`
+              : escapeHtml(item.itemName);
             return `<li style="margin-bottom:10px;">
               <div style="font-weight:600;color:#111827;">${titleLine}</div>
               ${meta ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">${escapeHtml(meta)}</div>` : ""}
@@ -4656,6 +4854,56 @@ window.denyRequest = async function(requestId) {
 window.applyApprovedSupplyRequestToInventory = applyApprovedSupplyRequestToInventory;
 window.approveSupplyRequest = approveSupplyRequest;
 window.denySupplyRequest = denySupplyRequest;
+
+/** Retry path for already-approved supply requests that never hit Inventory. */
+window.ffInboxApplySupplyToInventory = async function (requestId, btnEl) {
+  try {
+    if (!inboxCanManageInbox()) {
+      if (typeof showToast === "function") showToast("You do not have permission.", "error");
+      return;
+    }
+    const salonId = currentUserProfile?.salonId;
+    if (!salonId || !requestId) return;
+    if (btnEl instanceof HTMLButtonElement) {
+      btnEl.disabled = true;
+      btnEl.textContent = "Applying…";
+    }
+    const snap = await getDoc(doc(db, `salons/${salonId}/inboxItems`, requestId));
+    if (!snap.exists()) {
+      if (typeof showToast === "function") showToast("Request not found.", "error");
+      return;
+    }
+    const item = snap.data();
+    if (String(item.status || "").trim() !== "approved") {
+      if (typeof showToast === "function") showToast("Request is not approved yet.", "error");
+      return;
+    }
+    if (item.appliedToInventory === true) {
+      if (typeof showToast === "function") showToast("Already applied.", "info");
+      if (typeof closeRequestDetailsModal === "function") closeRequestDetailsModal();
+      showRequestDetails(requestId);
+      return;
+    }
+    const result = await applyApprovedSupplyRequestToInventory(requestId, item.data || {});
+    const n = result && typeof result.totalContributions === "number" ? result.totalContributions : 0;
+    if (typeof showToast === "function") {
+      showToast(
+        n === 1 ? "Added 1 item to inventory Order." : `Added ${n} items to inventory Order.`,
+        "success"
+      );
+    }
+    if (typeof closeRequestDetailsModal === "function") closeRequestDetailsModal();
+    showRequestDetails(requestId);
+  } catch (e) {
+    console.error("[Inbox] Apply to Inventory retry failed", e);
+    if (btnEl instanceof HTMLButtonElement) {
+      btnEl.disabled = false;
+      btnEl.textContent = "Apply to Inventory";
+    }
+    const msg = e && typeof e.message === "string" ? e.message : "Unknown error";
+    if (typeof showToast === "function") showToast(`Could not apply: ${msg}`, "error");
+  }
+};
 
 window.archiveRequest = async function(requestId) {
   if (!inboxCanManageInbox()) {
