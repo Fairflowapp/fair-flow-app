@@ -157,6 +157,14 @@ function subscribeMain(salonId) {
         delete nextPreferences.salonTimeZone;
       }
     }
+    if (data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, "currency")) {
+      const cur = normalizeSalonCurrency(data.preferences.currency);
+      if (cur) {
+        nextPreferences.currency = cur;
+      } else {
+        delete nextPreferences.currency;
+      }
+    }
     if (JSON.stringify(window.settings.preferences || {}) !== JSON.stringify(nextPreferences)) {
       window.settings.preferences = nextPreferences;
       changed = true;
@@ -291,6 +299,26 @@ function normalizeSalonTimeZone(value) {
   return s;
 }
 
+/** Curated list of salon currencies. Codes are ISO-4217. Sorted by region in the UI. */
+const FF_SUPPORTED_CURRENCIES = [
+  // Americas
+  "USD", "CAD", "MXN", "BRL", "ARS", "CLP", "COP", "PEN", "UYU",
+  // Europe
+  "EUR", "GBP", "CHF", "NOK", "SEK", "DKK", "PLN", "CZK", "HUF", "RON", "BGN", "RUB", "UAH",
+  // Middle East & Africa
+  "ILS", "AED", "SAR", "QAR", "KWD", "BHD", "OMR", "JOD", "LBP", "EGP", "TRY",
+  "ZAR", "NGN", "KES", "GHS", "MAD", "TND", "DZD", "ETB",
+  // Asia & Pacific
+  "JPY", "CNY", "HKD", "TWD", "KRW", "SGD", "MYR", "THB", "VND", "IDR", "PHP",
+  "INR", "PKR", "BDT", "LKR", "AUD", "NZD",
+];
+
+function normalizeSalonCurrency(value) {
+  const s = typeof value === "string" ? value.trim().toUpperCase() : "";
+  if (!s) return "";
+  return FF_SUPPORTED_CURRENCIES.includes(s) ? s : "";
+}
+
 function ffSavePreferencesSettings(preferences) {
   if (!_salonId) return;
   const nextPreferences = preferences && typeof preferences === "object" ? preferences : {};
@@ -307,7 +335,77 @@ function ffSavePreferencesSettings(preferences) {
       payload["preferences.salonTimeZone"] = deleteField();
     }
   }
+  if (Object.prototype.hasOwnProperty.call(nextPreferences, "currency")) {
+    const cur = normalizeSalonCurrency(nextPreferences.currency);
+    if (cur) {
+      payload["preferences.currency"] = cur;
+    } else {
+      payload["preferences.currency"] = deleteField();
+    }
+  }
   updateDoc(settingsMainRef(_salonId), payload).catch((e) => console.warn("[SettingsCloud] save preferences settings failed", e));
+}
+
+/** Resolve the current salon currency code (defaults to USD). Reads from window.settings.preferences.currency. */
+function ffGetSalonCurrencyCode() {
+  try {
+    const raw =
+      (typeof window !== "undefined" &&
+        window.settings &&
+        window.settings.preferences &&
+        window.settings.preferences.currency) ||
+      "";
+    const norm = normalizeSalonCurrency(raw);
+    return norm || "USD";
+  } catch (e) {
+    return "USD";
+  }
+}
+
+/** Symbol for the current currency (best-effort; used for input prefix and compact UI labels). */
+function ffGetCurrencySymbol(code) {
+  const c = normalizeSalonCurrency(code) || ffGetSalonCurrencyCode();
+  try {
+    const parts = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: c,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).formatToParts(0);
+    const sym = parts.find((p) => p.type === "currency");
+    if (sym && sym.value) return sym.value;
+  } catch (e) {
+    /* ignore */
+  }
+  const map = {
+    USD: "$", CAD: "C$", MXN: "MX$", BRL: "R$", ARS: "AR$", CLP: "CLP$", COP: "COL$", PEN: "S/", UYU: "UY$",
+    EUR: "€", GBP: "£", CHF: "CHF", NOK: "kr", SEK: "kr", DKK: "kr", PLN: "zł", CZK: "Kč", HUF: "Ft", RON: "lei", BGN: "лв", RUB: "₽", UAH: "₴",
+    ILS: "₪", AED: "د.إ", SAR: "﷼", QAR: "QR", KWD: "KD", BHD: "BD", OMR: "OR", JOD: "JD", LBP: "ل.ل", EGP: "E£", TRY: "₺",
+    ZAR: "R", NGN: "₦", KES: "KSh", GHS: "₵", MAD: "د.م", TND: "د.ت", DZD: "د.ج", ETB: "Br",
+    JPY: "¥", CNY: "¥", HKD: "HK$", TWD: "NT$", KRW: "₩", SGD: "S$", MYR: "RM", THB: "฿", VND: "₫", IDR: "Rp", PHP: "₱",
+    INR: "₹", PKR: "₨", BDT: "৳", LKR: "Rs", AUD: "A$", NZD: "NZ$",
+  };
+  return map[c] || c;
+}
+
+/** Format a number using the salon currency. */
+function ffFormatCurrency(amount, opts) {
+  const n = typeof amount === "number" ? amount : Number(amount);
+  const v = Number.isFinite(n) ? n : 0;
+  const code = (opts && typeof opts.currency === "string" && normalizeSalonCurrency(opts.currency)) || ffGetSalonCurrencyCode();
+  const minF = opts && Number.isFinite(opts.minimumFractionDigits) ? opts.minimumFractionDigits : 2;
+  const maxF = opts && Number.isFinite(opts.maximumFractionDigits) ? opts.maximumFractionDigits : 2;
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: code,
+      minimumFractionDigits: minF,
+      maximumFractionDigits: maxF,
+    }).format(v);
+  } catch (e) {
+    const sym = ffGetCurrencySymbol(code);
+    return `${sym}${v.toLocaleString(undefined, { minimumFractionDigits: minF, maximumFractionDigits: maxF })}`;
+  }
 }
 
 /**
@@ -580,4 +678,8 @@ if (typeof window !== "undefined") {
   window.ffUpdateTechnicianType = ffUpdateTechnicianType;
   window.ffCheckTechnicianTypeExists = ffCheckTechnicianTypeExists;
   window.ffDeleteTechnicianType = ffDeleteTechnicianType;
+  window.ffGetSalonCurrencyCode = ffGetSalonCurrencyCode;
+  window.ffGetCurrencySymbol = ffGetCurrencySymbol;
+  window.ffFormatCurrency = ffFormatCurrency;
+  window.ffSupportedCurrencies = FF_SUPPORTED_CURRENCIES.slice();
 }

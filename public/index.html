@@ -49,7 +49,7 @@
       return window.goToInventory();
     }
     try {
-      await import('/inventory.js?v=20260415_insights_dropdown_v96');
+      await import('/inventory.js?v=20260415_currency_v99');
     } catch (e) {
       console.error('[Inventory mock] load failed', e);
       return;
@@ -2886,7 +2886,7 @@ dialog footer button, .code-dialog footer button {
         <!-- Preferences Card (typography aligned with Staff Setup) -->
         <div id="userProfileCardPreferences" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Preferences</h3>
-          <p style="margin:0 0 14px 0;font-size:11px;color:#9ca3af;">Display, week start, default screen, and salon timezone.</p>
+          <p style="margin:0 0 14px 0;font-size:11px;color:#9ca3af;">Display, week start, business timezone &amp; currency, and default screen.</p>
           <div style="display:flex;flex-direction:column;gap:14px;">
             <div>
               <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Time format</label>
@@ -2915,14 +2915,7 @@ dialog footer button, .code-dialog footer button {
               </div>
             </div>
             <div>
-              <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Default screen</label>
-              <select id="userProfileDefaultScreen" style="width:100%;max-width:280px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:#fff;cursor:pointer;">
-                <option value="queue">Queue</option>
-                <option value="tasks">Tasks</option>
-              </select>
-            </div>
-            <div>
-              <label for="userProfileSalonTimeZone" style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">Salon timezone</label>
+              <label for="userProfileSalonTimeZone" style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">Business timezone</label>
               <div style="font-size:11px;color:#6b7280;margin-bottom:6px;line-height:1.4;">Calendar date for the business (birthday reminders, “today”). Auto uses this device’s timezone.</div>
               <select id="userProfileSalonTimeZone" style="width:100%;max-width:380px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:#fff;cursor:pointer;">
                 <option value="">Auto (this device)</option>
@@ -2959,6 +2952,87 @@ dialog footer button, .code-dialog footer button {
                   <option value="Australia/Sydney">Australia/Sydney</option>
                   <option value="Pacific/Auckland">Pacific/Auckland</option>
                 </optgroup>
+              </select>
+            </div>
+            <div>
+              <label for="userProfileSalonCurrency" style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">Business currency</label>
+              <div style="font-size:11px;color:#6b7280;margin-bottom:6px;line-height:1.4;">Used across tickets, inventory prices, and financial reports. Default: USD.</div>
+              <select id="userProfileSalonCurrency" style="width:100%;max-width:380px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:#fff;cursor:pointer;">
+                <optgroup label="Americas">
+                  <option value="USD">USD — US Dollar ($)</option>
+                  <option value="CAD">CAD — Canadian Dollar (C$)</option>
+                  <option value="MXN">MXN — Mexican Peso (MX$)</option>
+                  <option value="BRL">BRL — Brazilian Real (R$)</option>
+                  <option value="ARS">ARS — Argentine Peso (AR$)</option>
+                  <option value="CLP">CLP — Chilean Peso</option>
+                  <option value="COP">COP — Colombian Peso</option>
+                  <option value="PEN">PEN — Peruvian Sol (S/)</option>
+                  <option value="UYU">UYU — Uruguayan Peso</option>
+                </optgroup>
+                <optgroup label="Europe">
+                  <option value="EUR">EUR — Euro (€)</option>
+                  <option value="GBP">GBP — British Pound (£)</option>
+                  <option value="CHF">CHF — Swiss Franc</option>
+                  <option value="NOK">NOK — Norwegian Krone (kr)</option>
+                  <option value="SEK">SEK — Swedish Krona (kr)</option>
+                  <option value="DKK">DKK — Danish Krone (kr)</option>
+                  <option value="PLN">PLN — Polish Złoty (zł)</option>
+                  <option value="CZK">CZK — Czech Koruna (Kč)</option>
+                  <option value="HUF">HUF — Hungarian Forint (Ft)</option>
+                  <option value="RON">RON — Romanian Leu (lei)</option>
+                  <option value="BGN">BGN — Bulgarian Lev (лв)</option>
+                  <option value="RUB">RUB — Russian Ruble (₽)</option>
+                  <option value="UAH">UAH — Ukrainian Hryvnia (₴)</option>
+                </optgroup>
+                <optgroup label="Middle East">
+                  <option value="ILS">ILS — Israeli Shekel (₪)</option>
+                  <option value="AED">AED — UAE Dirham (د.إ)</option>
+                  <option value="SAR">SAR — Saudi Riyal (﷼)</option>
+                  <option value="QAR">QAR — Qatari Riyal (QR)</option>
+                  <option value="KWD">KWD — Kuwaiti Dinar (KD)</option>
+                  <option value="BHD">BHD — Bahraini Dinar (BD)</option>
+                  <option value="OMR">OMR — Omani Rial (OR)</option>
+                  <option value="JOD">JOD — Jordanian Dinar (JD)</option>
+                  <option value="LBP">LBP — Lebanese Pound (ل.ل)</option>
+                  <option value="EGP">EGP — Egyptian Pound (E£)</option>
+                  <option value="TRY">TRY — Turkish Lira (₺)</option>
+                </optgroup>
+                <optgroup label="Africa">
+                  <option value="ZAR">ZAR — South African Rand (R)</option>
+                  <option value="NGN">NGN — Nigerian Naira (₦)</option>
+                  <option value="KES">KES — Kenyan Shilling (KSh)</option>
+                  <option value="GHS">GHS — Ghanaian Cedi (₵)</option>
+                  <option value="MAD">MAD — Moroccan Dirham</option>
+                  <option value="TND">TND — Tunisian Dinar</option>
+                  <option value="DZD">DZD — Algerian Dinar</option>
+                  <option value="ETB">ETB — Ethiopian Birr</option>
+                </optgroup>
+                <optgroup label="Asia &amp; Pacific">
+                  <option value="JPY">JPY — Japanese Yen (¥)</option>
+                  <option value="CNY">CNY — Chinese Yuan (¥)</option>
+                  <option value="HKD">HKD — Hong Kong Dollar (HK$)</option>
+                  <option value="TWD">TWD — Taiwan Dollar (NT$)</option>
+                  <option value="KRW">KRW — South Korean Won (₩)</option>
+                  <option value="SGD">SGD — Singapore Dollar (S$)</option>
+                  <option value="MYR">MYR — Malaysian Ringgit (RM)</option>
+                  <option value="THB">THB — Thai Baht (฿)</option>
+                  <option value="VND">VND — Vietnamese Dong (₫)</option>
+                  <option value="IDR">IDR — Indonesian Rupiah (Rp)</option>
+                  <option value="PHP">PHP — Philippine Peso (₱)</option>
+                  <option value="INR">INR — Indian Rupee (₹)</option>
+                  <option value="PKR">PKR — Pakistani Rupee (₨)</option>
+                  <option value="BDT">BDT — Bangladeshi Taka (৳)</option>
+                  <option value="LKR">LKR — Sri Lankan Rupee (Rs)</option>
+                  <option value="AUD">AUD — Australian Dollar (A$)</option>
+                  <option value="NZD">NZD — New Zealand Dollar (NZ$)</option>
+                </optgroup>
+              </select>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:14px;">
+              <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Default screen</label>
+              <select id="userProfileDefaultScreen" style="width:100%;max-width:280px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:#fff;cursor:pointer;">
+                <option value="queue">Queue</option>
+                <option value="tasks">Tasks</option>
               </select>
             </div>
             <div id="userProfileStaffCallTemplatesSection" style="display:none;border-top:1px solid var(--border);padding-top:14px;">
@@ -29625,6 +29699,7 @@ function initializeUserProfileMenu() {
   const weekStartsOnSunday = document.getElementById('userProfileWeekStartsOnSunday');
   const defaultScreenSelect = document.getElementById('userProfileDefaultScreen');
   const salonTimeZoneSelect = document.getElementById('userProfileSalonTimeZone');
+  const salonCurrencySelect = document.getElementById('userProfileSalonCurrency');
   
   function loadPreferences() {
     const prefs = getProfilePrefs();
@@ -29658,6 +29733,13 @@ function initializeUserProfileMenu() {
       }
       salonTimeZoneSelect.value = z || '';
     }
+    if (salonCurrencySelect) {
+      const cur = (window.settings && window.settings.preferences && typeof window.settings.preferences.currency === 'string')
+        ? window.settings.preferences.currency.trim().toUpperCase()
+        : '';
+      const hasOpt = Array.from(salonCurrencySelect.options).some(function(o) { return o.value === cur; });
+      salonCurrencySelect.value = hasOpt && cur ? cur : 'USD';
+    }
     renderUserProfileStaffCallMessageSettings();
   }
   
@@ -29665,6 +29747,7 @@ function initializeUserProfileMenu() {
     const prefs = getProfilePrefs();
     const nextWeekStartsOn = weekStartsOnSunday && weekStartsOnSunday.checked ? 'sunday' : 'monday';
     const salonTz = salonTimeZoneSelect ? String(salonTimeZoneSelect.value || '').trim() : '';
+    const salonCur = salonCurrencySelect ? String(salonCurrencySelect.value || '').trim().toUpperCase() : '';
     prefs.preferences = {
       timeFormat: timeFormat24h && timeFormat24h.checked ? '24h' : '12h',
       defaultScreen: defaultScreenSelect ? defaultScreenSelect.value : 'queue'
@@ -29681,6 +29764,11 @@ function initializeUserProfileMenu() {
       } else {
         delete currentSettings.preferences.salonTimeZone;
       }
+      if (salonCur) {
+        currentSettings.preferences.currency = salonCur;
+      } else {
+        delete currentSettings.preferences.currency;
+      }
       localStorage.setItem('ffv24_settings', JSON.stringify(currentSettings));
       settings.preferences = {
         ...(settings.preferences && typeof settings.preferences === 'object' ? settings.preferences : {}),
@@ -29690,6 +29778,11 @@ function initializeUserProfileMenu() {
         settings.preferences.salonTimeZone = salonTz;
       } else {
         delete settings.preferences.salonTimeZone;
+      }
+      if (salonCur) {
+        settings.preferences.currency = salonCur;
+      } else {
+        delete settings.preferences.currency;
       }
       window.settings = settings;
       try {
@@ -29708,9 +29801,14 @@ function initializeUserProfileMenu() {
     if (typeof window.ffSavePreferencesSettings === 'function') {
       window.ffSavePreferencesSettings({
         weekStartsOn: nextWeekStartsOn,
-        salonTimeZone: salonTz
+        salonTimeZone: salonTz,
+        currency: salonCur
       });
     }
+    // Notify listening screens (Inventory, Tickets) to refresh money displays.
+    try {
+      window.dispatchEvent(new CustomEvent('ff-currency-changed', { detail: { currency: salonCur || 'USD' } }));
+    } catch (_) {}
     setTimeout(function() {
       if (typeof window.ffRunBirthdayChatRemindersSoon === 'function') {
         window.ffRunBirthdayChatRemindersSoon();
@@ -29741,6 +29839,10 @@ function initializeUserProfileMenu() {
   if (salonTimeZoneSelect && !salonTimeZoneSelect.__ffBound) {
     salonTimeZoneSelect.__ffBound = true;
     salonTimeZoneSelect.addEventListener('change', savePreferences);
+  }
+  if (salonCurrencySelect && !salonCurrencySelect.__ffBound) {
+    salonCurrencySelect.__ffBound = true;
+    salonCurrencySelect.addEventListener('change', savePreferences);
   }
   
   // Load preferences on initialization
@@ -38264,12 +38366,12 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/staff-cloud.js?v=20260415_ff_toast"></script>
   <script type="module" src="/staff-documents.js?v=20260412_doc_meta_edit"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260412_staffcall_accept_ui"></script>
-  <script type="module" src="/settings-cloud.js?v=20260412_owner_uid_cache"></script>
+  <script type="module" src="/settings-cloud.js?v=20260420_salon_currency_v2"></script>
   <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/tickets.js?v=20260420_tickets_load_more_ff_toast"></script>
+  <script type="module" src="/tickets.js?v=20260420_tickets_currency_v2"></script>
   <script type="module" src="/media-upload.js?v=20260412_app_js_unify"></script>
-  <script type="module" src="/inventory.js?v=20260415_insights_dropdown_v96"></script>
+  <script type="module" src="/inventory.js?v=20260415_currency_v99"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">

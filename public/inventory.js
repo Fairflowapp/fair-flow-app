@@ -90,7 +90,7 @@ let _invTableSaveTimer = null;
 /** Row drag-reorder: row id being dragged (HTML5 DnD). */
 let _invRowDndDragId = null;
 
-const STYLE_ID = "ff-inv2-mock-styles-v96";
+const STYLE_ID = "ff-inv2-mock-styles-v99";
 
 /** One-step undo for row/group delete: delayed Firestore write + toast. */
 const INV_UNDO_MS = 5000;
@@ -1575,8 +1575,12 @@ function formatOrderDisplay(n) {
 }
 
 function formatOrderDetailEstimatedCost(n) {
-  const r = Math.round(Number(n) * 100) / 100;
-  if (!Number.isFinite(r)) return "0.00";
+  const v = Number(n);
+  const amount = Number.isFinite(v) ? v : 0;
+  if (typeof window !== "undefined" && typeof window.ffFormatCurrency === "function") {
+    return window.ffFormatCurrency(amount, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  const r = Math.round(amount * 100) / 100;
   try {
     return r.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   } catch (e) {
@@ -3272,6 +3276,19 @@ let _invInsightsLoading = false;
 let _invInsightsRows = [];
 let _invInsightsLoadSeq = 0;
 let _invInsightsError = null;
+/** KPI summary for the selected range. */
+let _invInsightsKpis = { totalSpend: 0, doneOrders: 0, totalOrders: 0, uniqueItems: 0 };
+/** Spend grouped by categoryName for the selected range. */
+/** @type {Array<{ name: string, spend: number, percent: number }>} */
+let _invInsightsCategorySpend = [];
+/** Running-low cells: current ≤ threshold × stock (requires stock > 0). */
+/** @type {Array<{ catId: string, subId: string, rowId: string, groupId: string, itemName: string, groupName: string, subcategoryName: string, categoryName: string, stock: number, current: number, pctLeft: number }>} */
+let _invInsightsRunningLow = [];
+/** Dead stock cells: current > 0 but no purchase activity in range. */
+/** @type {Array<{ catId: string, subId: string, rowId: string, groupId: string, itemName: string, groupName: string, subcategoryName: string, categoryName: string, current: number }>} */
+let _invInsightsDeadStock = [];
+const INV_INSIGHTS_LOW_THRESHOLD = 0.3;
+const INV_INSIGHTS_DEAD_STOCK_MIN_CURRENT = 1;
 
 /** Convert local YYYY-MM-DD input value to a JS Date (start of day local time). */
 function ffParseDateInputStart(s) {
@@ -3341,19 +3358,49 @@ async function refreshInventoryInsightsAsync() {
   try {
     const salonId = await getSalonId();
     if (!salonId) throw new Error("No salon");
-    const snap = await getDocs(collection(db, `salons/${salonId}/inventoryOrders`));
+    // Fetch orders (for purchases) and every subcategory doc (for stock health) in parallel.
+    const ordersPromise = getDocs(collection(db, `salons/${salonId}/inventoryOrders`));
+    const tree = getCategoryTree();
+    const subFetches = [];
+    for (const c of tree) {
+      const subs = Array.isArray(c.subcategories) ? c.subcategories : [];
+      for (const s of subs) {
+        subFetches.push(
+          fetchSubcategoryInventoryDoc(salonId, c.id, s.id)
+            .then((data) => ({
+              catId: String(c.id),
+              catName: c.name != null ? String(c.name) : "",
+              subId: String(s.id),
+              subName: s.name != null ? String(s.name) : "",
+              data,
+            }))
+            .catch((e) => {
+              console.warn("[Inventory] insights sub fetch failed", c.id, s.id, e);
+              return null;
+            })
+        );
+      }
+    }
+    const [ordersSnap, subResults] = await Promise.all([ordersPromise, Promise.all(subFetches)]);
     if (seq !== _invInsightsLoadSeq) return;
+
     const { from, to } = getInventoryInsightsDateRange();
+
     /** @type {Map<string, { name: string, totalQty: number }>} */
     const buckets = new Map();
-    snap.forEach((d) => {
+    /** key = `${catId}:${subId}:${rowId}:${groupId}` → summed purchased qty in range */
+    const activityByCell = new Map();
+    /** key = categoryName → spend */
+    const spendByCategory = new Map();
+    const ordersWithActivity = new Set();
+    let totalSpend = 0;
+
+    ordersSnap.forEach((d) => {
       const order = { id: d.id, ...d.data() };
       const items = Array.isArray(order.items) ? order.items : [];
       for (const it of items) {
         if (!it || typeof it !== "object") continue;
-        // Purchase contribution (Confirm Purchase): only when applied + has positive qty.
-        const purchaseQty =
-          it.appliedToInventory === true ? Number(it.qtyBought) : NaN;
+        const purchaseQty = it.appliedToInventory === true ? Number(it.qtyBought) : NaN;
         const receiveQty = Number(it.receivedCumulative);
         const purchaseValid = Number.isFinite(purchaseQty) && purchaseQty > 0;
         const receiveValid = Number.isFinite(receiveQty) && receiveQty > 0;
@@ -3361,37 +3408,149 @@ async function refreshInventoryInsightsAsync() {
         const eventDate = ffResolveItemEventDate(it, order);
         if (from && eventDate && eventDate < from) continue;
         if (to && eventDate && eventDate > to) continue;
-        // If we couldn't resolve a date AND the user picked a non-"all" range, skip.
-        if ((!eventDate) && _invInsightsRange !== "all") continue;
+        if (!eventDate && _invInsightsRange !== "all") continue;
         const itemName = it.itemName != null ? String(it.itemName).trim() : "";
         if (!itemName) continue;
         const groupName = it.groupName != null ? String(it.groupName).trim() : "";
-        const key = `${itemName}__${groupName}`;
+        const qty = Math.max(purchaseValid ? purchaseQty : 0, receiveValid ? receiveQty : 0);
+        // Most Purchased bucket
+        const keyName = `${itemName}__${groupName}`;
         const displayName = groupName ? `${itemName} (${groupName})` : itemName;
-        const prev = buckets.get(key) || { name: displayName, totalQty: 0 };
-        // Use the larger of purchase vs receive to avoid double-counting when both happen on the same item.
-        // Background: the same `current` increment may show up via both flows in legacy data.
-        prev.totalQty += Math.max(purchaseValid ? purchaseQty : 0, receiveValid ? receiveQty : 0);
-        buckets.set(key, prev);
+        const prevB = buckets.get(keyName) || { name: displayName, totalQty: 0 };
+        prevB.totalQty += qty;
+        buckets.set(keyName, prevB);
+        // Activity by cell (for Dead Stock detection)
+        const catId = it.categoryId != null ? String(it.categoryId).trim() : "";
+        const subId = it.subcategoryId != null ? String(it.subcategoryId).trim() : "";
+        const rowId = it.itemId != null && String(it.itemId).includes(":")
+          ? String(it.itemId).split(":")[1] || ""
+          : "";
+        const groupId = it.groupId != null ? String(it.groupId).trim() : "";
+        if (catId && subId && rowId && groupId) {
+          const cellKey = `${catId}:${subId}:${rowId}:${groupId}`;
+          activityByCell.set(cellKey, (activityByCell.get(cellKey) || 0) + qty);
+        }
+        // Category spend
+        const price = Number(it.price);
+        if (Number.isFinite(price) && price > 0) {
+          const spend = qty * price;
+          totalSpend += spend;
+          const cn = it.categoryName != null && String(it.categoryName).trim() !== ""
+            ? String(it.categoryName).trim()
+            : "Uncategorized";
+          spendByCategory.set(cn, (spendByCategory.get(cn) || 0) + spend);
+        }
+        ordersWithActivity.add(order.id);
       }
     });
+
     const rows = [];
     for (const [key, v] of buckets) {
       if (v.totalQty > 0) rows.push({ key, name: v.name, totalQty: v.totalQty });
     }
     rows.sort((a, b) => b.totalQty - a.totalQty || a.name.localeCompare(b.name));
+
+    const categoryRows = Array.from(spendByCategory.entries())
+      .map(([name, spend]) => ({ name, spend }))
+      .sort((a, b) => b.spend - a.spend);
+    const spendSum = categoryRows.reduce((acc, r) => acc + r.spend, 0) || 0;
+    for (const r of categoryRows) {
+      r.percent = spendSum > 0 ? Math.round((r.spend / spendSum) * 1000) / 10 : 0;
+    }
+
+    /** @type {typeof _invInsightsRunningLow} */
+    const runningLow = [];
+    /** @type {typeof _invInsightsDeadStock} */
+    const deadStock = [];
+    for (const res of subResults) {
+      if (!res || !res.data) continue;
+      const { groups, rows: subRows } = parseSubcategoryDocToTable(res.data);
+      for (const r of subRows) {
+        for (const g of groups) {
+          const cell = r.byGroup && r.byGroup[g.id];
+          if (!cell) continue;
+          const stock = typeof cell.stock === "number" ? cell.stock : parseNum(cell.stock);
+          const current = typeof cell.current === "number" ? cell.current : parseNum(cell.current);
+          const rowName = r.name != null ? String(r.name).trim() : "";
+          if (!rowName) continue;
+          const groupName = g.label != null ? String(g.label) : "";
+          const base = {
+            catId: res.catId,
+            subId: res.subId,
+            rowId: String(r.id),
+            groupId: String(g.id),
+            itemName: rowName,
+            groupName,
+            subcategoryName: res.subName,
+            categoryName: res.catName,
+          };
+          if (stock > 0) {
+            const pctLeft = current / stock;
+            if (pctLeft <= INV_INSIGHTS_LOW_THRESHOLD) {
+              runningLow.push({ ...base, stock, current, pctLeft });
+            }
+          }
+          const cellKey = `${res.catId}:${res.subId}:${String(r.id)}:${String(g.id)}`;
+          if (
+            current >= INV_INSIGHTS_DEAD_STOCK_MIN_CURRENT &&
+            !activityByCell.has(cellKey) &&
+            _invInsightsRange !== "all"
+          ) {
+            deadStock.push({ ...base, current });
+          }
+        }
+      }
+    }
+    runningLow.sort((a, b) => a.pctLeft - b.pctLeft || b.stock - a.stock);
+    deadStock.sort((a, b) => b.current - a.current || a.itemName.localeCompare(b.itemName));
+
+    // Count "Done" orders separately — only fully received/bought orders count as real purchases.
+    let doneOrders = 0;
+    ordersSnap.forEach((d) => {
+      if (!ordersWithActivity.has(d.id)) return;
+      const effStatus = getEffectiveInventoryOrderStatus({ id: d.id, ...d.data() });
+      if (effStatus === "done") doneOrders += 1;
+    });
+
     if (seq !== _invInsightsLoadSeq) return;
     _invInsightsRows = rows;
+    _invInsightsKpis = {
+      totalSpend,
+      doneOrders,
+      totalOrders: ordersWithActivity.size,
+      uniqueItems: rows.length,
+    };
+    _invInsightsCategorySpend = categoryRows;
+    _invInsightsRunningLow = runningLow;
+    _invInsightsDeadStock = deadStock;
   } catch (e) {
     console.error("[Inventory] insights load failed", e);
     if (seq !== _invInsightsLoadSeq) return;
     _invInsightsRows = [];
-    _invInsightsError = "Could not load purchase data.";
+    _invInsightsKpis = { totalSpend: 0, doneOrders: 0, totalOrders: 0, uniqueItems: 0 };
+    _invInsightsCategorySpend = [];
+    _invInsightsRunningLow = [];
+    _invInsightsDeadStock = [];
+    _invInsightsError = "Could not load insights data.";
   } finally {
     if (seq === _invInsightsLoadSeq) {
       _invInsightsLoading = false;
       mountOrRefreshMockUi();
     }
+  }
+}
+
+function formatInsightsCurrency(n) {
+  const v = Number(n);
+  const amount = Number.isFinite(v) ? v : 0;
+  if (typeof window !== "undefined" && typeof window.ffFormatCurrency === "function") {
+    return window.ffFormatCurrency(amount, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  const r = Math.round(amount * 100) / 100;
+  try {
+    return `$${r.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  } catch (e) {
+    return `$${r.toFixed(2)}`;
   }
 }
 
@@ -3420,15 +3579,38 @@ function renderInventoryInsightsTabHtml() {
   <label class="ff-inv2-insights-date-label">To <input type="date" data-inv-insights-to value="${escapeHtml(_invInsightsCustomTo)}" /></label>
 </div>`
       : "";
-  let body;
+  const kpis = _invInsightsKpis;
+  const inProgress = Math.max(0, (kpis.totalOrders || 0) - (kpis.doneOrders || 0));
+  const doneSubtitle = kpis.totalOrders > 0
+    ? `${kpis.doneOrders} of ${kpis.totalOrders} · ${inProgress} in progress`
+    : "No activity yet";
+  const kpiBlock = `<div class="ff-inv2-insights-kpis">
+  <div class="ff-inv2-insights-kpi">
+    <span class="ff-inv2-insights-kpi-label">Total spend</span>
+    <span class="ff-inv2-insights-kpi-value">${escapeHtml(formatInsightsCurrency(kpis.totalSpend))}</span>
+    <span class="ff-inv2-insights-kpi-sub">Based on items actually bought</span>
+  </div>
+  <div class="ff-inv2-insights-kpi">
+    <span class="ff-inv2-insights-kpi-label">Done orders</span>
+    <span class="ff-inv2-insights-kpi-value">${escapeHtml(String(kpis.doneOrders))}</span>
+    <span class="ff-inv2-insights-kpi-sub">${escapeHtml(doneSubtitle)}</span>
+  </div>
+  <div class="ff-inv2-insights-kpi">
+    <span class="ff-inv2-insights-kpi-label">Unique items</span>
+    <span class="ff-inv2-insights-kpi-value">${escapeHtml(String(kpis.uniqueItems))}</span>
+    <span class="ff-inv2-insights-kpi-sub">Distinct SKUs purchased</span>
+  </div>
+</div>`;
+
+  let mostPurchasedBody;
   if (_invInsightsLoading) {
-    body = `<p class="ff-inv2-insights-empty">Loading…</p>`;
+    mostPurchasedBody = `<p class="ff-inv2-insights-empty">Loading…</p>`;
   } else if (_invInsightsError) {
-    body = `<p class="ff-inv2-insights-empty">${escapeHtml(_invInsightsError)}</p>`;
+    mostPurchasedBody = `<p class="ff-inv2-insights-empty">${escapeHtml(_invInsightsError)}</p>`;
   } else if (_invInsightsRows.length === 0) {
-    body = `<p class="ff-inv2-insights-empty">No purchases in this range.</p>`;
+    mostPurchasedBody = `<p class="ff-inv2-insights-empty">No purchases in this range.</p>`;
   } else {
-    body = `<ol class="ff-inv2-insights-list">${_invInsightsRows
+    mostPurchasedBody = `<ol class="ff-inv2-insights-list">${_invInsightsRows
       .map(
         (r, i) => `<li class="ff-inv2-insights-row">
   <span class="ff-inv2-insights-rank">${i + 1}.</span>
@@ -3438,15 +3620,111 @@ function renderInventoryInsightsTabHtml() {
       )
       .join("")}</ol>`;
   }
+
+  // Spend by Category
+  const categoryRows = _invInsightsCategorySpend || [];
+  const spendBlock = !_invInsightsLoading && categoryRows.length > 0
+    ? `<div class="ff-inv2-insights-card">
+  <div class="ff-inv2-insights-card-head">
+    <h4 class="ff-inv2-insights-card-title">Spend by Category</h4>
+  </div>
+  <div class="ff-inv2-insights-spend-list">${categoryRows
+    .map((r) => `<div class="ff-inv2-insights-spend-row">
+  <div class="ff-inv2-insights-spend-name-row">
+    <span class="ff-inv2-insights-spend-name">${escapeHtml(r.name)}</span>
+    <span class="ff-inv2-insights-spend-amount">${escapeHtml(formatInsightsCurrency(r.spend))}</span>
+    <span class="ff-inv2-insights-spend-pct">${escapeHtml(String(r.percent))}%</span>
+  </div>
+  <div class="ff-inv2-insights-spend-bar" aria-hidden="true"><span style="width:${Math.max(2, r.percent)}%"></span></div>
+</div>`)
+    .join("")}</div>
+</div>`
+    : "";
+
+  // Running Low
+  const runningLow = _invInsightsRunningLow || [];
+  const lowList = runningLow.slice(0, 8);
+  const lowBlock = !_invInsightsLoading && lowList.length > 0
+    ? `<div class="ff-inv2-insights-card ff-inv2-insights-card--warn">
+  <div class="ff-inv2-insights-card-head">
+    <h4 class="ff-inv2-insights-card-title">⚠ Running Low (${runningLow.length})</h4>
+    <span class="ff-inv2-insights-card-hint">Below ${Math.round(INV_INSIGHTS_LOW_THRESHOLD * 100)}% of stock target</span>
+  </div>
+  <ul class="ff-inv2-insights-low-list">${lowList
+    .map((e) => {
+      const pct = Math.max(0, Math.round(e.pctLeft * 100));
+      const name = e.groupName ? `${e.itemName} (${e.groupName})` : e.itemName;
+      const path = [e.categoryName, e.subcategoryName].filter(Boolean).join(" › ");
+      return `<li class="ff-inv2-insights-low-row">
+  <div class="ff-inv2-insights-low-main">
+    <div class="ff-inv2-insights-low-name">${escapeHtml(name)}</div>
+    <div class="ff-inv2-insights-low-path">${escapeHtml(path)}</div>
+  </div>
+  <div class="ff-inv2-insights-low-qty">
+    <span class="ff-inv2-insights-low-current">${escapeHtml(formatOrderDisplay(e.current))}</span>
+    <span class="ff-inv2-insights-low-sep">/</span>
+    <span class="ff-inv2-insights-low-stock">${escapeHtml(formatOrderDisplay(e.stock))}</span>
+    <span class="ff-inv2-insights-low-pct">${pct}%</span>
+  </div>
+</li>`;
+    })
+    .join("")}</ul>
+</div>`
+    : "";
+
+  // Dead Stock
+  const deadStock = _invInsightsDeadStock || [];
+  const deadList = deadStock.slice(0, 8);
+  const rangeLabelForDead = _invInsightsRange === "all" ? "" : (
+    _invInsightsRange === "custom"
+      ? "in selected range"
+      : _invInsightsRange === "year"
+        ? "in the past year"
+        : `in last ${_invInsightsRange.replace("d", " days")}`
+  );
+  const deadBlock = !_invInsightsLoading && deadList.length > 0 && _invInsightsRange !== "all"
+    ? `<div class="ff-inv2-insights-card ff-inv2-insights-card--dead">
+  <div class="ff-inv2-insights-card-head">
+    <h4 class="ff-inv2-insights-card-title">Dead Stock (${deadStock.length})</h4>
+    <span class="ff-inv2-insights-card-hint">In stock · no activity ${escapeHtml(rangeLabelForDead)}</span>
+  </div>
+  <ul class="ff-inv2-insights-low-list">${deadList
+    .map((e) => {
+      const name = e.groupName ? `${e.itemName} (${e.groupName})` : e.itemName;
+      const path = [e.categoryName, e.subcategoryName].filter(Boolean).join(" › ");
+      return `<li class="ff-inv2-insights-low-row">
+  <div class="ff-inv2-insights-low-main">
+    <div class="ff-inv2-insights-low-name">${escapeHtml(name)}</div>
+    <div class="ff-inv2-insights-low-path">${escapeHtml(path)}</div>
+  </div>
+  <div class="ff-inv2-insights-low-qty">
+    <span class="ff-inv2-insights-low-current">${escapeHtml(formatOrderDisplay(e.current))}</span>
+    <span class="ff-inv2-insights-low-sep">in stock</span>
+  </div>
+</li>`;
+    })
+    .join("")}</ul>
+</div>`
+    : "";
+
   return `<div class="ff-inv2-insights-wrap">
   <div class="ff-inv2-insights-head">
     <div class="ff-inv2-insights-head-row">
-      <h3 class="ff-inv2-insights-title">Most Purchased</h3>
+      <h3 class="ff-inv2-insights-title">Inventory Insights</h3>
       ${rangeControl}
     </div>
     ${customRow}
   </div>
-  <div class="ff-inv2-insights-body">${body}</div>
+  ${kpiBlock}
+  <div class="ff-inv2-insights-card">
+    <div class="ff-inv2-insights-card-head">
+      <h4 class="ff-inv2-insights-card-title">Most Purchased</h4>
+    </div>
+    <div class="ff-inv2-insights-body">${mostPurchasedBody}</div>
+  </div>
+  ${spendBlock}
+  ${lowBlock}
+  ${deadBlock}
 </div>`;
 }
 
@@ -6364,10 +6642,190 @@ function injectMockStylesOnce() {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+#inventoryScreen .ff-inv2-insights-wrap > .ff-inv2-insights-head {
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
-  padding: 16px;
+  padding: 14px 16px;
+  gap: 8px;
+}
+#inventoryScreen .ff-inv2-insights-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+#inventoryScreen .ff-inv2-insights-kpi {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#inventoryScreen .ff-inv2-insights-kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+#inventoryScreen .ff-inv2-insights-kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+#inventoryScreen .ff-inv2-insights-kpi-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+#inventoryScreen .ff-inv2-insights-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+#inventoryScreen .ff-inv2-insights-card--warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+#inventoryScreen .ff-inv2-insights-card--dead {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+}
+#inventoryScreen .ff-inv2-insights-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+#inventoryScreen .ff-inv2-insights-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+#inventoryScreen .ff-inv2-insights-card-hint {
+  font-size: 11px;
+  color: #94a3b8;
+}
+#inventoryScreen .ff-inv2-insights-spend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#inventoryScreen .ff-inv2-insights-spend-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#inventoryScreen .ff-inv2-insights-spend-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+}
+#inventoryScreen .ff-inv2-insights-spend-name {
+  flex: 1;
+  font-weight: 600;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#inventoryScreen .ff-inv2-insights-spend-amount {
+  font-weight: 700;
+  color: #5b21b6;
+  font-variant-numeric: tabular-nums;
+}
+#inventoryScreen .ff-inv2-insights-spend-pct {
+  font-size: 11px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  min-width: 40px;
+  text-align: right;
+}
+#inventoryScreen .ff-inv2-insights-spend-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  overflow: hidden;
+}
+#inventoryScreen .ff-inv2-insights-spend-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #a78bfa 0%, #7c3aed 100%);
+  border-radius: 999px;
+}
+#inventoryScreen .ff-inv2-insights-low-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+#inventoryScreen .ff-inv2-insights-low-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+#inventoryScreen .ff-inv2-insights-low-row:last-child {
+  border-bottom: none;
+}
+#inventoryScreen .ff-inv2-insights-low-main {
+  flex: 1;
+  min-width: 0;
+}
+#inventoryScreen .ff-inv2-insights-low-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#inventoryScreen .ff-inv2-insights-low-path {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+#inventoryScreen .ff-inv2-insights-low-qty {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+#inventoryScreen .ff-inv2-insights-low-current {
+  font-weight: 700;
+  font-size: 14px;
+  color: #b45309;
+}
+#inventoryScreen .ff-inv2-insights-card--dead .ff-inv2-insights-low-current {
+  color: #64748b;
+}
+#inventoryScreen .ff-inv2-insights-low-sep {
+  font-size: 11px;
+  color: #94a3b8;
+}
+#inventoryScreen .ff-inv2-insights-low-stock {
+  font-size: 13px;
+  color: #475569;
+}
+#inventoryScreen .ff-inv2-insights-low-pct {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 999px;
+  padding: 2px 8px;
 }
 #inventoryScreen .ff-inv2-insights-head {
   display: flex;
@@ -7170,6 +7628,23 @@ function injectMockStylesOnce() {
   text-align: right;
   font-variant-numeric: tabular-nums;
   min-width: 4.75rem;
+}
+#inventoryScreen .ff-inv2-td-price {
+  position: relative;
+}
+#inventoryScreen .ff-inv2-price-symbol {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: #94a3b8;
+  pointer-events: none;
+  font-weight: 600;
+}
+#inventoryScreen .ff-inv2-td-price .ff-inv2-cell-view,
+#inventoryScreen .ff-inv2-td-price .ff-inv2-cell-input--editing {
+  padding-left: 18px;
 }
 #inventoryScreen .ff-inv2-td-numcell .ff-inv2-cell-view,
 #inventoryScreen .ff-inv2-td-numcell .ff-inv2-cell-input--editing {
@@ -8212,7 +8687,7 @@ function rowGroupCells(row) {
       return `<td class="ff-inv2-td-numcell">${renderEditableCell("stock", rid, v.stock, { groupId: gid, inputMode: "decimal" })}</td>
 <td class="ff-inv2-td-numcell">${renderEditableCell("current", rid, v.current, { groupId: gid, inputMode: "decimal" })}</td>
 ${renderOrderCellTd(rid, gid, order, approved)}
-<td class="ff-inv2-td-numcell">${renderEditableCell("price", rid, v.price, { groupId: gid })}</td>`;
+<td class="ff-inv2-td-numcell ff-inv2-td-price"><span class="ff-inv2-price-symbol" aria-hidden="true">${escapeHtml(typeof window !== "undefined" && typeof window.ffGetCurrencySymbol === "function" ? window.ffGetCurrencySymbol() : "$")}</span>${renderEditableCell("price", rid, v.price, { groupId: gid, inputMode: "decimal" })}</td>`;
     })
     .join("");
 }
@@ -9831,6 +10306,15 @@ function ffInventoryReloadSub(catId, subId) {
 }
 if (typeof window !== "undefined") {
   window.ffInventoryReloadSub = ffInventoryReloadSub;
+  // Re-render the Inventory screen when the salon currency changes so price cells + Insights reflect it.
+  window.addEventListener("ff-currency-changed", () => {
+    try {
+      const root = document.getElementById("inventoryScreen");
+      if (root) mountOrRefreshMockUi();
+    } catch (_) {
+      /* ignore */
+    }
+  });
 }
 
 function mountOrRefreshMockUi() {

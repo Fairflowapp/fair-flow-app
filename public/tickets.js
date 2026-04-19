@@ -999,6 +999,9 @@ function ticketMatchesEmployeeFilter(t, staffId) {
 function formatSummaryMoney(n) {
   const x = n == null || n === '' ? NaN : Number(n);
   const v = Number.isFinite(x) ? x : 0;
+  if (typeof window !== 'undefined' && typeof window.ffFormatCurrency === 'function') {
+    return window.ffFormatCurrency(v, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  }
   try {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -1009,6 +1012,25 @@ function formatSummaryMoney(n) {
   } catch (_) {
     return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   }
+}
+
+/** Ticket money helper — respects salon currency, formats with given decimals. */
+function ffTicketMoney(n, decimals) {
+  const x = n == null || n === '' ? NaN : Number(n);
+  const v = Number.isFinite(x) ? x : 0;
+  const d = Number.isFinite(decimals) ? decimals : 2;
+  if (typeof window !== 'undefined' && typeof window.ffFormatCurrency === 'function') {
+    return window.ffFormatCurrency(v, { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  return '$' + v.toFixed(d);
+}
+
+/** Current salon currency symbol (fallback $). Used for inline prefixes/placeholders. */
+function ffTicketCurSym() {
+  if (typeof window !== 'undefined' && typeof window.ffGetCurrencySymbol === 'function') {
+    return window.ffGetCurrencySymbol();
+  }
+  return '$';
 }
 
 function formatSummaryInt(n) {
@@ -1618,9 +1640,9 @@ function formatLineForList(l) {
   const base = Number(l.catalogPrice) || 0;
   const adj = Number(l.ticketPrice) || 0;
   if (l.isOverride && base !== adj) {
-    return `${name} <span style="font-size:11px;color:#d97706;" title="Price adjusted">(base $${base.toFixed(0)} → $${adj.toFixed(0)})</span>`;
+    return `${name} <span style="font-size:11px;color:#d97706;" title="Price adjusted">(base ${ffTicketMoney(base, 0)} → ${ffTicketMoney(adj, 0)})</span>`;
   }
-  return `${name} $${adj.toFixed(0)}`;
+  return `${name} ${ffTicketMoney(adj, 0)}`;
 }
 
 function getInitial(name) {
@@ -1961,7 +1983,7 @@ function openTicketModal(ticketId, appointmentData = null) {
       if (none) none.style.display = 'none';
       if (content) {
         const booked = appointmentData.services;
-        content.innerHTML = booked.map(s => `<div style="font-size:13px;">${escapeHtml(s.name || s.serviceName)} — $${(s.price || 0).toFixed(2)}</div>`).join('');
+        content.innerHTML = booked.map(s => `<div style="font-size:13px;">${escapeHtml(s.name || s.serviceName)} — ${ffTicketMoney(s.price || 0)}</div>`).join('');
         content.style.display = 'none';
       }
     }
@@ -1990,7 +2012,7 @@ function openAdminTicketView(t) {
       const adjusted = base > 0 && price !== base;
       return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:14px;">
         <span style="color:#374151;">${escapeHtml(l.serviceName || '')}</span>
-        <span style="font-weight:700;color:${adjusted ? '#d97706' : '#111'};">$${price.toFixed(2)}${adjusted ? ` <small style="color:#9ca3af;">(base $${base.toFixed(2)})</small>` : ''}</span>
+        <span style="font-weight:700;color:${adjusted ? '#d97706' : '#111'};">${ffTicketMoney(price)}${adjusted ? ` <small style="color:#9ca3af;">(base ${ffTicketMoney(base)})</small>` : ''}</span>
       </div>`;
     }).join('') || '<div style="color:#9ca3af;font-size:14px;padding:8px 0;">No services</div>';
   }
@@ -2032,7 +2054,7 @@ function openAdminTicketView(t) {
   const totalBlock = document.getElementById('ticketTotalBlock');
   const totalAmt   = document.getElementById('ticketTotalAmount');
   if (totalBlock) totalBlock.style.display = lines.length > 0 ? 'block' : 'none';
-  if (totalAmt)   totalAmt.textContent = '$' + total.toFixed(2);
+  if (totalAmt)   totalAmt.textContent = ffTicketMoney(total);
 
   const priceApprovedWrap = document.getElementById('ticketCustomerPriceApprovedWrap');
   if (priceApprovedWrap) priceApprovedWrap.style.display = 'none';
@@ -2143,7 +2165,7 @@ function openTicketDetailsModal(t) {
     const tickPrice = Number(l.ticketPrice) || 0;
     const basePrice = Number(l.catalogPrice) || 0;
     const hasOverride = basePrice > 0 && basePrice !== tickPrice;
-    const priceText = hasOverride ? `base $${basePrice.toFixed(2)} → $${tickPrice.toFixed(2)}` : `$${tickPrice.toFixed(2)}`;
+    const priceText = hasOverride ? `base ${ffTicketMoney(basePrice)} → ${ffTicketMoney(tickPrice)}` : ffTicketMoney(tickPrice);
     const notePart = l.note ? ` <span style="color:#6b7280;font-size:12px;">— ${escapeHtml(l.note)}</span>` : '';
     return `<div style="padding:10px;background:#f9fafb;border-radius:8px;margin-bottom:8px;font-size:14px;">${escapeHtml(l.serviceName)} — ${priceText}${notePart}</div>`;
   }).join('');
@@ -2155,15 +2177,15 @@ function openTicketDetailsModal(t) {
   const totalHtml = showTicketTotal
     ? `<div style="margin-top:12px;padding:12px 14px;background:#f3f4f6;border-radius:8px;display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:600;color:#111827;border:1px solid #e5e7eb;">
         <span>Total</span>
-        <span>$${ticketTotalAmount.toFixed(2)}</span>
+        <span>${ffTicketMoney(ticketTotalAmount)}</span>
       </div>`
     : '';
   let diffHtml = '';
   if (hasDiff) {
     const parts = [];
     (diff.removed || []).forEach(r => parts.push(`<div style="color:#dc2626;font-size:13px;">Removed: ${escapeHtml(r.name)}</div>`));
-    (diff.added || []).forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} ($${(a.price || 0).toFixed(2)})</div>`));
-    (diff.changed || []).forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} → $${(c.to || 0).toFixed(2)}</div>`));
+    (diff.added || []).forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} (${ffTicketMoney(a.price || 0)})</div>`));
+    (diff.changed || []).forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} → ${ffTicketMoney(c.to || 0)}</div>`));
     diffHtml = `<div style="margin-top:16px;"><h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#374151;">Changes vs booked</h3><div style="background:#f9fafb;border-radius:8px;padding:12px;">${parts.join('')}</div></div>`;
   }
   const asIsHtml = (t.asIs && t.asIsMessage) ? `<div style="margin-top:16px;font-size:13px;color:#059669;background:#d1fae5;padding:10px 12px;border-radius:8px;"><strong>AS IS:</strong> ${escapeHtml(t.asIsMessage)}</div>` : '';
@@ -2281,7 +2303,7 @@ function populateTicketForm(t) {
   set('ticketAsBookedBlock', el => { el.style.display = hasAppointment ? 'block' : 'none'; });
   set('ticketAsBookedNone', el => { el.style.display = hasAppointment ? 'none' : 'block'; });
   set('ticketAsBookedContent', el => {
-    el.innerHTML = booked.map(s => `<div style="font-size:13px;">${escapeHtml(s.name || s.serviceName)} — $${(s.price || 0).toFixed(2)}</div>`).join('');
+    el.innerHTML = booked.map(s => `<div style="font-size:13px;">${escapeHtml(s.name || s.serviceName)} — ${ffTicketMoney(s.price || 0)}</div>`).join('');
     el.style.display = 'none';
   });
   set('ticketAsBookedToggle', el => { el.textContent = 'Show As Booked'; });
@@ -2371,7 +2393,7 @@ function renderPerformedLines(lines, readOnly = false) {
       const tickPrice = Number(l.ticketPrice) || 0;
       const basePrice = Number(l.catalogPrice) || 0;
       const hasOverride = basePrice > 0 && basePrice !== tickPrice;
-      const priceText = hasOverride ? `base $${basePrice.toFixed(2)} → $${tickPrice.toFixed(2)}` : `$${tickPrice.toFixed(2)}`;
+      const priceText = hasOverride ? `base ${ffTicketMoney(basePrice)} → ${ffTicketMoney(tickPrice)}` : ffTicketMoney(tickPrice);
       const notePart = l.note ? ` <span style="color:#6b7280;font-size:11px;">— ${escapeHtml(l.note)}</span>` : '';
       return `<div style="padding:6px 10px;background:#f9fafb;border-radius:6px;margin-bottom:4px;font-size:12px;">${escapeHtml(l.serviceName)} — ${priceText}${notePart}</div>`;
     }).join('');
@@ -2385,9 +2407,9 @@ function renderPerformedLines(lines, readOnly = false) {
     return `
     <div class="ticket-line" data-idx="${i}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 8px;background:#f9fafb;border-radius:6px;margin-bottom:4px;">
       <span style="flex:1;min-width:100px;font-size:12px;font-weight:500;">${escapeHtml(l.serviceName)}</span>
-      <span style="font-size:10px;color:#9ca3af;">base $${catPrice.toFixed(2)}</span>
+      <span style="font-size:10px;color:#9ca3af;">base ${ffTicketMoney(catPrice)}</span>
       <label style="display:flex;align-items:center;gap:4px;font-size:12px;">
-        <span style="color:#6b7280;">$</span>
+        <span style="color:#6b7280;">${ffTicketCurSym()}</span>
         <input type="number" min="0" step="0.01" value="${tickPrice.toFixed(2)}" class="ticket-price-input" data-idx="${i}" style="width:60px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
         ${isOverride ? '<span style="font-size:10px;color:#d97706;background:#fef3c7;padding:2px 6px;border-radius:4px;">Adjusted</span>' : ''}
       </label>
@@ -2443,10 +2465,10 @@ function renderDiff(diff, total, hasLines) {
   if (!cont) return;
   const parts = [];
   (diff.removed || []).forEach(r => parts.push(`<div style="color:#dc2626;font-size:13px;">Removed: ${escapeHtml(r.name)}</div>`));
-  (diff.added || []).forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} ($${(a.price || 0).toFixed(2)})</div>`));
-  (diff.changed || []).forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} → $${(c.to || 0).toFixed(2)}</div>`));
+  (diff.added || []).forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} (${ffTicketMoney(a.price || 0)})</div>`));
+  (diff.changed || []).forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} → ${ffTicketMoney(c.to || 0)}</div>`));
   if (hasLines && typeof total === 'number') {
-    parts.push(`<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;font-size:15px;font-weight:700;color:#166534;">Total: $${total.toFixed(2)}</div>`);
+    parts.push(`<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;font-size:15px;font-weight:700;color:#166534;">Total: ${ffTicketMoney(total)}</div>`);
   }
   cont.innerHTML = parts.length ? parts.join('') : '<div style="color:#9ca3af;font-size:13px;">No changes</div>';
 }
@@ -2501,7 +2523,7 @@ function updateTicketTotal(lines) {
   const block = document.getElementById('ticketTotalBlock');
   const amountEl = document.getElementById('ticketTotalAmount');
   if (block) block.style.display = arr.length > 0 ? 'block' : 'none';
-  if (amountEl) amountEl.textContent = '$' + total.toFixed(2);
+  if (amountEl) amountEl.textContent = ffTicketMoney(total);
   const sendNewBtn = document.getElementById('ticketSendNewBtn');
   const priceWrap = document.getElementById('ticketCustomerPriceApprovedWrap');
   if (priceWrap && sendNewBtn) {
@@ -2685,7 +2707,10 @@ async function openServicesModal() {
   const nameEl = document.getElementById('serviceFormName');
   const priceEl = document.getElementById('serviceFormPrice');
   if (nameEl) nameEl.value = '';
-  if (priceEl) priceEl.value = '';
+  if (priceEl) {
+    priceEl.value = '';
+    priceEl.placeholder = `Default price (${ffTicketCurSym()})`;
+  }
   populateServiceCategoryDropdown(null);
   renderServicesList();
   modal.style.display = 'flex';
@@ -2827,7 +2852,7 @@ function renderServicesList() {
       const pencilSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
       const trashSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
       services.forEach((s) => {
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;"><div><strong style="font-size:11px !important;font-weight:600;">${escapeHtml(s.name)}</strong><span style="color:#6b7280;font-size:8px !important;margin-left:5px;">$${(s.defaultPrice || 0).toFixed(2)}</span></div><div style="display:flex;gap:9px;"><button type="button" class="services-edit-btn" data-id="${s.id}" title="Edit" style="padding:2px;border:none;background:none;cursor:pointer;line-height:0;">${pencilSvg}</button><button type="button" class="services-delete-btn" data-id="${s.id}" title="Delete" style="padding:2px;border:none;background:none;cursor:pointer;line-height:0;">${trashSvg}</button></div></div>`;
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;"><div><strong style="font-size:11px !important;font-weight:600;">${escapeHtml(s.name)}</strong><span style="color:#6b7280;font-size:8px !important;margin-left:5px;">${ffTicketMoney(s.defaultPrice || 0)}</span></div><div style="display:flex;gap:9px;"><button type="button" class="services-edit-btn" data-id="${s.id}" title="Edit" style="padding:2px;border:none;background:none;cursor:pointer;line-height:0;">${pencilSvg}</button><button type="button" class="services-delete-btn" data-id="${s.id}" title="Delete" style="padding:2px;border:none;background:none;cursor:pointer;line-height:0;">${trashSvg}</button></div></div>`;
       });
       html += '</div></div>';
     });
@@ -3039,7 +3064,7 @@ async function setupTicketsUI() {
     html += `<div class="ticket-category-header" role="button" tabindex="0" style="display:flex;align-items:center;gap:4px;padding:6px 8px;cursor:pointer;user-select:none;font-size:11px;font-weight:600;color:#374151;background:#f9fafb;"><span class="ticket-cat-arrow" style="font-size:9px;color:#6b7280;">▶</span><span>${label}</span></div>`;
     html += `<div class="ticket-category-body" style="display:none;padding:4px 8px 8px 16px;background:#fff;">`;
     (data.services || []).forEach((s) => {
-      html += `<button type="button" class="ticket-service-btn" data-id="${s.id}" style="display:block;width:100%;text-align:left;padding:5px 8px;margin-bottom:3px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;transition:background 0.15s;">${escapeHtml(s.name)} <span style="color:#6b7280;font-size:11px;">$${(s.defaultPrice || 0).toFixed(2)}</span></button>`;
+      html += `<button type="button" class="ticket-service-btn" data-id="${s.id}" style="display:block;width:100%;text-align:left;padding:5px 8px;margin-bottom:3px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;transition:background 0.15s;">${escapeHtml(s.name)} <span style="color:#6b7280;font-size:11px;">${ffTicketMoney(s.defaultPrice || 0)}</span></button>`;
     });
     html += '</div></div>';
   });
