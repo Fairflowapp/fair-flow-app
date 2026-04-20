@@ -2953,26 +2953,11 @@ async function loadApprovedScheduleRequests() {
 function renderScheduleSummary(validation, days) {
   const summaryBar = document.getElementById("scheduleSummaryBar");
   if (!summaryBar) return;
-  if (!scheduleUserCanManualEdit()) {
-    summaryBar.innerHTML = "";
-    return;
-  }
-  if (schedulePreviewMode === "my_shifts") {
+  if (schedulePreviewMode === "my_shifts" && scheduleUserCanManualEdit()) {
     summaryBar.innerHTML = `<span style="font-size:12px;color:#6b7280;">Your shifts only — switch to <strong>Team view</strong> to edit the full team.</span>`;
     return;
   }
-  const summary = validation?.summary || { totalWarnings: 0, highSeverityCount: 0, mediumSeverityCount: 0 };
-  const dayList = Array.isArray(days) ? days : [];
-  const coverageCount = dayList.reduce((n, day) => n + filterCoverageWarnings(day?.warnings).length, 0);
-  const total = summary.totalWarnings || 0;
-  const otherCount = Math.max(0, total - coverageCount);
-
-  if (otherCount === 0) {
-    summaryBar.innerHTML = "";
-    return;
-  }
-
-  summaryBar.innerHTML = `<span style="display:inline-flex;padding:4px 10px;border-radius:999px;background:#fffbeb;color:#b45309;border:1px solid #fcd34d;font-size:12px;font-weight:600;">${otherCount} issue${otherCount === 1 ? "" : "s"}</span>`;
+  summaryBar.innerHTML = "";
 }
 
 function setSchedulePreviewMode(mode) {
@@ -3474,11 +3459,7 @@ function renderScheduleBoard(draft, validation, staffList) {
         issueHtml = `<div style="margin-top:6px;font-size:11px;color:#94a3b8;">${other.length} note${other.length === 1 ? "" : "s"}</div>`;
       }
     }
-    const showCoverageStar =
-      canBuild && businessStatus.isOpen !== false && coverageWarnings.length > 0;
-    const coverageStarHtml = showCoverageStar
-      ? `<button type="button" data-schedule-coverage-day="true" data-date="${escapeScheduleAttr(day.date)}" title="Coverage staffing — open details" aria-label="Coverage staffing issues for this day" style="flex-shrink:0;margin:0;padding:0 4px;border:none;background:transparent;color:#ea580c;font-size:20px;font-weight:800;line-height:1;cursor:pointer;align-self:flex-start;">*</button>`
-      : "";
+    const coverageStarHtml = "";
     const specialNoteRaw = String(businessStatus.note || "").trim();
     const specialNoteHtml = specialNoteRaw
       ? `<div style="margin-top:5px;font-size:10px;color:#6d28d9;line-height:1.35;font-weight:500;">* ${escapeScheduleHtml(specialNoteRaw)}</div>`
@@ -3521,10 +3502,10 @@ function renderScheduleBoard(draft, validation, staffList) {
       const businessStatus = day.businessStatus || getBusinessStatusForDate(day.date);
       const canEditShift = Boolean(assignment && businessStatus?.isOpen !== false && allowCellEdit);
       const cellStyle = assignment
-        ? `background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.35)" : "none"};`
+        ? `background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;`
         : manualOff || inboxApprovedOff
-          ? `background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.28)" : "none"};`
-          : `background:#f3f4f6;border:1px solid #e5e7eb;color:#6b7280;box-shadow:${hasWarnings ? "inset 0 0 0 1px rgba(245,158,11,0.28)" : "none"};`;
+          ? `background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;`
+          : `background:#f3f4f6;border:1px solid #e5e7eb;color:#6b7280;`;
       const assignmentId = assignment ? getAssignmentId(assignment, day.date) : "";
       const safeStaffName = escapeScheduleAttr(staff.name || "");
       const editBtn = canEditShift
@@ -3603,7 +3584,6 @@ function renderScheduleBoard(draft, validation, staffList) {
         : "";
       return `
         <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:6px;border-radius:8px;min-height:50px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:${assignment ? "700" : "500"};line-height:1.25;transition:outline-color 0.12s ease;${cellStyle}">
-          ${hasWarnings ? `<span style="position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:#f59e0b;opacity:0.9;"></span>` : ""}
           ${editBtn}
           <div ${assignment && allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : assignment ? `style="user-select:none;"` : emptyCellWrap}>
             <div>${

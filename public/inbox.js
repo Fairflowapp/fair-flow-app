@@ -2454,8 +2454,19 @@ function getRequestSummary(request) {
     }
     case 'maintenance':
       return `${data.area || 'Unknown area'} - ${data.severity || 'minor'} issue`;
-    case 'staff_birthday_reminder':
-      return data.details || `${data.subjectStaffName || 'Staff'} · ${data.birthdayDisplay || ''}`;
+    case 'staff_birthday_reminder': {
+      const birthdayName = String(data.subjectStaffName || 'Staff').trim();
+      const daysUntil = Number(data.daysUntil);
+      const daysPart = !Number.isFinite(daysUntil)
+        ? ''
+        : daysUntil === 0
+          ? ' (today)'
+          : ` in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`;
+      const displayRaw = String(data.birthdayDisplay || '').trim();
+      const displayIsEnglishSafe = displayRaw && !/[\u0590-\u05FF\u0600-\u06FF]/.test(displayRaw);
+      const datePart = displayIsEnglishSafe ? ` ${displayRaw}` : '';
+      return `${birthdayName}'s birthday is${datePart}${daysPart}.`;
+    }
     case 'document_request':
       return `${data.documentType || 'Document'} – ${(data.reason || '').substring(0, 40)}`;
     case 'document_renewal_request':
@@ -3971,7 +3982,7 @@ function showRequestDetails(requestId) {
         <p style="margin:0 0 12px;color:#6b7280;font-size:12px;">The employee is not notified. Visible to management only.</p>
         <div style="display:grid;gap:8px;font-size:13px;">
           <div><span style="color:#6b7280;">Staff member:</span> <strong>${escapeHtml(rd.subjectStaffName || '')}</strong></div>
-          <div><span style="color:#6b7280;">Birthday:</span> ${escapeHtml(rd.birthdayDisplay || '')}</div>
+          <div><span style="color:#6b7280;">Birthday:</span> ${(() => { const s = String(rd.birthdayDisplay || '').trim(); return s && !/[\u0590-\u05FF\u0600-\u06FF]/.test(s) ? escapeHtml(s) : '—'; })()}</div>
           <div><span style="color:#6b7280;">When:</span> ${rd.daysUntil === 0 ? 'Today' : `In ${Number(rd.daysUntil) || 0} day(s)`}</div>
           <div><span style="color:#6b7280;">Logged:</span> ${createdDate.toLocaleString()}</div>
         </div>
@@ -4624,12 +4635,24 @@ function renderRequestData(request) {
       `;
     }
 
-    case 'staff_birthday_reminder':
+    case 'staff_birthday_reminder': {
+      const bdName = String(data.subjectStaffName || 'Staff').trim();
+      const bdDays = Number(data.daysUntil);
+      const bdDaysPart = !Number.isFinite(bdDays)
+        ? ''
+        : bdDays === 0
+          ? ' (today)'
+          : ` in ${bdDays} day${bdDays === 1 ? '' : 's'}`;
+      const bdDisplayRaw = String(data.birthdayDisplay || '').trim();
+      const bdDisplaySafe = bdDisplayRaw && !/[\u0590-\u05FF\u0600-\u06FF]/.test(bdDisplayRaw);
+      const bdDatePart = bdDisplaySafe ? ` ${bdDisplayRaw}` : '';
+      const bdLine = `${bdName}'s birthday is${bdDatePart}${bdDaysPart}.`;
       return `
         <div style="font-size:13px;line-height:1.5;color:#374151;">
-          ${data.details ? `<div style="padding:10px;background:#f9fafb;border-radius:8px;">${escapeHtml(data.details)}</div>` : '<div style="color:#9ca3af;">—</div>'}
+          <div style="padding:10px;background:#f9fafb;border-radius:8px;">${escapeHtml(bdLine)}</div>
         </div>
       `;
+    }
 
     case 'document_expiring_soon':
     case 'document_expired':
