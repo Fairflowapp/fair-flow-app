@@ -15,6 +15,7 @@ import {
   serverTimestamp,
   query,
   orderBy,
+  where,
   deleteDoc,
   onSnapshot,
   runTransaction,
@@ -90,7 +91,7 @@ let _invTableSaveTimer = null;
 /** Row drag-reorder: row id being dragged (HTML5 DnD). */
 let _invRowDndDragId = null;
 
-const STYLE_ID = "ff-inv2-mock-styles-v99";
+const STYLE_ID = "ff-inv2-mock-styles-v123";
 
 /** One-step undo for row/group delete: delayed Firestore write + toast. */
 const INV_UNDO_MS = 5000;
@@ -173,9 +174,33 @@ let _invOrderBuilderCustomSubIds = new Set();
 let _invOrderBuilderPreviewLines = [];
 let _invOrderBuilderPreviewLoading = false;
 let _invOrderBuilderPreviewSeq = 0;
-/** Order Builder: locally-added manual items (not persisted until Save as Order). */
+/** Order Builder: locally-added manual items (mirror of Firestore draft doc). */
 /** @type {Array<Record<string, unknown>>} */
 let _invOrderBuilderManualLines = [];
+
+/** Doc id used for the legacy single-draft (migrated on first load). */
+const INVENTORY_LEGACY_DRAFT_DOC_ID = "active";
+/** Doc id of the currently-active Create Order draft, or null when none exists yet. */
+/** @type {string | null} */
+let _invActiveDraftId = null;
+/** Whether the active draft has been loaded into memory since entering Inventory. */
+let _invOrderDraftLoaded = false;
+/** Whether a draft load is currently in flight. */
+let _invOrderDraftLoading = false;
+/** Debounce timer for persisting draft changes. */
+let _invOrderDraftSaveTimer = null;
+/** In-flight guard (for Save as Order to flush before create). */
+let _invOrderDraftSaveInFlight = false;
+/** Draft save status for the UI indicator. */
+/** @type {"idle" | "saving" | "saved"} */
+let _invOrderDraftSaveStatus = "idle";
+/** When the last successful draft save happened (ms). */
+let _invOrderDraftLastSavedAt = 0;
+/** One-shot "Resumed unfinished draft" toast — show only on the first load per session that actually had items. */
+let _invOrderDraftResumeToastShown = false;
+/** Drafts picker modal state. */
+/** @type {{ open: boolean, loading: boolean, error: string | null, drafts: Array<{ id: string, isActive: boolean, manualItems: Array<Record<string, unknown>>, orderName: string, createdAt: number, updatedAt: number }> }} */
+let _invDraftsPicker = { open: false, loading: false, error: null, drafts: [] };
 /** Inventory: Order cell breakdown modal state (long-press). */
 /** @type {{ rowId: string, groupId: string, busy: boolean } | null} */
 let _invOrderCellBreakdownModal = null;
@@ -1830,8 +1855,8 @@ function renderOrderBuilderSourceHtml() {
   seedOrderBuilderSelectionIfEmpty();
   expandOrderBuilderCatsForCurrentSelection();
   return `<div class="ff-inv2-ob-source">
-  <p class="ff-inv2-ob-source-title">Build Your Order</p>
-  <p class="ff-inv2-ob-source-hint">Tap a category to expand, then pick one or more subcategories (or the whole category).</p>
+  <p class="ff-inv2-ob-source-title">Create Order</p>
+  <p class="ff-inv2-ob-source-hint">Pick categories or subcategories to include, then review below.</p>
   <div class="ff-inv2-ob-custom">${renderOrderBuilderCustomTreeHtml()}</div>
 </div>`;
 }
@@ -2006,8 +2031,8 @@ async function saveInventoryOrderDraft() {
       itemCount: items.length,
       items,
     });
-    _invOrderSaveNameDraft = "";
-    _invOrderBuilderManualLines = [];
+    // Clear the persistent active-draft doc so the next Create Order starts fresh.
+    await clearInventoryOrderDraft();
     inventoryOrderDraftToast("Order saved", "success");
   } catch (e) {
     console.error("[Inventory] save order draft failed", e);
@@ -2055,13 +2080,14 @@ function renderOrderListSectionHtml() {
             const subTd = showSubCol
               ? `<td class="ff-inv2-ol-td">${escapeHtml(l.subcategoryName != null ? String(l.subcategoryName) : "—")}</td>`
               : "";
+            const qtyInputHtml = `<input type="number" min="1" step="1" class="ff-inv2-ol-qty-input" data-inv-ob-manual-qty="${lidEsc}" value="${escapeHtml(String(typeof l.orderQty === "number" ? l.orderQty : Number(l.orderQty) || 0))}" aria-label="Order qty" />`;
             return `<tr class="ff-inv2-ol-tr ff-inv2-ol-tr--manual">
   <td class="ff-inv2-ol-td">—</td>
   <td class="ff-inv2-ol-td">${escapeHtml(l.code != null && String(l.code) !== "" ? String(l.code) : "—")}</td>
   <td class="ff-inv2-ol-td">${nameHtml}</td>
   ${subTd}
   <td class="ff-inv2-ol-td">${escapeHtml(l.groupName != null && String(l.groupName) !== "" ? String(l.groupName) : "—")}</td>
-  <td class="ff-inv2-ol-td ff-inv2-num">${escapeHtml(formatOrderDisplay(l.orderQty))}</td>
+  <td class="ff-inv2-ol-td ff-inv2-num">${qtyInputHtml}</td>
   <td class="ff-inv2-ol-td">—</td>
   <td class="ff-inv2-ol-td">—</td>
   <td class="ff-inv2-ol-td ff-inv2-ol-url-wrap">${removeBtn}</td>
@@ -2105,10 +2131,45 @@ ${subTh}
   } else {
     body = `<p class="ff-inv2-order-list-empty">No line items with positive order quantity (Stock − Current).</p>`;
   }
+  // Banner: highlight how many manual items are in the active draft (so the user knows where Inbox-added items went).
+  const manualCount = manualLines.length;
+  const fromSuggestions = manualLines.filter((L) => L && L.fromSuggestionId).length;
+  const draftBanner = manualCount > 0
+    ? `<div class="ff-inv2-draft-banner" role="status">
+  <span class="ff-inv2-draft-banner-icon" aria-hidden="true">📋</span>
+  <span class="ff-inv2-draft-banner-text">
+    <strong>${manualCount}</strong> item${manualCount === 1 ? "" : "s"} in your active draft${fromSuggestions > 0 ? ` · <strong>${fromSuggestions}</strong> from Inbox suggestions` : ""}
+  </span>
+</div>`
+    : "";
+
+  // Status chip next to the "Order list" title — always visible so the user sees it's a Draft with auto-save.
+  const statusText = _invOrderDraftSaveStatus === "saving"
+    ? "Saving…"
+    : _invOrderDraftSaveStatus === "saved"
+      ? "Saved"
+      : "Auto-save enabled";
+  const draftChipHtml = `<button type="button" class="ff-inv2-draft-chip ff-inv2-draft-chip--btn" aria-label="Open drafts list" data-inv-drafts-picker-open="1" title="View and switch drafts">
+  <span class="ff-inv2-draft-chip-dot" aria-hidden="true"></span>
+  <span class="ff-inv2-draft-chip-label">Draft</span>
+  <span class="ff-inv2-draft-chip-sep" aria-hidden="true">·</span>
+  <span class="ff-inv2-draft-chip-status" data-inv-draft-status data-state="${_invOrderDraftSaveStatus}">${escapeHtml(statusText)}</span>
+  <span class="ff-inv2-draft-chip-caret" aria-hidden="true">▾</span>
+</button>`;
+  // "+ New" starts a fresh draft, deactivating (but not deleting) the current one.
+  const newDraftBtn = !loading
+    ? `<button type="button" class="ff-inv2-draft-new-btn" data-inv-ob-new-draft="1"${busy ? " disabled" : ""} title="Start a new draft">+ New</button>`
+    : "";
+
   return `<div class="ff-inv2-order-list-card">
   ${renderOrderBuilderSourceHtml()}
+  ${draftBanner}
   <div class="ff-inv2-order-list-head">
-    <h3 class="ff-inv2-order-list-title">Order list</h3>
+    <div class="ff-inv2-order-list-title-row">
+      <h3 class="ff-inv2-order-list-title">Order list</h3>
+      ${draftChipHtml}
+      ${newDraftBtn}
+    </div>
     <div class="ff-inv2-order-list-head-actions">
       ${addItemBtn}
       ${saveBtn}
@@ -2313,7 +2374,474 @@ function commitInventoryOrderBuilderAddItem() {
   }
   _invOrderBuilderManualLines.push(entry);
   _invOrderBuilderAddModal = null;
+  scheduleInventoryOrderDraftSave();
   mountOrRefreshMockUi();
+}
+
+/** Sanitize a manual item so it's safe to persist (no functions/undefineds). */
+function sanitizeManualItemForDraft(item) {
+  if (!item || typeof item !== "object") return null;
+  /** @type {Record<string, unknown>} */
+  const out = {};
+  const copyKeys = [
+    "id",
+    "itemName",
+    "orderQty",
+    "isManual",
+    "linkedInventoryItemId",
+    "code",
+    "groupId",
+    "groupName",
+    "categoryId",
+    "categoryName",
+    "subcategoryId",
+    "subcategoryName",
+    "fromSuggestionId",
+  ];
+  for (const k of copyKeys) {
+    const v = item[k];
+    if (v === undefined) continue;
+    out[k] = v;
+  }
+  if (typeof out.orderQty !== "number") {
+    const n = Number(out.orderQty);
+    out.orderQty = Number.isFinite(n) ? n : 0;
+  }
+  if (!out.id) out.id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  return out;
+}
+
+/**
+ * Apply a draft doc snapshot into local state.
+ * @param {string} docId Firestore doc id
+ * @param {Record<string, unknown>} d Doc data
+ */
+function ffApplyDraftSnapshotToLocalState(docId, d) {
+  _invActiveDraftId = docId;
+  const rawManual = Array.isArray(d.manualItems) ? d.manualItems : [];
+  _invOrderBuilderManualLines = rawManual
+    .map(sanitizeManualItemForDraft)
+    .filter((x) => x && x.itemName);
+  _invOrderBuilderCustomSubIds = Array.isArray(d.selectedSubcategoryIds)
+    ? new Set(d.selectedSubcategoryIds.map(String))
+    : new Set();
+  _invOrderSaveNameDraft = typeof d.orderName === "string" ? d.orderName : "";
+  if (d.updatedAt && typeof d.updatedAt.toMillis === "function") {
+    _invOrderDraftLastSavedAt = d.updatedAt.toMillis();
+    _invOrderDraftSaveStatus = "saved";
+  } else {
+    _invOrderDraftLastSavedAt = 0;
+    _invOrderDraftSaveStatus = "idle";
+  }
+}
+
+/** Load the active Create Order draft from Firestore into local state. Called on tab entry. */
+async function loadInventoryOrderDraft(forceReload) {
+  if (_invOrderDraftLoading) return;
+  if (_invOrderDraftLoaded && !forceReload) return;
+  _invOrderDraftLoading = true;
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) return;
+
+    // Find the active draft (any doc id) by the isActive flag.
+    let activeId = null;
+    /** @type {Record<string, unknown> | null} */
+    let activeData = null;
+    try {
+      const qActive = query(
+        collection(db, `salons/${salonId}/inventoryDrafts`),
+        where("isActive", "==", true)
+      );
+      const snap = await getDocs(qActive);
+      if (!snap.empty) {
+        const first = snap.docs[0];
+        activeId = first.id;
+        activeData = first.data();
+      }
+    } catch (e) {
+      console.warn("[Inventory] query active drafts failed", e);
+    }
+
+    // Legacy fallback: a doc pinned at id='active' from before multi-draft support.
+    if (!activeId) {
+      try {
+        const legacyRef = doc(db, `salons/${salonId}/inventoryDrafts`, INVENTORY_LEGACY_DRAFT_DOC_ID);
+        const legacySnap = await getDoc(legacyRef);
+        if (legacySnap.exists()) {
+          activeId = legacySnap.id;
+          activeData = legacySnap.data();
+          // Promote to isActive for future queries.
+          try {
+            await setDoc(legacyRef, { isActive: true, status: "draft" }, { merge: true });
+          } catch (mErr) {
+            console.warn("[Inventory] migrate legacy draft failed", mErr);
+          }
+        }
+      } catch (e) {
+        console.warn("[Inventory] legacy draft check failed", e);
+      }
+    }
+
+    let loadedItemCount = 0;
+    if (activeId && activeData) {
+      ffApplyDraftSnapshotToLocalState(activeId, activeData);
+      loadedItemCount = _invOrderBuilderManualLines.length;
+    } else {
+      // No draft found — keep local empty state. A new draft is created lazily on first write.
+      _invActiveDraftId = null;
+      _invOrderBuilderManualLines = [];
+      _invOrderBuilderCustomSubIds = new Set();
+      _invOrderSaveNameDraft = "";
+      _invOrderDraftLastSavedAt = 0;
+      _invOrderDraftSaveStatus = "idle";
+    }
+
+    _invOrderDraftLoaded = true;
+    if (!_invOrderDraftResumeToastShown && loadedItemCount > 0) {
+      _invOrderDraftResumeToastShown = true;
+      inventoryOrderDraftToast(`Resumed unfinished draft · ${loadedItemCount} item${loadedItemCount === 1 ? "" : "s"}`, "info");
+    }
+    mountOrRefreshMockUi();
+    void refreshOrderBuilderPreviewAsync();
+  } catch (e) {
+    console.error("[Inventory] load active draft failed", e && (e.code || e.message) ? (e.code || e.message) : e);
+  } finally {
+    _invOrderDraftLoading = false;
+  }
+}
+
+/** Debounced save of the active draft. Called after every local mutation. */
+function scheduleInventoryOrderDraftSave() {
+  if (_invOrderDraftSaveTimer) {
+    clearTimeout(_invOrderDraftSaveTimer);
+    _invOrderDraftSaveTimer = null;
+  }
+  // Indicate pending save in the UI without re-rendering (we only re-render when the status actually flips).
+  if (_invOrderDraftSaveStatus !== "saving") {
+    _invOrderDraftSaveStatus = "saving";
+    updateInventoryOrderDraftStatusIndicator();
+  }
+  _invOrderDraftSaveTimer = setTimeout(() => {
+    _invOrderDraftSaveTimer = null;
+    void flushInventoryOrderDraftSave();
+  }, 600);
+}
+
+/** Update the Draft status chip in-place without re-rendering the whole Create Order tab. */
+function updateInventoryOrderDraftStatusIndicator() {
+  const el = document.querySelector("[data-inv-draft-status]");
+  if (!(el instanceof HTMLElement)) return;
+  const st = _invOrderDraftSaveStatus;
+  el.setAttribute("data-state", st);
+  if (st === "saving") el.textContent = "Saving…";
+  else if (st === "saved") {
+    const secs = _invOrderDraftLastSavedAt > 0
+      ? Math.max(0, Math.round((Date.now() - _invOrderDraftLastSavedAt) / 1000))
+      : null;
+    el.textContent = secs != null && secs < 10 ? "Saved just now" : "Auto-saved";
+  } else {
+    el.textContent = "Auto-save enabled";
+  }
+}
+
+/** Immediate write of current state to the active draft doc. Creates a new draft on first write. */
+async function flushInventoryOrderDraftSave() {
+  if (_invOrderDraftSaveTimer) {
+    clearTimeout(_invOrderDraftSaveTimer);
+    _invOrderDraftSaveTimer = null;
+  }
+  if (_invOrderDraftSaveInFlight) return;
+  _invOrderDraftSaveInFlight = true;
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) return;
+    const uid = auth.currentUser && auth.currentUser.uid ? String(auth.currentUser.uid) : null;
+    const manualItems = _invOrderBuilderManualLines
+      .map(sanitizeManualItemForDraft)
+      .filter((x) => x && x.itemName);
+    const payload = {
+      status: "draft",
+      isActive: true,
+      manualItems,
+      selectedSubcategoryIds: Array.from(_invOrderBuilderCustomSubIds),
+      orderName: String(_invOrderSaveNameDraft ?? ""),
+      updatedAt: serverTimestamp(),
+      updatedBy: uid,
+    };
+    if (_invActiveDraftId) {
+      const ref = doc(db, `salons/${salonId}/inventoryDrafts`, _invActiveDraftId);
+      await setDoc(ref, payload, { merge: true });
+    } else {
+      // First write — create the draft doc. Auto-id avoids collisions.
+      const newRef = await addDoc(collection(db, `salons/${salonId}/inventoryDrafts`), {
+        ...payload,
+        createdAt: serverTimestamp(),
+        createdBy: uid,
+      });
+      _invActiveDraftId = newRef.id;
+    }
+    _invOrderDraftLastSavedAt = Date.now();
+    _invOrderDraftSaveStatus = "saved";
+    updateInventoryOrderDraftStatusIndicator();
+  } catch (e) {
+    console.warn("[Inventory] save active draft failed", e);
+    _invOrderDraftSaveStatus = "idle";
+    updateInventoryOrderDraftStatusIndicator();
+  } finally {
+    _invOrderDraftSaveInFlight = false;
+  }
+}
+
+/** Format a draft entry for the picker. */
+function renderDraftsPickerRowHtml(draft) {
+  const idEsc = escapeHtml(draft.id);
+  const isActive = draft.isActive;
+  const itemCount = Array.isArray(draft.manualItems) ? draft.manualItems.length : 0;
+  const name = draft.orderName && draft.orderName.trim() ? draft.orderName.trim() : "Untitled draft";
+  const updated = draft.updatedAt
+    ? new Date(draft.updatedAt).toLocaleString()
+    : draft.createdAt
+      ? new Date(draft.createdAt).toLocaleString()
+      : "—";
+  const switchBtn = isActive
+    ? `<span class="ff-inv2-drafts-picker-current">Current</span>`
+    : `<button type="button" class="ff-inv2-drafts-picker-switch" data-inv-drafts-picker-switch="${idEsc}">Switch</button>`;
+  return `<li class="ff-inv2-drafts-picker-row${isActive ? " ff-inv2-drafts-picker-row--active" : ""}">
+  <div class="ff-inv2-drafts-picker-main">
+    <div class="ff-inv2-drafts-picker-name">${escapeHtml(name)}</div>
+    <div class="ff-inv2-drafts-picker-meta">${itemCount} item${itemCount === 1 ? "" : "s"} · ${escapeHtml(updated)}</div>
+  </div>
+  <div class="ff-inv2-drafts-picker-actions">
+    ${switchBtn}
+    <button type="button" class="ff-inv2-drafts-picker-delete" data-inv-drafts-picker-delete="${idEsc}" aria-label="Delete draft" title="Delete draft">🗑</button>
+  </div>
+</li>`;
+}
+
+/** Modal listing all drafts — clicking the Draft chip opens this. */
+function renderInventoryDraftsPickerModal() {
+  if (!_invDraftsPicker.open) return "";
+  let body;
+  if (_invDraftsPicker.loading) {
+    body = `<p class="ff-inv2-drafts-picker-empty">Loading…</p>`;
+  } else if (_invDraftsPicker.error) {
+    body = `<p class="ff-inv2-drafts-picker-empty">${escapeHtml(_invDraftsPicker.error)}</p>`;
+  } else if (!_invDraftsPicker.drafts.length) {
+    body = `<p class="ff-inv2-drafts-picker-empty">No drafts yet. Add an item to create one.</p>`;
+  } else {
+    body = `<ul class="ff-inv2-drafts-picker-list">${_invDraftsPicker.drafts.map(renderDraftsPickerRowHtml).join("")}</ul>`;
+  }
+  return `<div class="ff-inv2-modal-backdrop ff-inv2-drafts-picker-backdrop" data-inv-drafts-picker-close-backdrop="1" role="dialog" aria-modal="true" aria-labelledby="ff-inv2-drafts-picker-title">
+  <div class="ff-inv2-modal-card ff-inv2-drafts-picker-card" data-inv-drafts-picker-card="1">
+    <div class="ff-inv2-drafts-picker-head">
+      <h3 id="ff-inv2-drafts-picker-title" class="ff-inv2-modal-title">Your drafts</h3>
+      <button type="button" class="ff-inv2-drafts-picker-close" data-inv-drafts-picker-close="1" aria-label="Close">×</button>
+    </div>
+    <p class="ff-inv2-modal-hint">Switch between unfinished drafts or delete ones you don't need.</p>
+    ${body}
+    <div class="ff-inv2-modal-actions ff-inv2-drafts-picker-actions-row">
+      <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-cancel" data-inv-drafts-picker-close="1">Close</button>
+      <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-primary" data-inv-drafts-picker-new="1">+ New draft</button>
+    </div>
+  </div>
+</div>`;
+}
+
+/** Open the drafts picker and fetch the list. */
+async function openInventoryDraftsPicker() {
+  _invDraftsPicker = { open: true, loading: true, error: null, drafts: [] };
+  mountOrRefreshMockUi();
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) {
+      _invDraftsPicker.error = "No salon context";
+      _invDraftsPicker.loading = false;
+      mountOrRefreshMockUi();
+      return;
+    }
+    const snap = await getDocs(collection(db, `salons/${salonId}/inventoryDrafts`));
+    const drafts = [];
+    snap.forEach((d) => {
+      const data = d.data() || {};
+      if (data.status === "cleared") return;
+      const manualItems = Array.isArray(data.manualItems) ? data.manualItems : [];
+      drafts.push({
+        id: d.id,
+        isActive: data.isActive === true || d.id === _invActiveDraftId,
+        manualItems,
+        orderName: typeof data.orderName === "string" ? data.orderName : "",
+        createdAt: data.createdAt && typeof data.createdAt.toMillis === "function" ? data.createdAt.toMillis() : 0,
+        updatedAt: data.updatedAt && typeof data.updatedAt.toMillis === "function" ? data.updatedAt.toMillis() : 0,
+      });
+    });
+    drafts.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    _invDraftsPicker = { open: true, loading: false, error: null, drafts };
+    mountOrRefreshMockUi();
+  } catch (e) {
+    console.warn("[Inventory] drafts picker load failed", e);
+    _invDraftsPicker = { open: true, loading: false, error: "Could not load drafts", drafts: [] };
+    mountOrRefreshMockUi();
+  }
+}
+
+function closeInventoryDraftsPicker() {
+  _invDraftsPicker = { open: false, loading: false, error: null, drafts: [] };
+  mountOrRefreshMockUi();
+}
+
+/** Switch the active draft to the given doc id. */
+async function switchActiveInventoryDraft(draftId) {
+  if (!draftId || draftId === _invActiveDraftId) {
+    closeInventoryDraftsPicker();
+    return;
+  }
+  if (_invOrderDraftSaveTimer) {
+    await flushInventoryOrderDraftSave();
+  }
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) return;
+    const uid = auth.currentUser && auth.currentUser.uid ? String(auth.currentUser.uid) : null;
+    // Deactivate current
+    if (_invActiveDraftId && _invActiveDraftId !== draftId) {
+      try {
+        const oldRef = doc(db, `salons/${salonId}/inventoryDrafts`, _invActiveDraftId);
+        await setDoc(
+          oldRef,
+          { isActive: false, updatedAt: serverTimestamp(), updatedBy: uid },
+          { merge: true }
+        );
+      } catch (e) {
+        console.warn("[Inventory] deactivate previous draft (switch) failed", e);
+      }
+    }
+    // Activate the chosen one
+    const newRef = doc(db, `salons/${salonId}/inventoryDrafts`, draftId);
+    const snap = await getDoc(newRef);
+    if (!snap.exists()) {
+      inventoryOrderDraftToast("That draft is gone", "error");
+      closeInventoryDraftsPicker();
+      return;
+    }
+    await setDoc(
+      newRef,
+      { isActive: true, updatedAt: serverTimestamp(), updatedBy: uid },
+      { merge: true }
+    );
+    ffApplyDraftSnapshotToLocalState(draftId, snap.data() || {});
+    _invOrderDraftLoaded = true;
+    _invOrderDraftResumeToastShown = true;
+    inventoryOrderDraftToast("Switched draft", "info");
+    closeInventoryDraftsPicker();
+    void refreshOrderBuilderPreviewAsync();
+  } catch (e) {
+    console.error("[Inventory] switchActiveInventoryDraft failed", e);
+    inventoryOrderDraftToast("Could not switch draft", "error");
+  }
+}
+
+/** Delete a draft from Firestore. If it was the active one, reset local state. */
+async function deleteInventoryDraftFromPicker(draftId) {
+  if (!draftId) return;
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) return;
+    const ref = doc(db, `salons/${salonId}/inventoryDrafts`, draftId);
+    await deleteDoc(ref);
+    if (draftId === _invActiveDraftId) {
+      _invActiveDraftId = null;
+      _invOrderBuilderManualLines = [];
+      _invOrderBuilderCustomSubIds = new Set();
+      _invOrderSaveNameDraft = "";
+      _invOrderDraftLastSavedAt = 0;
+      _invOrderDraftSaveStatus = "idle";
+    }
+    inventoryOrderDraftToast("Draft deleted", "success");
+    // Refresh list in place
+    void openInventoryDraftsPicker();
+    void refreshOrderBuilderPreviewAsync();
+  } catch (e) {
+    console.error("[Inventory] delete draft failed", e);
+    inventoryOrderDraftToast("Could not delete draft", "error");
+  }
+}
+
+/**
+ * Start a fresh draft: deactivate the current one (if any) so it remains in Firestore
+ * as a non-active draft, and clear local state. A new Firestore doc is created lazily
+ * on the first mutation via flushInventoryOrderDraftSave().
+ */
+async function createNewInventoryOrderDraft() {
+  // Flush any pending save so we don't clobber the soon-to-be-deactivated draft.
+  if (_invOrderDraftSaveTimer) {
+    await flushInventoryOrderDraftSave();
+  }
+  try {
+    const salonId = await getSalonId();
+    if (salonId && _invActiveDraftId) {
+      const uid = auth.currentUser && auth.currentUser.uid ? String(auth.currentUser.uid) : null;
+      const oldRef = doc(db, `salons/${salonId}/inventoryDrafts`, _invActiveDraftId);
+      await setDoc(
+        oldRef,
+        { isActive: false, updatedAt: serverTimestamp(), updatedBy: uid },
+        { merge: true }
+      );
+    }
+  } catch (e) {
+    console.warn("[Inventory] deactivate previous draft failed", e);
+  }
+  // Reset local state. New draft doc will be created on first mutation.
+  _invActiveDraftId = null;
+  _invOrderBuilderManualLines = [];
+  _invOrderBuilderCustomSubIds = new Set();
+  _invOrderSaveNameDraft = "";
+  _invOrderDraftLastSavedAt = 0;
+  _invOrderDraftSaveStatus = "idle";
+  _invOrderDraftResumeToastShown = true;
+  _invOrderDraftLoaded = true;
+  inventoryOrderDraftToast("Started a new draft", "info");
+  mountOrRefreshMockUi();
+  void refreshOrderBuilderPreviewAsync();
+}
+
+/** Remove the active draft entirely (after Save as Order). Other drafts are untouched. */
+async function clearInventoryOrderDraft() {
+  const draftIdToDelete = _invActiveDraftId;
+  _invOrderBuilderManualLines = [];
+  _invOrderBuilderCustomSubIds = new Set();
+  _invOrderSaveNameDraft = "";
+  _invActiveDraftId = null;
+  _invOrderDraftLastSavedAt = 0;
+  _invOrderDraftSaveStatus = "idle";
+  _invOrderDraftLoaded = true;
+  if (_invOrderDraftSaveTimer) {
+    clearTimeout(_invOrderDraftSaveTimer);
+    _invOrderDraftSaveTimer = null;
+  }
+  if (!draftIdToDelete) return;
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) return;
+    const ref = doc(db, `salons/${salonId}/inventoryDrafts`, draftIdToDelete);
+    await deleteDoc(ref).catch((e) => {
+      console.warn("[Inventory] clear draft delete failed; falling back to empty overwrite", e);
+      return setDoc(
+        ref,
+        {
+          status: "cleared",
+          isActive: false,
+          manualItems: [],
+          selectedSubcategoryIds: [],
+          orderName: "",
+          updatedAt: serverTimestamp(),
+        },
+        { merge: false }
+      );
+    });
+  } catch (e) {
+    console.warn("[Inventory] clear active draft failed", e);
+  }
 }
 
 function renderInventoryTableCardHtml() {
@@ -2334,7 +2862,7 @@ function renderInventoryTableCardHtml() {
 function renderInvMainTabsHtml() {
   const tabs = [
     { id: "inventory", label: "Inventory" },
-    { id: "orderBuilder", label: "Order Builder" },
+    { id: "orderBuilder", label: "Create Order" },
     { id: "orders", label: "Orders" },
     { id: "insights", label: "Insights" },
   ];
@@ -3269,6 +3797,8 @@ function renderOrderDetailLineViewModal() {
 
 /** @type {"30d" | "60d" | "120d" | "year" | "all" | "custom"} */
 let _invInsightsRange = "30d";
+/** @type {"overview" | "purchases" | "forecast" | "health"} */
+let _invInsightsSubTab = "overview";
 let _invInsightsCustomFrom = "";
 let _invInsightsCustomTo = "";
 let _invInsightsLoading = false;
@@ -3277,7 +3807,15 @@ let _invInsightsRows = [];
 let _invInsightsLoadSeq = 0;
 let _invInsightsError = null;
 /** KPI summary for the selected range. */
-let _invInsightsKpis = { totalSpend: 0, doneOrders: 0, totalOrders: 0, uniqueItems: 0 };
+let _invInsightsKpis = { totalSpend: 0, doneOrders: 0, totalOrders: 0, uniqueItems: 0, prevSpend: 0, spendPctChange: null };
+/** Per-cell usage + days-left forecast, sorted ascending by daysLeft. */
+/** @type {Array<{ catId: string, subId: string, rowId: string, groupId: string, itemName: string, groupName: string, categoryName: string, subcategoryName: string, current: number, stock: number, dailyRate: number, daysLeft: number, level: "critical" | "low" | "ok" }>} */
+let _invInsightsUsage = [];
+/** Smart reorder suggestions — subset of usage with daysLeft ≤ threshold. */
+let _invInsightsReorder = [];
+const INV_INSIGHTS_REORDER_DAYS = 7;
+const INV_INSIGHTS_CRITICAL_DAYS = 7;
+const INV_INSIGHTS_LOW_DAYS = 14;
 /** Spend grouped by categoryName for the selected range. */
 /** @type {Array<{ name: string, spend: number, percent: number }>} */
 let _invInsightsCategorySpend = [];
@@ -3349,6 +3887,233 @@ function ffResolveItemEventDate(it, order) {
   return null;
 }
 
+/** Compute the previous comparison period [from, to] matching the currently-selected range. */
+function getInventoryInsightsPrevRange() {
+  const cur = getInventoryInsightsDateRange();
+  if (!cur.from || !cur.to) return { from: null, to: null };
+  const durationMs = cur.to.getTime() - cur.from.getTime();
+  if (!(durationMs > 0)) return { from: null, to: null };
+  const prevTo = new Date(cur.from.getTime() - 1);
+  const prevFrom = new Date(cur.from.getTime() - durationMs - 1);
+  return { from: prevFrom, to: prevTo };
+}
+
+/** One-shot guard so the suggestion scan runs only once per app session. */
+let _invSuggestionsScannedThisSession = false;
+
+/**
+ * Smart Inventory Suggestions — scans all items, and creates an Inbox alert
+ * (type="inventory_suggestion") whenever a cell is forecast to run out within 3 days
+ * based on purchase rate over the last ≤ 60 days.
+ *
+ * Rules:
+ *   - lookbackDays = min(60, daysWithData)
+ *   - totalUsed = sum(qtyBought|receivedCumulative) in lookback window
+ *   - dailyUsage = totalUsed / lookbackDays
+ *   - Fire an alert only when dailyUsage > 0 AND daysLeft < 3
+ *   - suggestedQty = ceil(dailyUsage * 7)
+ *   - Skip if an open alert already exists for the same rowId:groupId.
+ */
+async function scanInventorySuggestionsOnce() {
+  if (_invSuggestionsScannedThisSession) return;
+  _invSuggestionsScannedThisSession = true;
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) return;
+    const user = auth.currentUser;
+    if (!user) return;
+
+    // Read the current user profile to satisfy inboxItems create rules.
+    let userData = {};
+    try {
+      const snap = await getDoc(doc(db, "users", user.uid));
+      if (snap.exists()) userData = snap.data() || {};
+    } catch (e) {
+      console.warn("[Inventory] suggestion scan: user doc read failed", e);
+      return;
+    }
+    const role = userData.role != null ? String(userData.role) : "";
+    const roleLower = role.toLowerCase();
+    // Only managers/admins/owners create system alerts — technicians would hit permission checks.
+    if (!["manager", "admin", "owner"].includes(roleLower)) return;
+
+    const uid = user.uid;
+    const staffId = userData.staffId != null ? String(userData.staffId) : "";
+    const displayName = userData.displayName || userData.name || "System";
+
+    // Load existing inventory_suggestion items — dedup against ALL statuses.
+    // Rationale: if a suggestion was already acted on (archived after Add to Order) or dismissed,
+    // don't create a duplicate. The scanner re-enables re-alerts only after the user-facing doc
+    // is fully removed (e.g. via archive-tab delete).
+    const existingKeys = new Set();
+    try {
+      const existingSnap = await getDocs(
+        query(
+          collection(db, `salons/${salonId}/inboxItems`),
+          where("type", "==", "inventory_suggestion")
+        )
+      );
+      existingSnap.forEach((d) => {
+        const data = d.data() || {};
+        const nested = (data.data && typeof data.data === "object") ? data.data : {};
+        const rowId = nested.rowId != null ? String(nested.rowId) : "";
+        const groupId = nested.groupId != null ? String(nested.groupId) : "";
+        if (rowId && groupId) existingKeys.add(`${rowId}:${groupId}`);
+      });
+    } catch (e) {
+      console.warn("[Inventory] suggestion scan: existing alerts query failed", e);
+      return;
+    }
+
+    // Fetch categories + subcategories in parallel.
+    const catSnap = await getDocs(collection(db, `salons/${salonId}/inventoryCategories`));
+    const cats = catSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const perCatPromises = cats.map((c) =>
+      getDocs(collection(db, `salons/${salonId}/inventoryCategories/${c.id}/inventorySubcategories`))
+        .then((s) => ({ cat: c, subs: s.docs.map((d) => ({ id: d.id, ...d.data() })) }))
+        .catch((e) => {
+          console.warn("[Inventory] suggestion scan: sub load failed", c.id, e);
+          return { cat: c, subs: [] };
+        })
+    );
+    // Fetch orders in parallel (all orders — we filter dates client-side).
+    const ordersPromise = getDocs(collection(db, `salons/${salonId}/inventoryOrders`)).catch((e) => {
+      console.warn("[Inventory] suggestion scan: orders load failed", e);
+      return null;
+    });
+    const [perCat, ordersSnap] = await Promise.all([Promise.all(perCatPromises), ordersPromise]);
+    if (!ordersSnap) return;
+
+    // Build per-cell usage in the last ≤60 days.
+    const now = Date.now();
+    const cutoff = now - 60 * 86400000;
+    /** @type {Map<string, { total: number, oldestMs: number }>} */
+    const cellUsage = new Map();
+    ordersSnap.forEach((d) => {
+      const order = { id: d.id, ...d.data() };
+      const items = Array.isArray(order.items) ? order.items : [];
+      for (const it of items) {
+        if (!it || typeof it !== "object") continue;
+        const purchaseQty = it.appliedToInventory === true ? Number(it.qtyBought) : NaN;
+        const receiveQty = Number(it.receivedCumulative);
+        const purchaseValid = Number.isFinite(purchaseQty) && purchaseQty > 0;
+        const receiveValid = Number.isFinite(receiveQty) && receiveQty > 0;
+        if (!purchaseValid && !receiveValid) continue;
+        const eventDate = ffResolveItemEventDate(it, order);
+        if (!eventDate) continue;
+        const ms = eventDate.getTime();
+        if (!(ms >= cutoff)) continue;
+        const rowId = it.itemId && String(it.itemId).includes(":")
+          ? String(it.itemId).split(":")[1] || ""
+          : "";
+        const groupId = it.groupId != null ? String(it.groupId).trim() : "";
+        if (!rowId || !groupId) continue;
+        const key = `${rowId}:${groupId}`;
+        const qty = Math.max(purchaseValid ? purchaseQty : 0, receiveValid ? receiveQty : 0);
+        const prev = cellUsage.get(key) || { total: 0, oldestMs: now };
+        prev.total += qty;
+        if (ms < prev.oldestMs) prev.oldestMs = ms;
+        cellUsage.set(key, prev);
+      }
+    });
+
+    let createdCount = 0;
+    for (const { cat, subs } of perCat) {
+      for (const sub of subs) {
+        let groups;
+        let rows;
+        try {
+          const parsed = parseSubcategoryDocToTable(sub);
+          groups = parsed.groups;
+          rows = parsed.rows;
+        } catch (e) {
+          console.warn("[Inventory] suggestion scan: parse sub failed", sub.id, e);
+          continue;
+        }
+        for (const r of rows) {
+          for (const g of groups) {
+            const cell = r.byGroup && r.byGroup[g.id];
+            if (!cell) continue;
+            const current = typeof cell.current === "number" ? cell.current : parseNum(cell.current);
+            if (!Number.isFinite(current) || current < 0) continue;
+            const key = `${String(r.id)}:${String(g.id)}`;
+            if (existingKeys.has(key)) continue;
+            const usage = cellUsage.get(key);
+            if (!usage || !(usage.total > 0)) continue;
+            const daysWithData = Math.max(1, Math.ceil((now - usage.oldestMs) / 86400000));
+            const lookbackDays = Math.min(60, daysWithData);
+            const dailyUsage = usage.total / lookbackDays;
+            if (!(dailyUsage > 0)) continue;
+            const daysLeft = current > 0 ? current / dailyUsage : 0;
+            if (!(daysLeft < 3)) continue;
+            const suggestedQty = Math.max(1, Math.ceil(dailyUsage * 7));
+            const itemName = r.name != null ? String(r.name).trim() : "";
+            const groupName = g.label != null ? String(g.label) : "";
+            const payload = {
+              tenantId: salonId,
+              locationId: null,
+              type: "inventory_suggestion",
+              status: "open",
+              priority: "high",
+              assignedTo: null,
+              sentToStaffIds: [],
+              sentToNames: [],
+              managerNotes: null,
+              responseNote: null,
+              decidedBy: null,
+              decidedAt: null,
+              needsInfoQuestion: null,
+              staffReply: null,
+              visibility: "managers_only",
+              unreadForManagers: true,
+              createdByUid: uid,
+              createdByStaffId: staffId,
+              createdByName: displayName,
+              createdByRole: role,
+              forUid: uid,
+              forStaffId: staffId,
+              forStaffName: displayName,
+              createdAt: serverTimestamp(),
+              lastActivityAt: serverTimestamp(),
+              updatedAt: null,
+              data: {
+                itemName,
+                groupName,
+                categoryId: String(cat.id),
+                categoryName: cat.name != null ? String(cat.name) : "",
+                subcategoryId: String(sub.id),
+                subcategoryName: sub.name != null ? String(sub.name) : "",
+                rowId: String(r.id),
+                groupId: String(g.id),
+                current: Math.round(current * 100) / 100,
+                dailyUsage: Math.round(dailyUsage * 100) / 100,
+                daysLeft: Math.round(daysLeft * 10) / 10,
+                suggestedQty,
+                lookbackDays,
+                totalUsed: usage.total,
+              },
+            };
+            try {
+              await addDoc(collection(db, `salons/${salonId}/inboxItems`), payload);
+              existingKeys.add(key);
+              createdCount += 1;
+            } catch (e) {
+              console.warn("[Inventory] suggestion scan: create failed", { cat: cat.id, sub: sub.id, row: r.id, group: g.id }, e);
+            }
+          }
+        }
+      }
+    }
+    if (createdCount > 0) {
+      console.log(`[Inventory] Smart Suggestion scan — created ${createdCount} alert(s)`);
+    } else {
+      console.log("[Inventory] Smart Suggestion scan — no new alerts");
+    }
+  } catch (e) {
+    console.warn("[Inventory] suggestion scan failed", e);
+  }
+}
+
 async function refreshInventoryInsightsAsync() {
   if (_invMainTab !== "insights") return;
   const seq = ++_invInsightsLoadSeq;
@@ -3385,6 +4150,7 @@ async function refreshInventoryInsightsAsync() {
     if (seq !== _invInsightsLoadSeq) return;
 
     const { from, to } = getInventoryInsightsDateRange();
+    const prevRange = getInventoryInsightsPrevRange();
 
     /** @type {Map<string, { name: string, totalQty: number }>} */
     const buckets = new Map();
@@ -3394,6 +4160,7 @@ async function refreshInventoryInsightsAsync() {
     const spendByCategory = new Map();
     const ordersWithActivity = new Set();
     let totalSpend = 0;
+    let prevSpend = 0;
 
     ordersSnap.forEach((d) => {
       const order = { id: d.id, ...d.data() };
@@ -3406,6 +4173,14 @@ async function refreshInventoryInsightsAsync() {
         const receiveValid = Number.isFinite(receiveQty) && receiveQty > 0;
         if (!purchaseValid && !receiveValid) continue;
         const eventDate = ffResolveItemEventDate(it, order);
+        // Previous-period tally for MoM comparison
+        if (prevRange.from && prevRange.to && eventDate && eventDate >= prevRange.from && eventDate <= prevRange.to) {
+          const qtyPrev = Math.max(purchaseValid ? purchaseQty : 0, receiveValid ? receiveQty : 0);
+          const pricePrev = Number(it.price);
+          if (Number.isFinite(pricePrev) && pricePrev > 0) {
+            prevSpend += qtyPrev * pricePrev;
+          }
+        }
         if (from && eventDate && eventDate < from) continue;
         if (to && eventDate && eventDate > to) continue;
         if (!eventDate && _invInsightsRange !== "all") continue;
@@ -3462,6 +4237,17 @@ async function refreshInventoryInsightsAsync() {
     const runningLow = [];
     /** @type {typeof _invInsightsDeadStock} */
     const deadStock = [];
+    /** @type {typeof _invInsightsUsage} */
+    const usage = [];
+    // Determine the number of days used to compute the daily consumption rate.
+    // For "all time", fall back to 90 days so the rate remains meaningful.
+    let rateDays = 30;
+    if (from && to) {
+      const ms = to.getTime() - from.getTime();
+      rateDays = Math.max(1, Math.round(ms / 86400000));
+    } else {
+      rateDays = 90;
+    }
     for (const res of subResults) {
       if (!res || !res.data) continue;
       const { groups, rows: subRows } = parseSubcategoryDocToTable(res.data);
@@ -3498,11 +4284,47 @@ async function refreshInventoryInsightsAsync() {
           ) {
             deadStock.push({ ...base, current });
           }
+          // Days of Stock Left — compute only when we have any activity or stock target to work from.
+          const activityQty = activityByCell.get(cellKey) || 0;
+          const dailyRate = activityQty > 0 ? activityQty / rateDays : 0;
+          let daysLeft = Infinity;
+          if (current <= 0) {
+            daysLeft = 0;
+          } else if (dailyRate > 0) {
+            daysLeft = current / dailyRate;
+          }
+          const isFinite = Number.isFinite(daysLeft);
+          // Only track cells that either have any activity, have a stock target, or are out of stock.
+          if (activityQty > 0 || stock > 0 || current <= 0) {
+            let level = "ok";
+            if (isFinite) {
+              if (daysLeft <= INV_INSIGHTS_CRITICAL_DAYS) level = "critical";
+              else if (daysLeft <= INV_INSIGHTS_LOW_DAYS) level = "low";
+            }
+            usage.push({
+              ...base,
+              stock,
+              current,
+              dailyRate,
+              daysLeft,
+              level,
+            });
+          }
         }
       }
     }
     runningLow.sort((a, b) => a.pctLeft - b.pctLeft || b.stock - a.stock);
     deadStock.sort((a, b) => b.current - a.current || a.itemName.localeCompare(b.itemName));
+    usage.sort((a, b) => {
+      const ad = Number.isFinite(a.daysLeft) ? a.daysLeft : Number.POSITIVE_INFINITY;
+      const bd = Number.isFinite(b.daysLeft) ? b.daysLeft : Number.POSITIVE_INFINITY;
+      if (ad !== bd) return ad - bd;
+      return b.dailyRate - a.dailyRate || a.itemName.localeCompare(b.itemName);
+    });
+    // Smart reorder suggestions = items forecast to run out within the reorder window AND have actual demand signal.
+    const reorder = usage.filter(
+      (u) => u.dailyRate > 0 && Number.isFinite(u.daysLeft) && u.daysLeft <= INV_INSIGHTS_REORDER_DAYS
+    );
 
     // Count "Done" orders separately — only fully received/bought orders count as real purchases.
     let doneOrders = 0;
@@ -3513,24 +4335,36 @@ async function refreshInventoryInsightsAsync() {
     });
 
     if (seq !== _invInsightsLoadSeq) return;
+    let spendPctChange = null;
+    if (prevSpend > 0) {
+      spendPctChange = ((totalSpend - prevSpend) / prevSpend) * 100;
+    } else if (totalSpend > 0) {
+      spendPctChange = null; // No baseline — can't compare.
+    }
     _invInsightsRows = rows;
     _invInsightsKpis = {
       totalSpend,
       doneOrders,
       totalOrders: ordersWithActivity.size,
       uniqueItems: rows.length,
+      prevSpend,
+      spendPctChange,
     };
     _invInsightsCategorySpend = categoryRows;
     _invInsightsRunningLow = runningLow;
     _invInsightsDeadStock = deadStock;
+    _invInsightsUsage = usage;
+    _invInsightsReorder = reorder;
   } catch (e) {
     console.error("[Inventory] insights load failed", e);
     if (seq !== _invInsightsLoadSeq) return;
     _invInsightsRows = [];
-    _invInsightsKpis = { totalSpend: 0, doneOrders: 0, totalOrders: 0, uniqueItems: 0 };
+    _invInsightsKpis = { totalSpend: 0, doneOrders: 0, totalOrders: 0, uniqueItems: 0, prevSpend: 0, spendPctChange: null };
     _invInsightsCategorySpend = [];
     _invInsightsRunningLow = [];
     _invInsightsDeadStock = [];
+    _invInsightsUsage = [];
+    _invInsightsReorder = [];
     _invInsightsError = "Could not load insights data.";
   } finally {
     if (seq === _invInsightsLoadSeq) {
@@ -3538,6 +4372,76 @@ async function refreshInventoryInsightsAsync() {
       mountOrRefreshMockUi();
     }
   }
+}
+
+/** Fixed palette for donut slices. Shared across charts so colors stay consistent. */
+const INV_INSIGHTS_CHART_COLORS = [
+  "#7c3aed", // purple
+  "#0ea5e9", // sky
+  "#10b981", // emerald
+  "#f59e0b", // amber
+  "#ec4899", // pink
+  "#14b8a6", // teal
+  "#ef4444", // red
+  "#6366f1", // indigo
+  "#84cc16", // lime
+  "#64748b", // slate (reserved for "Other")
+];
+
+/** Build an SVG donut chart from [{ name, spend, percent }] rows. Returns "" when empty. */
+function renderInsightsDonutSvg(rows, totalSpend) {
+  const sum = rows.reduce((acc, r) => acc + (Number(r.spend) || 0), 0);
+  if (!(sum > 0) || !rows.length) return "";
+  const cx = 70;
+  const cy = 70;
+  const rOuter = 60;
+  const rInner = 40;
+  // Single-slice edge case: draw two half-arc slices so SVG renders correctly.
+  if (rows.length === 1) {
+    const color = INV_INSIGHTS_CHART_COLORS[0];
+    const ring = `<circle cx="${cx}" cy="${cy}" r="${(rOuter + rInner) / 2}" fill="none" stroke="${color}" stroke-width="${rOuter - rInner}" />`;
+    const totalText = formatInsightsCurrency(totalSpend);
+    return `<svg class="ff-inv2-insights-donut-svg" viewBox="0 0 140 140" width="140" height="140" role="img" aria-label="Spend by category donut chart">
+  ${ring}
+  <text class="ff-inv2-insights-donut-total" x="${cx}" y="${cy - 4}" text-anchor="middle">${escapeHtml(totalText)}</text>
+  <text class="ff-inv2-insights-donut-sub" x="${cx}" y="${cy + 12}" text-anchor="middle">Total spend</text>
+</svg>`;
+  }
+  let angle = -Math.PI / 2; // Start at top.
+  const slices = rows
+    .map((r, i) => {
+      const frac = (Number(r.spend) || 0) / sum;
+      if (!(frac > 0)) return "";
+      const start = angle;
+      const end = angle + frac * 2 * Math.PI;
+      angle = end;
+      const largeArc = end - start > Math.PI ? 1 : 0;
+      const x1o = cx + rOuter * Math.cos(start);
+      const y1o = cy + rOuter * Math.sin(start);
+      const x2o = cx + rOuter * Math.cos(end);
+      const y2o = cy + rOuter * Math.sin(end);
+      const x1i = cx + rInner * Math.cos(end);
+      const y1i = cy + rInner * Math.sin(end);
+      const x2i = cx + rInner * Math.cos(start);
+      const y2i = cy + rInner * Math.sin(start);
+      const d = [
+        `M ${x1o.toFixed(2)} ${y1o.toFixed(2)}`,
+        `A ${rOuter} ${rOuter} 0 ${largeArc} 1 ${x2o.toFixed(2)} ${y2o.toFixed(2)}`,
+        `L ${x1i.toFixed(2)} ${y1i.toFixed(2)}`,
+        `A ${rInner} ${rInner} 0 ${largeArc} 0 ${x2i.toFixed(2)} ${y2i.toFixed(2)}`,
+        "Z",
+      ].join(" ");
+      const color = INV_INSIGHTS_CHART_COLORS[i % INV_INSIGHTS_CHART_COLORS.length];
+      const title = `${r.name}: ${formatInsightsCurrency(r.spend)} (${r.percent}%)`;
+      return `<path d="${d}" fill="${color}" stroke="#fff" stroke-width="1.5"><title>${escapeHtml(title)}</title></path>`;
+    })
+    .join("");
+  const totalText = formatInsightsCurrency(totalSpend);
+  return `<svg class="ff-inv2-insights-donut-svg" viewBox="0 0 140 140" width="140" height="140" role="img" aria-label="Spend by category donut chart">
+  ${slices}
+  <text class="ff-inv2-insights-donut-total" x="${cx}" y="${cy - 4}" text-anchor="middle">${escapeHtml(totalText)}</text>
+  <text class="ff-inv2-insights-donut-sub" x="${cx}" y="${cy + 12}" text-anchor="middle">Total spend</text>
+</svg>`;
 }
 
 function formatInsightsCurrency(n) {
@@ -3584,11 +4488,28 @@ function renderInventoryInsightsTabHtml() {
   const doneSubtitle = kpis.totalOrders > 0
     ? `${kpis.doneOrders} of ${kpis.totalOrders} · ${inProgress} in progress`
     : "No activity yet";
+  // Month-over-Month delta for Total spend.
+  let spendDeltaHtml = `<span class="ff-inv2-insights-kpi-sub">Based on items actually bought</span>`;
+  const pct = kpis.spendPctChange;
+  if (_invInsightsRange !== "all" && typeof pct === "number" && Number.isFinite(pct)) {
+    const rounded = Math.round(pct * 10) / 10;
+    const up = rounded > 0;
+    const flat = Math.abs(rounded) < 0.05;
+    // For spend, UP is bad (red) and DOWN is good (green). Flat stays neutral.
+    const cls = flat ? "ff-inv2-insights-delta--flat" : up ? "ff-inv2-insights-delta--up" : "ff-inv2-insights-delta--down";
+    const arrow = flat ? "≈" : up ? "▲" : "▼";
+    const label = flat
+      ? "No change vs previous period"
+      : `${Math.abs(rounded)}% vs previous (${escapeHtml(formatInsightsCurrency(kpis.prevSpend || 0))})`;
+    spendDeltaHtml = `<span class="ff-inv2-insights-delta ${cls}"><span class="ff-inv2-insights-delta-arrow">${arrow}</span>${escapeHtml(label)}</span>`;
+  } else if (_invInsightsRange !== "all" && (kpis.prevSpend || 0) === 0 && (kpis.totalSpend || 0) > 0) {
+    spendDeltaHtml = `<span class="ff-inv2-insights-kpi-sub">No prior-period spend</span>`;
+  }
   const kpiBlock = `<div class="ff-inv2-insights-kpis">
   <div class="ff-inv2-insights-kpi">
     <span class="ff-inv2-insights-kpi-label">Total spend</span>
     <span class="ff-inv2-insights-kpi-value">${escapeHtml(formatInsightsCurrency(kpis.totalSpend))}</span>
-    <span class="ff-inv2-insights-kpi-sub">Based on items actually bought</span>
+    ${spendDeltaHtml}
   </div>
   <div class="ff-inv2-insights-kpi">
     <span class="ff-inv2-insights-kpi-label">Done orders</span>
@@ -3707,6 +4628,192 @@ function renderInventoryInsightsTabHtml() {
 </div>`
     : "";
 
+  // Smart Reorder Suggestions — forecast-driven, showing items likely to run out soon.
+  const reorder = _invInsightsReorder || [];
+  const reorderList = reorder.slice(0, 10);
+  const reorderBlock = !_invInsightsLoading && reorderList.length > 0
+    ? `<div class="ff-inv2-insights-card ff-inv2-insights-card--warn">
+  <div class="ff-inv2-insights-card-head">
+    <h4 class="ff-inv2-insights-card-title">⏰ Reorder Suggestions (${reorder.length})</h4>
+    <span class="ff-inv2-insights-card-hint">Will run out within ${INV_INSIGHTS_REORDER_DAYS} days at current pace</span>
+  </div>
+  <ul class="ff-inv2-insights-low-list">${reorderList
+    .map((u) => {
+      const name = u.groupName ? `${u.itemName} (${u.groupName})` : u.itemName;
+      const path = [u.categoryName, u.subcategoryName].filter(Boolean).join(" › ");
+      const days = Math.max(0, Math.round(u.daysLeft));
+      const target = u.stock > 0 ? u.stock : Math.max(1, Math.round(u.dailyRate * (INV_INSIGHTS_LOW_DAYS * 2)));
+      const suggest = Math.max(1, Math.ceil(target - u.current));
+      const ratePerWeek = Math.round(u.dailyRate * 7 * 10) / 10;
+      const rateLabel = ratePerWeek >= 1 ? `${ratePerWeek}/wk` : `${Math.round(u.dailyRate * 30 * 10) / 10}/mo`;
+      return `<li class="ff-inv2-insights-low-row">
+  <div class="ff-inv2-insights-low-main">
+    <div class="ff-inv2-insights-low-name">${escapeHtml(name)}</div>
+    <div class="ff-inv2-insights-low-path">${escapeHtml(path)} · ${escapeHtml(rateLabel)}</div>
+  </div>
+  <div class="ff-inv2-insights-reorder-qty">
+    <span class="ff-inv2-insights-reorder-days">${days}d left</span>
+    <span class="ff-inv2-insights-reorder-suggest">Order ${escapeHtml(formatOrderDisplay(suggest))}</span>
+  </div>
+</li>`;
+    })
+    .join("")}</ul>
+</div>`
+    : "";
+
+  // Days of Stock Left — forecast card (usage-driven view only).
+  // Only include items with meaningful forecast signal:
+  // - dailyRate > 0 (real usage history) → a proper forecast
+  // - current > 0 && some signal on stock target → shows how long stock will last
+  // Exclude items with current=0 AND no usage — those are "inactive", not a forecast.
+  const usage = _invInsightsUsage || [];
+  const usageList = usage
+    .filter((u) => u.dailyRate > 0 || (u.current > 0 && u.stock > 0))
+    .slice(0, 12);
+  const totalAtRisk = usage.filter((u) => (u.level === "critical" || u.level === "low") && u.dailyRate > 0).length;
+  const usageBlock = !_invInsightsLoading && usageList.length > 0
+    ? `<div class="ff-inv2-insights-card">
+  <div class="ff-inv2-insights-card-head">
+    <h4 class="ff-inv2-insights-card-title">Days of Stock Left</h4>
+    <span class="ff-inv2-insights-card-hint">${totalAtRisk > 0 ? `${totalAtRisk} at risk` : "Based on usage in the selected range"}</span>
+  </div>
+  <ul class="ff-inv2-insights-usage-list">${usageList
+    .map((u) => {
+      const name = u.groupName ? `${u.itemName} (${u.groupName})` : u.itemName;
+      const path = [u.categoryName, u.subcategoryName].filter(Boolean).join(" › ");
+      const hasUsage = u.dailyRate > 0;
+      // Only show a numeric days label when we have real usage data.
+      // Without usage, the forecast is meaningless — show "—" instead of a fake "0d".
+      let daysLabel;
+      let levelForBadge = u.level;
+      if (hasUsage) {
+        daysLabel = Number.isFinite(u.daysLeft) ? `${Math.max(0, Math.round(u.daysLeft))}d` : "∞";
+      } else if (u.current <= 0) {
+        daysLabel = "Empty";
+        levelForBadge = "critical";
+      } else {
+        daysLabel = "—";
+        levelForBadge = "ok";
+      }
+      const ratePerWeek = Math.round(u.dailyRate * 7 * 10) / 10;
+      const rateLabel = hasUsage
+        ? (ratePerWeek >= 1 ? `${ratePerWeek}/wk` : `${Math.round(u.dailyRate * 30 * 10) / 10}/mo`)
+        : "no recent usage";
+      const levelCls = `ff-inv2-insights-usage-badge--${levelForBadge}`;
+      return `<li class="ff-inv2-insights-usage-row">
+  <div class="ff-inv2-insights-usage-main">
+    <div class="ff-inv2-insights-usage-name">${escapeHtml(name)}</div>
+    <div class="ff-inv2-insights-usage-path">${escapeHtml(path)} · ${escapeHtml(rateLabel)}</div>
+  </div>
+  <div class="ff-inv2-insights-usage-meta">
+    <span class="ff-inv2-insights-usage-current">${escapeHtml(formatOrderDisplay(u.current))} left</span>
+    <span class="ff-inv2-insights-usage-badge ${levelCls}">${escapeHtml(daysLabel)}</span>
+  </div>
+</li>`;
+    })
+    .join("")}</ul>
+  ${usage.length > usageList.length ? `<div class="ff-inv2-insights-usage-more">+ ${usage.length - usageList.length} more tracked</div>` : ""}
+</div>`
+    : "";
+
+  // Wrap Most Purchased as a standalone card so we can place it inside a sub-tab.
+  const mostPurchasedCard = `<div class="ff-inv2-insights-card">
+    <div class="ff-inv2-insights-card-head">
+      <h4 class="ff-inv2-insights-card-title">Most Purchased</h4>
+    </div>
+    <div class="ff-inv2-insights-body">${mostPurchasedBody}</div>
+  </div>`;
+
+  // ---- Sub-tabs inside Insights ------------------------------------------
+  const subTabs = [
+    { id: "overview", label: "Overview" },
+    { id: "purchases", label: "Purchases" },
+    { id: "forecast", label: "Forecast" },
+    { id: "health", label: "Stock Health" },
+  ];
+  const activeSub = subTabs.some((t) => t.id === _invInsightsSubTab) ? _invInsightsSubTab : "overview";
+  const subTabBar = `<div class="ff-inv2-insights-subtabs" role="tablist" aria-label="Insights sections">${subTabs
+    .map((t) => {
+      const active = t.id === activeSub ? " ff-inv2-insights-subtab--active" : "";
+      return `<button type="button" class="ff-inv2-insights-subtab${active}" role="tab" aria-selected="${t.id === activeSub}" data-inv-insights-subtab="${t.id}">${escapeHtml(t.label)}</button>`;
+    })
+    .join("")}</div>`;
+
+  const emptyState = (msg) => `<div class="ff-inv2-insights-card"><p class="ff-inv2-insights-empty">${escapeHtml(msg)}</p></div>`;
+
+  // Donut chart (Spend by Category) for Overview.
+  const categoryRowsForDonut = _invInsightsCategorySpend || [];
+  // Collapse categories beyond the palette size into "Other" so the chart stays readable.
+  const maxSlices = INV_INSIGHTS_CHART_COLORS.length - 1; // reserve last color for "Other"
+  let donutRows = categoryRowsForDonut;
+  if (categoryRowsForDonut.length > maxSlices) {
+    const top = categoryRowsForDonut.slice(0, maxSlices);
+    const rest = categoryRowsForDonut.slice(maxSlices);
+    const restSpend = rest.reduce((acc, r) => acc + (r.spend || 0), 0);
+    const totalSpendSum = categoryRowsForDonut.reduce((acc, r) => acc + (r.spend || 0), 0) || 0;
+    const restPct = totalSpendSum > 0 ? Math.round((restSpend / totalSpendSum) * 1000) / 10 : 0;
+    donutRows = [...top, { name: `Other (${rest.length})`, spend: restSpend, percent: restPct }];
+  }
+  const donutSvg = renderInsightsDonutSvg(donutRows, kpis.totalSpend || 0);
+  const donutBlock = donutSvg
+    ? `<div class="ff-inv2-insights-card">
+  <div class="ff-inv2-insights-card-head">
+    <h4 class="ff-inv2-insights-card-title">Spend by Category</h4>
+    <span class="ff-inv2-insights-card-hint">${donutRows.length} ${donutRows.length === 1 ? "category" : "categories"}</span>
+  </div>
+  <div class="ff-inv2-insights-donut-wrap">
+    <div class="ff-inv2-insights-donut-chart">${donutSvg}</div>
+    <ul class="ff-inv2-insights-donut-legend">${donutRows
+      .map((r, i) => {
+        const color = INV_INSIGHTS_CHART_COLORS[i % INV_INSIGHTS_CHART_COLORS.length];
+        return `<li class="ff-inv2-insights-donut-legend-row">
+  <span class="ff-inv2-insights-donut-dot" style="background:${color}" aria-hidden="true"></span>
+  <span class="ff-inv2-insights-donut-legend-name">${escapeHtml(r.name)}</span>
+  <span class="ff-inv2-insights-donut-legend-amount">${escapeHtml(formatInsightsCurrency(r.spend))}</span>
+  <span class="ff-inv2-insights-donut-legend-pct">${escapeHtml(String(r.percent))}%</span>
+</li>`;
+      })
+      .join("")}</ul>
+  </div>
+</div>`
+    : "";
+
+  let subContent = "";
+  if (_invInsightsLoading) {
+    subContent = `<div class="ff-inv2-insights-card"><p class="ff-inv2-insights-empty">Loading…</p></div>`;
+  } else if (_invInsightsError) {
+    subContent = `<div class="ff-inv2-insights-card"><p class="ff-inv2-insights-empty">${escapeHtml(_invInsightsError)}</p></div>`;
+  } else if (activeSub === "overview") {
+    subContent = `${kpiBlock}${donutBlock}`;
+  } else if (activeSub === "purchases") {
+    const hasMost = (_invInsightsRows || []).length > 0;
+    const hasSpend = (_invInsightsCategorySpend || []).length > 0;
+    if (!hasMost && !hasSpend) {
+      subContent = emptyState("No purchases in this range yet.");
+    } else {
+      subContent = `${mostPurchasedCard}${spendBlock}`;
+    }
+  } else if (activeSub === "forecast") {
+    const forecastIntro = `<div class="ff-inv2-insights-subtab-intro">
+      <span class="ff-inv2-insights-subtab-intro-icon" aria-hidden="true">🔮</span>
+      <div>
+        <div class="ff-inv2-insights-subtab-intro-title">Forecast — predicted stock behavior</div>
+        <div class="ff-inv2-insights-subtab-intro-hint">Based on your purchase rate in the selected range. Items you haven't bought recently are excluded.</div>
+      </div>
+    </div>`;
+    if (!reorderBlock && !usageBlock) {
+      subContent = `${forecastIntro}${emptyState("Not enough purchase history to forecast yet. Buy more items or widen the date range.")}`;
+    } else {
+      subContent = `${forecastIntro}${reorderBlock}${usageBlock}`;
+    }
+  } else if (activeSub === "health") {
+    if (!lowBlock && !deadBlock) {
+      subContent = emptyState("All good — nothing running low or sitting unused.");
+    } else {
+      subContent = `${lowBlock}${deadBlock}`;
+    }
+  }
+
   return `<div class="ff-inv2-insights-wrap">
   <div class="ff-inv2-insights-head">
     <div class="ff-inv2-insights-head-row">
@@ -3715,16 +4822,8 @@ function renderInventoryInsightsTabHtml() {
     </div>
     ${customRow}
   </div>
-  ${kpiBlock}
-  <div class="ff-inv2-insights-card">
-    <div class="ff-inv2-insights-card-head">
-      <h4 class="ff-inv2-insights-card-title">Most Purchased</h4>
-    </div>
-    <div class="ff-inv2-insights-body">${mostPurchasedBody}</div>
-  </div>
-  ${spendBlock}
-  ${lowBlock}
-  ${deadBlock}
+  ${subTabBar}
+  ${subContent}
 </div>`;
 }
 
@@ -3751,7 +4850,7 @@ function renderOrdersTabHtml() {
   <div class="ff-inv2-orders-head">
     <h3 class="ff-inv2-orders-title">Orders</h3>
   </div>
-  <p class="ff-inv2-orders-empty">No saved orders yet. Use Order Builder to save a draft.</p>
+  <p class="ff-inv2-orders-empty">No saved orders yet. Use Create Order to save a draft.</p>
 </div>`;
   }
   const fil = _invOrdersStatusFilter;
@@ -4629,6 +5728,20 @@ function handleInventoryInput(ev) {
   if (!(t instanceof HTMLInputElement)) return;
   if (t.hasAttribute("data-inv-order-save-name-input")) {
     _invOrderSaveNameDraft = t.value;
+    scheduleInventoryOrderDraftSave();
+    return;
+  }
+  // Inline qty editing for a manual Order-list line.
+  if (t.hasAttribute("data-inv-ob-manual-qty")) {
+    const lid = t.getAttribute("data-inv-ob-manual-qty");
+    if (lid) {
+      const idx = _invOrderBuilderManualLines.findIndex((L) => L && L.id === lid);
+      if (idx >= 0) {
+        const n = Number(t.value);
+        _invOrderBuilderManualLines[idx].orderQty = Number.isFinite(n) && n > 0 ? n : 0;
+        scheduleInventoryOrderDraftSave();
+      }
+    }
     return;
   }
   if (t.hasAttribute("data-inv-ob-add-input")) {
@@ -4803,7 +5916,7 @@ function injectMockStylesOnce() {
   el.id = STYLE_ID;
   el.textContent = `
 #inventoryScreen.ff-inv2-screen {
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Avenir Next', 'Open Sans', Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   color: #0f172a;
   background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
 }
@@ -4930,37 +6043,48 @@ function injectMockStylesOnce() {
 #inventoryScreen .ff-inv2-main-tabs {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  align-items: stretch;
+  gap: 12px;
   flex-shrink: 0;
+  border-bottom: 1px solid #e5e7eb;
+  background: transparent;
+  padding: 2px 0 0;
+  margin: 0 0 8px;
 }
 #inventoryScreen .ff-inv2-main-tab {
-  margin: 0;
-  padding: 8px 16px;
-  font-size: 13px;
-  font-weight: 600;
-  border: 1px solid #ddd6fe;
-  border-radius: 999px;
-  background: #fff;
-  color: #64748b;
+  padding: 8px 14px;
+  margin: 0 0 -1px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  box-shadow: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 0;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 #inventoryScreen .ff-inv2-main-tab:hover {
-  background: #faf5ff;
   color: #5b21b6;
-  border-color: #c4b5fd;
+  background: transparent;
 }
 #inventoryScreen .ff-inv2-main-tab--active {
-  background: #7c3aed;
-  border-color: #7c3aed;
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.28);
+  color: #7c3aed;
+  border-bottom-color: #7c3aed;
+  font-weight: 500;
+  z-index: 1;
+  background: transparent;
+  box-shadow: none;
 }
 #inventoryScreen .ff-inv2-main-tab:focus-visible {
   outline: 2px solid #a78bfa;
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 #inventoryScreen .ff-inv2-main-tab-body {
   flex: 1;
@@ -6363,6 +7487,302 @@ function injectMockStylesOnce() {
   background: #fafafa;
   flex-shrink: 0;
 }
+#inventoryScreen .ff-inv2-draft-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: linear-gradient(180deg, #faf5ff 0%, #f5f3ff 100%);
+  border-bottom: 1px solid #e9d5ff;
+  font-size: 12px;
+  color: #5b21b6;
+  flex-shrink: 0;
+}
+#inventoryScreen .ff-inv2-order-list-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+/* Always-visible "Draft · Saved" chip next to the Order list title */
+#inventoryScreen .ff-inv2-draft-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5b21b6;
+  background: #ede9fe;
+  border: 1px solid #ddd6fe;
+  border-radius: 999px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+#inventoryScreen .ff-inv2-draft-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7c3aed;
+  display: inline-block;
+  flex-shrink: 0;
+}
+#inventoryScreen .ff-inv2-draft-chip-label {
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+}
+#inventoryScreen .ff-inv2-draft-chip-sep {
+  color: #c4b5fd;
+  opacity: 0.8;
+}
+#inventoryScreen .ff-inv2-draft-chip-status {
+  color: #6d28d9;
+  font-weight: 500;
+}
+#inventoryScreen .ff-inv2-draft-chip-status[data-state="saving"] {
+  color: #9ca3af;
+  font-style: italic;
+}
+#inventoryScreen .ff-inv2-draft-chip-status[data-state="saved"] {
+  color: #047857;
+}
+#inventoryScreen .ff-inv2-draft-chip-status[data-state="saving"]::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 4px;
+  animation: ff-inv2-draft-pulse 1s ease-in-out infinite;
+}
+@keyframes ff-inv2-draft-pulse {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+}
+/* "+ New" button next to the Draft chip — small, subtle, doesn't steal attention from Save as Order. */
+#inventoryScreen .ff-inv2-draft-new-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5b21b6;
+  background: #fff;
+  border: 1px solid #ddd6fe;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.4;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+#inventoryScreen .ff-inv2-draft-new-btn:hover:not(:disabled) {
+  background: #f5f3ff;
+  border-color: #c4b5fd;
+}
+#inventoryScreen .ff-inv2-draft-new-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* Draft chip becomes a clickable button — same visual, adds caret + hover affordance */
+#inventoryScreen .ff-inv2-draft-chip--btn {
+  cursor: pointer;
+  font-family: inherit;
+  user-select: none;
+}
+#inventoryScreen .ff-inv2-draft-chip--btn:hover {
+  background: #ddd6fe;
+  border-color: #c4b5fd;
+}
+#inventoryScreen .ff-inv2-draft-chip-caret {
+  margin-left: 2px;
+  font-size: 9px;
+  opacity: 0.7;
+}
+/* Drafts picker modal */
+#inventoryScreen .ff-inv2-drafts-picker-backdrop {
+  z-index: 2147483645;
+}
+#inventoryScreen .ff-inv2-drafts-picker-card {
+  max-width: 520px;
+  width: 100%;
+}
+#inventoryScreen .ff-inv2-drafts-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+#inventoryScreen .ff-inv2-drafts-picker-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0 4px;
+}
+#inventoryScreen .ff-inv2-drafts-picker-close:hover {
+  color: #0f172a;
+}
+#inventoryScreen .ff-inv2-drafts-picker-list {
+  list-style: none;
+  margin: 10px 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+#inventoryScreen .ff-inv2-drafts-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+#inventoryScreen .ff-inv2-drafts-picker-row--active {
+  border-color: #c4b5fd;
+  background: #faf5ff;
+}
+#inventoryScreen .ff-inv2-drafts-picker-main {
+  flex: 1;
+  min-width: 0;
+}
+#inventoryScreen .ff-inv2-drafts-picker-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#inventoryScreen .ff-inv2-drafts-picker-meta {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+#inventoryScreen .ff-inv2-drafts-picker-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+#inventoryScreen .ff-inv2-drafts-picker-current {
+  font-size: 11px;
+  font-weight: 700;
+  color: #5b21b6;
+  background: #ede9fe;
+  padding: 3px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+#inventoryScreen .ff-inv2-drafts-picker-switch {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: #7c3aed;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+#inventoryScreen .ff-inv2-drafts-picker-switch:hover {
+  background: #6d28d9;
+}
+#inventoryScreen .ff-inv2-drafts-picker-delete {
+  padding: 4px 8px;
+  font-size: 13px;
+  color: #94a3b8;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+#inventoryScreen .ff-inv2-drafts-picker-delete:hover {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+#inventoryScreen .ff-inv2-drafts-picker-empty {
+  color: #64748b;
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 0;
+  margin: 0;
+}
+#inventoryScreen .ff-inv2-drafts-picker-actions-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+#inventoryScreen .ff-inv2-draft-banner-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+#inventoryScreen .ff-inv2-draft-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+#inventoryScreen .ff-inv2-draft-banner-text strong {
+  color: #6d28d9;
+  font-weight: 700;
+}
+#inventoryScreen .ff-inv2-draft-banner-hint {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7c3aed;
+  background: #ede9fe;
+  padding: 2px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+/* Inline editable qty input for manual Order-list rows — matches the "plain cell" look
+ * from the Inventory table. Transparent by default; hover / focus reveal the edit state. */
+#inventoryScreen .ff-inv2-ol-qty-input {
+  width: 100%;
+  max-width: 64px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+  text-align: right;
+  font-family: inherit;
+  line-height: 1.3;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+  cursor: text;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+#inventoryScreen .ff-inv2-ol-qty-input::-webkit-outer-spin-button,
+#inventoryScreen .ff-inv2-ol-qty-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+#inventoryScreen .ff-inv2-ol-qty-input:hover {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+#inventoryScreen .ff-inv2-ol-qty-input:focus {
+  outline: none;
+  background: #fff;
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.12);
+}
 #inventoryScreen .ff-inv2-order-list-title {
   margin: 0;
   font-size: 14px;
@@ -6632,16 +8052,20 @@ function injectMockStylesOnce() {
   flex-shrink: 0;
 }
 #inventoryScreen .ff-inv2-main-tab-body--insights {
-  padding: 12px 16px;
+  padding: 12px 16px 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 #inventoryScreen .ff-inv2-insights-wrap {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  flex-shrink: 0;
 }
 #inventoryScreen .ff-inv2-insights-wrap > .ff-inv2-insights-head {
   background: #fff;
@@ -6826,6 +8250,283 @@ function injectMockStylesOnce() {
   background: #fef3c7;
   border-radius: 999px;
   padding: 2px 8px;
+}
+/* Month-over-Month delta pill on Total spend KPI */
+#inventoryScreen .ff-inv2-insights-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  width: fit-content;
+  margin-top: 4px;
+}
+#inventoryScreen .ff-inv2-insights-delta-arrow {
+  font-size: 10px;
+  line-height: 1;
+}
+#inventoryScreen .ff-inv2-insights-delta--up {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+#inventoryScreen .ff-inv2-insights-delta--down {
+  color: #047857;
+  background: #d1fae5;
+}
+#inventoryScreen .ff-inv2-insights-delta--flat {
+  color: #64748b;
+  background: #f1f5f9;
+}
+/* Smart Reorder Suggestions */
+#inventoryScreen .ff-inv2-insights-reorder-qty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+#inventoryScreen .ff-inv2-insights-reorder-days {
+  font-size: 11px;
+  font-weight: 700;
+  color: #b91c1c;
+  background: #fee2e2;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+#inventoryScreen .ff-inv2-insights-reorder-suggest {
+  font-size: 11px;
+  font-weight: 600;
+  color: #0f172a;
+  background: #ede9fe;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+/* Days of Stock Left — usage list */
+#inventoryScreen .ff-inv2-insights-usage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+#inventoryScreen .ff-inv2-insights-usage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+#inventoryScreen .ff-inv2-insights-usage-row:last-child {
+  border-bottom: none;
+}
+#inventoryScreen .ff-inv2-insights-usage-main {
+  flex: 1;
+  min-width: 0;
+}
+#inventoryScreen .ff-inv2-insights-usage-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#inventoryScreen .ff-inv2-insights-usage-path {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+#inventoryScreen .ff-inv2-insights-usage-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+#inventoryScreen .ff-inv2-insights-usage-current {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+}
+#inventoryScreen .ff-inv2-insights-usage-badge {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: #f1f5f9;
+  color: #475569;
+  min-width: 44px;
+  text-align: center;
+}
+#inventoryScreen .ff-inv2-insights-usage-badge--critical {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+#inventoryScreen .ff-inv2-insights-usage-badge--low {
+  color: #b45309;
+  background: #fef3c7;
+}
+#inventoryScreen .ff-inv2-insights-usage-badge--ok {
+  color: #047857;
+  background: #d1fae5;
+}
+#inventoryScreen .ff-inv2-insights-usage-more {
+  font-size: 11px;
+  color: #94a3b8;
+  padding-top: 8px;
+  text-align: center;
+  font-style: italic;
+}
+/* Donut chart — Spend by Category (Overview) */
+#inventoryScreen .ff-inv2-insights-donut-wrap {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+#inventoryScreen .ff-inv2-insights-donut-chart {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#inventoryScreen .ff-inv2-insights-donut-svg {
+  display: block;
+}
+#inventoryScreen .ff-inv2-insights-donut-total {
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  fill: #0f172a;
+}
+#inventoryScreen .ff-inv2-insights-donut-sub {
+  font-family: inherit;
+  font-size: 9px;
+  fill: #94a3b8;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+#inventoryScreen .ff-inv2-insights-donut-legend {
+  flex: 1;
+  min-width: 220px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#inventoryScreen .ff-inv2-insights-donut-legend-row {
+  display: grid;
+  grid-template-columns: 12px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 12px;
+  color: #0f172a;
+}
+#inventoryScreen .ff-inv2-insights-donut-legend-row:last-child {
+  border-bottom: none;
+}
+#inventoryScreen .ff-inv2-insights-donut-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+#inventoryScreen .ff-inv2-insights-donut-legend-name {
+  font-weight: 600;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+#inventoryScreen .ff-inv2-insights-donut-legend-amount {
+  font-variant-numeric: tabular-nums;
+  color: #475569;
+}
+#inventoryScreen .ff-inv2-insights-donut-legend-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #0f172a;
+  font-size: 11px;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 999px;
+  min-width: 42px;
+  text-align: center;
+}
+/* Intro banner for sub-tabs (e.g. Forecast explanation) */
+#inventoryScreen .ff-inv2-insights-subtab-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #faf5ff 0%, #f5f3ff 100%);
+  border: 1px solid #e9d5ff;
+  border-radius: 10px;
+}
+#inventoryScreen .ff-inv2-insights-subtab-intro-icon {
+  font-size: 18px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+#inventoryScreen .ff-inv2-insights-subtab-intro-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #5b21b6;
+  letter-spacing: 0.02em;
+}
+#inventoryScreen .ff-inv2-insights-subtab-intro-hint {
+  font-size: 11px;
+  color: #6b21a8;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+/* Insights sub-tabs (Overview / Purchases / Forecast / Stock Health) */
+#inventoryScreen .ff-inv2-insights-subtabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid #e2e8f0;
+  margin: 2px 0 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+#inventoryScreen .ff-inv2-insights-subtabs::-webkit-scrollbar {
+  display: none;
+}
+#inventoryScreen .ff-inv2-insights-subtab {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  transition: color 120ms ease, border-color 120ms ease;
+  font-family: inherit;
+}
+#inventoryScreen .ff-inv2-insights-subtab:hover {
+  color: #0f172a;
+}
+#inventoryScreen .ff-inv2-insights-subtab--active {
+  color: #7c3aed;
+  font-weight: 600;
+  border-bottom-color: #7c3aed;
+}
+#inventoryScreen .ff-inv2-insights-subtab:focus-visible {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 #inventoryScreen .ff-inv2-insights-head {
   display: flex;
@@ -8933,6 +10634,7 @@ function handleOrderBuilderSourceChange(ev) {
     } else {
       for (const s of subs) _invOrderBuilderCustomSubIds.delete(s.id);
     }
+    scheduleInventoryOrderDraftSave();
     mountOrRefreshMockUi();
     void refreshOrderBuilderPreviewAsync();
     return;
@@ -8945,6 +10647,7 @@ function handleOrderBuilderSourceChange(ev) {
     const subId = val.slice(colon + 1);
     if (t.checked) _invOrderBuilderCustomSubIds.add(subId);
     else _invOrderBuilderCustomSubIds.delete(subId);
+    scheduleInventoryOrderDraftSave();
     mountOrRefreshMockUi();
     void refreshOrderBuilderPreviewAsync();
   }
@@ -9363,6 +11066,7 @@ function ensureInventoryScreenDelegates(root) {
           }
           mountOrRefreshMockUi();
           if (tab === "orderBuilder") {
+            void loadInventoryOrderDraft();
             void refreshOrderBuilderPreviewAsync();
           }
           if (tab === "orders") {
@@ -9372,6 +11076,18 @@ function ensureInventoryScreenDelegates(root) {
             void refreshInventoryInsightsAsync();
           }
         }
+      }
+      return;
+    }
+
+    const insightsSubTabBtn = t.closest("[data-inv-insights-subtab]");
+    if (insightsSubTabBtn && root.contains(insightsSubTabBtn)) {
+      ev.preventDefault();
+      const sub = insightsSubTabBtn.getAttribute("data-inv-insights-subtab");
+      const allowedSub = ["overview", "purchases", "forecast", "health"];
+      if (sub && allowedSub.includes(sub) && _invInsightsSubTab !== sub) {
+        _invInsightsSubTab = sub;
+        mountOrRefreshMockUi();
       }
       return;
     }
@@ -10259,12 +11975,55 @@ function ensureInventoryScreenDelegates(root) {
       mountOrRefreshMockUi();
       return;
     }
+    const obNewDraft = t.closest("[data-inv-ob-new-draft]");
+    if (obNewDraft && root.contains(obNewDraft)) {
+      ev.preventDefault();
+      void createNewInventoryOrderDraft();
+      return;
+    }
+    // Drafts picker: open
+    const draftsPickerOpenBtn = t.closest("[data-inv-drafts-picker-open]");
+    if (draftsPickerOpenBtn && root.contains(draftsPickerOpenBtn)) {
+      ev.preventDefault();
+      void openInventoryDraftsPicker();
+      return;
+    }
+    // Drafts picker: close (any close button or backdrop)
+    if (t.hasAttribute("data-inv-drafts-picker-close") || t.hasAttribute("data-inv-drafts-picker-close-backdrop")) {
+      ev.preventDefault();
+      closeInventoryDraftsPicker();
+      return;
+    }
+    // Drafts picker: switch to another draft
+    const draftsPickerSwitch = t.closest("[data-inv-drafts-picker-switch]");
+    if (draftsPickerSwitch && root.contains(draftsPickerSwitch)) {
+      ev.preventDefault();
+      const did = draftsPickerSwitch.getAttribute("data-inv-drafts-picker-switch");
+      if (did) void switchActiveInventoryDraft(did);
+      return;
+    }
+    // Drafts picker: delete a draft
+    const draftsPickerDelete = t.closest("[data-inv-drafts-picker-delete]");
+    if (draftsPickerDelete && root.contains(draftsPickerDelete)) {
+      ev.preventDefault();
+      const did = draftsPickerDelete.getAttribute("data-inv-drafts-picker-delete");
+      if (did) void deleteInventoryDraftFromPicker(did);
+      return;
+    }
+    // Drafts picker: "+ New draft" button inside picker
+    if (t.hasAttribute("data-inv-drafts-picker-new")) {
+      ev.preventDefault();
+      closeInventoryDraftsPicker();
+      void createNewInventoryOrderDraft();
+      return;
+    }
     const obManualRemove = t.closest("[data-inv-ob-manual-remove]");
     if (obManualRemove && root.contains(obManualRemove)) {
       ev.preventDefault();
       const lid = obManualRemove.getAttribute("data-inv-ob-manual-remove");
       if (lid) {
         _invOrderBuilderManualLines = _invOrderBuilderManualLines.filter((x) => x.id !== lid);
+        scheduleInventoryOrderDraftSave();
         mountOrRefreshMockUi();
       }
       return;
@@ -10410,7 +12169,8 @@ ${renderInventoryOrdersDeleteModal()}
 ${renderInventoryOrdersMarkOrderedModal()}
 ${renderInventoryOrdersRenameModal()}
 ${renderInventoryOrderBuilderAddItemModal()}
-${renderInventoryOrderCellBreakdownModal()}`;
+${renderInventoryOrderCellBreakdownModal()}
+${renderInventoryDraftsPickerModal()}`;
 
   ensureInventoryScreenDelegates(root);
   syncInvColWidthsToDom();
@@ -10512,6 +12272,9 @@ export async function goToInventory() {
   const screen = document.getElementById("inventoryScreen");
   if (!screen) return;
 
+  // Invalidate active-draft cache so the next Create Order entry reads fresh from Firestore.
+  _invOrderDraftLoaded = false;
+
   _invCategoriesLoading = true;
   try {
     await loadInventoryCategoriesFromFirestore();
@@ -10524,6 +12287,11 @@ export async function goToInventory() {
     _invCategoriesLoading = false;
   }
 
+  // If the user lands directly on the Create Order tab, load its draft before first paint.
+  if (_invMainTab === "orderBuilder") {
+    void loadInventoryOrderDraft();
+  }
+
   mountOrRefreshMockUi();
 
   screen.style.display = "flex";
@@ -10532,6 +12300,10 @@ export async function goToInventory() {
   document.querySelectorAll(".btn-pill").forEach((b) => b.classList.remove("active"));
   const invBtn = document.getElementById("inventoryNavBtn");
   if (invBtn) invBtn.classList.add("active");
+
+  // Smart Inventory Suggestions — run once per session, fire-and-forget.
+  // Silently creates Inbox alerts for items forecast to run out within 3 days.
+  void scanInventorySuggestionsOnce();
 
   try {
     const bd = document.getElementById("appsOverlayBackdrop");
@@ -10552,6 +12324,125 @@ export async function goToInventory() {
   }
 }
 
+/**
+ * Add a Smart Inventory Suggestion (from Inbox) as a manual line in Create Order.
+ * - Navigates to Inventory → Create Order tab
+ * - Pushes a linked manual line (rowId:groupId) with the suggested quantity
+ * - Avoids duplicates: if the same linked item is already in the manual list, just bumps qty.
+ * Returns true on success.
+ */
+async function ffAddInventorySuggestionToOrder(suggestion, opts) {
+  if (!suggestion || !suggestion.data) return false;
+  const d = suggestion.data;
+  const rowId = d.rowId != null ? String(d.rowId) : "";
+  const groupId = d.groupId != null ? String(d.groupId) : "";
+  const subId = d.subcategoryId != null ? String(d.subcategoryId) : "";
+  const catId = d.categoryId != null ? String(d.categoryId) : "";
+  // Accept a user-edited qty override from the Inbox modal; fall back to suggestedQty.
+  const overrideQtyRaw = opts && opts.qtyOverride;
+  const overrideQty = overrideQtyRaw != null
+    ? (typeof overrideQtyRaw === "number" ? overrideQtyRaw : Number(overrideQtyRaw))
+    : NaN;
+  const suggestedQty = typeof d.suggestedQty === "number" ? d.suggestedQty : Number(d.suggestedQty);
+  const qty = Number.isFinite(overrideQty) && overrideQty > 0 ? overrideQty : suggestedQty;
+  console.log("[Inventory] Add to Order — qty resolution", { overrideQtyRaw, overrideQty, suggestedQty, finalQty: qty });
+  if (!rowId || !groupId || !subId || !catId || !(qty > 0)) return false;
+  const salonId = await getSalonId();
+  if (!salonId) return false;
+
+  // Step 1: ensure the active draft is loaded (so we know its Firestore id).
+  // This also picks up any draft created from a previous session.
+  await loadInventoryOrderDraft();
+
+  // Step 2: read-modify-write the active draft (or create one if none exists).
+  const uid = auth.currentUser && auth.currentUser.uid ? String(auth.currentUser.uid) : null;
+  const linkedId = `${subId}:${rowId}:${groupId}`;
+  /** @type {Array<Record<string, unknown>>} */
+  let existing = [];
+  /** @type {import("firebase/firestore").DocumentReference | null} */
+  let ref = null;
+  if (_invActiveDraftId) {
+    ref = doc(db, `salons/${salonId}/inventoryDrafts`, _invActiveDraftId);
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const data = snap.data() || {};
+        if (Array.isArray(data.manualItems)) {
+          existing = data.manualItems.map(sanitizeManualItemForDraft).filter((x) => x && x.itemName);
+        }
+      }
+    } catch (e) {
+      console.warn("[Inventory] draft fetch (add suggestion) failed", e);
+    }
+  }
+  const existingIdx = existing.findIndex((L) => L && L.linkedInventoryItemId === linkedId);
+  if (existingIdx >= 0) {
+    // User explicitly chose this qty in the modal — respect it, even if it lowers a previous value.
+    existing[existingIdx].orderQty = qty;
+    if (!existing[existingIdx].fromSuggestionId && suggestion.id) {
+      existing[existingIdx].fromSuggestionId = suggestion.id;
+    }
+  } else {
+    /** @type {Record<string, unknown>} */
+    const entry = {
+      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      itemName: d.itemName != null ? String(d.itemName) : "Suggested item",
+      orderQty: qty,
+      isManual: true,
+      linkedInventoryItemId: linkedId,
+      groupId,
+      groupName: d.groupName != null ? String(d.groupName) : "",
+      categoryId: catId,
+      categoryName: d.categoryName != null ? String(d.categoryName) : "",
+      subcategoryId: subId,
+      subcategoryName: d.subcategoryName != null ? String(d.subcategoryName) : "",
+      fromSuggestionId: suggestion.id || null,
+    };
+    existing.push(entry);
+  }
+  try {
+    const payload = {
+      status: "draft",
+      isActive: true,
+      manualItems: existing,
+      updatedAt: serverTimestamp(),
+      updatedBy: uid,
+    };
+    if (ref) {
+      await setDoc(ref, payload, { merge: true });
+    } else {
+      // No active draft exists — create one now.
+      const newRef = await addDoc(collection(db, `salons/${salonId}/inventoryDrafts`), {
+        ...payload,
+        selectedSubcategoryIds: [],
+        orderName: "",
+        createdAt: serverTimestamp(),
+        createdBy: uid,
+      });
+      _invActiveDraftId = newRef.id;
+    }
+  } catch (e) {
+    console.error("[Inventory] Add to Order — draft save failed:", e && (e.code || e.message) ? (e.code || e.message) : e);
+    try {
+      if (typeof window !== "undefined" && typeof window.alert === "function") {
+        window.alert("Could not save item to Create Order draft:\n" + (e && (e.code || e.message) ? (e.code || e.message) : String(e)));
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  // Step 3: navigate to Inventory → Create Order. The tab will reload the draft (now containing the new item).
+  _invOrderDraftLoaded = false;
+  await goToInventory();
+  _invMainTab = "orderBuilder";
+  _invOrderBuilderPreviewLoading = true;
+  mountOrRefreshMockUi();
+  await loadInventoryOrderDraft(true);
+  void refreshOrderBuilderPreviewAsync();
+  return true;
+}
+
 if (typeof window !== "undefined") {
   window.goToInventory = goToInventory;
+  window.ffAddInventorySuggestionToOrder = ffAddInventorySuggestionToOrder;
 }

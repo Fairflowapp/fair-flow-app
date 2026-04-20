@@ -358,6 +358,24 @@ service cloud.firestore {
       // UPDATE
       allow update: if belongsToSalon(salonId)
         && (
+          // Automated system alerts (e.g. inventory_suggestion): managers can archive / annotate
+          // them with a minimal set of status fields — bypasses full identity-equality checks because
+          // these docs are created by the scanner and have no strict "author" constraints.
+          (
+            isManager(salonId)
+            && resource.data.type == 'inventory_suggestion'
+            && changedKeys().hasOnly([
+              'status',
+              'decidedBy',
+              'decidedAt',
+              'lastActivityAt',
+              'updatedAt',
+              'unreadForManagers',
+              'responseNote',
+              'managerNotes'
+            ])
+          )
+          ||
           // Managers: update management fields
           (
             isManager(salonId)
@@ -692,6 +710,11 @@ service cloud.firestore {
     match /salons/{salonId}/inventoryOrders/{orderId} {
       allow read: if belongsToSalon(salonId);
       allow create, update, delete: if isManager(salonId);
+    }
+
+    /** Active Create Order draft — one per salon (doc id = "active"). Persists in-progress work across refreshes. */
+    match /salons/{salonId}/inventoryDrafts/{draftId} {
+      allow read, write: if belongsToSalon(salonId) && isManager(salonId);
     }
 
     /** Receipts / invoices attached to an inventory order (multiple per order).
