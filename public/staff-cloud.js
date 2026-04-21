@@ -93,11 +93,16 @@ function _startListener() {
     async snap => {
       dlog('[StaffCloud] onSnapshot received. docs:', snap.size);
 
-      // If Firestore is empty → migrate localStorage to Firestore (first time only)
-      if (snap.empty && !_migrated) {
-        _migrated = true;
-        await _migrateLocalToCloud();
-        return; // migration will trigger another snapshot
+      // NOTE: We deliberately do NOT auto-migrate localStorage → Firestore here.
+      // An empty snapshot means a genuinely empty salon (e.g. a brand-new owner account).
+      // Auto-migrating would leak the previous tenant's cached staff into the new salon
+      // (multi-tenant data bleed). Empty salons must stay empty until the owner adds staff.
+      if (snap.empty) {
+        // Overwrite local cache with an empty list so stale data can't leak into the UI.
+        localStorage.setItem('ff_staff_v1', JSON.stringify({ staff: [] }));
+        dlog('[StaffCloud] Salon is empty — cleared local staff cache');
+        document.dispatchEvent(new CustomEvent('ff-staff-cloud-updated'));
+        return;
       }
 
       // Build staff from Firestore docs (explicit technicianTypes to handle any naming)
@@ -128,25 +133,43 @@ function _startListener() {
   );
 }
 
-// ─── First-time migration: localStorage → Firestore ───────────────────────────
-async function _migrateLocalToCloud() {
-  const raw   = localStorage.getItem('ff_staff_v1');
-  const staff = raw ? (JSON.parse(raw).staff || []) : [];
-  if (staff.length === 0) {
-    console.log('[StaffCloud] No local staff to migrate');
-    return;
+// ─── (Removed: _migrateLocalToCloud) ──────────────────────────────────────────
+// Previous versions auto-migrated localStorage staff into any empty salon on login.
+// That leaked staff across tenants when the same browser logged into a new account.
+// See comment inside _startListener() above.
+
+// ─── Public: purge every staff doc from the current salon (one-click cleanup) ─
+// Intended for the recovery case where previous auto-migration leaked data into
+// a fresh salon. Use via the browser console: await window.ffClearAllStaffFromCloud();
+window.ffClearAllStaffFromCloud = async function() {
+  if (!_salonId) {
+    console.warn('[StaffCloud] Cannot clear — no salonId.');
+    return { deleted: 0 };
   }
-  console.log('[StaffCloud] Migrating', staff.length, 'staff to Firestore...');
   try {
-    await _batchWrite(staff);
-    _toast('☁️ Staff uploaded to cloud (' + staff.length + ')', 'success');
-    console.log('[StaffCloud] Migration complete');
-  } catch(e) {
-    _toast('❌ Migration failed: ' + (e.code || e.message), 'error');
-    console.error('[StaffCloud] Migration error:', e.code, e.message, e);
-    _migrated = false; // allow retry
+    const snap = await getDocs(collection(db, `salons/${_salonId}/staff`));
+    if (snap.empty) {
+      console.log('[StaffCloud] Nothing to clear — salon has no staff.');
+      return { deleted: 0 };
+    }
+    let deleted = 0;
+    for (let i = 0; i < snap.docs.length; i += 400) {
+      const batch = writeBatch(db);
+      snap.docs.slice(i, i + 400).forEach(d => {
+        batch.delete(doc(db, `salons/${_salonId}/staff`, d.id));
+        deleted += 1;
+      });
+      await batch.commit();
+    }
+    localStorage.setItem('ff_staff_v1', JSON.stringify({ staff: [] }));
+    _toast('🗑️ Cleared ' + deleted + ' staff from this salon', 'success');
+    return { deleted };
+  } catch (e) {
+    console.error('[StaffCloud] ffClearAllStaffFromCloud error:', e);
+    _toast('❌ Clear failed: ' + (e.code || e.message), 'error');
+    throw e;
   }
-}
+};
 
 // ─── Batch write helper ────────────────────────────────────────────────────────
 async function _batchWrite(staff) {

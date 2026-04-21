@@ -885,9 +885,11 @@ function hideAuthScreens() {
   const loginSection = document.getElementById("login-section");
   const signupSection = document.getElementById("signup-section");
   const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
   if (loginSection) loginSection.style.display = "none";
   if (signupSection) signupSection.style.display = "none";
   if (resetSection) resetSection.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "none";
 }
 
 /** Full-screen routes (outside #main-app-content). Hidden on logout; inline pointer-events must not stay "none" after login. */
@@ -905,10 +907,12 @@ function showLoginScreen() {
   const loginSection = document.getElementById("login-section");
   const signupSection = document.getElementById("signup-section");
   const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
   const mainApp = document.getElementById("main-app-content");
   if (loginSection) loginSection.style.display = "block";
   if (signupSection) signupSection.style.display = "none";
   if (resetSection) resetSection.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
   document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
   document.body.classList.add("ff-logged-out");
@@ -932,10 +936,12 @@ function showResetPasswordScreen() {
   const loginSection = document.getElementById("login-section");
   const signupSection = document.getElementById("signup-section");
   const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
   const mainApp = document.getElementById("main-app-content");
 
   if (loginSection) loginSection.style.display = "none";
   if (signupSection) signupSection.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
   document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
   document.body.classList.add("ff-logged-out");
@@ -1024,6 +1030,255 @@ function switchToSignup() {
 }
 
 // =====================
+// Complete setup (self-healing for authed users without a users/{uid} doc)
+// =====================
+function showCompleteSetupError(msg) {
+  const errEl = document.getElementById("complete-setup-error");
+  if (errEl) errEl.textContent = msg || "";
+}
+
+function showCompleteSetupScreen(user) {
+  const loginSection = document.getElementById("login-section");
+  const signupSection = document.getElementById("signup-section");
+  const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
+  const mainApp = document.getElementById("main-app-content");
+
+  if (loginSection) loginSection.style.display = "none";
+  if (signupSection) signupSection.style.display = "none";
+  if (resetSection) resetSection.style.display = "none";
+  if (mainApp) mainApp.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "block";
+
+  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.add("ff-logged-out");
+
+  // Pre-fill what we can from the auth user
+  const emailDisplay = document.getElementById("complete-setup-email-display");
+  if (emailDisplay) {
+    emailDisplay.textContent = user?.email ? `Signed in as ${user.email}` : "";
+  }
+
+  const ownerNameEl = document.getElementById("complete-setup-owner-name");
+  if (ownerNameEl && !ownerNameEl.value && user?.displayName) {
+    ownerNameEl.value = user.displayName;
+  }
+
+  showCompleteSetupError("");
+
+  // Store the user we're completing setup for
+  window.__ff_completeSetupUser = user || null;
+}
+
+async function handleCompleteSetup() {
+  showCompleteSetupError("");
+
+  const user = window.__ff_completeSetupUser || auth.currentUser;
+  if (!user) {
+    showCompleteSetupError("Session expired. Please log in again.");
+    showLoginScreen();
+    return;
+  }
+
+  const businessNameEl = document.getElementById("complete-setup-business-name");
+  const ownerNameEl = document.getElementById("complete-setup-owner-name");
+  const btnEl = document.getElementById("complete-setup-button");
+
+  const businessName = businessNameEl?.value.trim();
+  const ownerName = ownerNameEl?.value.trim();
+
+  if (!businessName || !ownerName) {
+    showCompleteSetupError("Please fill in both fields.");
+    return;
+  }
+
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.style.opacity = "0.6";
+    btnEl.textContent = "Creating your account...";
+  }
+
+  try {
+    // Double-check the users doc still doesn't exist (race condition protection)
+    const userDocRef = doc(db, "users", user.uid);
+    const existing = await getDoc(userDocRef);
+    if (existing.exists()) {
+      console.log("[CompleteSetup] users doc appeared since last check, proceeding to load view");
+      await loadUserRoleAndShowView(user);
+      return;
+    }
+
+    // Create salon (business) document
+    const generatedPin = generateDefaultAdminPin();
+    const salonsRef = collection(db, "salons");
+    const salonDocRef = await addDoc(salonsRef, {
+      name: businessName,
+      ownerUid: user.uid,
+      adminPin: generatedPin,
+      createdAt: serverTimestamp(),
+      plan: "trial",
+      status: "active"
+    });
+
+    console.log("[CompleteSetup] Salon doc created:", salonDocRef.id);
+
+    // Create user profile document with role "owner"
+    await setDoc(userDocRef, {
+      role: "owner",
+      salonId: salonDocRef.id,
+      name: ownerName,
+      email: user.email || "",
+      createdAt: serverTimestamp()
+    });
+
+    console.log("[CompleteSetup] User profile created:", user.uid);
+
+    // Bootstrap the owner's staff + members docs so she appears in her own
+    // Staff list with full permissions from the very first load.
+    try {
+      await ensureOwnerStaffAndMemberDocs({
+        user,
+        salonId: salonDocRef.id,
+        ownerName
+      });
+    } catch (bootstrapErr) {
+      console.warn("[CompleteSetup] Owner staff bootstrap failed:", bootstrapErr);
+    }
+
+    // Clear stored user and proceed
+    window.__ff_completeSetupUser = null;
+    if (businessNameEl) businessNameEl.value = "";
+    if (ownerNameEl) ownerNameEl.value = "";
+
+    await loadUserRoleAndShowView(user);
+  } catch (err) {
+    console.error("[CompleteSetup] Failed", err);
+    showCompleteSetupError(err?.message || "Setup failed. Please try again.");
+  } finally {
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.style.opacity = "";
+      btnEl.textContent = "Complete setup";
+    }
+  }
+}
+
+async function handleCompleteSetupSignOut() {
+  try {
+    window.__ff_completeSetupUser = null;
+    await signOut(auth);
+  } catch (e) {
+    console.warn("[CompleteSetup] signOut failed", e);
+  }
+  showLoginScreen();
+}
+
+// =====================
+// Shared: create the owner's staff + members documents.
+// Called by both the initial sign-up flow (handleOwnerSignup) and the
+// self-heal "Complete your setup" flow (handleCompleteSetup), so a fresh
+// owner always appears in their own Staff list with full permissions.
+// =====================
+function _ffOwnerDefaultPermissions() {
+  // Grant every known permission key to the owner. The owner also has a runtime
+  // bypass (ffCurrentUserSalonOwnerPermissionBypass) but setting explicit
+  // permissions keeps UI renders that read `staff.permissions` (Queue, Apps panel,
+  // Staff Members modal, etc.) consistent with the owner bypass.
+  return {
+    queue_view: true,
+    queue_manage: true,
+    queue_locked_view: false,
+    tickets_view: true,
+    tickets_manage: true,
+    tasks_view: true,
+    tasks_use: true,
+    tasks_manage: true,
+    tasks_reset: true,
+    chat_view: true,
+    chat_manage: true,
+    chat_free_text: true,
+    inbox_view: true,
+    inbox_manage: true,
+    inbox_send: true,
+    media_view: true,
+    media_manage: true,
+    inventory_view: true,
+    inventory_manage: true,
+    schedule_view: true,
+    schedule_manage: true,
+    training_view: true,
+    training_manage: true,
+    settings_view: true,
+    settings_manage: true,
+    staff_view: true,
+    staff_manage: true,
+    history_view: true,
+    history_export: true,
+    history_clear: true
+  };
+}
+
+async function ensureOwnerStaffAndMemberDocs({ user, salonId, ownerName }) {
+  if (!user || !salonId) return null;
+  const safeName = String(ownerName || user.displayName || user.email || "Owner").trim() || "Owner";
+  const safeEmail = String(user.email || "").trim();
+
+  const staffId = `staff_${user.uid}`;
+  const staffRef = doc(db, `salons/${salonId}/staff`, staffId);
+  const memberRef = doc(db, `salons/${salonId}/members`, user.uid);
+  const userRef = doc(db, "users", user.uid);
+
+  const staffPayload = {
+    id: staffId,
+    uid: user.uid,
+    name: safeName,
+    email: safeEmail,
+    role: "owner",
+    isAdmin: true,
+    isManager: false,
+    isArchived: false,
+    invited: true,
+    inviteStatus: "accepted",
+    permissions: _ffOwnerDefaultPermissions(),
+    technicianTypes: [],
+    allowedLocationIds: [],
+    primaryLocationId: null,
+    createdAt: Date.now(),
+    _syncedAt: serverTimestamp()
+  };
+
+  const memberPayload = {
+    name: safeName,
+    email: safeEmail,
+    role: "owner",
+    staffId
+  };
+
+  try {
+    await setDoc(staffRef, staffPayload, { merge: true });
+  } catch (e) {
+    console.warn("[OwnerStaffBootstrap] staff write failed", e?.code, e?.message);
+  }
+  try {
+    await setDoc(memberRef, memberPayload, { merge: true });
+  } catch (e) {
+    console.warn("[OwnerStaffBootstrap] member write failed", e?.code, e?.message);
+  }
+  try {
+    await setDoc(userRef, { staffId }, { merge: true });
+  } catch (e) {
+    console.warn("[OwnerStaffBootstrap] user.staffId write failed", e?.code, e?.message);
+  }
+
+  if (typeof window !== "undefined") {
+    window.__ff_authedStaffId = staffId;
+    try { localStorage.setItem("ff_authedStaffId_v1", staffId); } catch (_) {}
+  }
+
+  return staffId;
+}
+
+// =====================
 // Owner signup flow
 // =====================
 async function handleOwnerSignup() {
@@ -1086,6 +1341,18 @@ async function handleOwnerSignup() {
     });
 
     console.log("[SignUp] User profile created:", user.uid);
+
+    // Bootstrap the owner's staff + members docs so she appears in her own
+    // Staff list with full permissions from the very first load.
+    try {
+      await ensureOwnerStaffAndMemberDocs({
+        user,
+        salonId: salonDocRef.id,
+        ownerName
+      });
+    } catch (bootstrapErr) {
+      console.warn("[SignUp] Owner staff bootstrap failed:", bootstrapErr);
+    }
 
     // After sign up, automatically navigate to owner view
     await loadUserRoleAndShowView(user);
@@ -1371,10 +1638,11 @@ async function loadUserRoleAndShowView(user) {
     const snap = await getDoc(userDocRef);
 
     if (!snap.exists()) {
-      console.warn("[Auth] No user profile found for", user.uid);
-      alert("No user profile found. Please contact your business owner.");
-      // stay on login screen
-      showLoginScreen();
+      console.warn("[Auth] No user profile found for", user.uid, "- showing Complete Setup screen");
+      // Self-heal: the Firebase Auth user exists but there's no Firestore profile
+      // (happens after Google sign-in on a fresh account, or a partial signup).
+      // Let the user finish creating their business + profile inline, no Firebase console needed.
+      showCompleteSetupScreen(user);
       return;
     }
 
@@ -1390,6 +1658,17 @@ async function loadUserRoleAndShowView(user) {
     
     try {
       localStorage.removeItem("ff_user_avatar_v1");
+      // Also nuke the photoURL / avatarURL / updatedAt keys BEFORE starting the
+      // listener. Otherwise the UI paints the previous user's photo during the
+      // brief window between "signed in" and "listener's first snapshot".
+      // The listener will immediately re-populate these from the current user's
+      // users/{uid} doc once onSnapshot fires.
+      localStorage.removeItem("ff_user_photo_url_v1");
+      localStorage.removeItem("ff_user_avatar_url_v1");
+      localStorage.removeItem("ff_user_avatar_updated_at_v1");
+      window.__ffCurrentUserAvatarMeta = null;
+      window.__ff_avatarMeta = null;
+      window.__ffAvatarDirectoryCache = null;
     } catch (e) {
       console.warn("[Auth] Error clearing legacy avatar cache:", e);
     }
@@ -1420,6 +1699,27 @@ async function loadUserRoleAndShowView(user) {
         }
       } catch (ouErr) {
         console.warn('[Auth] ownerUid bootstrap on settings/main failed', ouErr);
+      }
+    }
+
+    // Retroactive bootstrap: ensure the owner has matching staff + members docs
+    // even if they signed up before the auto-create logic was added. No-op on
+    // subsequent logins (setDoc merge simply rewrites the same payload).
+    if (currentSalonId && user && role === 'owner') {
+      try {
+        const ownerStaffId = `staff_${user.uid}`;
+        const ownerStaffRef = doc(db, `salons/${currentSalonId}/staff`, ownerStaffId);
+        const ownerStaffSnap = await getDoc(ownerStaffRef);
+        if (!ownerStaffSnap.exists()) {
+          console.log('[Auth] Owner has no staff doc — bootstrapping now');
+          await ensureOwnerStaffAndMemberDocs({
+            user,
+            salonId: currentSalonId,
+            ownerName: data.name || user.displayName || ''
+          });
+        }
+      } catch (bootErr) {
+        console.warn('[Auth] Owner staff retroactive bootstrap failed', bootErr);
       }
     }
 
@@ -1587,6 +1887,17 @@ async function loadUserRoleAndShowView(user) {
     }
   } catch (err) {
     console.error("[Auth] Failed to load user profile:", err);
+    // If the Complete Setup modal is already on-screen (fresh Google sign-in / partial
+    // signup self-heal), don't annoy the user with a "Failed to load user profile" alert
+    // and don't kick them back to the login screen — they're mid-setup. Just log and exit.
+    const completeSetupEl = document.getElementById('complete-setup-section');
+    const isCompleteSetupVisible = !!(
+      completeSetupEl && window.getComputedStyle(completeSetupEl).display !== 'none'
+    );
+    if (isCompleteSetupVisible || window.__ff_completeSetupUser) {
+      console.warn("[Auth] profile load errored while Complete Setup is active — suppressing alert");
+      return;
+    }
     alert("Failed to load user profile.");
     showLoginScreen();
   }
@@ -1772,6 +2083,35 @@ window.addEventListener("DOMContentLoaded", () => {
     } else {
       console.warn("[UI] Missing element: signup-button");
     }
+
+    const completeSetupBtn = document.getElementById("complete-setup-button");
+    if (completeSetupBtn) {
+      completeSetupBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        handleCompleteSetup();
+      });
+    }
+
+    const completeSetupSignOutBtn = document.getElementById("complete-setup-signout-button");
+    if (completeSetupSignOutBtn) {
+      completeSetupSignOutBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        handleCompleteSetupSignOut();
+      });
+    }
+
+    // Submit on Enter inside complete-setup fields
+    ["complete-setup-business-name", "complete-setup-owner-name"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            handleCompleteSetup();
+          }
+        });
+      }
+    });
   } catch (e) {
     console.error("[UI] initAuthButtons failed", e);
   }
@@ -1926,6 +2266,44 @@ window.addEventListener("DOMContentLoaded", () => {
           tasksScreen.style.display = 'none';
           tasksScreen.style.pointerEvents = 'none';
         }
+
+        // Clear tenant-scoped localStorage caches so data from this salon can never
+        // leak into the next account that logs in on the same browser.
+        try {
+          const tenantKeys = [
+            "ff_staff_v1",
+            "ff_users_v1",
+            "ff_queues_v1",
+            "ff_queue_settings_v1",
+            "ff_tasks_catalog_v1",
+            "ff_tasks_active_deleted_v1",
+            "ff_tasks_alert_windows_v1",
+            "ff_authedStaffId_v1",
+            "ff_user_avatar_v1",
+            // Avatar URL + timestamp. Missing these was causing the previous
+            // tenant's profile photo (e.g. NEO DAY SPA logo) to appear on the
+            // next owner's My Profile screen because ffGetCurrentUserAvatarMeta
+            // falls back to localStorage when no live meta is set.
+            "ff_user_photo_url_v1",
+            "ff_user_avatar_url_v1",
+            "ff_user_avatar_updated_at_v1",
+            "ff_active_location_id",
+            "ff_onboarding_completed_v1",
+          ];
+          tenantKeys.forEach((k) => {
+            try { localStorage.removeItem(k); } catch (_) {}
+          });
+          window.__ff_authedStaffId = null;
+          window.__ff_active_location_id = null;
+          // Reset in-memory avatar state so the stale photo doesn't survive
+          // until the next page refresh.
+          try { window.__ffCurrentUserAvatarMeta = null; } catch (_) {}
+          try { window.__ff_avatarMeta = null; } catch (_) {}
+          try { window.__ffAvatarDirectoryCache = null; } catch (_) {}
+        } catch (clearErr) {
+          console.warn("[Auth] Error clearing tenant caches on logout:", clearErr);
+        }
+
         await signOut(auth);
         showLoginScreen();
       } catch (err) {

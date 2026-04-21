@@ -152,7 +152,8 @@ body.ff-logged-out #inboxScreen,
 body.ff-logged-out #tasksScreen,
 body.ff-logged-out #trainingScreen,
 body.ff-logged-out #scheduleScreen,
-body.ff-logged-out #inventoryScreen {
+body.ff-logged-out #inventoryScreen,
+body.ff-logged-out #ff-onboarding-wizard {
   display: none !important;
   visibility: hidden !important;
   pointer-events: none !important;
@@ -195,7 +196,8 @@ body.ff-queue-ui-visible .wrap {
 
 body.ff-logged-out #login-section,
 body.ff-logged-out #signup-section,
-body.ff-logged-out #reset-password-section {
+body.ff-logged-out #reset-password-section,
+body.ff-logged-out #complete-setup-section {
   position: relative;
   z-index: 200000 !important;
   margin: 0 auto !important;
@@ -2300,7 +2302,7 @@ dialog footer button, .code-dialog footer button {
            style="width:100%;margin-bottom:16px;padding:10px 14px;border-radius:8px;border:1px solid #ddd;font-size:14px;" />
 
     <button id="signup-button"
-            style="width:100%;padding:12px 16px;border:none;border-radius:999px;background:linear-gradient(90deg,#a855f7,#fb7185);color:#fff;font-size:16px;font-weight:600;cursor:pointer;">
+            style="width:100%;padding:12px 16px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:16px;font-weight:600;cursor:pointer;">
       Create account
     </button>
 
@@ -2314,6 +2316,136 @@ dialog footer button, .code-dialog footer button {
       </button>
     </div>
   </section>
+
+  <!-- COMPLETE SETUP SECTION (shown when authed user has no users/{uid} doc) -->
+  <section id="complete-setup-section" style="display:none;max-width:440px;margin:40px auto;padding:32px;background:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.08);">
+    <h2 style="text-align:center;font-size:24px;margin-bottom:8px;">Complete your setup</h2>
+    <p style="text-align:center;color:#666;font-size:13px;margin-bottom:20px;">
+      Welcome! Just tell us a bit about your business to finish creating your account.
+    </p>
+
+    <div id="complete-setup-email-display" style="text-align:center;color:#333;font-size:13px;margin-bottom:16px;"></div>
+
+    <input id="complete-setup-business-name" type="text" placeholder="Business name"
+           style="width:100%;margin-bottom:10px;padding:10px 14px;border-radius:8px;border:1px solid #ddd;font-size:14px;" />
+
+    <input id="complete-setup-owner-name" type="text" placeholder="Your name"
+           style="width:100%;margin-bottom:16px;padding:10px 14px;border-radius:8px;border:1px solid #ddd;font-size:14px;" />
+
+    <button id="complete-setup-button"
+            style="width:100%;padding:12px 16px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:16px;font-weight:600;cursor:pointer;">
+      Complete setup
+    </button>
+
+    <div id="complete-setup-error" style="color:red;margin-top:8px;text-align:center;"></div>
+
+    <div style="margin-top:16px;text-align:center;">
+      <button id="complete-setup-signout-button" type="button"
+              style="background:none;border:none;color:#7b3fe4;cursor:pointer;text-decoration:underline;font-size:13px;">
+        Use a different account
+      </button>
+    </div>
+  </section>
+
+  <!-- ONBOARDING WIZARD (shown once to a fresh owner after signup) -->
+  <div id="ff-onboarding-wizard"
+       role="dialog" aria-modal="true" aria-labelledby="ffOnboardingTitle"
+       style="display:none;position:fixed;inset:0;z-index:999996;background:rgba(17,24,39,0.55);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:24px;">
+    <div style="background:#fff;max-width:540px;width:100%;border-radius:20px;padding:36px 32px;box-shadow:0 25px 60px rgba(0,0,0,0.3);max-height:calc(100vh - 48px);overflow-y:auto;">
+
+      <!-- Progress pills -->
+      <div style="display:flex;gap:8px;margin-bottom:20px;">
+        <div class="ff-onb-pill" data-step="1" style="flex:1;height:4px;border-radius:4px;background:#7c3aed;"></div>
+        <div class="ff-onb-pill" data-step="2" style="flex:1;height:4px;border-radius:4px;background:#e5e7eb;"></div>
+        <div class="ff-onb-pill" data-step="3" style="flex:1;height:4px;border-radius:4px;background:#e5e7eb;"></div>
+      </div>
+
+      <div id="ffOnboardingStepBadge" style="font-size:12px;font-weight:600;color:#7c3aed;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px;">Step 1 of 3</div>
+      <h2 id="ffOnboardingTitle" style="margin:0 0 6px 0;font-size:24px;font-weight:700;color:#111827;">Welcome to Fair Flow</h2>
+      <p id="ffOnboardingSubtitle" style="margin:0 0 24px 0;font-size:14px;color:#6b7280;line-height:1.5;">Let's get your business set up in a minute.</p>
+
+      <!-- STEP 1: Add first location -->
+      <div id="ffOnboardingStep1" class="ff-onb-step">
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">Location name <span style="color:#dc2626;">*</span></label>
+          <input id="ffOnbLocationName" type="text" placeholder="e.g. Brickell"
+                 style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #d1d5db;font-size:14px;box-sizing:border-box;" />
+        </div>
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">Address <span style="color:#9ca3af;font-weight:400;">(optional)</span></label>
+          <input id="ffOnbLocationAddress" type="text" placeholder="123 Main St, City, State"
+                 style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #d1d5db;font-size:14px;box-sizing:border-box;" />
+        </div>
+        <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">You can add more locations later under Apps → Management.</p>
+      </div>
+
+      <!-- STEP 2: Add first teammate -->
+      <div id="ffOnboardingStep2" class="ff-onb-step" style="display:none;">
+        <div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:13px;color:#065f46;line-height:1.5;display:flex;gap:10px;align-items:flex-start;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <div><strong>You're already set up as the Owner.</strong> No need to add yourself here — this step is only for <em>other</em> people who will use the app with you.</div>
+        </div>
+        <div style="background:#f9fafb;border-radius:12px;padding:14px 16px;margin-bottom:16px;font-size:13px;color:#4b5563;line-height:1.5;">
+          If you work alone, click <strong>Skip</strong>. You can always add staff later from <strong>Apps → Staff Members</strong>.
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:12px;">
+          <div style="flex:1;">
+            <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">First name</label>
+            <input id="ffOnbStaffFirstName" type="text" placeholder="Jane"
+                   style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #d1d5db;font-size:14px;box-sizing:border-box;" />
+          </div>
+          <div style="flex:1;">
+            <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">Last name</label>
+            <input id="ffOnbStaffLastName" type="text" placeholder="Doe"
+                   style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #d1d5db;font-size:14px;box-sizing:border-box;" />
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:12px;">
+          <div style="flex:1;">
+            <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">Role</label>
+            <select id="ffOnbStaffRole"
+                    style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #d1d5db;font-size:14px;box-sizing:border-box;background:#fff;">
+              <option value="technician">Service provider</option>
+              <option value="manager">Manager</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">PIN (4+ digits)</label>
+            <input id="ffOnbStaffPin" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="1234"
+                   style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #d1d5db;font-size:14px;box-sizing:border-box;" />
+          </div>
+        </div>
+        <p style="margin:0;font-size:12px;color:#6b7280;">The teammate will be assigned to your new location automatically.</p>
+      </div>
+
+      <!-- STEP 3: Done -->
+      <div id="ffOnboardingStep3" class="ff-onb-step" style="display:none;text-align:center;padding:12px 0 8px;">
+        <div style="width:64px;height:64px;border-radius:50%;background:#7c3aed;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:32px;line-height:1;">✓</div>
+        <h3 style="margin:0 0 8px 0;font-size:20px;font-weight:700;color:#111827;">You're all set!</h3>
+        <p style="margin:0 0 4px 0;font-size:14px;color:#6b7280;line-height:1.5;">Your business is ready. You can manage locations, staff, services and more anytime from <strong>Apps → Management</strong>.</p>
+      </div>
+
+      <!-- Error + action row -->
+      <div id="ffOnboardingError" style="display:none;color:#dc2626;font-size:13px;margin:12px 0 0;"></div>
+
+      <div style="display:flex;gap:10px;align-items:center;margin-top:24px;">
+        <button id="ffOnboardingSkip" type="button"
+                style="background:none;border:none;color:#6b7280;text-decoration:underline;font-size:13px;cursor:pointer;padding:8px 4px;">
+          Skip for now
+        </button>
+        <div style="flex:1;"></div>
+        <button id="ffOnboardingBack" type="button"
+                style="display:none;padding:10px 18px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:999px;font-size:14px;font-weight:500;cursor:pointer;">
+          Back
+        </button>
+        <button id="ffOnboardingNext" type="button"
+                style="padding:11px 22px;border:none;background:#7c3aed;color:#fff;border-radius:999px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 6px 14px rgba(124,58,237,0.35);">
+          Continue
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- RESET PASSWORD SECTION -->
   <section id="reset-password-section"
@@ -2408,6 +2540,8 @@ dialog footer button, .code-dialog footer button {
           <div class="appname ff-app-title">Fair Flow App</div>
 
           <div class="owner owner-row" id="salonName"></div>
+
+          <div id="ffLocationSwitcher" class="ff-location-switcher" style="display:none;margin-top:2px;font-size:12px;color:#374151;line-height:1.2;"></div>
 
         </div>
 
@@ -2805,6 +2939,7 @@ dialog footer button, .code-dialog footer button {
       <!-- Left Side Menu -->
       <div style="flex-shrink:0;width:160px;">
         <nav style="display:flex;flex-direction:column;gap:4px;">
+          <button class="user-profile-menu-item" data-section="locations" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Locations</button>
           <button class="user-profile-menu-item" data-section="technician-types" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Staff Setup</button>
           <button class="user-profile-menu-item" data-section="schedule" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Schedule</button>
           <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Notifications</button>
@@ -2817,6 +2952,46 @@ dialog footer button, .code-dialog footer button {
       
       <!-- Right Side Card Container -->
       <div style="flex:1;min-width:0;">
+        <!-- Locations Card (Business Setup → Locations) -->
+        <div id="userProfileCardLocations" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Locations</h3>
+          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;">Manage your business locations. Each staff member can be assigned to one or more locations.</p>
+
+          <div id="ffLocationsList" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;"></div>
+
+          <!-- Add / edit form (hidden by default) -->
+          <div id="ffLocationFormCard" style="display:none;background:#faf5ff;border:1px solid #e9d5ff;border-radius:12px;padding:16px;margin-bottom:12px;">
+            <div style="font-size:13px;font-weight:600;color:#6b21a8;margin-bottom:10px;" id="ffLocationFormTitle">Add new location</div>
+            <div style="margin-bottom:10px;">
+              <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">Location name <span style="color:#dc2626;">*</span></label>
+              <input id="ffLocationFormName" type="text" placeholder="e.g. Aventura"
+                     style="width:100%;padding:9px 12px;border-radius:8px;border:1px solid #d1d5db;font-size:13px;box-sizing:border-box;" />
+            </div>
+            <div style="margin-bottom:12px;">
+              <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">Address <span style="color:#9ca3af;font-weight:400;">(optional)</span></label>
+              <input id="ffLocationFormAddress" type="text" placeholder="123 Main St, City, State"
+                     style="width:100%;padding:9px 12px;border-radius:8px;border:1px solid #d1d5db;font-size:13px;box-sizing:border-box;" />
+            </div>
+            <div id="ffLocationFormError" style="display:none;color:#dc2626;font-size:12px;margin-bottom:10px;"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+              <button id="ffLocationFormCancel" type="button"
+                      style="padding:8px 14px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:999px;font-size:13px;font-weight:500;cursor:pointer;">
+                Cancel
+              </button>
+              <button id="ffLocationFormSave" type="button"
+                      style="padding:8px 16px;border:none;background:#7c3aed;color:#fff;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;">
+                Save
+              </button>
+            </div>
+          </div>
+
+          <button id="ffLocationsAddBtn" type="button"
+                  style="width:100%;padding:11px;border:1px dashed #c4b5fd;background:#faf5ff;color:#7c3aed;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            Add new location
+          </button>
+        </div>
+
         <!-- Password Card -->
         <div id="userProfileCardPassword" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Password</h3>
@@ -2874,7 +3049,7 @@ dialog footer button, .code-dialog footer button {
         <!-- Notifications Card (Birthday reminders settings live here; see ff-build-notifications-v2) -->
         <div id="userProfileCardNotifications" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Notifications</h3>
-          <p style="margin:0 0 14px 0;font-size:11px;color:#9ca3af;">Birthday Inbox rows, task reminders, and queue alerts.</p>
+          <p style="margin:0 0 14px 0;font-size:11px;color:#9ca3af;">Birthday Inbox reminders for this location.</p>
           <div style="display:flex;flex-direction:column;gap:14px;">
             <div style="padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
               <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Birthday reminders (Inbox)</div>
@@ -2888,32 +3063,6 @@ dialog footer button, .code-dialog footer button {
               <button type="button" id="ffClearBirthdaySentFlagsBtn" class="btn-mini" style="display:block;margin-top:8px;font-size:11px;padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;">Reset “sent this year” (all staff)</button>
               <div style="font-size:11px;color:#9ca3af;margin-top:4px;">For testing if reminders stopped firing.</div>
             </div>
-            <div style="padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
-              <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Staff document expiry (Inbox)</div>
-              <div style="font-size:11px;color:#6b7280;margin-bottom:6px;line-height:1.4;">When a <strong>licensed / approved</strong> staff document is <strong>within 30 calendar days</strong> of expiration (by <strong>salon timezone</strong>), each owner / admin / manager gets one automatic <strong>Inbox → Team → Open</strong> row — same idea as birthday reminders. Runs about every 5 minutes while the app is open (also shortly after you approve a document request), plus a daily server backup.</div>
-              <div style="font-size:11px;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:6px 8px;line-height:1.4;">Deduped per document: once sent, it won’t repeat until the document is replaced or the flag is cleared in Firestore.</div>
-            </div>
-            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px;">
-              <div>
-                <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:2px;">Task reminders</div>
-                <div style="font-size:11px;color:#6b7280;">Reminders for scheduled tasks</div>
-              </div>
-              <input type="checkbox" id="userProfileToggleTaskReminders" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;flex-shrink:0;">
-            </label>
-            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px;">
-              <div>
-                <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:2px;">Daily summary</div>
-                <div style="font-size:11px;color:#6b7280;">Daily activity summary</div>
-              </div>
-              <input type="checkbox" id="userProfileToggleDailySummary" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;flex-shrink:0;">
-            </label>
-            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px;">
-              <div>
-                <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:2px;">Queue alerts</div>
-                <div style="font-size:11px;color:#6b7280;">Notify on queue changes</div>
-              </div>
-              <input type="checkbox" id="userProfileToggleQueueAlerts" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;flex-shrink:0;">
-            </label>
           </div>
         </div>
         
@@ -3096,12 +3245,12 @@ dialog footer button, .code-dialog footer button {
                   <div style="font-size:12px;font-weight:700;color:#111827;">Special Days</div>
                   <div style="font-size:11px;color:#6b7280;margin-top:4px;">Set full-day closures or custom hours for specific dates.</div>
                 </div>
-                <button id="userProfileAddSpecialBusinessDayBtn" type="button" onclick="window.ffAddSpecialBusinessDayProfile && window.ffAddSpecialBusinessDayProfile()" class="btn-mini" style="font-size:12px;padding:7px 14px;background:#7c3aed;color:#fff;border-color:#7c3aed;">+ Add Special Day</button>
+                <button id="userProfileAddSpecialBusinessDayBtn" type="button" class="btn-mini" style="font-size:12px;padding:7px 14px;background:#7c3aed;color:#fff;border-color:#7c3aed;">+ Add Special Day</button>
               </div>
               <div id="userProfileSpecialBusinessDaysBox" style="display:flex;flex-direction:column;gap:8px;"></div>
             </div>
             <div style="display:flex;justify-content:flex-end;">
-              <button id="userProfileSaveScheduleSettings" type="button" onclick="window.ffSaveScheduleSettingsProfile && window.ffSaveScheduleSettingsProfile()" style="padding:9px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:12px;font-weight:600;cursor:pointer;">Save Schedule Settings</button>
+              <button id="userProfileSaveScheduleSettings" type="button" style="padding:9px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:12px;font-weight:600;cursor:pointer;">Save Schedule Settings</button>
             </div>
           </div>
         </div>
@@ -3681,100 +3830,128 @@ async function initFirebaseAuth() {
       if (user) {
         // Signed in - check if user is archived
         console.log('[AUTH] signed in:', user.email, user.uid);
-        
-        // Check access guard: block archived users
+
+        // Archived-user access guard runs asynchronously against Firestore so it
+        // can no longer be fooled by stale cross-tenant localStorage. While the
+        // check is in-flight we proceed with normal sign-in UI; if the guard
+        // later confirms the user is archived we show the block screen and log
+        // them out. Benign users see no interruption.
         if (typeof checkArchivedUserAccessGuard === 'function') {
-          const isBlocked = checkArchivedUserAccessGuard(user.email);
-            if (isBlocked) {
-            console.log('[AUTH] Access guard triggered: User is archived:', user.email);
+          Promise.resolve(checkArchivedUserAccessGuard(user))
+            .then((isBlocked) => {
+              if (!isBlocked) return;
+              console.log('[AUTH] Access guard triggered: User is archived:', user.email);
+              try {
+                document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
+              } catch (eArch) {}
+              if (archivedBlockScreen) archivedBlockScreen.style.display = 'flex';
+              if (mainContent) mainContent.style.display = 'none';
+              if (authBanner) authBanner.style.display = 'none';
+              if (loginSection) loginSection.style.display = 'none';
+              setTimeout(async () => {
+                try {
+                  const { signOut } = window.__firebaseAuthFunctions || {};
+                  if (signOut && ffAuth) {
+                    await signOut(ffAuth);
+                    console.log('[AUTH] Forced logout for archived user');
+                  }
+                } catch (e) {
+                  console.error('[AUTH] Error forcing logout:', e);
+                }
+              }, 100);
+            })
+            .catch((e) => console.error('[AUTH] archived guard error', e));
+        }
+
+        // PRE-PAINT PROFILE CHECK — if the user has no users/{uid} Firestore profile yet
+        // (fresh Google sign-in, or partial signup), the "Complete your setup" flow in
+        // app.js is about to take over. Do NOT paint main-app-content or run goToQueue
+        // in that case — the app chrome would flash behind the setup modal and the
+        // downstream Queue/permissions read would spuriously alert "Failed to load user profile".
+        // We check Firestore synchronously-ish (await) before painting anything.
+        (async function ffHandleSignedInUser() {
+          let hasProfile = true; // safe default: if we can't check, proceed with normal paint
+          try {
+            const firestoreDb = window.db || window.ffDb;
+            if (firestoreDb && typeof getTrainingFirestoreApi === 'function') {
+              const { doc, getDoc } = await getTrainingFirestoreApi();
+              const snap = await getDoc(doc(firestoreDb, 'users', user.uid));
+              hasProfile = snap.exists();
+            }
+          } catch (e) {
+            console.warn('[AUTH] Pre-paint profile check failed (treating as has-profile):', e?.code, e?.message);
+          }
+
+          if (!hasProfile) {
+            console.log('[AUTH] No users/{uid} profile — keeping signed-out shell so Complete Setup can take over');
             try {
               document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
-            } catch (eArch) {}
-            // Show blocking screen and hide app
-            if (archivedBlockScreen) archivedBlockScreen.style.display = 'flex';
+              document.body.classList.add('ff-logged-out');
+            } catch (_) {}
             if (mainContent) mainContent.style.display = 'none';
             if (authBanner) authBanner.style.display = 'none';
-            if (loginSection) loginSection.style.display = 'none';
-            // Force logout
-            setTimeout(async () => {
-              try {
-                const { signOut } = window.__firebaseAuthFunctions;
-                if (signOut && ffAuth) {
-                  await signOut(ffAuth);
-                  console.log('[AUTH] Forced logout for archived user');
-                }
-              } catch (e) {
-                console.error('[AUTH] Error forcing logout:', e);
-              }
-            }, 100);
+            // app.js will call showCompleteSetupScreen(user) which flips on complete-setup-section.
             return;
           }
-        }
-        
-        // User is active — hide auth panels before lifting signed-out shell so queue never paints behind login card margins.
-        if (loginSection) loginSection.style.display = 'none';
-        if (signupSection) signupSection.style.display = 'none';
-        if (resetPasswordSection) resetPasswordSection.style.display = 'none';
-        document.body.classList.remove('ff-logged-out');
-        if (mainContent) mainContent.style.display = 'block';
-        if (authBanner) authBanner.style.display = 'none';
-        if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
-        if (typeof ensureTrainingItemsSubscription === 'function') {
-          setTimeout(() => {
-            ensureTrainingItemsSubscription().catch((err) => {
-              console.warn('[Training] Failed to start items subscription after auth', err);
-            });
-          }, 0);
-        }
-        if (typeof ensureTrainingNotificationsSubscription === 'function') {
-          setTimeout(() => {
-            ensureTrainingNotificationsSubscription().catch((err) => {
-              console.warn('[Training] Failed to start notifications subscription after auth', err);
-            });
-          }, 0);
-        }
-        
-        // Initialize Queue screen on sign-in (default view) - ensures gear icon appears on initial load
-        // Call goToQueue() to set up Queue UI and check permissions for gear icon visibility
-        if (typeof goToQueue === 'function') {
-          goToQueue();
-        }
-        if (typeof ffMaybeQueueUiReadyAfterAuth === 'function') {
-          ffMaybeQueueUiReadyAfterAuth();
-        }
-        // Initialize Manage Queue button handlers after Queue is shown
-        if (typeof initManageQueueButtons === 'function') {
-          // Use setTimeout to ensure DOM is ready after goToQueue()
-          setTimeout(function() {
-            initManageQueueButtons();
-          }, 0);
-        }
-        // Safety net: on a cold load, Firestore staff sync may arrive slightly after goToQueue()
-        // and ffApplyQueueViewGate() evaluates permissions as "false" before the row lands.
-        // Re-run goToQueue() at 1500ms and 3000ms so the Queue paints even if the race loses.
-        try {
-          [1500, 3000].forEach(function(ms){
-            setTimeout(function(){
-              try {
-                if (!document.body || document.body.classList.contains('ff-logged-out')) return;
-                var queueBtnEl = document.getElementById('queueBtn');
-                var queueIsActive = queueBtnEl && queueBtnEl.classList.contains('active');
-                if (!queueIsActive) return;
-                var wrapEl = document.querySelector('.wrap');
-                var wrapHidden = !wrapEl || (window.getComputedStyle(wrapEl).display === 'none') || (window.getComputedStyle(wrapEl).visibility === 'hidden');
-                if (wrapHidden && typeof goToQueue === 'function') {
-                  console.warn('[QueueSafetyNet] re-running goToQueue after', ms, 'ms because .wrap was still hidden');
-                  goToQueue();
-                  if (typeof ffMarkUiReady === 'function') ffMarkUiReady();
+
+          // Normal signed-in flow: the user has a profile, paint the main app.
+          // User is active — hide auth panels before lifting signed-out shell so queue never paints behind login card margins.
+          if (loginSection) loginSection.style.display = 'none';
+          if (signupSection) signupSection.style.display = 'none';
+          if (resetPasswordSection) resetPasswordSection.style.display = 'none';
+          document.body.classList.remove('ff-logged-out');
+          if (mainContent) mainContent.style.display = 'block';
+          if (authBanner) authBanner.style.display = 'none';
+          if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
+
+          if (typeof ensureTrainingItemsSubscription === 'function') {
+            setTimeout(() => {
+              ensureTrainingItemsSubscription().catch((err) => {
+                console.warn('[Training] Failed to start items subscription after auth', err);
+              });
+            }, 0);
+          }
+          if (typeof ensureTrainingNotificationsSubscription === 'function') {
+            setTimeout(() => {
+              ensureTrainingNotificationsSubscription().catch((err) => {
+                console.warn('[Training] Failed to start notifications subscription after auth', err);
+              });
+            }, 0);
+          }
+
+          // Initialize Queue screen on sign-in (default view) - ensures gear icon appears on initial load
+          if (typeof goToQueue === 'function') {
+            goToQueue();
+          }
+          if (typeof ffMaybeQueueUiReadyAfterAuth === 'function') {
+            ffMaybeQueueUiReadyAfterAuth();
+          }
+          if (typeof initManageQueueButtons === 'function') {
+            setTimeout(function() { initManageQueueButtons(); }, 0);
+          }
+          try {
+            [1500, 3000].forEach(function(ms){
+              setTimeout(function(){
+                try {
+                  if (!document.body || document.body.classList.contains('ff-logged-out')) return;
+                  var queueBtnEl = document.getElementById('queueBtn');
+                  var queueIsActive = queueBtnEl && queueBtnEl.classList.contains('active');
+                  if (!queueIsActive) return;
+                  var wrapEl = document.querySelector('.wrap');
+                  var wrapHidden = !wrapEl || (window.getComputedStyle(wrapEl).display === 'none') || (window.getComputedStyle(wrapEl).visibility === 'hidden');
+                  if (wrapHidden && typeof goToQueue === 'function') {
+                    console.warn('[QueueSafetyNet] re-running goToQueue after', ms, 'ms because .wrap was still hidden');
+                    goToQueue();
+                    if (typeof ffMarkUiReady === 'function') ffMarkUiReady();
+                  }
+                } catch (e) {
+                  console.warn('[QueueSafetyNet] retry failed', e);
                 }
-              } catch (e) {
-                console.warn('[QueueSafetyNet] retry failed', e);
-              }
-            }, ms);
-          });
-        } catch (e) { console.warn('[QueueSafetyNet] scheduling failed', e); }
-        // Update header to show current user's name
-        if (typeof renderBrand === 'function') renderBrand();
+              }, ms);
+            });
+          } catch (e) { console.warn('[QueueSafetyNet] scheduling failed', e); }
+          if (typeof renderBrand === 'function') renderBrand();
+        })();
       } else {
         // Signed out – hide app shell completely (sync with app.js showLoginScreen + overlays)
         console.log('[AUTH] signed out');
@@ -5383,6 +5560,18 @@ function renderHistory() {
 // Render
 
 function ffFormatStaffRoleLabelForHeader(staff) {
+  // Always respect the session-level role first for owners/admins. This covers the case
+  // where an owner has no staff doc yet (fresh signup) and resolveCurrentTrainingStaffRecord
+  // returns a placeholder object without role/isAdmin flags — previously fell through to
+  // "Service provider" which is wrong for owners.
+  const sessionRole = String(
+    window.__ff_user_role ||
+    window.__ff_actorRole ||
+    (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_role') : '') ||
+    ''
+  ).trim().toLowerCase();
+  if (sessionRole === 'owner') return 'Owner';
+
   if (staff && typeof staff === 'object') {
     const r = String(staff.role || '').trim().toLowerCase();
     if (staff.isAdmin === true || r === 'admin') return r === 'owner' ? 'Owner' : 'Admin';
@@ -5391,15 +5580,11 @@ function ffFormatStaffRoleLabelForHeader(staff) {
     if (r && r !== 'technician' && r !== 'staff' && r !== 'tech' && r !== '') {
       return typeof toLabel === 'function' ? toLabel(r) : r;
     }
+    // Fall back to session role before defaulting to "Service provider"
+    if (sessionRole === 'admin') return 'Admin';
+    if (sessionRole === 'manager') return 'Manager';
     return 'Service provider';
   }
-  const sessionRole = String(
-    window.__ff_user_role ||
-    window.__ff_actorRole ||
-    (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_role') : '') ||
-    ''
-  ).trim().toLowerCase();
-  if (sessionRole === 'owner') return 'Owner';
   if (sessionRole === 'admin') return 'Admin';
   if (sessionRole === 'manager') return 'Manager';
   if (sessionRole === 'technician' || sessionRole === 'tech') return 'Service provider';
@@ -5449,6 +5634,9 @@ if (typeof document !== 'undefined') {
     if (typeof ffApplyQueueViewGate === 'function') ffApplyQueueViewGate();
     if (typeof window.ffScheduleRefreshPermissionChrome === 'function') window.ffScheduleRefreshPermissionChrome();
     if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') window.ffSyncUserProfileBillingMenuVisibility();
+    if (typeof window.ffSyncUserProfileLocationsMenuVisibility === 'function') window.ffSyncUserProfileLocationsMenuVisibility();
+    if (typeof window.ffSyncUserProfileScheduleMenuVisibility === 'function') window.ffSyncUserProfileScheduleMenuVisibility();
+    if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') window.ffSyncUserProfilePreferencesMenuVisibility();
     if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
     if (typeof window.ffApplyHistoryActionButtonsVisibility === 'function') window.ffApplyHistoryActionButtonsVisibility();
     if (typeof ffRefreshTasksPermissionControls === 'function') ffRefreshTasksPermissionControls();
@@ -6060,9 +6248,16 @@ function ffCurrentUserHasQueueReorderPermission() {
   return ffStaffHasQueueReorderPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 
-/** Reset Queue control: staff.permissions.queue_reset === true (Permissions tab: Reset queue). */
+/** Reset Queue control: staff.permissions.queue_reset === true (Permissions tab: Reset queue).
+ *  Salon owner ALWAYS passes — they have full access regardless of the
+ *  permissions doc (which may be missing/false for legacy accounts). */
 function ffStaffHasQueueResetPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
+  if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+    return true;
+  }
+  const roleLc = String(staff.role || '').toLowerCase().trim();
+  if (roleLc === 'owner') return true;
   const p = staff.permissions;
   return !!(p && typeof p === 'object' && p.queue_reset === true);
 }
@@ -6227,6 +6422,9 @@ function ffUpdateAppsPanelPermissionVisibility() {
   setAppsTileVisible('.apps-panel-item[data-app="settings"]:not([data-staff])', tabUnlessExplicitOff('settings_view'));
   setAppsTileVisible('.apps-panel-item[data-app="settings"][data-staff="true"]', typeof ffCurrentUserHasStaffViewPermission === 'function' && ffCurrentUserHasStaffViewPermission());
   setAppsTileVisible('.apps-panel-item[data-app="history"]', typeof ffCurrentUserHasHistoryViewPermission === 'function' && ffCurrentUserHasHistoryViewPermission());
+
+  // Locations management now lives under Settings → Locations, not as a
+  // standalone Apps tile. Visibility is handled inside the User Profile screen.
 }
 window.ffUpdateMainNavTabVisibility = ffUpdateMainNavTabVisibility;
 window.ffUpdateAppsPanelPermissionVisibility = ffUpdateAppsPanelPermissionVisibility;
@@ -6548,24 +6746,58 @@ function renderSelect(){
   try {
     const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
     const staffList = Array.isArray(store.staff) ? store.staff : [];
+    // Scope the Join dropdown STRICTLY to the active branch. The user
+    // asked for "two separate businesses", so a staff member can only join
+    // the queue at a branch where their allowedLocationIds explicitly
+    // lists that branch. Empty / missing arrays do NOT fall back to "every
+    // branch" here (that fallback is only for Staff Members sidebar, where
+    // hiding an unassigned technician would make them unreachable).
+    const activeLoc =
+      (typeof window.ffGetActiveLocationId === 'function' ? window.ffGetActiveLocationId() : null) ||
+      (typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id
+        ? window.__ff_active_location_id
+        : null);
     // All non-archived staff with queue_join (shared station uses full list; personal technician join overrides selection in handleJoin unless ffCurrentUserIsQueueSharedStationJoin).
+    const filterDebug = [];
     technicians = staffList.filter((s) => {
       if (!s || s.isArchived === true) return false;
       const name = String(s.name || '').trim();
       if (!name) return false;
-      return ffStaffHasQueueJoinPermission(s);
+      if (!ffStaffHasQueueJoinPermission(s)) return false;
+      if (activeLoc) {
+        const allowed = Array.isArray(s.allowedLocationIds) ? s.allowedLocationIds : [];
+        // Admins / owners are salon-wide and typically do not join the
+        // Queue as service providers, but if they do have queue_join, they
+        // should appear everywhere.
+        const isSalonWide = s.isAdmin === true || s.isOwner === true || String(s.role || '').toLowerCase() === 'owner';
+        const included = isSalonWide || allowed.indexOf(activeLoc) !== -1;
+        filterDebug.push({ name: name, id: s.id, allowed: allowed, included: included, isSalonWide: isSalonWide });
+        if (!included) return false;
+      }
+      return true;
     });
-    console.log('[renderSelect] Loaded', technicians.length, 'active technicians from ff_staff_v1');
+    console.log('[renderSelect] active location:', activeLoc || '(none)');
+    console.log('[renderSelect] filter decisions:', filterDebug);
+    console.log('[renderSelect] Loaded', technicians.length, 'active technicians');
+    // Stash the active location on a local so we can decide below whether
+    // to run the legacy settings fallback. When a branch is active, an
+    // empty result is the correct answer (= no staff at this branch) and
+    // we MUST NOT fall back to the settings list — that list is not
+    // location-aware and would re-introduce staff from other branches.
+    renderSelect._activeLocForFallback = activeLoc;
   } catch (e) {
     console.error('[renderSelect] Error loading from ff_staff_v1:', e);
   }
-  if (technicians.length === 0) {
+  const _activeLocForFallback = renderSelect._activeLocForFallback;
+  if (technicians.length === 0 && !_activeLocForFallback) {
     try {
       technicians = loadTechniciansFromSettings();
       console.log('[renderSelect] Fallback: loadTechniciansFromSettings →', technicians.length);
     } catch (e2) {
       console.warn('[renderSelect] Fallback technicians failed:', e2);
     }
+  } else if (technicians.length === 0 && _activeLocForFallback) {
+    console.log('[renderSelect] No staff assigned to location', _activeLocForFallback, '— skipping legacy settings fallback on purpose.');
   }
 
   const techniciansDeduped = ffDeduplicateTechniciansByName(technicians);
@@ -6864,7 +7096,10 @@ function updateQueueManagementUiVisibility() {
 
 function canTechnicianSelfCheckoutQueueRow(row) {
   if (!row) return false;
-  if (getCurrentQueueActorRole() !== 'technician') return false;
+  // Intentionally no role gate here: an Owner/Admin/Manager who also joined
+  // the queue (via a technician PIN) must be able to self-remove using their
+  // PIN, just like a pure technician. We key off the authed staff identity
+  // that was stamped at Queue-join time, not the Firebase Auth role.
   const currentStaffId = String(window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '').trim();
   const currentStaffName = String(
     window.__ff_authedStaffName ||
@@ -6888,7 +7123,7 @@ function canViewQueueRowActionControls(row) {
     return false;
   }
   const role = getCurrentQueueActorRole();
-  if (role === 'admin' || role === 'manager') return true;
+  if (role === 'owner' || role === 'admin' || role === 'manager') return true;
   if (role === 'technician') return canTechnicianSelfCheckoutQueueRow(row);
   return false;
 }
@@ -7287,6 +7522,46 @@ function renderQueue(){
       ].join(";");
       selfLeaveBtn.onclick = () => selfRemoveFromQueue(qi);
       ctrls.prepend(selfLeaveBtn);
+    }
+
+    // Always-visible red ✖ for Owner/Admin/Manager so they can remove a row
+    // from the Available list without entering Reorder mode. Placed BEFORE
+    // HOLD/START so the order reads: 📞 → ✖ → HOLD → START. Skipped when
+    // Reorder is active (the Reorder block below already appends a ✖) OR
+    // when this row is the current user's own row — in that case the
+    // selfLeaveBtn above already rendered a PIN-based ✖, so we avoid
+    // showing two buttons.
+    const isMyOwnRow = canTechnicianSelfCheckoutQueueRow(q);
+    if (
+      !queueLocked &&
+      !reorderMode &&
+      !isMyOwnRow &&
+      canViewQueueRowActionControls(q) &&
+      (function () {
+        const r = getCurrentQueueActorRole();
+        return r === 'owner' || r === 'admin' || r === 'manager';
+      })() &&
+      typeof ffCurrentUserHasQueueReorderPermission === 'function' &&
+      ffCurrentUserHasQueueReorderPermission()
+    ) {
+      const quickRemove = document.createElement("button");
+      quickRemove.type = "button";
+      quickRemove.textContent = "✖";
+      quickRemove.title = "Remove from queue";
+      quickRemove.style.cssText = [
+        "border:1px solid #fecaca",
+        "background:#fff",
+        "color:#dc2626",
+        "border-radius:999px",
+        "width:34px",
+        "height:34px",
+        "cursor:pointer",
+        "font-size:15px",
+        "line-height:1",
+        "flex-shrink:0"
+      ].join(";");
+      quickRemove.onclick = () => guardHold(() => removeFromQueue(qi));
+      ctrls.append(quickRemove);
     }
 
     if (canViewQueueRowActionControls(q)) {
@@ -8031,7 +8306,7 @@ async function resetDay(){
     return;
   }
   if (!ffCurrentUserHasQueueResetPermission()) {
-    alert("You don't have permission to reset the queue.");
+    await ffStyledAlert("You don't have permission to reset the queue.", 'Reset Queue');
     return;
   }
   // Check if user is owner/admin - block if not
@@ -8039,7 +8314,7 @@ async function resetDay(){
     try {
       const isOwner = await window.isCurrentUserOwner();
       if (!isOwner) {
-        alert("Not authorized - Only admin/owner can reset the day");
+        await ffStyledAlert('Not authorized — only admin/owner can reset the day.', 'Reset Queue');
         return;
       }
     } catch (e) {
@@ -8060,18 +8335,22 @@ async function resetDay(){
     return; // User cancelled or invalid code (error already shown)
   }
   
-  // Set actor info from staff-based PIN validation (must have Reset queue permission)
+  // Set actor info from staff-based PIN validation (must have Reset queue permission).
+  // Salon owner is always authorized via ffStaffHasQueueResetPermission bypass.
   if (!window.ffAuthByPin) {
-    alert('Not authorized to reset the queue.');
+    await ffStyledAlert('Not authorized to reset the queue.', 'Reset Queue');
     return;
   }
   const authResult = window.ffAuthByPin(code);
   if (!authResult.ok || !authResult.staff || !ffStaffHasQueueResetPermission(authResult.staff)) {
-    alert('Not authorized to reset the queue.');
+    await ffStyledAlert('Not authorized to reset the queue.', 'Reset Queue');
     return;
   }
   const staff = authResult.staff;
-  const role = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Tech');
+  const isOwnerStaff = typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff);
+  const role = isOwnerStaff
+    ? 'Owner'
+    : (staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Tech'));
   const name = staff.name || 'Unknown';
   window.__ff_lastValidatedCode = { role: role, name: name };
   window.__ff_actorRole = role;
@@ -8125,6 +8404,101 @@ function ffQueueHasInService() {
 }
 
 // Helper function to show RESET confirmation modal (Step 1)
+/**
+ * Show a styled, on-brand info alert (single purple OK button).
+ * Replaces native `alert()` calls for in-app messaging so the dialog
+ * matches our design system (see screenshot in the Reset flow).
+ * Returns a Promise that resolves when the user dismisses the dialog.
+ */
+function ffStyledAlert(message, title) {
+  return new Promise((resolve) => {
+    try {
+      // Always remove any previous instance so the overlay never lingers
+      // in the DOM (which could block keyboard input on other modals that
+      // mount afterwards, e.g. the Reset PIN prompt).
+      try {
+        const prev = document.getElementById('ffStyledAlertOverlay');
+        if (prev && prev.parentNode) prev.parentNode.removeChild(prev);
+      } catch (_) {}
+
+      const overlay = document.createElement('div');
+      overlay.id = 'ffStyledAlertOverlay';
+      overlay.style.cssText = [
+        'position:fixed',
+        'inset:0',
+        'background:rgba(0,0,0,0.45)',
+        'z-index:1150',
+        'display:flex',
+        'align-items:center',
+        'justify-content:center',
+        'padding:20px',
+        'box-sizing:border-box'
+      ].join(';');
+
+      const card = document.createElement('div');
+      card.style.cssText = [
+        'background:#fff',
+        'border-radius:14px',
+        'box-shadow:0 24px 60px rgba(0,0,0,0.22)',
+        'max-width:420px',
+        'width:100%',
+        'padding:24px',
+        'font-family:inherit'
+      ].join(';');
+
+      const t = (title == null ? '' : String(title)).trim();
+      const titleHtml = t
+        ? '<h3 style="margin:0 0 10px;font-size:18px;font-weight:700;color:#111;">' +
+          t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') +
+          '</h3>'
+        : '';
+      const msgText = message == null ? '' : String(message);
+      const msgHtml =
+        '<p id="ffStyledAlertMsg" style="margin:0 0 22px;font-size:14px;color:#374151;line-height:1.5;white-space:pre-wrap;"></p>';
+
+      card.innerHTML =
+        titleHtml +
+        msgHtml +
+        '<div style="display:flex;justify-content:flex-end;">' +
+        '<button type="button" id="ffStyledAlertOk" style="padding:10px 22px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">OK</button>' +
+        '</div>';
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+
+      const msgEl = card.querySelector('#ffStyledAlertMsg');
+      if (msgEl) msgEl.textContent = msgText;
+      const okBtn = card.querySelector('#ffStyledAlertOk');
+
+      let finished = false;
+      const cleanup = () => {
+        if (finished) return;
+        finished = true;
+        try { document.removeEventListener('keydown', onKey, true); } catch (_) {}
+        try { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); } catch (_) {}
+      };
+      const done = () => { cleanup(); resolve(); };
+      const onKey = (e) => {
+        if (e.key === 'Escape' || e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          done();
+        }
+      };
+
+      if (okBtn) okBtn.onclick = done;
+      overlay.onclick = (e) => { if (e.target === overlay) done(); };
+      document.addEventListener('keydown', onKey, true);
+      if (okBtn) {
+        try { okBtn.focus(); } catch (_) {}
+      }
+    } catch (_) {
+      try { alert(message); } catch (__) {}
+      resolve();
+    }
+  });
+}
+try { window.ffStyledAlert = ffStyledAlert; } catch (_) {}
+
 function showResetConfirmation() {
   return new Promise((resolve) => {
     const overlay = document.getElementById('resetConfirmOverlay');
@@ -11970,33 +12344,58 @@ function setQueuesData(data, skipCloudWrite) {
   }
 }
 
+// Return the active branch id used as the key inside ff_queues_v1. We key
+// settings (Auto Reset, GeoFence, Runtime) per-branch so switching branches
+// never leaks another branch's configuration through the shared localStorage
+// blob, even if a previous session accidentally wrote under a different key.
+function _ffQueueLocKey() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  } catch (_) {}
+  const raw = typeof window !== 'undefined' && typeof window.__ff_active_location_id === 'string'
+    ? window.__ff_active_location_id.trim()
+    : '';
+  return raw || 'default';
+}
+
 function getQueueAutoResetSettings() {
   const queues = getQueuesData();
-  
-  // Check if new structure exists
-  if (queues.default && queues.default.settings && queues.default.settings.autoReset) {
+  const locKey = _ffQueueLocKey();
+
+  // Preferred: per-branch bucket
+  if (queues[locKey] && queues[locKey].settings && queues[locKey].settings.autoReset) {
+    return queues[locKey].settings.autoReset;
+  }
+
+  // Migrate from legacy single-branch bucket ('default') for the first branch only.
+  // We DO NOT auto-copy settings to other branches — each branch must opt in via
+  // its own "Enable queue auto reset" toggle, otherwise one location's schedule
+  // would silently apply everywhere.
+  if (locKey === 'default' && queues.default && queues.default.settings && queues.default.settings.autoReset) {
     return queues.default.settings.autoReset;
   }
-  
-  // Fallback: read from old structure and initialize new structure
+
   const oldSettings = JSON.parse(localStorage.getItem('ff_queue_settings_v1') || '{}');
-  if (oldSettings.autoResetEnabled !== undefined || oldSettings.autoResetTime || oldSettings.autoResetForce !== undefined) {
+  if (
+    locKey === 'default' &&
+    (oldSettings.autoResetEnabled !== undefined || oldSettings.autoResetTime || oldSettings.autoResetForce !== undefined)
+  ) {
     const autoReset = {
       enabled: oldSettings.autoResetEnabled === true,
       time: oldSettings.autoResetTime || '04:00',
       resetWhileInService: oldSettings.autoResetForce === true
     };
-    
-    // Initialize new structure
     if (!queues.default) queues.default = {};
     if (!queues.default.settings) queues.default.settings = {};
     queues.default.settings.autoReset = autoReset;
     setQueuesData(queues);
-    
     return autoReset;
   }
-  
-  // Default values
+
+  // Default values for any branch that hasn't configured Auto Reset yet.
   return {
     enabled: false,
     time: '04:00',
@@ -12006,33 +12405,35 @@ function getQueueAutoResetSettings() {
 
 function getQueueRuntime() {
   const queues = getQueuesData();
-  
-  // Check if new structure exists
-  if (queues.default && queues.default.runtime) {
+  const locKey = _ffQueueLocKey();
+
+  if (queues[locKey] && queues[locKey].runtime) {
+    return queues[locKey].runtime;
+  }
+
+  if (locKey === 'default' && queues.default && queues.default.runtime) {
     return queues.default.runtime;
   }
-  
-  // Fallback: migrate from old structure
+
   const oldSettings = JSON.parse(localStorage.getItem('ff_queue_settings_v1') || '{}');
-  if (oldSettings.lastAutoResetDate !== undefined) {
-    // Initialize new structure and migrate
+  if (locKey === 'default' && oldSettings.lastAutoResetDate !== undefined) {
     if (!queues.default) queues.default = {};
     if (!queues.default.runtime) queues.default.runtime = {};
     queues.default.runtime.lastAutoResetDate = oldSettings.lastAutoResetDate;
     setQueuesData(queues);
     return queues.default.runtime;
   }
-  
-  // Default: empty runtime object
-  if (!queues.default) queues.default = {};
-  if (!queues.default.runtime) queues.default.runtime = {};
-  return queues.default.runtime;
+
+  if (!queues[locKey]) queues[locKey] = {};
+  if (!queues[locKey].runtime) queues[locKey].runtime = {};
+  return queues[locKey].runtime;
 }
 
 function setQueueRuntime(runtime) {
   const queues = getQueuesData();
-  if (!queues.default) queues.default = {};
-  queues.default.runtime = runtime;
+  const locKey = _ffQueueLocKey();
+  if (!queues[locKey]) queues[locKey] = {};
+  queues[locKey].runtime = runtime;
   setQueuesData(queues);
 }
 
@@ -12056,11 +12457,12 @@ function clearQueueLastAutoResetDate() {
 function saveQueueAutoResetSettings(autoReset) {
   if (!ffCurrentUserHasQueueManagePermission()) return;
   const queues = getQueuesData();
-  if (!queues.default) queues.default = {};
-  if (!queues.default.settings) queues.default.settings = {};
-  queues.default.settings.autoReset = autoReset;
+  const locKey = _ffQueueLocKey();
+  if (!queues[locKey]) queues[locKey] = {};
+  if (!queues[locKey].settings) queues[locKey].settings = {};
+  queues[locKey].settings.autoReset = autoReset;
   setQueuesData(queues);
-  
+
   // Clear lastAutoResetDate when settings change so next scheduled check can run
   clearQueueLastAutoResetDate();
 }
@@ -12084,7 +12486,12 @@ function sanitizeQueueGeoFenceRadius(value) {
 
 function getQueueGeoFenceSettings() {
   const queues = getQueuesData();
-  const raw = queues?.default?.settings?.queueGeoFence;
+  const locKey = _ffQueueLocKey();
+  // Only read the per-branch bucket. No fallback to 'default' for non-default
+  // branches — this prevents a salon-wide GeoFence set under a legacy session
+  // (or by a different user who only ever used the default bucket) from
+  // polluting every other branch.
+  const raw = queues?.[locKey]?.settings?.queueGeoFence;
   if (!raw || typeof raw !== 'object') return getDefaultQueueGeoFenceSettings();
   const defaults = getDefaultQueueGeoFenceSettings();
   return {
@@ -12100,10 +12507,11 @@ function getQueueGeoFenceSettings() {
 function saveQueueGeoFenceSettings(queueGeoFence) {
   if (!ffCurrentUserHasQueueManagePermission()) return;
   const queues = getQueuesData();
-  if (!queues.default) queues.default = {};
-  if (!queues.default.settings) queues.default.settings = {};
+  const locKey = _ffQueueLocKey();
+  if (!queues[locKey]) queues[locKey] = {};
+  if (!queues[locKey].settings) queues[locKey].settings = {};
   const current = getQueueGeoFenceSettings();
-  queues.default.settings.queueGeoFence = {
+  queues[locKey].settings.queueGeoFence = {
     enabled: queueGeoFence?.enabled === true,
     lat: Number.isFinite(Number(queueGeoFence?.lat)) ? Number(queueGeoFence.lat) : current.lat,
     lng: Number.isFinite(Number(queueGeoFence?.lng)) ? Number(queueGeoFence.lng) : current.lng,
@@ -12545,6 +12953,15 @@ function goToUserProfile(section) {
 
   if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') {
     window.ffSyncUserProfileBillingMenuVisibility();
+  }
+  if (typeof window.ffSyncUserProfileLocationsMenuVisibility === 'function') {
+    window.ffSyncUserProfileLocationsMenuVisibility();
+  }
+  if (typeof window.ffSyncUserProfileScheduleMenuVisibility === 'function') {
+    window.ffSyncUserProfileScheduleMenuVisibility();
+  }
+  if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') {
+    window.ffSyncUserProfilePreferencesMenuVisibility();
   }
 
   // Load avatar from localStorage when User Profile screen is shown
@@ -13927,6 +14344,27 @@ function renderUserProfileScheduleSettings() {
   }
 }
 
+// Re-render the Schedule settings card when the active location changes or
+// when the settings subscriber re-applies a snapshot (schedule fields are
+// per-location now — see settings-cloud.js). We only repaint if the card is
+// visible so we don't thrash the DOM on background branch switches.
+if (typeof document !== 'undefined' && !document.__ffScheduleSettingsRefreshBound) {
+  document.__ffScheduleSettingsRefreshBound = true;
+  const refreshScheduleProfileCard = () => {
+    try {
+      const card = document.getElementById('userProfileCardSchedule');
+      if (!card || card.style.display === 'none') return;
+      if (typeof renderUserProfileScheduleSettings === 'function') {
+        renderUserProfileScheduleSettings();
+      }
+    } catch (e) {
+      console.warn('[Schedule Settings] refresh failed', e);
+    }
+  };
+  document.addEventListener('ff-active-location-changed', refreshScheduleProfileCard);
+  document.addEventListener('ff-schedule-settings-changed', refreshScheduleProfileCard);
+}
+
 window.ffSaveScheduleSettingsProfile = async function() {
   const saveBtn = document.getElementById('userProfileSaveScheduleSettings');
   if (saveBtn) {
@@ -15067,21 +15505,26 @@ async function saveSettings(e){
   
   settings.workers = validWorkers.slice(0, 48);
 
-  // Queue Auto Reset settings — save into ff_queues_v1 (synced to cloud) and legacy ff_queue_settings_v1
+  // Queue Auto Reset settings — save into ff_queues_v1 (synced to cloud) under
+  // the ACTIVE BRANCH key so the configuration never leaks across branches.
   const autoResetEnabled = document.getElementById('queueAutoResetEnabled')?.checked === true || false;
   const autoResetTime = document.getElementById('queueAutoResetTime')?.value || '02:00';
   const autoResetForce = document.getElementById('queueAutoResetForce')?.checked === true || false;
   const lastAutoResetDate = (getQueueRuntime() || {}).lastAutoResetDate || null;
-  // Write to new structure (ff_queues_v1) — setQueuesData will also trigger cloud write
   const queuesData = getQueuesData();
-  if (!queuesData.default) queuesData.default = {};
-  if (!queuesData.default.settings) queuesData.default.settings = {};
-  queuesData.default.settings.autoReset = { enabled: autoResetEnabled, time: autoResetTime, resetWhileInService: autoResetForce };
-  if (!queuesData.default.runtime) queuesData.default.runtime = {};
-  queuesData.default.runtime.lastAutoResetDate = lastAutoResetDate;
+  const _saveLocKey = _ffQueueLocKey();
+  if (!queuesData[_saveLocKey]) queuesData[_saveLocKey] = {};
+  if (!queuesData[_saveLocKey].settings) queuesData[_saveLocKey].settings = {};
+  queuesData[_saveLocKey].settings.autoReset = { enabled: autoResetEnabled, time: autoResetTime, resetWhileInService: autoResetForce };
+  if (!queuesData[_saveLocKey].runtime) queuesData[_saveLocKey].runtime = {};
+  queuesData[_saveLocKey].runtime.lastAutoResetDate = lastAutoResetDate;
   setQueuesData(queuesData); // writes to localStorage + triggers queueCloudWrite
-  // Also keep legacy key in sync
-  localStorage.setItem('ff_queue_settings_v1', JSON.stringify({ autoResetEnabled, autoResetTime, autoResetForce: autoResetForce, lastAutoResetDate }));
+  // Keep legacy key in sync ONLY for the default (no-branch) case — we don't
+  // want the single-tenant legacy bucket to mirror one specific branch and
+  // then overwrite others on next getQueueAutoResetSettings() migration.
+  if (_saveLocKey === 'default') {
+    localStorage.setItem('ff_queue_settings_v1', JSON.stringify({ autoResetEnabled, autoResetTime, autoResetForce: autoResetForce, lastAutoResetDate }));
+  }
 
   // Save brandPalette (it's already updated in memory when edited)
 
@@ -15503,13 +15946,25 @@ function initializeTechnicianTypes() {
     userProfileAddBtn.addEventListener('click', showAddTechnicianTypeDialog);
   }
   
-  // Listen for technician types updates from cloud
+  // Listen for technician types updates from cloud. Note: e.detail carries
+  // the FULL salon-wide list; the per-location filter happens inside each
+  // render function via ffGetTechnicianTypes().
   if (!document.__ffTechnicianTypesListenerBound) {
     document.__ffTechnicianTypesListenerBound = true;
     document.addEventListener('ff-technician-types-updated', async (e) => {
       _technicianTypes = e.detail || [];
       await renderTechnicianTypes();
       await renderUserProfileTechnicianTypes();
+    });
+  }
+
+  // Re-render when the active location changes so the per-location filter
+  // on technician types actually repaints the lists.
+  if (!document.__ffTechnicianTypesLocationListenerBound) {
+    document.__ffTechnicianTypesLocationListenerBound = true;
+    document.addEventListener('ff-active-location-changed', async () => {
+      try { await renderTechnicianTypes(); } catch (_) {}
+      try { await renderUserProfileTechnicianTypes(); } catch (_) {}
     });
   }
 }
@@ -25398,28 +25853,50 @@ function initializeAppsPanel() {
     }
   }
   
-  // Access guard: Check if logged-in user (by email) is archived
-  function checkArchivedUserAccessGuard(userEmail) {
+  // Access guard: Check if the currently-signed-in user is archived in THEIR own salon.
+  //
+  // IMPORTANT: This used to read localStorage (ff_staff_v1), which caused false
+  // force-logouts when the browser had stale staff data from a PREVIOUS salon —
+  // e.g. signing into a fresh owner account in a browser that was previously logged
+  // into a test salon where the same email was archived. That cross-tenant bleed
+  // repeatedly kicked users out right after login.
+  //
+  // The guard now reads directly from Firestore:
+  //   users/{uid}  -> salonId + staffId (+ role)
+  //   salons/{salonId}/staff/{staffId} -> isArchived
+  // Owners are never blocked (they own the salon).
+  async function checkArchivedUserAccessGuard(user) {
     try {
-      if (!userEmail) return false;
-      
-      const staffStore = ffGetStaffStore();
-      const staff = staffStore.staff.find(s => s.email && s.email.toLowerCase() === userEmail.toLowerCase());
-      
-      if (staff && staff.isArchived === true) {
-        console.log('[checkArchivedUserAccessGuard] BLOCKED: User is archived', userEmail, staff.name || '');
+      if (!user || !user.uid) return false;
+      const firestoreDb = window.db || window.ffDb;
+      if (!firestoreDb) return false; // Firestore not ready — fail open
+      const firestoreApi = await getTrainingFirestoreApi();
+      const userSnap = await firestoreApi.getDoc(firestoreApi.doc(firestoreDb, 'users', user.uid));
+      if (!userSnap.exists()) return false;
+      const u = userSnap.data() || {};
+      const role = String(u.role || '').toLowerCase();
+      if (role === 'owner') return false; // owners are never archivable
+      const salonId = u.salonId ? String(u.salonId).trim() : '';
+      const staffId = u.staffId ? String(u.staffId).trim() : '';
+      if (!salonId || !staffId) return false;
+      const staffSnap = await firestoreApi.getDoc(
+        firestoreApi.doc(firestoreDb, `salons/${salonId}/staff`, staffId)
+      );
+      if (!staffSnap.exists()) return false;
+      const s = staffSnap.data() || {};
+      if (s.isArchived === true) {
+        console.log('[checkArchivedUserAccessGuard] BLOCKED: staff doc isArchived=true', {
+          email: user.email, salonId, staffId, name: s.name || ''
+        });
         return true;
       }
-      
       return false;
     } catch (e) {
       console.error('[checkArchivedUserAccessGuard] Error:', e);
-      // Fail open: don't block if check fails
-      return false;
+      return false; // fail open on any error
     }
   }
   
-  // Expose access guard globally for use in auth state handler
   window.checkArchivedUserAccessGuard = checkArchivedUserAccessGuard;
   
   // Helper function: Count number of staff with isAdmin === true
@@ -25491,7 +25968,9 @@ function initializeAppsPanel() {
   // Expose helper globally
   window.ffAuthByPin = ffAuthByPin;
   
-  // Helper to check if a PIN belongs to an Admin or Manager staff member
+  // Helper to check if a PIN belongs to an Admin or Manager staff member.
+  // The salon owner is ALWAYS accepted here — they have full access at
+  // runtime regardless of the Admin/Manager flags or permissions doc.
   function ffIsAdminOrManagerPin(pin) {
     try {
       if (!pin) return false;
@@ -25508,8 +25987,19 @@ function initializeAppsPanel() {
         String(s.pin).trim() === normalizedPin
       );
       
-      // Check if staff exists and is Admin or Manager
-      if (staff && (staff.isAdmin === true || staff.isManager === true)) {
+      if (!staff) return false;
+
+      // Salon owner bypass — always accepted for admin/manager gates.
+      if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
+        return true;
+      }
+
+      // Check if staff is Admin or Manager
+      if (staff.isAdmin === true || staff.isManager === true) {
+        return true;
+      }
+      const roleLc = String(staff.role || '').toLowerCase().trim();
+      if (roleLc === 'owner' || roleLc === 'admin' || roleLc === 'manager') {
         return true;
       }
       
@@ -25533,7 +26023,40 @@ function initializeAppsPanel() {
   function renderStaffList() {
     try {
       const staffData = ffGetStaffStore();
-      const staff = staffData.staff;
+      const staffAll = staffData.staff;
+      // STRICT client-side location filter (per product spec "each location is
+      // a separate business"):
+      //   - If an activeLocationId is set, keep only staff whose
+      //     allowedLocationIds explicitly includes it.
+      //   - Owner / Admin / Manager rows are ALWAYS visible regardless of
+      //     location — salon leadership needs to be reachable everywhere.
+      //   - If no activeLocationId (initial load, before locations doc
+      //     resolves), show everything so the UI doesn't blink empty.
+      // NOTE: Firestore query is unchanged; this is purely a display filter.
+      const activeLocationIdForFilter =
+        (typeof window.ffGetActiveLocationId === 'function' ? window.ffGetActiveLocationId() : null) ||
+        (typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id
+          ? window.__ff_active_location_id
+          : null);
+      const staff = activeLocationIdForFilter
+        ? staffAll.filter(function (s) {
+            if (!s) return false;
+            // Owner / Admin / Manager always visible across locations.
+            if (s.isAdmin === true || s.isManager === true) return true;
+            if (typeof window.ffStaffRowIsSalonOwner === 'function' &&
+                window.ffStaffRowIsSalonOwner(s)) return true;
+            const roleLc = String(s.role || '').toLowerCase().trim();
+            if (roleLc === 'owner' || roleLc === 'admin' || roleLc === 'manager') return true;
+            // Everyone else must be explicitly assigned to this location.
+            // Missing / empty allowedLocationIds => NOT assigned to any
+            // branch and therefore hidden from every location's list
+            // until someone assigns them via the Locations tab.
+            if (!Array.isArray(s.allowedLocationIds) || s.allowedLocationIds.length === 0) {
+              return false;
+            }
+            return s.allowedLocationIds.indexOf(activeLocationIdForFilter) !== -1;
+          })
+        : staffAll;
       const adminsList = document.getElementById('staffAdminsList');
       const managersList = document.getElementById('staffManagersList');
       const techniciansList = document.getElementById('staffTechniciansList');
@@ -25955,6 +26478,17 @@ function initializeAppsPanel() {
         } else if (tab === 'schedule') {
           renderScheduleTab(staff, isEditingStaffDetails);
         }
+      }
+    }
+    if (locationsContent && tab === 'locations' && selectedStaffId) {
+      const staffData = ffGetStaffStore();
+      const staff = staffData.staff.find(s => s.id === selectedStaffId);
+      if (staff && typeof renderLocationsTab === 'function') {
+        renderLocationsTab(staff);
+      }
+      // Kick a fresh read so the dropdown is up to date on first open.
+      if (typeof window.ffLocationsForceLoad === 'function') {
+        window.ffLocationsForceLoad();
       }
     }
     if (permissionsContent) {
@@ -26416,7 +26950,13 @@ function initializeAppsPanel() {
             rowOpts.disabled = true;
           }
         }
+        // The salon owner has unconditional full access at runtime, but the
+        // permissions document in Firestore may have empty/false fields for
+        // legacy reasons. Force every toggle ON (and locked) so the UI
+        // accurately reflects "full access" for the owner row — otherwise it
+        // looks like the owner is restricted, which they are not.
         if (ownerRowLocked) {
+          value = true;
           rowOpts.disabled = true;
         }
         return renderPermissionToggleRow(perm.key, perm.label, perm.desc, value, rowOpts);
@@ -26505,6 +27045,9 @@ function initializeAppsPanel() {
           if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
           if (typeof window.ffScheduleRefreshPermissionChrome === 'function') window.ffScheduleRefreshPermissionChrome();
           if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') window.ffSyncUserProfileBillingMenuVisibility();
+          if (typeof window.ffSyncUserProfileLocationsMenuVisibility === 'function') window.ffSyncUserProfileLocationsMenuVisibility();
+          if (typeof window.ffSyncUserProfileScheduleMenuVisibility === 'function') window.ffSyncUserProfileScheduleMenuVisibility();
+          if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') window.ffSyncUserProfilePreferencesMenuVisibility();
           if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
           if (typeof window.updateMediaScreenTabsForRole === 'function') window.updateMediaScreenTabsForRole();
           if (typeof window.refreshMediaWorksList === 'function') window.refreshMediaWorksList();
@@ -27001,7 +27544,183 @@ function initializeAppsPanel() {
       }
     }
   }
-  
+
+  /**
+   * Thin wrapper that delegates to the canonical implementation in
+   * location-helpers.js. Kept so the few call sites below can stay unchanged.
+   */
+  function ffEnsureStaffLocationFieldsLocal(staff) {
+    if (typeof window.ffEnsureStaffLocationFields === 'function') {
+      return window.ffEnsureStaffLocationFields(staff);
+    }
+    return staff || { primaryLocationId: null, allowedLocationIds: [] };
+  }
+
+  // Render the Locations tab for a staff member.
+  function renderLocationsTab(staff) {
+    const container = document.getElementById('staffLocationsTabContent');
+    if (!container) return;
+
+    const normalized = ffEnsureStaffLocationFieldsLocal(staff || {});
+    const locations = (typeof window.ffGetActiveLocations === 'function')
+      ? window.ffGetActiveLocations()
+      : [];
+
+    if (!Array.isArray(locations) || locations.length === 0) {
+      container.innerHTML = `
+        <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+          <h3 style="margin:0 0 6px 0;font-size:14px;font-weight:600;color:#111827;">Locations</h3>
+          <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.5;">
+            No salon locations have been added yet. Add at least one location in your salon settings to assign it to a staff member.
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    // No more "primary" concept in the UI — just a simple list of toggles.
+    // Which locations the staff is visible in == allowedLocationIds.
+    // We still compute a primary internally (first allowed id) to stay
+    // backward-compatible with any code that still reads primaryLocationId.
+    const currentAllowed = Array.isArray(normalized.allowedLocationIds) && normalized.allowedLocationIds.length > 0
+      ? normalized.allowedLocationIds.slice()
+      : (normalized.primaryLocationId ? [normalized.primaryLocationId] : []);
+
+    const toggleRows = locations.map(function (loc) {
+      const checked = currentAllowed.indexOf(loc.id) !== -1;
+      return `
+        <div class="staff-permission-row" data-ff-location-row="true">
+          <label class="staff-permission-toggle">
+            <input type="checkbox" class="ff-staff-loc-extra" value="${escapeHtml(loc.id)}"${checked ? ' checked' : ''}>
+            <span class="staff-permission-toggle-slider"></span>
+          </label>
+          <div class="staff-permission-label">
+            <div class="staff-permission-label-title">${escapeHtml(loc.name || loc.id)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = `
+      <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px;max-width:420px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <h3 style="margin:0;font-size:14px;font-weight:600;color:#111827;">Locations</h3>
+          <div style="display:flex;gap:6px;">
+            <button type="button" id="ffStaffLocationsSaveBtn" style="padding:5px 12px;background:#7c3aed;border:1px solid #7c3aed;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer;">Save</button>
+            <button type="button" id="ffStaffLocationsResetBtn" style="padding:5px 12px;background:#f3f4f6;border:1px solid var(--border);border-radius:6px;color:#374151;font-size:11px;font-weight:500;cursor:pointer;">Reset</button>
+          </div>
+        </div>
+        <p style="margin:0 0 10px 0;font-size:11px;color:#6b7280;line-height:1.45;">
+          Turn on the locations where this staff member works and should be visible. At least one location is required.
+        </p>
+
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div>
+            <div id="ffStaffLocationsExtraList" style="display:flex;flex-direction:column;gap:6px;">
+              ${toggleRows}
+            </div>
+          </div>
+
+          <div id="ffStaffLocationsFeedback" role="status" style="min-height:16px;font-size:11px;line-height:1.35;"></div>
+        </div>
+      </div>
+    `;
+
+    const resetBtn = document.getElementById('ffStaffLocationsResetBtn');
+    if (resetBtn) {
+      resetBtn.onclick = function () {
+        const fresh = ffGetStaffStore();
+        const live = fresh.staff.find(function (s) { return s.id === selectedStaffId; });
+        if (live) renderLocationsTab(live);
+      };
+    }
+
+    const saveBtn = document.getElementById('ffStaffLocationsSaveBtn');
+    if (saveBtn) {
+      saveBtn.onclick = function () {
+        saveStaffLocations();
+      };
+    }
+  }
+
+  function saveStaffLocations() {
+    const feedback = document.getElementById('ffStaffLocationsFeedback');
+    function showErr(msg) {
+      if (feedback) {
+        feedback.textContent = msg;
+        feedback.style.color = '#b91c1c';
+      } else {
+        alert(msg);
+      }
+    }
+    function showOk(msg) {
+      if (feedback) {
+        feedback.textContent = msg;
+        feedback.style.color = '#047857';
+      }
+    }
+
+    if (!selectedStaffId) return;
+    const extraInputs = document.querySelectorAll('#ffStaffLocationsExtraList input.ff-staff-loc-extra');
+
+    // Collect every toggled-on location. There's no "primary" concept in the
+    // UI anymore — the staff is visible in exactly the locations they're
+    // toggled on for.
+    const allowedSet = {};
+    extraInputs.forEach(function (inp) {
+      if (inp.checked && typeof inp.value === 'string' && inp.value.trim()) {
+        allowedSet[inp.value.trim()] = true;
+      }
+    });
+    const allowed = Object.keys(allowedSet);
+
+    if (allowed.length < 1) {
+      showErr('Please turn on at least one location.');
+      return;
+    }
+
+    const store = ffGetStaffStore();
+    const idx = store.staff.findIndex(function (s) { return s.id === selectedStaffId; });
+    if (idx === -1) {
+      showErr('Staff member not found.');
+      return;
+    }
+
+    const oldStaff = store.staff[idx];
+    // Preserve existing primary if still in allowed, otherwise default to the
+    // first allowed id. primaryLocationId is no longer user-editable but we
+    // keep it on the document for backward compatibility (schedule defaults,
+    // reports, etc.).
+    const preservedPrimary = oldStaff && oldStaff.primaryLocationId
+      && allowed.indexOf(oldStaff.primaryLocationId) !== -1
+      ? oldStaff.primaryLocationId
+      : allowed[0];
+
+    store.staff[idx] = Object.assign({}, oldStaff, {
+      primaryLocationId: preservedPrimary,
+      allowedLocationIds: allowed,
+      updatedAtMs: Date.now(),
+    });
+
+    ffSaveStaffStore(store);
+    showOk('Locations saved.');
+
+    // Re-render the tab AND the sidebar list, so the location filter
+    // reflects the change immediately (otherwise the staff still shows up
+    // under the wrong active location until a manual refresh).
+    renderLocationsTab(store.staff[idx]);
+    if (typeof renderStaffList === 'function') {
+      try { renderStaffList(); } catch (_) {}
+    }
+
+    // Fire a local event NOW so every listener (Queue Join dropdown,
+    // Inbox, etc.) refreshes immediately instead of waiting for the 450ms
+    // Firestore debounce round-trip.
+    try {
+      document.dispatchEvent(new CustomEvent('ff-staff-cloud-updated'));
+    } catch (_) {}
+  }
+
   // Start editing staff details
   function startEditStaffDetails() {
     if (!selectedStaffId) return;
@@ -27716,6 +28435,18 @@ function initializeAppsPanel() {
         technicianTypes = getSelectedTechnicianTypes('staffTechnicianTypesCheckboxes');
       }
       
+      // Auto-assign the newly created staff to the currently active location,
+      // so they are immediately visible in the Staff Members sidebar under the
+      // active location. Without this, a freshly added technician would appear
+      // only in the Queue dropdown (which ignores location) but not in the
+      // Staff Members list (which filters by allowedLocationIds). The owner
+      // can later add/remove locations from the Staff Member → Locations tab.
+      const activeLocationIdForNewStaff =
+        (typeof window.ffGetActiveLocationId === 'function' ? window.ffGetActiveLocationId() : null) ||
+        (typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id
+          ? window.__ff_active_location_id
+          : null);
+
       // Create new staff member object
       const newStaffMember = {
         id: 'staff_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
@@ -27736,6 +28467,8 @@ function initializeAppsPanel() {
         isAdmin: roleFields.isAdmin,
         isManager: roleFields.isManager,
         managerType: roleFields.managerType,
+        primaryLocationId: activeLocationIdForNewStaff || undefined,
+        allowedLocationIds: activeLocationIdForNewStaff ? [activeLocationIdForNewStaff] : [],
         employmentType: window.ffScheduleHelpers?.normalizeEmploymentType
           ? window.ffScheduleHelpers.normalizeEmploymentType(null)
           : null,
@@ -27796,6 +28529,55 @@ function initializeAppsPanel() {
   document.addEventListener('ff-staff-cloud-updated', function() {
     if (staffMembersModal && staffMembersModal.style.display !== 'none') {
       renderStaffList();
+    }
+  });
+
+  // Re-render the Staff Members list when the active location switches, so
+  // the client-side location filter reflects the new scope. This only affects
+  // the already-open modal; it does not touch sorting or the Firestore query.
+  document.addEventListener('ff-active-location-changed', function() {
+    if (staffMembersModal && staffMembersModal.style.display !== 'none') {
+      renderStaffList();
+    }
+  });
+
+  // Keep the Manage Queue screen in sync when the active location changes or
+  // when cloud queue settings are applied for a new location. Each branch has
+  // its own Auto Reset and Location Restriction configuration, so we must
+  // refresh every relevant input from the per-location ff_queues_v1.
+  function ffRefreshManageQueueSettingsUI() {
+    try {
+      const manageQueueScreen = document.getElementById('manageQueueScreen');
+      if (!manageQueueScreen || manageQueueScreen.style.display === 'none') return;
+      if (typeof getQueueAutoResetSettings === 'function') {
+        const autoReset = getQueueAutoResetSettings();
+        const enabledEl = document.getElementById('manageQueueAutoResetEnabled');
+        const timeEl = document.getElementById('manageQueueAutoResetTime');
+        const forceEl = document.getElementById('manageQueueAutoResetForce');
+        if (enabledEl) enabledEl.checked = autoReset.enabled === true;
+        if (timeEl) timeEl.value = autoReset.time || '04:00';
+        if (forceEl) forceEl.checked = autoReset.resetWhileInService === true;
+      }
+      if (typeof renderManageQueueGeoFenceSettings === 'function') {
+        renderManageQueueGeoFenceSettings();
+      }
+    } catch (err) {
+      console.warn('[ManageQueue] refresh after location change failed', err);
+    }
+  }
+  document.addEventListener('ff-active-location-changed', ffRefreshManageQueueSettingsUI);
+  document.addEventListener('ff-queue-settings-changed', ffRefreshManageQueueSettingsUI);
+
+  // Refresh Locations tab when the locations collection changes.
+  document.addEventListener('ff-locations-updated', function() {
+    if (!selectedStaffId) return;
+    if (currentTab !== 'locations') return;
+    const locationsContent = document.getElementById('staffLocationsTabContent');
+    if (!locationsContent || locationsContent.style.display === 'none') return;
+    const store = ffGetStaffStore();
+    const staff = store.staff.find(function (s) { return s.id === selectedStaffId; });
+    if (staff && typeof renderLocationsTab === 'function') {
+      renderLocationsTab(staff);
     }
   });
 
@@ -29453,11 +30235,7 @@ function initializeUserProfileMenu() {
     }
     // Default values
     return {
-      notifications: {
-        taskReminders: true,
-        dailySummary: true,
-        queueAlerts: true
-      },
+      notifications: {},
       preferences: {
         timeFormat: '12h',
         defaultScreen: 'queue'
@@ -29474,12 +30252,20 @@ function initializeUserProfileMenu() {
     }
   }
 
+  // Helper: true only if the current user is the Salon Owner. Admin/Manager
+  // staff DO NOT get owner-only sections (Billing, Locations, Schedule,
+  // Preferences) because those affect the entire salon / subscription.
+  function ffIsCurrentUserOwnerForSettings() {
+    try {
+      return typeof window.ffIsOwner === 'function' && window.ffIsOwner() === true;
+    } catch (_) { return false; }
+  }
+
   function ffSyncUserProfileBillingMenuVisibility() {
     try {
       const billingBtn = document.querySelector('.user-profile-menu-item[data-section="billing"]');
       if (!billingBtn) return;
-      const show = typeof window.ffIsOwner === 'function' && window.ffIsOwner();
-      billingBtn.style.display = show ? '' : 'none';
+      billingBtn.style.display = ffIsCurrentUserOwnerForSettings() ? '' : 'none';
     } catch (e) {
       console.warn('[User Profile] ffSyncUserProfileBillingMenuVisibility', e);
     }
@@ -29487,11 +30273,61 @@ function initializeUserProfileMenu() {
   window.ffSyncUserProfileBillingMenuVisibility = ffSyncUserProfileBillingMenuVisibility;
   ffSyncUserProfileBillingMenuVisibility();
 
+  // Locations section — OWNER ONLY. Only the salon owner can add, edit, or
+  // remove locations because locations drive the subscription/billing scope
+  // and the per-location data partitioning across the app.
+  function ffSyncUserProfileLocationsMenuVisibility() {
+    try {
+      const btn = document.querySelector('.user-profile-menu-item[data-section="locations"]');
+      if (!btn) return;
+      btn.style.display = ffIsCurrentUserOwnerForSettings() ? '' : 'none';
+    } catch (e) {
+      console.warn('[User Profile] ffSyncUserProfileLocationsMenuVisibility', e);
+    }
+  }
+  window.ffSyncUserProfileLocationsMenuVisibility = ffSyncUserProfileLocationsMenuVisibility;
+  ffSyncUserProfileLocationsMenuVisibility();
+
+  // Schedule section — OWNER ONLY. Defines salon-wide hours / working days
+  // that shape the rest of the app (Schedule module, Queue auto-reset).
+  function ffSyncUserProfileScheduleMenuVisibility() {
+    try {
+      const btn = document.querySelector('.user-profile-menu-item[data-section="schedule"]');
+      if (!btn) return;
+      btn.style.display = ffIsCurrentUserOwnerForSettings() ? '' : 'none';
+    } catch (e) {
+      console.warn('[User Profile] ffSyncUserProfileScheduleMenuVisibility', e);
+    }
+  }
+  window.ffSyncUserProfileScheduleMenuVisibility = ffSyncUserProfileScheduleMenuVisibility;
+  ffSyncUserProfileScheduleMenuVisibility();
+
+  // Preferences section — OWNER ONLY. Governs salon-wide defaults (timezone,
+  // currency, week start, staff-call templates, etc.). Per-user UI prefs
+  // (like time format / default screen) live in profile prefs localStorage
+  // and are handled elsewhere if/when we expose a per-user view.
+  function ffSyncUserProfilePreferencesMenuVisibility() {
+    try {
+      const btn = document.querySelector('.user-profile-menu-item[data-section="preferences"]');
+      if (!btn) return;
+      btn.style.display = ffIsCurrentUserOwnerForSettings() ? '' : 'none';
+    } catch (e) {
+      console.warn('[User Profile] ffSyncUserProfilePreferencesMenuVisibility', e);
+    }
+  }
+  window.ffSyncUserProfilePreferencesMenuVisibility = ffSyncUserProfilePreferencesMenuVisibility;
+  ffSyncUserProfilePreferencesMenuVisibility();
+
   // Menu item click handler
   function handleMenuClick(section) {
     // Expose for external use
     window.__ff_handleMenuClick = handleMenuClick;
-    if (section === 'billing' && typeof window.ffIsOwner === 'function' && !window.ffIsOwner()) {
+    // Double-gate owner-only sections (defense in depth). If someone forces
+    // a section via window.__ff_handleMenuClick or a stale deep-link, we
+    // bounce them to a safe tab. Visibility sync above already hides the
+    // menu buttons for non-owners.
+    const ownerOnlySections = ['billing', 'locations', 'schedule', 'preferences'];
+    if (ownerOnlySections.indexOf(section) !== -1 && !ffIsCurrentUserOwnerForSettings()) {
       section = 'password';
     }
     // Update menu item active states (purple tint via .user-profile-menu-item--active; see CSS)
@@ -29516,7 +30352,8 @@ function initializeUserProfileMenu() {
       'notifications': 'userProfileCardNotifications',
       'preferences': 'userProfileCardPreferences',
       'schedule': 'userProfileCardSchedule',
-      'billing': 'userProfileCardBilling'
+      'billing': 'userProfileCardBilling',
+      'locations': 'userProfileCardLocations'
     };
     
     const cardId = sectionToCardId[section] || `userProfileCard${section.charAt(0).toUpperCase() + section.slice(1)}`;
@@ -29582,6 +30419,12 @@ function initializeUserProfileMenu() {
             window.ffRunBirthdayChatRemindersSoon();
           }
         }, 500);
+      }
+      // Render locations list into the Settings card when user opens this tab.
+      // locations-manage.js listens for ff-locations-updated and re-renders,
+      // but we also trigger a one-shot render here so the list paints immediately.
+      if (section === 'locations' && typeof window.ffRenderLocationsSettings === 'function') {
+        window.ffRenderLocationsSettings();
       }
     }
   }
@@ -29703,16 +30546,10 @@ function initializeUserProfileMenu() {
     });
   }
   
-  // Load and bind notification toggles
-  const taskRemindersToggle = document.getElementById('userProfileToggleTaskReminders');
-  const dailySummaryToggle = document.getElementById('userProfileToggleDailySummary');
-  const queueAlertsToggle = document.getElementById('userProfileToggleQueueAlerts');
-  
+  // Notifications: only the birthday-reminder "days in advance" input remains
+  // (the old Task reminders / Daily summary / Queue alerts toggles were
+  // decorative and were removed from the UI — they aren't wired to anything).
   function loadNotificationPrefs() {
-    const prefs = getProfilePrefs();
-    if (taskRemindersToggle) taskRemindersToggle.checked = prefs.notifications.taskReminders;
-    if (dailySummaryToggle) dailySummaryToggle.checked = prefs.notifications.dailySummary;
-    if (queueAlertsToggle) queueAlertsToggle.checked = prefs.notifications.queueAlerts;
     const bDayInput = document.getElementById('userProfileBirthdayReminderDays');
     if (bDayInput && typeof settings !== 'undefined' && settings) {
       const v = settings.preferences && typeof settings.preferences.birthdayReminderDaysBefore === 'number'
@@ -29737,6 +30574,13 @@ function initializeUserProfileMenu() {
       localStorage.setItem('ffv24_settings', JSON.stringify(currentSettings));
     } catch (_) {}
     if (typeof save === 'function') save();
+    // Per-location cloud save — this is what persists across devices and
+    // what keeps Kibiscan's days-in-advance separate from Brickell's.
+    try {
+      if (typeof window.ffSaveBirthdayReminderDays === 'function') {
+        window.ffSaveBirthdayReminderDays(n);
+      }
+    } catch (e) { console.warn('[Notifications] save birthday days cloud', e); }
     try {
       sessionStorage.removeItem('ff_birthday_today_parts_v1');
     } catch (_) {}
@@ -29747,34 +30591,27 @@ function initializeUserProfileMenu() {
     }, 600);
   }
   
-  function saveNotificationPrefs() {
-    const prefs = getProfilePrefs();
-    prefs.notifications = {
-      taskReminders: taskRemindersToggle ? taskRemindersToggle.checked : true,
-      dailySummary: dailySummaryToggle ? dailySummaryToggle.checked : true,
-      queueAlerts: queueAlertsToggle ? queueAlertsToggle.checked : true
-    };
-    saveProfilePrefs(prefs);
-  }
-  
-  if (taskRemindersToggle && !taskRemindersToggle.__ffBound) {
-    taskRemindersToggle.__ffBound = true;
-    taskRemindersToggle.addEventListener('change', saveNotificationPrefs);
-  }
-  if (dailySummaryToggle && !dailySummaryToggle.__ffBound) {
-    dailySummaryToggle.__ffBound = true;
-    dailySummaryToggle.addEventListener('change', saveNotificationPrefs);
-  }
-  if (queueAlertsToggle && !queueAlertsToggle.__ffBound) {
-    queueAlertsToggle.__ffBound = true;
-    queueAlertsToggle.addEventListener('change', saveNotificationPrefs);
-  }
-
   const birthdayReminderDaysInput = document.getElementById('userProfileBirthdayReminderDays');
   if (birthdayReminderDaysInput && !birthdayReminderDaysInput.__ffBound) {
     birthdayReminderDaysInput.__ffBound = true;
     birthdayReminderDaysInput.addEventListener('change', saveBirthdayReminderPrefs);
     birthdayReminderDaysInput.addEventListener('blur', saveBirthdayReminderPrefs);
+  }
+
+  // Re-load the Notifications input when the active location changes — the
+  // days-in-advance is per-location and settings-cloud.js already updates
+  // window.settings.preferences.birthdayReminderDaysBefore on switch.
+  if (typeof document !== 'undefined' && !document.__ffNotificationsLocRefreshBound) {
+    document.__ffNotificationsLocRefreshBound = true;
+    document.addEventListener('ff-active-location-changed', () => {
+      try {
+        const card = document.getElementById('userProfileCardNotifications');
+        if (!card || card.style.display === 'none') return;
+        if (typeof loadNotificationPrefs === 'function') loadNotificationPrefs();
+      } catch (e) {
+        console.warn('[Notifications] refresh on location change failed', e);
+      }
+    });
   }
 
   const ffTestBirthdayInboxBtn = document.getElementById('ffTestBirthdayInboxBtn');
@@ -34121,24 +34958,42 @@ function openAddTechDialog(){
     console.error('[AddTech] Error loading ff_staff_v1:', e);
   }
 
+  // Scope the Reorder "Add service provider" dropdown to the active
+  // branch, mirroring the Join dropdown. Only staff with the active
+  // location in allowedLocationIds (or salon-wide admins/owners) appear
+  // here — otherwise the branches aren't really separate.
+  const activeLocForAddTech =
+    (typeof window.ffGetActiveLocationId === 'function' ? window.ffGetActiveLocationId() : null) ||
+    (typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id
+      ? window.__ff_active_location_id
+      : null);
+
   staffList.forEach(w => {
     if (
-      w &&
-      w.name &&
-      w.name.trim() &&
-      w.isArchived !== true &&
-      ffStaffHasQueueJoinPermission(w) &&
-      !availableNames.has(w.name)
+      !w ||
+      !w.name ||
+      !w.name.trim() ||
+      w.isArchived === true ||
+      !ffStaffHasQueueJoinPermission(w) ||
+      availableNames.has(w.name)
     ) {
-      const opt = document.createElement('option');
-      opt.value = w.name;
-      opt.textContent = w.name;
-      addTechSelect.appendChild(opt);
-      options.push(w.name);
+      return;
     }
+    if (activeLocForAddTech) {
+      const allowed = Array.isArray(w.allowedLocationIds) ? w.allowedLocationIds : [];
+      const isSalonWide = w.isAdmin === true || w.isOwner === true || String(w.role || '').toLowerCase() === 'owner';
+      if (!isSalonWide && allowed.indexOf(activeLocForAddTech) === -1) {
+        return;
+      }
+    }
+    const opt = document.createElement('option');
+    opt.value = w.name;
+    opt.textContent = w.name;
+    addTechSelect.appendChild(opt);
+    options.push(w.name);
   });
 
-  console.log('[AddTech] queue_join eligible options', options);
+  console.log('[AddTech] queue_join eligible options for location', activeLocForAddTech || '(none)', options);
 
   
 
@@ -34473,6 +35328,28 @@ window.__ffQueueCloudInit = function() {
     }
   });
 };
+
+// When the active branch changes in the header switcher, rebuild the Join
+// dropdown so it only offers staff who work at the new branch. The queue /
+// service / history cards are already refreshed by queue-cloud.js swapping
+// its Firestore subscription to the new branch's queueState doc.
+if (!window.__ffQueueLocationListenerBound) {
+  window.__ffQueueLocationListenerBound = true;
+  document.addEventListener('ff-active-location-changed', function () {
+    try {
+      if (typeof renderSelect === 'function') renderSelect();
+    } catch (e) {
+      console.warn('[Queue] renderSelect on location change failed', e);
+    }
+  });
+  // Staff's allowedLocationIds may have been edited (e.g. owner toggled a
+  // branch on/off in Staff Member → Locations). Rebuild the dropdown.
+  document.addEventListener('ff-staff-cloud-updated', function () {
+    try {
+      if (typeof renderSelect === 'function') renderSelect();
+    } catch (_) {}
+  });
+}
 
 // ===== AUTH FOUNDATION ONLY =====
 // Helper functions for staff profile and invite management
@@ -35011,7 +35888,7 @@ function hookSettingsGuard_DISABLED(){
     <div id="holdCodeError" style="color:#dc2626;font-size:13px;margin-top:8px;min-height:20px;display:none;text-align:center;"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
       <button id="holdCodeCancel" style="padding:8px 14px;border-radius:8px;border:1px solid #ddd;background:#fff;cursor:pointer">Cancel</button>
-      <button id="holdCodeOk" style="padding:8px 14px;border-radius:8px;border:0;background:#111;color:#fff;cursor:pointer">OK</button>
+      <button id="holdCodeOk" style="padding:8px 14px;border-radius:8px;border:0;background:#7c3aed;color:#fff;cursor:pointer;font-weight:600">OK</button>
     </div>
   </div>
 </div>
@@ -35029,7 +35906,7 @@ function hookSettingsGuard_DISABLED(){
 
       <button id="resetConfirmCancel" style="padding:8px 14px;border-radius:8px;border:1px solid #ddd;background:#fff;cursor:pointer">Cancel</button>
 
-      <button id="resetConfirmContinue" style="padding:8px 14px;border-radius:8px;border:0;background:#111;color:#fff;cursor:pointer">Continue</button>
+      <button id="resetConfirmContinue" style="padding:8px 14px;border-radius:8px;border:0;background:#7c3aed;color:#fff;cursor:pointer;font-weight:600">Continue</button>
 
     </div>
 
@@ -35963,7 +36840,7 @@ function hookSettingsGuard_DISABLED(){
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button id="__log_cancel" style="border:0;border-radius:10px;padding:9px 14px;background:#eee;font:600 14px inherit">Cancel</button>
-        <button id="__log_ok" style="border:0;border-radius:10px;padding:9px 14px;background:#111;color:#fff;font:600 14px inherit">OK</button>
+        <button id="__log_ok" style="border:0;border-radius:10px;padding:9px 14px;background:#7c3aed;color:#fff;font:600 14px inherit">OK</button>
       </div></div>`;
 
     document.body.appendChild(ov);
@@ -36230,7 +37107,7 @@ function hookSettingsGuard_DISABLED(){
 
             + '  <button id="sl_cancelX" type="button" style="border:1px solid #ddd;border-radius:10px;padding:8px 14px;background:#eee">Cancel</button>'
 
-            + '  <button id="sl_okX" type="button" style="border:0;border-radius:10px;padding:8px 16px;background:#111;color:#fff">OK</button>'
+            + '  <button id="sl_okX" type="button" style="border:0;border-radius:10px;padding:8px 16px;background:#7c3aed;color:#fff;font-weight:600">OK</button>'
 
             + '</div>';
 
@@ -38478,14 +39355,19 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/inbox.js?v=20260420_inv_draftpicker_v123"></script>
   <script type="module" src="/chat.js?v=20260412_chat_sender_display"></script>
   <script type="module" src="/staff-cloud.js?v=20260415_ff_toast"></script>
+  <script type="module" src="/locations-cloud.js?v=20260420_locations_v1"></script>
+  <script src="/location-helpers.js?v=20260420_owner_bypass_v1"></script>
+  <script src="/location-switcher.js?v=20260420_switcher_mangomint_v1"></script>
   <script type="module" src="/staff-documents.js?v=20260412_doc_meta_edit"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260412_staffcall_accept_ui"></script>
   <script type="module" src="/settings-cloud.js?v=20260420_salon_currency_v2"></script>
-  <script type="module" src="/queue-cloud.js?v=20260312_fix2"></script>
+  <script type="module" src="/queue-cloud.js?v=20260420_per_location_v1"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/tickets.js?v=20260420_tickets_currency_v2"></script>
+  <script type="module" src="/tickets.js?v=20260420_tickets_per_location_v2"></script>
   <script type="module" src="/media-upload.js?v=20260412_app_js_unify"></script>
   <script type="module" src="/inventory.js?v=20260420_inv_draftpicker_v123"></script>
+  <script type="module" src="/onboarding-wizard.js?v=20260420_onboarding_v1"></script>
+  <script type="module" src="/locations-manage.js?v=20260420_locations_in_settings_v1"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -39165,7 +40047,7 @@ function hookSettingsGuard_DISABLED(){
       <button onclick="window.closeServicesModal && window.closeServicesModal()" style="background:none;border:none;cursor:pointer;font-size:22px;color:#6b7280;line-height:1;">×</button>
     </div>
     <div style="display:flex;border-bottom:1px solid #e5e7eb;">
-      <button id="servicesCatalogTab" style="flex:1;padding:12px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid #111;">Services</button>
+      <button id="servicesCatalogTab" style="flex:1;padding:12px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:600;color:#7c3aed;border-bottom:2px solid #7c3aed;">Services</button>
       <button id="servicesCategoriesTab" style="flex:1;padding:12px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:500;color:#6b7280;border-bottom:2px solid transparent;">Categories</button>
     </div>
     <div id="servicesCatalogPanel" style="padding:16px;display:block;">
@@ -39174,13 +40056,13 @@ function hookSettingsGuard_DISABLED(){
         <input id="serviceFormName" type="text" placeholder="Service name" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
         <select id="serviceFormCategory" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;"></select>
         <input id="serviceFormPrice" type="number" min="0" step="0.01" placeholder="Default price ($)" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
-        <button onclick="window.saveServiceFromForm && window.saveServiceFromForm()" style="padding:10px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Save Service</button>
+        <button onclick="window.saveServiceFromForm && window.saveServiceFromForm()" style="padding:10px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Save Service</button>
       </div>
     </div>
     <div id="servicesCategoriesPanel" style="padding:16px;display:none;">
       <div style="display:flex;gap:8px;margin-bottom:12px;">
         <input id="newCategoryName" type="text" placeholder="Category name" style="flex:1;padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
-        <button onclick="window.addServiceCategory && window.addServiceCategory()" style="padding:10px 16px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Add</button>
+        <button onclick="window.addServiceCategory && window.addServiceCategory()" style="padding:10px 16px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Add</button>
       </div>
       <div id="categoriesList" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;"></div>
     </div>

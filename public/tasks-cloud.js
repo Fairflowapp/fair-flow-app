@@ -4,7 +4,7 @@
  * Firestore doc: { catalog, opening, closing, weekly, monthly, yearly, tombstone, alertWindows, enforceSelectSettings, updatedAt }
  */
 
-import { doc, getDoc, getDocFromServer, setDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { doc, getDoc, getDocFromServer, setDoc, deleteDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "./app.js?v=20260411_chat_reminder_attrfix";
 
@@ -86,30 +86,34 @@ function subscribe(salonId) {
   const ref = tasksStateRef(salonId);
   _unsubscribe = onSnapshot(ref, (snap) => {
     if (!_applyState) return;
-    const localState = _getState ? _getState() : null;
-    const localHasData = stateHasData(localState);
 
+    // NOTE: We deliberately do NOT push local state → cloud when the salon is empty.
+    // For a brand-new owner account the cloud is legitimately empty, and copying up
+    // localStorage tasks from the previous account leaks data across tenants.
+    // Instead, when the cloud is empty we clear the local applied state so stale
+    // tasks from a previous account cannot leak into the UI.
     if (!snap.exists()) {
-      if (localHasData) {
-        console.log("[TasksCloud] No cloud doc, pushing local state");
-        setDoc(ref, buildFirestoreState(localState)).catch((e) => console.warn("[TasksCloud] Initial write failed", e));
+      try {
+        _applyState({
+          catalog: {},
+          opening: { active: [], pending: [], done: [] },
+          closing: { active: [], pending: [], done: [] },
+          weekly:  { active: [], pending: [], done: [] },
+          monthly: { active: [], pending: [], done: [] },
+          yearly:  { active: [], pending: [], done: [] },
+          tombstone: {},
+          alertWindows: {},
+          enforceSelectSettings: {},
+          autoResetState: {}
+        });
+        if (typeof _onRefresh === "function") _onRefresh();
+      } catch (e) {
+        console.warn("[TasksCloud] clear-local-on-empty-cloud failed", e);
       }
       _firstSnapshot = false;
       return;
     }
     const data = snap.data();
-
-    // On first snapshot: if cloud is empty but local has data, push local to cloud
-    if (_firstSnapshot) {
-      const cloudState = { catalog: data.catalog || {} };
-      TABS.forEach((tab) => { cloudState[tab] = data[tab] || {}; });
-      if (!stateHasData(cloudState) && localHasData) {
-        console.log("[TasksCloud] Cloud empty but local has data, pushing local");
-        setDoc(ref, buildFirestoreState(localState)).catch((e) => console.warn("[TasksCloud] Push local failed", e));
-        _firstSnapshot = false;
-        return;
-      }
-    }
     _firstSnapshot = false;
 
     if (typeof window !== "undefined") window.__ffTasksApplyingRemote = true;
@@ -236,11 +240,58 @@ export function tasksCloudRefresh() {
   }).catch((e) => console.warn("[TasksCloud] refresh failed", e));
 }
 
+// ─── Public: one-click purge of tasks doc for the current salon ───────────────
+// Recovery helper for the case where the previous auto-migration leaked tasks
+// from one account into a fresh salon. Use via browser console:
+//   await window.ffClearAllTasksFromCloud();
+async function ffClearAllTasksFromCloud() {
+  const sid = _salonId || (await getSalonId());
+  if (!sid) {
+    console.warn("[TasksCloud] Cannot clear — no salonId.");
+    return { cleared: false };
+  }
+  try {
+    await deleteDoc(tasksStateRef(sid));
+    // Also wipe local tasks caches so the UI re-applies an empty state.
+    try {
+      ["ff_tasks_catalog_v1", "ff_tasks_active_deleted_v1", "ff_tasks_alert_windows_v1"].forEach((k) => {
+        try { localStorage.removeItem(k); } catch (_) {}
+      });
+    } catch (_) {}
+    if (_applyState) {
+      try {
+        window.__ffTasksApplyingRemote = true;
+        _applyState({
+          catalog: {},
+          opening: { active: [], pending: [], done: [] },
+          closing: { active: [], pending: [], done: [] },
+          weekly:  { active: [], pending: [], done: [] },
+          monthly: { active: [], pending: [], done: [] },
+          yearly:  { active: [], pending: [], done: [] },
+          tombstone: {},
+          alertWindows: {},
+          enforceSelectSettings: {},
+          autoResetState: {}
+        });
+        if (typeof _onRefresh === "function") _onRefresh();
+      } finally {
+        window.__ffTasksApplyingRemote = false;
+      }
+    }
+    console.log("[TasksCloud] Cleared tasks for salon", sid);
+    return { cleared: true };
+  } catch (e) {
+    console.error("[TasksCloud] ffClearAllTasksFromCloud error:", e);
+    throw e;
+  }
+}
+
 if (typeof window !== "undefined") {
   window.initTasksCloud = initTasksCloud;
   window.tasksCloudWrite = tasksCloudWrite;
   window.tasksCloudReconnect = tasksCloudReconnect;
   window.tasksCloudRefresh = tasksCloudRefresh;
+  window.ffClearAllTasksFromCloud = ffClearAllTasksFromCloud;
   if (typeof window.__ffTasksCloudInit === "function") {
     window.__ffTasksCloudInit();
   }

@@ -464,11 +464,35 @@ function updateTicketsEmployeeFilterVisibility() {
   if (sep && sep.classList.contains('tickets-filters-sep')) sep.style.display = disp;
 }
 
+/** Current active branch. Tickets with a locationId that doesn't match are
+ *  hidden; legacy tickets without a locationId are shown in every branch so
+ *  older data doesn't disappear from the UI. */
+function getActiveLocationIdForTickets() {
+  try {
+    if (typeof window === 'undefined') return null;
+    if (typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v) return v;
+    }
+    if (typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id) {
+      return window.__ff_active_location_id;
+    }
+  } catch (_) {}
+  return null;
+}
+
 /** Returns true if current user can see this ticket.
  *  Uses FIRESTORE profile role for admin/manager check — not PIN actor.
  *  This ensures admin always sees all tickets regardless of PIN state. */
 function canSeeTicket(ticket) {
   if (!currentUserProfile) return false;
+  // Location scope gate: if a branch is active AND the ticket is stamped
+  // for a different branch, hide it. Tickets without a locationId (legacy
+  // rows from before multi-branch) are still visible everywhere.
+  const activeLoc = getActiveLocationIdForTickets();
+  if (activeLoc && ticket && typeof ticket.locationId === 'string' && ticket.locationId && ticket.locationId !== activeLoc) {
+    return false;
+  }
   // Firestore role: admin/owner/manager always see all tickets
   const profileRole = (currentUserProfile.role || '').toLowerCase();
   if (['owner', 'admin', 'manager'].includes(profileRole)) return true;
@@ -640,6 +664,8 @@ async function createTicket(payload) {
   const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
   if (!salonId) throw new Error('No salon - ensure your account has salonId');
   const status = payload.status === 'READY_FOR_CHECKOUT' ? 'READY_FOR_CHECKOUT' : 'OPEN';
+  const activeLocForNewTicket = getActiveLocationIdForTickets();
+  console.log('[Tickets] createTicket → activeLocationId:', activeLocForNewTicket || '(NONE — ticket will have no locationId)');
   const doc = {
     status,
     asIs: payload.asIs === true,
@@ -654,6 +680,7 @@ async function createTicket(payload) {
     total: Number(payload.total) || 0,
     forUids: Array.isArray(payload.forUids) ? payload.forUids : [],
     forNames: Array.isArray(payload.forNames) ? payload.forNames : [],
+    ...(activeLocForNewTicket ? { locationId: activeLocForNewTicket } : {}),
     ...(status === 'READY_FOR_CHECKOUT' && { finalizedByUid: currentUserProfile.uid }),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -768,6 +795,14 @@ async function appendTicketSummaryOnClose(salonId, ticketId) {
     const now = new Date();
     const closedDateKey = _fmtYmdLocal(now);
 
+    // Prefer the ticket's own locationId (set at creation) so summaries stay
+    // scoped even if the user switched branches between opening and closing.
+    // Fallback to the currently active branch if the ticket predates multi-branch.
+    const ticketLocationId =
+      typeof t.locationId === 'string' && t.locationId
+        ? t.locationId
+        : getActiveLocationIdForTickets();
+
     const payload = {
       ticketId,
       salonId,
@@ -779,7 +814,8 @@ async function appendTicketSummaryOnClose(salonId, ticketId) {
       servicesCount,
       totalAmount,
       status: 'closed',
-      source: 'ticket_close'
+      source: 'ticket_close',
+      ...(ticketLocationId ? { locationId: ticketLocationId } : {})
     };
     console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: before addDoc ticketSummaries', {
       path: `salons/${salonId}/ticketSummaries`,
@@ -1067,6 +1103,16 @@ function summaryDocMatchesEmployee(d, staffId) {
   );
 }
 
+/** Mirrors canSeeTicket's location gate for summary rows: active branch wins
+ *  when the row has a locationId; legacy rows without a locationId stay
+ *  visible everywhere so older history isn't hidden. */
+function summaryDocMatchesLocation(d) {
+  const activeLoc = getActiveLocationIdForTickets();
+  if (!activeLoc) return true;
+  if (!d || typeof d.locationId !== 'string' || !d.locationId) return true;
+  return d.locationId === activeLoc;
+}
+
 function summaryDocClosedDateKeyString(d) {
   const k = d.closedDateKey;
   if (k == null) return null;
@@ -1350,7 +1396,9 @@ async function loadAndRenderTicketsSummary() {
     const nMapped = rows.length;
     const rowsAfterDate = rows.filter((d) => passesSummaryDocDateFilter(d, fromStr, toStr));
     const nAfterDate = rowsAfterDate.length;
-    rows = rowsAfterDate.filter((d) => summaryDocMatchesEmployee(d, employeeId));
+    rows = rowsAfterDate
+      .filter((d) => summaryDocMatchesLocation(d))
+      .filter((d) => summaryDocMatchesEmployee(d, employeeId));
     const nAfterEmployee = rows.length;
     console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: after filters', {
       mappedRows: nMapped,
@@ -1592,6 +1640,49 @@ function showToast(msg, type = 'info') {
 }
 
 /** Custom confirm for tickets: always use in-app modal, never browser confirm. */
+/** Styled text-input prompt that matches the app theme (purple buttons).
+ *  Resolves to the trimmed string, or null if cancelled. */
+function ticketPrompt(message, title = 'Enter value', defaultValue = '') {
+  if (typeof window.ffPrompt === 'function') return window.ffPrompt(message, title, defaultValue);
+  return new Promise((resolve) => {
+    let overlay = document.getElementById('ff-prompt-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'ff-prompt-overlay';
+      overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300000;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.2);max-width:400px;width:100%;padding:24px;';
+      card.innerHTML = '<h3 id="ff-prompt-title" style="margin:0 0 10px;font-size:17px;font-weight:700;color:#111;"></h3><p id="ff-prompt-msg" style="margin:0 0 14px;font-size:13px;color:#6b7280;line-height:1.5;"></p><input id="ff-prompt-input" type="text" style="width:100%;box-sizing:border-box;padding:11px 13px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:18px;outline:none;"><div style="display:flex;justify-content:flex-end;gap:10px;"><button type="button" id="ff-prompt-cancel" style="padding:10px 18px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:14px;color:#374151;">Cancel</button><button type="button" id="ff-prompt-ok" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Save</button></div>';
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+      const inputEl = card.querySelector('#ff-prompt-input');
+      const closeWith = (v) => {
+        overlay.style.display = 'none';
+        if (window._ffPromptResolve) { window._ffPromptResolve(v); window._ffPromptResolve = null; }
+      };
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) closeWith(null); });
+      card.querySelector('#ff-prompt-cancel').addEventListener('click', () => closeWith(null));
+      card.querySelector('#ff-prompt-ok').addEventListener('click', () => {
+        const v = (inputEl.value || '').trim();
+        closeWith(v || null);
+      });
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); card.querySelector('#ff-prompt-ok').click(); }
+        if (e.key === 'Escape') { e.preventDefault(); closeWith(null); }
+      });
+    }
+    window._ffPromptResolve = resolve;
+    const titleEl = overlay.querySelector('#ff-prompt-title');
+    const msgEl = overlay.querySelector('#ff-prompt-msg');
+    const inputEl = overlay.querySelector('#ff-prompt-input');
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = message;
+    if (inputEl) { inputEl.value = defaultValue || ''; inputEl.placeholder = title; }
+    overlay.style.display = 'flex';
+    setTimeout(() => { try { inputEl.focus(); inputEl.select(); } catch (_) {} }, 30);
+  });
+}
+
 function ticketConfirm(message, title = 'Confirm') {
   if (typeof window.ffConfirm === 'function') return window.ffConfirm(message, title);
   return new Promise((resolve) => {
@@ -2727,8 +2818,15 @@ function showServicesCatalogPanel() {
   const catTabBtn = document.getElementById('servicesCategoriesTab');
   if (panel) { panel.style.display = 'block'; panel.style.flex = '1'; }
   if (catPanel) catPanel.style.display = 'none';
-  if (tabBtn) { tabBtn.style.borderBottom = '2px solid #111'; tabBtn.style.fontWeight = '600'; tabBtn.style.color = '#111'; }
+  if (tabBtn) { tabBtn.style.borderBottom = '2px solid #7c3aed'; tabBtn.style.fontWeight = '600'; tabBtn.style.color = '#7c3aed'; }
   if (catTabBtn) { catTabBtn.style.borderBottom = '2px solid transparent'; catTabBtn.style.fontWeight = '500'; catTabBtn.style.color = '#6b7280'; }
+  // Re-populate the dropdown so any categories that were added/edited while
+  // the user was on the Categories tab appear immediately when they come
+  // back here. Keeps whatever was already selected.
+  const catSel = document.getElementById('serviceFormCategory');
+  const keepSelectedId = catSel ? catSel.value : '';
+  populateServiceCategoryDropdown(keepSelectedId || (editingServiceId ? undefined : null));
+  renderServicesList();
 }
 
 function showCategoriesPanel() {
@@ -2739,7 +2837,7 @@ function showCategoriesPanel() {
   if (panel) panel.style.display = 'none';
   if (catPanel) { catPanel.style.display = 'block'; catPanel.style.flex = '1'; }
   if (tabBtn) { tabBtn.style.borderBottom = '2px solid transparent'; tabBtn.style.fontWeight = '500'; tabBtn.style.color = '#6b7280'; }
-  if (catTabBtn) { catTabBtn.style.borderBottom = '2px solid #111'; catTabBtn.style.fontWeight = '600'; catTabBtn.style.color = '#111'; }
+  if (catTabBtn) { catTabBtn.style.borderBottom = '2px solid #7c3aed'; catTabBtn.style.fontWeight = '600'; catTabBtn.style.color = '#7c3aed'; }
   renderCategoriesList();
 }
 
@@ -2752,19 +2850,22 @@ function populateServiceCategoryDropdown(selectedId) {
   opts += `<option value="${ADD_NEW}">+ Add new category</option>`;
   sel.innerHTML = opts;
   sel.value = selectedId || '';
-  sel.onchange = () => {
+  sel.onchange = async () => {
     if (sel.value === ADD_NEW) {
-      const name = prompt('Category name:');
-      if (name && name.trim()) {
-        saveServiceCategory({ name: name.trim(), sortOrder: serviceCategories.length }).then(async (id) => {
+      sel.value = '';
+      const name = await ticketPrompt('Enter a name for the new category.', 'New category');
+      if (name && String(name).trim()) {
+        try {
+          const id = await saveServiceCategory({ name: String(name).trim(), sortOrder: serviceCategories.length });
           await loadServiceCategories();
           populateServiceCategoryDropdown(id);
           renderServicesList();
           setupTicketsUI();
           showToast('Category added', 'success');
-        }).catch((e) => showToast(e?.message || 'Failed', 'error'));
+        } catch (e) {
+          showToast(e?.message || 'Failed', 'error');
+        }
       }
-      sel.value = '';
     }
   };
 }
@@ -2797,19 +2898,22 @@ function renderCategoriesList() {
       return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid #eee;"><div><strong style="font-size:13px !important;">${escapeHtml(c.name)}</strong><span style="color:#9ca3af;font-size:13px;margin-left:8px;">${count} service(s)</span></div><div style="display:flex;gap:8px;"><button type="button" class="cat-edit-btn" data-id="${c.id}" title="Edit" style="padding:6px;border:none;background:none;cursor:pointer;line-height:0;">${pencilSvg}</button><button type="button" class="cat-delete-btn" data-id="${c.id}" title="Delete" style="padding:6px;border:none;background:none;cursor:pointer;line-height:0;">${trashSvg}</button></div></div>`;
     }).join('');
     list.querySelectorAll('.cat-edit-btn').forEach((btn) => {
-      btn.onclick = () => {
+      btn.onclick = async () => {
         const c = serviceCategories.find(x => x.id === btn.getAttribute('data-id'));
         if (!c) return;
-        const name = prompt('Category name:', c.name);
-        if (name != null && name.trim()) {
-          saveServiceCategory({ id: c.id, name: name.trim(), sortOrder: c.sortOrder }).then(async () => {
+        const name = await ticketPrompt('Rename this category.', 'Edit category', c.name || '');
+        if (name != null && String(name).trim() && String(name).trim() !== c.name) {
+          try {
+            await saveServiceCategory({ id: c.id, name: String(name).trim(), sortOrder: c.sortOrder });
             await loadServiceCategories();
             renderCategoriesList();
             populateServiceCategoryDropdown(null);
             renderServicesList();
             setupTicketsUI();
             showToast('Updated', 'success');
-          }).catch((e) => showToast(e?.message || 'Failed', 'error'));
+          } catch (e) {
+            showToast(e?.message || 'Failed', 'error');
+          }
         }
       };
     });
@@ -2839,20 +2943,24 @@ function renderServicesList() {
   const list = document.getElementById('servicesList');
   if (!list) return;
   const grouped = getServicesGroupedByCategory();
-  if (Object.keys(grouped).length === 0) {
-    list.innerHTML = '<div style="padding:16px;color:#9ca3af;">No services yet. Add one below.</div>';
+  // Only keep groups that actually have at least one service. An empty
+  // "Other" header at the top of the modal confused users into thinking
+  // it was a field placeholder.
+  const nonEmptyEntries = Object.entries(grouped).filter(([, data]) => (data.services || []).length > 0);
+  if (nonEmptyEntries.length === 0) {
+    list.innerHTML = '<div style="padding:16px;color:#9ca3af;font-size:13px;text-align:center;">No services yet. Add one below.</div>';
   } else {
     let html = '';
-    Object.entries(grouped).forEach(([key, data], idx) => {
+    nonEmptyEntries.forEach(([key, data], idx) => {
       const label = escapeHtml(data.label || 'Other');
       const services = data.services || [];
-      html += `<div class="services-category-section" data-cat-idx="${idx}" style="margin-bottom:6px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">`;
-      html += `<div class="services-category-header" style="display:flex;align-items:center;gap:4px;padding:3px 6px;font-size:10px !important;font-weight:600;color:#374151;background:#f9fafb;">${label}</div>`;
-      html += '<div style="padding:2px 6px 4px;display:flex;flex-direction:column;gap:2px;">';
-      const pencilSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+      html += `<div class="services-category-section" data-cat-idx="${idx}" style="margin-bottom:8px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">`;
+      html += `<div class="services-category-header" style="display:flex;align-items:center;gap:4px;padding:8px 12px;font-size:12px;font-weight:700;color:#374151;background:#f9fafb;border-bottom:1px solid #e5e7eb;letter-spacing:0.02em;">${label}</div>`;
+      html += '<div style="padding:4px 10px 6px;display:flex;flex-direction:column;gap:2px;">';
+      const pencilSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" style="display:block;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
       const trashSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
       services.forEach((s) => {
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;"><div><strong style="font-size:11px !important;font-weight:600;">${escapeHtml(s.name)}</strong><span style="color:#6b7280;font-size:8px !important;margin-left:5px;">${ffTicketMoney(s.defaultPrice || 0)}</span></div><div style="display:flex;gap:9px;"><button type="button" class="services-edit-btn" data-id="${s.id}" title="Edit" style="padding:2px;border:none;background:none;cursor:pointer;line-height:0;">${pencilSvg}</button><button type="button" class="services-delete-btn" data-id="${s.id}" title="Delete" style="padding:2px;border:none;background:none;cursor:pointer;line-height:0;">${trashSvg}</button></div></div>`;
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 6px;border-bottom:1px solid #f3f4f6;font-size:13px;"><div><strong style="font-size:13px;font-weight:600;color:#111;">${escapeHtml(s.name)}</strong><span style="color:#6b7280;font-size:12px;margin-left:8px;">${ffTicketMoney(s.defaultPrice || 0)}</span></div><div style="display:flex;gap:10px;"><button type="button" class="services-edit-btn" data-id="${s.id}" title="Edit" style="padding:4px;border:none;background:none;cursor:pointer;line-height:0;">${pencilSvg}</button><button type="button" class="services-delete-btn" data-id="${s.id}" title="Delete" style="padding:4px;border:none;background:none;cursor:pointer;line-height:0;">${trashSvg}</button></div></div>`;
       });
       html += '</div></div>';
     });
@@ -2893,12 +3001,22 @@ async function saveServiceFromForm() {
   const name = document.getElementById('serviceFormName').value.trim();
   if (!name) { showToast('Enter service name', 'error'); return; }
   const catSel = document.getElementById('serviceFormCategory');
-  const categoryId = (catSel?.value || '').trim() || null;
+  const rawCatValue = (catSel?.value || '').trim();
+  // Guard against the sentinel value: if somehow "+ Add new category" is
+  // still the current value when Save is clicked, treat it as "no
+  // category" rather than stamping the sentinel onto the service.
+  const categoryId = (!rawCatValue || rawCatValue === '__add_new__') ? null : rawCatValue;
   const defaultPrice = parseFloat(document.getElementById('serviceFormPrice').value) || 0;
   const isEdit = !!editingServiceId;
+  console.log('[Services] saveServiceFromForm →', { name, categoryId, defaultPrice, isEdit, rawCatValue, selectedLabel: catSel?.options?.[catSel.selectedIndex]?.text });
   try {
     await saveService(editingServiceId ? { id: editingServiceId, name, categoryId, defaultPrice } : { name, categoryId, defaultPrice });
-    await loadServices();
+    // Reload BOTH categories and services so any category added/edited
+    // moments ago on the Categories tab is reflected in the grouping used
+    // by the ticket service picker. Without this, a service can be saved
+    // with a valid categoryId but still show under "Other" in the picker
+    // because the picker's categories list is stale.
+    await Promise.all([loadServiceCategories(), loadServices()]);
     renderServicesList();
     const nameEl = document.getElementById('serviceFormName');
     const catEl = document.getElementById('serviceFormCategory');
@@ -3142,6 +3260,23 @@ export function initTickets() {
   if (loadMoreBtn && !loadMoreBtn._ffTicketsLoadMoreWired) {
     loadMoreBtn._ffTicketsLoadMoreWired = true;
     loadMoreBtn.onclick = () => void loadMoreTicketsOlder();
+  }
+
+  // Re-render Tickets list, summary and badge whenever the active branch
+  // switches. The underlying Firestore subscription stays the same (we
+  // don't want to rebuild/refetch), only the client-side visibility gate
+  // (canSeeTicket + summaryDocMatchesLocation) changes.
+  if (typeof document !== 'undefined' && !window.__ffTicketsLocationListenerBound) {
+    window.__ffTicketsLocationListenerBound = true;
+    document.addEventListener('ff-active-location-changed', function () {
+      try { renderTicketsList(); } catch (_) {}
+      try { updateTicketsNavBadge(); } catch (_) {}
+      try {
+        if (currentTicketsTab === 'summary' && typeof loadAndRenderTicketsSummary === 'function') {
+          loadAndRenderTicketsSummary();
+        }
+      } catch (_) {}
+    });
   }
 
   // Background subscription for badge — ONLY for admin/manager/owner (Firestore role)

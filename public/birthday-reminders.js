@@ -664,13 +664,22 @@ export async function runBirthdayChatRemindersOnce() {
             { birthdayReminderSentForYear: nextBirthdayYear, updatedAtMs: Date.now() },
             { merge: true }
           );
+          // Stamp the subject staff's primary location on the inbox item so
+          // the UI can scope it to the correct branch without having to look
+          // up staff allowedLocationIds at render time.
+          const subjectLocationId =
+            (staff && typeof staff.primaryLocationId === 'string' && staff.primaryLocationId.trim())
+              ? staff.primaryLocationId.trim()
+              : (Array.isArray(staff && staff.allowedLocationIds) && staff.allowedLocationIds[0]
+                  ? String(staff.allowedLocationIds[0])
+                  : null);
           for (const rec of recipients) {
             const forUid = rec.uid;
             const forStaffId = String(rec.staffId || "");
             const forStaffName = String(rec.name || "Manager").trim() || forUid;
             const requestDoc = {
               tenantId: salonId,
-              locationId: null,
+              locationId: subjectLocationId,
               type: "staff_birthday_reminder",
               status: "open",
               priority: "normal",

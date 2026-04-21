@@ -238,9 +238,22 @@ service cloud.firestore {
     }
 
     // Basic salon doc: any signed-in user can read
+    // CREATE: a signed-in user may create their own salon (owner sign-up / complete-setup flow)
+    //   - must set themselves as ownerUid
+    //   - must provide a non-empty name
+    //   - and must NOT already have a users/{uid} profile pointing at another salon
     match /salons/{salonId} {
       allow read: if request.auth != null;
-      allow write: if false;
+      allow create: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && (
+          !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.salonId == null
+          || !("salonId" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
+        );
+      allow update, delete: if false;
     }
 
     match /settings/{docId} {
@@ -691,6 +704,15 @@ service cloud.firestore {
     }
 
     match /salons/{salonId}/serviceCategories/{catId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isManager(salonId);
+    }
+
+    // ===== LOCATIONS =====
+    // Physical salon branches / check-in points (name, address, lat/lng, allowed radius, active flag).
+    // All salon members can read (needed for UI listings and check-in geofencing);
+    // Manager/Admin/Owner can CRUD.
+    match /salons/{salonId}/locations/{locationId} {
       allow read: if belongsToSalon(salonId);
       allow create, update, delete: if isManager(salonId);
     }
