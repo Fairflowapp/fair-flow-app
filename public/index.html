@@ -5094,6 +5094,18 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
     const finalRole = role || 'Unknown';
     const finalPerformedBy = performedBy || 'System';
     
+    // Stamp the active location on every new entry so History can stay
+    // isolated per branch even if the shared localStorage cache ever mixes
+    // entries from more than one location (eg. legacy data that predates
+    // the multi-location rollout).
+    let activeLocId = '';
+    try {
+      if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
+        const v = window.ffGetActiveLocationId();
+        if (typeof v === 'string' && v.trim()) activeLocId = v.trim();
+      }
+    } catch (_) {}
+
     // Create new entry object with date/time formatted using formatHistoryDate/formatHistoryTime
     const now = new Date();
     const entry = {
@@ -5104,6 +5116,7 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
       performedBy: finalPerformedBy,
       worker: worker || '',
       source: source || 'queue',
+      locationId: activeLocId,
       ts: Date.now()
     };
     
@@ -5605,8 +5618,24 @@ function getFilteredHistoryEntries(options = {}) {
   const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
   log = logArr;
   const normalizedEntries = logArr.map(normalizeHistoryEntry);
+  // Location scope: only show rows that belong to the active branch.
+  // Legacy entries without a `locationId` are treated as belonging to the
+  // "default" (primary) location so pre-multi-location history stays
+  // visible in the primary branch and never leaks to a new branch.
+  let activeLocKey = 'default';
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v.trim()) activeLocKey = v.trim();
+    }
+  } catch (_) {}
   const sourceFilter = (window.__historySourceFilter || 'all').toLowerCase();
-  let rows = normalizedEntries;
+  let rows = normalizedEntries.filter((entry) => {
+    const entryLoc = (entry && typeof entry.locationId === 'string' && entry.locationId.trim())
+      ? entry.locationId.trim()
+      : 'default';
+    return entryLoc === activeLocKey;
+  });
   if (sourceFilter !== 'all') {
     rows = rows.filter((normalized) => normalized.source.toLowerCase() === sourceFilter);
   }
@@ -5773,6 +5802,7 @@ function normalizeHistoryEntry(entry) {
         performedBy: '',
         worker: worker,
         source: 'queue',
+        locationId: '',
         ts: Date.parse(dateStr + ' ' + timeStr) || Date.now()
       };
     }
@@ -5785,6 +5815,7 @@ function normalizeHistoryEntry(entry) {
       performedBy: '',
       worker: '',
       source: 'queue',
+      locationId: '',
       ts: Date.now()
     };
   }
@@ -5799,6 +5830,7 @@ function normalizeHistoryEntry(entry) {
       performedBy: entry.performedBy || '',
       worker: entry.worker || entry.assignedTo || '',
       source: entry.source || 'queue',
+      locationId: (typeof entry.locationId === 'string' && entry.locationId.trim()) ? entry.locationId.trim() : '',
       ts: entry.ts || entry.timestamp || Date.now()
     };
   }
@@ -17285,11 +17317,40 @@ function clearHistory() {
     if (typeof showToast === 'function') showToast('You do not have permission to clear history.', 'error');
     return;
   }
-  if (!confirm("Clear history?")) return;
-  // Clear ffv24_log from localStorage
-  localStorage.setItem('ffv24_log', JSON.stringify([]));
-  // Update in-memory log variable
-  log = [];
+  if (!confirm("Clear history for this location?")) return;
+
+  // Determine the currently active branch. "default" stands for no-location
+  // or the primary branch and also covers legacy entries without a
+  // locationId. Clearing history must affect ONLY the active branch so
+  // other locations keep their log intact.
+  let activeLocKey = 'default';
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v.trim()) activeLocKey = v.trim();
+    }
+  } catch (_) {}
+
+  // Load, filter out this location's rows, save back.
+  let logArr = [];
+  try { logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]'); } catch (_) { logArr = []; }
+  const kept = logArr.filter((raw) => {
+    const entry = normalizeHistoryEntry(raw);
+    const entryLoc = (entry && typeof entry.locationId === 'string' && entry.locationId.trim())
+      ? entry.locationId.trim()
+      : 'default';
+    return entryLoc !== activeLocKey;
+  });
+  localStorage.setItem('ffv24_log', JSON.stringify(kept));
+  log = kept;
+
+  // Mirror the change to this location's cloud queueState doc so other
+  // devices/users see the clear too. queueCloudWrite only writes to the
+  // currently-active location doc — exactly what we want.
+  if (typeof window.queueCloudWrite === 'function') {
+    try { window.queueCloudWrite(); } catch (e) { console.warn('[History] cloud sync after clear failed', e); }
+  }
+
   renderHistory();
 }
 
@@ -35624,6 +35685,14 @@ if (!window.__ffQueueLocationListenerBound) {
     } catch (e) {
       console.warn('[Queue] renderSelect on location change failed', e);
     }
+    // If the History modal is open when the user switches locations, make
+    // sure the rows it shows belong to the new branch and not the old one.
+    try {
+      const hm = document.getElementById('historyModal');
+      if (hm && !hm.classList.contains('hidden') && typeof renderHistory === 'function') {
+        renderHistory();
+      }
+    } catch (_) {}
   });
   // Staff's allowedLocationIds may have been edited (e.g. owner toggled a
   // branch on/off in Staff Member → Locations). Rebuild the dropdown.
