@@ -987,17 +987,34 @@ function updateInboxBadges() {
 
   const uid = currentUserProfile.uid;
 
+  // Scope the counts to the currently active branch so the badges match
+  // what the user actually sees in the list for that location.
+  let activeLocId = null;
+  try {
+    if (typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v.trim()) activeLocId = v.trim();
+    }
+    if (!activeLocId && typeof window.__ff_active_location_id === 'string'
+        && window.__ff_active_location_id.trim()) {
+      activeLocId = window.__ff_active_location_id.trim();
+    }
+  } catch (_) {}
+  const staffLocMap = activeLocId ? inboxGetStaffLocationMap() : null;
+  const inActiveLoc = (r) => !activeLocId || inboxItemMatchesActiveLocation(r, activeLocId, staffLocMap);
+
   // Open: new requests not yet seen by recipient
   const openCount = currentRequests.filter(
     (r) =>
       r.forUid === uid &&
       (r.status === "open" || r.status === "pending") &&
-      r.unreadForManagers === true
+      r.unreadForManagers === true &&
+      inActiveLoc(r)
   ).length;
 
   // Needs Info: requests where staff replied but recipient hasn't seen it yet
   const needsInfoCount = currentRequests.filter(
-    r => r.forUid === uid && r.status === 'needs_info' && r.unreadForManagers === true
+    r => r.forUid === uid && r.status === 'needs_info' && r.unreadForManagers === true && inActiveLoc(r)
   ).length;
 
   const totalCount = openCount + needsInfoCount;
@@ -3885,9 +3902,24 @@ async function submitRequest(type) {
         ? { documentOwnerStaffId: String(data.documentOwnerStaffId).trim() }
         : {};
 
+    // Stamp the active location on every user-created request so the Inbox
+    // can keep it scoped to the branch where it was submitted. Without this
+    // the item falls back to the subject staff's allowedLocationIds, which
+    // makes requests leak into every branch the staff member is allowed in.
+    let activeLocationIdForCreate = null;
+    try {
+      if (typeof window.ffGetActiveLocationId === 'function') {
+        const v = window.ffGetActiveLocationId();
+        if (typeof v === 'string' && v.trim()) activeLocationIdForCreate = v.trim();
+      }
+      if (!activeLocationIdForCreate && typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id.trim()) {
+        activeLocationIdForCreate = window.__ff_active_location_id.trim();
+      }
+    } catch (_) {}
+
     const baseDoc = {
       tenantId: salonId,
-      locationId: null,
+      locationId: activeLocationIdForCreate,
       type: type,
       status: type === "supplies" ? "pending" : "open",
       priority: 'normal',
@@ -5478,27 +5510,40 @@ if (document.readyState === 'loading') {
 // Background badge listener — runs regardless of which screen is visible
 // =====================
 let _bgBadgeUnsubscribe = null;
+// Latest snapshot rows cached so we can re-render the badges when the
+// user switches location without waiting for a new Firestore snapshot.
+let _bgBadgeLatestRows = [];
+let _bgBadgeIsTech = false;
 
-function startBgBadgeListener(uid, salonId, roleLc) {
-  if (_bgBadgeUnsubscribe) { _bgBadgeUnsubscribe(); _bgBadgeUnsubscribe = null; }
-  const q = query(
-    collection(db, `salons/${salonId}/inboxItems`),
-    where('forUid', '==', uid),
-    where('unreadForManagers', '==', true)
-  );
-  const isTech = String(roleLc || '').toLowerCase() === 'technician';
-  _bgBadgeUnsubscribe = onSnapshot(q, (snap) => {
-    let docs = snap.docs;
-    if (isTech) {
-      const rows = docs.map((d) => ({ id: d.id, ...d.data() }));
-      const keep = new Set(inboxTechnicianNoiseFilter(rows).map((r) => r.id));
-      docs = docs.filter((d) => keep.has(d.id));
+function _bgBadgeRecompute() {
+  try {
+    let rows = _bgBadgeLatestRows || [];
+
+    // Scope the badges to the currently active branch. Use the same rule
+    // set as the main inbox list (explicit locationId → subject staff
+    // allowedLocationIds → fall-through). Without this, a request sent in
+    // branch A would show "1" on the Open tab and on the nav Inbox icon
+    // when viewing branch B.
+    let activeLocId = null;
+    try {
+      if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
+        const v = window.ffGetActiveLocationId();
+        if (typeof v === 'string' && v.trim()) activeLocId = v.trim();
+      }
+      if (!activeLocId && typeof window !== 'undefined'
+          && typeof window.__ff_active_location_id === 'string'
+          && window.__ff_active_location_id.trim()) {
+        activeLocId = window.__ff_active_location_id.trim();
+      }
+    } catch (_) {}
+    if (activeLocId) {
+      const staffLocMap = (typeof inboxGetStaffLocationMap === 'function')
+        ? inboxGetStaffLocationMap() : {};
+      rows = rows.filter((r) => inboxItemMatchesActiveLocation(r, activeLocId, staffLocMap));
     }
-    const openCount = docs.filter((d) => {
-      const s = d.data().status;
-      return s === "open" || s === "pending";
-    }).length;
-    const needsInfoCount = docs.filter((d) => d.data().status === 'needs_info').length;
+
+    const openCount = rows.filter((r) => r.status === 'open' || r.status === 'pending').length;
+    const needsInfoCount = rows.filter((r) => r.status === 'needs_info').length;
     const total = openCount + needsInfoCount;
 
     const navBadge = document.querySelector('#inboxBtn .ff-inbox-badge');
@@ -5509,7 +5554,40 @@ function startBgBadgeListener(uid, salonId, roleLc) {
 
     const needsInfoBadge = document.getElementById('inboxNeedsInfoBadge');
     if (needsInfoBadge) needsInfoBadge.textContent = needsInfoCount > 0 ? needsInfoCount : '';
+  } catch (e) {
+    console.warn('[Inbox] bg badge recompute failed', e);
+  }
+}
+
+function startBgBadgeListener(uid, salonId, roleLc) {
+  if (_bgBadgeUnsubscribe) { _bgBadgeUnsubscribe(); _bgBadgeUnsubscribe = null; }
+  const q = query(
+    collection(db, `salons/${salonId}/inboxItems`),
+    where('forUid', '==', uid),
+    where('unreadForManagers', '==', true)
+  );
+  _bgBadgeIsTech = String(roleLc || '').toLowerCase() === 'technician';
+  _bgBadgeUnsubscribe = onSnapshot(q, (snap) => {
+    let rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (_bgBadgeIsTech) {
+      rows = inboxTechnicianNoiseFilter(rows);
+    }
+    _bgBadgeLatestRows = rows;
+    _bgBadgeRecompute();
   }, () => {});
+}
+
+// Recompute badges when the active branch changes, even if Firestore did
+// not push a new snapshot (e.g. purely switching branches on the same set
+// of cached items).
+if (typeof document !== 'undefined' && !window.__ffInboxBadgeLocListener) {
+  window.__ffInboxBadgeLocListener = true;
+  document.addEventListener('ff-active-location-changed', () => {
+    _bgBadgeRecompute();
+  });
+  document.addEventListener('ff-staff-cloud-updated', () => {
+    _bgBadgeRecompute();
+  });
 }
 
 onAuthStateChanged(auth, async (user) => {

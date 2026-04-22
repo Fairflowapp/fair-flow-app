@@ -103,12 +103,55 @@ function sanitize(obj) {
 }
 
 // =====================
+// Active-location helpers (defined early so createContentWork can use them)
+// =====================
+
+/**
+ * Resolve the active location id. Mirrors the accessor used by
+ * settings-cloud/queue-cloud so we don't race on first paint when
+ * `window.__ff_active_location_id` hasn't been populated yet.
+ */
+function _ffActiveLocationIdForMedia() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
+      const v = window.ffGetActiveLocationId();
+      const s = typeof v === "string" ? v.trim() : (v ? String(v).trim() : "");
+      if (s) return s;
+    }
+  } catch (_) {}
+  try {
+    const raw = typeof window !== "undefined" && typeof window.__ff_active_location_id === "string"
+      ? window.__ff_active_location_id.trim()
+      : "";
+    return raw;
+  } catch (_) {
+    return "";
+  }
+}
+
+/**
+ * Filter content works to the active location. Legacy docs without a
+ * `locationId` are treated as belonging to the Owner's "default" branch so
+ * historical works don't vanish after the multi-location upgrade.
+ */
+function _ffFilterContentWorksByLocation(items) {
+  const locId = _ffActiveLocationIdForMedia();
+  if (!locId) return items; // no active location yet → show everything (onboarding)
+  return items.filter((w) => {
+    const raw = w && typeof w.locationId === "string" ? w.locationId.trim() : "";
+    // Missing `locationId` = legacy work → only visible in the default branch.
+    const effective = raw || "default";
+    return effective === locId;
+  });
+}
+
+// =====================
 // contentWorks CRUD
 // =====================
 
 /**
  * Create a new content work.
- * @param {object} data - { staffId, staffName, createdByRole, serviceType, caption?, featured?, duplicate?, status? }
+ * @param {object} data - { staffId, staffName, createdByRole, serviceType, caption?, featured?, duplicate?, status?, locationId? }
  */
 export async function createContentWork(data) {
   const salonId = await getSalonId();
@@ -118,6 +161,15 @@ export async function createContentWork(data) {
 
   const categoryIds = Array.isArray(data.categoryIds) ? data.categoryIds : (data.categoryId ? [data.categoryId] : []);
   const categoryNames = Array.isArray(data.categoryNames) ? data.categoryNames : (data.categoryName ? [data.categoryName] : []);
+
+  // Stamp the active branch so every work is scoped per-location. Callers may
+  // override by passing `locationId` explicitly (e.g. cloud jobs). Legacy rows
+  // without `locationId` are treated as belonging to the "default" branch on
+  // read — see `_ffFilterContentWorksByLocation` below.
+  const locId = (typeof data.locationId === "string" && data.locationId.trim())
+    ? data.locationId.trim()
+    : _ffActiveLocationIdForMedia();
+
   const docData = sanitize({
     salonId,
     staffId: data.staffId,
@@ -134,6 +186,7 @@ export async function createContentWork(data) {
     duplicate: data.duplicate ?? false,
     status: data.status ?? "active",
     postedCount: 0,
+    locationId: locId || null,
     createdAt: serverTimestamp(),
     updatedAt: null,
   });
@@ -185,11 +238,18 @@ export async function getContentWork(workId) {
  */
 export function subscribeContentWorks(opts, callback) {
   let unsubSnapshot = null;
+  let latestRaw = [];
+  const emit = () => {
+    if (callback) callback(_ffFilterContentWorksByLocation(latestRaw));
+  };
+  const locHandler = () => emit();
+
   const unsubAuth = auth.onAuthStateChanged(async (user) => {
     if (unsubSnapshot) {
       unsubSnapshot();
       unsubSnapshot = null;
     }
+    latestRaw = [];
     if (!user) {
       if (callback) callback([]);
       return;
@@ -211,14 +271,24 @@ export function subscribeContentWorks(opts, callback) {
       q = query(coll, orderBy("createdAt", "desc"));
     }
     unsubSnapshot = onSnapshot(q, (snap) => {
-      const works = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      if (callback) callback(works);
+      latestRaw = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      emit();
     }, (err) => console.warn("[MediaCloud] subscribeContentWorks error", err));
   });
+
+  // Re-emit cached list (filtered for the new branch) when the Owner
+  // switches locations, so the Media screen flips instantly without
+  // waiting for a fresh Firestore snapshot.
+  if (typeof document !== "undefined") {
+    document.addEventListener("ff-active-location-changed", locHandler);
+  }
 
   return () => {
     unsubAuth();
     if (unsubSnapshot) unsubSnapshot();
+    if (typeof document !== "undefined") {
+      document.removeEventListener("ff-active-location-changed", locHandler);
+    }
   };
 }
 
@@ -518,28 +588,6 @@ export function subscribePostedHistory(workId, callback) {
  * lists). Docs without `locationId` are legacy salon-wide and are shown in
  * every location for backward compatibility until the Owner re-saves them.
  */
-function _ffActiveLocationIdForMedia() {
-  // Mirror the accessor pattern used by settings-cloud / queue-cloud so we
-  // don't drop the active location when `ffGetActiveLocationId()` is the
-  // canonical source and `window.__ff_active_location_id` hasn't been
-  // populated yet (race during first paint after login).
-  try {
-    if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
-      const v = window.ffGetActiveLocationId();
-      const s = typeof v === "string" ? v.trim() : (v ? String(v).trim() : "");
-      if (s) return s;
-    }
-  } catch (_) {}
-  try {
-    const raw = typeof window !== "undefined" && typeof window.__ff_active_location_id === "string"
-      ? window.__ff_active_location_id.trim()
-      : "";
-    return raw;
-  } catch (_) {
-    return "";
-  }
-}
-
 function _ffFilterCategoriesByLocation(items) {
   const locId = _ffActiveLocationIdForMedia();
   if (!locId) return items; // no active location → show everything (onboarding)

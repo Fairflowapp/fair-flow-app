@@ -1024,6 +1024,7 @@ async function _commitStaffDocAlertBatch(docRef, salonId, payload) {
     documentType,
     expirationMs,
     subjectStaffName,
+    subjectLocationId,
     creatorUid,
     creatorStaffId,
     creatorName,
@@ -1055,7 +1056,7 @@ async function _commitStaffDocAlertBatch(docRef, salonId, payload) {
     }
     batch.set(ref, {
       tenantId: salonId,
-      locationId: null,
+      locationId: subjectLocationId || null,
       type: alertType,
       status: "open",
       priority: "normal",
@@ -1140,9 +1141,20 @@ async function _processOneStaffDocument(salonId, staffId, docSnap, managersCache
   }
 
   let staffName = "";
+  let subjectLocationId = null;
   try {
     const st = await admin.firestore().doc(`salons/${salonId}/staff/${sid}`).get();
-    staffName = String((st.exists && st.data() && st.data().name) || "").trim();
+    const sd = (st.exists && st.data()) || {};
+    staffName = String(sd.name || "").trim();
+    // Resolve the subject staff's location so each inbox reminder can be
+    // scoped to the correct branch. Prefer the primary location; fall back
+    // to the first allowed location; otherwise leave as null so the client
+    // can fall through to legacy staff-based location resolution.
+    if (typeof sd.primaryLocationId === "string" && sd.primaryLocationId.trim()) {
+      subjectLocationId = sd.primaryLocationId.trim();
+    } else if (Array.isArray(sd.allowedLocationIds) && sd.allowedLocationIds[0]) {
+      subjectLocationId = String(sd.allowedLocationIds[0]).trim() || null;
+    }
   } catch (_) {
     staffName = "";
   }
@@ -1172,6 +1184,7 @@ async function _processOneStaffDocument(salonId, staffId, docSnap, managersCache
         documentType,
         expirationMs: expMs,
         subjectStaffName,
+        subjectLocationId,
         creatorUid: creator.uid,
         creatorStaffId: creator.staffId,
         creatorName: creator.name,
@@ -1204,6 +1217,7 @@ async function _processOneStaffDocument(salonId, staffId, docSnap, managersCache
         documentType,
         expirationMs: expMs,
         subjectStaffName,
+        subjectLocationId,
         creatorUid: creator.uid,
         creatorStaffId: creator.staffId,
         creatorName: creator.name,

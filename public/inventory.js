@@ -25,6 +25,78 @@ import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "ht
 
 const SALON_ID_CACHE_KEY = "ff_salonId_v1";
 
+/**
+ * Resolve the currently active location id (for multi-branch salons).
+ * Returns an empty string when no location context exists (e.g. single-branch
+ * salons or before the active-location bootstrap has run). Callers should treat
+ * an empty value as "no filter" so single-branch accounts keep working.
+ *
+ * Resolution order:
+ *   1. window.ffGetActiveLocationId()           — canonical helper
+ *   2. window.__ff_active_location_id           — direct global
+ *   3. localStorage.ff_active_location_id       — persisted selection
+ * The localStorage fallback is important: on the very first frame after a
+ * full refresh the helper module may not have wired yet, but the selection
+ * from the previous session is already available in storage.
+ */
+function _ffInvActiveLocId() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
+      const v = window.ffGetActiveLocationId();
+      const s = typeof v === "string" ? v.trim() : (v != null ? String(v).trim() : "");
+      if (s) return s;
+    }
+  } catch (_) {}
+  try {
+    const raw = (typeof window !== "undefined" && typeof window.__ff_active_location_id === "string")
+      ? window.__ff_active_location_id.trim()
+      : "";
+    if (raw) return raw;
+  } catch (_) {}
+  try {
+    if (typeof localStorage !== "undefined") {
+      const stored = localStorage.getItem("ff_active_location_id");
+      if (typeof stored === "string" && stored.trim()) return stored.trim();
+    }
+  } catch (_) {}
+  return "";
+}
+
+/** True when the current user has more than one location available. */
+function _ffInvUserHasMultipleLocations() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffUserHasMultipleLocations === "function") {
+      return !!window.ffUserHasMultipleLocations();
+    }
+  } catch (_) {}
+  return false;
+}
+
+/**
+ * Return true when the given Firestore doc payload belongs to the active
+ * branch.
+ *
+ * Rules (simple + strict):
+ *   - No active locationId resolved → show everything (single-branch accounts
+ *     or the brief frame before the active-location helper bootstraps).
+ *   - Active locationId resolved → require the doc's `locationId` to match
+ *     exactly. Docs with missing or different `locationId` are hidden — no
+ *     "legacy default" bucket, because that's what keeps leaking between
+ *     branches.
+ *
+ * Note: we intentionally do NOT consult `ffUserHasMultipleLocations()` here.
+ * If that helper returns false during startup for a legitimately multi-branch
+ * account, we were falling back to "show everything" and the filter did
+ * nothing. The active-location id is the single source of truth.
+ */
+function _ffInvDocInActiveLoc(data) {
+  const active = _ffInvActiveLocId();
+  if (!active) return true;
+  const raw = data && typeof data.locationId === "string" ? data.locationId.trim() : "";
+  if (!raw) return false;
+  return raw === active;
+}
+
 /** @type {Set<string>} */
 let _expandedCategoryIds = new Set();
 /** @type {string | null} */
@@ -289,16 +361,32 @@ async function loadInventoryCategoriesFromFirestore() {
   }
   _invCatLoadError = null;
   const catSnap = await getDocs(collection(db, `salons/${salonId}/inventoryCategories`));
-  const rawCats = catSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const rawCatsAll = catSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const rawCats = rawCatsAll.filter(_ffInvDocInActiveLoc);
+  // Optional diagnostic log — only prints when the user explicitly opts in via
+  //   localStorage.setItem('ff_inv_debug', 'true')
+  try {
+    if (typeof localStorage !== "undefined" && localStorage.getItem("ff_inv_debug") === "true") {
+      console.log(
+        "[Inventory/loc] load categories — active=%o total=%d visible=%d",
+        _ffInvActiveLocId() || "(none)",
+        rawCatsAll.length,
+        rawCats.length,
+        rawCatsAll.map((c) => ({ id: c.id, name: c.name, locationId: c.locationId ?? null })),
+      );
+    }
+  } catch (_) {}
   rawCats.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const tree = await Promise.all(
     rawCats.map(async (c) => {
       const subCol = collection(db, `salons/${salonId}/inventoryCategories/${c.id}/inventorySubcategories`);
       const subSnap = await getDocs(subCol);
-      const subs = subSnap.docs.map((d) => {
-        const data = d.data();
-        return { id: d.id, name: data.name, order: data.order ?? 0 };
-      });
+      const subs = subSnap.docs
+        .map((d) => {
+          const data = d.data();
+          return { id: d.id, name: data.name, order: data.order ?? 0, locationId: data.locationId };
+        })
+        .filter(_ffInvDocInActiveLoc);
       subs.sort((a, b) => a.order - b.order);
       return {
         id: c.id,
@@ -396,11 +484,33 @@ async function persistInventoryCategoryTree(desiredTree) {
     }
   }
 
+  const activeLocId = _ffInvActiveLocId();
+  try {
+    if (typeof localStorage !== "undefined" && localStorage.getItem("ff_inv_debug") === "true") {
+      console.log("[Inventory/loc] save categories — active=%o newCount=%d", activeLocId || "(none)", desiredTree.filter((c) => !oldCatIds.has(c.id)).length);
+    }
+  } catch (_) {}
+  if (!activeLocId) {
+    // Loud warning: stamping null here means the new doc will be invisible in
+    // any explicitly-named branch. Almost always the wrong thing for a
+    // multi-branch salon, but we still write so single-location accounts keep
+    // working during onboarding.
+    try {
+      console.warn("[Inventory/loc] saving categories without an active locationId — new rows will fall back to the 'default' branch bucket.");
+    } catch (_) {}
+  }
+
   for (let ci = 0; ci < desiredTree.length; ci++) {
     const c = desiredTree[ci];
     const ref = doc(db, `salons/${salonId}/inventoryCategories/${c.id}`);
     if (!oldCatIds.has(c.id)) {
-      batch.set(ref, { name: c.name, order: ci, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      batch.set(ref, {
+        name: c.name,
+        order: ci,
+        locationId: activeLocId || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
     } else {
       batch.update(ref, { name: c.name, order: ci, updatedAt: serverTimestamp() });
     }
@@ -418,13 +528,20 @@ async function persistInventoryCategoryTree(desiredTree) {
       const wasMoved = old && old.catId !== c.id;
 
       if (isNew) {
-        batch.set(ref, { name: s.name, order, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        batch.set(ref, {
+          name: s.name,
+          order,
+          locationId: activeLocId || null,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
       } else if (wasMoved) {
         const ca = movedCreatedAt.get(s.id);
         const tbl = movedTableData.get(s.id);
         batch.set(ref, {
           name: s.name,
           order,
+          locationId: activeLocId || null,
           createdAt: ca || serverTimestamp(),
           updatedAt: serverTimestamp(),
           groups: tbl ? tbl.groups : [],
@@ -2026,6 +2143,7 @@ async function saveInventoryOrderDraft() {
       categoryName: src.categoryName,
       subcategoryId: src.subcategoryId,
       subcategoryName: src.subcategoryName,
+      locationId: _ffInvActiveLocId() || null,
       createdAt: serverTimestamp(),
       createdBy: uid,
       itemCount: items.length,
@@ -2445,6 +2563,8 @@ async function loadInventoryOrderDraft(forceReload) {
     if (!salonId) return;
 
     // Find the active draft (any doc id) by the isActive flag.
+    // Multi-branch salons may have one active draft per location, so we also
+    // filter by the current locationId client-side after the query returns.
     let activeId = null;
     /** @type {Record<string, unknown> | null} */
     let activeData = null;
@@ -2455,9 +2575,14 @@ async function loadInventoryOrderDraft(forceReload) {
       );
       const snap = await getDocs(qActive);
       if (!snap.empty) {
-        const first = snap.docs[0];
-        activeId = first.id;
-        activeData = first.data();
+        const rows = snap.docs
+          .map((d) => ({ id: d.id, data: d.data() }))
+          .filter((r) => _ffInvDocInActiveLoc(r.data));
+        if (rows.length > 0) {
+          const first = rows[0];
+          activeId = first.id;
+          activeData = first.data;
+        }
       }
     } catch (e) {
       console.warn("[Inventory] query active drafts failed", e);
@@ -2576,6 +2701,7 @@ async function flushInventoryOrderDraftSave() {
       // First write — create the draft doc. Auto-id avoids collisions.
       const newRef = await addDoc(collection(db, `salons/${salonId}/inventoryDrafts`), {
         ...payload,
+        locationId: _ffInvActiveLocId() || null,
         createdAt: serverTimestamp(),
         createdBy: uid,
       });
@@ -2665,6 +2791,7 @@ async function openInventoryDraftsPicker() {
     snap.forEach((d) => {
       const data = d.data() || {};
       if (data.status === "cleared") return;
+      if (!_ffInvDocInActiveLoc(data)) return;
       const manualItems = Array.isArray(data.manualItems) ? data.manualItems : [];
       drafts.push({
         id: d.id,
@@ -2993,10 +3120,12 @@ async function loadInventoryOrdersList(opts) {
     if (!salonId) throw new Error("No salon");
     const q = query(collection(db, `salons/${salonId}/inventoryOrders`), orderBy("createdAt", "desc"));
     const snap = await getDocs(q);
-    _invOrdersList = snap.docs.map((d) => {
-      const x = d.data();
-      return { id: d.id, ...x };
-    });
+    _invOrdersList = snap.docs
+      .map((d) => {
+        const x = d.data();
+        return { id: d.id, ...x };
+      })
+      .filter(_ffInvDocInActiveLoc);
     _invOrdersLoadError = null;
   } catch (e) {
     console.error("[Inventory] orders list load failed", e);
@@ -3052,6 +3181,7 @@ async function duplicateInventoryOrderDraft(orderId) {
       categoryName: o.categoryName ?? null,
       subcategoryId: o.subcategoryId ?? null,
       subcategoryName: o.subcategoryName ?? null,
+      locationId: _ffInvActiveLocId() || (typeof o.locationId === "string" ? o.locationId : null),
       itemCount,
       items,
       createdAt: serverTimestamp(),
@@ -3965,18 +4095,26 @@ async function scanInventorySuggestionsOnce() {
       return;
     }
 
-    // Fetch categories + subcategories in parallel.
+    // Fetch categories + subcategories in parallel. Scope to the active
+    // location so suggestions are generated per-branch only.
     const catSnap = await getDocs(collection(db, `salons/${salonId}/inventoryCategories`));
-    const cats = catSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const cats = catSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter(_ffInvDocInActiveLoc);
     const perCatPromises = cats.map((c) =>
       getDocs(collection(db, `salons/${salonId}/inventoryCategories/${c.id}/inventorySubcategories`))
-        .then((s) => ({ cat: c, subs: s.docs.map((d) => ({ id: d.id, ...d.data() })) }))
+        .then((s) => ({
+          cat: c,
+          subs: s.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .filter(_ffInvDocInActiveLoc),
+        }))
         .catch((e) => {
           console.warn("[Inventory] suggestion scan: sub load failed", c.id, e);
           return { cat: c, subs: [] };
         })
     );
-    // Fetch orders in parallel (all orders — we filter dates client-side).
+    // Fetch orders in parallel (all orders — we filter dates/locations client-side).
     const ordersPromise = getDocs(collection(db, `salons/${salonId}/inventoryOrders`)).catch((e) => {
       console.warn("[Inventory] suggestion scan: orders load failed", e);
       return null;
@@ -3991,6 +4129,7 @@ async function scanInventorySuggestionsOnce() {
     const cellUsage = new Map();
     ordersSnap.forEach((d) => {
       const order = { id: d.id, ...d.data() };
+      if (!_ffInvDocInActiveLoc(order)) return;
       const items = Array.isArray(order.items) ? order.items : [];
       for (const it of items) {
         if (!it || typeof it !== "object") continue;
@@ -4049,9 +4188,25 @@ async function scanInventorySuggestionsOnce() {
             const suggestedQty = Math.max(1, Math.ceil(dailyUsage * 7));
             const itemName = r.name != null ? String(r.name).trim() : "";
             const groupName = g.label != null ? String(g.label) : "";
+            // Stamp the suggestion with the active branch so it only
+            // surfaces in the Inbox of the location where the scan ran.
+            // Falls back to null for single-location salons (Inbox filter
+            // treats null as "no filter" in that case).
+            let suggestionLocationId = null;
+            try {
+              if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
+                const v = window.ffGetActiveLocationId();
+                if (typeof v === "string" && v.trim()) suggestionLocationId = v.trim();
+              }
+              if (!suggestionLocationId && typeof window !== "undefined"
+                  && typeof window.__ff_active_location_id === "string"
+                  && window.__ff_active_location_id.trim()) {
+                suggestionLocationId = window.__ff_active_location_id.trim();
+              }
+            } catch (_) {}
             const payload = {
               tenantId: salonId,
-              locationId: null,
+              locationId: suggestionLocationId,
               type: "inventory_suggestion",
               status: "open",
               priority: "high",
@@ -4164,6 +4319,7 @@ async function refreshInventoryInsightsAsync() {
 
     ordersSnap.forEach((d) => {
       const order = { id: d.id, ...d.data() };
+      if (!_ffInvDocInActiveLoc(order)) return;
       const items = Array.isArray(order.items) ? order.items : [];
       for (const it of items) {
         if (!it || typeof it !== "object") continue;
@@ -11570,8 +11726,29 @@ function ensureInventoryScreenDelegates(root) {
       ev.preventDefault();
       resetCatModalTransientState();
       _manageCategoriesOpen = true;
-      ensureCatManageDraft();
-      mountOrRefreshMockUi();
+      // Safety net: if the in-memory tree is empty (e.g. because a location
+      // switch wiped it before the screen fully remounted), force a fresh
+      // Firestore load before building the draft so the modal shows the real
+      // categories instead of "No categories yet".
+      const treeIsEmpty = !Array.isArray(_categoryTree) || _categoryTree.length === 0;
+      if (treeIsEmpty && !_invCategoriesLoading) {
+        _invCategoriesLoading = true;
+        mountOrRefreshMockUi();
+        loadInventoryCategoriesFromFirestore()
+          .catch((e) => {
+            console.warn("[Inventory] Manage Categories open: reload failed", e);
+            _invCatLoadError = (e && e.message) || "Failed to load categories";
+          })
+          .finally(() => {
+            _invCategoriesLoading = false;
+            _catManageDraftTree = null;
+            ensureCatManageDraft();
+            mountOrRefreshMockUi();
+          });
+      } else {
+        ensureCatManageDraft();
+        mountOrRefreshMockUi();
+      }
       return;
     }
     if (t.closest("[data-cat-manage-close]")) {
@@ -12074,6 +12251,58 @@ if (typeof window !== "undefined") {
       /* ignore */
     }
   });
+  // Re-load the entire inventory module when the active branch changes.
+  // Each location owns its own categories/subcategories/orders/drafts, so we
+  // wipe the in-memory caches and re-fetch from Firestore against the new
+  // `locationId` filter. The listener is lightweight — it only does real work
+  // when the Inventory screen is currently mounted.
+  const _ffInvHandleLocationChanged = () => {
+    try {
+      _categoryTree = [];
+      _persistedCategoryTree = [];
+      _invOrdersList = [];
+      _invOrdersLoadError = null;
+      _invOrderDraftLoaded = false;
+      _invActiveDraftId = null;
+      _invOrderBuilderManualLines = [];
+      _invOrderBuilderCustomSubIds = new Set();
+      _invOrderSaveNameDraft = "";
+      _invOrderDraftLastSavedAt = 0;
+      _invOrderDraftSaveStatus = "idle";
+      _invOrderDraftResumeToastShown = false;
+      _invSuggestionsScannedThisSession = false;
+      _invTableLoadedForSubId = null;
+      _selectedSubcategoryId = null;
+      // Always re-load categories from Firestore with the new location filter,
+      // even if the Inventory screen is not the active view right now. Skipping
+      // the load when `isMounted` was false created a race where the tree
+      // stayed empty after a location switch and Manage Categories showed
+      // "No categories yet" even though the sidebar had stale HTML.
+      _invCategoriesLoading = true;
+      mountOrRefreshMockUi();
+      loadInventoryCategoriesFromFirestore()
+        .catch((e) => {
+          console.warn("[Inventory] category reload on location change failed", e);
+          _invCatLoadError = (e && e.message) || "Failed to load categories";
+        })
+        .finally(() => {
+          _invCategoriesLoading = false;
+          mountOrRefreshMockUi();
+          if (_invMainTab === "orders") {
+            void loadInventoryOrdersList({ silent: true });
+          } else if (_invMainTab === "orderBuilder") {
+            void loadInventoryOrderDraft(true);
+          } else if (_invMainTab === "insights") {
+            void refreshInventoryInsightsAsync();
+          }
+          void scanInventorySuggestionsOnce();
+        });
+    } catch (e) {
+      console.warn("[Inventory] location change handler failed", e);
+    }
+  };
+  document.addEventListener("ff-active-location-changed", _ffInvHandleLocationChanged);
+  window.addEventListener("ff-active-location-changed", _ffInvHandleLocationChanged);
 }
 
 function mountOrRefreshMockUi() {
@@ -12141,6 +12370,22 @@ function mountOrRefreshMockUi() {
 
   ensureInventoryOrderReceiptsSubscription();
 
+  // Inline diagnostic banner removed — multi-branch isolation is confirmed
+  // working end-to-end. Set `localStorage.setItem('ff_inv_debug', 'true')` in
+  // the console to re-enable the banner for future debugging.
+  let _ffInvDebugBanner = "";
+  try {
+    if (typeof localStorage !== "undefined" && localStorage.getItem("ff_inv_debug") === "true") {
+      const activeLoc = _ffInvActiveLocId();
+      const hasMulti = _ffInvUserHasMultipleLocations();
+      _ffInvDebugBanner = `<div style="padding:6px 10px;margin:6px 8px 0;border-radius:6px;font:11px/1.3 system-ui;background:${activeLoc ? "#f1f5f9" : "#fef3c7"};color:#475569;">
+         <strong>Branch:</strong> <code>${escapeHtml(activeLoc || "(NONE — filter is bypassed)")}</code>
+         · <span>${getCategoryTree().length} cat(s)</span>
+         · <span>multi=${hasMulti ? "yes" : "no"}</span>
+       </div>`;
+    }
+  } catch (_) {}
+
   root.innerHTML = `
 <div class="ff-inv2-layout">
   <aside class="ff-inv2-aside" aria-label="Categories">
@@ -12148,6 +12393,7 @@ function mountOrRefreshMockUi() {
       <span>Categories</span>
       <button type="button" class="ff-inv2-aside-add" data-cat-manage-open="1">+ Add</button>
     </div>
+    ${_ffInvDebugBanner}
     <div class="ff-inv2-aside-body" id="ff-inv2-aside-body">${renderSidebarHtml()}</div>
   </aside>
   <main class="ff-inv2-main" id="ff-inv2-main">
@@ -12445,4 +12691,104 @@ async function ffAddInventorySuggestionToOrder(suggestion, opts) {
 if (typeof window !== "undefined") {
   window.goToInventory = goToInventory;
   window.ffAddInventorySuggestionToOrder = ffAddInventorySuggestionToOrder;
+  // Lightweight diagnostic helper — run `ffInventoryDumpLocations()` from the
+  // browser console to see every category & subcategory in Firestore grouped
+  // by their stamped `locationId`. Useful when verifying multi-branch
+  // separation end-to-end after bulk deletes/edits.
+  /**
+   * One-shot cleanup utility — removes inventory categories that have no
+   * `locationId` stamp (and all of their subcategories). These are leftovers
+   * from before multi-branch separation was wired up and are currently
+   * invisible in every branch, so deleting them is a safe housekeeping step.
+   * Returns `{ deletedCategories, deletedSubcategories }` for confirmation.
+   */
+  window.ffInventoryDeleteUnstampedCategories = async function ffInventoryDeleteUnstampedCategories() {
+    try {
+      const salonId = await getSalonId();
+      if (!salonId) { alert("No salonId — cannot clean up."); return; }
+      const catSnap = await getDocs(collection(db, `salons/${salonId}/inventoryCategories`));
+      const orphans = catSnap.docs.filter((d) => {
+        const lid = d.data()?.locationId;
+        return !(typeof lid === "string" && lid.trim());
+      });
+      if (orphans.length === 0) { alert("Nothing to clean up — no unstamped categories found."); return { deletedCategories: 0, deletedSubcategories: 0 }; }
+
+      const names = orphans.map((d) => d.data()?.name || "(unnamed)").join(", ");
+      const ok = confirm(`Delete ${orphans.length} unstamped category(ies) and all of their subcategories?\n\n${names}\n\nThis cannot be undone.`);
+      if (!ok) return "CANCELLED";
+
+      let batch = writeBatch(db);
+      let n = 0;
+      const commits = [];
+      let deletedSubs = 0;
+      for (const c of orphans) {
+        const subSnap = await getDocs(collection(db, `salons/${salonId}/inventoryCategories/${c.id}/inventorySubcategories`));
+        for (const s of subSnap.docs) {
+          batch.delete(s.ref);
+          deletedSubs++;
+          if (++n >= 450) { commits.push(batch.commit()); batch = writeBatch(db); n = 0; }
+        }
+        batch.delete(c.ref);
+        if (++n >= 450) { commits.push(batch.commit()); batch = writeBatch(db); n = 0; }
+      }
+      if (n > 0) commits.push(batch.commit());
+      await Promise.all(commits);
+      alert(`Cleanup done.\n\nDeleted ${orphans.length} category(ies) and ${deletedSubs} subcategory(ies).`);
+      try { document.dispatchEvent(new CustomEvent("ff-active-location-changed")); } catch (_) {}
+      return { deletedCategories: orphans.length, deletedSubcategories: deletedSubs };
+    } catch (e) {
+      console.error("[Inventory/cleanup] failed", e);
+      alert("Cleanup failed: " + ((e && e.message) || e));
+      return "ERROR";
+    }
+  };
+
+  window.ffInventoryDumpLocations = async function ffInventoryDumpLocations() {
+    try {
+      const salonId = await getSalonId();
+      if (!salonId) {
+        console.warn("[Inventory/dump] No salonId resolved.");
+        return "NO_SALON";
+      }
+      const active = _ffInvActiveLocId() || "(none)";
+      const catSnap = await getDocs(collection(db, `salons/${salonId}/inventoryCategories`));
+      const cats = catSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+      const buckets = {};
+      const detailed = [];
+      for (const c of cats) {
+        const key = typeof c.locationId === "string" && c.locationId.trim() ? c.locationId.trim() : "(unstamped)";
+        if (!buckets[key]) buckets[key] = 0;
+        buckets[key] += 1;
+        detailed.push({ id: c.id, name: c.name || "(unnamed)", locationId: key });
+      }
+
+      const lines = [];
+      lines.push(`active=${active}`);
+      lines.push(`firestoreTotal=${cats.length}`);
+      lines.push(`memoryTree=${(_categoryTree || []).length} cats (what the sidebar renders)`);
+      lines.push(`bucketCount=${Object.keys(buckets).length}`);
+      lines.push("--- by bucket ---");
+      for (const [k, v] of Object.entries(buckets)) {
+        lines.push(`  ${k}: ${v}`);
+      }
+      lines.push("--- in-memory tree (sidebar) ---");
+      for (const c of (_categoryTree || [])) {
+        lines.push(`  ${c.name || "(unnamed)"}  (id=${c.id}, subs=${(c.subcategories || []).length})`);
+      }
+      lines.push("--- firestore detailed ---");
+      for (const d of detailed) {
+        lines.push(`  ${d.locationId}  →  ${d.name}  (id=${d.id})`);
+      }
+      const report = lines.join("\n");
+      // Alert guarantees visibility regardless of console filter levels
+      try { alert("Inventory dump:\n\n" + report); } catch (_) {}
+      console.warn("[Inventory/dump] " + report);
+      return { active, total: cats.length, buckets, detailed };
+    } catch (e) {
+      console.error("[Inventory/dump] failed", e);
+      try { alert("Inventory dump failed: " + ((e && e.message) || e)); } catch (_) {}
+      return "ERROR";
+    }
+  };
 }

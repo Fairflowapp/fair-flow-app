@@ -853,9 +853,24 @@ export async function sendBirthdayInboxTestPing() {
     automated: true,
   };
 
+  // Scope the test ping to the currently active branch so it only shows
+  // in the location the manager is viewing. Falls back to null (visible
+  // everywhere) for single-location salons.
+  let testPingLocationId = null;
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === "string" && v.trim()) testPingLocationId = v.trim();
+    }
+    if (!testPingLocationId && typeof window !== "undefined"
+        && typeof window.__ff_active_location_id === "string"
+        && window.__ff_active_location_id.trim()) {
+      testPingLocationId = window.__ff_active_location_id.trim();
+    }
+  } catch (_) {}
   const ref = await addDoc(collection(db, `salons/${salonId}/inboxItems`), {
     tenantId: salonId,
-    locationId: null,
+    locationId: testPingLocationId,
     type: "staff_birthday_reminder",
     status: "open",
     priority: "normal",

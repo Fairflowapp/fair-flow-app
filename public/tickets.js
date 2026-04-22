@@ -1741,30 +1741,13 @@ function setupTicketsDateFilters() {
   if (empSel) empSel.addEventListener('change', onDatesChange);
 }
 
-/** Align the gear icon precisely under the user avatar circle — works on any screen/DPI */
-function _alignGearToAvatar() {
-  const gear = document.getElementById('ticketsManageServicesBtn');
-  // Target the circle itself, not the full button (which includes the ▼ arrow)
-  const avatarCircle = document.querySelector('.user-avatar-circle') || document.getElementById('userAvatarBtn');
-  if (!gear || !avatarCircle || gear.style.display === 'none') return;
-  const circleRect = avatarCircle.getBoundingClientRect();
-  const tabsRow = gear.closest('.tickets-tabs');
-  if (!tabsRow) return;
-  const tabsRect = tabsRow.getBoundingClientRect();
-  // Center gear under the circle center
-  const circleCenterX = circleRect.left + circleRect.width / 2;
-  const gearHalfWidth = 18; // 36px / 2
-  const rightFromRow = tabsRect.right - (circleCenterX + gearHalfWidth);
-  gear.style.marginRight = Math.max(4, Math.round(rightFromRow - 20)) + 'px';
-}
-
-// Re-align on resize
-if (typeof window !== 'undefined') {
-  window.addEventListener('resize', () => {
-    const gear = document.getElementById('ticketsManageServicesBtn');
-    if (gear && gear.style.display !== 'none') _alignGearToAvatar();
-  });
-}
+/**
+ * Legacy no-op: the gear used to live on the right toolbar and had to be
+ * re-aligned under the user avatar. It now sits inline right after the
+ * "Summary" tab, so no explicit alignment is needed anymore. Function
+ * kept to satisfy existing call sites.
+ */
+function _alignGearToAvatar() { /* no-op — see note above */ }
 
 function showToast(msg, type = 'info') {
   if (typeof window !== 'undefined' && window.ffToast && typeof window.ffToast.show === 'function') {

@@ -237,6 +237,17 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
 
       const subjectStaffName = trimStr(stRow.name) || "Staff member";
 
+      // Resolve the subject staff's location so each inbox reminder can be
+      // scoped to the correct branch (matches the pattern used by
+      // birthday-reminders.js). Prefer the primary location; fall back to
+      // the first allowed location if no primary is set; otherwise null.
+      const subjectLocationId =
+        (stRow && typeof stRow.primaryLocationId === "string" && stRow.primaryLocationId.trim())
+          ? stRow.primaryLocationId.trim()
+          : (Array.isArray(stRow && stRow.allowedLocationIds) && stRow.allowedLocationIds[0]
+              ? String(stRow.allowedLocationIds[0]).trim() || null
+              : null);
+
       let docsSnap;
       try {
         docsSnap = await getDocs(collection(db, `salons/${salonId}/staff/${staffId}/documents`));
@@ -334,7 +345,7 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
               const forStaffName = String(rec.name || "Manager").trim() || forUid;
               transaction.set(p.itemRef, {
                 tenantId: salonId,
-                locationId: null,
+                locationId: subjectLocationId,
                 type: "document_expiring_soon",
                 status: "open",
                 priority: "normal",

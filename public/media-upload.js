@@ -25,7 +25,7 @@ import {
   createMediaCategory,
   updateMediaCategory,
   deleteMediaCategory,
-} from "./media-cloud.js?v=20260420_media_per_location_strict";
+} from "./media-cloud.js?v=20260420_media_works_per_location";
 
 let currentUserProfile = null;
 let userWorks = [];
