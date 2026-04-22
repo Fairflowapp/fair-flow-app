@@ -513,22 +513,73 @@ export function subscribePostedHistory(workId, callback) {
 // =====================
 
 /**
- * Get all media categories for the salon (active + inactive, sorted by sortOrder).
+ * Media Categories are PER-LOCATION. Each category doc stores a `locationId`
+ * so branches never cross-contaminate (Kibiscan vs Brickell keep separate
+ * lists). Docs without `locationId` are legacy salon-wide and are shown in
+ * every location for backward compatibility until the Owner re-saves them.
+ */
+function _ffActiveLocationIdForMedia() {
+  // Mirror the accessor pattern used by settings-cloud / queue-cloud so we
+  // don't drop the active location when `ffGetActiveLocationId()` is the
+  // canonical source and `window.__ff_active_location_id` hasn't been
+  // populated yet (race during first paint after login).
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
+      const v = window.ffGetActiveLocationId();
+      const s = typeof v === "string" ? v.trim() : (v ? String(v).trim() : "");
+      if (s) return s;
+    }
+  } catch (_) {}
+  try {
+    const raw = typeof window !== "undefined" && typeof window.__ff_active_location_id === "string"
+      ? window.__ff_active_location_id.trim()
+      : "";
+    return raw;
+  } catch (_) {
+    return "";
+  }
+}
+
+function _ffFilterCategoriesByLocation(items) {
+  const locId = _ffActiveLocationIdForMedia();
+  if (!locId) return items; // no active location → show everything (onboarding)
+  // STRICT per-location scoping: a category is visible in this branch only
+  // when its `locationId` matches. Legacy docs without `locationId` are
+  // hidden on purpose to prevent cross-branch leaks; the Owner re-adds the
+  // ones they actually want in each location (quick and unambiguous).
+  return items.filter((c) => {
+    const raw = c && typeof c.locationId === "string" ? c.locationId.trim() : "";
+    return raw === locId;
+  });
+}
+
+/**
+ * Get all media categories for the active location (active + inactive,
+ * sorted by sortOrder). Falls back to the full salon list when no active
+ * location is set (legacy / onboarding).
  */
 export async function getMediaCategories() {
   const salonId = await getSalonId();
   if (!salonId) return [];
   const snap = await getDocs(query(mediaCategoriesRef(salonId), orderBy("sortOrder", "asc")));
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return _ffFilterCategoriesByLocation(all);
 }
 
 /**
- * Subscribe to media categories.
+ * Subscribe to media categories for the active location. The callback is
+ * re-invoked whenever Firestore fires a snapshot AND whenever the active
+ * location changes (we cache the latest raw list and re-filter locally).
  * @param {function} callback - (categories) => void
  * @returns {function} Unsubscribe
  */
 export function subscribeMediaCategories(callback) {
   let unsub = null;
+  let latestRaw = [];
+  const emit = () => {
+    if (callback) callback(_ffFilterCategoriesByLocation(latestRaw));
+  };
+  const locHandler = () => emit();
   (async () => {
     const salonId = await getSalonId();
     if (!salonId) {
@@ -537,18 +588,25 @@ export function subscribeMediaCategories(callback) {
     }
     const q = query(mediaCategoriesRef(salonId), orderBy("sortOrder", "asc"));
     unsub = onSnapshot(q, (snap) => {
-      const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      if (callback) callback(items);
+      latestRaw = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      emit();
     });
+    if (typeof document !== "undefined") {
+      document.addEventListener("ff-active-location-changed", locHandler);
+    }
   })();
   return () => {
     if (unsub) unsub();
+    if (typeof document !== "undefined") {
+      document.removeEventListener("ff-active-location-changed", locHandler);
+    }
   };
 }
 
 /**
- * Create a media category.
- * @param {object} data - { name, active?, sortOrder? }
+ * Create a media category for the active location (stores `locationId` so
+ * the doc is invisible in other branches).
+ * @param {object} data - { name, active?, sortOrder?, locationId? }
  */
 export async function createMediaCategory(data) {
   const salonId = await getSalonId();
@@ -556,13 +614,20 @@ export async function createMediaCategory(data) {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error("Not signed in");
 
+  // Order is computed from the filtered (per-location) list so each
+  // location has its own sort sequence starting at 1.
   const existing = await getMediaCategories();
   const maxOrder = existing.reduce((m, c) => Math.max(m, c.sortOrder ?? 0), 0);
+
+  const locId = (typeof data.locationId === "string" && data.locationId.trim())
+    ? data.locationId.trim()
+    : _ffActiveLocationIdForMedia();
 
   const docData = sanitize({
     name: String(data.name || "").trim() || "Unnamed",
     active: data.active !== false,
     sortOrder: data.sortOrder ?? maxOrder + 1,
+    locationId: locId || null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     createdByUid: uid,

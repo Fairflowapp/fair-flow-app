@@ -179,32 +179,99 @@ function _applyMainSnapshot(data) {
       window.settings.managers = data.managers;
       changed = true;
     }
-    if (data.staffCallTemplates && typeof data.staffCallTemplates === 'object') {
-      window.settings.staffCallTemplates = normalizeStaffCallTemplates(data.staffCallTemplates);
-      changed = true;
+    // Owner-only Preferences tab — weekStartsOn, salonTimeZone, currency,
+    // timeFormat, defaultScreen, staffCallTemplates and staffCallTimeoutSeconds
+    // are all PER-LOCATION (stored under `locationPreferences.{locationId}.*`).
+    // The legacy salon-wide fields are kept as the fallback until each
+    // location saves its own, so existing data still shows.
+    const _prefsActiveLoc = _ffActiveLocationIdForSettings();
+    const _prefsLocBucket = _prefsActiveLoc
+      && data.locationPreferences
+      && typeof data.locationPreferences === 'object'
+      ? data.locationPreferences[_prefsActiveLoc]
+      : null;
+    const _locPrefs = _prefsLocBucket && typeof _prefsLocBucket === 'object' ? _prefsLocBucket : {};
+
+    // Staff Call Messages — prefer per-location bucket, fallback to legacy
+    // salon-wide top-level fields so existing data keeps working.
+    {
+      const locTpls = _locPrefs && _locPrefs.staffCallTemplates;
+      if (locTpls && typeof locTpls === 'object') {
+        window.settings.staffCallTemplates = normalizeStaffCallTemplates(locTpls);
+        changed = true;
+      } else if (data.staffCallTemplates && typeof data.staffCallTemplates === 'object') {
+        window.settings.staffCallTemplates = normalizeStaffCallTemplates(data.staffCallTemplates);
+        changed = true;
+      }
+      const locTimeout = _locPrefs ? _locPrefs.staffCallTimeoutSeconds : undefined;
+      if (locTimeout !== undefined) {
+        window.settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(locTimeout);
+        changed = true;
+      } else if (data.staffCallTimeoutSeconds !== undefined) {
+        window.settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(data.staffCallTimeoutSeconds);
+        changed = true;
+      }
     }
-    if (data.staffCallTimeoutSeconds !== undefined) {
-      window.settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(data.staffCallTimeoutSeconds);
-      changed = true;
-    }
+
+    const _pickWeekStartsOn = Object.prototype.hasOwnProperty.call(_locPrefs, 'weekStartsOn')
+      ? _locPrefs.weekStartsOn
+      : (data.preferences ? data.preferences.weekStartsOn : undefined);
+
     const nextPreferences = {
       ...(window.settings.preferences && typeof window.settings.preferences === 'object' ? window.settings.preferences : {}),
-      weekStartsOn: normalizeWeekStartsOn(data.preferences?.weekStartsOn)
+      weekStartsOn: normalizeWeekStartsOn(_pickWeekStartsOn)
     };
-    if (data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, "salonTimeZone")) {
-      const st = data.preferences.salonTimeZone;
-      if (st != null && String(st).trim() !== "") {
-        nextPreferences.salonTimeZone = String(st).trim();
+
+    // salonTimeZone — prefer per-location, fallback to legacy top-level.
+    {
+      const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'salonTimeZone');
+      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'salonTimeZone');
+      const raw = hasLoc ? _locPrefs.salonTimeZone : (hasLegacy ? data.preferences.salonTimeZone : undefined);
+      if (raw != null && String(raw).trim() !== '') {
+        nextPreferences.salonTimeZone = String(raw).trim();
       } else {
         delete nextPreferences.salonTimeZone;
       }
     }
-    if (data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, "currency")) {
-      const cur = normalizeSalonCurrency(data.preferences.currency);
+
+    // currency — prefer per-location, fallback to legacy top-level.
+    {
+      const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'currency');
+      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'currency');
+      const raw = hasLoc ? _locPrefs.currency : (hasLegacy ? data.preferences.currency : undefined);
+      const cur = normalizeSalonCurrency(raw);
       if (cur) {
         nextPreferences.currency = cur;
       } else {
         delete nextPreferences.currency;
+      }
+    }
+
+    // timeFormat — '12h' or '24h', per-location first, fallback to legacy.
+    {
+      const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'timeFormat');
+      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'timeFormat');
+      const raw = hasLoc ? _locPrefs.timeFormat : (hasLegacy ? data.preferences.timeFormat : undefined);
+      const tf = (raw === '24h' || raw === '24hour' || raw === 24) ? '24h'
+               : (raw === '12h' || raw === '12hour' || raw === 12) ? '12h'
+               : undefined;
+      if (tf) {
+        nextPreferences.timeFormat = tf;
+      } else {
+        delete nextPreferences.timeFormat;
+      }
+    }
+
+    // defaultScreen — which screen the user lands on, per-location first.
+    {
+      const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'defaultScreen');
+      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'defaultScreen');
+      const raw = hasLoc ? _locPrefs.defaultScreen : (hasLegacy ? data.preferences.defaultScreen : undefined);
+      const s = typeof raw === 'string' ? raw.trim() : '';
+      if (s) {
+        nextPreferences.defaultScreen = s;
+      } else {
+        delete nextPreferences.defaultScreen;
       }
     }
     // Notifications → Birthday reminders "Days in advance" is PER-LOCATION.
@@ -424,8 +491,21 @@ function ffSaveAppSettings(brandName, brandPalette, managers, staffCallTemplates
   if (brandName !== undefined) payload.brandName = brandName || '';
   if (Array.isArray(brandPalette)) payload.brandPalette = brandPalette;
   if (Array.isArray(managers)) payload.managers = managers;
-  if (staffCallTemplates && typeof staffCallTemplates === 'object') payload.staffCallTemplates = normalizeStaffCallTemplates(staffCallTemplates);
-  if (staffCallTimeoutSeconds !== undefined) payload.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(staffCallTimeoutSeconds);
+  // Staff Call Messages are PER-LOCATION: when an active location is set we
+  // route the write to `locationPreferences.{locationId}.*`. Without one we
+  // keep the legacy salon-wide path so no data is lost during onboarding.
+  const _locId = _ffActiveLocationIdForSettings();
+  const _scBase = _locId ? `locationPreferences.${_locId}` : null;
+  if (staffCallTemplates && typeof staffCallTemplates === 'object') {
+    const tpls = normalizeStaffCallTemplates(staffCallTemplates);
+    if (_scBase) payload[`${_scBase}.staffCallTemplates`] = tpls;
+    else payload.staffCallTemplates = tpls;
+  }
+  if (staffCallTimeoutSeconds !== undefined) {
+    const n = normalizeStaffCallTimeoutSeconds(staffCallTimeoutSeconds);
+    if (_scBase) payload[`${_scBase}.staffCallTimeoutSeconds`] = n;
+    else payload.staffCallTimeoutSeconds = n;
+  }
   setDoc(settingsMainRef(_salonId), payload, { merge: true })
     .catch((e) => console.warn("[SettingsCloud] save app settings failed", e));
 }
@@ -462,27 +542,63 @@ function ffSavePreferencesSettings(preferences) {
   if (!_salonId) return;
   const nextPreferences = preferences && typeof preferences === "object" ? preferences : {};
   const wk = normalizeWeekStartsOn(nextPreferences.weekStartsOn);
+
+  // Owner-only Preferences are PER-LOCATION. When an active location is set
+  // we write under `locationPreferences.{locationId}.*`. Without one (legacy
+  // / onboarding before any location exists) we keep the old salon-wide
+  // path so no data is lost.
+  const locationId = _ffActiveLocationIdForSettings();
+  const basePath = locationId ? `locationPreferences.${locationId}` : 'preferences';
+
   const payload = {
     updatedAt: serverTimestamp(),
-    "preferences.weekStartsOn": wk
+    [`${basePath}.weekStartsOn`]: wk
   };
   if (Object.prototype.hasOwnProperty.call(nextPreferences, "salonTimeZone")) {
     const tz = normalizeSalonTimeZone(nextPreferences.salonTimeZone);
     if (tz) {
-      payload["preferences.salonTimeZone"] = tz;
+      payload[`${basePath}.salonTimeZone`] = tz;
     } else {
-      payload["preferences.salonTimeZone"] = deleteField();
+      payload[`${basePath}.salonTimeZone`] = deleteField();
     }
   }
   if (Object.prototype.hasOwnProperty.call(nextPreferences, "currency")) {
     const cur = normalizeSalonCurrency(nextPreferences.currency);
     if (cur) {
-      payload["preferences.currency"] = cur;
+      payload[`${basePath}.currency`] = cur;
     } else {
-      payload["preferences.currency"] = deleteField();
+      payload[`${basePath}.currency`] = deleteField();
     }
   }
-  updateDoc(settingsMainRef(_salonId), payload).catch((e) => console.warn("[SettingsCloud] save preferences settings failed", e));
+  if (Object.prototype.hasOwnProperty.call(nextPreferences, "timeFormat")) {
+    const raw = nextPreferences.timeFormat;
+    const tf = (raw === '24h' || raw === '24hour' || raw === 24) ? '24h'
+             : (raw === '12h' || raw === '12hour' || raw === 12) ? '12h'
+             : '';
+    if (tf) {
+      payload[`${basePath}.timeFormat`] = tf;
+    } else {
+      payload[`${basePath}.timeFormat`] = deleteField();
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(nextPreferences, "defaultScreen")) {
+    const s = typeof nextPreferences.defaultScreen === 'string'
+      ? nextPreferences.defaultScreen.trim()
+      : '';
+    if (s) {
+      payload[`${basePath}.defaultScreen`] = s;
+    } else {
+      payload[`${basePath}.defaultScreen`] = deleteField();
+    }
+  }
+  updateDoc(settingsMainRef(_salonId), payload).catch((e) => {
+    // When the parent map doesn't exist yet updateDoc rejects; fall back to
+    // a merge-setDoc which transparently creates the nested structure.
+    if (e && e.code === 'not-found') {
+      return setDoc(settingsMainRef(_salonId), payload, { merge: true });
+    }
+    console.warn("[SettingsCloud] save preferences settings failed", e);
+  });
 }
 
 /** Resolve the current salon currency code (defaults to USD). Reads from window.settings.preferences.currency. */

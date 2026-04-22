@@ -852,6 +852,289 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   margin-top: 16px;
 }
 .chat-section-label:first-child { margin-top: 0; }
+
+/* ===== CHAT TEMPLATES — COMPACT FORM + BANK ===== */
+.chat-tmpl-form-compact {
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chat-tmpl-form-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #7c3aed;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.chat-tmpl-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.chat-tmpl-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #111827;
+  background: #f9fafb;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.chat-tmpl-input:focus {
+  border-color: #7c3aed;
+  background: #fff;
+}
+.chat-tmpl-details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  flex-shrink: 0;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.chat-tmpl-details-toggle:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+.chat-tmpl-details-toggle[aria-expanded="true"] {
+  background: #f3e8ff;
+  border-color: #ddd6fe;
+  color: #6b21a8;
+}
+.chat-tmpl-details-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.chat-tmpl-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px;
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+  transition: background 0.12s;
+}
+.chat-tmpl-save-btn:hover:not(:disabled) { background: #6d28d9; }
+.chat-tmpl-save-btn:disabled { opacity: 0.6; cursor: wait; }
+
+.chat-tmpl-details {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 4px 4px;
+  border-top: 1px solid #f3f4f6;
+}
+.chat-tmpl-details-block { display: flex; flex-direction: column; gap: 6px; }
+.chat-tmpl-details-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.chat-tmpl-textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #111827;
+  background: #f9fafb;
+  resize: vertical;
+  min-height: 56px;
+  box-sizing: border-box;
+  outline: none;
+  font-family: inherit;
+}
+.chat-tmpl-textarea:focus { border-color: #7c3aed; background: #fff; }
+
+.chat-tmpl-senders-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chat-tmpl-sender-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.chat-tmpl-sender-pill:hover { background: #f3f4f6; }
+.chat-tmpl-sender-pill input { accent-color: #7c3aed; cursor: pointer; margin: 0; }
+.chat-tmpl-sender-pill:has(input:checked) {
+  background: #f3e8ff;
+  border-color: #c4b5fd;
+  color: #6b21a8;
+}
+.chat-tmpl-hint {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+/* Bank */
+.chat-tmpl-bank {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+.chat-tmpl-bank-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+.chat-tmpl-bank-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+  letter-spacing: 0.1px;
+}
+.chat-tmpl-bank-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  background: #f3e8ff;
+  color: #6b21a8;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.chat-tmpl-bank-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  min-height: 60px;
+  padding: 2px 4px 4px;
+}
+.chat-tmpl-bank-empty {
+  padding: 22px 16px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 12px;
+  background: #f9fafb;
+  border: 1px dashed #e5e7eb;
+  border-radius: 10px;
+}
+.chat-tmpl-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.chat-tmpl-card:hover {
+  border-color: #ddd6fe;
+  box-shadow: 0 1px 3px rgba(124, 58, 237, 0.06);
+}
+.chat-tmpl-card.editing {
+  border-color: #7c3aed;
+  background: #faf5ff;
+}
+.chat-tmpl-card-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.chat-tmpl-card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.chat-tmpl-card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+.chat-tmpl-card-roles-inline {
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.chat-tmpl-card-roles-inline.everyone { color: #059669; }
+.chat-tmpl-card-message {
+  font-size: 11.5px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-tmpl-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+.chat-tmpl-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #9ca3af;
+  transition: background 0.12s, color 0.12s;
+  padding: 0;
+}
+.chat-tmpl-icon-btn:hover { background: #f3f4f6; color: #374151; }
+.chat-tmpl-icon-btn.is-danger { color: #9ca3af; background: transparent; }
+.chat-tmpl-icon-btn.is-danger:hover { background: #fef2f2; color: #b91c1c; }
+
+/* Flow decision tree block — always-visible section under the form */
+.chat-flow-tree-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 4px 4px;
+  border-top: 1px solid #f3f4f6;
+}
+.chat-flow-tree-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+
 /* Nav badge (same class as tasks/inbox badges) */
 #chatNavBadge {
   display: none;
@@ -24590,7 +24873,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260412_chat_sender_display');
+            const m = await import('/chat.js?v=20260420_chat_settings_loc');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -39353,7 +39636,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-ui.js?v=20260420_remove_orange_dot"></script>
   <script type="module" src="/inbox.js?v=20260420_inv_draftpicker_v123"></script>
-  <script type="module" src="/chat.js?v=20260412_chat_sender_display"></script>
+  <script type="module" src="/chat.js?v=20260420_chat_settings_loc"></script>
   <script type="module" src="/staff-cloud.js?v=20260415_ff_toast"></script>
   <script type="module" src="/locations-cloud.js?v=20260420_locations_v1"></script>
   <script src="/location-helpers.js?v=20260420_owner_bypass_v1"></script>
@@ -40146,7 +40429,7 @@ function hookSettingsGuard_DISABLED(){
         style="display:none;">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </button>
-      <button id="chatSendBtn" type="button" onclick="window.openSendMessageModal && window.openSendMessageModal()">
+      <button id="chatSendBtn" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         New Message
       </button>
@@ -40283,94 +40566,114 @@ function hookSettingsGuard_DISABLED(){
     </div>
     <div class="chat-modal-body" style="display:flex;flex-direction:column;gap:14px;max-height:65vh;overflow-y:auto;min-height:0;">
       <!-- TAB: Templates -->
-      <div id="chatSettingsTemplatesPane" style="display:flex;flex-direction:column;gap:14px;flex:1;min-height:0;overflow-y:auto;">
-      <!-- Add / Edit form (keep at top) -->
-      <div id="chatTmplForm" style="margin-top:0;padding:18px 20px;background:#fff;border:2px solid #ede9fe;border-radius:12px;">
-        <div style="font-size:13px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;" id="chatTmplFormLabel">Create Structured Message Template</div>
-
-        <div style="margin-bottom:14px;">
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">
-            Title <span style="color:#ef4444;">*</span>
-          </label>
-          <input id="chatTmplTitle" type="text" placeholder="e.g. Need 15 more minutes" maxlength="80"
-            style="width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:7px;font-size:14px;color:#111827;box-sizing:border-box;">
+      <div id="chatSettingsTemplatesPane" style="display:flex;flex-direction:column;gap:12px;flex:1;min-height:0;overflow-y:auto;">
+      <!-- Compact add / edit form — title + expandable details -->
+      <div id="chatTmplForm" class="chat-tmpl-form-compact">
+        <div class="chat-tmpl-form-label" id="chatTmplFormLabel">New Template</div>
+        <div class="chat-tmpl-row">
+          <input id="chatTmplTitle" type="text" placeholder="Template title (e.g. Need 15 more minutes)" maxlength="80" class="chat-tmpl-input">
+          <button type="button" id="chatTmplDetailsToggle" class="chat-tmpl-details-toggle" aria-expanded="false">
+            <span>Options</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transition:transform 0.2s;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <button type="button" id="chatTmplSaveBtn" onclick="window.saveChatTemplate && window.saveChatTemplate()" class="chat-tmpl-save-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <span>Add</span>
+          </button>
         </div>
 
-        <div style="margin-bottom:14px;">
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">
-            Message Text <span style="color:#9ca3af;font-weight:400;">(optional)</span>
-          </label>
-          <textarea id="chatTmplMessage" placeholder="e.g. I need 15 more minutes with my client." rows="3" maxlength="300"
-            style="width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:7px;font-size:14px;color:#111827;resize:vertical;box-sizing:border-box;"></textarea>
-        </div>
-
-        <div style="margin-bottom:18px;">
-          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:8px;">Who Can Send This</label>
-          <div style="display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">
-            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#374151;">
-              <input type="checkbox" id="chatTmplSenderTech" value="technician"
-                style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;">
-              <span style="font-weight:500;">Service Provider</span>
+        <div id="chatTmplDetails" class="chat-tmpl-details" style="display:none;">
+          <div class="chat-tmpl-details-block">
+            <label class="chat-tmpl-details-label">
+              Message Text <span style="color:#9ca3af;font-weight:400;">(optional)</span>
             </label>
-            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#374151;">
-              <input type="checkbox" id="chatTmplSenderMgr" value="manager"
-                style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;">
-              <span style="font-weight:500;">Manager</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#374151;">
-              <input type="checkbox" id="chatTmplSenderAdmin" value="admin"
-                style="width:16px;height:16px;accent-color:#7c3aed;cursor:pointer;">
-              <span style="font-weight:500;">Admin</span>
-            </label>
+            <textarea id="chatTmplMessage" placeholder="e.g. I need 15 more minutes with my client." rows="2" maxlength="300"
+              class="chat-tmpl-textarea"></textarea>
           </div>
-          <div style="font-size:11px;color:#9ca3af;margin-top:5px;">Leave all unchecked = everyone can send.</div>
-        </div>
 
-        <div style="display:flex;gap:8px;">
-          <button type="button" id="chatTmplSaveBtn" onclick="window.saveChatTemplate && window.saveChatTemplate()"
-            style="padding:9px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">Create Template</button>
+          <div class="chat-tmpl-details-block">
+            <label class="chat-tmpl-details-label">Who Can Send This</label>
+            <div class="chat-tmpl-senders-pills">
+              <label class="chat-tmpl-sender-pill">
+                <input type="checkbox" id="chatTmplSenderTech" value="technician">
+                <span>Service Provider</span>
+              </label>
+              <label class="chat-tmpl-sender-pill">
+                <input type="checkbox" id="chatTmplSenderMgr" value="manager">
+                <span>Manager</span>
+              </label>
+              <label class="chat-tmpl-sender-pill">
+                <input type="checkbox" id="chatTmplSenderAdmin" value="admin">
+                <span>Admin</span>
+              </label>
+            </div>
+            <div class="chat-tmpl-hint">Leave all unchecked — everyone can send.</div>
+          </div>
         </div>
       </div>
 
-      <!-- Existing templates list (scrolls) -->
-      <div style="flex:1;min-height:0;overflow-y:auto;padding-right:6px;">
-        <div class="chat-section-label" style="margin-top:0;">Existing Messages</div>
-        <div id="chatTemplatesAdminList"></div>
+      <!-- Templates bank -->
+      <div class="chat-tmpl-bank">
+        <div class="chat-tmpl-bank-header">
+          <span class="chat-tmpl-bank-title">Templates</span>
+          <span id="chatTemplatesCountBadge" class="chat-tmpl-bank-count">0</span>
+        </div>
+        <div id="chatTemplatesAdminList" class="chat-tmpl-bank-list"></div>
       </div>
       </div>
 
       <!-- TAB: Flows -->
-      <div id="chatSettingsFlowsPane" style="display:none;flex-direction:column;gap:14px;flex:1;min-height:0;overflow-y:auto;">
-        <div id="chatFlowsSavedSection" style="padding:18px 20px;background:#f0fdf4;border:1px solid #86efac;border-radius:12px;">
-          <div style="font-size:14px;font-weight:700;color:#166534;margin-bottom:10px;">Your saved flows</div>
-          <div id="chatFlowsAdminList"></div>
-        </div>
-        <div id="chatFlowForm" style="padding:18px 20px;background:#fff;border:2px solid #ede9fe;border-radius:12px;">
-          <div style="font-size:13px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;" id="chatFlowFormLabel">Create Flow</div>
-          <div style="margin-bottom:14px;">
-            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">Flow Title <span style="color:#ef4444;">*</span></label>
-            <input id="chatFlowTitle" type="text" placeholder="e.g. Coffee Order (flow name)" maxlength="80"
-              style="width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:7px;font-size:14px;color:#111827;box-sizing:border-box;">
+      <div id="chatSettingsFlowsPane" style="display:none;flex-direction:column;gap:12px;flex:1;min-height:0;overflow-y:auto;">
+        <!-- Compact create / edit form -->
+        <div id="chatFlowForm" class="chat-tmpl-form-compact">
+          <div class="chat-tmpl-form-label" id="chatFlowFormLabel">New Flow</div>
+          <div class="chat-tmpl-row">
+            <input id="chatFlowTitle" type="text" placeholder="Flow title (e.g. Coffee Order)" maxlength="80" class="chat-tmpl-input">
+            <button type="button" id="chatFlowDetailsToggle" class="chat-tmpl-details-toggle" aria-expanded="false">
+              <span>Options</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transition:transform 0.2s;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            <button type="button" id="chatFlowSaveBtn" onclick="window.saveChatFlow && window.saveChatFlow()" class="chat-tmpl-save-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              <span>Add</span>
+            </button>
           </div>
-          <div style="margin-bottom:14px;">
-            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:8px;">Who Can Use</label>
-            <div style="display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">
-              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;"><input type="checkbox" id="chatFlowSenderTech" style="accent-color:#7c3aed;"> Service Provider</label>
-              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;"><input type="checkbox" id="chatFlowSenderMgr" style="accent-color:#7c3aed;"> Manager</label>
-              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;"><input type="checkbox" id="chatFlowSenderAdmin" style="accent-color:#7c3aed;"> Admin</label>
+
+          <!-- Options panel: Who Can Use (collapsible) -->
+          <div id="chatFlowDetails" class="chat-tmpl-details" style="display:none;">
+            <div class="chat-tmpl-details-block">
+              <label class="chat-tmpl-details-label">Who Can Use</label>
+              <div class="chat-tmpl-senders-pills">
+                <label class="chat-tmpl-sender-pill"><input type="checkbox" id="chatFlowSenderTech"><span>Service Provider</span></label>
+                <label class="chat-tmpl-sender-pill"><input type="checkbox" id="chatFlowSenderMgr"><span>Manager</span></label>
+                <label class="chat-tmpl-sender-pill"><input type="checkbox" id="chatFlowSenderAdmin"><span>Admin</span></label>
+              </div>
+              <div class="chat-tmpl-hint">Leave all unchecked — everyone can use.</div>
             </div>
           </div>
-          <div style="margin-bottom:14px;">
-            <div class="chat-section-label" style="font-size:12px;color:#6b7280;margin-bottom:6px;">Decision tree: Question → Answer → ↳ Add next question (optional). No continuation = end.</div>
+
+          <!-- Decision tree builder: always visible, it's the core of the flow -->
+          <div class="chat-flow-tree-block">
+            <div class="chat-flow-tree-header">
+              <span class="chat-tmpl-details-label">Decision Tree</span>
+              <span class="chat-tmpl-hint" style="margin:0;">Question → Answer → ↳ Add next question. No continuation = end.</span>
+            </div>
             <div id="chatFlowStepsList" class="chat-flow-tree"></div>
             <button type="button" id="chatFlowAddStepBtn" onclick="window._chatFlowAddStep && window._chatFlowAddStep()"
               style="margin-top:6px;padding:6px 12px;border:1px dashed #a78bfa;border-radius:6px;background:#f5f3ff;cursor:pointer;font-size:12px;color:#7c3aed;">+ Add first question</button>
+            <div style="display:flex;gap:8px;margin-top:10px;">
+              <button type="button" id="chatFlowCancelBtn" onclick="window.cancelEditChatFlow && window.cancelEditChatFlow()" style="display:none;padding:7px 14px;border:1px solid #d1d5db;border-radius:7px;background:#fff;cursor:pointer;font-size:12px;color:#6b7280;">Cancel Edit</button>
+            </div>
           </div>
-          <div style="display:flex;gap:8px;">
-            <button type="button" id="chatFlowSaveBtn" onclick="window.saveChatFlow && window.saveChatFlow()"
-              style="padding:9px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">Create Flow</button>
-            <button type="button" id="chatFlowCancelBtn" onclick="window.cancelEditChatFlow && window.cancelEditChatFlow()" style="display:none;padding:9px 18px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;">Cancel</button>
+        </div>
+
+        <!-- Flows bank -->
+        <div class="chat-tmpl-bank">
+          <div class="chat-tmpl-bank-header">
+            <span class="chat-tmpl-bank-title">Flows</span>
+            <span id="chatFlowsCountBadge" class="chat-tmpl-bank-count">0</span>
           </div>
+          <div id="chatFlowsAdminList" class="chat-tmpl-bank-list"></div>
         </div>
       </div>
     </div>
@@ -40952,6 +41255,12 @@ function hookSettingsGuard_DISABLED(){
 
 </body>
 </html>
+
+
+
+
+
+
 
 
 

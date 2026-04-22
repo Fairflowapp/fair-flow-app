@@ -249,18 +249,14 @@
       "font-size:13px;font-weight:500;color:#ffffff;line-height:1.2;" +
       "white-space:nowrap;letter-spacing:0.02em;";
 
-    // Single location → plain read-only label, no trigger, no popover.
+    // Single location → hide the switcher entirely. There's nothing to
+    // switch between, so the icon would just take up space in the header.
+    // The switcher reappears automatically once the user gains access to
+    // a second location (Owner adds them, or their `allowedLocationIds`
+    // grows) because we re-render on `ff-staff-cloud-updated` and
+    // `ff-locations-updated`.
     if (allowedLocations.length === 1) {
-      closePopover();
-      var onlyLoc = allowedLocations[0];
-      var onlyName = onlyLoc && onlyLoc.name ? onlyLoc.name : (onlyLoc && onlyLoc.id) || "";
-      mount.style.display = "inline-flex";
-      mount.style.alignItems = "center";
-      mount.innerHTML =
-        '<span style="' + BASE_TEXT_STYLE + '" title="Your current location. Add more in Settings → Locations.">' +
-        PIN_SVG +
-        '<span>' + escapeHtml(onlyName) + '</span>' +
-        "</span>";
+      hide(mount);
       return;
     }
 
@@ -269,10 +265,16 @@
                  || allowedLocations[0];
     var activeName = activeLoc && activeLoc.name ? activeLoc.name : (activeLoc && activeLoc.id) || "";
 
+    // Compact icon-only trigger: pin + small chevron, no location name text.
+    // The active branch name is exposed via the button `title` (hover tooltip)
+    // and visually marked with a purple dot inside the open popover. This
+    // frees horizontal space in the top nav when many tabs are present
+    // (Queue, Tickets, Tasks, Chat, Inbox, Media, Inventory, Schedule,
+    // Training, Apps…) so the toolbar no longer wraps onto two lines.
     var CHEVRON_SVG =
       '<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" ' +
       'fill="none" stroke="currentColor" stroke-width="2.5" ' +
-      'stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.75;margin-left:1px;">' +
+      'stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.85;margin-left:1px;">' +
       '<polyline points="6 9 12 15 18 9"></polyline>' +
       '</svg>';
 
@@ -281,14 +283,13 @@
     mount.innerHTML =
       '<button id="' + TRIGGER_ID + '" type="button" ' +
       'aria-haspopup="menu" aria-expanded="false" ' +
-      'title="Switch active location" ' +
+      'aria-label="Active location: ' + escapeHtml(activeName) + '. Click to switch." ' +
+      'title="' + escapeHtml(activeName) + ' — Click to switch location" ' +
       'style="' + BASE_TEXT_STYLE +
-      "background:transparent;border:none;padding:2px 0;cursor:pointer;" +
+      "background:transparent;border:none;padding:2px 4px;cursor:pointer;" +
+      "border-radius:6px;" +
       'font-family:inherit;">' +
       PIN_SVG +
-      '<span style="max-width:140px;overflow:hidden;text-overflow:ellipsis;">' +
-      escapeHtml(activeName) +
-      "</span>" +
       CHEVRON_SVG +
       "</button>";
 

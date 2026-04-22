@@ -25,7 +25,7 @@ import {
   createMediaCategory,
   updateMediaCategory,
   deleteMediaCategory,
-} from "./media-cloud.js?v=20260402_firebase_sdk_align";
+} from "./media-cloud.js?v=20260420_media_per_location_strict";
 
 let currentUserProfile = null;
 let userWorks = [];
@@ -1982,16 +1982,19 @@ async function reorderMediaCategories(cats, fromIdx, toIdx) {
 }
 
 async function addMediaCategoryFromSettings() {
+  // Kept as a programmatic helper (callable from the inline Add Category
+  // form in index.html). The native alert was removed because the inline
+  // form handles the empty-name case by simply returning, and shows styled
+  // errors via ffStyledAlert instead of the browser's black popup.
   const input = document.getElementById("userProfileAddMediaCategoryInput");
   if (!input) return;
   const name = input.value.trim();
-  if (!name) {
-    alert("Please enter a category name.");
-    return;
-  }
+  if (!name) return;
   try {
     await createMediaCategory({ name });
     input.value = "";
+    const form = document.getElementById("userProfileAddMediaCategoryForm");
+    if (form) form.style.display = "none";
     await renderMediaCategoriesSettings();
   } catch (e) {
     console.error("[Media] createMediaCategory failed", e);
@@ -1999,32 +2002,56 @@ async function addMediaCategoryFromSettings() {
       e && e.message
         ? String(e.message)
         : "Could not save category. If you use Media “To handle”, you need permission to manage media categories.";
-    alert(msg + "\n\nIf this is a permission error, ask an owner to set your role to Manager/Admin or enable Media → To handle for your staff profile.");
+    if (typeof window !== "undefined" && typeof window.ffStyledAlert === "function") {
+      window.ffStyledAlert(msg);
+    } else {
+      alert(msg);
+    }
   }
 }
 
 function initMediaCategoriesSettingsListeners() {
-  const addBtn = document.getElementById("userProfileAddMediaCategoryBtn");
-  if (addBtn && !addBtn.__mediaCatBound) {
-    addBtn.__mediaCatBound = true;
-    addBtn.addEventListener("click", addMediaCategoryFromSettings);
-  }
-  const input = document.getElementById("userProfileAddMediaCategoryInput");
-  if (input && !input.__mediaCatBound) {
-    input.__mediaCatBound = true;
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        addMediaCategoryFromSettings();
-      }
-    });
-  }
+  // NOTE: The inline form in index.html (openSettings + "+ Add category"
+  // button, Save/Cancel + input with Enter) owns the UX. Binding this
+  // function's own click+Enter here caused a second handler to fire on
+  // "+ Add category" with an empty input, which popped the ugly native
+  // alert. We intentionally no-op here and rely on index.html's
+  // `window.initMediaCategoriesSettingsListeners` instead.
 }
 
 if (typeof window !== "undefined") {
   window.renderMediaCategoriesSettings = renderMediaCategoriesSettings;
   window.addMediaCategoryFromSettings = addMediaCategoryFromSettings;
-  window.initMediaCategoriesSettingsListeners = initMediaCategoriesSettingsListeners;
+  // Expose Firestore CRUD so index.html's inline Save handler can write
+  // directly to the correct `salons/{salonId}/mediaCategories` subcollection
+  // (the snapshot listener re-renders the list automatically).
+  window.ffCreateMediaCategory = createMediaCategory;
+  window.ffUpdateMediaCategory = updateMediaCategory;
+  window.ffDeleteMediaCategory = deleteMediaCategory;
+  // DO NOT overwrite index.html's own initMediaCategoriesSettingsListeners.
+  // See note above. Keep this no-op reference only if nothing else set it,
+  // so callers that guard with `typeof ... === "function"` still succeed.
+  if (typeof window.initMediaCategoriesSettingsListeners !== "function") {
+    window.initMediaCategoriesSettingsListeners = initMediaCategoriesSettingsListeners;
+  }
+
+  // Media Categories are PER-LOCATION. When the user switches locations,
+  // re-run the list renderer if the Settings card is visible so the list
+  // reflects only the active branch. The media-cloud subscribe helper also
+  // re-emits filtered cats to the Upload Work dropdown consumer.
+  if (typeof document !== "undefined" && !document.__ffMediaCatLocBound) {
+    document.__ffMediaCatLocBound = true;
+    document.addEventListener("ff-active-location-changed", () => {
+      try {
+        const card = document.getElementById("userProfileCardMediaCategories");
+        if (card && card.style.display !== "none") {
+          renderMediaCategoriesSettings();
+        }
+      } catch (e) {
+        console.warn("[Media] re-render categories on location change failed", e);
+      }
+    });
+  }
 }
 
 initMediaUpload();

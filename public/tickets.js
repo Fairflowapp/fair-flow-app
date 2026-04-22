@@ -158,18 +158,146 @@ function getTicketTechnicianAvatarUrl(t) {
 }
 
 // =====================
-// Service Catalog
+// Service Catalog (PER-LOCATION, real-time)
 // =====================
+// Each branch has its own catalog. Services and categories are stamped with
+// `locationId`. Documents without a `locationId` are LEGACY (pre-multi-
+// location) — they're hidden from the UI and auto-deleted once on the first
+// load after this version ships, because the user explicitly chose "fresh
+// start" when we redesigned the catalog. Auto-wipe is best-effort: a
+// permission error simply leaves the legacy docs in Firestore (still
+// hidden) so the UI never breaks.
+//
+// Two `onSnapshot` subscriptions keep `_rawServices` / `_rawCategories`
+// live. Whenever either changes, or the active branch changes, we re-apply
+// the location filter into `salonServices` / `serviceCategories` and
+// re-render the UI. This is why a technician sees new services the moment
+// an owner adds them — no refresh needed.
+let _ffCatalogLegacyWiped = false;
+let _rawServices = [];
+let _rawCategories = [];
+let _servicesUnsub = null;
+let _serviceCatsUnsub = null;
+let _catalogSubSalonId = null;
+
+async function _ffWipeLegacyCatalogOnce() {
+  if (_ffCatalogLegacyWiped) return;
+  _ffCatalogLegacyWiped = true; // never retry within this session
+  if (!currentUserProfile?.salonId) return;
+  try {
+    const isOwnerOrAdmin = (() => {
+      try {
+        if (typeof window !== 'undefined' && typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
+      } catch (_) {}
+      const r = String(currentUserProfile?.role || '').toLowerCase();
+      return r === 'owner' || r === 'admin' || r === 'manager';
+    })();
+    if (!isOwnerOrAdmin) return;
+    const [svcSnap, catSnap] = await Promise.all([
+      getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`)),
+      getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`)),
+    ]);
+    const orphans = [];
+    svcSnap.docs.forEach((d) => {
+      const v = d.data() || {};
+      const loc = typeof v.locationId === 'string' ? v.locationId.trim() : '';
+      if (!loc) orphans.push(deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, d.id)));
+    });
+    catSnap.docs.forEach((d) => {
+      const v = d.data() || {};
+      const loc = typeof v.locationId === 'string' ? v.locationId.trim() : '';
+      if (!loc) orphans.push(deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/serviceCategories`, d.id)));
+    });
+    if (orphans.length) {
+      console.log(`[Tickets] Wiping ${orphans.length} legacy catalog docs (no locationId).`);
+      await Promise.allSettled(orphans);
+    }
+  } catch (e) {
+    console.warn('[Tickets] Legacy catalog wipe failed (non-fatal):', e);
+  }
+}
+
+function _ffServiceMatchesActiveLocation(s) {
+  const activeLoc = getActiveLocationIdForTickets();
+  if (!activeLoc) return true;
+  const raw = s && typeof s.locationId === 'string' ? s.locationId.trim() : '';
+  return raw === activeLoc;
+}
+
+/** Recompute `salonServices` + `serviceCategories` from raw caches using the
+ *  current active branch. Safe to call from any event (snapshot arrival,
+ *  location change, manual refresh). */
+function _applyCatalogFilter() {
+  salonServices = _rawServices
+    .filter(_ffServiceMatchesActiveLocation)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  serviceCategories = _rawCategories
+    .filter(_ffServiceMatchesActiveLocation)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+}
+
+/** Single handler for both snapshot sources. Applies filter then refreshes
+ *  anything currently on screen that depends on the catalog. */
+function _onCatalogSnapshot() {
+  _applyCatalogFilter();
+  try {
+    const modal = document.getElementById('servicesModal');
+    if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
+      renderServicesCatalogV2();
+    }
+  } catch (_) {}
+  try { setupTicketsUI(); } catch (_) {}
+}
+
+/** Live subscribe to services + serviceCategories for the current salon.
+ *  Idempotent; switching salon auto-rebinds. */
+function subscribeServiceCatalog() {
+  const salonId = currentUserProfile?.salonId;
+  if (!salonId) return;
+  if (_catalogSubSalonId === salonId && (_servicesUnsub || _serviceCatsUnsub)) return;
+  // Different salon than what we were subscribed to — tear down first.
+  if (_servicesUnsub) { try { _servicesUnsub(); } catch (_) {} _servicesUnsub = null; }
+  if (_serviceCatsUnsub) { try { _serviceCatsUnsub(); } catch (_) {} _serviceCatsUnsub = null; }
+  _catalogSubSalonId = salonId;
+
+  // One-time legacy cleanup BEFORE we start listening — so the first snapshot
+  // doesn't include the orphans we're about to delete.
+  _ffWipeLegacyCatalogOnce().finally(() => {
+    try {
+      _servicesUnsub = onSnapshot(
+        collection(db, `salons/${salonId}/services`),
+        (snap) => { _rawServices = snap.docs.map(d => ({ id: d.id, ...d.data() })); _onCatalogSnapshot(); },
+        (err) => console.warn('[Tickets] services subscription error', err)
+      );
+    } catch (e) { console.warn('[Tickets] services subscription failed', e); }
+    try {
+      _serviceCatsUnsub = onSnapshot(
+        collection(db, `salons/${salonId}/serviceCategories`),
+        (snap) => { _rawCategories = snap.docs.map(d => ({ id: d.id, ...d.data() })); _onCatalogSnapshot(); },
+        (err) => console.warn('[Tickets] categories subscription error', err)
+      );
+    } catch (e) { console.warn('[Tickets] categories subscription failed', e); }
+  });
+}
+
 async function loadServices() {
   if (!currentUserProfile?.salonId) return [];
+  // Make sure live subscriptions are running; they will refresh the UI the
+  // moment new data arrives.
+  subscribeServiceCatalog();
   try {
+    // First visit (before a snapshot has arrived) — do a one-shot getDocs
+    // so the caller has data to render immediately.
+    if (_rawServices.length === 0) {
+      await _ffWipeLegacyCatalogOnce();
     const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`));
-    salonServices = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+      _rawServices = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+    _applyCatalogFilter();
     return salonServices;
   } catch (err) {
     console.warn('[Tickets] Failed to load services', err);
-    salonServices = [];
-    return [];
+    return salonServices;
   }
 }
 
@@ -186,8 +314,11 @@ async function saveService(service) {
     await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, service.id), payload);
     return service.id;
   } else {
+    // New doc — stamp the active branch so this service only appears there.
+    const activeLoc = getActiveLocationIdForTickets();
     const ref = await addDoc(collection(db, `salons/${currentUserProfile.salonId}/services`), {
       ...payload,
+      locationId: activeLoc || null,
       createdAt: serverTimestamp()
     });
     return ref.id;
@@ -200,18 +331,22 @@ async function deleteService(serviceId) {
 }
 
 // =====================
-// Service Categories (managed objects)
+// Service Categories (managed objects, PER-LOCATION)
 // =====================
 async function loadServiceCategories() {
   if (!currentUserProfile?.salonId) return [];
+  subscribeServiceCatalog();
   try {
+    if (_rawCategories.length === 0) {
+      await _ffWipeLegacyCatalogOnce();
     const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`));
-    serviceCategories = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+      _rawCategories = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+    _applyCatalogFilter();
     return serviceCategories;
   } catch (err) {
     console.warn('[Tickets] Failed to load service categories', err);
-    serviceCategories = [];
-    return [];
+    return serviceCategories;
   }
 }
 
@@ -226,8 +361,10 @@ async function saveServiceCategory(cat) {
     await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/serviceCategories`, cat.id), payload);
     return cat.id;
   } else {
+    const activeLoc = getActiveLocationIdForTickets();
     const ref = await addDoc(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`), {
       ...payload,
+      locationId: activeLoc || null,
       createdAt: serverTimestamp()
     });
     return ref.id;
@@ -2787,249 +2924,551 @@ async function doCloseTicket(ticketId) {
 // =====================
 // UI: Service Catalog Modal
 // =====================
-let editingServiceId = null;
+// =====================
+// Service Catalog V2 — unified collapsible UI (per-location)
+// =====================
+// One screen. Each category is a header with ▸/▾ toggle; expanding reveals
+// its services (name + price) and a "+ Add service" link. A top "+ Add
+// Category" button and a small shared "Add/Edit" mini modal do all CRUD.
+// Legacy two-tab view + subcategory concept are removed.
+
+/** Which categories are open (in-memory; reset when the modal closes). */
+const _ffOpenCats = new Set();
+/** True after the first render of the modal in the current opening. Used to
+ *  auto-expand the first category so the user sees services immediately. */
+let _ffCatalogRenderedOnce = false;
 
 async function openServicesModal() {
   const modal = document.getElementById('servicesModal');
   if (!modal) return;
-  editingServiceId = null;
-  await loadServiceCategories();
-  showServicesCatalogPanel();
-  const nameEl = document.getElementById('serviceFormName');
-  const priceEl = document.getElementById('serviceFormPrice');
-  if (nameEl) nameEl.value = '';
-  if (priceEl) {
-    priceEl.value = '';
-    priceEl.placeholder = `Default price (${ffTicketCurSym()})`;
-  }
-  populateServiceCategoryDropdown(null);
-  renderServicesList();
+  _ffOpenCats.clear();
+  _ffCatalogRenderedOnce = false;
+  // Ensure we have the latest from Firestore scoped to the active branch.
+  await Promise.all([loadServiceCategories(), loadServices()]);
+  renderServicesCatalogV2();
   modal.style.display = 'flex';
-  const catTab = document.getElementById('servicesCategoriesTab');
-  const svcTab = document.getElementById('servicesCatalogTab');
-  if (svcTab) svcTab.onclick = showServicesCatalogPanel;
-  if (catTab) catTab.onclick = () => { showCategoriesPanel(); };
-}
-
-function showServicesCatalogPanel() {
-  const panel = document.getElementById('servicesCatalogPanel');
-  const catPanel = document.getElementById('servicesCategoriesPanel');
-  const tabBtn = document.getElementById('servicesCatalogTab');
-  const catTabBtn = document.getElementById('servicesCategoriesTab');
-  if (panel) { panel.style.display = 'block'; panel.style.flex = '1'; }
-  if (catPanel) catPanel.style.display = 'none';
-  if (tabBtn) { tabBtn.style.borderBottom = '2px solid #7c3aed'; tabBtn.style.fontWeight = '600'; tabBtn.style.color = '#7c3aed'; }
-  if (catTabBtn) { catTabBtn.style.borderBottom = '2px solid transparent'; catTabBtn.style.fontWeight = '500'; catTabBtn.style.color = '#6b7280'; }
-  // Re-populate the dropdown so any categories that were added/edited while
-  // the user was on the Categories tab appear immediately when they come
-  // back here. Keeps whatever was already selected.
-  const catSel = document.getElementById('serviceFormCategory');
-  const keepSelectedId = catSel ? catSel.value : '';
-  populateServiceCategoryDropdown(keepSelectedId || (editingServiceId ? undefined : null));
-  renderServicesList();
-}
-
-function showCategoriesPanel() {
-  const panel = document.getElementById('servicesCatalogPanel');
-  const catPanel = document.getElementById('servicesCategoriesPanel');
-  const tabBtn = document.getElementById('servicesCatalogTab');
-  const catTabBtn = document.getElementById('servicesCategoriesTab');
-  if (panel) panel.style.display = 'none';
-  if (catPanel) { catPanel.style.display = 'block'; catPanel.style.flex = '1'; }
-  if (tabBtn) { tabBtn.style.borderBottom = '2px solid transparent'; tabBtn.style.fontWeight = '500'; tabBtn.style.color = '#6b7280'; }
-  if (catTabBtn) { catTabBtn.style.borderBottom = '2px solid #7c3aed'; catTabBtn.style.fontWeight = '600'; catTabBtn.style.color = '#7c3aed'; }
-  renderCategoriesList();
-}
-
-function populateServiceCategoryDropdown(selectedId) {
-  const sel = document.getElementById('serviceFormCategory');
-  if (!sel) return;
-  const ADD_NEW = '__add_new__';
-  let opts = '<option value="">Other</option>';
-  serviceCategories.forEach((c) => { opts += `<option value="${c.id}">${escapeHtml(c.name)}</option>`; });
-  opts += `<option value="${ADD_NEW}">+ Add new category</option>`;
-  sel.innerHTML = opts;
-  sel.value = selectedId || '';
-  sel.onchange = async () => {
-    if (sel.value === ADD_NEW) {
-      sel.value = '';
-      const name = await ticketPrompt('Enter a name for the new category.', 'New category');
-      if (name && String(name).trim()) {
-        try {
-          const id = await saveServiceCategory({ name: String(name).trim(), sortOrder: serviceCategories.length });
-          await loadServiceCategories();
-          populateServiceCategoryDropdown(id);
-          renderServicesList();
-          setupTicketsUI();
-          showToast('Category added', 'success');
-        } catch (e) {
-          showToast(e?.message || 'Failed', 'error');
-        }
-      }
-    }
-  };
-}
-
-async function addServiceCategory() {
-  const inp = document.getElementById('newCategoryName');
-  const name = inp?.value?.trim();
-  if (!name) { showToast('Enter category name', 'error'); return; }
-  try {
-    await saveServiceCategory({ name, sortOrder: serviceCategories.length });
-    await loadServiceCategories();
-    if (inp) inp.value = '';
-    renderCategoriesList();
-    populateServiceCategoryDropdown(null);
-    setupTicketsUI();
-    showToast('Category added', 'success');
-  } catch (e) { showToast(e?.message || 'Failed', 'error'); }
-}
-
-function renderCategoriesList() {
-  const list = document.getElementById('categoriesList');
-  if (!list) return;
-  if (serviceCategories.length === 0) {
-    list.innerHTML = '<div style="padding:16px;color:#9ca3af;">No categories. Add one above.</div>';
-  } else {
-    list.innerHTML = serviceCategories.map((c) => {
-      const count = salonServices.filter(s => s.categoryId === c.id).length;
-      const pencilSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-      const trashSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid #eee;"><div><strong style="font-size:13px !important;">${escapeHtml(c.name)}</strong><span style="color:#9ca3af;font-size:13px;margin-left:8px;">${count} service(s)</span></div><div style="display:flex;gap:8px;"><button type="button" class="cat-edit-btn" data-id="${c.id}" title="Edit" style="padding:6px;border:none;background:none;cursor:pointer;line-height:0;">${pencilSvg}</button><button type="button" class="cat-delete-btn" data-id="${c.id}" title="Delete" style="padding:6px;border:none;background:none;cursor:pointer;line-height:0;">${trashSvg}</button></div></div>`;
-    }).join('');
-    list.querySelectorAll('.cat-edit-btn').forEach((btn) => {
-      btn.onclick = async () => {
-        const c = serviceCategories.find(x => x.id === btn.getAttribute('data-id'));
-        if (!c) return;
-        const name = await ticketPrompt('Rename this category.', 'Edit category', c.name || '');
-        if (name != null && String(name).trim() && String(name).trim() !== c.name) {
-          try {
-            await saveServiceCategory({ id: c.id, name: String(name).trim(), sortOrder: c.sortOrder });
-            await loadServiceCategories();
-            renderCategoriesList();
-            populateServiceCategoryDropdown(null);
-            renderServicesList();
-            setupTicketsUI();
-            showToast('Updated', 'success');
-          } catch (e) {
-            showToast(e?.message || 'Failed', 'error');
-          }
-        }
-      };
-    });
-    list.querySelectorAll('.cat-delete-btn').forEach((btn) => {
-      btn.onclick = async () => {
-        const id = btn.getAttribute('data-id');
-        try {
-          await deleteServiceCategory(id);
-          await loadServiceCategories();
-          renderCategoriesList();
-          populateServiceCategoryDropdown(null);
-          renderServicesList();
-          setupTicketsUI();
-          showToast('Category deleted', 'success');
-        } catch (e) { showToast(e?.message || 'Failed', 'error'); }
-      };
-    });
-  }
 }
 
 function closeServicesModal() {
   const modal = document.getElementById('servicesModal');
   if (modal) modal.style.display = 'none';
+  _ffCatalogEditorClose();
 }
 
-function renderServicesList() {
-  const list = document.getElementById('servicesList');
+/** Render the unified catalog. Keeps currently-open categories open. */
+function renderServicesCatalogV2() {
+  const list = document.getElementById('servicesCatalogV2List');
   if (!list) return;
-  const grouped = getServicesGroupedByCategory();
-  // Only keep groups that actually have at least one service. An empty
-  // "Other" header at the top of the modal confused users into thinking
-  // it was a field placeholder.
-  const nonEmptyEntries = Object.entries(grouped).filter(([, data]) => (data.services || []).length > 0);
-  if (nonEmptyEntries.length === 0) {
-    list.innerHTML = '<div style="padding:16px;color:#9ca3af;font-size:13px;text-align:center;">No services yet. Add one below.</div>';
-  } else {
-    let html = '';
-    nonEmptyEntries.forEach(([key, data], idx) => {
-      const label = escapeHtml(data.label || 'Other');
-      const services = data.services || [];
-      html += `<div class="services-category-section" data-cat-idx="${idx}" style="margin-bottom:8px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">`;
-      html += `<div class="services-category-header" style="display:flex;align-items:center;gap:4px;padding:8px 12px;font-size:12px;font-weight:700;color:#374151;background:#f9fafb;border-bottom:1px solid #e5e7eb;letter-spacing:0.02em;">${label}</div>`;
-      html += '<div style="padding:4px 10px 6px;display:flex;flex-direction:column;gap:2px;">';
-      const pencilSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" style="display:block;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-      const trashSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
-      services.forEach((s) => {
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 6px;border-bottom:1px solid #f3f4f6;font-size:13px;"><div><strong style="font-size:13px;font-weight:600;color:#111;">${escapeHtml(s.name)}</strong><span style="color:#6b7280;font-size:12px;margin-left:8px;">${ffTicketMoney(s.defaultPrice || 0)}</span></div><div style="display:flex;gap:10px;"><button type="button" class="services-edit-btn" data-id="${s.id}" title="Edit" style="padding:4px;border:none;background:none;cursor:pointer;line-height:0;">${pencilSvg}</button><button type="button" class="services-delete-btn" data-id="${s.id}" title="Delete" style="padding:4px;border:none;background:none;cursor:pointer;line-height:0;">${trashSvg}</button></div></div>`;
-      });
-      html += '</div></div>';
-    });
-    list.innerHTML = html;
+
+  if (!_ffCatalogRenderedOnce && _ffOpenCats.size === 0 && serviceCategories.length > 0) {
+    _ffOpenCats.add(serviceCategories[0].id);
   }
-  list.querySelectorAll('.services-edit-btn').forEach(btn => {
-    btn.onclick = () => {
-      const s = salonServices.find(x => x.id === btn.getAttribute('data-id'));
-      if (s) {
-        editingServiceId = s.id;
-        const nameEl = document.getElementById('serviceFormName');
-        const catEl = document.getElementById('serviceFormCategory');
-        const priceEl = document.getElementById('serviceFormPrice');
-        if (nameEl) nameEl.value = s.name || '';
-        populateServiceCategoryDropdown(s.categoryId || '');
-        if (priceEl) priceEl.value = (s.defaultPrice || 0).toString();
-      }
-    };
+  _ffCatalogRenderedOnce = true;
+
+  // Group services under each category. Services with no categoryId (or a
+  // category id that no longer exists) land in a virtual "Other" bucket,
+  // shown only when it actually has services.
+  const grouped = new Map();
+  serviceCategories.forEach((c) => grouped.set(c.id, { id: c.id, name: c.name, services: [] }));
+  const orphans = [];
+  salonServices.forEach((s) => {
+    const bucket = s.categoryId && grouped.has(s.categoryId) ? grouped.get(s.categoryId) : null;
+    if (bucket) bucket.services.push(s);
+    else orphans.push(s);
   });
-  list.querySelectorAll('.services-delete-btn').forEach(btn => {
-    btn.onclick = async () => {
-      const ok = await ticketConfirm('Delete this service?', 'Delete service');
-      if (!ok) return;
-      const id = btn.getAttribute('data-id');
-      try {
-        await deleteService(id);
-        await loadServices();
-        renderServicesList();
-        showToast('Service deleted', 'success');
-      } catch (e) {
-        showToast(e?.message || 'Failed', 'error');
-      }
-    };
+  if (orphans.length) grouped.set('__other__', { id: '__other__', name: 'Other', services: orphans });
+
+  if (grouped.size === 0) {
+    list.innerHTML = `
+      <div style="padding:36px 20px;color:#6b7280;text-align:center;font-size:14px;line-height:1.5;">
+        <div style="font-size:15px;color:#111;font-weight:600;margin-bottom:6px;">No categories yet</div>
+        <div>Start by adding a category (e.g. <em>Manicure</em>, <em>Pedicure</em>, <em>Massage</em>), then add services under it with their prices.</div>
+      </div>`;
+    return;
+  }
+
+  const dotsSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="#9ca3af" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+
+  let html = '';
+  for (const cat of grouped.values()) {
+    const isOpen = _ffOpenCats.has(cat.id);
+    const arrow = isOpen ? '▾' : '▸';
+    const count = cat.services.length;
+    const isOther = cat.id === '__other__';
+    html += `<div class="ffcat-row" data-cat-id="${escapeHtml(cat.id)}" style="margin-bottom:6px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff;">`;
+    // The HEADER itself is draggable for categories (so services inside
+    // don't accidentally pick up the category drag). Services have their
+    // own draggable row below.
+    const headDraggable = isOther ? '' : `draggable="true" data-drag-kind="category" data-cat-id="${escapeHtml(cat.id)}"`;
+    html += `<div class="ffcat-head" ${headDraggable} role="button" tabindex="0" title="${isOther ? '' : 'Drag to reorder'}" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:${isOther ? 'pointer' : 'grab'};background:#f9fafb;user-select:none;">`;
+    html += `<span class="ffcat-arrow" style="font-size:12px;color:#6b7280;width:10px;display:inline-block;">${arrow}</span>`;
+    html += `<span style="font-weight:600;color:#111;font-size:13px;flex:1;line-height:1.25;">${escapeHtml(cat.name)}</span>`;
+    html += `<span style="color:#9ca3af;font-size:11px;">${count}</span>`;
+    if (!isOther) {
+      html += `<button type="button" class="ffcat-menu-btn" data-cat-id="${escapeHtml(cat.id)}" title="Category actions" style="border:none;background:none;padding:2px 4px;cursor:pointer;line-height:0;border-radius:4px;">${dotsSvg}</button>`;
+    }
+    html += `</div>`;
+    html += `<div class="ffcat-body" style="display:${isOpen ? 'block' : 'none'};padding:2px 6px 6px;">`;
+    if (cat.services.length === 0) {
+      html += `<div style="padding:6px 10px;color:#9ca3af;font-size:12px;">No services yet.</div>`;
+    } else {
+      cat.services.forEach((s) => {
+        // Services that landed in the virtual "Other" bucket have no real
+        // parent category — drag them only to re-home into a real one.
+        html += `<div class="ffsvc-row" draggable="true" data-drag-kind="service" data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" title="Drag to reorder / move" style="display:flex;align-items:center;gap:8px;padding:5px 10px 5px 18px;border-bottom:1px solid #f3f4f6;cursor:grab;">`;
+        html += `<span style="font-weight:500;color:#111;font-size:12px;flex:1;line-height:1.25;">${escapeHtml(s.name)}</span>`;
+        html += `<span style="color:#374151;font-size:12px;font-variant-numeric:tabular-nums;">${ffTicketMoney(s.defaultPrice || 0)}</span>`;
+        html += `<button type="button" class="ffsvc-menu-btn" data-svc-id="${escapeHtml(s.id)}" title="Service actions" style="border:none;background:none;padding:2px 4px;cursor:pointer;line-height:0;border-radius:4px;">${dotsSvg}</button>`;
+        html += `</div>`;
+      });
+    }
+    if (!isOther) {
+      html += `<div style="padding:4px 6px;"><button type="button" class="ffcat-addsvc-btn" data-cat-id="${escapeHtml(cat.id)}" style="background:none;border:none;color:#7c3aed;font-weight:600;font-size:12px;padding:4px 6px;cursor:pointer;text-align:left;">+ Add service</button></div>`;
+    }
+    html += `</div></div>`;
+  }
+  list.innerHTML = html;
+  _ffWireCatalogDragDrop(list);
+
+  // Wire: expand/collapse on header click (but not when clicking the menu).
+  list.querySelectorAll('.ffcat-head').forEach((head) => {
+    head.addEventListener('click', (e) => {
+      if (e.target.closest('.ffcat-menu-btn')) return;
+      const row = head.closest('.ffcat-row');
+      const catId = row?.getAttribute('data-cat-id');
+      if (!catId) return;
+      if (_ffOpenCats.has(catId)) _ffOpenCats.delete(catId); else _ffOpenCats.add(catId);
+      renderServicesCatalogV2();
+    });
+  });
+  // Wire: category action menu
+  list.querySelectorAll('.ffcat-menu-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const catId = btn.getAttribute('data-cat-id');
+      _ffShowCategoryMenu(btn, catId);
+    });
+  });
+  // Wire: add service inside a category
+  list.querySelectorAll('.ffcat-addsvc-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const catId = btn.getAttribute('data-cat-id');
+      _ffOpenCats.add(catId);
+      _ffCatalogEditorOpen({ mode: 'service-add', categoryId: catId });
+    });
+  });
+  // Wire: service action menu
+  list.querySelectorAll('.ffsvc-menu-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const svcId = btn.getAttribute('data-svc-id');
+      _ffShowServiceMenu(btn, svcId);
+    });
   });
 }
 
-async function saveServiceFromForm() {
-  const name = document.getElementById('serviceFormName').value.trim();
-  if (!name) { showToast('Enter service name', 'error'); return; }
-  const catSel = document.getElementById('serviceFormCategory');
-  const rawCatValue = (catSel?.value || '').trim();
-  // Guard against the sentinel value: if somehow "+ Add new category" is
-  // still the current value when Save is clicked, treat it as "no
-  // category" rather than stamping the sentinel onto the service.
-  const categoryId = (!rawCatValue || rawCatValue === '__add_new__') ? null : rawCatValue;
-  const defaultPrice = parseFloat(document.getElementById('serviceFormPrice').value) || 0;
-  const isEdit = !!editingServiceId;
-  console.log('[Services] saveServiceFromForm →', { name, categoryId, defaultPrice, isEdit, rawCatValue, selectedLabel: catSel?.options?.[catSel.selectedIndex]?.text });
+/** Small popover menu for a category row. */
+function _ffShowCategoryMenu(anchorBtn, catId) {
+  _ffCloseAllPopovers();
+  const cat = serviceCategories.find((c) => c.id === catId);
+  if (!cat) return;
+  const pop = _ffBuildPopover(anchorBtn, [
+    { label: 'Rename category', onClick: () => _ffCatalogEditorOpen({ mode: 'category-edit', categoryId: catId }) },
+    { label: 'Delete category', danger: true, onClick: async () => {
+      const ok = await ticketConfirm(`Delete "${cat.name}"? Services inside must be moved first.`, 'Delete category');
+      if (!ok) return;
+      try {
+        await deleteServiceCategory(catId);
+        await Promise.all([loadServiceCategories(), loadServices()]);
+        _ffOpenCats.delete(catId);
+        renderServicesCatalogV2();
+    setupTicketsUI();
+        showToast('Category deleted', 'success');
+  } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+    }},
+  ]);
+  document.body.appendChild(pop);
+}
+
+/** Small popover menu for a service row. */
+function _ffShowServiceMenu(anchorBtn, svcId) {
+  _ffCloseAllPopovers();
+  const svc = salonServices.find((s) => s.id === svcId);
+  if (!svc) return;
+  const items = [
+    { label: 'Edit service', onClick: () => _ffCatalogEditorOpen({ mode: 'service-edit', serviceId: svcId }) },
+  ];
+  // Offer a "Move to…" shortcut for keyboards / touch devices where HTML5
+  // drag-and-drop isn't available. Only appears when there's somewhere
+  // meaningful to move to (another real category).
+  const otherCats = serviceCategories.filter((c) => c.id !== svc.categoryId);
+  if (otherCats.length > 0) {
+    items.push({ label: 'Move to category…', onClick: () => _ffShowMoveServicePicker(anchorBtn, svcId) });
+  }
+  items.push({ label: 'Delete service', danger: true, onClick: async () => {
+    const ok = await ticketConfirm(`Delete "${svc.name}"?`, 'Delete service');
+    if (!ok) return;
+    try {
+      await deleteService(svcId);
+      await loadServices();
+      renderServicesCatalogV2();
+          setupTicketsUI();
+      showToast('Service deleted', 'success');
+        } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+  }});
+  const pop = _ffBuildPopover(anchorBtn, items);
+  document.body.appendChild(pop);
+}
+
+/** Secondary popover: list of categories to move the service into. */
+function _ffShowMoveServicePicker(anchorBtn, svcId) {
+  _ffCloseAllPopovers();
+  const svc = salonServices.find((s) => s.id === svcId);
+  if (!svc) return;
+  const items = serviceCategories
+    .filter((c) => c.id !== svc.categoryId)
+    .map((c) => ({
+      label: c.name,
+      onClick: async () => {
+        try {
+          await _ffMoveServiceToCategoryEnd(svcId, c.id);
+          showToast(`Moved to "${c.name}"`, 'success');
+        } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+      },
+    }));
+  if (items.length === 0) return;
+  const pop = _ffBuildPopover(anchorBtn, items);
+  document.body.appendChild(pop);
+}
+
+function _ffCloseAllPopovers() {
+  document.querySelectorAll('.ffcat-popover').forEach((el) => el.remove());
+}
+
+/** Creates a small floating popover anchored near `anchorBtn`. */
+function _ffBuildPopover(anchorBtn, items) {
+  const pop = document.createElement('div');
+  pop.className = 'ffcat-popover';
+  const rect = anchorBtn.getBoundingClientRect();
+  pop.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${Math.max(8, rect.right - 160)}px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,0.12);padding:4px;min-width:160px;z-index:2147483500;`;
+  items.forEach(({ label, danger, onClick }) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.style.cssText = `display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;cursor:pointer;font-size:13px;color:${danger ? '#ef4444' : '#111'};border-radius:6px;`;
+    b.addEventListener('mouseenter', () => { b.style.background = danger ? '#fef2f2' : '#f3f4f6'; });
+    b.addEventListener('mouseleave', () => { b.style.background = 'none'; });
+    b.addEventListener('click', () => { _ffCloseAllPopovers(); onClick?.(); });
+    pop.appendChild(b);
+  });
+  // Auto-close on outside click
+  setTimeout(() => {
+    const off = (e) => { if (!pop.contains(e.target)) { _ffCloseAllPopovers(); document.removeEventListener('mousedown', off, true); } };
+    document.addEventListener('mousedown', off, true);
+  }, 0);
+  return pop;
+}
+
+// ---------- Drag-and-drop reordering ----------
+// Categories are reordered by dragging their header onto another header.
+// Services are reordered within a category by dragging one row onto another,
+// or moved across categories by dropping on another category's services or
+// directly on a category header (which appends the service to the end of
+// that category). Firestore writes update `sortOrder` for every sibling
+// affected; the onSnapshot subscription re-renders the UI.
+
+/** @type {{kind:'category'|'service', catId:string|null, svcId:string|null}|null} */
+let _ffDragSrc = null;
+let _ffDragHoverEl = null;
+
+function _ffClearDragHover() {
+  if (_ffDragHoverEl) {
+    _ffDragHoverEl.style.boxShadow = '';
+    _ffDragHoverEl.style.background = _ffDragHoverEl._ffPrevBg || '';
+    _ffDragHoverEl._ffPrevBg = undefined;
+    _ffDragHoverEl = null;
+  }
+}
+
+function _ffWireCatalogDragDrop(listEl) {
+  // The list is re-rendered on every snapshot, so wire once per render by
+  // attaching to the fresh listEl. No need for idempotence.
+  listEl.addEventListener('dragstart', (e) => {
+    const row = e.target.closest('[data-drag-kind]');
+    if (!row) return;
+    _ffDragSrc = {
+      kind: row.getAttribute('data-drag-kind'),
+      catId: row.getAttribute('data-cat-id') || null,
+      svcId: row.getAttribute('data-svc-id') || null,
+    };
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      // Firefox needs data set for dragstart to actually begin.
+      e.dataTransfer.setData('text/plain', _ffDragSrc.svcId || _ffDragSrc.catId || '');
+    } catch (_) {}
+    row.style.opacity = '0.4';
+  });
+
+  listEl.addEventListener('dragend', (e) => {
+    const row = e.target.closest('[data-drag-kind]');
+    if (row) row.style.opacity = '';
+    _ffClearDragHover();
+    _ffDragSrc = null;
+  });
+
+  listEl.addEventListener('dragover', (e) => {
+    if (!_ffDragSrc) return;
+    let hl = null;
+    if (_ffDragSrc.kind === 'category') {
+      const targetHead = e.target.closest('.ffcat-head[data-drag-kind="category"]');
+      if (targetHead && targetHead.getAttribute('data-cat-id') !== _ffDragSrc.catId) {
+        hl = targetHead;
+      }
+    } else if (_ffDragSrc.kind === 'service') {
+      const targetSvc = e.target.closest('.ffsvc-row');
+      const targetHead = e.target.closest('.ffcat-head[data-drag-kind="category"]');
+      if (targetSvc && targetSvc.getAttribute('data-svc-id') !== _ffDragSrc.svcId) {
+        hl = targetSvc;
+      } else if (targetHead) {
+        hl = targetHead;
+      }
+    }
+    if (hl) {
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+      if (hl !== _ffDragHoverEl) {
+        _ffClearDragHover();
+        _ffDragHoverEl = hl;
+        if (hl.classList.contains('ffcat-head')) {
+          hl._ffPrevBg = hl.style.background;
+          hl.style.background = '#ede9fe';
+        } else {
+          // inset box-shadow avoids the layout jitter a real border would cause.
+          hl.style.boxShadow = 'inset 0 2px 0 0 #7c3aed';
+        }
+      }
+    } else if (_ffDragHoverEl) {
+      _ffClearDragHover();
+    }
+  });
+
+  listEl.addEventListener('drop', async (e) => {
+    if (!_ffDragSrc) return;
+    e.preventDefault();
+    const src = _ffDragSrc;
+    _ffClearDragHover();
+    _ffDragSrc = null;
+    try {
+      if (src.kind === 'category') {
+        const targetHead = e.target.closest('.ffcat-head[data-drag-kind="category"]');
+        const dstId = targetHead?.getAttribute('data-cat-id');
+        if (dstId && dstId !== src.catId) {
+          await _ffReorderCategoriesBefore(src.catId, dstId);
+        }
+      } else if (src.kind === 'service') {
+        const targetSvc = e.target.closest('.ffsvc-row');
+        const targetHead = e.target.closest('.ffcat-head[data-drag-kind="category"]');
+        if (targetSvc && targetSvc.getAttribute('data-svc-id') !== src.svcId) {
+          const beforeSvcId = targetSvc.getAttribute('data-svc-id');
+          const targetCatId = targetSvc.getAttribute('data-cat-id');
+          await _ffReorderServiceBefore(src.svcId, beforeSvcId, targetCatId);
+        } else if (targetHead) {
+          const targetCatId = targetHead.getAttribute('data-cat-id');
+          await _ffMoveServiceToCategoryEnd(src.svcId, targetCatId);
+        }
+      }
+    } catch (err) {
+      console.error('[Tickets] Reorder failed', err);
+      showToast(err?.message || 'Reorder failed', 'error');
+    }
+  });
+}
+
+/** Move `srcId` so it lands immediately before `beforeId` in the category
+ *  order, then persist a fresh sortOrder (0,1,2,…) to every category. */
+async function _ffReorderCategoriesBefore(srcId, beforeId) {
+  const arr = [...serviceCategories];
+  const srcIdx = arr.findIndex(c => c.id === srcId);
+  if (srcIdx < 0) return;
+  const [moved] = arr.splice(srcIdx, 1);
+  const dstIdx = arr.findIndex(c => c.id === beforeId);
+  arr.splice(dstIdx >= 0 ? dstIdx : arr.length, 0, moved);
+  await Promise.all(arr.map((c, idx) => saveServiceCategory({ id: c.id, name: c.name, sortOrder: idx })));
+}
+
+/** Service reorder: insert `srcId` before `beforeSvcId` inside `targetCatId`
+ *  (same or different category from source). Rewrites sortOrder for every
+ *  service in the target bucket. If `targetCatId` is the virtual "Other"
+ *  bucket, bail out — it isn't a real category. */
+async function _ffReorderServiceBefore(srcId, beforeSvcId, targetCatId) {
+  if (!targetCatId || targetCatId === '__other__') return;
+  const src = salonServices.find(s => s.id === srcId);
+  if (!src) return;
+  const siblings = salonServices
+    .filter(s => s.categoryId === targetCatId && s.id !== srcId)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  const beforeIdx = siblings.findIndex(s => s.id === beforeSvcId);
+  siblings.splice(beforeIdx >= 0 ? beforeIdx : siblings.length, 0, src);
+  await Promise.all(siblings.map((s, idx) => saveService({
+    id: s.id,
+    name: s.name,
+    categoryId: targetCatId,
+    defaultPrice: s.defaultPrice || 0,
+    sortOrder: idx,
+  })));
+}
+
+/** Drop on a category header = move the service to the END of that category. */
+async function _ffMoveServiceToCategoryEnd(srcId, targetCatId) {
+  if (!targetCatId || targetCatId === '__other__') return;
+  const src = salonServices.find(s => s.id === srcId);
+  if (!src) return;
+  if (src.categoryId === targetCatId) return;
+  const siblings = salonServices
+    .filter(s => s.categoryId === targetCatId)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  const lastOrder = siblings.length > 0 ? (siblings[siblings.length - 1].sortOrder ?? siblings.length - 1) : -1;
+  await saveService({
+    id: src.id,
+    name: src.name,
+    categoryId: targetCatId,
+    defaultPrice: src.defaultPrice || 0,
+    sortOrder: lastOrder + 1,
+  });
+  _ffOpenCats.add(targetCatId);
+}
+
+// ---------- Shared mini editor modal (Add/Edit category or service) ----------
+
+/** Shape: { mode: 'category-add'|'category-edit'|'service-add'|'service-edit', categoryId?, serviceId? } */
+function _ffCatalogEditorOpen(opts) {
+  const mod = document.getElementById('servicesCatalogEditorModal');
+  if (!mod) return;
+  const title = document.getElementById('servicesCatalogEditorTitle');
+  const wrapCat = document.getElementById('servicesCatalogEditorCatWrap');
+  const wrapPrice = document.getElementById('servicesCatalogEditorPriceWrap');
+  const nameInp = document.getElementById('servicesCatalogEditorName');
+  const catSel = document.getElementById('servicesCatalogEditorCategory');
+  const priceInp = document.getElementById('servicesCatalogEditorPrice');
+  const saveBtn = document.getElementById('servicesCatalogEditorSave');
+  if (!title || !nameInp || !saveBtn) return;
+
+  // Reset visibility + fields
+  wrapCat.style.display = 'none';
+  wrapPrice.style.display = 'none';
+  nameInp.value = '';
+  nameInp.placeholder = '';
+  priceInp.value = '';
+  catSel.innerHTML = '';
+  saveBtn.disabled = false;
+  saveBtn.style.opacity = '1';
+
+  const ctx = { ...opts };
+
+  if (opts.mode === 'category-add') {
+    title.textContent = 'New category';
+    nameInp.placeholder = 'Category name (e.g. Manicure)';
+  } else if (opts.mode === 'category-edit') {
+    const c = serviceCategories.find((x) => x.id === opts.categoryId);
+    if (!c) return;
+    title.textContent = 'Rename category';
+    nameInp.placeholder = 'Category name';
+    nameInp.value = c.name || '';
+    ctx.existing = c;
+  } else if (opts.mode === 'service-add' || opts.mode === 'service-edit') {
+    title.textContent = opts.mode === 'service-add' ? 'New service' : 'Edit service';
+    nameInp.placeholder = 'Service name (e.g. Gel Full Set)';
+    wrapCat.style.display = 'block';
+    wrapPrice.style.display = 'block';
+    priceInp.placeholder = `Default price (${ffTicketCurSym()})`;
+    // Populate category dropdown
+    let optsHtml = '';
+    serviceCategories.forEach((c) => { optsHtml += `<option value="${c.id}">${escapeHtml(c.name)}</option>`; });
+    catSel.innerHTML = optsHtml;
+    if (opts.mode === 'service-edit') {
+      const s = salonServices.find((x) => x.id === opts.serviceId);
+      if (!s) return;
+      nameInp.value = s.name || '';
+      priceInp.value = s.defaultPrice != null ? String(s.defaultPrice) : '';
+      if (s.categoryId && serviceCategories.some((c) => c.id === s.categoryId)) {
+        catSel.value = s.categoryId;
+      }
+      ctx.existing = s;
+    } else {
+      if (opts.categoryId && serviceCategories.some((c) => c.id === opts.categoryId)) {
+        catSel.value = opts.categoryId;
+      }
+    }
+  }
+
+  saveBtn.onclick = () => _ffCatalogEditorSubmit(ctx);
+  nameInp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); _ffCatalogEditorSubmit(ctx); } };
+  mod.style.display = 'flex';
+  setTimeout(() => { try { nameInp.focus(); nameInp.select(); } catch (_) {} }, 50);
+}
+
+function _ffCatalogEditorClose() {
+  const mod = document.getElementById('servicesCatalogEditorModal');
+  if (mod) mod.style.display = 'none';
+}
+
+async function _ffCatalogEditorSubmit(ctx) {
+  const nameInp = document.getElementById('servicesCatalogEditorName');
+  const catSel = document.getElementById('servicesCatalogEditorCategory');
+  const priceInp = document.getElementById('servicesCatalogEditorPrice');
+  const saveBtn = document.getElementById('servicesCatalogEditorSave');
+  const name = String(nameInp?.value || '').trim();
+  const flashErr = (el) => {
+    try {
+      const prev = el.style.borderColor;
+      el.style.borderColor = '#ef4444';
+      el.focus();
+      setTimeout(() => { el.style.borderColor = prev || '#e5e7eb'; }, 1400);
+    } catch (_) {}
+  };
+  if (!name) { flashErr(nameInp); return; }
+
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
   try {
-    await saveService(editingServiceId ? { id: editingServiceId, name, categoryId, defaultPrice } : { name, categoryId, defaultPrice });
-    // Reload BOTH categories and services so any category added/edited
-    // moments ago on the Categories tab is reflected in the grouping used
-    // by the ticket service picker. Without this, a service can be saved
-    // with a valid categoryId but still show under "Other" in the picker
-    // because the picker's categories list is stale.
-    await Promise.all([loadServiceCategories(), loadServices()]);
-    renderServicesList();
-    const nameEl = document.getElementById('serviceFormName');
-    const catEl = document.getElementById('serviceFormCategory');
-    const priceEl = document.getElementById('serviceFormPrice');
-    if (nameEl) nameEl.value = '';
-    populateServiceCategoryDropdown(null);
-    if (priceEl) priceEl.value = '';
-    editingServiceId = null;
-    showToast(isEdit ? 'Updated' : 'Service added', 'success');
-    setupTicketsUI(); // refresh dropdown in ticket form
+    if (ctx.mode === 'category-add') {
+      await saveServiceCategory({ name, sortOrder: serviceCategories.length });
+      await Promise.all([loadServiceCategories(), loadServices()]);
+      showToast('Category added', 'success');
+    } else if (ctx.mode === 'category-edit') {
+      const c = ctx.existing;
+      await saveServiceCategory({ id: c.id, name, sortOrder: c.sortOrder });
+      await Promise.all([loadServiceCategories(), loadServices()]);
+      showToast('Updated', 'success');
+    } else if (ctx.mode === 'service-add') {
+      const categoryId = catSel?.value || null;
+      const defaultPrice = parseFloat(priceInp?.value) || 0;
+      await saveService({ name, categoryId, defaultPrice });
+      await Promise.all([loadServiceCategories(), loadServices()]);
+      if (categoryId) _ffOpenCats.add(categoryId);
+      showToast('Service added', 'success');
+    } else if (ctx.mode === 'service-edit') {
+      const s = ctx.existing;
+      const categoryId = catSel?.value || null;
+      const defaultPrice = parseFloat(priceInp?.value) || 0;
+      await saveService({ id: s.id, name, categoryId, defaultPrice });
+      await Promise.all([loadServiceCategories(), loadServices()]);
+      if (categoryId) _ffOpenCats.add(categoryId);
+      showToast('Updated', 'success');
+    }
+    _ffCatalogEditorClose();
+    renderServicesCatalogV2();
+    setupTicketsUI();
   } catch (e) {
     showToast(e?.message || 'Failed', 'error');
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
   }
+}
+
+/** Entry from header "+ Add Category" button. */
+function addServiceCategoryV2() {
+  _ffCatalogEditorOpen({ mode: 'category-add' });
 }
 
 // =====================
@@ -3245,8 +3684,9 @@ export function initTickets() {
   window.closeTicketDetailsModal = closeTicketDetailsModal;
   window.saveTicket = saveTicket;
   window.closeServicesModal = closeServicesModal;
-  window.saveServiceFromForm = saveServiceFromForm;
-  window.addServiceCategory = addServiceCategory;
+  window.openServicesModal = openServicesModal;
+  window.addServiceCategoryV2 = addServiceCategoryV2;
+  window.ffCloseCatalogEditor = _ffCatalogEditorClose;
   window.updateTicketsNavBadge = updateTicketsNavBadge;
   window.ffRefreshTicketsTabVisibility = () => {
     updateTicketsTabsVisibility();
@@ -3274,6 +3714,19 @@ export function initTickets() {
       try {
         if (currentTicketsTab === 'summary' && typeof loadAndRenderTicketsSummary === 'function') {
           loadAndRenderTicketsSummary();
+        }
+      } catch (_) {}
+      // Service Catalog is per-branch. The raw caches already hold every
+      // doc for the salon — re-apply the filter against the new active
+      // branch (no Firestore roundtrip), then refresh anything on screen.
+      try {
+        _applyCatalogFilter();
+        setupTicketsUI();
+        const modal = document.getElementById('servicesModal');
+        if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
+          _ffOpenCats.clear();
+          _ffCatalogRenderedOnce = false;
+          renderServicesCatalogV2();
         }
       } catch (_) {}
     });

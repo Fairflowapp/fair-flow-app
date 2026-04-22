@@ -613,7 +613,8 @@ service cloud.firestore {
           'unreadFor',
           'updatedAt',
           'updatedAtMs',
-          'createdAt'
+          'createdAt',
+          'locationId'
         ]);
 
       allow delete: if false;

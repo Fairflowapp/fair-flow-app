@@ -21,6 +21,20 @@ import {
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "./app.js?v=20260408_inbox_upload_deeplink";
 
+// Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
+// window level in capture phase to beat any other handler that might
+// stopPropagation. Idempotent.
+if (typeof document !== 'undefined' && !window.__ff_chatSendBtnDelegated) {
+  window.__ff_chatSendBtnDelegated = true;
+  window.addEventListener('click', function (ev) {
+    const btn = ev.target && ev.target.closest && ev.target.closest('#chatSendBtn');
+    if (!btn) return;
+    if (typeof window.openSendMessageModal === 'function') {
+      try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] delegated openSendMessageModal threw', e); }
+    }
+  }, true);
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 let chatUserProfile    = null;
 let chatTemplates      = [];
@@ -98,7 +112,153 @@ function linkifyMessageHtml(raw) {
   }).join('');
 }
 const roleLabel = r => ({technician:'Service Provider',manager:'Manager',admin:'Admin',owner:'Owner'}[(r||'').toLowerCase()] || r || '');
-const buildConvId = (a, b) => [a, b].sort().join('__');
+
+// ─── Location helpers (per-location chat isolation) ────────────────────────────
+/**
+ * Resolve the currently active location id from the header switcher.
+ * Returns the trimmed location id string, or "" when nothing is active
+ * (single-location salon, or locations not loaded yet).
+ */
+function _readActiveLocationId() {
+  if (typeof window === 'undefined') return '';
+  try {
+    if (typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  } catch (_) {}
+  const raw = typeof window.__ff_active_location_id === 'string' ? window.__ff_active_location_id.trim() : '';
+  return raw || '';
+}
+
+/** Normalized key used to scope conversations: "default" when no active location. */
+const CHAT_DEFAULT_LOC_KEY = 'default';
+function _activeLocKey() {
+  const raw = _readActiveLocationId();
+  return raw ? raw : CHAT_DEFAULT_LOC_KEY;
+}
+/**
+ * Derive the location from a conversation document ID.
+ *
+ * `buildConvId` encodes location into the ID itself:
+ *   - default location → `{uidA}__{uidB}`
+ *   - other location  → `loc_{locKey}__{uidA}__{uidB}`
+ *
+ * The ID is set at document creation and never mutates, so it is the
+ * authoritative signal for which location the conversation belongs to.
+ */
+function _convLocKeyFromId(id) {
+  const s = String(id || '');
+  if (s.startsWith('loc_')) {
+    const sep = s.indexOf('__', 4);
+    if (sep > 4) return s.substring(4, sep);
+  }
+  return CHAT_DEFAULT_LOC_KEY;
+}
+/**
+ * Resolve the location a conversation doc belongs to.
+ *
+ * Prefers the ID prefix (immutable, authoritative). Falls back to the
+ * `locationId` field only if we do not have the document ID on hand (e.g.
+ * when only a snapshot of the data was passed in).
+ */
+function _convLocKey(conv) {
+  if (!conv || typeof conv !== 'object') return CHAT_DEFAULT_LOC_KEY;
+  if (conv.id) return _convLocKeyFromId(conv.id);
+  const v = typeof conv.locationId === 'string' ? conv.locationId.trim() : '';
+  return v ? v : CHAT_DEFAULT_LOC_KEY;
+}
+/** True when a conversation doc belongs to the given location key. */
+function _convMatchesLocation(conv, locKey) {
+  const k = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
+  return _convLocKey(conv) === k;
+}
+
+/**
+ * True when a salon-scoped item (chat template, flow, …) belongs to the
+ * active location. Items without a `locationId` field are treated as
+ * belonging to the "default" (primary) location so legacy data stays
+ * visible where it originally lived.
+ */
+function _itemMatchesLocation(item, locKey) {
+  const k = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
+  if (!item || typeof item !== 'object') return k === CHAT_DEFAULT_LOC_KEY;
+  const v = typeof item.locationId === 'string' ? item.locationId.trim() : '';
+  return (v || CHAT_DEFAULT_LOC_KEY) === k;
+}
+
+/**
+ * True when the given member/user row is allowed to work in the active location.
+ *
+ * Mirrors the staff list filter in index.html (search "STRICT client-side
+ * location filter"):
+ *   - No active location → allow everyone (initial load, single-location salons).
+ *   - Owner / Admin / Manager → always visible everywhere ("leadership must be
+ *     reachable in every branch").
+ *   - Everyone else → must have `allowedLocationIds` that includes the active
+ *     location id. Empty / missing means not assigned anywhere → hidden.
+ *
+ * Resolves the staff record for the member via `window.ffGetStaffStore()` and
+ * falls back to the member row's own fields if no staff match exists (covers
+ * the owner row which may not be in the staff store).
+ */
+function _userAllowedInActiveLocation(u) {
+  if (!u) return false;
+  const activeLoc = _readActiveLocationId();
+  if (!activeLoc) return true;
+  const roleLc = String(u.role || '').toLowerCase().trim();
+  if (roleLc === 'owner' || roleLc === 'admin' || roleLc === 'manager') return true;
+
+  // Cross-reference the staff store for primaryLocationId / allowedLocationIds.
+  let staffRow = null;
+  try {
+    const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
+    const staff = store && Array.isArray(store.staff) ? store.staff : [];
+    staffRow = staff.find(
+      s =>
+        s &&
+        (String(s.uid || '').trim() === u.uid ||
+          String(s.firebaseUid || '').trim() === u.uid)
+    ) || null;
+  } catch (_) {}
+
+  if (staffRow) {
+    if (staffRow.isAdmin === true || staffRow.isManager === true) return true;
+    const sRole = String(staffRow.role || '').toLowerCase().trim();
+    if (sRole === 'owner' || sRole === 'admin' || sRole === 'manager') return true;
+    if (Array.isArray(staffRow.allowedLocationIds) && staffRow.allowedLocationIds.length) {
+      return staffRow.allowedLocationIds.indexOf(activeLoc) !== -1;
+    }
+    if (typeof staffRow.primaryLocationId === 'string' && staffRow.primaryLocationId.trim()) {
+      return staffRow.primaryLocationId.trim() === activeLoc;
+    }
+    return false;
+  }
+
+  // Fallback: member row itself.
+  if (Array.isArray(u.allowedLocationIds) && u.allowedLocationIds.length) {
+    return u.allowedLocationIds.indexOf(activeLoc) !== -1;
+  }
+  if (typeof u.primaryLocationId === 'string' && u.primaryLocationId.trim()) {
+    return u.primaryLocationId.trim() === activeLoc;
+  }
+  // No staff row AND no location hints on the member — treat as unscoped and
+  // allow (prevents hiding the salon owner who may not be in the staff store).
+  return true;
+}
+
+/**
+ * Build the deterministic conversation id for a 1:1 chat between two users,
+ * scoped to a location. The "default" branch keeps the legacy `a__b` format
+ * so existing conversations (created before multi-location rollout) remain
+ * visible to users viewing the primary/default branch; all non-default
+ * locations use a prefixed id so the same pair gets a fresh thread per branch.
+ */
+const buildConvId = (a, b, locKey) => {
+  const pair = [a, b].sort().join('__');
+  const lk = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
+  return lk === CHAT_DEFAULT_LOC_KEY ? pair : `loc_${lk}__${pair}`;
+};
 
 function _trimStr(v) {
   if (v == null) return '';
@@ -237,8 +397,43 @@ function _getChatFreeTextTrimmed() {
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
+/**
+ * Attach a direct click listener to the New Message button. Idempotent — the
+ * flag on the element prevents double-binding. We also re-run this every time
+ * the chat screen opens so we recover if a parent re-render swaps the node.
+ */
+function _bindChatSendBtn() {
+  const btn = document.getElementById('chatSendBtn');
+  if (!btn) return;
+  if (btn.__ffSendBtnBound) return;
+  btn.__ffSendBtnBound = true;
+  btn.addEventListener('click', function (ev) {
+    ev.preventDefault();
+    if (typeof window.openSendMessageModal === 'function') {
+      try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] direct openSendMessageModal threw', e); }
+    } else {
+      setTimeout(() => {
+        if (typeof window.openSendMessageModal === 'function') {
+          try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] retry openSendMessageModal threw', e); }
+        }
+      }, 50);
+    }
+  });
+}
+
+// Bind ASAP — the button is already in the DOM when chat.js executes because
+// it's declared statically in index.html.
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _bindChatSendBtn, { once: true });
+  } else {
+    _bindChatSendBtn();
+  }
+}
+
 async function goToChat() {
   console.log('[ChatBadgePerf] screen-open', performance.now(), Date.now());
+  _bindChatSendBtn();
   _chatBadgePerfOpenMs = performance.now();
   _chatBadgePerfRenderLogged = false;
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
@@ -343,18 +538,22 @@ async function loadChatSalonUsers() {
 
 async function loadChatTemplates() {
   if (!chatUserProfile?.salonId) return;
+  const locKey = _activeLocKey();
   try {
     const snap = await getDocs(query(
       collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
       orderBy('order','asc')
     ));
-    chatTemplates = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    chatTemplates = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(t => _itemMatchesLocation(t, locKey));
   } catch (e) {
     console.warn('[Chat] loadChatTemplates orderBy failed, retrying without order', e?.code, e?.message);
     try {
       const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`));
       chatTemplates = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
+        .filter(t => _itemMatchesLocation(t, locKey))
         .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
     } catch (e2) {
       console.error('[Chat] loadChatTemplates error', e2);
@@ -365,11 +564,13 @@ async function loadChatTemplates() {
 
 async function loadChatFlows() {
   if (!chatUserProfile?.salonId) return;
+  const locKey = _activeLocKey();
   try {
     const flowsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows`));
     const flows = [];
     for (const fd of flowsSnap.docs) {
       const flowData = { id: fd.id, ...fd.data() };
+      if (!_itemMatchesLocation(flowData, locKey)) continue;
       const stepsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps`));
       flowData.steps = [];
       for (const sd of stepsSnap.docs) {
@@ -392,8 +593,9 @@ function subscribeToConversationList() {
   if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
 
   const uid  = chatUserProfile.uid;
+  const locKey = _activeLocKey();
 
-  console.log('[ChatBadgePerf] subscribe-start', performance.now(), Date.now());
+  console.log('[ChatBadgePerf] subscribe-start', performance.now(), Date.now(), 'loc=', locKey);
   _chatConvFirstSnapLogged = false;
 
   chatConvsUnsub = onSnapshot(
@@ -406,7 +608,19 @@ function subscribeToConversationList() {
         _chatConvFirstSnapLogged = true;
         console.log('[ChatBadgePerf] first-snapshot', performance.now(), Date.now());
       }
-      allConversations = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      allConversations = allDocs.filter(c => _convMatchesLocation(c, locKey));
+      console.log(
+        '[Chat] threads snapshot: locKey=', locKey,
+        'totalDocs=', allDocs.length,
+        'matchLocation=', allConversations.length,
+        'sample=', allDocs.slice(0, 8).map(d => ({
+          id: d.id,
+          locationId: d.locationId || '(none)',
+          resolvedLoc: _convLocKey(d),
+          matches: _convMatchesLocation(d, locKey)
+        }))
+      );
       // Sort client-side (avoid composite index requirements)
       allConversations.sort((a, b) => {
         const aMs = a.lastMessageAt?.toMillis?.()
@@ -650,12 +864,13 @@ async function _sendFreeTextDirect(recipientUid, recipientName, conversationIdOv
   const senderRole = chatUserProfile.role || '';
   const rUid = recipientUid;
   const rName = recipientName || _nameForUidForSend(rUid);
-  const convId = conversationIdOverride || buildConvId(senderUid, rUid);
+  const locKey = _activeLocKey();
+  const convId = conversationIdOverride || buildConvId(senderUid, rUid, locKey);
 
   const convRef = doc(db, `salons/${salonId}/conversations`, convId);
   await setDoc(
     convRef,
-    { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp() },
+    { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp(), locationId: locKey },
     { merge: true }
   );
 
@@ -798,8 +1013,26 @@ async function markThreadRead(convId) {
 
 // ─── Send Modal (new message from main screen) ────────────────────────────────
 window.openSendMessageModal = async function() {
-  chatReplyContext = null;
-  await _openChatModal({ title: 'New Message', showSendTo: true });
+  try {
+    chatReplyContext = null;
+    // Make sure profile is ready — the Chat top bar is rendered as soon as the
+    // screen becomes visible, which means the New Message button can be clicked
+    // before initChatScreen() finishes. _openChatModal silently returns when
+    // chatUserProfile is null, which looks like "button does nothing".
+    if (!chatUserProfile) {
+      await loadChatUserProfile();
+    }
+    if (!chatUserProfile) {
+      console.warn('[Chat] openSendMessageModal: no chatUserProfile after load; aborting.');
+      if (typeof window.ffStyledAlert === 'function') {
+        window.ffStyledAlert('Unable to open New Message — please refresh and try again.');
+      }
+      return;
+    }
+    await _openChatModal({ title: 'New Message', showSendTo: true });
+  } catch (e) {
+    console.error('[Chat] openSendMessageModal error', e);
+  }
 };
 
 // ─── Shared Modal Renderer ─────────────────────────────────────────────────────
@@ -967,7 +1200,13 @@ async function _openChatModal({ title, showSendTo }) {
 
   // Recipients
   if (showSendTo) {
-    const pool = isMgrPlus(role) ? chatSalonUsers : chatSalonUsers.filter(u => isMgrPlus(u.role));
+    const myRole = chatUserProfile && chatUserProfile.role;
+    // Base pool: leaders see everyone, non-leaders only see leadership they can
+    // message (existing rule). Then apply STRICT location filter so each branch
+    // only sees the staff actually assigned to it (mirrors the staff list and
+    // queue behavior elsewhere in the app).
+    const basePool = isMgrPlus(myRole) ? chatSalonUsers : chatSalonUsers.filter(u => isMgrPlus(u.role));
+    const pool = basePool.filter(_userAllowedInActiveLocation);
     // Reset UI
     if (searchInput) searchInput.value = '';
     if (panel) panel.style.display = 'none';
@@ -1306,16 +1545,18 @@ window.confirmSendChatMessage = async function() {
         (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
         '';
       const senderRole = chatUserProfile.role || '';
+      const locKey = _activeLocKey();
 
       for (let i = 0; i < recipientUids.length; i++) {
         const rUid = recipientUids[i];
         const rName = recipientNames[i] || _nameForUidForSend(rUid);
-        const convId = chatReplyContext?.conversationId || buildConvId(senderUid, rUid);
+        const convId = chatReplyContext?.conversationId || buildConvId(senderUid, rUid, locKey);
+        console.log('[Chat] send → locKey=', locKey, ' convId=', convId);
 
         const convRef = doc(db, `salons/${salonId}/conversations`, convId);
         await setDoc(
           convRef,
-          { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp() },
+          { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp(), locationId: locKey },
           { merge: true }
         );
 
@@ -1379,12 +1620,19 @@ window.confirmSendChatMessage = async function() {
 };
 
 // ─── Badge ─────────────────────────────────────────────────────────────────────
+// Remember last auth context so the location-change listener can re-subscribe.
+let _chatAuthUid = null;
+let _chatAuthSalonId = null;
+
 export function subscribeToChatBadge(uid, salonId) {
   if (!uid || !salonId) return;
+  _chatAuthUid = uid;
+  _chatAuthSalonId = salonId;
   if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
   _chatNavBadgeFirstSnapLogged = false;
   _chatNavBadgeRenderDoneLogged = false;
-  console.log('[ChatBadgePerf] subscribe-start nav-badge', performance.now(), Date.now());
+  const locKey = _activeLocKey();
+  console.log('[ChatBadgePerf] subscribe-start nav-badge', performance.now(), Date.now(), 'loc=', locKey);
   chatBadgeUnsub = onSnapshot(
     query(
       collection(db, `salons/${salonId}/conversations`),
@@ -1397,6 +1645,8 @@ export function subscribeToChatBadge(uid, salonId) {
       }
       const unread = snap.docs.reduce((sum, d) => {
         const data = d.data() || {};
+        data.id = d.id;
+        if (!_convMatchesLocation(data, locKey)) return sum;
         const n = (data.unreadFor && data.unreadFor[uid]) ? Number(data.unreadFor[uid]) : 0;
         return sum + (isNaN(n) ? 0 : n);
       }, 0);
@@ -1459,7 +1709,10 @@ function showChatToast({ senderName, role, preview, convId }) {
 
 export function subscribeToChatToastNotifications(myUid, salonId) {
   if (!myUid || !salonId) return;
+  _chatAuthUid = myUid;
+  _chatAuthSalonId = salonId;
   if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
+  const locKey = _activeLocKey();
   chatToastUnsub = onSnapshot(
     query(
       collection(db, `salons/${salonId}/conversations`),
@@ -1469,6 +1722,8 @@ export function subscribeToChatToastNotifications(myUid, salonId) {
       snap.docChanges().forEach(change => {
         if (change.type !== 'modified') return;
         const data = change.doc.data() || {};
+        data.id = change.doc.id;
+        if (!_convMatchesLocation(data, locKey)) return;
         const convId = change.doc.id;
         const lastMs = Number(data.lastMessageAtMs) || 0;
         const prevShown = _lastChatToastLastMsgMsByConv.get(convId);
@@ -1513,6 +1768,32 @@ window.openChatTemplatesSettings = async function() {
   if (!chatUserProfile) await loadChatUserProfile();
   await loadChatTemplates();
   await loadChatFlows();
+  // Reset the compact form to its default "new" state each time we open
+  chatEditingTmplId = null;
+  const titleEl = document.getElementById('chatTmplTitle');
+  const msgEl   = document.getElementById('chatTmplMessage');
+  if (titleEl) titleEl.value = '';
+  if (msgEl)   msgEl.value   = '';
+  ['Tech','Mgr','Admin'].forEach(s => {
+    const cb = document.getElementById(`chatTmplSender${s}`);
+    if (cb) cb.checked = false;
+  });
+  _setChatTmplSaveBtn('add');
+  const label = document.getElementById('chatTmplFormLabel');
+  if (label) label.textContent = 'New Template';
+  _setChatTmplDetailsOpen(false);
+
+  // Wire up the Options toggle (idempotent — uses a dataset flag so multiple opens don't stack listeners)
+  const toggle = document.getElementById('chatTmplDetailsToggle');
+  if (toggle && !toggle.dataset.ffBound) {
+    toggle.addEventListener('click', function(e) {
+      e.preventDefault();
+      const currentlyOpen = toggle.getAttribute('aria-expanded') === 'true';
+      _setChatTmplDetailsOpen(!currentlyOpen);
+    });
+    toggle.dataset.ffBound = '1';
+  }
+
   _renderTmplList();
   _chatSettingsTab('templates');
   document.getElementById('chatTemplatesModal').style.display = 'flex';
@@ -1522,6 +1803,7 @@ window.closeChatTemplatesModal = function() {
   chatEditingTmplId = null;
   chatEditingFlowId = null;
   chatFlowDraft = null;
+  _setChatTmplDetailsOpen(false);
 };
 
 window._chatSettingsTab = function(tab) {
@@ -1534,6 +1816,22 @@ window._chatSettingsTab = function(tab) {
   if (fp) {
     fp.style.display = tab === 'flows' ? 'flex' : 'none';
     if (tab === 'flows') {
+      // Wire the flow options toggle once
+      const flowToggle = document.getElementById('chatFlowDetailsToggle');
+      if (flowToggle && !flowToggle.dataset.ffBound) {
+        flowToggle.addEventListener('click', function(e) {
+          e.preventDefault();
+          const open = flowToggle.getAttribute('aria-expanded') === 'true';
+          _setChatFlowDetailsOpen(!open);
+        });
+        flowToggle.dataset.ffBound = '1';
+      }
+      // If not editing, keep form collapsed and save button in "add" mode
+      if (!chatEditingFlowId) {
+        _setChatFlowSaveBtn('add');
+        const label = document.getElementById('chatFlowFormLabel');
+        if (label) label.textContent = 'New Flow';
+      }
       _renderFlowsAdminList();
       _renderFlowBuilder();
     }
@@ -1745,19 +2043,79 @@ function _collectFlowDraftFromUI() {
   return { title, allowedSenders, steps };
 }
 
+// Helpers for the compact Flow form
+function _setChatFlowSaveBtn(mode) {
+  const btn = document.getElementById('chatFlowSaveBtn');
+  if (!btn) return;
+  const plusSvg  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+  const checkSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+  if (mode === 'saving') btn.innerHTML = '<span>Saving…</span>';
+  else if (mode === 'update') btn.innerHTML = `${checkSvg}<span>Save</span>`;
+  else btn.innerHTML = `${plusSvg}<span>Add</span>`;
+}
+function _setChatFlowDetailsOpen(open) {
+  const details = document.getElementById('chatFlowDetails');
+  const toggle  = document.getElementById('chatFlowDetailsToggle');
+  if (!details || !toggle) return;
+  details.style.display = open ? 'flex' : 'none';
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+window._setChatFlowDetailsOpen = _setChatFlowDetailsOpen;
+
 window.saveChatFlow = async function() {
   if (!_chatManageAllowed()) return;
+
+  // Specific, per-field validation so the user knows exactly what's missing
+  const titleEl = document.getElementById('chatFlowTitle');
+  const rawTitle = (titleEl?.value || '').trim();
+  if (!rawTitle) {
+    if (titleEl) {
+      titleEl.focus();
+      titleEl.style.borderColor = '#ef4444';
+      titleEl.style.background = '#fef2f2';
+      const clear = () => {
+        titleEl.style.borderColor = '';
+        titleEl.style.background = '';
+        titleEl.removeEventListener('input', clear);
+      };
+      titleEl.addEventListener('input', clear);
+    }
+    const msg = 'Please enter a flow title first.';
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
+    return;
+  }
+  // Make sure the draft is up-to-date before validating the tree
+  try { _syncFlowDraftFromUI(); } catch (_) {}
+  const treeNodes = document.querySelectorAll('#chatFlowStepsList > .chat-flow-node');
+  if (!treeNodes || !treeNodes.length) {
+    const msg = 'Please add at least one question in the decision tree.';
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
+    const addBtn = document.getElementById('chatFlowAddStepBtn');
+    if (addBtn) addBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
   const draft = _collectFlowDraftFromUI();
-  if (!draft) { alert('Please add at least one step with options, and fill flow title.'); return; }
+  if (!draft) {
+    // Most common: questions or answers are blank
+    const msg = 'Please fill in every question with at least one answer before saving.';
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
+    return;
+  }
   const btn = document.getElementById('chatFlowSaveBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  const wasEditing = !!chatEditingFlowId;
+  if (btn) { btn.disabled = true; }
+  _setChatFlowSaveBtn('saving');
+  const locKey = _activeLocKey();
   try {
     const salonId = chatUserProfile.salonId;
     const flowsRef = collection(db, `salons/${salonId}/chatFlows`);
     let flowId = chatEditingFlowId;
     if (flowId) {
       await updateDoc(doc(db, `salons/${salonId}/chatFlows`, flowId), {
-        title: draft.title, allowedSenders: draft.allowedSenders, updatedAt: serverTimestamp()
+        title: draft.title, allowedSenders: draft.allowedSenders, locationId: locKey, updatedAt: serverTimestamp()
       });
       // Delete old steps/options and recreate (simplest)
       const oldSteps = await getDocs(collection(db, `salons/${salonId}/chatFlows/${flowId}/steps`));
@@ -1768,7 +2126,7 @@ window.saveChatFlow = async function() {
       }
     } else {
       const ref = await addDoc(flowsRef, {
-        title: draft.title, allowedSenders: draft.allowedSenders, status: 'active',
+        title: draft.title, allowedSenders: draft.allowedSenders, status: 'active', locationId: locKey,
         startStepId: draft.steps[0]?.id, createdAt: serverTimestamp(), createdBy: chatUserProfile.uid
       });
       flowId = ref.id;
@@ -1793,27 +2151,33 @@ window.saveChatFlow = async function() {
     window.cancelEditChatFlow();
     await loadChatFlows();
     _renderFlowsAdminList();
-    alert('Saved! Flow appears in the list above.');
-    document.getElementById('chatFlowsSavedSection')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (typeof window.showToast === 'function') window.showToast('Flow saved', 'success');
   } catch(e) {
     console.error('[Chat] save flow error', e);
-    alert('Failed to save: ' + (e?.code || e?.message || 'unknown'));
+    const msg = 'Failed to save: ' + (e?.code || e?.message || 'unknown');
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = chatEditingFlowId ? 'Update Flow' : 'Create Flow'; }
+    if (btn) { btn.disabled = false; }
+    _setChatFlowSaveBtn(chatEditingFlowId ? 'update' : 'add');
   }
 };
 
 window.cancelEditChatFlow = function() {
   chatEditingFlowId = null;
   chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  document.getElementById('chatFlowTitle').value = '';
+  const titleEl = document.getElementById('chatFlowTitle');
+  if (titleEl) titleEl.value = '';
   ['chatFlowSenderTech','chatFlowSenderMgr','chatFlowSenderAdmin'].forEach(id => {
     const cb = document.getElementById(id);
     if (cb) cb.checked = false;
   });
-  document.getElementById('chatFlowFormLabel').textContent = 'Create Flow';
-  document.getElementById('chatFlowSaveBtn').textContent = 'Create Flow';
-  document.getElementById('chatFlowCancelBtn').style.display = 'none';
+  const label = document.getElementById('chatFlowFormLabel');
+  if (label) label.textContent = 'New Flow';
+  _setChatFlowSaveBtn('add');
+  const cancelBtn = document.getElementById('chatFlowCancelBtn');
+  if (cancelBtn) cancelBtn.style.display = 'none';
+  _setChatFlowDetailsOpen(false);
   _renderFlowBuilder();
   _renderFlowsAdminList();
 };
@@ -1843,17 +2207,23 @@ window.editChatFlow = function(id) {
     const cb = document.getElementById(id);
     if (cb) cb.checked = Array.isArray(f.allowedSenders) && f.allowedSenders.includes(['technician','manager','admin'][i]);
   });
-  document.getElementById('chatFlowFormLabel').textContent = 'Edit Flow';
-  document.getElementById('chatFlowSaveBtn').textContent = 'Update Flow';
-  document.getElementById('chatFlowCancelBtn').style.display = 'inline-block';
+  const label = document.getElementById('chatFlowFormLabel');
+  if (label) label.textContent = 'Edit Flow';
+  _setChatFlowSaveBtn('update');
+  const cancelBtn = document.getElementById('chatFlowCancelBtn');
+  if (cancelBtn) cancelBtn.style.display = 'inline-block';
+  _setChatFlowDetailsOpen(true);
   _renderFlowBuilder();
+  _renderFlowsAdminList();
+  document.getElementById('chatFlowForm')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
 window.deleteChatFlow = async function(id) {
   if (!_chatManageAllowed()) return;
-  if (!confirm('Delete this flow?')) return;
+  const flow = chatFlows.find(x => x.id === id);
+  const titleStr = flow?.title ? `"${flow.title}"` : 'this flow';
+  if (!confirm(`Delete ${titleStr}?`)) return;
   try {
-    const flow = chatFlows.find(x => x.id === id);
     if (flow?.steps) {
       for (const s of flow.steps) {
         if (s.options) for (const o of s.options) {
@@ -1863,32 +2233,62 @@ window.deleteChatFlow = async function(id) {
         try { await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatFlows/${id}/steps`, s.id)); } catch(_) {}
       }
     }
+    if (chatEditingFlowId === id) window.cancelEditChatFlow();
     await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatFlows`, id));
     await loadChatFlows();
     _renderFlowsAdminList();
   } catch(e) {
     console.error('[Chat] delete flow error', e);
-    alert('Failed to delete: ' + (e?.code || e?.message || 'unknown'));
+    const msg = 'Failed to delete: ' + (e?.code || e?.message || 'unknown');
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
   }
 };
 
 function _renderFlowsAdminList() {
   const el = document.getElementById('chatFlowsAdminList');
+  const countEl = document.getElementById('chatFlowsCountBadge');
+  if (countEl) countEl.textContent = String(chatFlows.length || 0);
   if (!el) return;
-  el.innerHTML = chatFlows.length === 0
-    ? '<div style="padding:12px;color:#6b7280;font-size:13px;">No saved flows. Fill in below and click Create Flow — it will appear here.</div>'
-    : chatFlows.map(f => `
-        <div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;background:#fff;">
-          <div style="flex:1;">
-            <div style="font-size:14px;font-weight:600;color:#111827;">${escHtml(f.title)}</div>
-            <div style="font-size:11px;color:#9ca3af;">${(f.steps||[]).length} steps · Can use: ${Array.isArray(f.allowedSenders) && f.allowedSenders.length ? f.allowedSenders.map(roleLabel).join(', ') : 'Everyone'}</div>
+
+  if (chatFlows.length === 0) {
+    el.innerHTML = `
+      <div class="chat-tmpl-bank-empty">
+        No flows yet. Use the form above to add your first one.
+      </div>`;
+    return;
+  }
+
+  const editSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
+  const delSvg  = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>';
+  const roleShort = r => ({ technician: 'SP', manager: 'M', admin: 'A' }[r] || (r || '').slice(0,2).toUpperCase());
+
+  el.innerHTML = chatFlows.map(f => {
+    const idEsc = escHtml(f.id);
+    const isEditing = chatEditingFlowId === f.id;
+    const stepCount = (f.steps || []).length;
+    const hasRoles = Array.isArray(f.allowedSenders) && f.allowedSenders.length > 0;
+    const rolesInline = hasRoles
+      ? `<span class="chat-tmpl-card-roles-inline" title="${escHtml(f.allowedSenders.map(roleLabel).join(', '))}">${escHtml(f.allowedSenders.map(roleShort).join(' · '))}</span>`
+      : '<span class="chat-tmpl-card-roles-inline everyone" title="Everyone can use">ALL</span>';
+    return `
+      <div class="chat-tmpl-card${isEditing ? ' editing' : ''}" data-flow-id="${idEsc}">
+        <div class="chat-tmpl-card-main">
+          <div class="chat-tmpl-card-top">
+            <span class="chat-tmpl-card-title">${escHtml(f.title)}</span>
+            ${rolesInline}
           </div>
-          <div style="display:flex;gap:6px;">
-            <button type="button" onclick="window.editChatFlow('${escHtml(f.id)}')" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;">Edit</button>
-            <button type="button" onclick="window.deleteChatFlow('${escHtml(f.id)}')" style="padding:6px 12px;border:1px solid #fca5a5;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#b91c1c;">Delete</button>
-          </div>
+          <div class="chat-tmpl-card-message">${stepCount} ${stepCount === 1 ? 'question' : 'questions'}</div>
         </div>
-      `).join('');
+        <div class="chat-tmpl-card-actions">
+          <button type="button" class="chat-tmpl-icon-btn" title="Edit" aria-label="Edit flow"
+            onclick="window.editChatFlow('${idEsc}')">${editSvg}</button>
+          <button type="button" class="chat-tmpl-icon-btn is-danger" title="Delete" aria-label="Delete flow"
+            onclick="window.deleteChatFlow('${idEsc}')">${delSvg}</button>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 function _renderFlowBuilder() {
@@ -1947,28 +2347,74 @@ function _renderFlowBuilder() {
 
 function _renderTmplList() {
   const el = document.getElementById('chatTemplatesAdminList');
+  const countEl = document.getElementById('chatTemplatesCountBadge');
+  if (countEl) countEl.textContent = String(chatTemplates.length || 0);
   if (!el) return;
-  el.innerHTML = chatTemplates.length === 0
-    ? '<div style="padding:16px;text-align:center;color:#9ca3af;font-size:14px;">No templates yet.</div>'
-    : chatTemplates.map(t => `
-        <div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;background:#fff;">
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:14px;font-weight:600;color:#111827;">${escHtml(t.title)}</div>
-            ${t.message ? `<div style="font-size:13px;color:#6b7280;margin-bottom:4px;">${escHtml(t.message)}</div>` : ''}
-            <div style="font-size:11px;color:#9ca3af;">Can send: ${
-              Array.isArray(t.allowedSenders) && t.allowedSenders.length
-                ? t.allowedSenders.map(roleLabel).join(', ') : 'Everyone'
-            }</div>
+
+  if (chatTemplates.length === 0) {
+    el.innerHTML = `
+      <div class="chat-tmpl-bank-empty">
+        No templates yet. Use the form above to add your first one.
+      </div>`;
+    return;
+  }
+
+  const editSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
+  const delSvg  = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>';
+
+  // Short role codes: Service Provider → SP, Manager → M, Admin → A
+  const roleShort = r => ({ technician: 'SP', manager: 'M', admin: 'A' }[r] || (r || '').slice(0,2).toUpperCase());
+
+  el.innerHTML = chatTemplates.map(t => {
+    const idEsc = escHtml(t.id);
+    const isEditing = chatEditingTmplId === t.id;
+    const hasRoles = Array.isArray(t.allowedSenders) && t.allowedSenders.length > 0;
+    const rolesInline = hasRoles
+      ? `<span class="chat-tmpl-card-roles-inline" title="${escHtml(t.allowedSenders.map(roleLabel).join(', '))}">${escHtml(t.allowedSenders.map(roleShort).join(' · '))}</span>`
+      : '<span class="chat-tmpl-card-roles-inline everyone" title="Everyone can send">ALL</span>';
+    return `
+      <div class="chat-tmpl-card${isEditing ? ' editing' : ''}" data-tmpl-id="${idEsc}">
+        <div class="chat-tmpl-card-main">
+          <div class="chat-tmpl-card-top">
+            <span class="chat-tmpl-card-title">${escHtml(t.title)}</span>
+            ${rolesInline}
           </div>
-          <div style="display:flex;gap:6px;flex-shrink:0;">
-            <button type="button" onclick="window.editChatTemplate('${escHtml(t.id)}')"
-              style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#374151;">Edit</button>
-            <button type="button" onclick="window.deleteChatTemplate('${escHtml(t.id)}')"
-              style="padding:6px 12px;border:1px solid #fca5a5;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#b91c1c;">Delete</button>
-          </div>
+          ${t.message ? `<div class="chat-tmpl-card-message">${escHtml(t.message)}</div>` : ''}
         </div>
-      `).join('');
+        <div class="chat-tmpl-card-actions">
+          <button type="button" class="chat-tmpl-icon-btn" title="Edit" aria-label="Edit template"
+            onclick="window.editChatTemplate('${idEsc}')">${editSvg}</button>
+          <button type="button" class="chat-tmpl-icon-btn is-danger" title="Delete" aria-label="Delete template"
+            onclick="window.deleteChatTemplate('${idEsc}')">${delSvg}</button>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
+// Helpers for the compact form
+function _setChatTmplSaveBtn(mode) {
+  // mode: 'add' | 'update' | 'saving'
+  const btn = document.getElementById('chatTmplSaveBtn');
+  if (!btn) return;
+  const plusSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+  const checkSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+  if (mode === 'saving') {
+    btn.innerHTML = '<span>Saving…</span>';
+  } else if (mode === 'update') {
+    btn.innerHTML = `${checkSvg}<span>Save</span>`;
+  } else {
+    btn.innerHTML = `${plusSvg}<span>Add</span>`;
+  }
+}
+function _setChatTmplDetailsOpen(open) {
+  const details = document.getElementById('chatTmplDetails');
+  const toggle  = document.getElementById('chatTmplDetailsToggle');
+  if (!details || !toggle) return;
+  details.style.display = open ? 'flex' : 'none';
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+window._setChatTmplDetailsOpen = _setChatTmplDetailsOpen;
+
 window.editChatTemplate = function(id) {
   if (!_chatManageAllowed()) return;
   const t = chatTemplates.find(x => x.id === id);
@@ -1980,20 +2426,28 @@ window.editChatTemplate = function(id) {
     const cb = document.getElementById(`chatTmplSender${s}`);
     if (cb) cb.checked = Array.isArray(t.allowedSenders) && t.allowedSenders.includes(['technician','manager','admin'][i]);
   });
-  document.getElementById('chatTmplSaveBtn').textContent   = 'Update Template';
-  document.getElementById('chatTmplFormLabel').textContent = 'Edit Template';
-  document.getElementById('chatTmplForm')?.scrollIntoView({ behavior:'smooth' });
+  _setChatTmplSaveBtn('update');
+  const label = document.getElementById('chatTmplFormLabel');
+  if (label) label.textContent = 'Edit Template';
+  _setChatTmplDetailsOpen(true);
+  document.getElementById('chatTmplForm')?.scrollIntoView({ behavior:'smooth', block:'start' });
+  _renderTmplList();
 };
 window.cancelEditChatTemplate = function() {
   chatEditingTmplId = null;
-  document.getElementById('chatTmplTitle').value   = '';
-  document.getElementById('chatTmplMessage').value = '';
+  const titleEl = document.getElementById('chatTmplTitle');
+  const msgEl   = document.getElementById('chatTmplMessage');
+  if (titleEl) titleEl.value = '';
+  if (msgEl)   msgEl.value   = '';
   ['Tech','Mgr','Admin'].forEach(s => {
     const cb = document.getElementById(`chatTmplSender${s}`);
     if (cb) cb.checked = false;
   });
-  document.getElementById('chatTmplSaveBtn').textContent   = 'Create Template';
-  document.getElementById('chatTmplFormLabel').textContent = 'Create Structured Message Template';
+  _setChatTmplSaveBtn('add');
+  const label = document.getElementById('chatTmplFormLabel');
+  if (label) label.textContent = 'New Template';
+  _setChatTmplDetailsOpen(false);
+  _renderTmplList();
 };
 window.saveChatTemplate = async function() {
   if (!_chatManageAllowed()) return;
@@ -2002,38 +2456,53 @@ window.saveChatTemplate = async function() {
   const allowedSenders = ['technician','manager','admin'].filter((_,i) => {
     return document.getElementById(`chatTmplSender${['Tech','Mgr','Admin'][i]}`)?.checked;
   });
-  if (!title) { alert('Please enter a title.'); return; }
+  if (!title) {
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert('Please enter a title.');
+    else alert('Please enter a title.');
+    return;
+  }
   const btn = document.getElementById('chatTmplSaveBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  const wasEditing = !!chatEditingTmplId;
+  if (btn) { btn.disabled = true; }
+  _setChatTmplSaveBtn('saving');
+  const locKey = _activeLocKey();
   try {
     if (chatEditingTmplId) {
       await updateDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, chatEditingTmplId),
-        { title, message, allowedSenders, updatedAt: serverTimestamp() });
+        { title, message, allowedSenders, locationId: locKey, updatedAt: serverTimestamp() });
     } else {
       await addDoc(collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
-        { title, message, allowedSenders, order: chatTemplates.length, createdAt: serverTimestamp(), createdBy: chatUserProfile.uid });
+        { title, message, allowedSenders, locationId: locKey, order: chatTemplates.length, createdAt: serverTimestamp(), createdBy: chatUserProfile.uid });
     }
     window.cancelEditChatTemplate();
     await loadChatTemplates();
     _renderTmplList();
   } catch(e) {
     console.error('[Chat] save template error', e?.code, e?.message, e);
-    alert('Failed to save: ' + (e?.code || e?.message || 'unknown'));
+    const msg = 'Failed to save: ' + (e?.code || e?.message || 'unknown');
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
   }
   finally {
-    if (btn) { btn.disabled = false; btn.textContent = chatEditingTmplId ? 'Update Template' : 'Create Template'; }
+    if (btn) { btn.disabled = false; }
+    _setChatTmplSaveBtn(chatEditingTmplId ? 'update' : 'add');
   }
 };
 window.deleteChatTemplate = async function(id) {
   if (!_chatManageAllowed()) return;
-  if (!confirm('Delete this template?')) return;
+  const tmpl = chatTemplates.find(x => x.id === id);
+  const titleStr = tmpl?.title ? `"${tmpl.title}"` : 'this template';
+  if (!confirm(`Delete ${titleStr}?`)) return;
   try {
     await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, id));
+    if (chatEditingTmplId === id) window.cancelEditChatTemplate();
     await loadChatTemplates();
     _renderTmplList();
   } catch(e) {
     console.error('[Chat] delete template error', e?.code, e?.message, e);
-    alert('Failed to delete: ' + (e?.code || e?.message || 'unknown'));
+    const msg = 'Failed to delete: ' + (e?.code || e?.message || 'unknown');
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
   }
 };
 
@@ -2079,6 +2548,8 @@ onAuthStateChanged(auth, async user => {
       }
     } catch(e) {}
   } else {
+    _chatAuthUid = null;
+    _chatAuthSalonId = null;
     if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
     if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
     _lastChatToastLastMsgMsByConv.clear();
@@ -2086,6 +2557,61 @@ onAuthStateChanged(auth, async user => {
     if (badge) badge.style.display = 'none';
   }
 });
+
+// ─── Location-change Listener (per-location chat isolation) ────────────────────
+// When the active location changes, tear down every chat listener and
+// re-subscribe so the thread list / badge / toasts only surface data that
+// belongs to the new location. Legacy conversations (no `locationId`) are
+// treated as belonging to the "default" branch so they remain visible there.
+if (typeof document !== 'undefined' && !window.__ff_chatLocationListener) {
+  window.__ff_chatLocationListener = true;
+  document.addEventListener('ff-active-location-changed', () => {
+    try {
+      console.log('[Chat] location changed → resetting chat state, new loc=', _activeLocKey());
+      if (chatConvsUnsub) { chatConvsUnsub(); chatConvsUnsub = null; }
+      if (chatMsgsUnsub)  { chatMsgsUnsub();  chatMsgsUnsub  = null; }
+      if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
+      if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
+      _lastChatToastLastMsgMsByConv.clear();
+
+      allConversations = [];
+      currentMessages  = [];
+      currentConvId    = null;
+
+      try { renderThreadList(); } catch (_) {}
+      try { _renderEmptyConversation(); } catch (_) {}
+
+      const navBadge = document.getElementById('chatNavBadge');
+      if (navBadge) { navBadge.textContent = ''; navBadge.style.display = 'none'; }
+
+      // Re-subscribe with the cached auth context (captured by the
+      // subscribe* functions on first run). Each internally reads the new
+      // active location via _activeLocKey() during the resubscribe.
+      if (_chatAuthUid && _chatAuthSalonId) {
+        subscribeToChatBadge(_chatAuthUid, _chatAuthSalonId);
+        subscribeToChatToastNotifications(_chatAuthUid, _chatAuthSalonId);
+      }
+      if (chatUserProfile?.salonId) {
+        subscribeToConversationList();
+        // Also reload per-location salon data (templates, flows) so the
+        // settings modal and the "New Message" picker show only what the
+        // currently active location has configured.
+        (async () => {
+          try {
+            await loadChatTemplates();
+            await loadChatFlows();
+            try { if (typeof _renderTmplList === 'function') _renderTmplList(); } catch (_) {}
+            try { if (typeof _renderFlowsAdminList === 'function') _renderFlowsAdminList(); } catch (_) {}
+          } catch (err) {
+            console.warn('[Chat] reload templates/flows after loc change failed', err);
+          }
+        })();
+      }
+    } catch (e) {
+      console.warn('[Chat] location change handler error', e);
+    }
+  });
+}
 
 // ─── Global Exports (no export keywords - avoids parse errors in some envs) ───
 window.goToChat = goToChat;

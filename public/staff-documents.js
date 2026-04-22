@@ -1310,7 +1310,22 @@ async function ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId })
   // Same shape as chat.js template sends — Firestore rules allow templateId+title (and message body).
   const STAFF_DOC_EXPIRY_TEMPLATE_ID = "ff_staff_doc_expiry_reminder";
 
-  const convId = [senderUid, recipientUid].sort().join("__");
+  // Resolve the sender's current location so this reminder is scoped to the
+  // same branch as the rest of their chat (mirrors chat.js _activeLocKey).
+  let locKey = "default";
+  try {
+    if (typeof window !== "undefined") {
+      if (typeof window.ffGetActiveLocationId === "function") {
+        const v = window.ffGetActiveLocationId();
+        if (typeof v === "string" && v.trim()) locKey = v.trim();
+      } else if (typeof window.__ff_active_location_id === "string" && window.__ff_active_location_id.trim()) {
+        locKey = window.__ff_active_location_id.trim();
+      }
+    }
+  } catch (_) {}
+
+  const pair = [senderUid, recipientUid].sort().join("__");
+  const convId = locKey === "default" ? pair : `loc_${locKey}__${pair}`;
   const convRef = doc(db, `salons/${sid}/conversations`, convId);
   const msgRef = doc(collection(db, `salons/${sid}/conversations/${convId}/messages`));
 
@@ -1321,7 +1336,7 @@ async function ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId })
   if (!convSnap.exists()) {
     await setDoc(
       convRef,
-      { participants: [senderUid, recipientUid].sort(), createdAt: serverTimestamp() },
+      { participants: [senderUid, recipientUid].sort(), createdAt: serverTimestamp(), locationId: locKey },
       { merge: true },
     );
   }

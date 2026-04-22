@@ -1,4 +1,4 @@
-// Static imports must be first in ES modules (avoids SyntaxError / "Unexpected end of input" in some browsers).
+﻿// Static imports must be first in ES modules (avoids SyntaxError / "Unexpected end of input" in some browsers).
 import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
 import {
   getAuth,
@@ -215,7 +215,7 @@ onAuthStateChanged(auth, async user => {
       __ffChatBadgeEarlyGen++;
       const gen = __ffChatBadgeEarlyGen;
       if (sid && uid) {
-        import("/chat.js?v=20260412_chat_sender_display")
+        import("/chat.js?v=20260420_chat_settings_loc")
           .then((m) => {
             if (gen !== __ffChatBadgeEarlyGen) return;
             if (m.subscribeToChatBadge) m.subscribeToChatBadge(uid, sid);
@@ -5836,3 +5836,8 @@ window.ffMaybeAutoResetMonthly = function(nowDate) { _ffMaybeAutoResetTab('month
 
 // Main auto-reset function for Yearly tab
 window.ffMaybeAutoResetYearly  = function(nowDate) { _ffMaybeAutoResetTab('yearly',  nowDate); };
+
+
+
+
+
