@@ -8890,7 +8890,11 @@ async function showResetPinPrompt() {
     if (window.ffIsAdminOrManagerPin && window.ffIsAdminOrManagerPin(code)) {
       return code;
     } else {
-      alert('Invalid admin/manager code - Reset cancelled');
+      if (typeof window.ffStyledAlert === 'function') {
+        await window.ffStyledAlert('The admin/manager code you entered is not correct. Reset was cancelled.', 'Invalid code');
+      } else {
+        alert('Invalid admin/manager code - Reset cancelled');
+      }
       return null;
     }
   }
@@ -8969,8 +8973,12 @@ async function showResetPinPrompt() {
       if (errorEl) errorEl.style.display = 'none';
       return retryCode;
     } else {
-      // Modal elements not found - fallback to alert
-      alert('Invalid admin/manager code - Reset cancelled');
+      // Modal elements not found - fallback to styled alert
+      if (typeof window.ffStyledAlert === 'function') {
+        await window.ffStyledAlert('The admin/manager code you entered is not correct. Reset was cancelled.', 'Invalid code');
+      } else {
+        alert('Invalid admin/manager code - Reset cancelled');
+      }
       return null;
     }
   }
@@ -8987,7 +8995,11 @@ async function showReturnPinPrompt() {
     if (window.ffIsAdminOrManagerPin && window.ffIsAdminOrManagerPin(code)) {
       return code;
     } else {
-      alert('Invalid Admin/Manager PIN');
+      if (typeof window.ffStyledAlert === 'function') {
+        await window.ffStyledAlert('The Admin/Manager PIN you entered is not correct.', 'Invalid PIN');
+      } else {
+        alert('Invalid Admin/Manager PIN');
+      }
       return null;
     }
   }
@@ -9066,8 +9078,12 @@ async function showReturnPinPrompt() {
       if (errorEl) errorEl.style.display = 'none';
       return retryCode;
     } else {
-      // Modal elements not found - fallback to alert
-      alert('Invalid Admin/Manager PIN');
+      // Modal elements not found - fallback to styled alert
+      if (typeof window.ffStyledAlert === 'function') {
+        await window.ffStyledAlert('The Admin/Manager PIN you entered is not correct.', 'Invalid PIN');
+      } else {
+        alert('Invalid Admin/Manager PIN');
+      }
       return null;
     }
   }
@@ -9240,13 +9256,21 @@ async function guardStart(workerName, idx, fn){
 
   // Use staff-based PIN authentication
   if (!window.ffAuthByPin) {
-    alert("Not authorized - staff authentication unavailable");
+    if (typeof window.ffStyledAlert === 'function') {
+      await window.ffStyledAlert('Staff authentication is still loading. Please wait a moment and try again.', 'Not authorized');
+    } else {
+      alert("Not authorized - staff authentication unavailable");
+    }
     return;
   }
 
   const authResult = window.ffAuthByPin(entry);
   if (!authResult.ok || !authResult.staff) {
-    alert("Not authorized");
+    if (typeof window.ffStyledAlert === 'function') {
+      await window.ffStyledAlert('The PIN you entered is not correct.', 'Not authorized');
+    } else {
+      alert("Not authorized");
+    }
     return;
   }
 
@@ -9267,7 +9291,11 @@ async function guardStart(workerName, idx, fn){
   const isAdminOrManager = authenticatedStaff.isAdmin === true || authenticatedStaff.isManager === true;
 
   if (!isTargetTechnician && !isAdminOrManager) {
-    alert("Not authorized");
+    if (typeof window.ffStyledAlert === 'function') {
+      await window.ffStyledAlert('This PIN does not match the selected technician, and is not an Admin/Manager PIN.', 'Not authorized');
+    } else {
+      alert("Not authorized");
+    }
     return;
   }
 
@@ -9302,13 +9330,21 @@ async function guardFinish(workerName, fn){
 
   // Use staff-based PIN authentication
   if (!window.ffAuthByPin) {
-    alert("Not authorized - staff authentication unavailable");
+    if (typeof window.ffStyledAlert === 'function') {
+      await window.ffStyledAlert('Staff authentication is still loading. Please wait a moment and try again.', 'Not authorized');
+    } else {
+      alert("Not authorized - staff authentication unavailable");
+    }
     return;
   }
 
   const authResult = window.ffAuthByPin(entry);
   if (!authResult.ok || !authResult.staff) {
-    alert("Not authorized");
+    if (typeof window.ffStyledAlert === 'function') {
+      await window.ffStyledAlert('The PIN you entered is not correct.', 'Not authorized');
+    } else {
+      alert("Not authorized");
+    }
     return;
   }
 
@@ -9329,7 +9365,11 @@ async function guardFinish(workerName, fn){
   const isAdminOrManager = authenticatedStaff.isAdmin === true || authenticatedStaff.isManager === true;
 
   if (!isTargetTechnician && !isAdminOrManager) {
-    alert("Not authorized");
+    if (typeof window.ffStyledAlert === 'function') {
+      await window.ffStyledAlert('This PIN does not match the selected technician, and is not an Admin/Manager PIN.', 'Not authorized');
+    } else {
+      alert("Not authorized");
+    }
     return;
   }
 
@@ -14328,8 +14368,8 @@ function renderSettings(){
       dot.style.cssText = "width:18px;height:18px;border-radius:50%;border:1px solid #d0d0d0;cursor:pointer;background:"+color;
       dot.title = color;
       dot.dataset.paletteIndex = idx;
-      dot.onclick = () => {
-        editPaletteColor(idx);
+      dot.onclick = (e) => {
+        editPaletteColor(idx, e && e.currentTarget ? e.currentTarget : dot);
         // Update preview box when palette color is clicked
         const preview = document.getElementById('buttonColorPreview');
         if (preview) {
@@ -15825,7 +15865,180 @@ function updateWorkerIndices() {
   });
 }
 
-function editPaletteColor(index){
+/**
+ * Attach short-press / long-press behaviour to a palette colour dot.
+ *  • short press (tap/click up within LONG_MS and without drifting) → onShortPress
+ *  • long press (pointer held for LONG_MS)                          → onLongPress
+ *
+ * Works with mouse, touch and pen via Pointer Events, with mouse/touch
+ * fallbacks for older browsers. The handler suppresses the synthetic
+ * `click` that follows a long-press so we don't also trigger short-press.
+ *
+ * Set `window.ffPaletteLongPressDebug = true` in the console to trace.
+ */
+function _ffAttachPaletteDotLongPress(el, opts){
+  if (!el) return;
+  if (el.dataset.ffPaletteLongPressBound === '1') return; // idempotent
+  el.dataset.ffPaletteLongPressBound = '1';
+
+  const LONG_MS = 500;
+  const MOVE_TOLERANCE = 10; // px
+  const onShort = (opts && typeof opts.onShortPress === 'function') ? opts.onShortPress : null;
+  const onLong  = (opts && typeof opts.onLongPress  === 'function') ? opts.onLongPress  : null;
+
+  let timer = null;
+  let startX = 0, startY = 0;
+  let pressing = false;
+  let longFired = false;
+  let suppressClickUntil = 0;
+
+  const dbg = (...args) => { try { if (window.ffPaletteLongPressDebug) console.log('[paletteDot]', ...args); } catch (_) {} };
+
+  // Kill native long-press UX on touch devices
+  try {
+    el.style.touchAction = 'manipulation';
+    el.style.userSelect = 'none';
+    el.style.webkitUserSelect = 'none';
+    el.style.webkitTouchCallout = 'none';
+    el.style.cursor = el.style.cursor || 'pointer';
+  } catch (_) {}
+
+  const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  const resetVisual = () => { try { el.style.transform = ''; el.style.boxShadow = ''; } catch (_) {} };
+
+  const startPress = (clientX, clientY, pointerId) => {
+    pressing = true;
+    longFired = false;
+    startX = clientX; startY = clientY;
+    dbg('pressstart', { clientX, clientY, pointerId });
+    if (pointerId != null) {
+      try { el.setPointerCapture && el.setPointerCapture(pointerId); } catch (_) {}
+    }
+    el.style.transform = 'scale(0.9)';
+    clearTimer();
+    timer = setTimeout(() => {
+      longFired = true;
+      el.style.transform = 'scale(1.25)';
+      el.style.boxShadow = '0 0 0 3px rgba(124,58,237,0.45)';
+      suppressClickUntil = Date.now() + 1200;
+      dbg('LONG-PRESS FIRED');
+      if (onLong) { try { onLong(el); } catch (err) { console.error('[paletteDot] long-press handler error', err); } }
+      setTimeout(resetVisual, 260);
+    }, LONG_MS);
+  };
+
+  const movePress = (clientX, clientY) => {
+    if (!pressing) return;
+    const dx = Math.abs(clientX - startX);
+    const dy = Math.abs(clientY - startY);
+    if (dx > MOVE_TOLERANCE || dy > MOVE_TOLERANCE) {
+      dbg('drifted → cancel long-press');
+      clearTimer();
+      resetVisual();
+      pressing = false;
+    }
+  };
+
+  const endPress = (kind) => {
+    if (!pressing && !longFired) return;
+    const wasLong = longFired;
+    clearTimer();
+    resetVisual();
+    pressing = false;
+    dbg('pressend', { kind, wasLong });
+    if (wasLong) {
+      suppressClickUntil = Date.now() + 1200;
+      return; // onLong already fired inside the timer
+    }
+    if (onShort) { try { onShort(el); } catch (err) { console.error('[paletteDot] short-press handler error', err); } }
+  };
+
+  const cancelPress = () => {
+    if (!pressing) return;
+    clearTimer();
+    resetVisual();
+    pressing = false;
+    dbg('pressCancelled');
+  };
+
+  // Prefer Pointer Events when available
+  const hasPointerEvents = 'onpointerdown' in window || (typeof PointerEvent !== 'undefined');
+
+  if (hasPointerEvents) {
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button != null && e.button !== 0) return; // primary button / any touch
+      startPress(e.clientX, e.clientY, e.pointerId);
+    });
+    el.addEventListener('pointermove', (e) => movePress(e.clientX, e.clientY));
+    el.addEventListener('pointerup',   (e) => endPress('pointerup'));
+    el.addEventListener('pointercancel', cancelPress);
+    el.addEventListener('lostpointercapture', () => { if (pressing && !longFired) cancelPress(); });
+  } else {
+    // Touch fallback
+    el.addEventListener('touchstart', (e) => {
+      if (!e.touches || !e.touches.length) return;
+      const t = e.touches[0];
+      startPress(t.clientX, t.clientY, null);
+    }, { passive: true });
+    el.addEventListener('touchmove', (e) => {
+      if (!e.touches || !e.touches.length) return;
+      const t = e.touches[0];
+      movePress(t.clientX, t.clientY);
+    }, { passive: true });
+    el.addEventListener('touchend',    () => endPress('touchend'));
+    el.addEventListener('touchcancel', cancelPress);
+
+    // Mouse fallback
+    el.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      startPress(e.clientX, e.clientY, null);
+    });
+    el.addEventListener('mousemove', (e) => movePress(e.clientX, e.clientY));
+    el.addEventListener('mouseup',   () => endPress('mouseup'));
+    el.addEventListener('mouseleave',() => cancelPress());
+  }
+
+  // Kill the browser's built-in long-press context menu so we own the gesture
+  el.addEventListener('contextmenu', (e) => {
+    if (pressing || Date.now() < suppressClickUntil) {
+      e.preventDefault();
+    }
+  });
+
+  // Neutralise the synthetic click that follows long-press.
+  // We use stopImmediatePropagation so that even same-element onclick handlers
+  // (e.g. staff-color-swatch onclick) are bypassed after a long-press.
+  const suppressClick = (e) => {
+    if (Date.now() < suppressClickUntil) {
+      dbg('click suppressed', e.type);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      e.stopPropagation();
+    }
+  };
+  el.addEventListener('click', suppressClick, true);
+  el.addEventListener('dblclick', (e) => {
+    // Don't let a long-press accidentally turn into dblclick
+    if (Date.now() < suppressClickUntil) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      e.stopPropagation();
+    }
+  }, true);
+
+  // Keyboard support: Enter = short press
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('role', 'button');
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (onShort) onShort(el);
+    }
+  });
+}
+try { window._ffAttachPaletteDotLongPress = _ffAttachPaletteDotLongPress; } catch (_) {}
+
+function editPaletteColor(index, anchorEl){
 
   const currentColor = (settings.brandPalette||DEFAULTS.brandPalette)[index]||"#111827";
 
@@ -15837,32 +16050,50 @@ function editPaletteColor(index){
 
   colorInput.value = currentColor;
 
-  // Position the color picker near the Color palette row
+  // Position the hidden input near the element that triggered the edit so
+  // the native color-picker dialog pops up right next to it. Falls back to
+  // the legacy Settings palette row, then to screen center.
 
-  const paletteRow = document.querySelector("#workersBox .row:first-child");
+  let anchor = anchorEl;
+  if (!anchor) {
+    // Try to find the most recently-hovered / focused swatch in the edit form
+    anchor =
+      document.activeElement && document.activeElement.classList &&
+      (document.activeElement.classList.contains('staff-color-swatch') ||
+       document.activeElement.classList.contains('dot'))
+        ? document.activeElement
+        : null;
+  }
+  if (!anchor) {
+    // Look for a swatch matching this palette index in any of the known edit rows
+    anchor = document.querySelector(
+      `#staffEditButtonColorSwatches [data-palette-index="${index}"]`
+    ) || document.querySelector(
+      `#staffButtonColorSwatches [data-palette-index="${index}"]`
+    ) || document.querySelector(
+      `#workersBox .dot[data-palette-index="${index}"]`
+    );
+  }
+  if (!anchor) {
+    anchor = document.querySelector("#workersBox .row:first-child");
+  }
 
-  if(paletteRow){
+  colorInput.style.position = "fixed";
+  colorInput.style.zIndex = "10000";
+  colorInput.style.width = "1px";
+  colorInput.style.height = "1px";
 
-    const rect = paletteRow.getBoundingClientRect();
-
-    colorInput.style.position = "fixed";
-
-    colorInput.style.left = `${rect.left + 150}px`;
-
-    colorInput.style.top = `${rect.bottom + 40}px`;
-
-    colorInput.style.zIndex = "10000";
-
-  }else{
-
-    colorInput.style.position = "fixed";
-
+  if (anchor && typeof anchor.getBoundingClientRect === 'function') {
+    const rect = anchor.getBoundingClientRect();
+    // Place the (hidden) input at the centre of the anchor. Most browsers
+    // open the native picker anchored to the input element's position.
+    const x = Math.max(0, Math.min(window.innerWidth  - 4, rect.left + rect.width  / 2));
+    const y = Math.max(0, Math.min(window.innerHeight - 4, rect.top  + rect.height / 2));
+    colorInput.style.left = `${x}px`;
+    colorInput.style.top  = `${y}px`;
+  } else {
     colorInput.style.left = "50%";
-
-    colorInput.style.top = "50%";
-
-    colorInput.style.zIndex = "10000";
-
+    colorInput.style.top  = "50%";
   }
 
   colorInput.style.opacity = "0";
@@ -15896,6 +16127,18 @@ function editPaletteColor(index){
     // Update all worker rows to reflect the new palette color
 
     renderSettings();
+
+    // Notify anyone else who has palette swatches rendered (Staff edit form,
+    // Add Staff form, Staff Members modal, Queue buttons, etc.) so they can
+    // live-refresh without waiting for a re-open.
+    try {
+      document.dispatchEvent(new CustomEvent('ff-brand-palette-changed', {
+        detail: { index: index, color: newColor, palette: settings.brandPalette.slice() }
+      }));
+    } catch (_) {}
+
+    // Persist so the new palette sticks across sessions and other users.
+    try { if (typeof save === 'function') save(); } catch (_) {}
 
     cleanup();
 
@@ -16090,26 +16333,37 @@ function workerRow(i,w){
 
 
   // Quick dots - per-worker palette selection (sets worker's buttonColorIndex)
+  //  • short click  → pick this palette colour for the current staff row
+  //  • long-press   → open the palette editor (changes the colour for everyone)
   const quick = document.createElement("span"); quick.className="quick4";
 
   palette.forEach((hex,paletteIdx)=>{
 
-    const d=document.createElement('span'); d.className='dot'; d.style.background=hex; d.title=hex;
+    const d=document.createElement('span'); d.className='dot'; d.style.background=hex;
+    d.title = `Tap: use ${hex} for this staff  •  Hold: edit palette colour (affects everyone)`;
+    d.style.transition = 'transform 120ms ease';
 
     d.dataset.paletteIndex = paletteIdx;
     d.dataset.workerIndex = i; // Store worker index for click handler
 
-    // Clicking a palette dot sets this worker's buttonColorIndex to link to the palette
-    d.onclick=(e)=> { 
-      const workerIdx = Number(e.currentTarget.dataset.workerIndex);
-      const paletteIndex = Number(e.currentTarget.dataset.paletteIndex);
-      if (settings.workers[workerIdx] !== undefined) {
-        settings.workers[workerIdx].buttonColorIndex = paletteIndex;
-        delete settings.workers[workerIdx].color; // Clear direct color to ensure palette linkage
-        save();
-        renderSettings(); // Re-render to show updated color
+    _ffAttachPaletteDotLongPress(d, {
+      onShortPress: (el) => {
+        const workerIdx = Number(el.dataset.workerIndex);
+        const paletteIndex = Number(el.dataset.paletteIndex);
+        if (settings.workers[workerIdx] !== undefined) {
+          settings.workers[workerIdx].buttonColorIndex = paletteIndex;
+          delete settings.workers[workerIdx].color; // Clear direct color to ensure palette linkage
+          save();
+          renderSettings(); // Re-render to show updated color
+        }
+      },
+      onLongPress: (el) => {
+        const paletteIndex = Number(el.dataset.paletteIndex);
+        if (typeof editPaletteColor === 'function') {
+          editPaletteColor(paletteIndex, el); // anchor picker next to this dot
+        }
       }
-    };
+    });
 
     quick.appendChild(d);
 
@@ -17487,7 +17741,11 @@ async function handleReorderClick() {
   ensureTasksScreenHidden();
 
   if (!reorderMode && !ffCurrentUserHasQueueReorderPermission()) {
-    alert("You don't have permission to reorder the queue.");
+    if (typeof window.ffStyledAlert === 'function') {
+      await window.ffStyledAlert('You don\u2019t have permission to reorder the queue. Ask an Admin or Manager.', 'Not authorized');
+    } else {
+      alert("You don't have permission to reorder the queue.");
+    }
     return;
   }
 
@@ -17585,11 +17843,19 @@ async function handleReorderClick() {
       }
     }
   } else {
-    alert("Not authorized");
+    if (typeof window.ffStyledAlert === 'function') {
+      await window.ffStyledAlert('The admin/manager code you entered is not correct.', 'Not authorized');
+    } else {
+      alert("Not authorized");
+    }
     }
   } catch (e) {
     console.error('[Navigation] Error in handleReorderClick:', e);
-    alert('Error in reorder: ' + (e.message || 'Unknown error'));
+    if (typeof window.ffStyledAlert === 'function') {
+      await window.ffStyledAlert('Error in reorder: ' + (e.message || 'Unknown error'), 'Something went wrong');
+    } else {
+      alert('Error in reorder: ' + (e.message || 'Unknown error'));
+    }
   }
 }
 
@@ -28494,11 +28760,11 @@ function initializeAppsPanel() {
       const fontColorSwatches = document.getElementById('staffEditFontColorSwatches');
       const fontColorMoreBtn = document.getElementById('staffEditFontColorMoreBtn');
 
-      function renderEditColorSwatches(container, colors, selectedColor, onSelect) {
+      function renderEditColorSwatches(container, colors, selectedColor, onSelect, onLongPressIndex) {
         if (!container) return;
         container.innerHTML = '';
         const normalizedSelectedColor = ffNormalizeHexColor(selectedColor || '#111827', '#111827');
-        colors.forEach((color) => {
+        colors.forEach((color, idx) => {
           const swatch = document.createElement('div');
           const normalizedColor = ffNormalizeHexColor(color || '#111827', '#111827');
           swatch.style.width = '28px';
@@ -28508,9 +28774,23 @@ function initializeAppsPanel() {
           swatch.style.border = normalizedColor === normalizedSelectedColor ? '2px solid #111827' : '1px solid #d1d5db';
           swatch.style.cursor = 'pointer';
           swatch.style.flexShrink = '0';
-          swatch.onclick = function() {
-            onSelect(normalizedColor);
-          };
+          swatch.dataset.paletteIndex = String(idx);
+          if (typeof onLongPressIndex === 'function') {
+            swatch.title = 'Tap: use this colour for this staff  •  Hold: edit palette colour (affects everyone)';
+          }
+
+          if (typeof onLongPressIndex === 'function' && typeof window._ffAttachPaletteDotLongPress === 'function') {
+            // Short press → pick, Long press → edit palette colour for everyone.
+            // We don't set swatch.onclick; both actions go through the helper.
+            window._ffAttachPaletteDotLongPress(swatch, {
+              onShortPress: () => onSelect(normalizedColor),
+              onLongPress:  () => onLongPressIndex(idx, swatch)
+            });
+          } else {
+            swatch.onclick = function() {
+              onSelect(normalizedColor);
+            };
+          }
           container.appendChild(swatch);
         });
       }
@@ -28519,7 +28799,17 @@ function initializeAppsPanel() {
         const normalizedColor = ffNormalizeHexColor(color || currentButtonColor, currentButtonColor);
         if (buttonColorInput) buttonColorInput.value = normalizedColor;
         if (buttonColorPreview) buttonColorPreview.style.background = normalizedColor;
-        renderEditColorSwatches(buttonColorSwatches, palette, normalizedColor, updateEditButtonColor);
+        // Always pull the freshest palette so long-press edits show up immediately.
+        const livePalette = settings.brandPalette || DEFAULTS.brandPalette || [];
+        renderEditColorSwatches(
+          buttonColorSwatches,
+          livePalette,
+          normalizedColor,
+          updateEditButtonColor,
+          (index, anchorEl) => {
+            if (typeof editPaletteColor === 'function') editPaletteColor(index, anchorEl);
+          }
+        );
       }
 
       function updateEditFontColor(color) {
@@ -28528,6 +28818,24 @@ function initializeAppsPanel() {
         if (fontColorPreview) fontColorPreview.style.background = normalizedColor;
         renderEditColorSwatches(fontColorSwatches, ['#111111', '#FFFFFF'], normalizedColor, updateEditFontColor);
       }
+
+      // If any palette colour gets edited elsewhere, live-refresh the button swatches.
+      const _ffPaletteChangedHandler = function() {
+        try { updateEditButtonColor(buttonColorInput ? buttonColorInput.value : currentButtonColor); } catch (_) {}
+      };
+      document.addEventListener('ff-brand-palette-changed', _ffPaletteChangedHandler);
+      // Clean up when the edit section is removed
+      try {
+        if (typeof MutationObserver !== 'undefined' && buttonColorSwatches && buttonColorSwatches.parentNode) {
+          const _obs = new MutationObserver(() => {
+            if (!document.body.contains(buttonColorSwatches)) {
+              document.removeEventListener('ff-brand-palette-changed', _ffPaletteChangedHandler);
+              _obs.disconnect();
+            }
+          });
+          _obs.observe(document.body, { childList: true, subtree: true });
+        }
+      } catch (_) {}
 
       updateEditButtonColor(currentButtonColor);
       updateEditFontColor(currentFontColor);
@@ -28931,7 +29239,9 @@ function initializeAppsPanel() {
         // Check if this is the last admin
         const otherAdmins = staffStore.staff.filter(s => s.id !== selectedStaffId && s.isAdmin === true && s.isArchived !== true);
         if (otherAdmins.length === 0) {
-          alert('At least one Admin is required.');
+          (typeof window.ffStyledAlert === 'function')
+            ? window.ffStyledAlert('At least one Admin is required.', 'Cannot save')
+            : alert('At least one Admin is required.');
           return;
         }
       }
@@ -28941,13 +29251,17 @@ function initializeAppsPanel() {
       if (currentTab === 'details' && newPinValue) {
         // Validate PIN is numeric only
         if (!/^\d+$/.test(newPinValue)) {
-          alert('PIN must contain only digits');
+          (typeof window.ffStyledAlert === 'function')
+            ? window.ffStyledAlert('PIN must contain only digits.', 'Invalid PIN')
+            : alert('PIN must contain only digits');
           return;
         }
         
         // Validate PIN length (4-6 digits)
         if (newPinValue.length < 4 || newPinValue.length > 6) {
-          alert('PIN must be 4-6 digits');
+          (typeof window.ffStyledAlert === 'function')
+            ? window.ffStyledAlert('PIN must be 4–6 digits.', 'Invalid PIN')
+            : alert('PIN must be 4-6 digits');
           return;
         }
         
@@ -28957,7 +29271,9 @@ function initializeAppsPanel() {
         });
         
         if (existingWithPin) {
-          alert('This PIN is already in use');
+          (typeof window.ffStyledAlert === 'function')
+            ? window.ffStyledAlert('This PIN is already in use by another staff member.', 'Duplicate PIN')
+            : alert('This PIN is already in use');
           return;
         }
         
@@ -30187,11 +30503,11 @@ function initializeAppsPanel() {
           updateHsvFromHex(color);
         };
 
-        // Double-click: open color picker to edit THIS swatch
-        (function(swatchEl, swatchIndex, swatchColor) {
-          swatchEl.ondblclick = function(e) {
-            e.preventDefault();
-            e.stopPropagation();
+        swatch.title = 'Tap: pick this colour  •  Double-click / long-press: edit colour for everyone';
+
+        // Shared handler: open the palette editor targeting THIS swatch
+        const openPaletteEditorForSwatch = (function(swatchEl, swatchIndex, swatchColor) {
+          return function() {
             editingSwatchIndex = swatchIndex;
             updateHsvFromHex(swatchColor);
             if (popover) popover.hidden = false;
@@ -30202,7 +30518,23 @@ function initializeAppsPanel() {
             swatchEl.style.outline = '2px solid #7c3aed';
           };
         })(swatch, index, color);
-        
+
+        // Desktop: double-click opens the palette editor
+        swatch.ondblclick = function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          openPaletteEditorForSwatch();
+        };
+
+        // Touch / mouse: long-press also opens the palette editor.
+        // onShortPress is intentionally omitted so `swatch.onclick` above still
+        // handles a plain tap.
+        if (typeof _ffAttachPaletteDotLongPress === 'function') {
+          _ffAttachPaletteDotLongPress(swatch, {
+            onLongPress: openPaletteEditorForSwatch
+          });
+        }
+
         swatchesContainer.appendChild(swatch);
       });
       
@@ -34997,14 +35329,22 @@ async function handleForgotAdminPin(event) {
     event.preventDefault(); // Stop any default action
   }
   
+  const _styledOrAlert = (msg, title) => {
+    if (typeof window.ffStyledAlert === 'function') return window.ffStyledAlert(msg, title);
+    try { alert((title ? title + '\n\n' : '') + msg); } catch (_) {}
+    return Promise.resolve();
+  };
+
   // Check if user is signed in
   if (!window.auth || !window.auth.currentUser) {
-    alert('Please log in with your owner account to reset the admin PIN.');
+    await _styledOrAlert('Please log in with your owner account to reset the admin PIN.', 'Sign in required');
     return;
   }
   
-  // Show loading message
-  alert('Sending PIN reset link. Please wait...');
+  // Show loading message (non-blocking)
+  if (typeof window.showToast === 'function') {
+    try { window.showToast('Sending PIN reset link…'); } catch (_) {}
+  }
   
   try {
     // Ensure Firebase Functions SDK is available
@@ -35021,8 +35361,8 @@ async function handleForgotAdminPin(event) {
     // Close any open modals
     closeTasksAdminAccessModal();
     
-    // Show success alert
-    alert('Success! ' + successMessage);
+    // Show styled success dialog
+    await _styledOrAlert(successMessage, 'Reset link sent');
     
   } catch (error) {
     console.error('[AdminPIN] Error requesting PIN reset:', error);
@@ -35042,7 +35382,7 @@ async function handleForgotAdminPin(event) {
       errorMessage += 'Please try again or contact support.';
     }
     
-    alert('Error: ' + errorMessage);
+    await _styledOrAlert(errorMessage, 'Reset failed');
   }
 }
 
@@ -36857,7 +37197,14 @@ async function openSettings_DISABLED(){
 
   const saved = getState().adminCode || "";
 
-  if(saved && code !== saved) { alert("Wrong admin code"); return; }
+  if(saved && code !== saved) {
+    if (typeof window.ffStyledAlert === 'function') {
+      await window.ffStyledAlert('The admin code you entered is not correct.', 'Wrong code');
+    } else {
+      alert('Wrong admin code');
+    }
+    return;
+  }
 
   document.getElementById("settingsModal").style.display="block";
 
