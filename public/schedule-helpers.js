@@ -743,6 +743,117 @@ function normalizeSpecialBusinessDays(value) {
   return normalized;
 }
 
+/**
+ * Multi-location staff: a staff member can be assigned to several branches
+ * (`allowedLocationIds`) and may work DIFFERENT hours in each. The canonical
+ * shape stored on the staff document is:
+ *   {
+ *     <locationId>: {
+ *       defaultSchedule: { monday: {enabled,startTime,endTime}, ... }
+ *     }
+ *   }
+ * Only locations with an explicit override are persisted; any location
+ * without an entry here falls back to the staff's top-level `defaultSchedule`.
+ */
+function normalizeLocationScheduleAvailability(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const normalized = {};
+  Object.keys(value).forEach((locId) => {
+    const key = typeof locId === "string" ? locId.trim() : "";
+    if (!key) return;
+    const entry = value[locId];
+    if (!entry || typeof entry !== "object") return;
+    const ds = entry.defaultSchedule;
+    if (!ds || typeof ds !== "object") return;
+    normalized[key] = {
+      defaultSchedule: normalizeDefaultSchedule(ds),
+    };
+  });
+  return normalized;
+}
+
+/**
+ * Returns the effective `defaultSchedule` for a staff row at a given location.
+ *
+ * Precedence:
+ *   1. `locationScheduleAvailability[locId].defaultSchedule` when present.
+ *   2. Multi-location staff who have already configured at least one
+ *      branch-specific schedule but NOT this branch → "not scheduled here"
+ *      (all days off). This matches the owner's mental model of
+ *      "tell me which days you work at each branch" — a branch that was
+ *      deliberately left empty is not a place the staff works.
+ *   3. Otherwise fall back to the top-level `staff.defaultSchedule`.
+ *      This preserves legacy behaviour for single-location staff and for
+ *      multi-location staff who haven't yet been migrated to the new
+ *      per-branch schedule UI.
+ */
+function getStaffDefaultScheduleForLocation(staff, locationId) {
+  const locKey = typeof locationId === "string" ? locationId.trim() : "";
+  const mapRaw = staff && staff.locationScheduleAvailability;
+  if (locKey && mapRaw && typeof mapRaw === "object") {
+    const entry = mapRaw[locKey];
+    if (entry && entry.defaultSchedule && typeof entry.defaultSchedule === "object") {
+      return normalizeDefaultSchedule(entry.defaultSchedule);
+    }
+    const allowed = Array.isArray(staff && staff.allowedLocationIds) ? staff.allowedLocationIds : [];
+    if (allowed.length > 1 && Object.keys(mapRaw).length > 0) {
+      return cloneDefaultSchedule();
+    }
+  }
+  return normalizeDefaultSchedule(staff && staff.defaultSchedule);
+}
+
+/**
+ * Cross-branch conflict detection for a multi-location staff member.
+ * Returns a list of `{ dayKey, locationAId, locationBId, overlap: "HH:MM-HH:MM" }`
+ * when the staff is scheduled to work overlapping hours in two different
+ * branches on the same weekday. Callers can surface this as a warning when
+ * the owner edits a schedule, or block auto-build from placing conflicting
+ * shifts. Days that are Off in a branch, or where only one branch has
+ * hours, never produce a conflict.
+ */
+function detectStaffLocationScheduleConflicts(staff) {
+  const source = staff && typeof staff === "object" ? staff : {};
+  const perLoc = normalizeLocationScheduleAvailability(source.locationScheduleAvailability);
+  const allowed = Array.isArray(source.allowedLocationIds) ? source.allowedLocationIds.slice() : [];
+  if (allowed.length < 2) return [];
+  // Resolve each location's effective schedule from the explicit override.
+  // Locations without an override are treated as "not scheduled" (all days off)
+  // — matching the strict no-default model used by getStaffDefaultScheduleForLocation.
+  const emptySchedule = cloneDefaultSchedule();
+  const perLocEffective = {};
+  allowed.forEach((locId) => {
+    if (!locId) return;
+    perLocEffective[locId] = perLoc[locId]?.defaultSchedule || emptySchedule;
+  });
+  const conflicts = [];
+  DAY_KEYS.forEach((dayKey) => {
+    for (let i = 0; i < allowed.length; i += 1) {
+      for (let j = i + 1; j < allowed.length; j += 1) {
+        const a = allowed[i]; const b = allowed[j];
+        const da = perLocEffective[a]?.[dayKey]; const db = perLocEffective[b]?.[dayKey];
+        if (!da || !db || !da.enabled || !db.enabled) continue;
+        const aS = parseScheduleTimeToMinutes(da.startTime);
+        const aE = parseScheduleTimeToMinutes(da.endTime);
+        const bS = parseScheduleTimeToMinutes(db.startTime);
+        const bE = parseScheduleTimeToMinutes(db.endTime);
+        if (aS == null || aE == null || bS == null || bE == null) continue;
+        if (aE <= aS || bE <= bS) continue;
+        const lo = Math.max(aS, bS); const hi = Math.min(aE, bE);
+        if (hi > lo) {
+          conflicts.push({
+            dayKey,
+            locationAId: a,
+            locationBId: b,
+            overlap: `${formatMinutesAsScheduleTime(lo)}-${formatMinutesAsScheduleTime(hi)}`,
+          });
+        }
+      }
+    }
+  });
+  return conflicts;
+}
+
 function normalizeStaffSchedulingData(staff) {
   const source = staff && typeof staff === "object" ? staff : {};
   const explicitRole = normalizeRoleKey(source.role);
@@ -764,6 +875,7 @@ function normalizeStaffSchedulingData(staff) {
     employmentType: normalizeEmploymentType(source.employmentType),
     weeklyHoursTarget: normalizeWeeklyHoursTarget(source.weeklyHoursTarget),
     defaultSchedule: normalizeDefaultSchedule(source.defaultSchedule),
+    locationScheduleAvailability: normalizeLocationScheduleAvailability(source.locationScheduleAvailability),
     constraints: normalizeConstraints(source.constraints),
   };
 }
@@ -878,6 +990,9 @@ const scheduleHelpers = {
   isCoverageRulesAllZeros,
   normalizeSpecialBusinessDays,
   normalizeStaffSchedulingData,
+  normalizeLocationScheduleAvailability,
+  getStaffDefaultScheduleForLocation,
+  detectStaffLocationScheduleConflicts,
   getStaffRoleLevel,
   canWorkAlone,
   hasRequiredManager,
@@ -941,6 +1056,9 @@ export {
   isCoverageRulesAllZeros,
   normalizeSpecialBusinessDays,
   normalizeStaffSchedulingData,
+  normalizeLocationScheduleAvailability,
+  getStaffDefaultScheduleForLocation,
+  detectStaffLocationScheduleConflicts,
   getStaffRoleLevel,
   canWorkAlone,
   hasRequiredManager,

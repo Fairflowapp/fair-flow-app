@@ -769,7 +769,9 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Per-staff ping when their row changed after publish (manager triggers)
+    // Per-staff ping when their row changed after publish (manager triggers).
+    // Doc id is either legacy `weekStart_staffId` (single-branch / pre-multi-location)
+    // or per-location `locationId__weekStart_staffId` so each branch is isolated.
     match /salons/{salonId}/scheduleStaffChangePings/{pingId} {
       allow read: if belongsToSalon(salonId)
         && (
@@ -784,11 +786,20 @@ service cloud.firestore {
         && request.resource.data.weekStart is string
         && request.resource.data.staffId is string
         && request.resource.data.pingAt is timestamp
-        && pingId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+        && (
+          pingId == request.resource.data.weekStart + '_' + request.resource.data.staffId
+          || (
+            request.resource.data.locationId is string
+            && request.resource.data.locationId != ''
+            && pingId == request.resource.data.locationId + '__' + request.resource.data.weekStart + '_' + request.resource.data.staffId
+          )
+        );
       allow delete: if false;
     }
 
-    // Staff confirmed they viewed a published week (doc id = weekStart_staffId)
+    // Staff confirmed they viewed a published week.
+    // Doc id is either legacy `weekStart_staffId` or per-location
+    // `locationId__weekStart_staffId`.
     match /salons/{salonId}/scheduleWeekAcks/{ackId} {
       allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
       allow create: if belongsToSalon(salonId)
@@ -798,7 +809,14 @@ service cloud.firestore {
         && request.resource.data.staffId is string
         && request.resource.data.staffId == userStaffId()
         && request.resource.data.seenAt is timestamp
-        && ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+        && (
+          ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId
+          || (
+            request.resource.data.locationId is string
+            && request.resource.data.locationId != ''
+            && ackId == request.resource.data.locationId + '__' + request.resource.data.weekStart + '_' + request.resource.data.staffId
+          )
+        );
       allow update: if belongsToSalon(salonId)
         && userStaffId() != ''
         && resource.data.staffId == userStaffId()
@@ -806,7 +824,14 @@ service cloud.firestore {
         && request.resource.data.weekStart == resource.data.weekStart
         && request.resource.data.staffId == resource.data.staffId
         && request.resource.data.seenAt is timestamp
-        && ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+        && (
+          ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId
+          || (
+            request.resource.data.locationId is string
+            && request.resource.data.locationId != ''
+            && ackId == request.resource.data.locationId + '__' + request.resource.data.weekStart + '_' + request.resource.data.staffId
+          )
+        );
       allow delete: if false;
     }
 

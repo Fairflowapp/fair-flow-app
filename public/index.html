@@ -9759,6 +9759,12 @@ function mapTrainingItemDoc(docSnap) {
     description: data.description || '',
     visibleToRoles: Array.isArray(data.visibleToRoles) ? data.visibleToRoles : [],
     technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
+    // locationIds: empty array or missing = visible at ALL locations (legacy
+    // trainings have no locationIds field and should remain visible everywhere).
+    // Non-empty array = visible only at the listed locations.
+    locationIds: Array.isArray(data.locationIds)
+      ? data.locationIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : [],
     required: data.required === true,
     contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
     quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
@@ -9782,7 +9788,15 @@ function hasTrainingItem(trainingId) {
 function shouldDisplayTrainingNotification(notification) {
   if (!notification) return false;
   if (!trainingItemsLoadedOnce) return true;
-  return hasTrainingItem(notification.trainingId);
+  if (!hasTrainingItem(notification.trainingId)) return false;
+  // Suppress notifications for trainings that are scoped to a different
+  // location than the one the user is currently viewing. The notification
+  // row still exists in Firestore (it was valid at send time), but we hide
+  // it from the bell/badge so the count matches what the user can actually
+  // see in the library.
+  const item = trainingItems.find((t) => t.id === notification.trainingId);
+  if (item && !isTrainingVisibleAtCurrentLocation(item)) return false;
+  return true;
 }
 
 function isTrainingNotificationNew(notification) {
@@ -9808,6 +9822,7 @@ async function createTrainingItem(data) {
     description: data.description || '',
     visibleToRoles: Array.isArray(data.visibleToRoles) ? data.visibleToRoles : [],
     technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
+    locationIds: Array.isArray(data.locationIds) ? data.locationIds : [],
     required: data.required === true,
     contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
     quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
@@ -9831,6 +9846,7 @@ async function updateTrainingItem(id, data) {
     description: data.description || '',
     visibleToRoles: Array.isArray(data.visibleToRoles) ? data.visibleToRoles : [],
     technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
+    locationIds: Array.isArray(data.locationIds) ? data.locationIds : [],
     required: data.required === true,
     contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
     quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
@@ -10007,12 +10023,48 @@ function stopTrainingItemsSubscription() {
   trainingItemsSubKey = '';
 }
 
+// Re-render the Training Library whenever the user switches locations, so
+// location-scoped trainings appear/disappear immediately. This listener is
+// installed once on first subscription setup — subsequent calls are no-ops
+// thanks to the `__ff_training_loc_listener_installed` flag.
+function _ffInstallTrainingLocationListener() {
+  if (typeof document === 'undefined') return;
+  if (window.__ff_training_loc_listener_installed === true) return;
+  window.__ff_training_loc_listener_installed = true;
+  document.addEventListener('ff-active-location-changed', () => {
+    try {
+      const trainingScreen = document.getElementById('trainingScreen');
+      if (trainingScreen && trainingScreen.style.display !== 'none') {
+        const detailsView = document.getElementById('trainingDetailsView');
+        if (detailsView && detailsView.style.display !== 'none' && selectedTrainingItemId && hasTrainingItem(selectedTrainingItemId)) {
+          const item = trainingItems.find((entry) => entry.id === selectedTrainingItemId);
+          // If the now-active location hides the currently-open training,
+          // fall back to the library view instead of showing stale details.
+          if (item && isTrainingVisibleAtCurrentLocation(item)) {
+            renderTrainingDetails(item);
+          } else {
+            selectedTrainingItemId = null;
+            if (typeof renderTrainingLibrary === 'function') renderTrainingLibrary();
+          }
+        } else if (typeof renderTrainingLibrary === 'function') {
+          renderTrainingLibrary();
+        }
+      }
+      renderTrainingAppsBadge();
+      renderTrainingNotificationSummary();
+    } catch (err) {
+      console.warn('[Training] location-change re-render failed', err);
+    }
+  });
+}
+
 async function ensureTrainingItemsSubscription() {
   const salonId = await waitForTrainingSalonId();
   if (!salonId) {
     console.warn('[Training] Items subscription skipped: salonId not ready');
     return;
   }
+  _ffInstallTrainingLocationListener();
   if (trainingItemsSubKey === salonId && typeof trainingItemsUnsub === 'function') return;
   stopTrainingItemsSubscription();
   const db = getTrainingDb();
@@ -10118,10 +10170,39 @@ function buildTrainingUserContextFromStaff(staff) {
   };
 }
 
+/**
+ * Whether a specific staff record can receive a training notification based
+ * on the training's locationIds vs the staff's allowedLocationIds.
+ *
+ * This is the *staff-centric* counterpart to isTrainingVisibleAtCurrentLocation
+ * (which is UI-centric and uses the owner's current active location). We need
+ * both because an owner sending a notification from Brickell still wants to
+ * notify a Key-Biscayne-only staff if the training is tagged for that branch.
+ */
+function isTrainingVisibleForStaff(trainingItem, staff) {
+  const locIds = Array.isArray(trainingItem?.locationIds) ? trainingItem.locationIds : [];
+  if (!locIds.length) return true;
+  const staffAllowed = Array.isArray(staff?.allowedLocationIds)
+    ? staff.allowedLocationIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  // Legacy staff without explicit location assignments shouldn't be blocked
+  // from training — they pre-date the per-location model and are assumed to
+  // work everywhere in the salon.
+  if (!staffAllowed.length) return true;
+  return staffAllowed.some((lid) => locIds.includes(lid));
+}
+
 function isStaffEligibleForTrainingNotification(trainingItem, staff) {
   if (!trainingItem || !staff) return false;
   if (staff.isArchived === true || staff.archived === true) return false;
-  return isTrainingRelevantToCurrentUser(trainingItem, buildTrainingUserContextFromStaff(staff));
+  // Location gate is evaluated per-staff (not per-active-location) so that
+  // notifications are routed correctly regardless of where the sender is
+  // currently viewing from.
+  if (!isTrainingVisibleForStaff(trainingItem, staff)) return false;
+  // Run the rest of the relevance check (role + technician-type) without
+  // re-applying the location gate — we already handled it above.
+  const trainingWithoutLocationGate = { ...trainingItem, locationIds: [] };
+  return isTrainingRelevantToCurrentUser(trainingWithoutLocationGate, buildTrainingUserContextFromStaff(staff));
 }
 
 async function fetchTrainingNotificationsForCurrentUser() {
@@ -11457,11 +11538,16 @@ function normalizeTrainingQuizQuestions(questions) {
 
 function getFilteredTrainingItems() {
   const userCtx = getCurrentTrainingUserContext();
-  let scopedItems = trainingItems;
+  // First apply the active-location gate to every item — no matter what tab
+  // is selected. "My Training" and "Required" are further narrowed by role
+  // and technician type below, but the location filter must precede them so
+  // that the Library tab (visible to managers/owners) also respects the
+  // active location. This matches how Inventory/Tasks/Queue behave.
+  let scopedItems = trainingItems.filter((item) => isTrainingVisibleAtCurrentLocation(item));
   if (trainingViewMode === 'my') {
-    scopedItems = trainingItems.filter((item) => isTrainingRelevantToCurrentUser(item, userCtx));
+    scopedItems = scopedItems.filter((item) => isTrainingRelevantToCurrentUser(item, userCtx));
   } else if (trainingViewMode === 'required') {
-    scopedItems = trainingItems.filter((item) => isTrainingRequiredForUser(item, userCtx));
+    scopedItems = scopedItems.filter((item) => isTrainingRequiredForUser(item, userCtx));
   }
   const q = trainingSearchQuery.trim().toLowerCase();
   return scopedItems.filter((item) => {
@@ -11549,11 +11635,36 @@ function getCurrentTrainingUserContext() {
   return { currentRole, currentTechnicianTypes };
 }
 
+/**
+ * Check whether a training item is visible at the currently active location.
+ *
+ * Rules:
+ * - Training with empty/missing locationIds is "salon-wide" → always visible.
+ * - Training with one or more locationIds is only visible when the user's
+ *   active location matches one of them.
+ * - If we can't determine an active location (single-location salon, or the
+ *   location switcher hasn't initialized yet), we fall back to "visible" so
+ *   we don't accidentally hide content from users who only operate in one
+ *   salon.
+ */
+function isTrainingVisibleAtCurrentLocation(item) {
+  const locIds = Array.isArray(item?.locationIds) ? item.locationIds : [];
+  if (!locIds.length) return true;
+  const activeLocId = (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function')
+    ? String(window.ffGetActiveLocationId() || '').trim()
+    : '';
+  if (!activeLocId) return true;
+  return locIds.some((id) => String(id || '').trim() === activeLocId);
+}
+
 function isTrainingRelevantToCurrentUser(item, ctx) {
   const role = String(ctx?.currentRole || '').toLowerCase();
   if (!role) return false;
   const visibleToRoles = Array.isArray(item?.visibleToRoles) ? item.visibleToRoles.map((r) => String(r || '').toLowerCase()) : [];
   if (!visibleToRoles.includes(role)) return false;
+  // Location gate: trainings targeted at specific locations only reach
+  // staff who are currently working at one of those locations.
+  if (!isTrainingVisibleAtCurrentLocation(item)) return false;
   if (role !== 'technician') return true;
 
   const techTypes = Array.isArray(item?.technicianTypes) ? item.technicianTypes.map((t) => String(t || '').toLowerCase()) : [];
@@ -11580,13 +11691,19 @@ async function populateTrainingTechTypes() {
     const active = types.filter(t => t.active !== false);
     active.forEach(t => {
       const lbl = document.createElement('label');
-      lbl.style.cssText = 'font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;';
+      lbl.className = 'ttm-chip';
       const cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.name = 'trainingTechnicianType';
       cb.value = t.id;
       lbl.appendChild(cb);
-      lbl.appendChild(document.createTextNode(t.name || t.id));
+      const dot = document.createElement('span');
+      dot.className = 'ttm-chip-dot';
+      dot.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      lbl.appendChild(dot);
+      const txt = document.createElement('span');
+      txt.textContent = t.name || t.id;
+      lbl.appendChild(txt);
       container.appendChild(lbl);
     });
   } catch(e) { console.warn('[Training] Could not load service provider types', e); }
@@ -11627,12 +11744,104 @@ function resetTrainingForm() {
   if (descriptionInput) descriptionInput.value = '';
   document.querySelectorAll('input[name="trainingVisibleRole"]').forEach((cb) => { cb.checked = false; });
   document.querySelectorAll('input[name="trainingTechnicianType"]').forEach((cb) => { cb.checked = false; cb.disabled = false; });
+  populateTrainingLocationCheckboxes([]);
   trainingDraftBlocks = [];
   trainingDraftQuizQuestions = [];
   if (validation) validation.style.display = 'none';
   syncTechnicianTypesUI();
   renderTrainingBlocksEditor();
   renderTrainingQuizEditor();
+}
+
+/**
+ * Rebuild the "Visible At Locations" checkbox list inside the training modal.
+ *
+ * - If the salon has zero or one location we hide the whole section, because
+ *   the concept of "per-location training" is meaningless there.
+ * - An "All locations" master checkbox sits on top. When it's checked, the
+ *   individual location checkboxes are cleared and disabled — this mirrors
+ *   the "select all_technicians or specific types" pattern we use for
+ *   Service Provider Types and keeps the UX consistent.
+ * - `preSelected` is the array of locationIds already saved on the training
+ *   (empty for new trainings or legacy salon-wide trainings).
+ */
+function populateTrainingLocationCheckboxes(preSelected) {
+  const wrap = document.getElementById('trainingLocationsWrap');
+  const container = document.getElementById('trainingLocationsCheckboxes');
+  if (!wrap || !container) return;
+  const locations = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
+    ? (window.ffGetActiveLocations() || [])
+    : [];
+  if (!Array.isArray(locations) || locations.length <= 1) {
+    wrap.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+  wrap.style.display = 'block';
+  const selected = Array.isArray(preSelected)
+    ? preSelected.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  const isAllLocations = selected.length === 0;
+  container.innerHTML = '';
+
+  // Helper that builds a chip-styled label matching the modern modal design.
+  // Each chip wraps a hidden native checkbox so the existing form logic (which
+  // reads `input[name="trainingLocation"]:checked`) keeps working unchanged.
+  const buildChip = (value, labelText, checked, disabled) => {
+    const lbl = document.createElement('label');
+    lbl.className = 'ttm-chip';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.name = 'trainingLocation';
+    cb.value = value;
+    cb.checked = !!checked;
+    cb.disabled = !!disabled;
+    lbl.appendChild(cb);
+    const dot = document.createElement('span');
+    dot.className = 'ttm-chip-dot';
+    dot.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+    lbl.appendChild(dot);
+    const txt = document.createElement('span');
+    txt.textContent = labelText;
+    lbl.appendChild(txt);
+    return { label: lbl, input: cb };
+  };
+
+  const { label: allLabel, input: allCb } = buildChip('__all__', 'All locations', isAllLocations, false);
+  container.appendChild(allLabel);
+
+  locations.forEach((loc) => {
+    if (!loc || !loc.id) return;
+    const { label: lbl } = buildChip(
+      String(loc.id),
+      loc.name || loc.id,
+      selected.includes(String(loc.id)),
+      isAllLocations
+    );
+    container.appendChild(lbl);
+  });
+
+  // Wire up the "All locations" toggle so it clears + disables the specific
+  // checkboxes when re-activated. This prevents the user from saving an
+  // inconsistent state like "All locations + Brickell only".
+  allCb.addEventListener('change', () => {
+    const specific = container.querySelectorAll('input[name="trainingLocation"]:not([value="__all__"])');
+    if (allCb.checked) {
+      specific.forEach((el) => { el.checked = false; el.disabled = true; });
+    } else {
+      specific.forEach((el) => { el.disabled = false; });
+    }
+  });
+  // Unchecking every specific location auto-restores the "All" state.
+  container.querySelectorAll('input[name="trainingLocation"]:not([value="__all__"])').forEach((el) => {
+    el.addEventListener('change', () => {
+      const anyChecked = Array.from(container.querySelectorAll('input[name="trainingLocation"]:not([value="__all__"])'))
+        .some((c) => c.checked);
+      if (anyChecked) {
+        allCb.checked = false;
+      }
+    });
+  });
 }
 
 function bindTrainingFormEvents() {
@@ -11649,22 +11858,74 @@ function bindTrainingFormEvents() {
   if (allTechCb) allTechCb.onchange = () => syncTechnicianTypesUI();
 }
 
-function openCreateTrainingModal() {
+/**
+ * Ensure the modal sits as a direct child of <body> and has a rock-solid
+ * overlay style. We were seeing cases where the card collapsed to a tiny
+ * strip at the top of the viewport — symptom of an ancestor clipping it
+ * with overflow:hidden or breaking position:fixed with a transform. Moving
+ * to body and forcing the critical styles defensively eliminates that.
+ */
+function _ffEnsureTrainingModalPortal() {
   const modal = document.getElementById('createTrainingModal');
+  if (!modal) return null;
+  if (modal.parentElement !== document.body) {
+    try { document.body.appendChild(modal); } catch (_) {}
+  }
+  modal.style.setProperty('position', 'fixed', 'important');
+  modal.style.setProperty('top', '0', 'important');
+  modal.style.setProperty('left', '0', 'important');
+  modal.style.setProperty('right', '0', 'important');
+  modal.style.setProperty('bottom', '0', 'important');
+  modal.style.setProperty('width', '100vw', 'important');
+  modal.style.setProperty('height', '100vh', 'important');
+  modal.style.setProperty('z-index', '2147483647', 'important');
+  modal.style.setProperty('background', 'rgba(0,0,0,0.45)', 'important');
+  modal.style.setProperty('isolation', 'isolate', 'important');
+  modal.style.setProperty('align-items', 'flex-start', 'important');
+  modal.style.setProperty('justify-content', 'center', 'important');
+  modal.style.setProperty('padding', '40px 20px 20px', 'important');
+  modal.style.setProperty('overflow-y', 'auto', 'important');
+  modal.style.setProperty('overflow-x', 'hidden', 'important');
+  modal.style.setProperty('margin', '0', 'important');
+  modal.style.setProperty('transform', 'none', 'important');
+  // Also bulletproof the inner card so it gets a proper width and is never
+  // collapsed to a tiny strip by some inherited CSS.
+  const card = modal.firstElementChild;
+  if (card && card.tagName === 'DIV') {
+    card.style.setProperty('width', '100%', 'important');
+    card.style.setProperty('max-width', '640px', 'important');
+    card.style.setProperty('min-height', '200px', 'important');
+    card.style.setProperty('max-height', 'calc(100vh - 80px)', 'important');
+    card.style.setProperty('background', '#fff', 'important');
+    card.style.setProperty('border-radius', '12px', 'important');
+    card.style.setProperty('padding', '20px 20px 16px', 'important');
+    card.style.setProperty('box-shadow', '0 12px 36px rgba(0,0,0,0.22)', 'important');
+    card.style.setProperty('overflow-y', 'auto', 'important');
+    card.style.setProperty('flex-shrink', '0', 'important');
+    card.style.setProperty('margin', '0 auto', 'important');
+    card.style.setProperty('position', 'relative', 'important');
+    card.style.setProperty('z-index', '1', 'important');
+  }
+  return modal;
+}
+
+function openCreateTrainingModal() {
+  try { console.log('TrainingModal opening'); } catch (_) {}
+  const modal = _ffEnsureTrainingModalPortal();
   const modalTitle = document.getElementById('trainingModalTitle');
   const saveBtn = document.getElementById('trainingSaveBtn');
   if (!modal) return;
   editingTrainingItemId = null;
-  resetTrainingForm();
+  try { resetTrainingForm(); } catch (err) { console.error('resetTrainingForm failed', err); }
   if (modalTitle) modalTitle.textContent = 'Create Training';
   if (saveBtn) saveBtn.textContent = 'Save';
-  bindTrainingFormEvents();
-  modal.style.display = 'flex';
+  try { bindTrainingFormEvents(); } catch (err) { console.error('bindTrainingFormEvents failed', err); }
+  modal.style.setProperty('display', 'flex', 'important');
 }
 
 function openEditTrainingModal(itemId) {
   const item = trainingItems.find((x) => x.id === itemId);
-  const modal = document.getElementById('createTrainingModal');
+  const modal = _ffEnsureTrainingModalPortal();
   const modalTitle = document.getElementById('trainingModalTitle');
   const saveBtn = document.getElementById('trainingSaveBtn');
   const titleInput = document.getElementById('trainingTitleInput');
@@ -11687,6 +11948,7 @@ function openEditTrainingModal(itemId) {
     const cb = document.querySelector(`input[name="trainingTechnicianType"][value="${t}"]`);
     if (cb) cb.checked = true;
   });
+  populateTrainingLocationCheckboxes(Array.isArray(item.locationIds) ? item.locationIds : []);
   trainingDraftBlocks = (item.contentBlocks || []).map((b) => JSON.parse(JSON.stringify(b)));
   trainingDraftQuizQuestions = (item.quizQuestions || []).map((q) => JSON.parse(JSON.stringify(q)));
   syncTechnicianTypesUI();
@@ -11695,7 +11957,7 @@ function openEditTrainingModal(itemId) {
   if (modalTitle) modalTitle.textContent = 'Edit Training';
   if (saveBtn) saveBtn.textContent = 'Save Changes';
   bindTrainingFormEvents();
-  modal.style.display = 'flex';
+  modal.style.setProperty('display', 'flex', 'important');
 }
 
 function closeCreateTrainingModal() {
@@ -11709,11 +11971,23 @@ function collectTrainingFormData() {
   const requiredInput = document.getElementById('trainingRequiredInput');
   const sendNotificationInput = document.getElementById('trainingSendNotificationInput');
   const descriptionInput = document.getElementById('trainingDescriptionInput');
+  // Collect selected locations. The "__all__" sentinel means "salon-wide" and
+  // is persisted as an empty array (matches legacy trainings created before
+  // per-location scoping existed). Any specific selection overrides "__all__"
+  // even if both were somehow checked, to avoid an inconsistent record.
+  const allLocCb = document.querySelector('input[name="trainingLocation"][value="__all__"]');
+  const specificLocIds = Array.from(document.querySelectorAll('input[name="trainingLocation"]:checked'))
+    .map((el) => el.value)
+    .filter((v) => v && v !== '__all__');
+  const locationIds = (allLocCb && allLocCb.checked && specificLocIds.length === 0)
+    ? []
+    : specificLocIds;
   return {
     title: titleInput?.value?.trim() || '',
     category: categorySelect?.value?.trim() || '',
     visibleToRoles: Array.from(document.querySelectorAll('input[name="trainingVisibleRole"]:checked')).map((el) => el.value),
     technicianTypes: Array.from(document.querySelectorAll('input[name="trainingTechnicianType"]:checked')).map((el) => el.value),
+    locationIds,
     required: !!requiredInput?.checked,
     sendNotificationNow: !!sendNotificationInput?.checked,
     description: descriptionInput?.value?.trim() || '',
@@ -11880,11 +12154,12 @@ function renderTrainingLibrary() {
   }
 
   const userCtx = getCurrentTrainingUserContext();
+  const locationGated = trainingItems.filter((item) => isTrainingVisibleAtCurrentLocation(item));
   const scopedItems = trainingViewMode === 'my'
-    ? trainingItems.filter((item) => isTrainingRelevantToCurrentUser(item, userCtx))
+    ? locationGated.filter((item) => isTrainingRelevantToCurrentUser(item, userCtx))
     : trainingViewMode === 'required'
-      ? trainingItems.filter((item) => isTrainingRequiredForUser(item, userCtx))
-      : trainingItems;
+      ? locationGated.filter((item) => isTrainingRequiredForUser(item, userCtx))
+      : locationGated;
 
   const filteredItems = getFilteredTrainingItems();
   emptyEl.style.display = 'none';
@@ -11955,12 +12230,31 @@ function renderTrainingLibrary() {
     const completedBadge = isCompleted
       ? '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#d1fae5;border:1px solid #10b981;color:#059669;font-weight:600;">Completed ✓</span>'
       : '';
+    // Location badge: tell managers at a glance which locations a training
+    // is pinned to. Empty locationIds (the common case) = salon-wide, no
+    // badge. Otherwise show the location name(s) so it's obvious when a
+    // training will NOT appear at certain branches.
+    let locationBadge = '';
+    if (Array.isArray(item.locationIds) && item.locationIds.length > 0) {
+      const allLocs = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
+        ? (window.ffGetActiveLocations() || [])
+        : [];
+      const nameById = new Map();
+      allLocs.forEach((l) => { if (l && l.id) nameById.set(String(l.id), String(l.name || l.id)); });
+      const labels = item.locationIds
+        .map((id) => nameById.get(String(id)) || String(id))
+        .filter(Boolean);
+      if (labels.length) {
+        locationBadge = `<span title="Training is visible only at these locations" style="font-size:10px;padding:2px 6px;border-radius:4px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-weight:600;">📍 ${labels.join(' • ')}</span>`;
+      }
+    }
     meta.innerHTML = `
       <span style="font-size:10px;padding:2px 5px;border-radius:4px;border:1px solid #d1d5db;color:#6b7280;">${toLabel(item.category)}</span>
       ${newBadge}
       ${requiredBadge}
       ${assignedBadge}
       ${completedBadge}
+      ${locationBadge}
     `;
 
     const roles = Array.isArray(item.visibleToRoles) ? item.visibleToRoles : [];
@@ -25758,6 +26052,206 @@ function initializeAppsPanel() {
       : (staff?.defaultSchedule || {});
   }
 
+  // ---- Multi-location per-staff schedule editor state ----------------------
+  // When a staff row has multiple `allowedLocationIds`, the Schedule tab
+  // shows location sub-tabs ("Default" + one per branch). Each sub-tab has
+  // its own weekly rows. We keep the edit-mode state across tab switches
+  // here; the Save flow reads this map to persist
+  // `defaultSchedule` + `locationScheduleAvailability` together.
+  const FF_STAFF_SCHED_DEFAULT_KEY = '__default__';
+  let _ffStaffSchedActiveTabKey = FF_STAFF_SCHED_DEFAULT_KEY;
+  /** key → weekly schedule (same shape as normalizeDefaultSchedule output) OR null = "inherit from default" */
+  let _ffStaffSchedEditDraftMap = {};
+
+  function _ffStaffSchedGetLocationTabs(staff) {
+    if (!staff) return [];
+    const allowed = Array.isArray(staff.allowedLocationIds) ? staff.allowedLocationIds : [];
+    if (allowed.length <= 1) return [];
+    const locs = (typeof window.ffGetActiveLocations === 'function')
+      ? window.ffGetActiveLocations()
+      : [];
+    if (!Array.isArray(locs) || locs.length === 0) return [];
+    return locs
+      .filter(function (l) { return l && allowed.indexOf(l.id) !== -1; })
+      .map(function (l) { return { id: l.id, name: l.name || l.id }; });
+  }
+
+  function _ffStaffSchedCloneEmpty() {
+    return window.ffScheduleHelpers?.cloneDefaultSchedule
+      ? window.ffScheduleHelpers.cloneDefaultSchedule()
+      : {};
+  }
+
+  function _ffStaffSchedNormalize(value) {
+    return window.ffScheduleHelpers?.normalizeDefaultSchedule
+      ? window.ffScheduleHelpers.normalizeDefaultSchedule(value)
+      : (value || {});
+  }
+
+  /** Initialize the editor state for a staff, keyed by tab id.
+   *
+   * Single-location staff: one grid, edits the top-level `defaultSchedule`.
+   * Multi-location staff:  one grid per branch, edits
+   * `locationScheduleAvailability[locId].defaultSchedule` directly.
+   * There is no "Default" concept in the multi-location case — each branch
+   * defines its own days/hours independently, matching the owner's mental
+   * model of "two separate businesses". We seed each branch from either the
+   * existing per-location override OR the legacy `defaultSchedule` so that
+   * nothing is lost when a single-location staff is promoted to multi.
+   */
+  function _ffStaffSchedInitEditDraft(staff) {
+    _ffStaffSchedEditDraftMap = {};
+    const baseline = _ffStaffSchedNormalize(staff?.defaultSchedule);
+    // Default key always stored — for single-location staff this is the
+    // edited grid; for multi-location it's preserved unchanged on save.
+    _ffStaffSchedEditDraftMap[FF_STAFF_SCHED_DEFAULT_KEY] = baseline;
+    const tabs = _ffStaffSchedGetLocationTabs(staff);
+    const perLocRaw = (staff && staff.locationScheduleAvailability && typeof staff.locationScheduleAvailability === 'object')
+      ? staff.locationScheduleAvailability
+      : {};
+    tabs.forEach(function (t) {
+      const entry = perLocRaw[t.id];
+      const ds = entry && entry.defaultSchedule;
+      _ffStaffSchedEditDraftMap[t.id] = ds ? _ffStaffSchedNormalize(ds) : _ffStaffSchedNormalize(baseline);
+    });
+    _ffStaffSchedActiveTabKey = tabs.length > 0 ? tabs[0].id : FF_STAFF_SCHED_DEFAULT_KEY;
+  }
+
+  /** Commits the currently-rendered rows back into the editor state map. */
+  function _ffStaffSchedCaptureCurrentTabRows() {
+    if (!document.getElementById('staffScheduleRows')) return;
+    const rows = getScheduleRowsValue('staffScheduleRows');
+    _ffStaffSchedEditDraftMap[_ffStaffSchedActiveTabKey] = _ffStaffSchedNormalize(rows);
+  }
+
+  function _ffStaffSchedRenderTabBar(staff) {
+    const tabs = _ffStaffSchedGetLocationTabs(staff);
+    if (tabs.length === 0) return '';
+    // Multi-location: only branch tabs, no "Default". Each branch's hours
+    // are edited independently.
+    const btns = tabs.map(function (t) {
+      const isActive = t.id === _ffStaffSchedActiveTabKey;
+      return `
+        <button type="button" data-ff-staff-sched-tab="${escapeHtml(t.id)}"
+          style="padding:5px 10px;border:1px solid ${isActive ? '#7c3aed' : '#e5e7eb'};background:${isActive ? '#ede9fe' : '#fff'};color:${isActive ? '#5b21b6' : '#374151'};border-radius:8px;font-size:11px;font-weight:${isActive ? '600' : '500'};cursor:pointer;white-space:nowrap;">
+          ${escapeHtml(t.name)}
+        </button>
+      `;
+    }).join('');
+    return `
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;padding:6px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">
+        ${btns}
+      </div>
+    `;
+  }
+
+  function _ffStaffSchedBindTabBar(staff) {
+    const tabBtns = document.querySelectorAll('[data-ff-staff-sched-tab]');
+    tabBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _ffStaffSchedCaptureCurrentTabRows();
+        const next = btn.getAttribute('data-ff-staff-sched-tab') || FF_STAFF_SCHED_DEFAULT_KEY;
+        _ffStaffSchedActiveTabKey = next;
+        _ffStaffSchedRerenderSection(staff);
+      });
+    });
+  }
+
+  function _ffStaffSchedRenderConflictBanner(staff) {
+    const tabs = _ffStaffSchedGetLocationTabs(staff);
+    if (tabs.length === 0) return '';
+    const helper = window.ffScheduleHelpers?.detectStaffLocationScheduleConflicts;
+    if (typeof helper !== 'function') return '';
+    const perLocFromDraft = {};
+    Object.keys(_ffStaffSchedEditDraftMap).forEach(function (k) {
+      if (k === FF_STAFF_SCHED_DEFAULT_KEY) return;
+      const v = _ffStaffSchedEditDraftMap[k];
+      if (!v) return;
+      perLocFromDraft[k] = { defaultSchedule: v };
+    });
+    const probe = {
+      allowedLocationIds: staff.allowedLocationIds,
+      defaultSchedule: _ffStaffSchedEditDraftMap[FF_STAFF_SCHED_DEFAULT_KEY] || staff.defaultSchedule,
+      locationScheduleAvailability: perLocFromDraft,
+    };
+    let conflicts = [];
+    try { conflicts = helper(probe) || []; } catch (_) {}
+    if (conflicts.length === 0) return '';
+    const nameById = {};
+    tabs.forEach(function (t) { nameById[t.id] = t.name; });
+    const dayLabels = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' };
+    const rows = conflicts.slice(0, 6).map(function (c) {
+      const a = escapeHtml(nameById[c.locationAId] || c.locationAId);
+      const b = escapeHtml(nameById[c.locationBId] || c.locationBId);
+      const d = escapeHtml(dayLabels[c.dayKey] || c.dayKey);
+      return `<li style="margin:0;">${d} — ${a} vs ${b} overlap <strong>${escapeHtml(c.overlap)}</strong></li>`;
+    }).join('');
+    return `
+      <div style="padding:8px 10px;margin-bottom:8px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;">
+        <div style="font-size:10px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Conflict — staff can't be in two places at once</div>
+        <ul style="margin:0;padding-left:16px;font-size:11px;color:#7f1d1d;line-height:1.5;">${rows}</ul>
+      </div>
+    `;
+  }
+
+  function _ffStaffSchedRerenderSection(staff) {
+    const section = document.getElementById('staffScheduleLocSection');
+    if (!section) return;
+    const tabBar = _ffStaffSchedRenderTabBar(staff);
+    const conflictBanner = _ffStaffSchedRenderConflictBanner(staff);
+    const visibleSchedule = _ffStaffSchedEditDraftMap[_ffStaffSchedActiveTabKey] || _ffStaffSchedCloneEmpty();
+    section.innerHTML = `
+      ${tabBar}
+      ${conflictBanner}
+      <div id="staffScheduleRows" style="display:flex;flex-direction:column;gap:0;"></div>
+    `;
+    renderScheduleRows('staffScheduleRows', visibleSchedule, false);
+    // Live refresh of the conflict banner on any change (toggle/time).
+    const rowsContainer = document.getElementById('staffScheduleRows');
+    if (rowsContainer) {
+      rowsContainer.addEventListener('change', function () {
+        _ffStaffSchedCaptureCurrentTabRows();
+        _ffStaffSchedRerenderSection(staff);
+      });
+    }
+    _ffStaffSchedBindTabBar(staff);
+  }
+
+  /**
+   * Capture edit-mode state into `{ defaultSchedule, locationScheduleAvailability }`.
+   * Called by `saveStaffDetails` right before the write.
+   *
+   * Single-location staff: the single visible grid IS the top-level
+   * `defaultSchedule`. No per-location overrides are written.
+   *
+   * Multi-location staff: each branch tab is saved into
+   * `locationScheduleAvailability[locId]`. The top-level `defaultSchedule`
+   * is preserved unchanged (it's no longer surfaced in the UI but we keep
+   * it on the document for backwards compatibility with single-branch code
+   * paths and for the case where the staff is later reduced to one branch).
+   */
+  function _ffStaffSchedCollectForSave(oldStaff) {
+    _ffStaffSchedCaptureCurrentTabRows();
+    const tabs = _ffStaffSchedGetLocationTabs(oldStaff);
+    if (tabs.length === 0) {
+      const defaultSched = _ffStaffSchedNormalize(
+        _ffStaffSchedEditDraftMap[FF_STAFF_SCHED_DEFAULT_KEY]
+        || (document.getElementById('staffScheduleRows')
+            ? getScheduleRowsValue('staffScheduleRows')
+            : getNormalizedStaffDefaultSchedule(oldStaff))
+      );
+      return { defaultSchedule: defaultSched, locationScheduleAvailability: {} };
+    }
+    const preservedDefault = getNormalizedStaffDefaultSchedule(oldStaff);
+    const perLoc = {};
+    tabs.forEach(function (t) {
+      const v = _ffStaffSchedEditDraftMap[t.id];
+      if (!v) return;
+      perLoc[t.id] = { defaultSchedule: _ffStaffSchedNormalize(v) };
+    });
+    return { defaultSchedule: preservedDefault, locationScheduleAvailability: perLoc };
+  }
+
   function getScheduleRowsValue(containerId) {
     const container = document.getElementById(containerId);
     const fallbackSchedule = window.ffScheduleHelpers?.cloneDefaultSchedule
@@ -25797,18 +26291,41 @@ function initializeAppsPanel() {
           </div>
         `;
       }
+      // Edit mode — toggle switch + conditionally-visible time inputs.
+      // When the toggle is off we hide the times entirely (as requested by
+      // the owner) so the row collapses to just "Mon — Off", mirroring
+      // the permission-toggle UX used elsewhere in the app.
       return `
-        <div data-schedule-day="${option.value}" style="display:grid;grid-template-columns:44px 72px minmax(110px,160px) minmax(110px,160px);gap:6px;align-items:center;padding:6px 8px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:8px;box-sizing:border-box;justify-content:start;">
-          <div style="font-size:11px;font-weight:600;color:#111827;">${option.label}</div>
-          <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:10px;color:#374151;min-width:0;">
-            <input type="checkbox" data-field="enabled" ${entry.enabled ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;accent-color:#7c3aed;">
-            <span>On</span>
+        <div data-schedule-day="${option.value}" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:8px;box-sizing:border-box;">
+          <div style="font-size:11px;font-weight:600;color:#111827;flex:0 0 40px;">${option.label}</div>
+          <label class="staff-permission-toggle" style="flex:0 0 auto;">
+            <input type="checkbox" data-field="enabled" ${entry.enabled ? 'checked' : ''}>
+            <span class="staff-permission-toggle-slider"></span>
           </label>
-          <input type="time" data-field="startTime" value="${entry.startTime || ''}" style="width:100%;max-width:160px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
-          <input type="time" data-field="endTime" value="${entry.endTime || ''}" style="width:100%;max-width:160px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
+          <div data-ff-sched-times style="display:${entry.enabled ? 'flex' : 'none'};align-items:center;gap:6px;flex:1 1 auto;min-width:0;">
+            <input type="time" data-field="startTime" value="${entry.startTime || ''}" style="width:100%;max-width:160px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
+            <span style="font-size:10px;color:#9ca3af;">–</span>
+            <input type="time" data-field="endTime" value="${entry.endTime || ''}" style="width:100%;max-width:160px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
+          </div>
+          <div data-ff-sched-offlabel style="display:${entry.enabled ? 'none' : 'inline-block'};font-size:10px;color:#9ca3af;">Off</div>
         </div>
       `;
     }).join('');
+    // Bind toggles: flipping them should show/hide the time inputs
+    // without re-rendering the whole grid (preserves focus + typed values).
+    if (!readOnly) {
+      container.querySelectorAll('[data-schedule-day]').forEach(function (row) {
+        const toggle = row.querySelector('[data-field="enabled"]');
+        const times = row.querySelector('[data-ff-sched-times]');
+        const offLabel = row.querySelector('[data-ff-sched-offlabel]');
+        if (!toggle) return;
+        toggle.addEventListener('change', function () {
+          const on = toggle.checked === true;
+          if (times) times.style.display = on ? 'flex' : 'none';
+          if (offLabel) offLabel.style.display = on ? 'none' : 'inline-block';
+        });
+      });
+    }
   }
 
   function toggleManagerTypeSection(role) {
@@ -26448,6 +26965,40 @@ function initializeAppsPanel() {
       // Technicians: the rest (not admin, not manager)
       const technicians = staff.filter(t => t.isAdmin !== true && t.isManager !== true && (showArchivedStaff ? t.isArchived === true : t.isArchived !== true))
         .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: "base" }));
+
+      // Detect duplicate names in the currently-rendered list, so we can add
+      // a disambiguator (email and/or short ID) beside each duplicate entry.
+      // Without this, two "Test Multi" Admins look identical and you can't
+      // tell which one you're clicking. An orange dot signals the duplicate.
+      const _nameCounts = new Map();
+      const _emailByName = new Map();
+      [...admins, ...managers, ...technicians].forEach((s) => {
+        const nm = String(s?.name || '').trim().toLowerCase();
+        if (!nm) return;
+        _nameCounts.set(nm, (_nameCounts.get(nm) || 0) + 1);
+        // Track how many *different* emails exist for this name. If only 1
+        // distinct email, email isn't a useful disambiguator → show ID.
+        const em = String(s?.email || '').trim().toLowerCase();
+        if (!_emailByName.has(nm)) _emailByName.set(nm, new Set());
+        _emailByName.get(nm).add(em);
+      });
+      function _dupSuffix(s) {
+        const nm = String(s?.name || '').trim().toLowerCase();
+        if (!nm || (_nameCounts.get(nm) || 0) < 2) return '';
+        const emailSet = _emailByName.get(nm) || new Set();
+        const emailIsDistinct = emailSet.size > 1;
+        const em = String(s?.email || '').trim();
+        const shortId = String(s?.id || '').slice(-6);
+        // If every duplicate shares the same email, show the ID suffix so
+        // the rows are visibly distinct. Otherwise show the email.
+        const tag = (em && emailIsDistinct)
+          ? escapeHtml(em)
+          : (shortId ? `id …${escapeHtml(shortId)}` : escapeHtml(em));
+        return `<span title="Duplicate name — this record is distinct from another with the same name" style="margin-left:6px;display:inline-flex;align-items:center;gap:4px;color:#c2410c;font-size:10px;font-weight:500;">
+          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f97316;"></span>
+          ${tag}
+        </span>`;
+      }
       
       // Render admins based on toggle state
       if (admins.length === 0) {
@@ -26460,7 +27011,7 @@ function initializeAppsPanel() {
           const textColor = showArchivedStaff ? '#6b7280' : '#111827';
           item.className = `staff-sidebar-item${isSelected ? ' is-selected' : ''}`;
           item.style.cssText = `display:flex;align-items:center;padding:6px 10px;cursor:pointer;transition:background-color 0.15s;opacity:${opacity};`;
-          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(a.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}</span>`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(a.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}${_dupSuffix(a)}</span>`;
           item.onclick = function() {
             selectStaffMember(a.id);
           };
@@ -26479,7 +27030,7 @@ function initializeAppsPanel() {
           const textColor = showArchivedStaff ? '#6b7280' : '#111827';
           item.className = `staff-sidebar-item${isSelected ? ' is-selected' : ''}`;
           item.style.cssText = `display:flex;align-items:center;padding:6px 10px;cursor:pointer;transition:background-color 0.15s;opacity:${opacity};`;
-          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(m.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}</span>`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(m.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}${_dupSuffix(m)}</span>`;
           item.onclick = function() {
             selectStaffMember(m.id);
           };
@@ -26498,7 +27049,7 @@ function initializeAppsPanel() {
           const textColor = showArchivedStaff ? '#6b7280' : '#111827';
           item.className = `staff-sidebar-item${isSelected ? ' is-selected' : ''}`;
           item.style.cssText = `display:flex;align-items:center;padding:6px 10px;cursor:pointer;transition:background-color 0.15s;opacity:${opacity};`;
-          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(t.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}</span>`;
+          item.innerHTML = `<span style="font-weight:${isSelected ? '600' : '400'};color:${textColor};font-size:12px;">${escapeHtml(t.name)}${showArchivedStaff ? ' <span style="color:#9ca3af;font-size:10px;">(Archived)</span>' : ''}${_dupSuffix(t)}</span>`;
           item.onclick = function() {
             selectStaffMember(t.id);
           };
@@ -27512,16 +28063,19 @@ function initializeAppsPanel() {
 
             <section style="padding:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
               <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:8px;">Default schedule</div>
-              <div style="font-size:10px;color:#6b7280;margin-bottom:6px;line-height:1.4;">Weekly schedule — leave times empty on an “On” day to use the salon’s open hours for that day.</div>
-              <div id="staffScheduleRows" style="display:flex;flex-direction:column;gap:0;"></div>
+              <div style="font-size:10px;color:#6b7280;margin-bottom:6px;line-height:1.4;">${(Array.isArray(staff.allowedLocationIds) && staff.allowedLocationIds.length > 1) ? 'Set the days and hours this staff works at each branch. Switch tabs to configure each location independently.' : 'Weekly schedule — leave times empty on an “On” day to use the salon’s open hours for that day.'}</div>
+              <div id="staffScheduleLocSection"></div>
             </section>
 
             <section style="padding:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
               <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:8px;">Scheduling constraints</div>
-              <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;">
-                <input type="checkbox" id="staffScheduleRequiresManager" ${normalizedConstraints.requiresManager ? 'checked' : ''} style="width:14px;height:14px;accent-color:#7c3aed;cursor:pointer;">
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;">
+                <label class="staff-permission-toggle" style="flex:0 0 auto;">
+                  <input type="checkbox" id="staffScheduleRequiresManager" ${normalizedConstraints.requiresManager ? 'checked' : ''}>
+                  <span class="staff-permission-toggle-slider"></span>
+                </label>
                 <span style="font-size:11px;color:#111827;font-weight:500;">Requires manager present</span>
-              </label>
+              </div>
               <div style="max-width:220px;margin-top:8px;">
                 <label style="display:block;margin-bottom:4px;font-size:9px;font-weight:500;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Max weekly hours</label>
                 <input type="number" id="staffScheduleMaxWeeklyHours" min="0" step="0.5" value="${normalizedConstraints.maxWeeklyHours ?? ''}" placeholder="No limit" style="width:100%;height:30px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;">
@@ -27531,7 +28085,8 @@ function initializeAppsPanel() {
         </div>
       `;
 
-      renderScheduleRows('staffScheduleRows', normalizedSchedule, false);
+      _ffStaffSchedInitEditDraft(staff);
+      _ffStaffSchedRerenderSection(staff);
       const saveBtn = document.getElementById('staffScheduleSaveBtn');
       const cancelBtn = document.getElementById('staffScheduleCancelBtn');
       if (saveBtn) saveBtn.onclick = function() { saveStaffDetails(); };
@@ -27566,6 +28121,7 @@ function initializeAppsPanel() {
 
           <section style="padding:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
             <div style="font-size:11px;font-weight:700;color:#111827;margin-bottom:8px;">Default schedule</div>
+            <div id="staffScheduleLocViewSection"></div>
             <div id="staffScheduleRows" style="display:flex;flex-direction:column;gap:0;"></div>
           </section>
 
@@ -27586,7 +28142,41 @@ function initializeAppsPanel() {
       </div>
     `;
 
-    renderScheduleRows('staffScheduleRows', normalizedSchedule, true);
+    // Multi-location view: show branch sub-tabs so the user can inspect
+    // per-branch hours without entering edit mode. Single-location staff
+    // still see the single default grid (the tab bar is hidden).
+    const viewLocTabs = _ffStaffSchedGetLocationTabs(staff);
+    let viewActiveKey = viewLocTabs.length > 0 ? viewLocTabs[0].id : FF_STAFF_SCHED_DEFAULT_KEY;
+    const viewLocSection = document.getElementById('staffScheduleLocViewSection');
+
+    function _ffRenderScheduleView() {
+      const perLocRaw = (staff && staff.locationScheduleAvailability && typeof staff.locationScheduleAvailability === 'object')
+        ? staff.locationScheduleAvailability : {};
+      const tabBar = viewLocTabs.length > 0 ? `
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;padding:6px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">
+          ${viewLocTabs.map(function (t) {
+            const isActive = t.id === viewActiveKey;
+            return `<button type="button" data-ff-view-sched-tab="${escapeHtml(t.id)}" style="padding:5px 10px;border:1px solid ${isActive ? '#7c3aed' : '#e5e7eb'};background:${isActive ? '#ede9fe' : '#fff'};color:${isActive ? '#5b21b6' : '#374151'};border-radius:8px;font-size:11px;font-weight:${isActive ? '600' : '500'};cursor:pointer;white-space:nowrap;">${escapeHtml(t.name)}</button>`;
+          }).join('')}
+        </div>
+      ` : '';
+      let scheduleToShow = normalizedSchedule;
+      if (viewLocTabs.length > 0) {
+        const entry = perLocRaw[viewActiveKey];
+        scheduleToShow = entry && entry.defaultSchedule
+          ? _ffStaffSchedNormalize(entry.defaultSchedule)
+          : _ffStaffSchedCloneEmpty();
+      }
+      if (viewLocSection) viewLocSection.innerHTML = tabBar;
+      renderScheduleRows('staffScheduleRows', scheduleToShow, true);
+      document.querySelectorAll('[data-ff-view-sched-tab]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          viewActiveKey = btn.getAttribute('data-ff-view-sched-tab') || FF_STAFF_SCHED_DEFAULT_KEY;
+          _ffRenderScheduleView();
+        });
+      });
+    }
+    _ffRenderScheduleView();
 
     const editBtn = document.getElementById('staffScheduleEditBtn');
     if (editBtn) {
@@ -28064,9 +28654,22 @@ function initializeAppsPanel() {
       ? oldStaff.primaryLocationId
       : allowed[0];
 
+    // Prune per-location schedule overrides for locations the staff no
+    // longer works in. This keeps the Firestore document clean and prevents
+    // stale overrides from re-appearing if the location is re-enabled later.
+    let prunedLocSchedAvail = oldStaff && oldStaff.locationScheduleAvailability;
+    if (prunedLocSchedAvail && typeof prunedLocSchedAvail === 'object') {
+      const kept = {};
+      Object.keys(prunedLocSchedAvail).forEach(function (k) {
+        if (allowed.indexOf(k) !== -1) kept[k] = prunedLocSchedAvail[k];
+      });
+      prunedLocSchedAvail = kept;
+    }
+
     store.staff[idx] = Object.assign({}, oldStaff, {
       primaryLocationId: preservedPrimary,
       allowedLocationIds: allowed,
+      locationScheduleAvailability: prunedLocSchedAvail || {},
       updatedAtMs: Date.now(),
     });
 
@@ -28254,13 +28857,11 @@ function initializeAppsPanel() {
       const nextWeeklyHoursTarget = window.ffScheduleHelpers?.normalizeWeeklyHoursTarget
         ? window.ffScheduleHelpers.normalizeWeeklyHoursTarget(scheduleWeeklyHoursTargetInput?.value)
         : (scheduleWeeklyHoursTargetInput?.value || null);
-      const nextDefaultSchedule = window.ffScheduleHelpers?.normalizeDefaultSchedule
-        ? window.ffScheduleHelpers.normalizeDefaultSchedule({
-            ...(document.getElementById('staffScheduleRows')
-              ? getScheduleRowsValue('staffScheduleRows')
-              : getNormalizedStaffDefaultSchedule(oldStaff))
-          })
-        : getNormalizedStaffDefaultSchedule(oldStaff);
+      // Multi-location aware collection: reads from the in-memory
+      // per-tab map so overrides entered on other tabs are preserved.
+      const _ffStaffSchedForSave = _ffStaffSchedCollectForSave(oldStaff);
+      const nextDefaultSchedule = _ffStaffSchedForSave.defaultSchedule;
+      const nextLocationScheduleAvailability = _ffStaffSchedForSave.locationScheduleAvailability;
       const nextConstraints = window.ffScheduleHelpers?.normalizeConstraints
         ? window.ffScheduleHelpers.normalizeConstraints({
             cannotWorkAlone: oldStaff.constraints?.cannotWorkAlone,
@@ -28288,6 +28889,7 @@ function initializeAppsPanel() {
         employmentType: nextEmploymentType,
         weeklyHoursTarget: nextWeeklyHoursTarget,
         defaultSchedule: nextDefaultSchedule,
+        locationScheduleAvailability: nextLocationScheduleAvailability,
         constraints: nextConstraints,
         updatedAtMs: Date.now()
       };
@@ -39722,12 +40324,12 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260412_salon_owner_uid"></script>
-  <script type="module" src="/schedule-helpers.js?v=20260409_coverage_plain_cards"></script>
+  <script type="module" src="/app.js?v=20260420_invite_dedupe"></script>
+  <script type="module" src="/schedule-helpers.js?v=20260420_per_loc_no_default"></script>
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
-  <script type="module" src="/schedule-ui.js?v=20260420_remove_orange_dot"></script>
+  <script type="module" src="/schedule-ui.js?v=20260420_dedupe_merge"></script>
   <script type="module" src="/inbox.js?v=20260420_inv_draftpicker_v123"></script>
   <script type="module" src="/chat.js?v=20260420_chat_settings_loc"></script>
   <script type="module" src="/staff-cloud.js?v=20260415_ff_toast"></script>
@@ -40958,6 +41560,7 @@ function hookSettingsGuard_DISABLED(){
     <div id="schedulePreviewLoading" style="display:none;max-width:1200px;margin:0 auto 16px;padding:14px 16px;border:1px solid #ddd6fe;background:#f5f3ff;border-radius:12px;color:#6d28d9;font-size:13px;">Loading schedule preview...</div>
     <div id="schedulePreviewError" style="display:none;max-width:1200px;margin:0 auto 16px;padding:14px 16px;border:1px solid #fecaca;background:#fef2f2;border-radius:12px;color:#b91c1c;font-size:13px;"></div>
     <div id="schedulePreviewEmpty" style="display:none;max-width:1200px;margin:0 auto;padding:24px;border:1px dashed #d1d5db;border-radius:16px;background:#fff;color:#6b7280;font-size:14px;text-align:center;">No schedule preview available for this week.</div>
+    <div id="scheduleCrossLocConflictBanner" style="display:none;max-width:1400px;margin:0 auto 10px;padding:12px 14px;border:1px solid #fcd34d;background:#fffbeb;border-radius:12px;color:#92400e;font-size:13px;line-height:1.45;"></div>
     <div id="scheduleBoard" style="max-width:1400px;margin:0 auto;display:grid;gap:6px;"></div>
   </div>
 </div>
@@ -41222,95 +41825,312 @@ function hookSettingsGuard_DISABLED(){
   </div>
 </div>
 
-<!-- Create Training Modal (local-only MVP) -->
+<!-- Create Training Modal -->
+<style>
+  /* ===== Training Modal Modern Redesign =====
+   * Scoped with .ttm-* (training training modal) prefix so we don't collide
+   * with any existing component styles. All interactive states use soft
+   * shadows + purple accent that matches the rest of the app. */
+  .ttm-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding-bottom:16px; margin-bottom:20px;
+    border-bottom:1px solid #f1f5f9;
+  }
+  .ttm-header-left { display:flex; align-items:center; gap:12px; }
+  .ttm-header-icon {
+    width:36px; height:36px; border-radius:10px;
+    background:linear-gradient(135deg,#8b5cf6 0%, #7c3aed 100%);
+    display:flex; align-items:center; justify-content:center;
+    color:#fff; box-shadow:0 4px 12px rgba(124,58,237,0.25);
+  }
+  .ttm-header-title { margin:0; font-size:17px; font-weight:700; color:#0f172a; letter-spacing:-0.01em; }
+  .ttm-header-sub { font-size:12px; color:#64748b; margin-top:2px; }
+  .ttm-close-btn {
+    width:32px; height:32px; border-radius:8px;
+    background:transparent; border:none; cursor:pointer;
+    color:#94a3b8; display:flex; align-items:center; justify-content:center;
+    transition:background 0.15s, color 0.15s;
+  }
+  .ttm-close-btn:hover { background:#f1f5f9; color:#334155; }
+  .ttm-close-btn svg { width:20px; height:20px; }
+
+  .ttm-section { margin-bottom:18px; }
+  .ttm-section-label {
+    display:block; font-size:12px; font-weight:600; color:#475569;
+    margin-bottom:8px; letter-spacing:0.01em;
+  }
+  .ttm-section-hint {
+    font-size:11px; color:#94a3b8; margin-top:6px;
+  }
+  .ttm-divider {
+    height:1px; background:#f1f5f9; margin:22px 0 18px; border:none;
+  }
+  .ttm-section-title {
+    display:flex; align-items:center; gap:8px;
+    font-size:13px; font-weight:700; color:#0f172a;
+    margin-bottom:4px;
+  }
+  .ttm-section-title-desc {
+    font-size:12px; color:#64748b; margin-bottom:10px;
+  }
+
+  /* Inputs */
+  .ttm-input, .ttm-select, .ttm-textarea {
+    width:100%; padding:11px 13px;
+    border:1px solid #e2e8f0; border-radius:10px;
+    font-size:13px; color:#0f172a; background:#fff;
+    transition:border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    font-family:inherit;
+  }
+  .ttm-input:hover, .ttm-select:hover, .ttm-textarea:hover { border-color:#cbd5e1; }
+  .ttm-input:focus, .ttm-select:focus, .ttm-textarea:focus {
+    outline:none;
+    border-color:#7c3aed;
+    box-shadow:0 0 0 3px rgba(124,58,237,0.12);
+  }
+  .ttm-input::placeholder, .ttm-textarea::placeholder { color:#94a3b8; }
+  .ttm-textarea { resize:vertical; min-height:80px; line-height:1.5; }
+  .ttm-select {
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat:no-repeat;
+    background-position:right 12px center;
+    background-size:16px;
+    padding-right:36px;
+  }
+
+  /* Chip selector (for roles, locations, technician types) */
+  .ttm-chip-grid {
+    display:flex; flex-wrap:wrap; gap:8px;
+  }
+  .ttm-chip {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:8px 14px; border-radius:999px;
+    border:1px solid #e2e8f0; background:#fff;
+    font-size:13px; font-weight:500; color:#475569;
+    cursor:pointer; user-select:none;
+    transition:all 0.15s ease;
+    position:relative;
+  }
+  .ttm-chip:hover { border-color:#cbd5e1; background:#f8fafc; color:#334155; }
+  .ttm-chip input { position:absolute; opacity:0; pointer-events:none; }
+  .ttm-chip-dot {
+    width:14px; height:14px; border-radius:50%;
+    border:1.5px solid #cbd5e1; background:#fff;
+    display:inline-flex; align-items:center; justify-content:center;
+    flex-shrink:0; transition:all 0.15s ease;
+  }
+  .ttm-chip-dot svg { width:10px; height:10px; opacity:0; color:#fff; transition:opacity 0.1s; }
+  .ttm-chip:has(input:checked) {
+    border-color:#7c3aed;
+    background:#f5f3ff;
+    color:#6d28d9;
+  }
+  .ttm-chip:has(input:checked) .ttm-chip-dot {
+    background:#7c3aed; border-color:#7c3aed;
+  }
+  .ttm-chip:has(input:checked) .ttm-chip-dot svg { opacity:1; }
+  .ttm-chip input:disabled ~ .ttm-chip-dot { opacity:0.5; }
+  .ttm-chip:has(input:disabled) { opacity:0.55; cursor:not-allowed; }
+
+  /* Toggle switch rows (for Required / Send Notification) */
+  .ttm-toggle-row {
+    display:flex; align-items:center; justify-content:space-between;
+    gap:16px; padding:12px 14px;
+    background:#f8fafc; border:1px solid #f1f5f9; border-radius:10px;
+    transition:background 0.15s, border-color 0.15s;
+  }
+  .ttm-toggle-row:hover { background:#f1f5f9; }
+  .ttm-toggle-info { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .ttm-toggle-title { font-size:13px; font-weight:600; color:#0f172a; }
+  .ttm-toggle-desc { font-size:11px; color:#64748b; line-height:1.4; }
+  .ttm-switch {
+    position:relative; display:inline-block; width:40px; height:22px;
+    flex-shrink:0;
+  }
+  .ttm-switch input { opacity:0; width:0; height:0; position:absolute; }
+  .ttm-switch-slider {
+    position:absolute; inset:0; cursor:pointer; background:#cbd5e1;
+    border-radius:22px; transition:background 0.2s;
+  }
+  .ttm-switch-slider::before {
+    content:''; position:absolute; left:3px; top:3px;
+    width:16px; height:16px; background:#fff; border-radius:50%;
+    box-shadow:0 1px 3px rgba(0,0,0,0.15);
+    transition:transform 0.2s;
+  }
+  .ttm-switch input:checked + .ttm-switch-slider { background:#7c3aed; }
+  .ttm-switch input:checked + .ttm-switch-slider::before { transform:translateX(18px); }
+
+  /* Content block adder buttons */
+  .ttm-block-btn {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:7px 12px; border-radius:8px;
+    border:1px dashed #cbd5e1; background:#fff;
+    font-size:12px; font-weight:500; color:#475569;
+    cursor:pointer; transition:all 0.15s;
+  }
+  .ttm-block-btn:hover { border-color:#7c3aed; border-style:solid; background:#f5f3ff; color:#6d28d9; }
+  .ttm-block-btn svg { width:14px; height:14px; }
+
+  /* Footer */
+  .ttm-footer {
+    display:flex; justify-content:flex-end; gap:10px;
+    margin-top:22px; padding-top:16px;
+    border-top:1px solid #f1f5f9;
+  }
+  .ttm-btn-cancel {
+    padding:9px 18px; border-radius:10px;
+    border:1px solid #e2e8f0; background:#fff;
+    font-size:13px; font-weight:600; color:#475569;
+    cursor:pointer; transition:all 0.15s;
+  }
+  .ttm-btn-cancel:hover { background:#f8fafc; border-color:#cbd5e1; }
+  .ttm-btn-save {
+    padding:9px 22px; border-radius:10px;
+    border:1px solid #7c3aed;
+    background:linear-gradient(135deg,#8b5cf6 0%, #7c3aed 100%);
+    font-size:13px; font-weight:600; color:#fff;
+    cursor:pointer; transition:all 0.15s;
+    box-shadow:0 4px 12px rgba(124,58,237,0.25);
+  }
+  .ttm-btn-save:hover { box-shadow:0 6px 16px rgba(124,58,237,0.35); transform:translateY(-1px); }
+  .ttm-btn-save:active { transform:translateY(0); }
+</style>
+
 <div id="createTrainingModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100030;align-items:center;justify-content:center;padding:20px;">
-  <div style="background:#fff;border-radius:12px;max-width:640px;width:100%;padding:20px 20px 16px;box-shadow:0 12px 36px rgba(0,0,0,0.22);max-height:86vh;overflow-y:auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <h3 id="trainingModalTitle" style="margin:0;font-size:16px;font-weight:600;color:#111827;">Create Training</h3>
-      <button type="button" onclick="closeCreateTrainingModal()" style="background:none;border:none;font-size:20px;line-height:1;cursor:pointer;color:#6b7280;">×</button>
+  <div style="background:#fff;border-radius:16px;max-width:640px;width:100%;padding:28px 28px 24px;box-shadow:0 24px 60px rgba(15,23,42,0.22);max-height:86vh;overflow-y:auto;">
+    <div class="ttm-header">
+      <div class="ttm-header-left">
+        <div class="ttm-header-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+        </div>
+        <div>
+          <h3 id="trainingModalTitle" class="ttm-header-title">Create Training</h3>
+          <div class="ttm-header-sub">Build a new learning module for your team</div>
+        </div>
+      </div>
+      <button type="button" onclick="closeCreateTrainingModal()" class="ttm-close-btn" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
     </div>
 
-    <div style="display:grid;gap:12px;">
-      <div>
-        <label for="trainingTitleInput" style="display:block;font-size:12px;color:#374151;margin-bottom:6px;">Title</label>
-        <input id="trainingTitleInput" type="text" placeholder="Enter training title" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;">
+    <div>
+      <div class="ttm-section">
+        <label for="trainingTitleInput" class="ttm-section-label">Title</label>
+        <input id="trainingTitleInput" type="text" placeholder="Enter training title" class="ttm-input">
       </div>
 
-      <div>
-        <label for="trainingCategoryInput" style="display:block;font-size:12px;color:#374151;margin-bottom:6px;">Category</label>
-        <select id="trainingCategoryInput" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff;">
+      <div class="ttm-section">
+        <label for="trainingCategoryInput" class="ttm-section-label">Category</label>
+        <select id="trainingCategoryInput" class="ttm-select">
           <option value="">Select category...</option>
-          <option value="onboarding">onboarding</option>
-          <option value="service">service</option>
-          <option value="procedure">procedure</option>
-          <option value="policy">policy</option>
+          <option value="onboarding">Onboarding</option>
+          <option value="service">Service</option>
+          <option value="procedure">Procedure</option>
+          <option value="policy">Policy</option>
         </select>
       </div>
 
-      <div>
-        <div style="font-size:12px;color:#374151;margin-bottom:6px;">Visible To Roles</div>
-        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;">
-          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingVisibleRole" value="admin">admin</label>
-          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingVisibleRole" value="manager">manager</label>
-          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingVisibleRole" value="technician">service provider</label>
+      <div class="ttm-section">
+        <div class="ttm-section-label">Visible To Roles</div>
+        <div class="ttm-chip-grid">
+          <label class="ttm-chip"><input type="checkbox" name="trainingVisibleRole" value="admin"><span class="ttm-chip-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>Admin</label>
+          <label class="ttm-chip"><input type="checkbox" name="trainingVisibleRole" value="manager"><span class="ttm-chip-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>Manager</label>
+          <label class="ttm-chip"><input type="checkbox" name="trainingVisibleRole" value="technician"><span class="ttm-chip-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>Service Provider</label>
         </div>
       </div>
 
-      <div id="trainingTechnicianTypesWrap" style="display:none;">
-        <div style="font-size:12px;color:#374151;margin-bottom:6px;">Service Provider Types</div>
-        <div id="trainingTechTypesCheckboxes" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;">
-          <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="checkbox" name="trainingTechnicianType" value="all_technicians">All Service Providers</label>
-          <span style="font-size:12px;color:#9ca3af;">Loading...</span>
+      <div id="trainingTechnicianTypesWrap" class="ttm-section" style="display:none;">
+        <div class="ttm-section-label">Service Provider Types</div>
+        <div id="trainingTechTypesCheckboxes" class="ttm-chip-grid">
+          <label class="ttm-chip"><input type="checkbox" name="trainingTechnicianType" value="all_technicians"><span class="ttm-chip-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>All Service Providers</label>
+          <span style="font-size:12px;color:#94a3b8;padding:8px 0;">Loading...</span>
         </div>
       </div>
 
-      <div>
-        <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;">
-          <input id="trainingRequiredInput" type="checkbox">
-          Required training
-        </label>
+      <div id="trainingLocationsWrap" class="ttm-section" style="display:none;">
+        <div class="ttm-section-label">Visible At Locations</div>
+        <div id="trainingLocationsCheckboxes" class="ttm-chip-grid">
+          <label class="ttm-chip">
+            <input type="checkbox" name="trainingLocation" value="__all__" checked>
+            <span class="ttm-chip-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+            <span>All locations</span>
+          </label>
+        </div>
+        <div class="ttm-section-hint">Select one or more specific locations, or leave as "All locations" for salon-wide training.</div>
       </div>
 
-      <div>
-        <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:8px;">
-          <input id="trainingSendNotificationInput" type="checkbox">
-          Send notification now to assigned staff
-        </label>
+      <div class="ttm-section">
+        <div class="ttm-toggle-row">
+          <div class="ttm-toggle-info">
+            <span class="ttm-toggle-title">Required training</span>
+            <span class="ttm-toggle-desc">Assigned staff must complete this training</span>
+          </div>
+          <label class="ttm-switch">
+            <input id="trainingRequiredInput" type="checkbox">
+            <span class="ttm-switch-slider"></span>
+          </label>
+        </div>
       </div>
 
-      <div>
-        <label for="trainingDescriptionInput" style="display:block;font-size:12px;color:#374151;margin-bottom:6px;">Description</label>
-        <textarea id="trainingDescriptionInput" rows="4" placeholder="Optional description" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;resize:vertical;"></textarea>
+      <div class="ttm-section">
+        <div class="ttm-toggle-row">
+          <div class="ttm-toggle-info">
+            <span class="ttm-toggle-title">Send notification now</span>
+            <span class="ttm-toggle-desc">Notify assigned staff immediately after saving</span>
+          </div>
+          <label class="ttm-switch">
+            <input id="trainingSendNotificationInput" type="checkbox">
+            <span class="ttm-switch-slider"></span>
+          </label>
+        </div>
       </div>
 
-      <div style="border-top:1px solid #e5e7eb;padding-top:12px;">
-        <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:8px;">Content Blocks</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-          <button type="button" onclick="addTrainingBlock('text')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Text</button>
-          <button type="button" onclick="addTrainingBlock('steps')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Steps</button>
-          <button type="button" onclick="addTrainingBlock('video')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Video</button>
-          <button type="button" onclick="addTrainingBlock('image')" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Image</button>
+      <div class="ttm-section">
+        <label for="trainingDescriptionInput" class="ttm-section-label">Description</label>
+        <textarea id="trainingDescriptionInput" rows="4" placeholder="Optional description" class="ttm-textarea"></textarea>
+      </div>
+
+      <hr class="ttm-divider">
+
+      <div class="ttm-section">
+        <div class="ttm-section-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+          Content Blocks
+        </div>
+        <div class="ttm-section-title-desc">Build the training body with rich content</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+          <button type="button" onclick="addTrainingBlock('text')" class="ttm-block-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="17" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/></svg>Add Text</button>
+          <button type="button" onclick="addTrainingBlock('steps')" class="ttm-block-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>Add Steps</button>
+          <button type="button" onclick="addTrainingBlock('video')" class="ttm-block-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>Add Video</button>
+          <button type="button" onclick="addTrainingBlock('image')" class="ttm-block-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>Add Image</button>
         </div>
         <div id="trainingBlocksEditor" style="display:grid;gap:10px;"></div>
       </div>
 
-      <div style="border-top:1px solid #e5e7eb;padding-top:12px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+      <hr class="ttm-divider">
+
+      <div class="ttm-section">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
           <div>
-            <div style="font-size:13px;font-weight:600;color:#111827;">Quiz</div>
-            <div style="font-size:12px;color:#6b7280;margin-top:2px;">Optional. Employees must answer all questions before the training is completed.</div>
+            <div class="ttm-section-title">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              Quiz
+            </div>
+            <div class="ttm-section-title-desc">Optional. Employees must answer all questions before completing the training.</div>
           </div>
-          <button type="button" onclick="addTrainingQuizQuestion()" class="btn-pill" style="font-size:12px;padding:5px 10px;">Add Question</button>
+          <button type="button" onclick="addTrainingQuizQuestion()" class="ttm-block-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Question</button>
         </div>
         <div id="trainingQuizEditor" style="display:grid;gap:10px;"></div>
       </div>
     </div>
 
-    <div id="trainingValidationMsg" style="display:none;margin-top:12px;font-size:12px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 10px;"></div>
+    <div id="trainingValidationMsg" style="display:none;margin-top:14px;font-size:12px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px 12px;"></div>
 
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
-      <button type="button" onclick="closeCreateTrainingModal()" class="btn-pill" style="font-size:13px;">Cancel</button>
-      <button id="trainingSaveBtn" type="button" onclick="saveTrainingItemLocal()" class="btn-pill" style="background:#7c3aed;color:#fff;border-color:#7c3aed;font-size:13px;">Save</button>
+    <div class="ttm-footer">
+      <button type="button" onclick="closeCreateTrainingModal()" class="ttm-btn-cancel">Cancel</button>
+      <button id="trainingSaveBtn" type="button" onclick="saveTrainingItemLocal()" class="ttm-btn-save">Save</button>
     </div>
   </div>
 </div>

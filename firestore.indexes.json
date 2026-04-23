@@ -107,6 +107,22 @@
         {"fieldPath": "order", "order": "ASCENDING"},
         {"fieldPath": "name", "order": "ASCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "scheduleWeekAcks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "weekStart", "order": "ASCENDING"},
+        {"fieldPath": "locationId", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "scheduleStaffChangePings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "weekStart", "order": "ASCENDING"},
+        {"fieldPath": "locationId", "order": "ASCENDING"}
+      ]
     }
   ],
   "fieldOverrides": []

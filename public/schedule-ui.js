@@ -20,7 +20,7 @@ import {
   getInboxApprovalDisplayForDate,
   isApprovedRequest,
 } from "./schedule-availability.js?v=20260409_coverage_plain_cards";
-import { parseScheduleTimeToMinutes, clipTimeWindowToBestShiftSegment } from "./schedule-helpers.js?v=20260409_coverage_plain_cards";
+import { parseScheduleTimeToMinutes, clipTimeWindowToBestShiftSegment } from "./schedule-helpers.js?v=20260420_per_loc_no_default";
 
 // Default to next week — managers usually plan/publish the upcoming week, not the one already in progress.
 let schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 7);
@@ -39,6 +39,54 @@ let schedulePreviewState = {
 let schedulePreviewView = "management";
 /** Editors only: "my_shifts" = personal row, view + ack | "build" = full grid editing. */
 let schedulePreviewMode = "build";
+
+/**
+ * Multi-location separation helpers
+ * ---------------------------------
+ * The Schedule module stores published weeks, week-draft snapshots, staff
+ * acknowledgements and change-pings under `salons/{salonId}/...`. To keep
+ * each branch fully isolated we:
+ *   • key all cloud documents by the active `locationId` (legacy = no suffix)
+ *   • stamp a `locationId` field on every write
+ *   • filter every cross-location query by the active location
+ *   • listen to `ff-active-location-changed` and re-load the whole board
+ *
+ * This matches the per-location isolation shipped for Queue/Tickets/Tasks/
+ * Inbox/Chat/Media/Inventory.
+ */
+function _ffSchedActiveLocId() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  } catch (_) { /* ignore */ }
+  try {
+    const v = typeof window !== "undefined" ? window.__ff_active_location_id : "";
+    if (typeof v === "string" && v.trim()) return v.trim();
+  } catch (_) { /* ignore */ }
+  try {
+    if (typeof localStorage !== "undefined") {
+      const v = localStorage.getItem("ff_active_location_id");
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  } catch (_) { /* ignore */ }
+  return "";
+}
+
+/** Per-location document id for `salons/{salonId}/schedulePublish/{id}`. */
+function _ffSchedPublishDocId() {
+  const locId = _ffSchedActiveLocId();
+  return locId ? `weeks_${locId}` : "weeks";
+}
+
+/** Per-location document id for ack / change-ping docs. */
+function _ffSchedPerLocDocId(weekStart, staffId) {
+  const locId = _ffSchedActiveLocId();
+  const ws = String(weekStart || "").trim();
+  const sid = String(staffId || "").trim();
+  return locId ? `${locId}__${ws}_${sid}` : `${ws}_${sid}`;
+}
 let scheduleDragState = null;
 let scheduleShiftEditPayload = null;
 
@@ -173,7 +221,8 @@ function ensureScheduleWeekAckListener(weekStart) {
     updateScheduleWeekAckStrip();
     return;
   }
-  const subKey = `${salonId}::${weekStart}`;
+  const locId = _ffSchedActiveLocId();
+  const subKey = `${salonId}::${locId || "_legacy"}::${weekStart}`;
   if (scheduleAckSalonWeek === subKey && scheduleAckUnsub) {
     updateScheduleWeekAckStrip();
     return;
@@ -181,7 +230,13 @@ function ensureScheduleWeekAckListener(weekStart) {
 
   teardownScheduleAckListener();
   scheduleAckSalonWeek = subKey;
-  const ackQ = query(collection(db, `salons/${salonId}/scheduleWeekAcks`), where("weekStart", "==", weekStart));
+  // Match per-location: if a location is active we only watch acks stamped
+  // with that `locationId`. Legacy (unstamped) docs stay visible when there
+  // is no active location yet (e.g. single-branch salons).
+  const ackCol = collection(db, `salons/${salonId}/scheduleWeekAcks`);
+  const ackQ = locId
+    ? query(ackCol, where("weekStart", "==", weekStart), where("locationId", "==", locId))
+    : query(ackCol, where("weekStart", "==", weekStart));
   scheduleAckUnsub = onSnapshot(
     ackQ,
     (snap) => {
@@ -248,9 +303,10 @@ async function refreshScheduleWeekAckStripAsync() {
   let pingMs = 0;
   let seenMs = scheduleWeekAckSeenAtByStaffId[mySid] || 0;
   try {
+    const perLoc = _ffSchedPerLocDocId(ws, mySid);
     const [pSnap, aSnap] = await Promise.all([
-      getDoc(doc(db, `salons/${salonId}/scheduleStaffChangePings/${ws}_${mySid}`)),
-      getDoc(doc(db, `salons/${salonId}/scheduleWeekAcks/${ws}_${mySid}`)),
+      getDoc(doc(db, `salons/${salonId}/scheduleStaffChangePings/${perLoc}`)),
+      getDoc(doc(db, `salons/${salonId}/scheduleWeekAcks/${perLoc}`)),
     ]);
     if (pSnap.exists()) {
       const p = pSnap.data().pingAt;
@@ -325,7 +381,7 @@ async function loadScheduleWeekPingMap(weekStart) {
     if (!scheduleInboxUserIsFirestoreManager()) {
       const mySid = getAuthedStaffIdForSchedule();
       if (!mySid) return;
-      const pingRef = doc(db, `salons/${salonId}/scheduleStaffChangePings/${weekStart}_${mySid}`);
+      const pingRef = doc(db, `salons/${salonId}/scheduleStaffChangePings/${_ffSchedPerLocDocId(weekStart, mySid)}`);
       const snap = await getDoc(pingRef);
       const m = {};
       if (snap.exists()) {
@@ -338,10 +394,11 @@ async function loadScheduleWeekPingMap(weekStart) {
       scheduleWeekPingAtByStaffId = m;
       return;
     }
-    const pingQ = query(
-      collection(db, `salons/${salonId}/scheduleStaffChangePings`),
-      where("weekStart", "==", weekStart),
-    );
+    const locId = _ffSchedActiveLocId();
+    const pingCol = collection(db, `salons/${salonId}/scheduleStaffChangePings`);
+    const pingQ = locId
+      ? query(pingCol, where("weekStart", "==", weekStart), where("locationId", "==", locId))
+      : query(pingCol, where("weekStart", "==", weekStart));
     const snap = await getDocs(pingQ);
     const m = {};
     snap.docs.forEach((d) => {
@@ -364,13 +421,15 @@ async function submitScheduleWeekAck() {
   const ws = weekRange.startDate;
   if (!salonId || !mySid || !ws || schedulePublishedMap[ws] !== true) return;
   try {
-    const ref = doc(db, `salons/${salonId}/scheduleWeekAcks/${ws}_${mySid}`);
+    const locId = _ffSchedActiveLocId();
+    const ref = doc(db, `salons/${salonId}/scheduleWeekAcks/${_ffSchedPerLocDocId(ws, mySid)}`);
     await setDoc(
       ref,
       {
         salonId,
         weekStart: ws,
         staffId: mySid,
+        locationId: locId || null,
         seenAt: serverTimestamp(),
       },
       { merge: true },
@@ -469,13 +528,14 @@ function ensureScheduleChangePingListener(weekStart) {
     }
     return;
   }
-  const subKey = `${salonId}::${weekStart}::${mySid}`;
+  const locId = _ffSchedActiveLocId();
+  const subKey = `${salonId}::${locId || "_legacy"}::${weekStart}::${mySid}`;
   if (scheduleChangePingSubKey === subKey && scheduleChangePingUnsub) {
     return;
   }
   teardownScheduleChangePingListener();
   scheduleChangePingSubKey = subKey;
-  const pingRef = doc(db, `salons/${salonId}/scheduleStaffChangePings/${weekStart}_${mySid}`);
+  const pingRef = doc(db, `salons/${salonId}/scheduleStaffChangePings/${_ffSchedPerLocDocId(weekStart, mySid)}`);
   scheduleChangePingUnsub = onSnapshot(
     pingRef,
     (snap) => {
@@ -1212,7 +1272,7 @@ function formatWeekLabel(weekRange) {
 function getSchedulePublishDocRef() {
   const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
   if (!salonId) return null;
-  return doc(db, `salons/${salonId}/schedulePublish/weeks`);
+  return doc(db, `salons/${salonId}/schedulePublish/${_ffSchedPublishDocId()}`);
 }
 
 /** Saved by managers on Notify / publish so all devices see the same shifts (not only localStorage). */
@@ -1258,11 +1318,13 @@ function ensureSchedulePublishListener() {
     teardownSchedulePublishListener();
     return;
   }
-  if (schedulePublishSalonSubscribed === salonId && schedulePublishUnsub) return;
+  const subKey = `${salonId}::${_ffSchedActiveLocId() || "_legacy"}`;
+  if (schedulePublishSalonSubscribed === subKey && schedulePublishUnsub) return;
 
   teardownSchedulePublishListener();
-  schedulePublishSalonSubscribed = salonId;
-  const ref = doc(db, `salons/${salonId}/schedulePublish/weeks`);
+  // Subscribe per-location so each branch's Build-schedule state is isolated.
+  schedulePublishSalonSubscribed = subKey;
+  const ref = doc(db, `salons/${salonId}/schedulePublish/${_ffSchedPublishDocId()}`);
   schedulePublishUnsub = onSnapshot(
     ref,
     (snap) => {
@@ -1407,9 +1469,11 @@ async function toggleScheduleWeekPublished() {
   try {
     schedulePublishSuppressToast = true;
     if (nextPublished) {
+      const locId = _ffSchedActiveLocId();
       try {
         await updateDoc(ref, {
           [`published.${key}`]: true,
+          locationId: locId || null,
           lastBroadcastAt: serverTimestamp(),
           lastBroadcastWeekKey: key,
           updatedAt: serverTimestamp(),
@@ -1417,6 +1481,7 @@ async function toggleScheduleWeekPublished() {
       } catch (e) {
         if (e?.code === "not-found") {
           await setDoc(ref, {
+            locationId: locId || null,
             published: { [key]: true },
             lastBroadcastAt: serverTimestamp(),
             lastBroadcastWeekKey: key,
@@ -1763,6 +1828,7 @@ async function persistStaffShiftFingerprintsForWeek(weekStart, draft, staffList)
     await setDoc(
       ref,
       {
+        locationId: _ffSchedActiveLocId() || null,
         staffShiftFingerprints: { [weekStart]: fp },
         weekDraftSnapshots: {
           [weekStart]: {
@@ -1799,6 +1865,7 @@ async function syncPublishedWeekStandByToCloud(weekStart) {
     await setDoc(
       ref,
       {
+        locationId: _ffSchedActiveLocId() || null,
         weekDraftSnapshots: {
           [weekStart]: {
             savedAt: serverTimestamp(),
@@ -1866,14 +1933,16 @@ async function notifyStaffScheduleChanges() {
   const batch = writeBatch(db);
   const weeksRef = getSchedulePublishDocRef();
   if (!weeksRef) return;
+  const locId = _ffSchedActiveLocId();
   for (const sid of changed) {
-    const pingRef = doc(db, `salons/${salonId}/scheduleStaffChangePings/${key}_${sid}`);
+    const pingRef = doc(db, `salons/${salonId}/scheduleStaffChangePings/${_ffSchedPerLocDocId(key, sid)}`);
     batch.set(
       pingRef,
       {
         salonId,
         weekStart: key,
         staffId: sid,
+        locationId: locId || null,
         pingAt: serverTimestamp(),
       },
       { merge: true },
@@ -1886,6 +1955,7 @@ async function notifyStaffScheduleChanges() {
   batch.set(
     weeksRef,
     {
+      locationId: locId || null,
       staffShiftFingerprints: { [key]: fpNew },
       weekDraftSnapshots: {
         [key]: {
@@ -1949,7 +2019,11 @@ const SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER = 4;
 
 function getSchedulePreviewSalonStorageKey() {
   const s = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
-  return s || "_local";
+  const loc = _ffSchedActiveLocId();
+  const base = s || "_local";
+  // Include active location so different branches never share the same
+  // localStorage bucket for draft overrides / manual-off / dirty markers.
+  return loc ? `${base}__${loc}` : base;
 }
 
 function getScheduleManualOffStorageKey(weekRange) {
@@ -2882,12 +2956,136 @@ function renderScheduleViewTabs() {
   applyState(techniciansBtn, schedulePreviewView === "technicians", false);
 }
 
+/**
+ * A staff row is visible in the active branch's schedule when:
+ *   • no active location is resolved (single-branch salon or bootstrap), OR
+ *   • the staff is the Owner (business owner is always present), OR
+ *   • `allowedLocationIds` is explicitly set and contains the active location, OR
+ *   • `allowedLocationIds` is empty/missing but `primaryLocationId` matches, OR
+ *   • neither field is set (legacy row) — we treat that as "no assignment
+ *     chosen yet" and keep them visible to avoid silently losing legacy data.
+ *
+ * Admins and managers who DID pick specific locations via the Locations tab
+ * are filtered — the user's expectation is that Magi (Manager, toggled only
+ * at Key Biscayne) must NOT appear in Brickell's grid.
+ */
+function _ffSchedStaffInActiveLocation(staff) {
+  const activeLoc = _ffSchedActiveLocId();
+  if (!activeLoc) return true;
+  if (!staff) return false;
+  const role = String(staff.role || "").toLowerCase().trim();
+  const isOwner = role === "owner" || staff.isOwner === true;
+  if (isOwner) return true;
+  const allowed = Array.isArray(staff.allowedLocationIds) ? staff.allowedLocationIds : [];
+  if (allowed.length > 0) {
+    return allowed.indexOf(activeLoc) !== -1;
+  }
+  const primary = typeof staff.primaryLocationId === "string" ? staff.primaryLocationId.trim() : "";
+  if (primary) return primary === activeLoc;
+  // Legacy row with no assignment info: default to visible so pre-existing
+  // staff don't disappear. Users can fix this by opening the Locations tab.
+  return true;
+}
+
+/**
+ * When a staff row has a per-location availability override
+ * (`locationScheduleAvailability[activeLoc].defaultSchedule`), swap in that
+ * map as the effective `defaultSchedule`. The generator + validator read
+ * `defaultSchedule` directly, so this single substitution propagates the
+ * per-branch hours everywhere (auto-build, availability, coverage checks).
+ * Rows without an override keep their top-level `defaultSchedule` — works
+ * identically to the previous behaviour for single-branch salons.
+ */
+function _ffSchedApplyPerLocationSchedule(staff) {
+  const activeLoc = _ffSchedActiveLocId();
+  if (!activeLoc || !staff || typeof staff !== "object") return staff;
+  const helper = window.ffScheduleHelpers && window.ffScheduleHelpers.getStaffDefaultScheduleForLocation;
+  if (typeof helper !== "function") return staff;
+  try {
+    const perLoc = helper(staff, activeLoc);
+    if (!perLoc) return staff;
+    // Diagnostic: log which branch schedule we're applying. Helps verify
+    // that per-location overrides are picked up by Build Schedule.
+    try {
+      const allowed = Array.isArray(staff.allowedLocationIds) ? staff.allowedLocationIds.length : 0;
+      if (allowed > 1) {
+        const active = Object.keys(perLoc).filter((d) => perLoc[d] && perLoc[d].enabled);
+        console.log(`[ScheduleUI] per-loc schedule for ${staff.name || staff.id} @ ${activeLoc}: ${active.length ? active.join(",") : "all days OFF"}`);
+      }
+    } catch (_) { /* ignore */ }
+    return { ...staff, defaultSchedule: perLoc };
+  } catch (_) {
+    return staff;
+  }
+}
+
 async function loadScheduleStaffList() {
   if (typeof window.ffStaffForceLoad === "function") {
     try { await window.ffStaffForceLoad(); } catch (_) {}
   }
   const store = typeof window.ffGetStaffStore === "function" ? window.ffGetStaffStore() : { staff: [] };
-  return (Array.isArray(store?.staff) ? store.staff : []).filter((staff) => staff && staff.isArchived !== true);
+  return (Array.isArray(store?.staff) ? store.staff : [])
+    .filter((staff) => staff && staff.isArchived !== true)
+    .filter(_ffSchedStaffInActiveLocation)
+    .map(_ffSchedApplyPerLocationSchedule);
+}
+
+/** Scan ALL staff (including those not filtered to the active location)
+ *  for same-day cross-location overlaps and render a warning banner above
+ *  the schedule grid. Only relevant for multi-location staff.
+ */
+function renderScheduleCrossLocationConflictBanner() {
+  const banner = document.getElementById("scheduleCrossLocConflictBanner");
+  if (!banner) return;
+  try {
+    const store = typeof window.ffGetStaffStore === "function" ? window.ffGetStaffStore() : { staff: [] };
+    const allStaff = Array.isArray(store?.staff) ? store.staff : [];
+    const detect = window.ffScheduleHelpers && window.ffScheduleHelpers.detectStaffLocationScheduleConflicts;
+    if (typeof detect !== "function") { banner.style.display = "none"; return; }
+    const locations = (typeof window !== "undefined" && typeof window.ffGetActiveLocations === "function")
+      ? (window.ffGetActiveLocations() || [])
+      : [];
+    const locNameById = new Map();
+    locations.forEach((loc) => {
+      if (loc && loc.id) locNameById.set(String(loc.id), String(loc.name || loc.id));
+    });
+    const labelLoc = (id) => locNameById.get(String(id)) || String(id);
+    const dayLabels = {
+      monday: "Mon", tuesday: "Tue", wednesday: "Wed",
+      thursday: "Thu", friday: "Fri", saturday: "Sat", sunday: "Sun",
+    };
+    const rows = [];
+    allStaff.forEach((staff) => {
+      if (!staff || staff.isArchived === true) return;
+      const conflicts = detect(staff) || [];
+      if (!conflicts.length) return;
+      const name = String(staff.name || staff.fullName || "Staff");
+      conflicts.forEach((c) => {
+        rows.push(`<li style="margin:3px 0;">
+          <strong>${name}</strong> — ${dayLabels[c.dayKey] || c.dayKey} overlap
+          between <em>${labelLoc(c.locationAId)}</em> and <em>${labelLoc(c.locationBId)}</em>
+          (${c.overlap})
+        </li>`);
+      });
+    });
+    if (!rows.length) { banner.style.display = "none"; banner.innerHTML = ""; return; }
+    banner.innerHTML = `
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <div style="flex:0 0 auto;font-size:18px;line-height:1;">⚠️</div>
+        <div style="flex:1 1 auto;">
+          <div style="font-weight:700;margin-bottom:4px;">Cross-location scheduling conflicts</div>
+          <div style="color:#92400e;font-size:12px;margin-bottom:6px;">
+            The following staff are scheduled at two locations on the same day with overlapping hours.
+            Review each staff member's Schedule tab to resolve.
+          </div>
+          <ul style="margin:0;padding-left:18px;color:#78350f;font-size:12px;">${rows.join("")}</ul>
+        </div>
+      </div>`;
+    banner.style.display = "block";
+  } catch (err) {
+    console.warn("[ScheduleUI] cross-loc banner failed", err);
+    banner.style.display = "none";
+  }
 }
 
 /** Inbox types that feed effective availability (approved only; see schedule-availability.js). */
@@ -2910,11 +3108,24 @@ function scheduleInboxUserIsFirestoreManager() {
 async function loadApprovedScheduleRequests() {
   const salonId = String(window.currentSalonId || "").trim();
   if (!salonId) return [];
+  const activeLocId = _ffSchedActiveLocId();
   const mapDoc = (docSnap) => ({ id: docSnap.id, ...docSnap.data() });
   const keepScheduleType = (item) =>
     SCHEDULE_INBOX_TYPES_FOR_AVAILABILITY.has(String(item?.type || "").trim());
+  // When a location is active, only keep requests that either belong to that
+  // branch (`locationId` stamped) or legacy items with no `locationId` (so
+  // they still appear for the default branch and don't disappear silently).
+  const keepLocation = (item) => {
+    if (!activeLocId) return true;
+    const raw = item && typeof item.locationId === "string" ? item.locationId.trim() : "";
+    // Legacy (unstamped) items fall through to "default" — visible in the
+    // first branch only so they don't leak sideways. When multiple locations
+    // exist we treat missing locationId as default.
+    const effective = raw || "default";
+    return effective === activeLocId;
+  };
   const filterPipeline = (docs) =>
-    docs.map(mapDoc).filter(keepScheduleType).filter(isApprovedRequest);
+    docs.map(mapDoc).filter(keepScheduleType).filter(keepLocation).filter(isApprovedRequest);
 
   const inboxRef = collection(db, `salons/${salonId}/inboxItems`);
   const statusApproved = ["approved", "done", "archived"];
@@ -3847,6 +4058,7 @@ async function refreshSchedulePreview() {
     await loadScheduleWeekPingMap(weekRange.startDate);
     renderScheduleSummary(validation, validation.days);
     renderScheduleViewTabs();
+    renderScheduleCrossLocationConflictBanner();
     renderScheduleBoard(draftWithBusinessRules, validation, staffList);
     updateSchedulePublishToggleUi();
     updateScheduleWeekAckStrip();
@@ -3867,6 +4079,7 @@ async function refreshSchedulePreview() {
     }
     renderScheduleSummary({ summary: { totalWarnings: 0, highSeverityCount: 0 } }, []);
     renderScheduleViewTabs();
+    (() => { const b = document.getElementById("scheduleCrossLocConflictBanner"); if (b) b.style.display = "none"; })();
     renderScheduleBoard(null, null, []);
     teardownScheduleAckListener();
     teardownScheduleChangePingListener();
@@ -4076,6 +4289,57 @@ function bindScheduleUi() {
       }
     }, 400);
   }
+
+  // Multi-location isolation: when the user switches branches, every cloud
+  // listener is tied to the old branch's doc id → tear them down, reset the
+  // caches, and re-bind against the new location-specific paths. If the
+  // Schedule screen is currently visible we also trigger a full preview
+  // refresh so the grid doesn't show stale cross-branch data.
+  if (typeof document !== "undefined" && !document.__ffScheduleLocChangeBound) {
+    document.__ffScheduleLocChangeBound = true;
+    const handler = () => {
+      try {
+        teardownSchedulePublishListener();
+        teardownScheduleAckListener();
+        teardownScheduleChangePingListener();
+        schedulePublishedMap = {};
+        scheduleWeekAckSeenAtByStaffId = {};
+        scheduleWeekPingAtByStaffId = {};
+        lastSeenWeekDraftSnapshotJsonByWeek = {};
+        schedulePreviewState = {
+          draft: null,
+          validation: null,
+          weekRange: null,
+          staffList: [],
+          requests: [],
+          businessHours: undefined,
+          standByByDate: {},
+        };
+        if (typeof window !== "undefined") {
+          window.ffSchedulePreviewState = schedulePreviewState;
+        }
+        ensureSchedulePublishListener();
+        const screen = document.getElementById("scheduleScreen");
+        if (screen && screen.style.display !== "none" && typeof refreshSchedulePreview === "function") {
+          void refreshSchedulePreview();
+        }
+      } catch (e) {
+        console.warn("[ScheduleUI] location change handler failed", e);
+      }
+    };
+    document.addEventListener("ff-active-location-changed", handler);
+    window.addEventListener("ff-active-location-changed", handler);
+    // When the owner edits a staff member's Locations tab we also need to
+    // re-evaluate who belongs in the current branch's grid.
+    const staffUpdatedHandler = () => {
+      const screen = document.getElementById("scheduleScreen");
+      if (screen && screen.style.display !== "none" && typeof refreshSchedulePreview === "function") {
+        void refreshSchedulePreview();
+      }
+    };
+    document.addEventListener("ff-staff-cloud-updated", staffUpdatedHandler);
+    window.addEventListener("ff-staff-cloud-updated", staffUpdatedHandler);
+  }
 }
 
 if (typeof window !== "undefined") {
@@ -4095,6 +4359,145 @@ if (typeof window !== "undefined") {
   window.submitScheduleWeekAck = submitScheduleWeekAck;
   window.notifyStaffScheduleChanges = notifyStaffScheduleChanges;
   window.ffDiscardSavedScheduleWeekDraft = discardSavedScheduleWeekDraftAndReload;
+
+  // Console utility: list duplicate staff members by name. Useful for finding
+  // accidentally-duplicated profiles (e.g. two "Test Multi" Admins) that cause
+  // doubled rows in the Schedule / Staff sidebar. Usage: ffListDuplicateStaff()
+  // Merge the unique data from the "archive" staff record into the "keep"
+  // staff record (only fills blanks on keep; never overwrites existing data),
+  // then archives the duplicate. This is the safe way to resolve duplicated
+  // staff profiles that share the same person but drift on some fields.
+  //
+  // Usage: await ffMergeAndArchiveDuplicateStaff("KEEP_ID", "ARCHIVE_ID")
+  window.ffMergeAndArchiveDuplicateStaff = async function ffMergeAndArchiveDuplicateStaff(keepId, archiveId) {
+    const kId = String(keepId || "").trim();
+    const aId = String(archiveId || "").trim();
+    if (!kId || !aId || kId === aId) {
+      console.warn("[StaffDedupe] provide two distinct IDs: keepId, archiveId");
+      return false;
+    }
+    const store = typeof window.ffGetStaffStore === "function" ? window.ffGetStaffStore() : { staff: [] };
+    const list = Array.isArray(store?.staff) ? store.staff : [];
+    const keepIdx = list.findIndex((s) => String(s?.id || "") === kId);
+    const archIdx = list.findIndex((s) => String(s?.id || "") === aId);
+    if (keepIdx === -1) { console.warn("[StaffDedupe] keepId not found:", kId); return false; }
+    if (archIdx === -1) { console.warn("[StaffDedupe] archiveId not found:", aId); return false; }
+    const keep = list[keepIdx];
+    const arch = list[archIdx];
+
+    // Only fill blanks on keep — never clobber existing data.
+    const blank = (v) => v === undefined || v === null ||
+      (typeof v === "string" && v.trim() === "") ||
+      (Array.isArray(v) && v.length === 0) ||
+      (typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0);
+
+    const merged = { ...keep };
+    const fieldsToCopy = [
+      "allowedLocationIds", "primaryLocationId", "locationScheduleAvailability",
+      "defaultSchedule", "constraints", "weeklyHoursTarget", "employmentType",
+      "technicianTypes", "permissions", "buttonColor", "color", "fontColor", "fcolor",
+      "managerType", "phone", "birthday", "pin",
+    ];
+    const copied = [];
+    fieldsToCopy.forEach((f) => {
+      if (blank(merged[f]) && !blank(arch[f])) {
+        merged[f] = arch[f];
+        copied.push(f);
+      }
+    });
+    merged.updatedAtMs = Date.now();
+
+    list[keepIdx] = merged;
+    list[archIdx] = { ...arch, isArchived: true, updatedAtMs: Date.now() };
+
+    if (typeof window.ffSaveStaffStore === "function") window.ffSaveStaffStore(store);
+    try { document.dispatchEvent(new CustomEvent("ff-staff-cloud-updated")); } catch (_) {}
+
+    console.log(`[StaffDedupe] Merged ${copied.length ? copied.join(", ") : "(nothing — keep already had all fields)"} from ${aId} into ${kId}.`);
+    console.log(`[StaffDedupe] Archived ${aId}. Toggle "Show Archived Staff" in the sidebar to view archived rows.`);
+    return true;
+  };
+
+  // Archive a staff record by Firestore ID (safer than delete — keeps history).
+  // Usage: await ffArchiveStaffById("abc123")
+  window.ffArchiveStaffById = async function ffArchiveStaffById(staffId) {
+    const id = String(staffId || "").trim();
+    if (!id) { console.warn("[StaffDedupe] missing id"); return false; }
+    try {
+      const store = typeof window.ffGetStaffStore === "function" ? window.ffGetStaffStore() : { staff: [] };
+      const list = Array.isArray(store?.staff) ? store.staff : [];
+      const idx = list.findIndex((s) => String(s?.id || "") === id);
+      if (idx === -1) { console.warn("[StaffDedupe] id not found in store:", id); return false; }
+      const target = list[idx];
+      list[idx] = { ...target, isArchived: true, updatedAtMs: Date.now() };
+      if (typeof window.ffSaveStaffStore === "function") window.ffSaveStaffStore(store);
+      console.log(`[StaffDedupe] Archived "${target.name}" (${id}). Toggle 'Show Archived Staff' to view archived rows.`);
+      try { document.dispatchEvent(new CustomEvent("ff-staff-cloud-updated")); } catch (_) {}
+      return true;
+    } catch (err) {
+      console.error("[StaffDedupe] archive failed", err);
+      return false;
+    }
+  };
+
+  window.ffListDuplicateStaff = function ffListDuplicateStaff() {
+    try {
+      const store = typeof window.ffGetStaffStore === "function" ? window.ffGetStaffStore() : { staff: [] };
+      const list = Array.isArray(store?.staff) ? store.staff : [];
+      const byName = new Map();
+      list.forEach((s) => {
+        if (!s || s.isArchived === true) return;
+        const name = String(s.name || s.fullName || "").trim().toLowerCase();
+        if (!name) return;
+        if (!byName.has(name)) byName.set(name, []);
+        byName.get(name).push(s);
+      });
+      const dups = [];
+      byName.forEach((arr, name) => {
+        if (arr.length > 1) dups.push({ name, count: arr.length, records: arr });
+      });
+      if (!dups.length) {
+        console.log("[StaffDedupe] No duplicate staff names detected.");
+        return [];
+      }
+      // Emit a compact comparison table per name so the user can scan
+      // the rows side-by-side and pick which one to keep. The table
+      // highlights the fields that usually differ between a real profile
+      // and an accidentally-re-invited duplicate.
+      console.log(`[StaffDedupe] Found ${dups.length} duplicated staff name${dups.length === 1 ? "" : "s"}. Scroll down for tables.`);
+      dups.forEach((d) => {
+        const rows = d.records.map((r) => {
+          const perLocKeys = r.locationScheduleAvailability && typeof r.locationScheduleAvailability === "object"
+            ? Object.keys(r.locationScheduleAvailability).length
+            : 0;
+          const createdMs = typeof r.createdAt === "number" ? r.createdAt : (r.createdAt?.toMillis ? r.createdAt.toMillis() : null);
+          const updatedMs = typeof r.updatedAtMs === "number" ? r.updatedAtMs : null;
+          return {
+            id: String(r.id || ""),
+            idTail: String(r.id || "").slice(-6),
+            email: String(r.email || ""),
+            role: String(r.role || ""),
+            allowedLocs: Array.isArray(r.allowedLocationIds) ? r.allowedLocationIds.length : 0,
+            primaryLoc: String(r.primaryLocationId || ""),
+            perLocSchedules: perLocKeys,
+            inviteSentCount: r.invite?.sentCount || 0,
+            invited: r.invited === true,
+            hasPin: !!r.pin,
+            created: createdMs ? new Date(createdMs).toISOString() : "",
+            updated: updatedMs ? new Date(updatedMs).toISOString() : "",
+          };
+        });
+        console.log(`── ${d.name} — ${d.count} records ──`);
+        console.table(rows);
+        console.log(`To archive one, copy its full id from the table above and run:`);
+        console.log(`  await ffArchiveStaffById("<paste id here>")`);
+      });
+      return dups;
+    } catch (err) {
+      console.warn("[StaffDedupe] failed", err);
+      return [];
+    }
+  };
 }
 
 if (document.readyState === "loading") {

@@ -26,7 +26,7 @@ import {
   normalizeSpecialBusinessDays,
   normalizeRolesHierarchy,
   normalizeScheduleRules,
-} from "./schedule-helpers.js?v=20260409_coverage_plain_cards";
+} from "./schedule-helpers.js?v=20260420_per_loc_no_default";
 
 let _salonId = null;
 let _unsubUi = null;

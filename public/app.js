@@ -9,7 +9,8 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
-  signInAnonymously
+  signInAnonymously,
+  fetchSignInMethodsForEmail
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import {
   getStorage,
@@ -521,6 +522,24 @@ function ffShowInviteFlow(inviteToken) {
   loadingEl.style.fontSize = "12px";
   loadingEl.style.display = "block";
 
+  // Visible toggle so the invitee can switch between "create new account" and
+  // "I already have one — let me sign in". Before this existed, the flow was
+  // stuck in create-mode until Firebase threw email-already-in-use, which no
+  // longer fires when Email Enumeration Protection is on — leading to duplicate
+  // Auth accounts for the same email. The toggle + pre-check in loadInvite()
+  // below prevent that.
+  const modeToggle = document.createElement("button");
+  modeToggle.type = "button";
+  modeToggle.style.background = "transparent";
+  modeToggle.style.border = "none";
+  modeToggle.style.color = "#1d4ed8";
+  modeToggle.style.fontSize = "12px";
+  modeToggle.style.cursor = "pointer";
+  modeToggle.style.padding = "4px 0";
+  modeToggle.style.textAlign = "center";
+  modeToggle.style.textDecoration = "underline";
+  modeToggle.textContent = "Already have an account? Sign in";
+
   function setLoading(isLoading, text) {
     loadingEl.textContent = text || "Finalizing your access...";
     loadingEl.style.display = isLoading ? "block" : "none";
@@ -545,14 +564,21 @@ function ffShowInviteFlow(inviteToken) {
       confirmInput.style.display = "none";
       primaryBtn.textContent = "Sign in";
       passwordInput.autocomplete = "current-password";
+      modeToggle.textContent = "New here? Create a password instead";
     } else {
       title.textContent = "Create Password";
       subtitle.textContent = "Create a password to finish your invite.";
       confirmInput.style.display = "block";
       primaryBtn.textContent = "Create password";
       passwordInput.autocomplete = "new-password";
+      modeToggle.textContent = "Already have an account? Sign in";
     }
   }
+
+  modeToggle.addEventListener("click", () => {
+    setError("");
+    setMode(mode === "signin" ? "create" : "signin");
+  });
 
   async function handlePrimaryAction() {
     const email = emailInput.value.trim();
@@ -630,10 +656,28 @@ function ffShowInviteFlow(inviteToken) {
       ffFinalizeInvite(inviteToken, credential.user);
     } catch (err) {
       console.error("[Invite] Auth error", err);
-      if (err?.code === "auth/email-already-in-use") {
+      // Firebase Auth with "Email Enumeration Protection" enabled no longer
+      // returns `auth/email-already-in-use` — it returns generic codes like
+      // `auth/invalid-credential` or `auth/email-exists`. We treat all of
+      // those as "account already exists" to prevent the user accidentally
+      // creating a second Auth account for the same email.
+      const code = err?.code || "";
+      const emailAlreadyUsedCodes = new Set([
+        "auth/email-already-in-use",
+        "auth/email-exists",
+        "auth/email-already-exists",
+        "auth/account-exists-with-different-credential",
+      ]);
+      // When EEP is on and the user tries to CREATE a password for an email
+      // that already has an account, the SDK may return auth/invalid-credential
+      // with no further context. In create mode we can safely interpret that
+      // as "account already exists" and switch to sign-in.
+      const looksLikeExisting = emailAlreadyUsedCodes.has(code) ||
+        (mode === "create" && code === "auth/invalid-credential");
+      if (looksLikeExisting) {
         setMode("signin");
         setLoading(false);
-        setError("Account already exists. Please sign in.");
+        setError("Account already exists. Please sign in with your existing password.");
         return;
       }
       setLoading(false);
@@ -649,6 +693,7 @@ function ffShowInviteFlow(inviteToken) {
   formEl.appendChild(passwordInput);
   formEl.appendChild(confirmInput);
   formEl.appendChild(primaryBtn);
+  formEl.appendChild(modeToggle);
   card.appendChild(formEl);
   card.appendChild(errorEl);
   card.appendChild(loadingEl);
@@ -673,7 +718,24 @@ function ffShowInviteFlow(inviteToken) {
       emailInput.value = inviteEmail;
       formEl.style.display = "flex";
       loadingEl.style.display = "none";
-      setMode("create");
+      // Best-effort check: does this email already have a Firebase Auth
+      // account? If yes, start in "Sign in" mode so the invitee doesn't
+      // accidentally create a duplicate account. Note: with Firebase Auth's
+      // Email Enumeration Protection enabled, this call returns an empty
+      // array regardless — which is fine: we then default to create-mode and
+      // the hardened catch block below catches the "invalid-credential" case
+      // that EEP uses to mask a duplicate email.
+      let existingMethods = [];
+      try {
+        if (inviteEmail) {
+          existingMethods = await fetchSignInMethodsForEmail(auth, inviteEmail);
+        }
+      } catch (_) { /* non-fatal: EEP or network */ }
+      if (Array.isArray(existingMethods) && existingMethods.length > 0) {
+        setMode("signin");
+      } else {
+        setMode("create");
+      }
     } catch (e) {
       console.error("[Invite] Load error", e);
       title.textContent = "Invite issue";

@@ -251,6 +251,47 @@ async function handleFinalizeInviteRequest(snap) {
         }
       }
 
+      // Guard: if the staff record is already linked to a DIFFERENT uid,
+      // block this finalize. This prevents a scenario where a second Firebase
+      // Auth account is created for the same invite and overwrites the first
+      // accepted invite's uid linkage — which is how duplicate Auth accounts
+      // previously got silently wired to the same staff profile.
+      if (staffSnap && staffSnap.exists) {
+        const sd = staffSnap.data() || {};
+        const existingUid = String(sd.uid || "").trim();
+        if (existingUid && existingUid !== uid) {
+          throw new Error(
+            "This invite has already been accepted by another account. " +
+            "Please sign in with the original account, or ask the owner to resend the invite."
+          );
+        }
+      }
+
+      // Guard: if ANY other staff doc in this salon is already linked to this
+      // uid, block. A single Auth user should map to exactly one staff record
+      // per salon. Without this, a previously-linked uid could accidentally
+      // accept a fresh invite and end up on two staff profiles.
+      try {
+        const dupStaffQuery = await admin.firestore()
+          .collection("salons").doc(salonId).collection("staff")
+          .where("uid", "==", uid)
+          .limit(2)
+          .get();
+        const conflicting = dupStaffQuery.docs.find((d) => d.id !== (staffId || ""));
+        if (conflicting) {
+          throw new Error(
+            "This account is already linked to another staff profile in this salon."
+          );
+        }
+      } catch (e) {
+        // Query failure shouldn't block the finalize (e.g. missing index during
+        // first deploy). Swallow and continue, but log for diagnostics.
+        if (e && typeof e.message === "string" && e.message.startsWith("This account is already linked")) {
+          throw e;
+        }
+        console.warn("[finalizeInvite] staff-uid dedupe check failed (non-fatal)", e?.message || e);
+      }
+
       // Resolve name from staff doc if available
       let staffName = "";
       if (staffSnap && staffSnap.exists) {
