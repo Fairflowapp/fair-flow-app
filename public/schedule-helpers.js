@@ -854,6 +854,41 @@ function detectStaffLocationScheduleConflicts(staff) {
   return conflicts;
 }
 
+/**
+ * Per-day multi-location availability for a staff member.
+ * Returns `[{ dayKey, locationIds: [...] }]` for every day (Mon–Sun) where
+ * the staff has `enabled === true` in 2 or more locations. This is a strict
+ * superset of `detectStaffLocationScheduleConflicts`: any day with an hour
+ * overlap is also a multi-location day, but a multi-location day alone does
+ * not imply a time conflict (e.g. Branch A 09:00–12:00 + Branch B 14:00–18:00).
+ * Used by the Default Schedule UI to surface an INFO banner even when there
+ * is no hard conflict.
+ */
+function detectStaffLocationScheduleMultiDays(staff) {
+  const source = staff && typeof staff === "object" ? staff : {};
+  const perLoc = normalizeLocationScheduleAvailability(source.locationScheduleAvailability);
+  const allowed = Array.isArray(source.allowedLocationIds) ? source.allowedLocationIds.slice() : [];
+  if (allowed.length < 2) return [];
+  const emptySchedule = cloneDefaultSchedule();
+  const perLocEffective = {};
+  allowed.forEach((locId) => {
+    if (!locId) return;
+    perLocEffective[locId] = perLoc[locId]?.defaultSchedule || emptySchedule;
+  });
+  const result = [];
+  DAY_KEYS.forEach((dayKey) => {
+    const activeLocs = [];
+    allowed.forEach((locId) => {
+      const day = perLocEffective[locId]?.[dayKey];
+      if (day && day.enabled === true) activeLocs.push(locId);
+    });
+    if (activeLocs.length >= 2) {
+      result.push({ dayKey, locationIds: activeLocs });
+    }
+  });
+  return result;
+}
+
 function normalizeStaffSchedulingData(staff) {
   const source = staff && typeof staff === "object" ? staff : {};
   const explicitRole = normalizeRoleKey(source.role);
@@ -993,6 +1028,7 @@ const scheduleHelpers = {
   normalizeLocationScheduleAvailability,
   getStaffDefaultScheduleForLocation,
   detectStaffLocationScheduleConflicts,
+  detectStaffLocationScheduleMultiDays,
   getStaffRoleLevel,
   canWorkAlone,
   hasRequiredManager,
@@ -1059,6 +1095,7 @@ export {
   normalizeLocationScheduleAvailability,
   getStaffDefaultScheduleForLocation,
   detectStaffLocationScheduleConflicts,
+  detectStaffLocationScheduleMultiDays,
   getStaffRoleLevel,
   canWorkAlone,
   hasRequiredManager,

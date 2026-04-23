@@ -13,7 +13,7 @@ import {
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { auth, db } from "./app.js?v=20260411_chat_reminder_attrfix";
-import { generateWeeklySchedule } from "./schedule-generator.js?v=20260409_stagger_by_coverage_min";
+import { generateWeeklySchedule } from "./schedule-generator.js?v=20260420_cross_loc_busy";
 import { validateScheduleDraft } from "./schedule-validator.js?v=20260409_coverage_total_staff_skip";
 import {
   getEffectiveAvailabilityForDate,
@@ -1297,6 +1297,169 @@ async function loadWeekDraftSnapshotBlockFromPublishDoc(weekStart) {
   }
 }
 
+/**
+ * Load draft days for a specific (non-active) location's weekDraftSnapshots
+ * block. Used by the cross-location busy map so Build Schedule in branch B
+ * knows which shifts branch A already has for the same staff + same week.
+ */
+async function loadOtherLocationWeekDraftDays(locationId, weekStart) {
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId || !locationId || !weekStart) return null;
+  try {
+    const ref = doc(db, `salons/${salonId}/schedulePublish/weeks_${locationId}`);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    const block = data.weekDraftSnapshots && data.weekDraftSnapshots[weekStart];
+    const days = block && Array.isArray(block.days) && block.days.length ? block.days : null;
+    return days;
+  } catch (e) {
+    console.warn("[ScheduleUI] load other-location weekDraftSnapshots", e);
+    return null;
+  }
+}
+
+/** Per-location cache key for the LAST auto-built draft (not user-edited). */
+function getScheduleLastBuildCacheStorageKey(locationId, weekRange) {
+  if (!weekRange?.startDate || !weekRange?.endDate) return null;
+  const salonBase = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim() || "_local";
+  const locPart = locationId ? `__${locationId}` : "";
+  return `ff_schedule_last_build_v${SCHEDULE_LAST_BUILD_CACHE_VER}_${salonBase}${locPart}_${weekRange.startDate}_${weekRange.endDate}`;
+}
+
+/** Persist the just-built draft for the active location. Cross-location
+ *  conflict detection reads this cache (plus the regular override cache
+ *  + cloud) when another location is rebuilt. Silent on storage errors. */
+function saveScheduleLastBuildCacheForActiveLocation(weekRange, draft) {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const locId = _ffSchedActiveLocId();
+    const key = getScheduleLastBuildCacheStorageKey(locId, weekRange);
+    if (!key) return;
+    const days = serializeDraftDaysForStorage(draft);
+    if (!Array.isArray(days) || days.length === 0) return;
+    const payload = { v: SCHEDULE_LAST_BUILD_CACHE_VER, savedAt: Date.now(), days };
+    localStorage.setItem(key, JSON.stringify(payload));
+  } catch (_) { /* storage full / disabled — ignore */ }
+}
+
+/** Read a different location's last-built cache (see above). */
+function loadOtherLocationLastBuildCache(locationId, weekRange) {
+  if (!locationId || typeof localStorage === "undefined") return null;
+  const key = getScheduleLastBuildCacheStorageKey(locationId, weekRange);
+  if (!key) return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.v !== SCHEDULE_LAST_BUILD_CACHE_VER) return null;
+    const days = Array.isArray(parsed.days) ? parsed.days : null;
+    return days && days.length ? days : null;
+  } catch (_) { return null; }
+}
+
+/**
+ * Same idea as `loadScheduleDraftOverridePayload` but for a DIFFERENT
+ * location's localStorage bucket. Owners who edit several branches on
+ * the same device keep their in-progress drafts per-location in
+ * localStorage until they press Notify/Publish. We surface those drafts
+ * too so cross-location conflict detection is correct even before the
+ * cloud snapshot is written.
+ */
+function loadOtherLocationLocalDraftDays(locationId, weekRange) {
+  if (!locationId || !weekRange?.startDate || !weekRange?.endDate || typeof localStorage === "undefined") return null;
+  const salonBase = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim() || "_local";
+  const salonKey = `${salonBase}__${locationId}`;
+  const storageKey = `ff_schedule_draft_override_v${SCHEDULE_DRAFT_OVERRIDE_KEY_VER}_${salonKey}_${weekRange.startDate}_${weekRange.endDate}`;
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.v !== 1 && parsed?.v !== 2 && parsed?.v !== 3 && parsed?.v !== SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER) return null;
+    const days = Array.isArray(parsed.days) ? parsed.days : null;
+    return days && days.length ? days : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Build a cross-location busy map for a week:
+ *   { [staffKey]: { [dateKey]: [{ startMin, endMin }, ...] } }
+ *
+ * Busy windows come from every OTHER location's current week draft.
+ * localStorage overrides (in-progress edits on this device) take priority
+ * over the cloud snapshot so the most recent state wins. The active
+ * location itself is excluded — the generator is the one building that
+ * location's shifts right now.
+ *
+ * This is what lets Build Schedule skip a staff member who is already
+ * booked for overlapping hours in a different branch on the same day.
+ */
+async function loadCrossLocationBusyForWeek(weekRange) {
+  try {
+    if (!weekRange?.startDate) return null;
+    const activeLoc = _ffSchedActiveLocId();
+    const allLocs = (typeof window !== "undefined" && typeof window.ffGetActiveLocations === "function")
+      ? (window.ffGetActiveLocations() || [])
+      : [];
+    const otherIds = allLocs
+      .map((l) => (l && l.id ? String(l.id) : ""))
+      .filter((id) => id && id !== activeLoc);
+    if (otherIds.length === 0) return null;
+
+    // Priority: user-edited override (hand-tweaked) > last auto-built cache
+    // (freshly generated but not saved as override) > cloud publish-doc
+    // snapshot (written when a manager presses Notify). Highest-priority
+    // source that produces days wins. This lets cross-location detection
+    // see the current branch's latest draft even before it's saved.
+    const perLocDays = await Promise.all(otherIds.map(async (locId) => {
+      const override = loadOtherLocationLocalDraftDays(locId, weekRange);
+      if (Array.isArray(override) && override.length > 0) return { locId, days: override };
+      const lastBuild = loadOtherLocationLastBuildCache(locId, weekRange);
+      if (Array.isArray(lastBuild) && lastBuild.length > 0) return { locId, days: lastBuild };
+      const cloud = await loadOtherLocationWeekDraftDays(locId, weekRange.startDate);
+      return { locId, days: Array.isArray(cloud) ? cloud : null };
+    }));
+
+    const busy = {};
+    const addBusy = (key, dateKey, startMin, endMin) => {
+      if (!key || !dateKey) return;
+      if (!Number.isFinite(startMin) || !Number.isFinite(endMin) || endMin <= startMin) return;
+      if (!busy[key]) busy[key] = {};
+      if (!busy[key][dateKey]) busy[key][dateKey] = [];
+      busy[key][dateKey].push({ startMin, endMin });
+    };
+
+    perLocDays.forEach(({ days }) => {
+      if (!Array.isArray(days)) return;
+      days.forEach((day) => {
+        const dateKey = String(day?.date || "").trim();
+        if (!dateKey) return;
+        const assignments = Array.isArray(day?.assignments) ? day.assignments : [];
+        assignments.forEach((a) => {
+          if (!a) return;
+          const s = parseScheduleTimeToMinutes(a.startTime);
+          const e = parseScheduleTimeToMinutes(a.endTime);
+          if (s == null || e == null || e <= s) return;
+          // Register under BOTH staffId and uid so the generator can look the
+          // same shift up by either identity (its internal keys differ per
+          // staff depending on whether they were invited / have a firebase uid).
+          const sid = String(a.staffId || "").trim();
+          const uid = String(a.uid || "").trim();
+          if (sid) addBusy(sid, dateKey, s, e);
+          if (uid && uid !== sid) addBusy(uid, dateKey, s, e);
+        });
+      });
+    });
+
+    return Object.keys(busy).length > 0 ? busy : null;
+  } catch (e) {
+    console.warn("[ScheduleUI] loadCrossLocationBusyForWeek failed", e);
+    return null;
+  }
+}
+
 function teardownSchedulePublishListener() {
   if (schedulePublishUnsub) {
     try {
@@ -2016,6 +2179,11 @@ const SCHEDULE_MANUAL_OFF_STORAGE_VERSION = 1;
 const SCHEDULE_DRAFT_OVERRIDE_KEY_VER = 1;
 /** Payload `v` inside JSON — bump when adding fields (e.g. stand-by per day). */
 const SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER = 4;
+/** Per-location cache of the most recently auto-built week draft. Written
+ *  after every successful `generateWeeklySchedule` so that cross-location
+ *  conflict detection can see a branch's just-built (not yet saved/notified)
+ *  shifts when the owner switches to another branch and hits Build there. */
+const SCHEDULE_LAST_BUILD_CACHE_VER = 1;
 
 function getSchedulePreviewSalonStorageKey() {
   const s = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
@@ -3161,11 +3329,203 @@ async function loadApprovedScheduleRequests() {
   }
 }
 
+/** "YYYY-MM-DD" + "HH:MM" → "YYYYMMDDTHHMMSS" (iCalendar local/floating time). */
+function _ffIcsFormatLocalDateTime(dateKey, timeHHmm) {
+  const d = String(dateKey || "").replace(/-/g, "");
+  const t = String(timeHHmm || "").replace(/:/g, "");
+  if (!/^\d{8}$/.test(d) || !/^\d{4}$/.test(t)) return null;
+  return `${d}T${t}00`;
+}
+
+/** iCalendar strings: CR-LF line endings and backslash-escape for TEXT values. */
+function _ffIcsEscape(str) {
+  return String(str || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+/** Current salon name (best-effort) — used in SUMMARY/DESCRIPTION. */
+function _ffCurrentSalonNameForIcs() {
+  try {
+    const s = (typeof window !== "undefined" && window.settings) || {};
+    const candidates = [s.salonName, s.businessName, s.name];
+    for (const c of candidates) {
+      const v = typeof c === "string" ? c.trim() : "";
+      if (v) return v;
+    }
+  } catch (_) {}
+  return "Salon";
+}
+
+/** Active-location display name (best-effort) — used in SUMMARY / LOCATION. */
+function _ffActiveLocationNameForIcs() {
+  try {
+    const id = _ffSchedActiveLocId();
+    if (!id) return "";
+    const locs = (typeof window !== "undefined" && typeof window.ffGetActiveLocations === "function")
+      ? (window.ffGetActiveLocations() || [])
+      : [];
+    const match = locs.find((l) => l && l.id === id);
+    const name = match && (match.name || "");
+    return typeof name === "string" ? name.trim() : "";
+  } catch (_) {}
+  return "";
+}
+
+/**
+ * Build an iCalendar (.ics) string with a VEVENT per shift for the currently
+ * authed staff in the currently-previewed week. "Floating" local time is
+ * used so the event displays at the scheduled clock time regardless of the
+ * device's timezone — matching how the schedule is shown on-screen.
+ */
+function buildMyShiftsIcsForCurrentWeek() {
+  const draft = schedulePreviewState?.draft;
+  const days = Array.isArray(draft?.days) ? draft.days : [];
+  const mySid = String(getAuthedStaffIdForSchedule() || "").trim();
+  if (!mySid || days.length === 0) return { ics: "", eventCount: 0 };
+
+  const salonName = _ffCurrentSalonNameForIcs();
+  const locationName = _ffActiveLocationNameForIcs();
+  const summaryBase = locationName
+    ? `Work shift — ${salonName} (${locationName})`
+    : `Work shift — ${salonName}`;
+  const nowStamp = (() => {
+    const d = new Date();
+    const yy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mi = String(d.getUTCMinutes()).padStart(2, "0");
+    const ss = String(d.getUTCSeconds()).padStart(2, "0");
+    return `${yy}${mm}${dd}T${hh}${mi}${ss}Z`;
+  })();
+
+  const events = [];
+  days.forEach((day) => {
+    if (!day || !day.date) return;
+    // Skip closed / off-day cells — those have no real shift to add.
+    const bs = day.businessStatus || { isOpen: true };
+    if (bs.isOpen === false) return;
+    const assignments = Array.isArray(day.assignments) ? day.assignments : [];
+    assignments.forEach((a, idx) => {
+      if (!a) return;
+      const sameStaff =
+        (a.staffId && String(a.staffId) === mySid) ||
+        (a.uid && String(a.uid) === mySid);
+      if (!sameStaff) return;
+      const dtStart = _ffIcsFormatLocalDateTime(day.date, a.startTime);
+      const dtEnd = _ffIcsFormatLocalDateTime(day.date, a.endTime);
+      if (!dtStart || !dtEnd || dtEnd <= dtStart) return;
+      const uid = `shift-${day.date}-${mySid}-${String(a.startTime || "").replace(/:/g, "")}-${idx}@fairflow`;
+      const desc = `Your scheduled shift at ${salonName}${locationName ? ` — ${locationName}` : ""}.`;
+      const lines = [
+        "BEGIN:VEVENT",
+        `UID:${uid}`,
+        `DTSTAMP:${nowStamp}`,
+        `DTSTART:${dtStart}`,
+        `DTEND:${dtEnd}`,
+        `SUMMARY:${_ffIcsEscape(summaryBase)}`,
+        `DESCRIPTION:${_ffIcsEscape(desc)}`,
+      ];
+      if (locationName) lines.push(`LOCATION:${_ffIcsEscape(locationName)}`);
+      lines.push("END:VEVENT");
+      events.push(lines.join("\r\n"));
+    });
+  });
+
+  if (events.length === 0) return { ics: "", eventCount: 0 };
+
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//FairFlow//Schedule//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    ...events,
+    "END:VCALENDAR",
+    "",
+  ].join("\r\n");
+  return { ics, eventCount: events.length };
+}
+
+/**
+ * Triggers a browser download of the current week's shifts as a .ics file.
+ * Works universally — iPhone / Android / desktop open it in the default
+ * calendar app (Apple Calendar / Google Calendar / Outlook / etc.).
+ */
+function downloadMyShiftsIcsForCurrentWeek() {
+  const { ics, eventCount } = buildMyShiftsIcsForCurrentWeek();
+  if (!ics || eventCount === 0) {
+    ffScheduleAppToast("No shifts found for you this week.", 4000);
+    return;
+  }
+  const weekStart = schedulePreviewState?.weekRange?.startDate || "week";
+  const filename = `my-shifts-${weekStart}.ics`;
+  try {
+    const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      try { document.body.removeChild(a); } catch (_) {}
+      try { URL.revokeObjectURL(url); } catch (_) {}
+    }, 200);
+    ffScheduleAppToast(`Added ${eventCount} shift${eventCount === 1 ? "" : "s"} to the calendar file.`, 3500);
+  } catch (e) {
+    console.warn("[ScheduleUI] ICS download failed", e);
+    ffScheduleAppToast("Could not generate the calendar file.", 4000);
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.ffDownloadMyShiftsIcs = downloadMyShiftsIcsForCurrentWeek;
+}
+
 function renderScheduleSummary(validation, days) {
   const summaryBar = document.getElementById("scheduleSummaryBar");
   if (!summaryBar) return;
-  if (schedulePreviewMode === "my_shifts" && scheduleUserCanManualEdit()) {
-    summaryBar.innerHTML = `<span style="font-size:12px;color:#6b7280;">Your shifts only — switch to <strong>Team view</strong> to edit the full team.</span>`;
+
+  // Show the "Add to calendar" button whenever the authed user is looking at
+  // their own shifts — either an editor in "my_shifts" mode or a read-only
+  // staff member (viewOwnOnly). Hide it for managers looking at the full team.
+  const ctx = getScheduleAccessContext();
+  const editorMyShifts = scheduleUserCanManualEdit() && schedulePreviewMode === "my_shifts";
+  const readOnlyOwnOnly = !scheduleUserCanManualEdit() && ctx && ctx.viewOwnOnly === true;
+  const showAddToCalendar = !!getAuthedStaffIdForSchedule() && (editorMyShifts || readOnlyOwnOnly);
+
+  if (showAddToCalendar) {
+    const { eventCount } = buildMyShiftsIcsForCurrentWeek();
+    const label = eventCount > 0
+      ? `Add ${eventCount} shift${eventCount === 1 ? "" : "s"} to calendar`
+      : `Add to calendar`;
+    const disabled = eventCount === 0;
+    const leftNote = editorMyShifts
+      ? `<span style="font-size:12px;color:#6b7280;">Your shifts only — switch to <strong>Team view</strong> to edit the full team.</span>`
+      : `<span style="font-size:12px;color:#6b7280;">Your shifts for this week.</span>`;
+    summaryBar.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        ${leftNote}
+        <button type="button" id="scheduleAddToCalendarBtn" title="Download a .ics file and open it in Google Calendar, Apple Calendar or Outlook"
+          ${disabled ? "disabled" : ""}
+          style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:10px;border:1px solid ${disabled ? "#e5e7eb" : "#c4b5fd"};background:${disabled ? "#f3f4f6" : "#ede9fe"};color:${disabled ? "#9ca3af" : "#5b21b6"};font-size:12px;font-weight:600;cursor:${disabled ? "not-allowed" : "pointer"};white-space:nowrap;">
+          <span aria-hidden="true" style="font-size:14px;line-height:1;">\uD83D\uDCC5</span>
+          <span>${escapeScheduleHtml(label)}</span>
+        </button>
+      </div>
+    `;
+    const btn = document.getElementById("scheduleAddToCalendarBtn");
+    if (btn && !disabled) {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        downloadMyShiftsIcsForCurrentWeek();
+      });
+    }
     return;
   }
   summaryBar.innerHTML = "";
@@ -3945,6 +4305,14 @@ async function refreshSchedulePreview() {
       ? window.settings.dayShiftSegments
       : undefined;
 
+    // Multi-location: load every OTHER branch's week draft so the generator
+    // can skip a staff member who is already booked for overlapping hours
+    // elsewhere on the same day. Intentionally non-blocking on failure —
+    // if the read errors out we fall back to no cross-location data and
+    // behave exactly as before (with the banner still surfacing the
+    // conflict in the Default Schedule editor).
+    const crossLocationBusy = await loadCrossLocationBusyForWeek(weekRange);
+
     const draft = generateWeeklySchedule({
       staffList,
       requests,
@@ -3953,6 +4321,7 @@ async function refreshSchedulePreview() {
       coverageRules,
       dayShiftSegments,
       dateRange: { startDate: weekRange.startDate, endDate: weekRange.endDate },
+      crossLocationBusy,
     });
     let draftWithBusinessRules = applyBusinessSettingsToDraft(draft);
     const localPayload = loadScheduleDraftOverridePayload(weekRange);
@@ -4023,6 +4392,14 @@ async function refreshSchedulePreview() {
       coverageRules,
       dateRange: { startDate: weekRange.startDate, endDate: weekRange.endDate },
     });
+
+    // Cache the final (post-override) draft for the active location so that
+    // when the owner switches to another branch and hits Build, the
+    // cross-location busy-map picks up these shifts and prevents
+    // double-booking the same staff member on overlapping hours. Saved on
+    // every refresh; cheap. Writes under a separate cache key so it doesn't
+    // collide with user "override" edits.
+    saveScheduleLastBuildCacheForActiveLocation(weekRange, draftWithBusinessRules);
 
     schedulePreviewState = {
       draft: draftWithBusinessRules,

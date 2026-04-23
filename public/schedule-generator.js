@@ -292,11 +292,52 @@ function filterAssignmentsByCoverageTargets(candidates, dateKey, scheduleRules, 
   return pickedList.sort(compareAssignmentsByTime);
 }
 
-function buildAssignmentsForDate(staffList, availabilityDirectory, dateKey) {
+/**
+ * Returns true when the given [startMin,endMin) window overlaps ANY busy
+ * window already assigned to this staff at a different location for the
+ * same date. Used to block cross-location double-booking during Build
+ * Schedule without introducing travel buffers or other complex rules.
+ * Busy windows come from `crossLocationBusy[staffKey][dateKey]`.
+ */
+function hasCrossLocationBusyConflict(crossLocationBusy, staffKeys, dateKey, startMin, endMin) {
+  if (!crossLocationBusy || !dateKey) return false;
+  if (startMin == null || endMin == null || endMin <= startMin) return false;
+  for (const k of staffKeys) {
+    const byDate = k ? crossLocationBusy[k] : null;
+    const list = byDate && byDate[dateKey];
+    if (!Array.isArray(list) || list.length === 0) continue;
+    for (const w of list) {
+      const ws = Number(w.startMin);
+      const we = Number(w.endMin);
+      if (!Number.isFinite(ws) || !Number.isFinite(we) || we <= ws) continue;
+      if (Math.min(endMin, we) > Math.max(startMin, ws)) return true;
+    }
+  }
+  return false;
+}
+
+function staffBusyElsewhereForAvailability(staff, dateKey, availability, crossLocationBusy) {
+  if (!crossLocationBusy) return false;
+  const aS = parseScheduleTimeToMinutes(availability?.startTime);
+  const aE = parseScheduleTimeToMinutes(availability?.endTime);
+  if (aS == null || aE == null || aE <= aS) return false;
+  const staffKeys = [getStaffIdentifier(staff), getStaffUid(staff)].filter(Boolean);
+  return hasCrossLocationBusyConflict(crossLocationBusy, staffKeys, dateKey, aS, aE);
+}
+
+function buildAssignmentsForDate(staffList, availabilityDirectory, dateKey, options = {}) {
+  const crossLocationBusy = options && options.crossLocationBusy;
   return getNormalizedStaffList(staffList)
     .map((staff) => {
       const dailyAvailability = getAvailabilityForStaffDate(staff, availabilityDirectory, dateKey);
       if (!dailyAvailability?.isAvailable) return null;
+      // Skip this staff entirely for this date if their availability overlaps
+      // with a busy window in another location. This matches the Multi-location
+      // conflict guard shown in the Default Schedule editor: same staff cannot
+      // be booked to overlapping shifts across branches.
+      if (staffBusyElsewhereForAvailability(staff, dateKey, dailyAvailability, crossLocationBusy)) {
+        return null;
+      }
       return buildAssignment(staff, dailyAvailability);
     })
     .filter(Boolean)
@@ -484,8 +525,8 @@ function narrowTechniciansToBestSegment({
   return next.sort(compareAssignmentsByTime);
 }
 
-function buildDayDraft({ date, staffList, availabilityDirectory, rules, coverageRules, businessHours, dayShiftSegments } = {}) {
-  const all = buildAssignmentsForDate(staffList, availabilityDirectory, date);
+function buildDayDraft({ date, staffList, availabilityDirectory, rules, coverageRules, businessHours, dayShiftSegments, crossLocationBusy } = {}) {
+  const all = buildAssignmentsForDate(staffList, availabilityDirectory, date, { crossLocationBusy });
   let assignments = filterAssignmentsByCoverageTargets(all, date, rules, coverageRules, { businessHours, dayShiftSegments });
   assignments = applyStaggeredFullManagerSegmentWindows({
     date,
@@ -609,7 +650,7 @@ function computeStaffWeeklyHoursInDays(days, staff) {
 /**
  * Adds shifts on days where the staff had no assignment yet, until weeklyHoursTarget (capped) is reached.
  */
-function applyWeeklyRemainingHoursFill(draft, staffList) {
+function applyWeeklyRemainingHoursFill(draft, staffList, crossLocationBusy) {
   const availabilityDirectory = draft.context?.availabilityDirectory;
   if (!availabilityDirectory) return draft;
 
@@ -627,6 +668,7 @@ function applyWeeklyRemainingHoursFill(draft, staffList) {
 
     const staffId = getStaffIdentifier(staff);
     const uid = getStaffUid(staff);
+    const staffKeys = [staffId, uid].filter(Boolean);
 
     for (let i = 0; i < days.length; i++) {
       if (remaining <= 0.02) break;
@@ -645,6 +687,15 @@ function applyWeeklyRemainingHoursFill(draft, staffList) {
 
       const window = sliceTimeWindowFromStart(avail.startTime, avail.endTime, addH);
       if (!window) continue;
+
+      // Respect cross-location busy windows when topping up weekly hours too,
+      // otherwise the fill step could re-introduce the exact double-booking
+      // buildDayDraft just prevented.
+      const winStart = parseScheduleTimeToMinutes(window.startTime);
+      const winEnd = parseScheduleTimeToMinutes(window.endTime);
+      if (hasCrossLocationBusyConflict(crossLocationBusy, staffKeys, day.date, winStart, winEnd)) {
+        continue;
+      }
 
       day.assignments.push({
         staffId,
@@ -795,7 +846,7 @@ function applyEqualSplitAmongManagement(draft, staffList, businessHours, dayShif
   return { ...draft, days };
 }
 
-function generateWeeklySchedule({ staffList = [], requests = [], rules = {}, dateRange, businessHours, coverageRules, dayShiftSegments } = {}) {
+function generateWeeklySchedule({ staffList = [], requests = [], rules = {}, dateRange, businessHours, coverageRules, dayShiftSegments, crossLocationBusy } = {}) {
   const dates = enumerateDateRange(dateRange);
   const normalizedStaffList = getNormalizedStaffList(staffList);
   const availabilityDirectory = buildAvailabilityDirectory(normalizedStaffList, requests, dateRange, {
@@ -803,6 +854,7 @@ function generateWeeklySchedule({ staffList = [], requests = [], rules = {}, dat
     dayShiftSegments,
   });
   const normalizedRules = normalizeScheduleRules(rules);
+  const normalizedCrossBusy = (crossLocationBusy && typeof crossLocationBusy === "object") ? crossLocationBusy : null;
 
   const days = dates.map((date) =>
     buildDayDraft({
@@ -813,6 +865,7 @@ function generateWeeklySchedule({ staffList = [], requests = [], rules = {}, dat
       coverageRules,
       businessHours,
       dayShiftSegments,
+      crossLocationBusy: normalizedCrossBusy,
     })
   );
 
@@ -835,7 +888,7 @@ function generateWeeklySchedule({ staffList = [], requests = [], rules = {}, dat
   };
 
   let draft = applyWeeklyHoursCapToDraft(draftBeforeCap, normalizedStaffList);
-  draft = applyWeeklyRemainingHoursFill(draft, normalizedStaffList);
+  draft = applyWeeklyRemainingHoursFill(draft, normalizedStaffList, normalizedCrossBusy);
   draft = applyWeeklyHoursCapToDraft(draft, normalizedStaffList);
   draft = applyEqualSplitAmongManagement(draft, normalizedStaffList, businessHours, dayShiftSegments);
   draft = applyWeeklyHoursCapToDraft(draft, normalizedStaffList);

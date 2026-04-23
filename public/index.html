@@ -26554,11 +26554,22 @@ function initializeAppsPanel() {
     });
   }
 
+  /**
+   * Multi-location availability insights for the Default Schedule editor.
+   *
+   * Shows non-blocking notices (no save prevention):
+   *   INFO    — a day is enabled in 2+ locations (regardless of hours).
+   *   WARNING — same day has actual overlapping hours across locations.
+   *   Summary — totals of multi-location days and overlapping days.
+   *
+   * Hidden entirely for single-location staff.
+   */
   function _ffStaffSchedRenderConflictBanner(staff) {
     const tabs = _ffStaffSchedGetLocationTabs(staff);
     if (tabs.length === 0) return '';
-    const helper = window.ffScheduleHelpers?.detectStaffLocationScheduleConflicts;
-    if (typeof helper !== 'function') return '';
+    const overlapHelper = window.ffScheduleHelpers?.detectStaffLocationScheduleConflicts;
+    const multiHelper = window.ffScheduleHelpers?.detectStaffLocationScheduleMultiDays;
+    if (typeof overlapHelper !== 'function' && typeof multiHelper !== 'function') return '';
     const perLocFromDraft = {};
     Object.keys(_ffStaffSchedEditDraftMap).forEach(function (k) {
       if (k === FF_STAFF_SCHED_DEFAULT_KEY) return;
@@ -26571,22 +26582,84 @@ function initializeAppsPanel() {
       defaultSchedule: _ffStaffSchedEditDraftMap[FF_STAFF_SCHED_DEFAULT_KEY] || staff.defaultSchedule,
       locationScheduleAvailability: perLocFromDraft,
     };
-    let conflicts = [];
-    try { conflicts = helper(probe) || []; } catch (_) {}
-    if (conflicts.length === 0) return '';
+    let overlaps = [];
+    let multiDays = [];
+    try { overlaps = (typeof overlapHelper === 'function' ? overlapHelper(probe) : []) || []; } catch (_) {}
+    try { multiDays = (typeof multiHelper === 'function' ? multiHelper(probe) : []) || []; } catch (_) {}
+
+    // De-dupe multi-days by dayKey (helper already does this, but be defensive).
+    const multiByDay = {};
+    multiDays.forEach(function (m) { if (m && m.dayKey) multiByDay[m.dayKey] = m; });
+    // Group overlaps by dayKey so each day is surfaced once in the WARNING list.
+    const overlapByDay = {};
+    overlaps.forEach(function (c) {
+      if (!c || !c.dayKey) return;
+      if (!overlapByDay[c.dayKey]) overlapByDay[c.dayKey] = [];
+      overlapByDay[c.dayKey].push(c);
+    });
+
+    const multiCount = Object.keys(multiByDay).length;
+    const overlapCount = Object.keys(overlapByDay).length;
+    if (multiCount === 0 && overlapCount === 0) return '';
+
     const nameById = {};
     tabs.forEach(function (t) { nameById[t.id] = t.name; });
     const dayLabels = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' };
-    const rows = conflicts.slice(0, 6).map(function (c) {
-      const a = escapeHtml(nameById[c.locationAId] || c.locationAId);
-      const b = escapeHtml(nameById[c.locationBId] || c.locationBId);
-      const d = escapeHtml(dayLabels[c.dayKey] || c.dayKey);
-      return `<li style="margin:0;">${d} — ${a} vs ${b} overlap <strong>${escapeHtml(c.overlap)}</strong></li>`;
-    }).join('');
+    const dayOrder = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+
+    // INFO — multi-location days that DON'T have an overlap (overlap days get
+    // the stronger WARNING treatment below, so we don't duplicate them here).
+    const infoDayKeys = dayOrder.filter(function (d) { return multiByDay[d] && !overlapByDay[d]; });
+    let infoBlock = '';
+    if (infoDayKeys.length > 0) {
+      const infoRows = infoDayKeys.map(function (d) {
+        const locs = (multiByDay[d].locationIds || []).map(function (id) { return escapeHtml(nameById[id] || id); }).join(' + ');
+        return `<li style="margin:0;"><strong>${escapeHtml(dayLabels[d] || d)}</strong> — available in ${locs}: This staff member is available in multiple locations on this day.</li>`;
+      }).join('');
+      infoBlock = `
+        <div style="padding:8px 10px;margin-bottom:6px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;">
+          <div style="font-size:10px;font-weight:700;color:#1d4ed8;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Info — multi-location day${infoDayKeys.length > 1 ? 's' : ''}</div>
+          <ul style="margin:0;padding-left:16px;font-size:11px;color:#1e3a8a;line-height:1.5;">${infoRows}</ul>
+        </div>
+      `;
+    }
+
+    // WARNING — days with actual hour overlaps across locations.
+    const warnDayKeys = dayOrder.filter(function (d) { return overlapByDay[d]; });
+    let warnBlock = '';
+    if (warnDayKeys.length > 0) {
+      const warnRows = warnDayKeys.map(function (d) {
+        const parts = overlapByDay[d].slice(0, 3).map(function (c) {
+          const a = escapeHtml(nameById[c.locationAId] || c.locationAId);
+          const b = escapeHtml(nameById[c.locationBId] || c.locationBId);
+          return `${a} vs ${b} (${escapeHtml(c.overlap)})`;
+        }).join('; ');
+        return `<li style="margin:0;"><strong>${escapeHtml(dayLabels[d] || d)}</strong> — Overlapping hours detected across locations on this day: ${parts}.</li>`;
+      }).join('');
+      warnBlock = `
+        <div style="padding:8px 10px;margin-bottom:6px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;">
+          <div style="font-size:10px;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Warning — overlapping hours</div>
+          <ul style="margin:0;padding-left:16px;font-size:11px;color:#78350f;line-height:1.5;">${warnRows}</ul>
+        </div>
+      `;
+    }
+
+    // Summary — totals shown only when there's anything to summarize. The
+    // "multi-location days" count includes overlap days (overlap is a subset
+    // of multi-location), matching the user's requested phrasing.
+    const summaryBlock = `
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:11px;color:#4b5563;margin-top:2px;">
+        <span><strong style="color:#111827;">${multiCount}</strong> multi-location day${multiCount === 1 ? '' : 's'}</span>
+        <span style="color:#d1d5db;">•</span>
+        <span><strong style="color:${overlapCount > 0 ? '#b45309' : '#111827'};">${overlapCount}</strong> overlapping day${overlapCount === 1 ? '' : 's'}</span>
+      </div>
+    `;
+
     return `
-      <div style="padding:8px 10px;margin-bottom:8px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;">
-        <div style="font-size:10px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Conflict — staff can't be in two places at once</div>
-        <ul style="margin:0;padding-left:16px;font-size:11px;color:#7f1d1d;line-height:1.5;">${rows}</ul>
+      <div style="margin-bottom:8px;">
+        ${infoBlock}
+        ${warnBlock}
+        ${summaryBlock}
       </div>
     `;
   }
@@ -27496,6 +27569,18 @@ function initializeAppsPanel() {
     if (form) {
       form.style.display = 'none';
     }
+
+    // Bring the newly-selected staff panel into view inside the (long,
+    // scrollable) Settings dialog. Without this the settings scroll position
+    // from the previous section (e.g. Business Hours / Billing) stays put
+    // and the owner opens Magi's profile only to see unrelated content on
+    // top of the screen.
+    try {
+      const container = document.getElementById('staffDetailsContainer');
+      if (container && typeof container.scrollIntoView === 'function') {
+        container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    } catch (_) {}
   }
   
   // Get initials from name
@@ -28546,6 +28631,72 @@ function initializeAppsPanel() {
     let viewActiveKey = viewLocTabs.length > 0 ? viewLocTabs[0].id : FF_STAFF_SCHED_DEFAULT_KEY;
     const viewLocSection = document.getElementById('staffScheduleLocViewSection');
 
+    function _ffRenderScheduleViewInsightsBanner() {
+      if (viewLocTabs.length === 0) return '';
+      const overlapHelper = window.ffScheduleHelpers?.detectStaffLocationScheduleConflicts;
+      const multiHelper = window.ffScheduleHelpers?.detectStaffLocationScheduleMultiDays;
+      if (typeof overlapHelper !== 'function' && typeof multiHelper !== 'function') return '';
+      let overlaps = [];
+      let multiDays = [];
+      try { overlaps = (typeof overlapHelper === 'function' ? overlapHelper(staff) : []) || []; } catch (_) {}
+      try { multiDays = (typeof multiHelper === 'function' ? multiHelper(staff) : []) || []; } catch (_) {}
+      const multiByDay = {};
+      multiDays.forEach(function (m) { if (m && m.dayKey) multiByDay[m.dayKey] = m; });
+      const overlapByDay = {};
+      overlaps.forEach(function (c) {
+        if (!c || !c.dayKey) return;
+        if (!overlapByDay[c.dayKey]) overlapByDay[c.dayKey] = [];
+        overlapByDay[c.dayKey].push(c);
+      });
+      const multiCount = Object.keys(multiByDay).length;
+      const overlapCount = Object.keys(overlapByDay).length;
+      if (multiCount === 0 && overlapCount === 0) return '';
+      const nameById = {};
+      viewLocTabs.forEach(function (t) { nameById[t.id] = t.name; });
+      const dayLabels = { monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu', friday:'Fri', saturday:'Sat', sunday:'Sun' };
+      const dayOrder = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+      const infoDayKeys = dayOrder.filter(function (d) { return multiByDay[d] && !overlapByDay[d]; });
+      let infoBlock = '';
+      if (infoDayKeys.length > 0) {
+        const infoRows = infoDayKeys.map(function (d) {
+          const locs = (multiByDay[d].locationIds || []).map(function (id) { return escapeHtml(nameById[id] || id); }).join(' + ');
+          return `<li style="margin:0;"><strong>${escapeHtml(dayLabels[d] || d)}</strong> — available in ${locs}: This staff member is available in multiple locations on this day.</li>`;
+        }).join('');
+        infoBlock = `
+          <div style="padding:8px 10px;margin-bottom:6px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;">
+            <div style="font-size:10px;font-weight:700;color:#1d4ed8;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Info — multi-location day${infoDayKeys.length > 1 ? 's' : ''}</div>
+            <ul style="margin:0;padding-left:16px;font-size:11px;color:#1e3a8a;line-height:1.5;">${infoRows}</ul>
+          </div>
+        `;
+      }
+      const warnDayKeys = dayOrder.filter(function (d) { return overlapByDay[d]; });
+      let warnBlock = '';
+      if (warnDayKeys.length > 0) {
+        const warnRows = warnDayKeys.map(function (d) {
+          const parts = overlapByDay[d].slice(0, 3).map(function (c) {
+            const a = escapeHtml(nameById[c.locationAId] || c.locationAId);
+            const b = escapeHtml(nameById[c.locationBId] || c.locationBId);
+            return `${a} vs ${b} (${escapeHtml(c.overlap)})`;
+          }).join('; ');
+          return `<li style="margin:0;"><strong>${escapeHtml(dayLabels[d] || d)}</strong> — Overlapping hours detected across locations on this day: ${parts}.</li>`;
+        }).join('');
+        warnBlock = `
+          <div style="padding:8px 10px;margin-bottom:6px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;">
+            <div style="font-size:10px;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Warning — overlapping hours</div>
+            <ul style="margin:0;padding-left:16px;font-size:11px;color:#78350f;line-height:1.5;">${warnRows}</ul>
+          </div>
+        `;
+      }
+      const summaryBlock = `
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:11px;color:#4b5563;margin-top:2px;margin-bottom:6px;">
+          <span><strong style="color:#111827;">${multiCount}</strong> multi-location day${multiCount === 1 ? '' : 's'}</span>
+          <span style="color:#d1d5db;">•</span>
+          <span><strong style="color:${overlapCount > 0 ? '#b45309' : '#111827'};">${overlapCount}</strong> overlapping day${overlapCount === 1 ? '' : 's'}</span>
+        </div>
+      `;
+      return `<div style="margin-bottom:6px;">${infoBlock}${warnBlock}${summaryBlock}</div>`;
+    }
+
     function _ffRenderScheduleView() {
       const perLocRaw = (staff && staff.locationScheduleAvailability && typeof staff.locationScheduleAvailability === 'object')
         ? staff.locationScheduleAvailability : {};
@@ -28564,7 +28715,8 @@ function initializeAppsPanel() {
           ? _ffStaffSchedNormalize(entry.defaultSchedule)
           : _ffStaffSchedCloneEmpty();
       }
-      if (viewLocSection) viewLocSection.innerHTML = tabBar;
+      const insightsBanner = _ffRenderScheduleViewInsightsBanner();
+      if (viewLocSection) viewLocSection.innerHTML = tabBar + insightsBanner;
       renderScheduleRows('staffScheduleRows', scheduleToShow, true);
       document.querySelectorAll('[data-ff-view-sched-tab]').forEach(function (btn) {
         btn.addEventListener('click', function () {
@@ -40814,9 +40966,9 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/app.js?v=20260420_invite_dedupe"></script>
   <script type="module" src="/schedule-helpers.js?v=20260420_per_loc_no_default"></script>
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
-  <script type="module" src="/schedule-generator.js?v=20260409_stagger_by_coverage_min"></script>
+  <script type="module" src="/schedule-generator.js?v=20260420_cross_loc_busy"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
-  <script type="module" src="/schedule-ui.js?v=20260420_dedupe_merge"></script>
+  <script type="module" src="/schedule-ui.js?v=20260420_my_shifts_ics_v2"></script>
   <script type="module" src="/inbox.js?v=20260420_inv_draftpicker_v123"></script>
   <script type="module" src="/chat.js?v=20260420_chat_settings_loc"></script>
   <script type="module" src="/staff-cloud.js?v=20260415_ff_toast"></script>

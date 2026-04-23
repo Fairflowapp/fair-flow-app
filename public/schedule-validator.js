@@ -20,7 +20,7 @@ import {
   getStaffUid,
   getStaffDisplayName,
   generateWeeklySchedule,
-} from "./schedule-generator.js?v=20260409_stagger_by_coverage_min";
+} from "./schedule-generator.js?v=20260420_cross_loc_busy";
 
 const WARNING_SEVERITY = Object.freeze({
   no_staff_assigned: "high",
