@@ -1460,6 +1460,80 @@ async function loadCrossLocationBusyForWeek(weekRange) {
   }
 }
 
+/**
+ * Load THIS user's own shifts across every OTHER active location for a week,
+ * so the unified "My shifts" view can render all their shifts in one row
+ * regardless of which branch is currently active. Same priority order as
+ * cross-location busy (override > last-build cache > cloud snapshot).
+ *
+ * Returns a Map<dateKey, Array<{ locationId, locationName, startTime,
+ * endTime, lunchBreakEnabled, lunchBreakStart, lunchBreakEnd }>>.
+ * Empty map if user is single-location or no other-location data exists.
+ */
+async function loadMyShiftsFromOtherLocationsForWeek(weekRange) {
+  const empty = new Map();
+  try {
+    const myId = String(getAuthedStaffIdForSchedule() || "").trim();
+    if (!myId || !weekRange?.startDate) return empty;
+    const activeLoc = _ffSchedActiveLocId();
+    const allLocs = (typeof window !== "undefined" && typeof window.ffGetActiveLocations === "function")
+      ? (window.ffGetActiveLocations() || [])
+      : [];
+    const others = allLocs.filter((l) => l && l.id && String(l.id) !== String(activeLoc));
+    if (others.length === 0) return empty;
+
+    const perLoc = await Promise.all(others.map(async (loc) => {
+      const override = loadOtherLocationLocalDraftDays(loc.id, weekRange);
+      if (Array.isArray(override) && override.length > 0) return { loc, days: override };
+      const lastBuild = loadOtherLocationLastBuildCache(loc.id, weekRange);
+      if (Array.isArray(lastBuild) && lastBuild.length > 0) return { loc, days: lastBuild };
+      const cloud = await loadOtherLocationWeekDraftDays(loc.id, weekRange.startDate);
+      return { loc, days: Array.isArray(cloud) ? cloud : null };
+    }));
+
+    const out = new Map();
+    perLoc.forEach(({ loc, days }) => {
+      if (!Array.isArray(days)) return;
+      days.forEach((day) => {
+        const dk = String(day?.date || "").trim();
+        if (!dk) return;
+        const assignments = Array.isArray(day?.assignments) ? day.assignments : [];
+        assignments.forEach((a) => {
+          if (!a) return;
+          const sid = String(a.staffId || "").trim();
+          const uid = String(a.uid || "").trim();
+          if (sid !== myId && uid !== myId) return;
+          if (!a.startTime || !a.endTime) return;
+          if (!out.has(dk)) out.set(dk, []);
+          out.get(dk).push({
+            locationId: loc.id,
+            locationName: loc.name || "",
+            startTime: a.startTime,
+            endTime: a.endTime,
+            lunchBreakEnabled: !!a.lunchBreakEnabled,
+            lunchBreakStart: a.lunchBreakStart,
+            lunchBreakEnd: a.lunchBreakEnd,
+          });
+        });
+      });
+    });
+    // Sort each day's shifts by start time for stable rendering.
+    out.forEach((arr) => {
+      arr.sort((x, y) => String(x.startTime || "").localeCompare(String(y.startTime || "")));
+    });
+    return out;
+  } catch (e) {
+    console.warn("[ScheduleUI] loadMyShiftsFromOtherLocationsForWeek failed", e);
+    return empty;
+  }
+}
+
+/** Is the currently-authed user scheduled in 2+ active locations this week? */
+function isAuthedUserMultiLocationForWeek() {
+  const map = schedulePreviewState?.myShiftsFromOtherLocs;
+  return !!(map && typeof map.size === "number" && map.size > 0);
+}
+
 function teardownSchedulePublishListener() {
   if (schedulePublishUnsub) {
     try {
@@ -3385,13 +3459,13 @@ function buildMyShiftsIcsForCurrentWeek() {
   const draft = schedulePreviewState?.draft;
   const days = Array.isArray(draft?.days) ? draft.days : [];
   const mySid = String(getAuthedStaffIdForSchedule() || "").trim();
-  if (!mySid || days.length === 0) return { ics: "", eventCount: 0 };
+  if (!mySid) return { ics: "", eventCount: 0 };
 
   const salonName = _ffCurrentSalonNameForIcs();
-  const locationName = _ffActiveLocationNameForIcs();
-  const summaryBase = locationName
-    ? `Work shift — ${salonName} (${locationName})`
-    : `Work shift — ${salonName}`;
+  const activeLocationName = _ffActiveLocationNameForIcs();
+  const otherMap = (schedulePreviewState?.myShiftsFromOtherLocs instanceof Map)
+    ? schedulePreviewState.myShiftsFromOtherLocs
+    : new Map();
   const nowStamp = (() => {
     const d = new Date();
     const yy = d.getUTCFullYear();
@@ -3404,9 +3478,32 @@ function buildMyShiftsIcsForCurrentWeek() {
   })();
 
   const events = [];
+  const pushEvent = ({ dateKey, startTime, endTime, locationName, uidSuffix }) => {
+    const dtStart = _ffIcsFormatLocalDateTime(dateKey, startTime);
+    const dtEnd = _ffIcsFormatLocalDateTime(dateKey, endTime);
+    if (!dtStart || !dtEnd || dtEnd <= dtStart) return;
+    const summary = locationName
+      ? `Work shift — ${salonName} (${locationName})`
+      : `Work shift — ${salonName}`;
+    const desc = `Your scheduled shift at ${salonName}${locationName ? ` — ${locationName}` : ""}.`;
+    const uid = `shift-${dateKey}-${mySid}-${String(startTime || "").replace(/:/g, "")}-${uidSuffix}@fairflow`;
+    const lines = [
+      "BEGIN:VEVENT",
+      `UID:${uid}`,
+      `DTSTAMP:${nowStamp}`,
+      `DTSTART:${dtStart}`,
+      `DTEND:${dtEnd}`,
+      `SUMMARY:${_ffIcsEscape(summary)}`,
+      `DESCRIPTION:${_ffIcsEscape(desc)}`,
+    ];
+    if (locationName) lines.push(`LOCATION:${_ffIcsEscape(locationName)}`);
+    lines.push("END:VEVENT");
+    events.push(lines.join("\r\n"));
+  };
+
+  // Active location (the currently-rendered draft).
   days.forEach((day) => {
     if (!day || !day.date) return;
-    // Skip closed / off-day cells — those have no real shift to add.
     const bs = day.businessStatus || { isOpen: true };
     if (bs.isOpen === false) return;
     const assignments = Array.isArray(day.assignments) ? day.assignments : [];
@@ -3416,23 +3513,28 @@ function buildMyShiftsIcsForCurrentWeek() {
         (a.staffId && String(a.staffId) === mySid) ||
         (a.uid && String(a.uid) === mySid);
       if (!sameStaff) return;
-      const dtStart = _ffIcsFormatLocalDateTime(day.date, a.startTime);
-      const dtEnd = _ffIcsFormatLocalDateTime(day.date, a.endTime);
-      if (!dtStart || !dtEnd || dtEnd <= dtStart) return;
-      const uid = `shift-${day.date}-${mySid}-${String(a.startTime || "").replace(/:/g, "")}-${idx}@fairflow`;
-      const desc = `Your scheduled shift at ${salonName}${locationName ? ` — ${locationName}` : ""}.`;
-      const lines = [
-        "BEGIN:VEVENT",
-        `UID:${uid}`,
-        `DTSTAMP:${nowStamp}`,
-        `DTSTART:${dtStart}`,
-        `DTEND:${dtEnd}`,
-        `SUMMARY:${_ffIcsEscape(summaryBase)}`,
-        `DESCRIPTION:${_ffIcsEscape(desc)}`,
-      ];
-      if (locationName) lines.push(`LOCATION:${_ffIcsEscape(locationName)}`);
-      lines.push("END:VEVENT");
-      events.push(lines.join("\r\n"));
+      pushEvent({
+        dateKey: day.date,
+        startTime: a.startTime,
+        endTime: a.endTime,
+        locationName: activeLocationName,
+        uidSuffix: `active-${idx}`,
+      });
+    });
+  });
+
+  // Other locations (unified view — included even if the user hasn't
+  // switched the active location to that branch).
+  otherMap.forEach((shifts, dateKey) => {
+    if (!Array.isArray(shifts)) return;
+    shifts.forEach((s, idx) => {
+      pushEvent({
+        dateKey,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        locationName: s.locationName || "",
+        uidSuffix: `${s.locationId || "loc"}-${idx}`,
+      });
     });
   });
 
@@ -3505,9 +3607,13 @@ function renderScheduleSummary(validation, days) {
       ? `Add ${eventCount} shift${eventCount === 1 ? "" : "s"} to calendar`
       : `Add to calendar`;
     const disabled = eventCount === 0;
+    const isMulti = isAuthedUserMultiLocationForWeek();
+    const multiSuffix = isMulti
+      ? ` <span style="font-size:11px;color:#1d4ed8;font-weight:600;">· All branches combined</span>`
+      : "";
     const leftNote = editorMyShifts
-      ? `<span style="font-size:12px;color:#6b7280;">Your shifts only — switch to <strong>Team view</strong> to edit the full team.</span>`
-      : `<span style="font-size:12px;color:#6b7280;">Your shifts for this week.</span>`;
+      ? `<span style="font-size:12px;color:#6b7280;">Your shifts only — switch to <strong>Team view</strong> to edit the full team.${multiSuffix}</span>`
+      : `<span style="font-size:12px;color:#6b7280;">Your shifts for this week.${multiSuffix}</span>`;
     summaryBar.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
         ${leftNote}
@@ -4052,6 +4158,17 @@ function renderScheduleBoard(draft, validation, staffList) {
     `;
   }).join("");
 
+  const myAuthedSid = String(getAuthedStaffIdForSchedule() || "").trim();
+  const activeLocName = _ffActiveLocationNameForIcs();
+  const ctxForBoard = getScheduleAccessContext();
+  const isOwnShiftsContext = (!canBuild) && (
+    (scheduleUserCanManualEdit() && schedulePreviewMode === "my_shifts") ||
+    (ctxForBoard && ctxForBoard.viewOwnOnly === true)
+  );
+  const unifiedMapForBoard = (schedulePreviewState.myShiftsFromOtherLocs instanceof Map)
+    ? schedulePreviewState.myShiftsFromOtherLocs
+    : new Map();
+
   const rowHtml = filteredStaff.map((staff) => {
     const staffKey = getScheduleStaffKey(staff);
     const roleLabel = getScheduleRoleLabel(staff);
@@ -4062,8 +4179,16 @@ function renderScheduleBoard(draft, validation, staffList) {
           .join(', ')
       : null;
     const allowCellEdit = canBuild;
+    const isMyRowUnified = Boolean(
+      isOwnShiftsContext &&
+      myAuthedSid &&
+      staffKey === myAuthedSid &&
+      unifiedMapForBoard.size > 0,
+    );
     const cells = draftDays.map((day) => {
       const assignment = assignmentLookup.get(`${staffKey}::${day.date}`) || null;
+      const otherLocShifts = isMyRowUnified ? (unifiedMapForBoard.get(day.date) || []) : [];
+      const hasOtherLocShifts = otherLocShifts.length > 0;
       const manualOff = Boolean(!assignment && dayHasManualOff(day, staffKey));
       const inboxApprovedOff = Boolean(
         !assignment && !manualOff && staffDayBlockedByApprovedInbox(staff, day.date),
@@ -4153,6 +4278,58 @@ function renderScheduleBoard(draft, validation, staffList) {
       const emptyCellWrap = !assignment
         ? `style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:100%;"`
         : "";
+
+      // Unified multi-location layout for the authed user's own row. Keeps
+      // the active-location block editable as usual and renders each
+      // other-location shift as a compact read-only sub-block beneath it.
+      if (isMyRowUnified && (assignment || hasOtherLocShifts)) {
+        const activeName = activeLocName || "This branch";
+        const activeBlock = assignment
+          ? `
+            <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:5px 6px;border-radius:8px;min-height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;font-size:11px;font-weight:700;line-height:1.2;background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;">
+              ${editBtn}
+              <div style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:999px;background:#ede9fe;color:#5b21b6;border:1px solid #c4b5fd;font-size:9px;font-weight:700;letter-spacing:0.02em;max-width:100%;line-height:1.25;">
+                <span style="width:5px;height:5px;border-radius:50%;background:#7c3aed;flex-shrink:0;"></span>
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeScheduleHtml(activeName)}</span>
+              </div>
+              <div ${allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : `style="user-select:none;"`}>
+                <div>${assignment.startTime || "--:--"} - ${assignment.endTime || "--:--"}</div>
+                ${lunchSubline}
+                ${approvedMismatchBlock}
+              </div>
+            </div>
+          `
+          : "";
+
+        const otherBlocks = otherLocShifts.map((s) => {
+          const labelName = s.locationName || "Other branch";
+          const lunchOther = s.lunchBreakEnabled
+            ? `<div style="font-size:9px;font-weight:600;color:#92400e;margin-top:3px;line-height:1.25;max-width:100%;">${escapeScheduleHtml(formatLunchBreakCellSubtitle({
+                lunchBreakEnabled: true,
+                lunchBreakStart: s.lunchBreakStart,
+                lunchBreakEnd: s.lunchBreakEnd,
+              }))}</div>`
+            : "";
+          return `
+            <div style="padding:5px 6px;border-radius:8px;min-height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;font-size:11px;font-weight:700;line-height:1.2;background:#eff6ff;border:1px dashed #93c5fd;color:#1d4ed8;" title="From ${escapeScheduleAttr(labelName)} — edit in that branch's schedule">
+              <div style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:999px;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;font-size:9px;font-weight:700;letter-spacing:0.02em;max-width:100%;line-height:1.25;">
+                <span style="width:5px;height:5px;border-radius:50%;background:#2563eb;flex-shrink:0;"></span>
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeScheduleHtml(labelName)}</span>
+              </div>
+              <div>${escapeScheduleHtml(s.startTime || "--:--")} - ${escapeScheduleHtml(s.endTime || "--:--")}</div>
+              ${lunchOther}
+            </div>
+          `;
+        }).join("");
+
+        return `
+          <div style="padding:4px;display:flex;flex-direction:column;gap:4px;min-height:50px;">
+            ${activeBlock}
+            ${otherBlocks}
+          </div>
+        `;
+      }
+
       return `
         <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:6px;border-radius:8px;min-height:50px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:${assignment ? "700" : "500"};line-height:1.25;transition:outline-color 0.12s ease;${cellStyle}">
           ${editBtn}
@@ -4401,6 +4578,12 @@ async function refreshSchedulePreview() {
     // collide with user "override" edits.
     saveScheduleLastBuildCacheForActiveLocation(weekRange, draftWithBusinessRules);
 
+    // Stage 1 "unified My shifts": for the authed user, pull their shifts
+    // from every OTHER active location so the My-shifts view can show a
+    // single row with a branch tag on each cell instead of forcing the user
+    // to switch active locations to see their full week.
+    const myShiftsFromOtherLocs = await loadMyShiftsFromOtherLocationsForWeek(weekRange);
+
     schedulePreviewState = {
       draft: draftWithBusinessRules,
       validation,
@@ -4410,6 +4593,7 @@ async function refreshSchedulePreview() {
       requests,
       businessHours,
       standByByDate,
+      myShiftsFromOtherLocs,
     };
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
@@ -4450,6 +4634,7 @@ async function refreshSchedulePreview() {
       requests: [],
       businessHours: undefined,
       standByByDate: {},
+      myShiftsFromOtherLocs: new Map(),
     };
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
