@@ -623,12 +623,26 @@ function getActiveLocationIdForTickets() {
  *  This ensures admin always sees all tickets regardless of PIN state. */
 function canSeeTicket(ticket) {
   if (!currentUserProfile) return false;
-  // Location scope gate: if a branch is active AND the ticket is stamped
-  // for a different branch, hide it. Tickets without a locationId (legacy
-  // rows from before multi-branch) are still visible everywhere.
+  // Location scope gate:
+  //  • Stamped tickets must match the active branch (if any).
+  //  • Legacy tickets without a locationId are visible in single-branch
+  //    mode but hidden from multi-branch users (matches Inventory policy
+  //    so cross-branch revenue/bills don't leak into the wrong branch).
   const activeLoc = getActiveLocationIdForTickets();
-  if (activeLoc && ticket && typeof ticket.locationId === 'string' && ticket.locationId && ticket.locationId !== activeLoc) {
-    return false;
+  if (activeLoc && ticket) {
+    const ticketLoc = typeof ticket.locationId === 'string' ? ticket.locationId : '';
+    if (ticketLoc && ticketLoc !== activeLoc) {
+      return false;
+    }
+    if (!ticketLoc) {
+      let viewerIsMultiBranch = false;
+      try {
+        if (typeof window !== 'undefined' && typeof window.ffUserHasMultipleLocations === 'function') {
+          viewerIsMultiBranch = !!window.ffUserHasMultipleLocations();
+        }
+      } catch (_) {}
+      if (viewerIsMultiBranch) return false;
+    }
   }
   // Firestore role: admin/owner/manager always see all tickets
   const profileRole = (currentUserProfile.role || '').toLowerCase();
@@ -1240,14 +1254,31 @@ function summaryDocMatchesEmployee(d, staffId) {
   );
 }
 
-/** Mirrors canSeeTicket's location gate for summary rows: active branch wins
- *  when the row has a locationId; legacy rows without a locationId stay
- *  visible everywhere so older history isn't hidden. */
+/** Mirrors canSeeTicket's location gate for summary rows.
+ *  Behavior:
+ *   • Single-branch mode / owners: legacy rows without a locationId stay
+ *     visible so older history isn't hidden.
+ *   • Multi-branch users: legacy rows without a locationId are HIDDEN.
+ *     Without this, a Brickell manager would see Key-Biscayne revenue mixed
+ *     into her "by employee" totals any time a ticket closed before the
+ *     multi-branch rollout stamped locationId. Matches the strict behavior
+ *     we adopted in Inventory. */
 function summaryDocMatchesLocation(d) {
   const activeLoc = getActiveLocationIdForTickets();
   if (!activeLoc) return true;
-  if (!d || typeof d.locationId !== 'string' || !d.locationId) return true;
-  return d.locationId === activeLoc;
+  const hasLocationId = d && typeof d.locationId === 'string' && d.locationId;
+  if (hasLocationId) {
+    return d.locationId === activeLoc;
+  }
+  // Legacy row (no locationId). Keep visible only when the viewer has a
+  // single branch; hide from multi-branch users to avoid cross-branch leak.
+  let viewerIsMultiBranch = false;
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffUserHasMultipleLocations === 'function') {
+      viewerIsMultiBranch = !!window.ffUserHasMultipleLocations();
+    }
+  } catch (_) {}
+  return !viewerIsMultiBranch;
 }
 
 function summaryDocClosedDateKeyString(d) {

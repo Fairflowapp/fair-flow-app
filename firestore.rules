@@ -23,6 +23,38 @@ service cloud.firestore {
         && userDocData().salonId == salonId;
     }
 
+    /**
+     * Whether the caller is allowed to write at a specific location within a
+     * salon. Used for per-location documents whose docId equals the locationId
+     * (e.g. queueState/{locationId}, tasksState/{locationId}).
+     *
+     * Allow cases (in precedence order):
+     *   1. The doc is the shared "default" doc — used in single-location mode
+     *      and as the legacy fallback for unstamped data; everyone can write.
+     *   2. The caller is a manager/admin/owner at this salon — salon leadership
+     *      can operate at any branch, matching existing client behavior.
+     *   3. The caller has no linked staff profile (users/{uid}.staffId missing
+     *      or blank) — legacy users created before the staff-link model existed.
+     *   4. The caller's staff document has no allowedLocationIds field, or an
+     *      empty list — legacy staff from before per-location assignments.
+     *   5. The caller's allowedLocationIds list contains this location.
+     *
+     * Anything else is denied. This prevents a technician at Brickell from
+     * writing to Key-Biscayne's queue or tasks state by crafting a request.
+     */
+    function userCanWriteAtLocation(salonId, locationId) {
+      return locationId == 'default'
+        || isManager(salonId)
+        || !userDocData().keys().hasAny(['staffId'])
+        || !(userDocData().staffId is string)
+        || userDocData().staffId == ''
+        || !exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId))
+        || !(get(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId)).data.keys().hasAny(['allowedLocationIds']))
+        || !(get(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId)).data.allowedLocationIds is list)
+        || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId)).data.allowedLocationIds.size() == 0
+        || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId)).data.allowedLocationIds.hasAny([locationId]);
+    }
+
     /** salons/{salonId}/settings/main ownerUid: cannot change once set (except first claim to own uid). */
     function settingsMainOwnerUidUpdateAllowed() {
       return !request.resource.data.diff(resource.data).changedKeys().hasAny(['ownerUid'])
@@ -953,14 +985,20 @@ service cloud.firestore {
     }
 
     // ===== QUEUE / TASKS STATE =====
+    // docId encodes the locationId (or "default" for single-location mode).
+    // Reads stay open to any salon member so staff can still see status at
+    // any branch they navigate to, but writes are gated by userCanWriteAtLocation
+    // so a technician at branch A cannot tamper with branch B's state.
     match /salons/{salonId}/queueState/{docId} {
       allow read: if belongsToSalon(salonId);
-      allow write: if belongsToSalon(salonId);
+      allow write: if belongsToSalon(salonId)
+        && userCanWriteAtLocation(salonId, docId);
     }
 
     match /salons/{salonId}/tasksState/{docId} {
       allow read: if belongsToSalon(salonId);
-      allow write: if belongsToSalon(salonId);
+      allow write: if belongsToSalon(salonId)
+        && userCanWriteAtLocation(salonId, docId);
     }
 
     // ===== TRAINING (root collections; each doc has salonId) =====

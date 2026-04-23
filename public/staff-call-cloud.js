@@ -499,6 +499,26 @@ function handleMyPresenceSnapshot(staffId, presence) {
     hideIncomingCallModal();
     return;
   }
+  // Gate by location: if the call was sent from branch A but this staff
+  // member is currently viewing branch B, suppress the modal. Legacy calls
+  // without a locationId still pop (preserves old behavior / single-branch).
+  try {
+    const callLocId = currentCall.locationId ? String(currentCall.locationId).trim() : "";
+    if (callLocId) {
+      let myActiveLocId = "";
+      if (typeof window !== "undefined") {
+        if (typeof window.ffGetActiveLocationId === "function") {
+          myActiveLocId = String(window.ffGetActiveLocationId() || "").trim();
+        } else if (typeof window.__ff_active_location_id === "string") {
+          myActiveLocId = String(window.__ff_active_location_id || "").trim();
+        }
+      }
+      if (myActiveLocId && myActiveLocId !== callLocId) {
+        hideIncomingCallModal();
+        return;
+      }
+    }
+  } catch (_) { /* fail-open: show modal if location resolution fails */ }
   if (_lastShownCallId === currentCall.callId && document.getElementById("ffStaffCallModal")?.style.display === "flex") {
     return;
   }
@@ -993,6 +1013,21 @@ window.ffSendStaffCall = async function(staffIdOrName, options = {}) {
   const callId = "call_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
   const sentAtMs = Date.now();
   const callTimeoutMs = getCallTimeoutMs() || CALL_TIMEOUT_MS;
+  // Stamp the sender's active location on the call so the receiving client
+  // can decide whether to pop the incoming-call modal. A staff member who
+  // happens to be viewing branch B shouldn't get a modal for a call sent
+  // from branch A — the staffCallTemplates are shared, but the call itself
+  // is branch-local (the client is physically waiting at that branch).
+  let sendingLocationId = "";
+  try {
+    if (typeof window !== "undefined") {
+      if (typeof window.ffGetActiveLocationId === "function") {
+        sendingLocationId = String(window.ffGetActiveLocationId() || "").trim();
+      } else if (typeof window.__ff_active_location_id === "string") {
+        sendingLocationId = String(window.__ff_active_location_id || "").trim();
+      }
+    }
+  } catch (_) { sendingLocationId = ""; }
   const currentCall = {
     callId,
     message: callMessage,
@@ -1002,7 +1037,8 @@ window.ffSendStaffCall = async function(staffIdOrName, options = {}) {
     sentAtMs,
     expiresAt: new Date(sentAtMs + callTimeoutMs),
     expiresAtMs: sentAtMs + callTimeoutMs,
-    sentBy: currentActorName()
+    sentBy: currentActorName(),
+    locationId: sendingLocationId || null
   };
 
   await setDoc(

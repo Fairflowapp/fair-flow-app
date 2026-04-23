@@ -9951,6 +9951,15 @@ function renderTrainingNotificationSummary() {
 
 function showTrainingAssignmentToast(notification) {
   if (!notification || notification.read === true) return;
+  // Apply the same per-location gate we use for the badge count.
+  // Without this, a multi-location staff member on location A would get a
+  // visible toast for a training scoped to location B (even though the badge
+  // correctly hides it). We only check trainings that are already loaded —
+  // otherwise we let the toast through, and the "mark seen" step below
+  // prevents repeat toasts once the items catch up.
+  if (trainingItemsLoadedOnce && !shouldDisplayTrainingNotification(notification)) {
+    return;
+  }
   const seenKey = getTrainingToastSeenKey(notification);
   if (!seenKey) return;
   const seen = new Set(getSeenTrainingToastKeys());
@@ -10036,6 +10045,8 @@ function _ffInstallTrainingLocationListener() {
       const trainingScreen = document.getElementById('trainingScreen');
       if (trainingScreen && trainingScreen.style.display !== 'none') {
         const detailsView = document.getElementById('trainingDetailsView');
+        const reportsView = document.getElementById('trainingReportsView');
+        const reportDetailsView = document.getElementById('trainingReportDetailsView');
         if (detailsView && detailsView.style.display !== 'none' && selectedTrainingItemId && hasTrainingItem(selectedTrainingItemId)) {
           const item = trainingItems.find((entry) => entry.id === selectedTrainingItemId);
           // If the now-active location hides the currently-open training,
@@ -10046,6 +10057,15 @@ function _ffInstallTrainingLocationListener() {
             selectedTrainingItemId = null;
             if (typeof renderTrainingLibrary === 'function') renderTrainingLibrary();
           }
+        } else if (reportDetailsView && reportDetailsView.style.display !== 'none') {
+          // We're deep inside a training's report details. Bounce back to the
+          // reports list so users don't see stale cross-branch completion
+          // data when they switch locations.
+          reportDetailsView.style.display = 'none';
+          if (reportsView) reportsView.style.display = 'block';
+          if (typeof renderTrainingReports === 'function') renderTrainingReports();
+        } else if (reportsView && reportsView.style.display !== 'none') {
+          if (typeof renderTrainingReports === 'function') renderTrainingReports();
         } else if (typeof renderTrainingLibrary === 'function') {
           renderTrainingLibrary();
         }
@@ -10457,10 +10477,40 @@ function getTrainingReportsStaffList() {
   try {
     const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
     const list = Array.isArray(store.staff) ? store.staff : [];
-    return list.filter((s) => s.isArchived !== true);
+    const active = list.filter((s) => s.isArchived !== true);
+    // Scope the reports to staff who are actually assigned to the active
+    // location. Without this a manager at Brickell would see completion
+    // totals / "not completed" rosters that include Key-Biscayne-only staff,
+    // which defeats the "each location is its own business" model.
+    return active.filter(isStaffAtCurrentTrainingLocation);
   } catch (_) {
     return [];
   }
+}
+
+/**
+ * Whether a staff record belongs to the currently-active location for the
+ * purposes of Training reports.
+ *
+ * - If the salon has only one location, or the caller cannot resolve an
+ *   active id, everyone passes (single-branch / legacy mode).
+ * - Staff without any allowedLocationIds pre-date the multi-location model
+ *   and are treated as "works everywhere" so they don't silently disappear
+ *   from reports after a migration.
+ * - Otherwise, the staff must have the active location in their
+ *   allowedLocationIds list.
+ */
+function isStaffAtCurrentTrainingLocation(staff) {
+  if (!staff) return false;
+  const activeLocId = (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function')
+    ? String(window.ffGetActiveLocationId() || '').trim()
+    : '';
+  if (!activeLocId) return true;
+  const allowed = Array.isArray(staff.allowedLocationIds)
+    ? staff.allowedLocationIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (!allowed.length) return true;
+  return allowed.includes(activeLocId);
 }
 
 function getStaffRoleForTraining(staff) {
@@ -11570,13 +11620,18 @@ function canUseTrainingRequiredTab() {
 }
 
 function canManageTraining() {
+  // Branch managers now get to create/edit training so they can author
+  // content for their own location (using the location chips in the
+  // training modal). Owners and admins keep salon-wide authoring rights.
+  // Read access is governed by the visibility rules (role/tech-type/loc),
+  // not by this guard.
   const role = String(
     window.__ff_user_role ||
     window.__ff_actorRole ||
     sessionStorage.getItem('ff_actor_role') ||
     ''
   ).toLowerCase().trim();
-  return role === 'owner' || role === 'admin';
+  return role === 'owner' || role === 'admin' || role === 'manager';
 }
 
 function canOverrideTrainingCompletion() {
@@ -12716,19 +12771,30 @@ function renderReportsByTraining() {
   const emptyEl = document.getElementById('trainingReportsByTrainingEmpty');
   if (!listEl || !emptyEl) return;
   listEl.innerHTML = '';
-  if (!trainingItems.length) {
+  // Only show trainings that are visible at the active location. Trainings
+  // tagged exclusively for other branches should not appear in this branch's
+  // reports at all.
+  const itemsForLocation = trainingItems.filter(isTrainingVisibleAtCurrentLocation);
+  if (!itemsForLocation.length) {
     listEl.style.display = 'none';
     emptyEl.style.display = 'block';
     return;
   }
   listEl.style.display = 'flex';
   emptyEl.style.display = 'none';
-  trainingItems.forEach((item) => {
+  itemsForLocation.forEach((item) => {
+    // getTrainingReportsStaffList() already filters by active location, so the
+    // staff list here reflects only the current branch's roster.
     const relevantStaff = getTrainingReportsStaffList().filter((s) => {
       const ctx = { currentRole: getStaffRoleForTraining(s), currentTechnicianTypes: (s.technicianTypes || []).map((t) => String(t).toLowerCase()) };
       return isTrainingRelevantToCurrentUser(item, ctx);
     });
-    const completed = getTrainingCompletedEntries(item.id);
+    // Restrict "completed" to entries belonging to staff at the active
+    // location so the green count matches the branch roster shown below it.
+    const relevantStaffIdSet = new Set(relevantStaff.map(getTrainingReportStaffId));
+    const completed = getTrainingCompletedEntries(item.id).filter((p) => {
+      return relevantStaffIdSet.has(String(p.staffId || '').trim());
+    });
     const completedIds = new Set(completed.map((p) => String(p.staffId || '').trim()));
     const notCompleted = relevantStaff.filter((s) => !completedIds.has(getTrainingReportStaffId(s)));
     const card = document.createElement('div');
@@ -12758,6 +12824,9 @@ function renderReportsByEmployee() {
   const emptyEl = document.getElementById('trainingReportsByEmployeeEmpty');
   if (!listEl || !emptyEl) return;
   listEl.innerHTML = '';
+  // Staff list is already scoped to the active location by
+  // getTrainingReportsStaffList(); this keeps the Employee report showing
+  // only this branch's roster.
   const staffList = getTrainingReportsStaffList();
   if (!staffList.length) {
     listEl.style.display = 'none';
@@ -12773,7 +12842,13 @@ function renderReportsByEmployee() {
       return !p.blockId && (pid === staffId || pid === (staff.id || '') || pid === (staff.staffId || '')) && p.status === 'completed';
     });
     const staffCtx = { currentRole: getStaffRoleForTraining(staff), currentTechnicianTypes: (staff.technicianTypes || []).map((t) => String(t).toLowerCase()) };
-    const requiredForStaff = trainingItems.filter((item) => isTrainingRequiredForUser(item, staffCtx));
+    // Only count trainings that are actually visible to this staff member.
+    // `isTrainingVisibleForStaff` is the staff-centric gate (uses the staff's
+    // own allowedLocationIds rather than the viewer's active location) so
+    // we don't overstate "open required" for a cross-branch staffer.
+    const requiredForStaff = trainingItems.filter((item) => {
+      return isTrainingVisibleForStaff(item, staff) && isTrainingRequiredForUser(item, staffCtx);
+    });
     const completedRequiredIds = new Set(completedForStaff.map((p) => p.trainingId));
     const openRequired = requiredForStaff.filter((item) => !completedRequiredIds.has(item.id));
     let lastCompletedDate = '';
@@ -12805,11 +12880,25 @@ function openReportTrainingDetails(trainingId) {
   if (!reportDetailsView) return;
   const item = trainingItems.find((x) => x.id === trainingId);
   if (!item) return;
+  // Block deep-linking into a training that isn't visible at this branch —
+  // bounce back to the reports list so the user doesn't see cross-branch
+  // completion data by mistake.
+  if (!isTrainingVisibleAtCurrentLocation(item)) {
+    if (typeof window.showToast === 'function') {
+      window.showToast('This training is not assigned to the current location.');
+    }
+    return;
+  }
   const relevantStaff = getTrainingReportsStaffList().filter((s) => {
     const ctx = { currentRole: getStaffRoleForTraining(s), currentTechnicianTypes: (s.technicianTypes || []).map((t) => String(t).toLowerCase()) };
     return isTrainingRelevantToCurrentUser(item, ctx);
   });
-  const completed = getTrainingCompletedEntries(item.id);
+  // Scope the "X completed" header to completions from staff at the active
+  // location only, matching the Employee Actions cards below.
+  const relevantStaffIdSet = new Set(relevantStaff.map(getTrainingReportStaffId));
+  const completed = getTrainingCompletedEntries(item.id).filter((p) => {
+    return relevantStaffIdSet.has(String(p.staffId || '').trim());
+  });
   const employeeCards = relevantStaff.map((staff) => renderTrainingReportEmployeeCard(item, staff)).join('');
   reportDetailsView.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
@@ -17031,7 +17120,49 @@ function openLog(){
   openHistoryModal();
 }
 
-$("#exportLog").addEventListener("click", e=>{ e.preventDefault(); const blob=new Blob([log.join("\n")],{type:"text/plain"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="fair-flow-log.txt"; a.click(); URL.revokeObjectURL(url); });
+$("#exportLog").addEventListener("click", e=>{
+  e.preventDefault();
+  // Legacy client-side log export. Entries are plain strings that were
+  // never tagged with a locationId, so we can't split cleanly by branch.
+  // We compromise by prepending a header that makes the scope explicit
+  // (active location, salon, export timestamp) so anyone reading the file
+  // knows this is the full client log — not a per-branch slice — and
+  // managers relying on it won't confuse cross-branch activity as their
+  // own branch's. The modern per-location export lives in the History
+  // module.
+  let locationLine = "Location: (unknown)";
+  try {
+    const locId = typeof window.ffGetActiveLocationId === "function"
+      ? String(window.ffGetActiveLocationId() || "").trim()
+      : "";
+    let locName = "";
+    if (locId && typeof window.ffGetActiveLocations === "function") {
+      const locs = window.ffGetActiveLocations() || [];
+      const match = Array.isArray(locs) ? locs.find((l) => String(l?.id || "").trim() === locId) : null;
+      locName = match && match.name ? String(match.name) : "";
+    }
+    if (locId) {
+      locationLine = `Location: ${locName || locId}${locName ? ` (${locId})` : ""}`;
+    } else {
+      locationLine = "Location: (single-branch mode)";
+    }
+  } catch (_) {}
+  const header = [
+    "# Fair Flow — Legacy Client Log Export",
+    "# NOTE: entries below are not tagged per-location. Exported as-is.",
+    `# ${locationLine}`,
+    `# Exported at: ${new Date().toISOString()}`,
+    "# For a per-location audit trail, use the History module export.",
+    "",
+  ].join("\n");
+  const blob=new Blob([header + log.join("\n")],{type:"text/plain"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download="fair-flow-log.txt";
+  a.click();
+  URL.revokeObjectURL(url);
+});
 
 $("#clearLog").addEventListener("click", e=>{ e.preventDefault(); if(confirm("Clear history?")){ log=[]; save(); openLog(); } });
 
@@ -28931,6 +29062,15 @@ function initializeAppsPanel() {
         window.ffStaffSyncNameToFirestore(newEmail, newName);
       } else if (nameChanged && oldStaff.email && typeof window.ffStaffSyncNameToFirestore === 'function') {
         window.ffStaffSyncNameToFirestore(oldStaff.email, newName);
+      }
+
+      // Role change → push role to users/{uid} + members/{uid} so that
+      // firestore.rules (which reads users.role for isManager checks) and
+      // the client permission UI stay consistent. Without this, a demotion
+      // from manager → technician would leave users.role = 'manager' and
+      // the newly-demoted user would still write to manager-only paths.
+      if (roleChanged && typeof window.ffStaffSyncRoleToFirestore === 'function') {
+        window.ffStaffSyncRoleToFirestore(updatedStaff);
       }
       
       // Exit edit mode

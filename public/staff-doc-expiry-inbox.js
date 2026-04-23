@@ -200,6 +200,13 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
       seenUids.add(u);
       return true;
     });
+
+    // Current viewer's active location — used to scope the end-of-run toast
+    // so a manager at Brickell doesn't get a toast about Key-Biscayne items.
+    const viewerActiveLocationId =
+      typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function"
+        ? String(window.ffGetActiveLocationId() || "").trim()
+        : "";
     if (managersAndAdmins.length === 0) {
       managersAndAdmins = [
         {
@@ -212,6 +219,7 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
     }
 
     let inboxItemsCreated = 0;
+    let inboxItemsForActiveLocation = 0;
     let docsChecked = 0;
     let docsInExpiryWindow = 0;
 
@@ -229,6 +237,36 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
         };
       }
       return;
+    }
+
+    // Build a staffId -> staff-doc lookup so we can resolve each recipient's
+    // own allowedLocationIds when routing inbox alerts by branch.
+    const staffRowsByIdLookup = {};
+    for (const sDoc of staffColSnap.docs) {
+      staffRowsByIdLookup[sDoc.id] = sDoc.data() || {};
+    }
+
+    /**
+     * Filter a recipient list to managers who actually cover the subject's
+     * location. Owners pass through unchanged (they run the salon), as do
+     * legacy managers whose staff record has no allowedLocationIds — the
+     * latter predates the per-location model and is treated as salon-wide.
+     */
+    function filterRecipientsForLocation(recipients, targetLocationId) {
+      if (!targetLocationId) return recipients;
+      return recipients.filter((rec) => {
+        const recRole = String(rec?.role || "").toLowerCase();
+        if (recRole === "owner") return true;
+        const recStaffId = String(rec?.staffId || "").trim();
+        if (!recStaffId) return true; // can't resolve → keep (fail-open)
+        const recStaff = staffRowsByIdLookup[recStaffId];
+        if (!recStaff) return true;
+        const allowed = Array.isArray(recStaff.allowedLocationIds)
+          ? recStaff.allowedLocationIds.map((id) => String(id || "").trim()).filter(Boolean)
+          : [];
+        if (!allowed.length) return true; // salon-wide
+        return allowed.includes(targetLocationId);
+      });
     }
     for (const staffDoc of staffColSnap.docs) {
       const staffId = staffDoc.id;
@@ -319,7 +357,15 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
             const d2 = salonCalendarDaysUntilExpiry(expirationToMillis(fd.expirationDate), ty, tm, td, tz);
             if (d2 <= 0 || d2 > 30) return 0;
 
-            const planned = managersAndAdmins.map((rec) => {
+            // Only alert managers who actually cover the subject staff's
+            // branch. Without this, a manager at Brickell would get an
+            // Inbox row about a Key-Biscayne employee whose document is
+            // expiring — noisy and wrong by the "two businesses" model.
+            const recipientsForThisSubject = filterRecipientsForLocation(
+              managersAndAdmins,
+              subjectLocationId,
+            );
+            const planned = recipientsForThisSubject.map((rec) => {
               const forUid = rec.uid;
               const itemId = buildDoc30InboxDocId({
                 forUid,
@@ -391,6 +437,17 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
           });
           if (createdInTx > 0) {
             inboxItemsCreated += createdInTx;
+            // Track rows relevant to the currently-viewing user's branch so
+            // the end-of-run toast count reflects what they can actually
+            // see in their Inbox (avoids "8 alerts" when only 2 are for
+            // the active location).
+            if (
+              !viewerActiveLocationId ||
+              !subjectLocationId ||
+              subjectLocationId === viewerActiveLocationId
+            ) {
+              inboxItemsForActiveLocation += createdInTx;
+            }
             console.info(
               "[StaffDocExpiry Inbox] Created reminder(s) for",
               subjectStaffName,
@@ -426,9 +483,9 @@ export async function runStaffDocExpiryInboxRemindersOnce() {
       };
     }
 
-    if (inboxItemsCreated > 0 && typeof window.showToast === "function") {
+    if (inboxItemsForActiveLocation > 0 && typeof window.showToast === "function") {
       window.showToast(
-        `Document expiry: ${inboxItemsCreated} Inbox alert(s) for managers (30 days before expiration).`,
+        `Document expiry: ${inboxItemsForActiveLocation} Inbox alert(s) for managers (30 days before expiration).`,
         8000,
       );
     }

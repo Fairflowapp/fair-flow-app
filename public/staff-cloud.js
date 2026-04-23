@@ -263,3 +263,127 @@ window.ffStaffDeleteFromCloud = async function(staffId) {
   await deleteDoc(doc(db, `salons/${_salonId}/staff`, staffId));
   _toast('🗑️ Staff deleted', 'neutral');
 };
+
+// ─── Public: sync role from staff record → users/{uid} + members/{uid} ─────────
+/**
+ * Keeps `users/{uid}.role` and `salons/{salonId}/members/{uid}.role` in sync
+ * with the staff record's role flags. Without this, a staff member demoted
+ * from "manager" to "technician" in the staff editor would still pass
+ * `isManager(salonId)` checks in firestore.rules (which read `users.role`),
+ * and a promotion would fail the same check until the user signs out.
+ *
+ * Accepts the staff record (needs id + uid/email + new role fields) and
+ * returns a promise that resolves when both docs are updated (or quietly
+ * no-ops if the staff isn't linked to a Firebase Auth user yet).
+ */
+/**
+ * Diagnostic console helper: scans staff/{id} ⟷ users/{uid} ⟷ members/{uid}
+ * for role drift and prints a table. Run from DevTools:
+ *   await ffAuditStaffRoleDrift();
+ *
+ * Returns the drift rows; optional `fix: true` argument will push the staff
+ * record's role to users + members to resolve the drift.
+ */
+window.ffAuditStaffRoleDrift = async function ffAuditStaffRoleDrift(opts = {}) {
+  const shouldFix = opts && opts.fix === true;
+  if (!_salonId) {
+    console.warn('[StaffCloud] Role drift audit requires an active salonId.');
+    return [];
+  }
+  try {
+    const [staffSnap, membersSnap] = await Promise.all([
+      getDocs(collection(db, `salons/${_salonId}/staff`)),
+      getDocs(collection(db, `salons/${_salonId}/members`)),
+    ]);
+    const membersByUid = new Map(membersSnap.docs.map(d => [d.id, d.data() || {}]));
+    const drift = [];
+    for (const sDoc of staffSnap.docs) {
+      const s = sDoc.data() || {};
+      if (s.isArchived === true) continue;
+      const uid = String(s.uid || '').trim();
+      if (!uid) continue; // unlinked (invite not yet finalized)
+      const staffRole = s.isAdmin === true ? 'admin'
+        : s.isManager === true ? 'manager'
+        : String(s.role || 'technician').toLowerCase();
+      const memberRole = String((membersByUid.get(uid) || {}).role || '').toLowerCase();
+      let userRole = '';
+      try {
+        const uSnap = await getDoc(doc(db, 'users', uid));
+        if (uSnap.exists()) userRole = String(uSnap.data().role || '').toLowerCase();
+      } catch (e) {
+        userRole = `(read failed: ${e.code || e.message})`;
+      }
+      if (staffRole !== memberRole || staffRole !== userRole) {
+        drift.push({
+          staffId: sDoc.id,
+          name: s.name || '(unknown)',
+          uid,
+          staffRole,
+          memberRole,
+          userRole,
+        });
+      }
+    }
+    if (!drift.length) {
+      console.info('[StaffCloud] No role drift detected.');
+      return [];
+    }
+    console.group('[StaffCloud] Role drift detected');
+    console.table(drift);
+    console.groupEnd();
+    if (shouldFix) {
+      console.info('[StaffCloud] Syncing', drift.length, 'drifted record(s)…');
+      for (const row of drift) {
+        const staffDoc = await getDoc(doc(db, `salons/${_salonId}/staff`, row.staffId));
+        if (!staffDoc.exists()) continue;
+        await window.ffStaffSyncRoleToFirestore({ id: row.staffId, ...staffDoc.data() });
+      }
+      console.info('[StaffCloud] Sync complete. Re-run ffAuditStaffRoleDrift() to verify.');
+    } else {
+      console.info('[StaffCloud] Pass { fix: true } to ffAuditStaffRoleDrift to resolve drift.');
+    }
+    return drift;
+  } catch (e) {
+    console.error('[StaffCloud] Role drift audit failed', e);
+    return [];
+  }
+};
+
+window.ffStaffSyncRoleToFirestore = async function(staff) {
+  if (!_salonId || !staff) return;
+  const role = String(
+    staff.isAdmin === true ? 'admin'
+    : staff.isManager === true ? 'manager'
+    : staff.role || 'technician'
+  ).toLowerCase();
+
+  try {
+    // Prefer the uid cached on the staff record (set during invite
+    // finalization). Fall back to looking up the member by email so older
+    // records without a uid still sync.
+    let memberUid = String(staff.uid || '').trim();
+    let memberEmail = String(staff.email || '').trim().toLowerCase();
+    if (!memberUid && memberEmail) {
+      const snap = await getDocs(collection(db, `salons/${_salonId}/members`));
+      const md = snap.docs.find(d => String(d.data().email || '').toLowerCase() === memberEmail);
+      if (md) memberUid = md.id;
+    }
+    if (!memberUid) {
+      // Unlinked staff (invite not yet accepted). Nothing to sync.
+      return;
+    }
+
+    const memberRef = doc(db, `salons/${_salonId}/members`, memberUid);
+    const userRef = doc(db, 'users', memberUid);
+    const results = await Promise.allSettled([
+      updateDoc(memberRef, { role }),
+      updateDoc(userRef, { role }),
+    ]);
+    const failed = results.filter(r => r.status === 'rejected');
+    if (failed.length) {
+      console.warn('[StaffCloud] role sync partial failure', failed.map(f => f.reason?.code || f.reason?.message));
+    }
+  } catch (e) {
+    console.warn('[StaffCloud] role sync error', e?.code, e?.message);
+  }
+};
