@@ -2126,6 +2126,100 @@ dialog footer button, .code-dialog footer button {
   box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
 }
 
+/* Segmented control — pill-style group of radio options where the selected
+   segment fills with purple. Used in Preferences (Time format, Week starts
+   on) and anywhere else that needs a two/three-state picker. Wraps plain
+   <label><input type="radio"></label> markup — no extra JS needed for the
+   visual, handlers wire the radios as usual. */
+.ff-segmented {
+  display: inline-flex;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+.ff-segmented > label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+  background: #fff;
+  border-right: 1px solid #d1d5db;
+  transition: background 0.15s ease, color 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+.ff-segmented > label:last-child { border-right: none; }
+.ff-segmented > label > input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+.ff-segmented > label:has(input[type="radio"]:checked) {
+  background: #7c3aed;
+  color: #fff;
+}
+.ff-segmented > label:hover:not(:has(input[type="radio"]:checked)) {
+  background: #f5f3ff;
+  color: #111827;
+}
+.ff-segmented > label:has(input[type="radio"]:focus-visible) {
+  box-shadow: inset 0 0 0 2px rgba(124, 58, 237, 0.35);
+}
+
+.ff-pref-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: nowrap;
+  margin: 0 0 14px 0;
+  padding: 4px;
+  border: 1px solid #ede9fe;
+  border-radius: 10px;
+  background: #faf5ff;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.ff-pref-tab {
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 8px 10px;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+}
+.ff-pref-tab:hover {
+  background: #fff;
+  color: #4c1d95;
+}
+.ff-pref-tab.is-active {
+  background: #7c3aed;
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(124, 58, 237, 0.18);
+}
+.ff-pref-pane {
+  display: none;
+}
+.ff-pref-pane.is-active {
+  display: block;
+}
+.ff-pref-pane-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .staff-permission-card {
   background: #fff;
   border: 1px solid var(--border);
@@ -2927,10 +3021,10 @@ dialog footer button, .code-dialog footer button {
 
   <!-- Apps Launcher Panel -->
   <!-- Apps Overlay Backdrop -->
-  <div id="appsOverlayBackdrop" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:100002;backdrop-filter:blur(2px);"></div>
+  <div id="appsOverlayBackdrop" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:100300;backdrop-filter:blur(2px);"></div>
   
   <!-- Apps Panel (Full-screen overlay) -->
-  <div id="appsPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:92vw;max-height:85vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);z-index:100003;overflow:hidden;flex-direction:column;">
+  <div id="appsPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:92vw;max-height:85vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);z-index:100301;overflow:hidden;flex-direction:column;">
     <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:flex-end;padding:10px 18px;border-bottom:1px solid var(--border);flex-shrink:0;">
       <button id="appsPanelCloseBtn" style="background:none;border:none;cursor:pointer;padding:8px;display:flex;align-items:center;justify-content:center;border-radius:8px;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">
@@ -3235,13 +3329,11 @@ dialog footer button, .code-dialog footer button {
       <!-- Left Side Menu -->
       <div style="flex-shrink:0;width:160px;">
         <nav style="display:flex;flex-direction:column;gap:4px;">
+          <button class="user-profile-menu-item" data-section="preferences" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Preferences</button>
           <button class="user-profile-menu-item" data-section="locations" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Locations</button>
-          <button class="user-profile-menu-item" data-section="technician-types" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Staff Setup</button>
           <button class="user-profile-menu-item" data-section="schedule" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Schedule</button>
           <button class="user-profile-menu-item" data-section="time-clock-settings" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Time Clock Settings</button>
           <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Notifications</button>
-          <button class="user-profile-menu-item" data-section="preferences" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Preferences</button>
-          <button class="user-profile-menu-item" data-section="media-categories" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Media Categories</button>
           <button class="user-profile-menu-item" data-section="billing" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Billing</button>
           <button class="user-profile-menu-item" data-section="password" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Password</button>
         </nav>
@@ -3296,53 +3388,6 @@ dialog footer button, .code-dialog footer button {
           <button id="userProfileChangePasswordBtn" class="btn-primary" style="font-size:12px;background:#7c3aed;background-image:none;border-color:#7c3aed;">Change</button>
         </div>
         
-        <!-- Staff Setup / Technician Types Card -->
-        <div id="userProfileCardTechnicianTypes" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Staff Setup</h3>
-          <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">Set up your service provider</p>
-          <p style="margin:0 0 16px 0;font-size:11px;color:#9ca3af;">Drag to reorder. You can add, edit and activate types.</p>
-          
-          <!-- Service Provider Types Subsection -->
-          <div style="margin-top:12px;">
-            <h4 style="margin:0 0 12px 0;font-size:13px;font-weight:600;color:#374151;">Service Provider Types</h4>
-            
-            <!-- Service Provider Types List -->
-            <div id="userProfileTechnicianTypesList" style="margin-bottom:16px;">
-              <!-- Empty state - will be shown if no types exist -->
-              <div id="userProfileTechnicianTypesEmptyState" style="display:none;text-align:center;padding:24px;color:#9ca3af;font-size:12px;background:#f9fafb;border-radius:8px;border:1px dashed var(--border);">
-                <div style="margin-bottom:6px;font-weight:500;">No service provider types yet</div>
-                <div style="font-size:11px;">Add your first service provider type to get started</div>
-              </div>
-              <!-- List items - populated dynamically -->
-            </div>
-            
-            <!-- Add Service Provider Button -->
-            <button id="userProfileAddTechnicianTypeBtn" type="button" class="btn-mini" style="font-size:12px;padding:6px 14px;background:#7c3aed;color:#fff;border-color:#7c3aed;">+ Add service provider</button>
-          </div>
-        </div>
-        
-        <!-- Media Categories Card (typography aligned with Schedule card) -->
-        <div id="userProfileCardMediaCategories" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:100%;overflow-x:hidden;box-sizing:border-box;">
-          <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Media Categories</h3>
-          <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;">Labels for uploads. Drag to reorder.</p>
-          <div style="margin-top:4px;">
-            <h4 style="margin:0 0 8px 0;font-size:13px;font-weight:600;color:#374151;">Categories</h4>
-            <div id="userProfileMediaCategoriesList" style="margin-bottom:16px;"></div>
-            <div id="userProfileMediaCategoriesEmptyState" style="display:none;text-align:center;padding:16px;color:#9ca3af;font-size:11px;background:#f9fafb;border-radius:6px;border:1px dashed var(--border);">
-              <div style="margin-bottom:4px;font-weight:500;color:#6b7280;">No categories yet</div>
-              <div style="font-size:10px;">Type a name below and click Add</div>
-            </div>
-            <button id="userProfileAddMediaCategoryBtn" type="button" class="btn-mini" style="font-size:12px;padding:6px 14px;background:#7c3aed;color:#fff;border-color:#7c3aed;">+ Add category</button>
-            <div id="userProfileAddMediaCategoryForm" style="display:none;margin-top:6px;">
-              <div style="display:flex;gap:6px;align-items:center;">
-                <input type="text" id="userProfileAddMediaCategoryInput" placeholder="Category name…" autocomplete="off" style="flex:1;padding:3px 8px;border:1px solid #a78bfa;border-radius:4px;font-size:11px;background:#fff;color:#111827;">
-                <button id="userProfileSaveMediaCategoryBtn" type="button" style="padding:2px 10px;border:none;border-radius:4px;background:#7c3aed;color:#fff;font-size:10px;font-weight:600;cursor:pointer;">Save</button>
-                <button id="userProfileCancelMediaCategoryBtn" type="button" style="padding:2px 8px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;color:#6b7280;font-size:10px;cursor:pointer;">Cancel</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        
         <!-- Notifications Card (Birthday reminders settings live here; see ff-build-notifications-v2) -->
         <div id="userProfileCardNotifications" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Notifications</h3>
@@ -3366,31 +3411,100 @@ dialog footer button, .code-dialog footer button {
         <!-- Preferences Card (typography aligned with Staff Setup) -->
         <div id="userProfileCardPreferences" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Preferences</h3>
-          <p style="margin:0 0 14px 0;font-size:11px;color:#9ca3af;">Display, week start, business timezone &amp; currency, and default screen.</p>
-          <div style="display:flex;flex-direction:column;gap:14px;">
+          <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;">Organized into focused sections so location, display, and message settings are easier to manage.</p>
+          <div class="ff-pref-tabs" role="tablist" aria-label="Preference sections">
+            <button type="button" class="ff-pref-tab" data-pref-tab="salon-location">Salon Location</button>
+            <button type="button" class="ff-pref-tab" data-pref-tab="business-format">Business Format</button>
+            <button type="button" class="ff-pref-tab" data-pref-tab="messages">Messages</button>
+            <button type="button" class="ff-pref-tab" data-pref-tab="staff-setup">Staff Setup</button>
+            <button type="button" class="ff-pref-tab" data-pref-tab="media-categories">Media Categories</button>
+          </div>
+          <div class="ff-pref-pane-stack">
+            <div class="ff-pref-pane" data-pref-pane="salon-location">
+            <!-- Salon Location (shared geofence for Queue + Time Clock) -->
+            <div id="userProfilePrefsSalonLocationSection" style="padding:12px;border:1px solid #ede9fe;border-radius:10px;background:#faf5ff;">
+              <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:4px;">Salon Location</div>
+              <div style="font-size:11px;color:#6b7280;line-height:1.5;margin-bottom:10px;">Pin your salon's GPS coordinates. Used to verify staff and customers are on premises.</div>
+              <div id="salonLocationBranchScope" style="margin-bottom:12px;padding:8px 10px;border:1px solid #ddd6fe;border-radius:8px;background:#fff;color:#4c1d95;font-size:11px;line-height:1.45;">
+                This setup is saved only for the active branch. Switch branch in the top bar before setting another salon location.
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:14px;">
+                <!-- Set Salon Location -->
+                <div>
+                  <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Branch coordinates</div>
+                  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <button type="button" id="salonLocationSetBtn" class="btn-pill" style="background:#7c3aed;color:#fff;border-color:#7c3aed;padding:8px 14px;font-size:12px;">Set Salon Location</button>
+                    <div id="salonLocationStatus" style="font-size:12px;color:#6b7280;">No salon location set</div>
+                  </div>
+                  <div style="font-size:11px;color:#9ca3af;margin-top:6px;line-height:1.4;">Stand at the salon entrance and tap Set — the browser will ask for location access.</div>
+                </div>
+
+                <!-- Radius -->
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-top:12px;border-top:1px solid #ede9fe;">
+                  <label for="salonLocationRadius" style="font-size:12px;font-weight:600;color:#374151;min-width:160px;">Allowed radius (meters)</label>
+                  <input type="number" id="salonLocationRadius" min="1" step="1" value="100" style="width:140px;height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;">
+                  <div style="font-size:11px;color:#9ca3af;line-height:1.4;">How far from the pin counts as "on premises".</div>
+                </div>
+
+                <!-- Enforce in: toggle switches -->
+                <div style="padding-top:12px;border-top:1px solid #ede9fe;">
+                  <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:10px;">Enforce location check in</div>
+                  <div style="display:flex;flex-direction:column;gap:12px;">
+                    <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;">
+                      <span class="staff-permission-toggle" style="margin-top:2px;flex:0 0 auto;">
+                        <input type="checkbox" id="salonLocationEnforceQueue">
+                        <span class="staff-permission-toggle-slider"></span>
+                      </span>
+                      <div>
+                        <div style="font-size:12px;font-weight:500;color:#111827;">Queue actions (join/leave)</div>
+                        <div style="font-size:11px;color:#6b7280;margin-top:2px;line-height:1.4;">Customers can only join or leave the queue while inside the allowed radius.</div>
+                      </div>
+                    </label>
+                    <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;">
+                      <span class="staff-permission-toggle" style="margin-top:2px;flex:0 0 auto;">
+                        <input type="checkbox" id="salonLocationEnforceTimeClock">
+                        <span class="staff-permission-toggle-slider"></span>
+                      </span>
+                      <div>
+                        <div style="font-size:12px;font-weight:500;color:#111827;">Time Clock kiosk (clock-in/out)</div>
+                        <div style="font-size:11px;color:#6b7280;margin-top:2px;line-height:1.4;">Staff PINs entered on the Time Clock kiosk are rejected unless the device is on premises. Per-staff override: turn off <em>Must be at the salon to clock in</em> under Staff → Permissions.</div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                <div id="salonLocationFeedback" role="status" aria-live="polite" style="min-height:16px;font-size:11px;color:#6b7280;line-height:1.35;"></div>
+              </div>
+            </div>
+            </div>
+
+            <div class="ff-pref-pane" data-pref-pane="business-format">
+            <div style="display:flex;flex-direction:column;gap:14px;">
             <div>
               <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Time format</label>
-              <div style="display:flex;gap:12px;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="radio" name="userProfileTimeFormat" value="12h" id="userProfileTimeFormat12h" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
-                  <span style="font-size:12px;color:#111827;">12-hour</span>
+              <div class="ff-segmented" role="radiogroup" aria-label="Time format">
+                <label>
+                  <input type="radio" name="userProfileTimeFormat" value="12h" id="userProfileTimeFormat12h">
+                  12-hour
                 </label>
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="radio" name="userProfileTimeFormat" value="24h" id="userProfileTimeFormat24h" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
-                  <span style="font-size:12px;color:#111827;">24-hour</span>
+                <label>
+                  <input type="radio" name="userProfileTimeFormat" value="24h" id="userProfileTimeFormat24h">
+                  24-hour
                 </label>
               </div>
             </div>
             <div>
               <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Week starts on</label>
-              <div style="display:flex;gap:12px;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="radio" name="userProfileWeekStartsOn" value="monday" id="userProfileWeekStartsOnMonday" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
-                  <span style="font-size:12px;color:#111827;">Monday</span>
+              <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:6px;">Applies across the whole app — calendars, schedule, and Time Clock weekly totals.</div>
+              <div class="ff-segmented" role="radiogroup" aria-label="Week starts on">
+                <label>
+                  <input type="radio" name="userProfileWeekStartsOn" value="monday" id="userProfileWeekStartsOnMonday">
+                  Monday
                 </label>
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="radio" name="userProfileWeekStartsOn" value="sunday" id="userProfileWeekStartsOnSunday" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;">
-                  <span style="font-size:12px;color:#111827;">Sunday</span>
+                <label>
+                  <input type="radio" name="userProfileWeekStartsOn" value="sunday" id="userProfileWeekStartsOnSunday">
+                  Sunday
                 </label>
               </div>
             </div>
@@ -3515,6 +3629,10 @@ dialog footer button, .code-dialog footer button {
                 <option value="tasks">Tasks</option>
               </select>
             </div>
+            </div>
+            </div>
+
+            <div class="ff-pref-pane" data-pref-pane="messages">
             <div id="userProfileStaffCallTemplatesSection" style="display:none;border-top:1px solid var(--border);padding-top:14px;">
               <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
                 <h4 style="margin:0;font-size:13px;font-weight:600;color:#374151;">Staff Call Messages</h4>
@@ -3523,6 +3641,49 @@ dialog footer button, .code-dialog footer button {
               <div id="userProfileStaffCallTemplatesBox" style="display:flex;flex-direction:column;gap:10px;"></div>
               <div style="display:flex;justify-content:flex-end;margin-top:10px;">
                 <button id="userProfileSaveStaffCallTemplates" type="button" style="padding:6px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:12px;font-weight:600;cursor:pointer;">Save Staff Call Messages</button>
+              </div>
+            </div>
+            </div>
+
+            <div class="ff-pref-pane" data-pref-pane="staff-setup">
+              <div style="padding:12px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+                <h4 style="margin:0 0 4px 0;font-size:13px;font-weight:600;color:#374151;">Staff Setup</h4>
+                <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">Set up your service providers.</p>
+                <p style="margin:0 0 16px 0;font-size:11px;color:#9ca3af;">Drag to reorder. You can add, edit and activate types.</p>
+
+                <div style="margin-top:12px;">
+                  <h4 style="margin:0 0 12px 0;font-size:13px;font-weight:600;color:#374151;">Service Provider Types</h4>
+                  <div id="userProfileTechnicianTypesList" style="margin-bottom:16px;">
+                    <div id="userProfileTechnicianTypesEmptyState" style="display:none;text-align:center;padding:24px;color:#9ca3af;font-size:12px;background:#f9fafb;border-radius:8px;border:1px dashed var(--border);">
+                      <div style="margin-bottom:6px;font-weight:500;">No service provider types yet</div>
+                      <div style="font-size:11px;">Add your first service provider type to get started</div>
+                    </div>
+                  </div>
+                  <button id="userProfileAddTechnicianTypeBtn" type="button" class="btn-mini" style="font-size:12px;padding:6px 14px;background:#7c3aed;color:#fff;border-color:#7c3aed;">+ Add service provider</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="ff-pref-pane" data-pref-pane="media-categories">
+              <div style="padding:12px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;max-width:100%;overflow-x:hidden;box-sizing:border-box;">
+                <h4 style="margin:0 0 6px 0;font-size:13px;font-weight:600;color:#374151;">Media Categories</h4>
+                <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;">Labels for uploads. Drag to reorder.</p>
+                <div style="margin-top:4px;">
+                  <h4 style="margin:0 0 8px 0;font-size:13px;font-weight:600;color:#374151;">Categories</h4>
+                  <div id="userProfileMediaCategoriesList" style="margin-bottom:16px;"></div>
+                  <div id="userProfileMediaCategoriesEmptyState" style="display:none;text-align:center;padding:16px;color:#9ca3af;font-size:11px;background:#fff;border-radius:6px;border:1px dashed var(--border);">
+                    <div style="margin-bottom:4px;font-weight:500;color:#6b7280;">No categories yet</div>
+                    <div style="font-size:10px;">Type a name below and click Add</div>
+                  </div>
+                  <button id="userProfileAddMediaCategoryBtn" type="button" class="btn-mini" style="font-size:12px;padding:6px 14px;background:#7c3aed;color:#fff;border-color:#7c3aed;">+ Add category</button>
+                  <div id="userProfileAddMediaCategoryForm" style="display:none;margin-top:6px;">
+                    <div style="display:flex;gap:6px;align-items:center;">
+                      <input type="text" id="userProfileAddMediaCategoryInput" placeholder="Category name…" autocomplete="off" style="flex:1;padding:3px 8px;border:1px solid #a78bfa;border-radius:4px;font-size:11px;background:#fff;color:#111827;">
+                      <button id="userProfileSaveMediaCategoryBtn" type="button" style="padding:2px 10px;border:none;border-radius:4px;background:#7c3aed;color:#fff;font-size:10px;font-weight:600;cursor:pointer;">Save</button>
+                      <button id="userProfileCancelMediaCategoryBtn" type="button" style="padding:2px 8px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;color:#6b7280;font-size:10px;cursor:pointer;">Cancel</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -3562,18 +3723,16 @@ dialog footer button, .code-dialog footer button {
 
           <div style="display:flex;flex-direction:column;gap:14px;">
 
-            <!-- Workweek starts on -->
-            <div style="padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
-              <label style="display:block;font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Workweek starts on</label>
-              <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:8px;">The day timesheets and weekly overtime counters reset on.</div>
-              <div id="tcWorkweekStartGroup" role="radiogroup" style="display:inline-flex;border:1px solid #d1d5db;border-radius:8px;overflow:hidden;background:#fff;">
-                <label style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;cursor:pointer;font-size:12px;color:#374151;border-right:1px solid #d1d5db;">
-                  <input type="radio" name="tcWorkweekStart" value="sunday" checked style="accent-color:#7c3aed;"> Sunday
-                </label>
-                <label style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;cursor:pointer;font-size:12px;color:#374151;">
-                  <input type="radio" name="tcWorkweekStart" value="monday" style="accent-color:#7c3aed;"> Monday
-                </label>
+            <!-- Workweek start — single source of truth lives in
+                 Preferences → "Week starts on". Shown read-only here so
+                 admins know where to change it, without duplicating the
+                 control. Updated live by ffTCRenderWorkweekStartMirror. -->
+            <div style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <div style="flex:1;min-width:220px;">
+                <div style="font-size:12px;font-weight:600;color:#111827;">Workweek starts on</div>
+                <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-top:2px;">The day timesheets and weekly overtime counters reset on. Set in <strong>Settings \u2192 Preferences \u2192 Week starts on</strong> so it stays in sync with the rest of the app.</div>
               </div>
+              <span id="tcWorkweekStartMirror" style="padding:6px 12px;border-radius:999px;background:#f3e8ff;color:#5b21b6;font-size:12px;font-weight:600;min-width:72px;text-align:center;">Monday</span>
             </div>
 
             <!-- Weekly + Daily standard hours (side-by-side on wider screens) -->
@@ -3832,41 +3991,61 @@ dialog footer button, .code-dialog footer button {
       <div style="margin-bottom:24px;">
         <div style="margin:0 0 16px 0;font-size:13px;font-weight:500;color:#111827;">Queue Auto Reset</div>
         
-        <div style="display:flex;flex-direction:column;gap:16px;">
-          <!-- Enable queue auto reset checkbox -->
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="manageQueueAutoResetEnabled" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
-            <span style="font-size:12px;font-weight:400;color:#111827;">Enable queue auto reset</span>
-          </label>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <!-- Enable queue auto reset switch -->
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;min-width:210px;">
+              <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                <input type="checkbox" id="manageQueueAutoResetEnabled">
+                <span class="staff-permission-toggle-slider"></span>
+              </span>
+              <span style="font-size:12px;font-weight:400;color:#111827;">Enable queue auto reset</span>
+            </label>
 
-          <!-- Reset time input -->
-          <div style="display:flex;align-items:center;gap:12px;">
-            <label style="font-size:12px;font-weight:400;color:#111827;min-width:100px;">Reset time:</label>
-            <input type="time" id="manageQueueAutoResetTime" value="04:00" style="height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
+            <div id="manageQueueAutoResetOptions" style="display:none;align-items:center;gap:14px;flex-wrap:wrap;">
+              <!-- Reset time input -->
+              <div style="display:flex;align-items:center;gap:8px;">
+                <label style="font-size:12px;font-weight:400;color:#111827;">Reset time:</label>
+                <input type="time" id="manageQueueAutoResetTime" value="04:00" style="height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
+              </div>
+
+              <!-- Reset even if people are In Service switch -->
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                  <input type="checkbox" id="manageQueueAutoResetForce">
+                  <span class="staff-permission-toggle-slider"></span>
+                </span>
+                <span style="font-size:12px;font-weight:400;color:#111827;">Reset even if people are In Service</span>
+              </label>
+            </div>
           </div>
-
-          <!-- Reset even if people are In Service checkbox -->
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="manageQueueAutoResetForce" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
-            <span style="font-size:12px;font-weight:400;color:#111827;">Reset even if people are In Service</span>
-          </label>
         </div>
       </div>
       <div style="margin-bottom:8px;padding-top:20px;border-top:1px solid #ede9fe;">
-        <div style="margin:0 0 16px 0;font-size:13px;font-weight:500;color:#111827;">Queue Location Restriction</div>
-        <div style="display:flex;flex-direction:column;gap:16px;">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="manageQueueGeoFenceEnabled" style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed;">
+        <div style="margin:0 0 10px 0;font-size:13px;font-weight:500;color:#111827;">Queue Location Restriction</div>
+        <div style="padding:12px 14px;border-radius:10px;border:1px solid #e9d5ff;background:#faf5ff;display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;align-items:flex-start;gap:8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            <div style="font-size:12px;color:#4c1d95;line-height:1.5;">
+              Salon location &amp; radius have moved to <strong>Settings → Preferences → Salon Location</strong>. They are saved per active branch and shared with the Time Clock kiosk. The toggle below is a shortcut to the same <em>Queue actions</em> setting for this branch.
+            </div>
+          </div>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+            <span class="staff-permission-toggle" style="flex:0 0 auto;">
+              <input type="checkbox" id="manageQueueGeoFenceEnabled">
+              <span class="staff-permission-toggle-slider"></span>
+            </span>
             <span style="font-size:12px;font-weight:400;color:#111827;">Enable location restriction for Queue actions</span>
           </label>
-          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-            <button type="button" id="manageQueueSetSalonLocationBtn" class="btn-pill" style="background:#7c3aed;color:#fff;border-color:#7c3aed;padding:8px 14px;font-size:12px;">Set Salon Location</button>
-            <div id="manageQueueGeoFenceStatus" style="font-size:12px;color:#6b7280;">No salon location set</div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:11px;color:#6b7280;">
+            <span id="manageQueueGeoFenceStatus">No salon location set</span>
+            <button type="button" id="manageQueueOpenSalonLocationBtn" style="background:none;border:none;padding:0;color:#7c3aed;font-size:11px;font-weight:600;cursor:pointer;text-decoration:underline;">Open Salon Location settings →</button>
           </div>
-          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-            <label for="manageQueueGeoFenceRadius" style="font-size:12px;font-weight:400;color:#111827;min-width:160px;">Allowed Radius (meters)</label>
-            <input type="number" id="manageQueueGeoFenceRadius" min="1" step="1" value="100" style="width:140px;height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;">
-          </div>
+          <!-- Hidden legacy inputs kept so renderManageQueueGeoFenceSettings
+               + existing handlers stay happy without null-safety churn.
+               The visible UI is now the toggle above + the Settings link. -->
+          <button type="button" id="manageQueueSetSalonLocationBtn" style="display:none;" aria-hidden="true"></button>
+          <input type="number" id="manageQueueGeoFenceRadius" style="display:none;" aria-hidden="true">
         </div>
       </div>
     </div>
@@ -4318,6 +4497,9 @@ async function initFirebaseAuth() {
           }
           if (typeof initManageQueueButtons === 'function') {
             setTimeout(function() { initManageQueueButtons(); }, 0);
+          }
+          if (typeof initSalonLocationCardHandlers === 'function') {
+            setTimeout(function() { initSalonLocationCardHandlers(); }, 0);
           }
           try {
             [1500, 3000].forEach(function(ms){
@@ -5586,6 +5768,42 @@ async function verifyQueueGeoFenceForAction({ action, staffId, staffName }) {
     return { allowed: false, reason: blockedReason, distanceMeters, allowedRadiusMeters, accuracy };
   }
 }
+
+/**
+ * Generic salon-location geofence verifier for non-Queue callers (Time Clock,
+ * and future features). Same backing data as the Queue fence, but skipped
+ * when `enforceTimeClock` (or other feature flag) is off. Returns
+ * { allowed: boolean, reason?, distanceMeters?, allowedRadiusMeters?, accuracy? }.
+ *
+ * Unlike verifyQueueGeoFenceForAction, this flavor is non-interactive: the
+ * caller is responsible for the UI (the Time Clock kiosk already has its
+ * own compact error line below the PIN pad).
+ */
+async function verifyTimeClockGeoFence() {
+  const geo = getQueueGeoFenceSettings();
+  if (!isTimeClockGeoFenceActive(geo)) return { allowed: true, skipped: true };
+  const allowedRadiusMeters = sanitizeQueueGeoFenceRadius(geo.allowedRadiusMeters);
+  const accuracyLimit = getQueueGeoFenceActionAccuracyLimitMeters();
+  let accuracy = null;
+  let distanceMeters = null;
+  try {
+    const position = await requestCurrentBrowserLocation();
+    accuracy = Math.round(Number(position.accuracy || 0));
+    if (accuracy > accuracyLimit) {
+      return { allowed: false, reason: 'low_accuracy', allowedRadiusMeters, accuracy };
+    }
+    distanceMeters = Math.round(
+      calculateHaversineDistanceMeters(position.lat, position.lng, geo.lat, geo.lng)
+    );
+    if (distanceMeters > allowedRadiusMeters) {
+      return { allowed: false, reason: 'outside_radius', allowedRadiusMeters, accuracy, distanceMeters };
+    }
+    return { allowed: true, allowedRadiusMeters, accuracy, distanceMeters };
+  } catch (_) {
+    return { allowed: false, reason: 'location_denied', allowedRadiusMeters, accuracy };
+  }
+}
+window.verifyTimeClockGeoFence = verifyTimeClockGeoFence;
 
 // Wrapper function for Tasks history logging
 function logTaskHistory(actionText, extra = {}) {
@@ -13418,7 +13636,13 @@ function saveQueueAutoResetSettings(autoReset) {
 
 function getDefaultQueueGeoFenceSettings() {
   return {
-    enabled: false,
+    // Legacy: "enabled" historically meant "enforce for Queue actions".
+    // New fields split that into per-feature toggles so the same geofence
+    // data can be reused for Time Clock (and future features) without
+    // forcing one feature's policy onto another.
+    enabled: false,           // legacy back-compat alias — kept in sync with enforceQueue
+    enforceQueue: false,      // require on-premises for queue join/leave
+    enforceTimeClock: false,  // require on-premises for Time Clock kiosk PIN
     lat: null,
     lng: null,
     accuracy: null,
@@ -13443,8 +13667,18 @@ function getQueueGeoFenceSettings() {
   const raw = queues?.[locKey]?.settings?.queueGeoFence;
   if (!raw || typeof raw !== 'object') return getDefaultQueueGeoFenceSettings();
   const defaults = getDefaultQueueGeoFenceSettings();
+  // Migration: documents written before per-feature toggles only have
+  // `enabled`. Treat that legacy value as "enforceQueue" (since it gated
+  // Queue actions historically) and leave Time Clock enforcement off.
+  const legacyEnabled = raw.enabled === true;
+  const enforceQueue = Object.prototype.hasOwnProperty.call(raw, 'enforceQueue')
+    ? raw.enforceQueue === true
+    : legacyEnabled;
+  const enforceTimeClock = raw.enforceTimeClock === true;
   return {
-    enabled: raw.enabled === true,
+    enabled: enforceQueue, // keep `enabled` in sync with enforceQueue for any legacy readers
+    enforceQueue,
+    enforceTimeClock,
     lat: Number.isFinite(Number(raw.lat)) ? Number(raw.lat) : defaults.lat,
     lng: Number.isFinite(Number(raw.lng)) ? Number(raw.lng) : defaults.lng,
     accuracy: Number.isFinite(Number(raw.accuracy)) ? Math.round(Number(raw.accuracy)) : defaults.accuracy,
@@ -13454,14 +13688,31 @@ function getQueueGeoFenceSettings() {
 }
 
 function saveQueueGeoFenceSettings(queueGeoFence) {
+  // Permission: Queue-manage OR (now) Salon-Location managers have always
+  // been Owner/Admin so the existing check is a safe superset. If we ever
+  // split ownership, swap this for a dedicated permission.
   if (!ffCurrentUserHasQueueManagePermission()) return;
   const queues = getQueuesData();
   const locKey = _ffQueueLocKey();
   if (!queues[locKey]) queues[locKey] = {};
   if (!queues[locKey].settings) queues[locKey].settings = {};
   const current = getQueueGeoFenceSettings();
+  // Resolve enforcement flags with priority:
+  //   explicit enforceQueue/enforceTimeClock on the input ->
+  //   legacy `enabled` on the input (treated as enforceQueue) ->
+  //   current stored values.
+  const hasEnforceQueueIn = queueGeoFence && Object.prototype.hasOwnProperty.call(queueGeoFence, 'enforceQueue');
+  const hasEnabledIn = queueGeoFence && Object.prototype.hasOwnProperty.call(queueGeoFence, 'enabled');
+  const enforceQueue = hasEnforceQueueIn
+    ? queueGeoFence.enforceQueue === true
+    : (hasEnabledIn ? queueGeoFence.enabled === true : current.enforceQueue === true);
+  const enforceTimeClock = queueGeoFence && Object.prototype.hasOwnProperty.call(queueGeoFence, 'enforceTimeClock')
+    ? queueGeoFence.enforceTimeClock === true
+    : current.enforceTimeClock === true;
   queues[locKey].settings.queueGeoFence = {
-    enabled: queueGeoFence?.enabled === true,
+    enabled: enforceQueue, // legacy alias kept in sync
+    enforceQueue,
+    enforceTimeClock,
     lat: Number.isFinite(Number(queueGeoFence?.lat)) ? Number(queueGeoFence.lat) : current.lat,
     lng: Number.isFinite(Number(queueGeoFence?.lng)) ? Number(queueGeoFence.lng) : current.lng,
     accuracy: Number.isFinite(Number(queueGeoFence?.accuracy)) ? Math.round(Number(queueGeoFence.accuracy)) : current.accuracy,
@@ -13475,10 +13726,40 @@ function hasSavedQueueGeoFenceLocation(queueGeoFence) {
   return Number.isFinite(Number(queueGeoFence?.lat)) && Number.isFinite(Number(queueGeoFence?.lng));
 }
 
+function getActiveSalonLocationScopeLabel() {
+  try {
+    const locId = typeof window.ffGetActiveLocationId === 'function'
+      ? String(window.ffGetActiveLocationId() || '').trim()
+      : (typeof window.__ff_active_location_id === 'string' ? window.__ff_active_location_id.trim() : '');
+    if (!locId) return 'Single-branch mode';
+    if (typeof window.ffGetActiveLocations === 'function') {
+      const locs = window.ffGetActiveLocations() || [];
+      const match = Array.isArray(locs)
+        ? locs.find((l) => String((l && l.id) || '').trim() === locId)
+        : null;
+      if (match && match.name) return `${String(match.name)} (${locId})`;
+    }
+    return locId;
+  } catch (_) {
+    return 'Active branch';
+  }
+}
+
 function isQueueGeoFenceActive(queueGeoFence) {
   const settings = queueGeoFence || getQueueGeoFenceSettings();
-  return settings.enabled === true && hasSavedQueueGeoFenceLocation(settings);
+  // enforceQueue is the new authoritative flag; `enabled` is its legacy
+  // alias kept in sync by the getter/setter above, so either read is safe.
+  return settings.enforceQueue === true && hasSavedQueueGeoFenceLocation(settings);
 }
+
+/** Time Clock mirror of isQueueGeoFenceActive — shares the same geofence
+ *  data (per-branch salon location) but a separate enforcement flag. */
+function isTimeClockGeoFenceActive(geoFence) {
+  const settings = geoFence || getQueueGeoFenceSettings();
+  return settings.enforceTimeClock === true && hasSavedQueueGeoFenceLocation(settings);
+}
+window.isTimeClockGeoFenceActive = isTimeClockGeoFenceActive;
+window.getSalonLocationGeoFence = getQueueGeoFenceSettings;
 
 function formatQueueGeoFenceUpdatedAt(updatedAt) {
   const ts = Number(updatedAt);
@@ -13495,7 +13776,7 @@ function renderManageQueueGeoFenceSettings() {
   const enabledEl = document.getElementById('manageQueueGeoFenceEnabled');
   const radiusEl = document.getElementById('manageQueueGeoFenceRadius');
   const statusEl = document.getElementById('manageQueueGeoFenceStatus');
-  if (enabledEl) enabledEl.checked = queueGeoFence.enabled === true;
+  if (enabledEl) enabledEl.checked = queueGeoFence.enforceQueue === true;
   if (radiusEl) radiusEl.value = String(sanitizeQueueGeoFenceRadius(queueGeoFence.allowedRadiusMeters));
   if (statusEl) {
     if (!hasSavedQueueGeoFenceLocation(queueGeoFence)) {
@@ -13509,7 +13790,116 @@ function renderManageQueueGeoFenceSettings() {
       statusEl.style.color = '#166534';
     }
   }
+  // Mirror into the Settings → Salon Location card whenever this is called,
+  // so the two surfaces never drift while both are visible during the
+  // deprecation window.
+  try { renderSalonLocationCard(); } catch (_) {}
 }
+
+function renderManageQueueAutoResetSettings() {
+  const enabledEl = document.getElementById('manageQueueAutoResetEnabled');
+  const optionsEl = document.getElementById('manageQueueAutoResetOptions');
+  const timeEl = document.getElementById('manageQueueAutoResetTime');
+  const forceEl = document.getElementById('manageQueueAutoResetForce');
+  const enabled = enabledEl && enabledEl.checked === true;
+  if (optionsEl) optionsEl.style.display = enabled ? 'flex' : 'none';
+  if (timeEl) timeEl.disabled = !enabled;
+  if (forceEl) forceEl.disabled = !enabled;
+}
+
+/**
+ * Settings → Salon Location card.
+ * Shares the same per-branch data as the (legacy) Queue settings card — see
+ * getQueueGeoFenceSettings / saveQueueGeoFenceSettings. The two surfaces
+ * stay in sync because all writers call renderManageQueueGeoFenceSettings /
+ * renderSalonLocationCard after mutating state.
+ */
+function renderSalonLocationCard() {
+  const geo = getQueueGeoFenceSettings();
+  const statusEl = document.getElementById('salonLocationStatus');
+  const scopeEl = document.getElementById('salonLocationBranchScope');
+  const radiusEl = document.getElementById('salonLocationRadius');
+  const enforceQEl = document.getElementById('salonLocationEnforceQueue');
+  const enforceTCEl = document.getElementById('salonLocationEnforceTimeClock');
+  if (radiusEl) radiusEl.value = String(sanitizeQueueGeoFenceRadius(geo.allowedRadiusMeters));
+  if (enforceQEl) enforceQEl.checked = geo.enforceQueue === true;
+  if (enforceTCEl) enforceTCEl.checked = geo.enforceTimeClock === true;
+  if (scopeEl) {
+    scopeEl.innerHTML = `<strong>Active branch:</strong> ${escapeHtml(getActiveSalonLocationScopeLabel())}. This GPS pin, radius, and enforcement toggles are saved only for this branch. Switch branch in the top bar before setting another salon location.`;
+  }
+  if (statusEl) {
+    if (!hasSavedQueueGeoFenceLocation(geo)) {
+      statusEl.textContent = 'No salon location set';
+      statusEl.style.color = '#6b7280';
+    } else {
+      const updatedLabel = formatQueueGeoFenceUpdatedAt(geo.updatedAt);
+      statusEl.textContent = updatedLabel
+        ? `Saved. Last updated: ${updatedLabel}`
+        : 'Saved';
+      statusEl.style.color = '#166534';
+    }
+  }
+}
+window.renderSalonLocationCard = renderSalonLocationCard;
+
+/**
+ * Wire the Settings → Salon Location card once. Idempotent — re-entry is a
+ * no-op via data-handler-attached sentinels (same pattern as
+ * initManageQueueButtons).
+ */
+function initSalonLocationCardHandlers() {
+  const setBtn = document.getElementById('salonLocationSetBtn');
+  const radiusEl = document.getElementById('salonLocationRadius');
+  const enforceQEl = document.getElementById('salonLocationEnforceQueue');
+  const enforceTCEl = document.getElementById('salonLocationEnforceTimeClock');
+
+  if (setBtn && !setBtn.hasAttribute('data-handler-attached')) {
+    setBtn.setAttribute('data-handler-attached', 'true');
+    setBtn.addEventListener('click', async function () {
+      // Reuse the Queue flow — it already handles accuracy retries,
+      // permission denial, and the "saved" confirmation modal. It writes
+      // to the same underlying doc and flips enforceQueue on (legacy
+      // behaviour) which is usually what the admin wants after pinning.
+      try { await handleSetQueueSalonLocation(); } catch (_) {}
+      renderSalonLocationCard();
+      if (typeof renderManageQueueGeoFenceSettings === 'function') renderManageQueueGeoFenceSettings();
+    });
+  }
+
+  if (radiusEl && !radiusEl.hasAttribute('data-handler-attached')) {
+    radiusEl.setAttribute('data-handler-attached', 'true');
+    radiusEl.addEventListener('change', function () {
+      const geo = getQueueGeoFenceSettings();
+      geo.allowedRadiusMeters = sanitizeQueueGeoFenceRadius(radiusEl.value);
+      radiusEl.value = String(geo.allowedRadiusMeters);
+      saveQueueGeoFenceSettings(geo);
+      renderSalonLocationCard();
+      if (typeof renderManageQueueGeoFenceSettings === 'function') renderManageQueueGeoFenceSettings();
+    });
+  }
+
+  if (enforceQEl && !enforceQEl.hasAttribute('data-handler-attached')) {
+    enforceQEl.setAttribute('data-handler-attached', 'true');
+    enforceQEl.addEventListener('change', function () {
+      const geo = getQueueGeoFenceSettings();
+      geo.enforceQueue = enforceQEl.checked === true;
+      saveQueueGeoFenceSettings(geo);
+      renderSalonLocationCard();
+      if (typeof renderManageQueueGeoFenceSettings === 'function') renderManageQueueGeoFenceSettings();
+    });
+  }
+
+  if (enforceTCEl && !enforceTCEl.hasAttribute('data-handler-attached')) {
+    enforceTCEl.setAttribute('data-handler-attached', 'true');
+    enforceTCEl.addEventListener('change', function () {
+      const geo = getQueueGeoFenceSettings();
+      geo.enforceTimeClock = enforceTCEl.checked === true;
+      saveQueueGeoFenceSettings(geo);
+      renderSalonLocationCard();
+    });
+  }
+}
+window.initSalonLocationCardHandlers = initSalonLocationCardHandlers;
 
 function openManageQueue() {
   if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
@@ -13537,6 +13927,7 @@ function openManageQueue() {
   if (enabledEl) enabledEl.checked = autoReset.enabled === true;
   if (timeEl) timeEl.value = autoReset.time || '04:00';
   if (forceEl) forceEl.checked = autoReset.resetWhileInService === true;
+  renderManageQueueAutoResetSettings();
   renderManageQueueGeoFenceSettings();
   
   // Show Manage Queue screen
@@ -13593,6 +13984,7 @@ function initManageQueueButtons() {
       const autoReset = getQueueAutoResetSettings();
       autoReset.enabled = enabledEl.checked === true;
       saveQueueAutoResetSettings(autoReset);
+      renderManageQueueAutoResetSettings();
     });
   }
   
@@ -13638,7 +14030,9 @@ function initManageQueueButtons() {
     geoFenceEnabledEl.setAttribute('data-handler-attached', 'true');
     geoFenceEnabledEl.addEventListener('change', function() {
       const queueGeoFence = getQueueGeoFenceSettings();
-      queueGeoFence.enabled = geoFenceEnabledEl.checked === true;
+      // Shortcut path (Queue settings). Writes the new per-feature flag
+      // directly — the setter keeps the legacy `enabled` alias in sync.
+      queueGeoFence.enforceQueue = geoFenceEnabledEl.checked === true;
       queueGeoFence.allowedRadiusMeters = sanitizeQueueGeoFenceRadius(
         geoFenceRadiusEl?.value || queueGeoFence.allowedRadiusMeters
       );
@@ -13655,6 +14049,21 @@ function initManageQueueButtons() {
       geoFenceRadiusEl.value = String(queueGeoFence.allowedRadiusMeters);
       saveQueueGeoFenceSettings(queueGeoFence);
       renderManageQueueGeoFenceSettings();
+    });
+  }
+
+  // "Open Salon Location settings" deep-link — opens the user profile modal
+  // and jumps straight to the new shared card (owner/admin only).
+  const openSalonBtn = document.getElementById('manageQueueOpenSalonLocationBtn');
+  if (openSalonBtn && !openSalonBtn.hasAttribute('data-handler-attached')) {
+    openSalonBtn.setAttribute('data-handler-attached', 'true');
+    openSalonBtn.addEventListener('click', function () {
+      if (typeof goToUserProfile === 'function') {
+        try { goToUserProfile('salon-location'); return; } catch (_) {}
+      }
+      // Fallback: click the menu item if the modal is already open.
+      const item = document.querySelector('.user-profile-menu-item[data-section="salon-location"]');
+      if (item) item.click();
     });
   }
 
@@ -13745,7 +14154,7 @@ function goToUserProfile(section) {
   const userProfileScreenExists = !!userProfileScreen;
   
   // Handle section parameter
-  const targetSection = section || 'password';
+  const targetSection = section || 'preferences';
   
   console.log('goToUserProfile START', {
     section: targetSection,
@@ -13923,6 +14332,9 @@ function goToUserProfile(section) {
   }
   if (typeof window.ffSyncUserProfileTimeClockSettingsMenuVisibility === 'function') {
     window.ffSyncUserProfileTimeClockSettingsMenuVisibility();
+  }
+  if (typeof window.ffSyncUserProfileSalonLocationMenuVisibility === 'function') {
+    window.ffSyncUserProfileSalonLocationMenuVisibility();
   }
 
   // Load avatar from localStorage when User Profile screen is shown
@@ -17879,6 +18291,11 @@ function initializeDefaultQueueView() {
         initManageQueueButtons();
       }, 0);
     }
+    if (typeof initSalonLocationCardHandlers === 'function') {
+      setTimeout(function() {
+        initSalonLocationCardHandlers();
+      }, 0);
+    }
   }
 }
 
@@ -18754,7 +19171,9 @@ function renderSettingsTaskList(tabKey) {
                   <button class="tasks-modal-draft-cancel-edit" data-task-id="${resolvedTaskId}" style="background:none;border:1px solid #e5e7eb;color:#374151;cursor:pointer;font-size:10px;font-weight:500;padding:6px 12px;border-radius:8px;flex-shrink:0;">Cancel</button>
                 </div>
                 <div style="display:flex;gap:6px;justify-content:flex-end;">
-                  <button class="tasks-modal-draft-force-delete" data-task-id="${resolvedTaskId}" data-task-id-value="${escapeHtmlDraft(displayId)}" data-task-taskid-value="${escapeHtmlDraft(displayTaskId)}" data-settings-tab="${tab}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:10px;padding:3px 6px;text-decoration:underline;">Force Delete</button>
+                  <button class="tasks-modal-draft-force-delete" data-task-id="${resolvedTaskId}" data-task-id-value="${escapeHtmlDraft(displayId)}" data-task-taskid-value="${escapeHtmlDraft(displayTaskId)}" data-settings-tab="${tab}" title="Force delete task" aria-label="Force delete task" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;background:#fff;border:1px solid #fecaca;color:#dc2626;cursor:pointer;border-radius:999px;padding:0;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                  </button>
                 </div>
               </div>
             </div>
@@ -18928,9 +19347,13 @@ function renderSettingsTaskList(tabKey) {
                 ${daysSelectorHtml}
                 ${monthlyDaySelectorHtml}
                 ${yearlyDateSelectorHtml}
-                <div style="display:flex;flex-direction:column;gap:4px;">
-                  <button class="tasks-modal-draft-edit" data-task-id="${resolvedTaskId}" style="background:none;border:none;color:#7c3aed;cursor:pointer;font-size:10px;font-weight:500;padding:3px 6px;border-radius:4px;text-decoration:underline;">Edit</button>
-                  <button class="tasks-modal-draft-remove" data-task-id="${resolvedTaskId}" data-is-orphan="${isOrphan ? 'true' : 'false'}" data-settings-tab="${tab}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:10px;font-weight:500;padding:3px 8px;border-radius:4px;text-decoration:underline;">DELETE</button>
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <button class="tasks-modal-draft-edit" data-task-id="${resolvedTaskId}" title="Edit task" aria-label="Edit task" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;background:#fff;border:1px solid #ede9fe;color:#7c3aed;cursor:pointer;border-radius:999px;padding:0;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+                  </button>
+                  <button class="tasks-modal-draft-remove" data-task-id="${resolvedTaskId}" data-is-orphan="${isOrphan ? 'true' : 'false'}" data-settings-tab="${tab}" title="Delete task" aria-label="Delete task" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;background:#fff;border:1px solid #fecaca;color:#dc2626;cursor:pointer;border-radius:999px;padding:0;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                  </button>
                 </div>
               </div>
           </div>
@@ -20657,12 +21080,16 @@ function setSettingsModalTab(tabName, options) {
     // Show/hide alert controls based on tab type
     const alertTimeControl = document.getElementById('tasksAlertTimeControl');
     const alertTimeInput = document.getElementById('tasksAlertTimeInput');
+    const alertTimeInputRow = document.getElementById('tasksAlertTimeInputRow');
     const alertWeekdayControl = document.getElementById('tasksAlertWeekdayControl');
     const alertWeekdayTimeInput = document.getElementById('tasksAlertWeekdayTimeInput');
+    const alertWeekdayTimeRow = document.getElementById('tasksAlertWeekdayTimeRow');
     const alertDayControl = document.getElementById('tasksAlertDayControl');
-    const alertDayInput = document.getElementById('tasksAlertDayInput');
+    const alertDayTimeInput = document.getElementById('tasksAlertDayTimeInput');
+    const alertDayTimeRow = document.getElementById('tasksAlertDayTimeRow');
     const alertYearlyControl = document.getElementById('tasksAlertYearlyControl');
     const alertYearlyTimeInput = document.getElementById('tasksAlertYearlyTimeInput');
+    const alertYearlyTimeRow = document.getElementById('tasksAlertYearlyTimeRow');
     
     // Cache Monthly Auto-Reset elements
     const tasksMonthlyAutoResetSection = document.getElementById('tasksMonthlyAutoResetSection');
@@ -20688,6 +21115,10 @@ function setSettingsModalTab(tabName, options) {
       if (row) {
         section.appendChild(row);
       }
+    };
+
+    const setRowVisible = (el, visible, display) => {
+      if (el) el.style.display = visible ? (display || 'flex') : 'none';
     };
     
     // Hide all controls first
@@ -20734,13 +21165,19 @@ function setSettingsModalTab(tabName, options) {
         const showOnHomeCheckbox = document.getElementById('tasksAlertTimeShowOnHomeCheckbox');
         if (showOnHomeCheckbox) {
           showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
+          setRowVisible(alertTimeInputRow, showOnHomeCheckbox.checked, 'block');
           showOnHomeCheckbox.onchange = function() {
             const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
             if (!alertWindows[tabName]) {
               alertWindows[tabName] = {};
             }
             alertWindows[tabName].showOnHome = showOnHomeCheckbox.checked;
+            if (showOnHomeCheckbox.checked && !alertTimeInput.value) {
+              alertTimeInput.value = tabName === 'opening' ? '09:00' : '18:00';
+              alertWindows[tabName].startTime = alertTimeInput.value;
+            }
             localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            setRowVisible(alertTimeInputRow, showOnHomeCheckbox.checked, 'block');
             
             // Update both badges
             if (typeof window.ffUpdateTasksTabBadges === 'function') {
@@ -21007,13 +21444,19 @@ function setSettingsModalTab(tabName, options) {
         const showOnHomeCheckbox = document.getElementById('tasksAlertWeekdayShowOnHomeCheckbox');
         if (showOnHomeCheckbox) {
           showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
+          setRowVisible(alertWeekdayTimeRow, showOnHomeCheckbox.checked, 'block');
           showOnHomeCheckbox.onchange = function() {
             const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
             if (!alertWindows[tabName]) {
               alertWindows[tabName] = {};
             }
             alertWindows[tabName].showOnHome = showOnHomeCheckbox.checked;
+            if (showOnHomeCheckbox.checked && !alertWeekdayTimeInput.value) {
+              alertWeekdayTimeInput.value = '09:00';
+              alertWindows[tabName].startTime = alertWeekdayTimeInput.value;
+            }
             localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            setRowVisible(alertWeekdayTimeRow, showOnHomeCheckbox.checked, 'block');
             
             // Update both badges
             if (typeof window.ffUpdateTasksTabBadges === 'function') {
@@ -21134,19 +21577,19 @@ function setSettingsModalTab(tabName, options) {
         autoResetSectionClosing.style.display = 'none';
       }
       
-      if (alertTimeControl && alertTimeInput) {
-        alertTimeControl.style.display = 'block';
+      if (alertDayControl && alertDayTimeInput) {
+        alertDayControl.style.display = 'block';
         const defaultTime = '09:00';
         // Migration: if old startDayOfMonth exists, ignore it and use startTime (or default)
-        alertTimeInput.value = tabConfig.startTime || defaultTime;
+        alertDayTimeInput.value = tabConfig.startTime || defaultTime;
         
         // Save on change
-        alertTimeInput.onchange = function() {
+        alertDayTimeInput.onchange = function() {
           const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
           if (!alertWindows[tabName]) {
             alertWindows[tabName] = {};
           }
-          const timeValue = alertTimeInput.value;
+          const timeValue = alertDayTimeInput.value;
           if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
             alertWindows[tabName].startTime = timeValue;
             // Remove old startDayOfMonth if it exists (migration cleanup)
@@ -21164,19 +21607,25 @@ function setSettingsModalTab(tabName, options) {
             }
           }
         };
-        alertTimeInput.oninput = alertTimeInput.onchange;
+        alertDayTimeInput.oninput = alertDayTimeInput.onchange;
         
         // Setup checkbox for showOnHome
         const showOnHomeCheckbox = document.getElementById('tasksAlertDayShowOnHomeCheckbox');
         if (showOnHomeCheckbox) {
           showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
+          setRowVisible(alertDayTimeRow, showOnHomeCheckbox.checked, 'block');
           showOnHomeCheckbox.onchange = function() {
             const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
             if (!alertWindows[tabName]) {
               alertWindows[tabName] = {};
             }
             alertWindows[tabName].showOnHome = showOnHomeCheckbox.checked;
+            if (showOnHomeCheckbox.checked && !alertDayTimeInput.value) {
+              alertDayTimeInput.value = '09:00';
+              alertWindows[tabName].startTime = alertDayTimeInput.value;
+            }
             localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            setRowVisible(alertDayTimeRow, showOnHomeCheckbox.checked, 'block');
             
             // Update both badges
             if (typeof window.ffUpdateTasksTabBadges === 'function') {
@@ -21355,13 +21804,19 @@ function setSettingsModalTab(tabName, options) {
         const showOnHomeCheckbox = document.getElementById('tasksAlertYearlyShowOnHomeCheckbox');
         if (showOnHomeCheckbox) {
           showOnHomeCheckbox.checked = tabConfig.showOnHome === true;
+          setRowVisible(alertYearlyTimeRow, showOnHomeCheckbox.checked, 'block');
           showOnHomeCheckbox.onchange = function() {
             const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
             if (!alertWindows[tabName]) {
               alertWindows[tabName] = {};
             }
             alertWindows[tabName].showOnHome = showOnHomeCheckbox.checked;
+            if (showOnHomeCheckbox.checked && !alertYearlyTimeInput.value) {
+              alertYearlyTimeInput.value = '09:00';
+              alertWindows[tabName].startTime = alertYearlyTimeInput.value;
+            }
             localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            setRowVisible(alertYearlyTimeRow, showOnHomeCheckbox.checked, 'block');
             
             // Update both badges
             if (typeof window.ffUpdateTasksTabBadges === 'function') {
@@ -25986,11 +26441,11 @@ function initializeNavigationButtons() {
                 
                 // Small delay to ensure dropdown is closed before navigation
                 setTimeout(() => {
-                  // Open existing settings view at Schedule tab
+                  // Open Settings on Preferences by default.
                   if (typeof goToUserProfile === 'function') {
-                    goToUserProfile('schedule');
+                    goToUserProfile('preferences');
                   } else if (typeof window.goToUserProfile === 'function') {
-                    window.goToUserProfile('schedule');
+                    window.goToUserProfile('preferences');
                   } else {
                     console.error('[Settings] goToUserProfile function not found');
                   }
@@ -26378,9 +26833,9 @@ function initializeAppsPanel() {
             break;
           case 'settings':
             if (typeof goToUserProfile === 'function') {
-              goToUserProfile('schedule');
+              goToUserProfile('preferences');
             } else if (typeof window.goToUserProfile === 'function') {
-              window.goToUserProfile('schedule');
+              window.goToUserProfile('preferences');
             }
             break;
           default:
@@ -28248,12 +28703,18 @@ function initializeAppsPanel() {
   }
   window.ffUpdateScheduleAppVisibility = ffUpdateScheduleAppVisibility;
   
-  // Render permission toggle row (optional options.disabled for parent-gated children)
+  // Render permission toggle row (optional options.disabled for parent-gated children).
+  // options.inverted=true means the toggle visually shows the OPPOSITE of the stored
+  // flag. Used by "Must be at the salon to …" rows that read queue_bypass_location /
+  // time_clock_bypass_location — the raw flag means "skip location check", but the
+  // user-facing toggle is "require location check", i.e. !stored.
   function renderPermissionToggleRow(permissionKey, label, description, value, options) {
     options = options || {};
     const disabled = options.disabled === true;
+    const inverted = options.inverted === true;
     const checked = value === true ? 'checked' : '';
     const disabledAttr = disabled ? ' disabled' : '';
+    const invertedAttr = inverted ? ' data-permission-inverted="true"' : '';
     const rowClass = 'staff-permission-row' + (disabled ? ' staff-permission-row--disabled' : '');
     const descBlock = String(description || '').trim()
       ? `<div class="staff-permission-label-desc">${escapeHtml(description)}</div>`
@@ -28261,7 +28722,7 @@ function initializeAppsPanel() {
     return `
       <div class="${rowClass}">
         <label class="staff-permission-toggle"${disabled ? ' style="cursor:not-allowed"' : ''}>
-          <input type="checkbox" data-permission-key="${escapeHtml(permissionKey)}" ${checked}${disabledAttr}>
+          <input type="checkbox" data-permission-key="${escapeHtml(permissionKey)}"${invertedAttr} ${checked}${disabledAttr}>
           <span class="staff-permission-toggle-slider"></span>
         </label>
         <div class="staff-permission-label">
@@ -28321,6 +28782,16 @@ function initializeAppsPanel() {
         parentKey: 'queue_view',
         parentMode: 'strictTrue',
         childKeys: ['queue_locked_view', 'queue_reorder', 'queue_reset', 'queue_manage']
+      },
+      {
+        // Time Clock parent rule: `time_clock_use` defaults ON (notFalse) so
+        // existing staff keep clock-in access. Only `time_clock_bypass_location`
+        // is a child — `time_clock_manage` is independent because a payroll
+        // manager may review time cards without clocking in themselves.
+        groupTitle: 'Time Clock',
+        parentKey: 'time_clock_use',
+        parentMode: 'notFalse',
+        childKeys: ['time_clock_bypass_location']
       },
       {
         groupTitle: 'Tickets',
@@ -28409,12 +28880,13 @@ function initializeAppsPanel() {
           {
             key: 'queue_join',
             label: 'Join queue',
-            desc: 'Allows joining with PIN where the app allows it: on a kiosk/wall browser, or a station with Join + Bypass location, or when View queue is on without Locked view. If Locked queue view is on, this phone cannot use the Join row here—use the salon join screen instead.'
+            desc: 'Allows joining with PIN where the app allows it: on a kiosk/wall browser, or a station with Join queue on and \u201CMust be at the salon to join the queue\u201D off, or when View queue is on without Locked view. If Locked queue view is on, this phone cannot use the Join row here\u2014use the salon join screen instead.'
           },
           {
             key: 'queue_bypass_location',
-            label: 'Bypass location for join',
-            desc: 'When salon location check is enabled, skip location for join. PIN still required. Requires Join queue on; View queue is not required.'
+            label: 'Must be at the salon to join the queue',
+            desc: 'On: this staff member\u2019s PIN only works to join the queue when the phone/tablet is physically at the salon (inside the allowed radius). Off: this PIN can be used to join the queue from anywhere. PIN is always required. Only has an effect when Settings \u2192 Preferences \u2192 Salon Location \u2192 Queue actions is on.',
+            inverted: true
           },
           { key: 'queue_reorder', label: 'Show Reorder', desc: 'Show the Reorder button on the Queue screen' },
           { key: 'queue_reset', label: 'Reset queue', desc: 'Reset/clear the queue' },
@@ -28532,19 +29004,6 @@ function initializeAppsPanel() {
         ]
       },
       {
-        title: 'Training',
-        permissions: [
-          {
-            key: 'training_view',
-            label: 'View Training (top bar)',
-            desc: 'Show the Training tab in the main navigation. Turn off to hide it completely.',
-            getValue: function (st) {
-              return (st.permissions || {}).training_view !== false;
-            }
-          }
-        ]
-      },
-      {
         title: 'Inventory',
         permissions: [
           {
@@ -28564,6 +29023,43 @@ function initializeAppsPanel() {
           { key: 'schedule_edit', label: 'Edit schedule', desc: 'Add shifts, mark days OFF, drag shifts, and change hours on the team schedule board.' },
           { key: 'schedule_view_all', label: 'View all schedules (read-only)', desc: 'See everyone’s shifts without editing. Use when “Edit schedule” is off.' },
           { key: 'schedule_view_own', label: 'View own schedule only', desc: 'See only your own row on the board (read-only). Narrowest access.' }
+        ]
+      },
+      {
+        title: 'Training',
+        permissions: [
+          {
+            key: 'training_view',
+            label: 'View Training (top bar)',
+            desc: 'Show the Training tab in the main navigation. Turn off to hide it completely.',
+            getValue: function (st) {
+              return (st.permissions || {}).training_view !== false;
+            }
+          }
+        ]
+      },
+      {
+        title: 'Time Clock',
+        permissions: [
+          {
+            key: 'time_clock_use',
+            label: 'Use Time Clock',
+            desc: 'Allow clocking in and out with this PIN on the Time Clock kiosk. When off, the PIN is rejected on the Time Clock screen (all other app features are unaffected). Default: on.',
+            getValue: function (st) {
+              return (st.permissions || {}).time_clock_use !== false;
+            }
+          },
+          {
+            key: 'time_clock_bypass_location',
+            label: 'Must be at the salon to clock in',
+            desc: 'On: this person can only clock in or out when the Time Clock device is physically at the salon (inside the allowed radius). Off: they can clock in and out from anywhere \u2014 useful for remote work or off-site events. PIN is always required. Only has an effect when Settings \u2192 Preferences \u2192 Salon Location \u2192 Time Clock kiosk is on.',
+            inverted: true
+          },
+          {
+            key: 'time_clock_manage',
+            label: 'Manage Time Cards',
+            desc: 'Access the Manage Time Cards screen — view, add, edit, and void time entries for all staff, plus the payroll Summary. Owner and Admin always have access; all other staff need this on. Independent of Use Time Clock — a payroll manager can manage time cards without clocking in themselves.'
+          }
         ]
       },
       {
@@ -28605,6 +29101,9 @@ function initializeAppsPanel() {
     const cards = permissionGroups.map(function(group) {
       const tabRule = ffPermRuleForGroupTitle(group.title);
       const rows = group.permissions.map(function(perm) {
+        // `value` reflects the RAW stored flag (non-inverted). All cascade
+        // guards below operate on this raw value. We flip to the displayed
+        // value only at the very end, if perm.inverted === true.
         var value = typeof perm.getValue === 'function' ? perm.getValue(staff) : permissions[perm.key] === true;
         var rowOpts = {};
         if (tabRule && tabRule.childKeys.indexOf(perm.key) !== -1) {
@@ -28619,16 +29118,32 @@ function initializeAppsPanel() {
             rowOpts.disabled = true;
           }
         }
+        // Time Clock bypass location is a child of time_clock_use (notFalse):
+        // the parent rule above already disables the child when parent is
+        // explicitly false. This guard also forces the rendered value to
+        // false when the parent is off, so the toggle never looks enabled
+        // while disabled.
+        if (group.title === 'Time Clock' && perm.key === 'time_clock_bypass_location') {
+          if (permissions.time_clock_use === false) {
+            value = false;
+            rowOpts.disabled = true;
+          }
+        }
+        // Flip to display value for inverted toggles ("Must be at salon …"
+        // rows). Stored flag meaning = "skip location check"; UI meaning =
+        // "require location check". They're opposites, so !value.
+        var displayValue = perm.inverted === true ? !value : value;
+        if (perm.inverted === true) rowOpts.inverted = true;
         // The salon owner has unconditional full access at runtime, but the
         // permissions document in Firestore may have empty/false fields for
         // legacy reasons. Force every toggle ON (and locked) so the UI
         // accurately reflects "full access" for the owner row — otherwise it
         // looks like the owner is restricted, which they are not.
         if (ownerRowLocked) {
-          value = true;
+          displayValue = true;
           rowOpts.disabled = true;
         }
-        return renderPermissionToggleRow(perm.key, perm.label, perm.desc, value, rowOpts);
+        return renderPermissionToggleRow(perm.key, perm.label, perm.desc, displayValue, rowOpts);
       });
       return renderPermissionCard(group.title, rows);
     });
@@ -28645,10 +29160,15 @@ function initializeAppsPanel() {
     permissionsContent.querySelectorAll('input[data-permission-key]').forEach(function(checkbox) {
       checkbox.onchange = function() {
         const permissionKey = checkbox.getAttribute('data-permission-key');
-        const newValue = checkbox.checked;
+        const isInverted = checkbox.getAttribute('data-permission-inverted') === 'true';
+        const uiChecked = checkbox.checked;
+        // For inverted toggles (e.g. "Must be at the salon …"), the stored
+        // flag is the OPPOSITE of what the checkbox shows. All downstream
+        // guards/cascades operate on the raw/stored semantics.
+        const newValue = isInverted ? !uiChecked : uiChecked;
 
         if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
-          checkbox.checked = !newValue;
+          checkbox.checked = !uiChecked;
           return;
         }
 
@@ -28666,6 +29186,14 @@ function initializeAppsPanel() {
         }
         const permsRef = staffStore.staff[staffIndex].permissions;
 
+        // When a guard blocks the change, we need to restore the checkbox
+        // to its previous visible state. For inverted toggles the stored
+        // default (false = "enforce location") shows as ON, so we can't
+        // blindly set checked=false. Helper computes the correct snap-back.
+        function __snapbackUiChecked(rawStored) {
+          return isInverted ? !(rawStored === true) : (rawStored === true);
+        }
+
         var childRuleForKey = null;
         for (var ri = 0; ri < ffPermissionTabParentRules.length; ri++) {
           if (ffPermissionTabParentRules[ri].childKeys.indexOf(permissionKey) !== -1) {
@@ -28674,12 +29202,17 @@ function initializeAppsPanel() {
           }
         }
         if (childRuleForKey && !ffPermRuleParentIsOn(childRuleForKey, permsRef)) {
-          checkbox.checked = false;
+          checkbox.checked = __snapbackUiChecked(permsRef[permissionKey]);
           return;
         }
 
         if (permissionKey === 'queue_bypass_location' && permsRef.queue_join !== true) {
-          checkbox.checked = false;
+          checkbox.checked = __snapbackUiChecked(permsRef[permissionKey]);
+          return;
+        }
+
+        if (permissionKey === 'time_clock_bypass_location' && permsRef.time_clock_use === false) {
+          checkbox.checked = __snapbackUiChecked(permsRef[permissionKey]);
           return;
         }
 
@@ -28698,6 +29231,10 @@ function initializeAppsPanel() {
 
         if (permissionKey === 'queue_join' && newValue === false) {
           permsRef.queue_bypass_location = false;
+        }
+
+        if (permissionKey === 'time_clock_use' && newValue === false) {
+          permsRef.time_clock_bypass_location = false;
         }
 
         permsRef[permissionKey] = newValue;
@@ -30192,6 +30729,11 @@ function initializeAppsPanel() {
       reset: false,
       manage: false
     },
+    timeClock: {
+      use: true,
+      bypassLocation: false,
+      manage: false
+    },
     tickets: {
       view: true,
       summary: true
@@ -30240,6 +30782,7 @@ function initializeAppsPanel() {
   /** Maps DEFAULT_PERMISSIONS_TECHNICIAN to flat keys used by Permissions tab / ff_staff_v1 (create-new-technician only). */
   function ffFlatPermissionsFromDefaultTechnician() {
     var d = structuredClone(DEFAULT_PERMISSIONS_TECHNICIAN);
+    var tc = d.timeClock || {};
     return {
       queue_view: d.queue.view,
       queue_join: d.queue.join,
@@ -30248,6 +30791,9 @@ function initializeAppsPanel() {
       queue_reorder: d.queue.reorder,
       queue_reset: d.queue.reset,
       queue_manage: d.queue.manage,
+      time_clock_use: tc.use !== false,
+      time_clock_bypass_location: tc.bypassLocation === true,
+      time_clock_manage: tc.manage === true,
       tickets_view: d.tickets.view,
       tickets_summary: d.tickets.summary,
       tickets_archived: false,
@@ -30291,6 +30837,11 @@ function initializeAppsPanel() {
       reorder: true,
       reset: true,
       manage: false
+    },
+    timeClock: {
+      use: true,
+      bypassLocation: false,
+      manage: true
     },
     tickets: {
       view: true,
@@ -30348,6 +30899,7 @@ function initializeAppsPanel() {
   function ffFlatPermissionsFromDefaultManager() {
     var d = structuredClone(DEFAULT_PERMISSIONS_MANAGER);
     var tr = d.training || {};
+    var tc = d.timeClock || {};
     var trainingTabOn =
       tr.view === true ||
       tr.create === true ||
@@ -30362,6 +30914,9 @@ function initializeAppsPanel() {
       queue_reorder: d.queue.reorder,
       queue_reset: d.queue.reset,
       queue_manage: d.queue.manage,
+      time_clock_use: tc.use !== false,
+      time_clock_bypass_location: tc.bypassLocation === true,
+      time_clock_manage: tc.manage === true,
       tickets_view: d.tickets.view,
       tickets_summary: d.tickets.summary,
       tickets_archived: false,
@@ -30408,6 +30963,11 @@ function initializeAppsPanel() {
       bypassLocation: false,
       reorder: true,
       reset: true,
+      manage: true
+    },
+    timeClock: {
+      use: true,
+      bypassLocation: false,
       manage: true
     },
     tickets: {
@@ -30484,6 +31044,7 @@ function initializeAppsPanel() {
   function ffFlatPermissionsFromDefaultAdmin() {
     var d = structuredClone(DEFAULT_PERMISSIONS_ADMIN);
     var tr = d.training || {};
+    var tc = d.timeClock || {};
     var trainingTabOn =
       tr.view === true ||
       tr.create === true ||
@@ -30516,6 +31077,9 @@ function initializeAppsPanel() {
       queue_reorder: d.queue.reorder,
       queue_reset: d.queue.reset,
       queue_manage: d.queue.manage,
+      time_clock_use: tc.use !== false,
+      time_clock_bypass_location: tc.bypassLocation === true,
+      time_clock_manage: tc.manage === true,
       tickets_view: d.tickets.view,
       tickets_summary: d.tickets.summary,
       tickets_archived: d.tickets.archived === true,
@@ -32568,6 +33132,13 @@ function initializeUserProfileMenu() {
   window.ffSyncUserProfileTimeClockSettingsMenuVisibility = ffSyncUserProfileTimeClockSettingsMenuVisibility;
   ffSyncUserProfileTimeClockSettingsMenuVisibility();
 
+  // Salon Location (shared geofence) now lives as a subsection inside the
+  // Preferences card, so there is no dedicated menu button to toggle. This
+  // stub is kept for backward compatibility with any call-sites that still
+  // invoke the global (e.g. during openUserProfile).
+  function ffSyncUserProfileSalonLocationMenuVisibility() { /* no-op */ }
+  window.ffSyncUserProfileSalonLocationMenuVisibility = ffSyncUserProfileSalonLocationMenuVisibility;
+
   // Time Clock (staff clock-in/out) — visible to ANY user linked to a staff
   // profile. That is the signal for "this account represents a worker";
   // owner-only accounts without a staff profile don't need a clock button.
@@ -32639,8 +33210,25 @@ function initializeUserProfileMenu() {
       const weeklyOtEl = card.querySelector('#tcWeeklyOvertimeThreshold');
       const dailyOtEl = card.querySelector('#tcDailyOvertimeThreshold');
       const multEl = card.querySelector('#tcOvertimeMultiplier');
-      const workweekRadios = card.querySelectorAll('input[name="tcWorkweekStart"]');
+      const workweekMirrorEl = card.querySelector('#tcWorkweekStartMirror');
       if (!toggle || !pill || !knob || !fields) return;
+
+      // Single source of truth for "week starts on" lives in the salon
+      // Preferences doc (window.settings.preferences.weekStartsOn). The TC
+      // card only mirrors it here so owners don't have to set it twice.
+      const getEffectiveWorkweek = function () {
+        try {
+          const v = (window.settings && window.settings.preferences && window.settings.preferences.weekStartsOn) || '';
+          if (v === 'sunday' || v === 'monday') return v;
+        } catch (_) {}
+        return FF_TC_UI_DEFAULTS.workweekStartDay;
+      };
+      const renderWorkweekMirror = function () {
+        if (!workweekMirrorEl) return;
+        const wk = getEffectiveWorkweek();
+        workweekMirrorEl.textContent = wk === 'sunday' ? 'Sunday' : 'Monday';
+      };
+      renderWorkweekMirror();
 
       const applyOvertimeVisibility = function () {
         const on = !!toggle.checked;
@@ -32683,9 +33271,10 @@ function initializeUserProfileMenu() {
       // overtime fields are read as-is (by design: their values persist
       // when overtime is off).
       const readCurrentSettings = function () {
-        let workweek = FF_TC_UI_DEFAULTS.workweekStartDay;
-        workweekRadios.forEach(function (r) { if (r.checked) workweek = r.value; });
-        if (workweek !== 'sunday' && workweek !== 'monday') workweek = FF_TC_UI_DEFAULTS.workweekStartDay;
+        // Always mirror the live Preferences value. The Firestore TC doc
+        // keeps a copy so downstream readers (payroll engine, history
+        // filters) don't need to reach into preferences themselves.
+        const workweek = getEffectiveWorkweek();
         return {
           workweekStartDay: workweek,
           standardHours: {
@@ -32703,7 +33292,8 @@ function initializeUserProfileMenu() {
 
       const hydrateUI = function (s) {
         if (!s || typeof s !== 'object') return;
-        workweekRadios.forEach(function (r) { r.checked = (r.value === s.workweekStartDay); });
+        // Week start is read-only here and always reflects Preferences.
+        renderWorkweekMirror();
         if (weeklyStdEl) weeklyStdEl.value = (s.standardHours && s.standardHours.weekly) ?? FF_TC_UI_DEFAULTS.standardHours.weekly;
         if (dailyStdEl)  dailyStdEl.value  = (s.standardHours && s.standardHours.daily)  ?? FF_TC_UI_DEFAULTS.standardHours.daily;
         toggle.checked = !!(s.overtime && s.overtime.enabled);
@@ -32866,6 +33456,27 @@ function initializeUserProfileMenu() {
     try { return window.ff_is_admin_cached === true; } catch (_) { return false; }
   }
 
+  /**
+   * Can the signed-in user open the Manage Time Cards screen?
+   * Accepts: owner bypass, admin cache, or current ff_staff_v1 row having
+   * permissions.time_clock_manage === true. This decouples payroll-manager
+   * access from the legacy admin flag so the "who can manage timecards"
+   * Permissions toggle is authoritative.
+   */
+  function _ffTCCurrentUserCanManage() {
+    if (_ffTCCurrentUserIsAdmin()) return true;
+    try {
+      if (typeof window.ffCurrentUserSalonOwnerPermissionBypass === 'function'
+          && window.ffCurrentUserSalonOwnerPermissionBypass() === true) return true;
+    } catch (_) {}
+    try {
+      const row = typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+        ? window.ffResolveCurrentStaffRowFromFfStaffV1()
+        : null;
+      return !!(row && row.permissions && row.permissions.time_clock_manage === true);
+    } catch (_) { return false; }
+  }
+
   function _ffTCDefaultLocationId() {
     const st = window.__ffTCState;
     if (st && st.selectedLocationId) return String(st.selectedLocationId);
@@ -32890,6 +33501,22 @@ function initializeUserProfileMenu() {
       }
     } catch (_) {}
     return [];
+  }
+
+  function _ffTCLocationName(locationId) {
+    const id = String(locationId || '').trim();
+    if (!id) return 'another location';
+    try {
+      const map = typeof window.ffLocationsById === 'function' ? window.ffLocationsById() : {};
+      const l = map && map[id];
+      if (l && l.name) return String(l.name);
+    } catch (_) {}
+    try {
+      const locs = _ffTCActiveLocations();
+      const match = locs.find((l) => String(l && l.id || '') === id);
+      if (match && match.name) return String(match.name);
+    } catch (_) {}
+    return id;
   }
 
   function _ffTCStaffList() {
@@ -32965,10 +33592,12 @@ function initializeUserProfileMenu() {
     if (!el) return;
     if (wide) {
       el.style.maxWidth = 'none';
+      el.style.overflowY = 'auto';
       el.style.padding = '16px 24px 24px';
     } else {
       el.style.maxWidth = '520px';
-      el.style.padding = '20px 16px 28px';
+      el.style.overflowY = 'hidden';
+      el.style.padding = '8px 16px 12px';
     }
   }
 
@@ -32982,28 +33611,28 @@ function initializeUserProfileMenu() {
     _ffTCSetWideLayout(false);
     const locs = _ffTCActiveLocations();
     const defLoc = _ffTCDefaultLocationId();
-    const showManage = _ffTCCurrentUserIsAdmin();
+    const showManage = _ffTCCurrentUserCanManage();
 
     const keyBtn = (label, val, kind) => `
       <button type="button" class="tc-key" data-key="${_ffTCEscape(val)}" data-kind="${kind || 'num'}"
-        style="height:58px;border-radius:14px;border:1px solid ${kind === 'enter' ? '#4c1d95' : '#e5e7eb'};background:${kind === 'enter' ? 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)' : '#fff'};color:${kind === 'enter' ? '#fff' : '#111827'};font-size:${kind === 'num' ? '20px' : '14px'};font-weight:${kind === 'num' ? '600' : '700'};letter-spacing:${kind === 'enter' ? '0.04em' : '0'};cursor:pointer;transition:all 0.1s ease;box-shadow:${kind === 'enter' ? '0 4px 12px rgba(123,63,228,0.35)' : '0 1px 2px rgba(0,0,0,0.04)'};user-select:none;">${label}</button>
+        style="height:46px;border-radius:12px;border:1px solid ${kind === 'enter' ? '#4c1d95' : '#e5e7eb'};background:${kind === 'enter' ? 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)' : '#fff'};color:${kind === 'enter' ? '#fff' : '#111827'};font-size:${kind === 'num' ? '18px' : '13px'};font-weight:${kind === 'num' ? '600' : '700'};letter-spacing:${kind === 'enter' ? '0.04em' : '0'};cursor:pointer;transition:all 0.1s ease;box-shadow:${kind === 'enter' ? '0 4px 12px rgba(123,63,228,0.35)' : '0 1px 2px rgba(0,0,0,0.04)'};user-select:none;">${label}</button>
     `;
 
     container.innerHTML = `
-      <div style="display:flex;flex-direction:column;align-items:center;gap:18px;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
         <!-- Live clock + date -->
-        <div style="text-align:center;margin-top:4px;">
-          <div id="tcKioskClockTime" style="font-size:40px;font-weight:800;color:#111827;letter-spacing:-0.02em;font-variant-numeric:tabular-nums;line-height:1;">&nbsp;</div>
-          <div id="tcKioskClockDate" style="margin-top:6px;font-size:12px;color:#6b7280;font-weight:500;letter-spacing:0.02em;text-transform:uppercase;">&nbsp;</div>
+        <div style="text-align:center;margin-top:0;">
+          <div id="tcKioskClockTime" style="font-size:34px;font-weight:800;color:#111827;letter-spacing:-0.02em;font-variant-numeric:tabular-nums;line-height:1;">&nbsp;</div>
+          <div id="tcKioskClockDate" style="margin-top:4px;font-size:11px;color:#6b7280;font-weight:500;letter-spacing:0.02em;text-transform:uppercase;">&nbsp;</div>
         </div>
 
         <!-- Card -->
-        <div style="background:#fff;border:1px solid rgba(229,231,235,0.9);border-radius:22px;box-shadow:0 10px 32px -12px rgba(123,63,228,0.15), 0 2px 6px rgba(0,0,0,0.04);padding:22px 22px 24px;width:100%;max-width:420px;box-sizing:border-box;position:relative;">
+        <div style="background:#fff;border:1px solid rgba(229,231,235,0.9);border-radius:20px;box-shadow:0 10px 32px -12px rgba(123,63,228,0.15), 0 2px 6px rgba(0,0,0,0.04);padding:16px 18px 14px;width:100%;max-width:420px;box-sizing:border-box;position:relative;">
           <!-- Location picker (unified: works for 1-to-many locations) -->
           <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Location</div>
-          <div style="position:relative;margin-bottom:22px;">
+          <div style="position:relative;margin-bottom:14px;">
             <button id="tcKioskLocBtn" type="button"
-              style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;border-radius:12px;border:1px solid #e5e7eb;background:#f9fafb;color:#111827;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s ease;">
+              style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-radius:12px;border:1px solid #e5e7eb;background:#f9fafb;color:#111827;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s ease;">
               <span style="display:inline-flex;align-items:center;gap:8px;min-width:0;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7b3fe4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
                 <span id="tcKioskLocName" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">&nbsp;</span>
@@ -33024,17 +33653,17 @@ function initializeUserProfileMenu() {
 
           <!-- PIN dots -->
           <div style="text-align:center;margin-bottom:6px;font-size:11px;color:#9ca3af;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;">Enter your PIN</div>
-          <div id="tcKioskDots" style="display:flex;justify-content:center;gap:14px;margin:10px 0 18px;" aria-live="polite"></div>
+          <div id="tcKioskDots" style="display:flex;justify-content:center;gap:14px;margin:8px 0 12px;" aria-live="polite"></div>
 
           <!-- Keypad -->
-          <div id="tcKioskPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+          <div id="tcKioskPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
             ${keyBtn('1','1','num')}${keyBtn('2','2','num')}${keyBtn('3','3','num')}
             ${keyBtn('4','4','num')}${keyBtn('5','5','num')}${keyBtn('6','6','num')}
             ${keyBtn('7','7','num')}${keyBtn('8','8','num')}${keyBtn('9','9','num')}
             ${keyBtn('Clear','clear','clear')}${keyBtn('0','0','num')}${keyBtn('Enter','enter','enter')}
           </div>
 
-          <div id="tcKioskError" style="min-height:16px;margin-top:10px;font-size:12px;color:#b91c1c;text-align:center;"></div>
+          <div id="tcKioskError" style="height:30px;margin-top:8px;font-size:11px;line-height:1.25;color:#b91c1c;text-align:center;overflow:hidden;"></div>
         </div>
 
         ${showManage ? `
@@ -33239,13 +33868,60 @@ function initializeUserProfileMenu() {
       if (errEl) errEl.textContent = 'Invalid PIN. Please try again.';
       return;
     }
-    // Soft-check location assignment — warn but don't block, so a staff
-    // member can still clock in at a covering shift at another branch.
+
+    // Owner row is always allowed — unconditional full access at runtime.
+    let isOwnerRow = false;
+    try {
+      isOwnerRow = typeof window.ffStaffRowIsSalonOwner === 'function'
+        && window.ffStaffRowIsSalonOwner(staff) === true;
+    } catch (_) {}
+    const staffPerms = (staff && staff.permissions && typeof staff.permissions === 'object')
+      ? staff.permissions
+      : {};
+
+    // Time Clock access permission: when explicitly disabled, reject the
+    // PIN at the kiosk. Undefined → treat as allowed (back-compat for all
+    // existing staff profiles predating this permission).
+    if (!isOwnerRow && staffPerms.time_clock_use === false) {
+      if (errEl) errEl.textContent = 'Time Clock access is disabled for this staff member.';
+      return;
+    }
+
+    // Location gate: when this staff row restricts to specific locations
+    // (allowedLocationIds), the kiosk's selected location must be one of
+    // them — unless they explicitly have time_clock_bypass_location.
+    // Owner row always bypasses. Matches the Queue bypass-for-join pattern.
     const allowed = Array.isArray(staff.allowedLocationIds)
       ? staff.allowedLocationIds.map((x) => String(x))
       : [];
-    if (allowed.length && !allowed.includes(String(locationId))) {
-      // Not an error — just remembered; store clock-in at this location regardless.
+    const mayBypassLoc = isOwnerRow || staffPerms.time_clock_bypass_location === true;
+    if (!mayBypassLoc && allowed.length && !allowed.includes(String(locationId))) {
+      if (errEl) errEl.textContent = 'You are not assigned to this location. Ask a manager to enable location bypass.';
+      return;
+    }
+
+    // Salon-location geofence gate. Separate from allowedLocationIds — this
+    // is a real GPS fence (set in Settings → Salon Location). Only enforced
+    // when the admin has turned on "Enforce in Time Clock kiosk" and the
+    // staff row does not have time_clock_bypass_location.
+    if (!mayBypassLoc && typeof window.verifyTimeClockGeoFence === 'function') {
+      try {
+        const fence = await window.verifyTimeClockGeoFence();
+        if (fence && fence.allowed === false) {
+          let msg = 'You must be at the salon to clock in.';
+          if (fence.reason === 'low_accuracy') {
+            msg = `Location is not accurate enough${fence.accuracy != null ? ` (${fence.accuracy}m)` : ''}. Please try again near the entrance.`;
+          } else if (fence.reason === 'location_denied') {
+            msg = 'Location access is required. Allow location in your browser and try again.';
+          } else if (fence.reason === 'outside_radius') {
+            msg = `You must be at the salon to clock in${fence.distanceMeters != null ? ` (you are ~${fence.distanceMeters}m away).` : '.'}`;
+          }
+          if (errEl) errEl.textContent = msg;
+          return;
+        }
+      } catch (e) {
+        console.warn('[Time Clock] geofence check failed', e);
+      }
     }
     // Look up their current open entry (if any) to decide Clock In vs Out.
     let openEntry = null;
@@ -33256,6 +33932,21 @@ function initializeUserProfileMenu() {
     } catch (e) {
       console.warn('[Time Clock] open entry lookup failed', e);
     }
+
+    // One staff member can only have one open shift across the whole salon.
+    // If they are already clocked in at a different branch, do not let the
+    // selected branch create another open card. They must clock out from the
+    // original branch first, then clock in again at the new branch.
+    if (openEntry && String(openEntry.locationId || '') !== String(locationId || '')) {
+      const openLocName = _ffTCLocationName(openEntry.locationId);
+      const selectedLocName = _ffTCLocationName(locationId);
+      const since = _ffTCFormatTime(openEntry.clockInAt);
+      if (errEl) {
+        errEl.textContent = `${staff.name || 'This staff member'} is already clocked in at ${openLocName}${since && since !== '—' ? ` since ${since}` : ''}. Clock out there before clocking in at ${selectedLocName}.`;
+      }
+      return;
+    }
+
     window.__ffTCState.selectedLocationId = locationId;
     window.__ffTCState.confirmStaff = { id: staff.id, name: staff.name || 'Staff', pin: null };
     window.__ffTCState.confirmOpenEntry = openEntry || null;
@@ -33374,7 +34065,13 @@ function initializeUserProfileMenu() {
   function _ffTCComputePeriodRange(period, customFrom, customTo) {
     const now = new Date();
     const startOfDay = (d) => { const c = new Date(d); c.setHours(0,0,0,0); return c; };
-    const wwStart = (window.__ffTCCachedSettings && window.__ffTCCachedSettings.workweekStartDay) || 'monday';
+    // Prefer the live salon Preferences value (single source of truth for
+    // week start across the app). Fall back to the cached TC doc for
+    // backwards compatibility if preferences haven't loaded yet.
+    const wwPrefRaw = (window.settings && window.settings.preferences && window.settings.preferences.weekStartsOn) || '';
+    const wwStart = (wwPrefRaw === 'sunday' || wwPrefRaw === 'monday')
+      ? wwPrefRaw
+      : ((window.__ffTCCachedSettings && window.__ffTCCachedSettings.workweekStartDay) || 'monday');
     const startOfWorkweek = (d) => {
       const c = startOfDay(d);
       const day = c.getDay(); // 0=Sun ... 6=Sat
@@ -33462,7 +34159,14 @@ function initializeUserProfileMenu() {
   function _ffTCComputeSummaryRows(rows, tcSettings, staffById) {
     const settings = tcSettings || {};
     const otMultiplier = (settings.overtime && Number(settings.overtime.multiplier)) || 1.5;
-    const wwStart = settings.workweekStartDay === 'sunday' ? 0 : 1;
+    // Single source of truth: salon Preferences → weekStartsOn. Fall back
+    // to the TC settings copy if preferences aren't available (e.g. older
+    // callers that pass only a tcSettings snapshot).
+    const wwPrefRawLocal = (window.settings && window.settings.preferences && window.settings.preferences.weekStartsOn) || '';
+    const wwStartKey = (wwPrefRawLocal === 'sunday' || wwPrefRawLocal === 'monday')
+      ? wwPrefRawLocal
+      : settings.workweekStartDay;
+    const wwStart = wwStartKey === 'sunday' ? 0 : 1;
     const startOfDay = (d) => { const c = new Date(d); c.setHours(0,0,0,0); return c; };
     const wwStartOf = (d) => {
       const c = startOfDay(d);
@@ -33543,8 +34247,10 @@ function initializeUserProfileMenu() {
   // soft shadows, and generous top spacing so nothing is pinned against
   // the app header.
   function _ffTCRenderManageView(container) {
-    if (!_ffTCCurrentUserIsAdmin()) {
-      // Defense in depth: bounce non-admins back to kiosk.
+    if (!_ffTCCurrentUserCanManage()) {
+      // Defense in depth: bounce unauthorized users back to kiosk. Admins,
+      // salon owners, and anyone with permissions.time_clock_manage === true
+      // are allowed through; everyone else lands back on the PIN pad.
       window.__ffTCState.view = 'clock';
       ffInitTimeClockUI();
       return;
@@ -34589,10 +35295,98 @@ function initializeUserProfileMenu() {
     }
   }
 
+  function ffShowPreferencesSubtab(tab) {
+    const card = document.getElementById('userProfileCardPreferences');
+    if (!card) return;
+    const desired = tab || card.getAttribute('data-active-pref-tab') || 'salon-location';
+    const valid = ['salon-location', 'business-format', 'messages', 'staff-setup', 'media-categories'].indexOf(desired) >= 0
+      ? desired
+      : 'salon-location';
+    card.setAttribute('data-active-pref-tab', valid);
+    card.querySelectorAll('.ff-pref-tab').forEach(function (btn) {
+      const isActive = btn.getAttribute('data-pref-tab') === valid;
+      btn.classList.toggle('is-active', isActive);
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    card.querySelectorAll('.ff-pref-pane').forEach(function (pane) {
+      pane.classList.toggle('is-active', pane.getAttribute('data-pref-pane') === valid);
+    });
+    ffRenderPreferencesSubtabContent(valid);
+  }
+  window.ffShowPreferencesSubtab = ffShowPreferencesSubtab;
+
+  function ffRenderPreferenceMediaCategories() {
+    if (typeof window.renderMediaCategoriesSettings === 'function') window.renderMediaCategoriesSettings();
+    if (typeof window.initMediaCategoriesSettingsListeners === 'function') window.initMediaCategoriesSettingsListeners();
+    window.__addMediaCatXButtons = function() {
+      var listEl = document.getElementById('userProfileMediaCategoriesList');
+      if (!listEl) return;
+      var ch = listEl.children;
+      for (var i = 0; i < ch.length; i++) {
+        var row = ch[i];
+        var catId = row.getAttribute('data-category-id');
+        if (!catId || row.querySelector('.mcd-xbtn')) continue;
+        var xb = document.createElement('button');
+        xb.type = 'button';
+        xb.className = 'mcd-xbtn';
+        xb.innerHTML = '&times;';
+        xb.title = 'Remove';
+        xb.style.cssText = 'padding:0 6px;border:1px solid #fecaca;border-radius:4px;background:#fff;color:#b91c1c;cursor:pointer;font-size:14px;font-weight:600;line-height:1.4;flex-shrink:0;';
+        (function(rowRef, id) {
+          xb.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var cat = Array.isArray(settings.mediaCategories) ? settings.mediaCategories.find(function(x){ return x.id === id; }) : null;
+            showDeleteConfirm(cat ? cat.name : 'category').then(function(confirmed) {
+              if (!confirmed) return;
+              settings.mediaCategories = settings.mediaCategories.filter(function(x){ return x.id !== id; });
+              ffPersistMediaCategoriesFromProfile();
+              if (typeof window.renderMediaCategoriesSettings === 'function') window.renderMediaCategoriesSettings();
+              setTimeout(window.__addMediaCatXButtons, 50);
+            });
+          });
+        })(row, catId);
+        row.appendChild(xb);
+      }
+    };
+    window.__addMediaCatXButtons();
+  }
+
+  function ffRenderPreferencesSubtabContent(tab) {
+    if (tab === 'salon-location' && typeof renderSalonLocationCard === 'function') {
+      renderSalonLocationCard();
+    }
+    if (tab === 'messages' && typeof renderUserProfileStaffCallMessageSettings === 'function') {
+      renderUserProfileStaffCallMessageSettings();
+    }
+    if (tab === 'staff-setup' && typeof renderUserProfileTechnicianTypes === 'function') {
+      renderUserProfileTechnicianTypes();
+    }
+    if (tab === 'media-categories') {
+      ffRenderPreferenceMediaCategories();
+    }
+  }
+
   // Menu item click handler
   function handleMenuClick(section) {
     // Expose for external use
     window.__ff_handleMenuClick = handleMenuClick;
+    // Salon Location is now a subsection inside Preferences. Remap the legacy
+    // alias FIRST so the owner-only gate below still applies correctly — we
+    // never want a non-owner to reach Preferences via the salon-location
+    // deep-link.
+    let __prefSubtab = null;
+    if (section === 'salon-location') {
+      section = 'preferences';
+      __prefSubtab = 'salon-location';
+    }
+    if (section === 'technician-types') {
+      section = 'preferences';
+      __prefSubtab = 'staff-setup';
+    }
+    if (section === 'media-categories') {
+      section = 'preferences';
+      __prefSubtab = 'media-categories';
+    }
     // Double-gate owner-only sections (defense in depth). If someone forces
     // a section via window.__ff_handleMenuClick or a stale deep-link, we
     // bounce them to a safe tab. Visibility sync above already hides the
@@ -34600,6 +35394,7 @@ function initializeUserProfileMenu() {
     const ownerOnlySections = ['billing', 'locations', 'schedule', 'preferences'];
     if (ownerOnlySections.indexOf(section) !== -1 && !ffIsCurrentUserOwnerForSettings()) {
       section = 'password';
+      __prefSubtab = null;
     }
     // Time Clock Settings — owner OR admin only (broader than the other
     // owner-only sections). Hidden for managers / staff even via deep link.
@@ -34623,8 +35418,6 @@ function initializeUserProfileMenu() {
     // Map section names to card IDs
     const sectionToCardId = {
       'password': 'userProfileCardPassword',
-      'technician-types': 'userProfileCardTechnicianTypes',
-      'media-categories': 'userProfileCardMediaCategories',
       'notifications': 'userProfileCardNotifications',
       'preferences': 'userProfileCardPreferences',
       'schedule': 'userProfileCardSchedule',
@@ -34646,6 +35439,14 @@ function initializeUserProfileMenu() {
       // Render technician types if it's the selected section
       if (section === 'technician-types' && typeof renderUserProfileTechnicianTypes === 'function') {
         renderUserProfileTechnicianTypes();
+      }
+
+      // Render the Salon Location subsection (shared geofence) whenever the
+      // Preferences card is opened. The legacy 'salon-location' alias now
+      // opens Preferences directly on its Salon Location inner tab.
+      if (section === 'preferences' && typeof renderSalonLocationCard === 'function') {
+        ffShowPreferencesSubtab(__prefSubtab || undefined);
+        renderSalonLocationCard();
       }
       // Render media categories if it's the selected section
       if (section === 'media-categories') {
@@ -34719,6 +35520,14 @@ function initializeUserProfileMenu() {
         handleMenuClick(item.dataset.section);
       });
     }
+  });
+
+  document.querySelectorAll('#userProfileCardPreferences .ff-pref-tab').forEach(function (btn) {
+    if (btn.__ffBound) return;
+    btn.__ffBound = true;
+    btn.addEventListener('click', function () {
+      ffShowPreferencesSubtab(btn.getAttribute('data-pref-tab') || 'salon-location');
+    });
   });
   
   // Set default active menu item (Password) only if not already set
@@ -34896,6 +35705,22 @@ function initializeUserProfileMenu() {
     });
   }
 
+  // Salon Location is a per-branch setting. If the owner switches branches
+  // while Settings → Preferences is open, refresh the label + controls so
+  // they always see the active branch's saved GPS/radius/toggles.
+  if (typeof document !== 'undefined' && !document.__ffSalonLocationPrefsLocRefreshBound) {
+    document.__ffSalonLocationPrefsLocRefreshBound = true;
+    document.addEventListener('ff-active-location-changed', () => {
+      try {
+        const card = document.getElementById('userProfileCardPreferences');
+        if (!card || card.style.display === 'none') return;
+        if (typeof renderSalonLocationCard === 'function') renderSalonLocationCard();
+      } catch (e) {
+        console.warn('[Salon Location] refresh on location change failed', e);
+      }
+    });
+  }
+
   const ffTestBirthdayInboxBtn = document.getElementById('ffTestBirthdayInboxBtn');
   if (ffTestBirthdayInboxBtn && !ffTestBirthdayInboxBtn.__ffBound) {
     ffTestBirthdayInboxBtn.__ffBound = true;
@@ -35020,6 +35845,17 @@ function initializeUserProfileMenu() {
       window.settings = settings;
       try {
         sessionStorage.removeItem('ff_birthday_today_parts_v1');
+      } catch (_) {}
+      // Keep the Time Clock cache and its read-only mirror in sync — the
+      // Workweek start there reflects this preference.
+      try {
+        if (window.__ffTCCachedSettings) {
+          window.__ffTCCachedSettings.workweekStartDay = nextWeekStartsOn;
+        }
+        const tcMirror = document.getElementById('tcWorkweekStartMirror');
+        if (tcMirror) {
+          tcMirror.textContent = nextWeekStartsOn === 'sunday' ? 'Sunday' : 'Monday';
+        }
       } catch (_) {}
     } catch (_) {}
     if (typeof renderStaffDetails === 'function') {
@@ -43162,20 +43998,28 @@ function hookSettingsGuard_DISABLED(){
           <!-- Alert Start Time control (only for opening/closing) -->
           <div id="tasksAlertTimeControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
             <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                <span>Show alerts starting at:</span>
-                <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
-              </label>
-              <label id="tasksAlertTimeShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                <input type="checkbox" id="tasksAlertTimeShowOnHomeCheckbox" style="cursor:pointer;accent-color:#7c3aed;">
+              <label id="tasksAlertTimeShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                  <input type="checkbox" id="tasksAlertTimeShowOnHomeCheckbox">
+                  <span class="staff-permission-toggle-slider"></span>
+                </span>
                 <span>Show this alert on Home screen</span>
               </label>
+              <div id="tasksAlertTimeInputRow" style="display:none;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                  <span>Show alerts starting at:</span>
+                  <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
+                </label>
+              </div>
             </div>
             <!-- Auto-reset controls (only for opening tab) -->
             <div id="tasksOpeningAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
               <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                  <input type="checkbox" id="tasksOpeningAutoResetEnabled" style="cursor:pointer;accent-color:#7c3aed;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                  <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                    <input type="checkbox" id="tasksOpeningAutoResetEnabled">
+                    <span class="staff-permission-toggle-slider"></span>
+                  </span>
                   <span>Auto-reset when all Opening tasks are completed</span>
                 </label>
                 <div id="tasksOpeningAutoResetTimeRow" style="display:none;">
@@ -43185,8 +44029,11 @@ function hookSettingsGuard_DISABLED(){
                 </label>
                 </div>
                 <div id="tasksEnforceSelectSection" style="display:none;flex-shrink:0;">
-                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                    <input type="checkbox" id="tasksEnforceSelectCheckboxOpening" style="cursor:pointer;accent-color:#7c3aed;">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                    <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                      <input type="checkbox" id="tasksEnforceSelectCheckboxOpening">
+                      <span class="staff-permission-toggle-slider"></span>
+                    </span>
                     <span>ENFORCE SELECT</span>
                   </label>
                 </div>
@@ -43195,8 +44042,11 @@ function hookSettingsGuard_DISABLED(){
             <!-- Auto-reset controls (only for closing tab) -->
             <div id="tasksClosingAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
               <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                  <input type="checkbox" id="tasksClosingAutoResetEnabled" style="cursor:pointer;accent-color:#7c3aed;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                  <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                    <input type="checkbox" id="tasksClosingAutoResetEnabled">
+                    <span class="staff-permission-toggle-slider"></span>
+                  </span>
                   <span>Auto-reset when all Closing tasks are completed</span>
                 </label>
                 <div id="tasksClosingAutoResetTimeRow" style="display:none;">
@@ -43206,8 +44056,11 @@ function hookSettingsGuard_DISABLED(){
                   </label>
                 </div>
                 <div id="tasksEnforceSelectSectionClosing" style="display:none;flex-shrink:0;">
-                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                    <input type="checkbox" id="tasksEnforceSelectCheckboxClosing" style="cursor:pointer;accent-color:#7c3aed;">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                    <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                      <input type="checkbox" id="tasksEnforceSelectCheckboxClosing">
+                      <span class="staff-permission-toggle-slider"></span>
+                    </span>
                     <span>ENFORCE SELECT</span>
                   </label>
                 </div>
@@ -43218,20 +44071,28 @@ function hookSettingsGuard_DISABLED(){
           <!-- Alert Start Weekday control (only for weekly) -->
           <div id="tasksAlertWeekdayControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
             <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                <span>Show alerts starting at:</span>
-                <input type="time" id="tasksAlertWeekdayTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
-              </label>
-              <label id="tasksAlertWeekdayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                <input type="checkbox" id="tasksAlertWeekdayShowOnHomeCheckbox" style="cursor:pointer;accent-color:#7c3aed;">
+              <label id="tasksAlertWeekdayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                  <input type="checkbox" id="tasksAlertWeekdayShowOnHomeCheckbox">
+                  <span class="staff-permission-toggle-slider"></span>
+                </span>
                 <span>Show this alert on Home screen</span>
               </label>
+              <div id="tasksAlertWeekdayTimeRow" style="display:none;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                  <span>Show alerts starting at:</span>
+                  <input type="time" id="tasksAlertWeekdayTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
+                </label>
+              </div>
             </div>
             <!-- Auto-reset controls (only for weekly tab) -->
             <div id="tasksWeeklyAutoResetSection" style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;display:none;">
               <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                  <input type="checkbox" id="tasksWeeklyAutoResetEnabled" style="cursor:pointer;accent-color:#7c3aed;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                  <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                    <input type="checkbox" id="tasksWeeklyAutoResetEnabled">
+                    <span class="staff-permission-toggle-slider"></span>
+                  </span>
                   <span>Auto-reset when all Weekly tasks for today are completed</span>
                 </label>
                 <div id="tasksWeeklyAutoResetTimeRow" style="display:none;">
@@ -43247,22 +44108,30 @@ function hookSettingsGuard_DISABLED(){
           <!-- Alert Start Time control (for monthly, uses same time input as opening/closing) -->
           <div id="tasksAlertDayControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
             <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                <span>Show alerts starting at:</span>
-                <input type="time" id="tasksAlertTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
-              </label>
-              <label id="tasksAlertDayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                <input type="checkbox" id="tasksAlertDayShowOnHomeCheckbox" style="cursor:pointer;accent-color:#7c3aed;">
+              <label id="tasksAlertDayShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                  <input type="checkbox" id="tasksAlertDayShowOnHomeCheckbox">
+                  <span class="staff-permission-toggle-slider"></span>
+                </span>
                 <span>Show this alert on Home screen</span>
               </label>
+              <div id="tasksAlertDayTimeRow" style="display:none;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                  <span>Show alerts starting at:</span>
+                  <input type="time" id="tasksAlertDayTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
+                </label>
+              </div>
             </div>
           </div>
           
           <!-- Auto-reset controls (only for monthly tab) -->
           <div id="tasksMonthlyAutoResetSection" style="display:none;">
             <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                <input type="checkbox" id="tasksMonthlyAutoResetEnabled" style="cursor:pointer;accent-color:#7c3aed;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                  <input type="checkbox" id="tasksMonthlyAutoResetEnabled">
+                  <span class="staff-permission-toggle-slider"></span>
+                </span>
                 <span>Auto-reset when all Monthly tasks for today are completed</span>
               </label>
               <div id="tasksMonthlyAutoResetTimeRow" style="display:none;">
@@ -43277,22 +44146,30 @@ function hookSettingsGuard_DISABLED(){
           <!-- Alert Start Time control (only for yearly) -->
           <div id="tasksAlertYearlyControl" style="flex-shrink:0;margin-bottom:12px;display:none;">
             <div class="tasks-alert-time-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                <span>Show alerts starting at:</span>
-                <input type="time" id="tasksAlertYearlyTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
-              </label>
-              <label id="tasksAlertYearlyShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                <input type="checkbox" id="tasksAlertYearlyShowOnHomeCheckbox" style="cursor:pointer;accent-color:#7c3aed;">
+              <label id="tasksAlertYearlyShowOnHome" style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                  <input type="checkbox" id="tasksAlertYearlyShowOnHomeCheckbox">
+                  <span class="staff-permission-toggle-slider"></span>
+                </span>
                 <span>Show this alert on Home screen</span>
               </label>
+              <div id="tasksAlertYearlyTimeRow" style="display:none;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
+                  <span>Show alerts starting at:</span>
+                  <input type="time" id="tasksAlertYearlyTimeInput" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
+                </label>
+              </div>
             </div>
           </div>
           
           <!-- Auto-reset controls (only for yearly tab) -->
           <div id="tasksYearlyAutoResetSection" style="display:none;">
             <div class="tasks-auto-reset-row" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;">
-                <input type="checkbox" id="tasksYearlyAutoResetEnabled" style="cursor:pointer;accent-color:#7c3aed;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                  <input type="checkbox" id="tasksYearlyAutoResetEnabled">
+                  <span class="staff-permission-toggle-slider"></span>
+                </span>
                 <span>Auto-reset when all Yearly tasks for today are completed</span>
               </label>
               <div id="tasksYearlyAutoResetTimeRow" style="display:none;">
@@ -43408,10 +44285,9 @@ function hookSettingsGuard_DISABLED(){
           <!-- End scrollable body content wrapper -->
         </div>
         
-        <!-- Sticky Save button -->
+        <!-- Sticky close button. Task settings are saved as changes are made. -->
         <div class="tasks-modal-footer" style="padding:10px 20px;border-top:1px solid #e5e7eb;background:#fff;border-radius:0 0 12px 12px;display:flex;justify-content:flex-end;gap:8px;">
           <button id="tasksModalCancelBtn" class="btn-pill" style="padding:8px 16px;font-size:10px;font-weight:500;border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:8px;cursor:pointer;">Cancel</button>
-          <button id="tasksModalSaveBtn" class="btn-primary" style="padding:8px 16px;font-size:10px;font-weight:600;background:#7c3aed;border:none;color:#fff;border-radius:8px;cursor:pointer;">Save</button>
         </div>
       </div>
     </div>
@@ -43665,14 +44541,14 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/staff-call-cloud.js?v=20260412_staffcall_accept_ui"></script>
   <script type="module" src="/settings-cloud.js?v=20260420_time_clock_v1"></script>
   <script src="/time-clock-engine.js?v=20260420_tc_engine_v2_shifts"></script>
-  <script type="module" src="/time-clock-entries.js?v=20260423_tc_onerow_r1"></script>
+  <script type="module" src="/time-clock-entries.js?v=20260424_tc_single_open_shift_r1"></script>
   <script type="module" src="/queue-cloud.js?v=20260420_per_location_v1"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/tickets.js?v=20260420_tickets_gear_next_to_summary"></script>
+  <script type="module" src="/tickets.js?v=20260424_ticket_service_upgrade_r1"></script>
   <script type="module" src="/media-upload.js?v=20260420_media_works_per_location"></script>
   <script type="module" src="/inventory.js?v=20260420_inv_race_fix"></script>
   <script type="module" src="/onboarding-wizard.js?v=20260420_onboarding_v1"></script>
-  <script type="module" src="/locations-manage.js?v=20260420_locations_in_settings_v1"></script>
+  <script type="module" src="/locations-manage.js?v=20260424_locations_compact_rows_r1"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -44318,6 +45194,12 @@ function hookSettingsGuard_DISABLED(){
       </label>
     </div>
     <div id="ticketAdminPriceApprovalBlock" style="display:none;margin-bottom:14px;"></div>
+    <div id="ticketServiceUpgradeWrap" style="display:none;margin-bottom:14px;">
+      <input type="hidden" id="ticketServiceUpgradeValue" value="false">
+      <button type="button" id="ticketServiceUpgradeBtn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;border:1px solid #e9d5ff;border-radius:10px;background:#fff;color:#7c3aed;font-size:14px;font-weight:700;cursor:pointer;">
+        Upgrade Service
+      </button>
+    </div>
     <!-- Actions -->
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
       <button id="ticketAsIsBtn" style="display:none;padding:10px 16px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;" onclick="window.doSendAsIsFromModal && window.doSendAsIsFromModal()">AS IS</button>
@@ -44350,25 +45232,34 @@ function hookSettingsGuard_DISABLED(){
       <h2 style="margin:0;font-size:17px;font-weight:700;">Service Catalog</h2>
       <button onclick="window.closeServicesModal && window.closeServicesModal()" style="background:none;border:none;cursor:pointer;font-size:22px;color:#6b7280;line-height:1;">×</button>
     </div>
-    <div style="display:flex;border-bottom:1px solid #e5e7eb;">
-      <button id="servicesCatalogTab" style="flex:1;padding:12px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:600;color:#7c3aed;border-bottom:2px solid #7c3aed;">Services</button>
-      <button id="servicesCategoriesTab" style="flex:1;padding:12px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:500;color:#6b7280;border-bottom:2px solid transparent;">Categories</button>
-    </div>
-    <div id="servicesCatalogPanel" style="padding:16px;display:block;">
-      <div id="servicesList" style="margin-bottom:16px;max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;"></div>
-      <div style="display:flex;flex-direction:column;gap:8px;">
-        <input id="serviceFormName" type="text" placeholder="Service name" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
-        <select id="serviceFormCategory" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;"></select>
-        <input id="serviceFormPrice" type="number" min="0" step="0.01" placeholder="Default price ($)" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
-        <button onclick="window.saveServiceFromForm && window.saveServiceFromForm()" style="padding:10px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Save Service</button>
+    <div style="padding:14px 16px 16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
+        <div style="font-size:12px;color:#6b7280;line-height:1.4;">Categories and services are saved for the active branch only.</div>
+        <button type="button" onclick="window.addServiceCategoryV2 && window.addServiceCategoryV2()" style="padding:7px 12px;background:#7c3aed;color:#fff;border:none;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;white-space:nowrap;">+ Add Category</button>
       </div>
+      <div id="servicesCatalogV2List" style="max-height:58vh;overflow-y:auto;padding-right:2px;"></div>
     </div>
-    <div id="servicesCategoriesPanel" style="padding:16px;display:none;">
-      <div style="display:flex;gap:8px;margin-bottom:12px;">
-        <input id="newCategoryName" type="text" placeholder="Category name" style="flex:1;padding:10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;">
-        <button onclick="window.addServiceCategory && window.addServiceCategory()" style="padding:10px 16px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Add</button>
+
+    <div id="servicesCatalogEditorModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.35);z-index:200003;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+      <div style="width:100%;max-width:420px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(15,23,42,0.25);padding:18px;box-sizing:border-box;" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;">
+          <h3 id="servicesCatalogEditorTitle" style="margin:0;font-size:16px;font-weight:800;color:#111827;">New item</h3>
+          <button type="button" onclick="document.getElementById('servicesCatalogEditorModal').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:20px;color:#6b7280;line-height:1;">×</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <input id="servicesCatalogEditorName" type="text" autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+          <div id="servicesCatalogEditorCatWrap" style="display:none;">
+            <select id="servicesCatalogEditorCategory" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;background:#fff;"></select>
+          </div>
+          <div id="servicesCatalogEditorPriceWrap" style="display:none;">
+            <input id="servicesCatalogEditorPrice" type="number" min="0" step="0.01" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+          <button type="button" onclick="document.getElementById('servicesCatalogEditorModal').style.display='none'" style="padding:8px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+          <button type="button" id="servicesCatalogEditorSave" style="padding:8px 16px;border:none;border-radius:10px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Save</button>
+        </div>
       </div>
-      <div id="categoriesList" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;"></div>
     </div>
   </div>
 </div>

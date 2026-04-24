@@ -196,6 +196,14 @@ export async function ffCreateTimeEntry(input = {}) {
     : await _ffGetSalonIdForTimeEntries();
   if (!salonId) throw new Error("ffCreateTimeEntry: unable to resolve salonId");
 
+  const alreadyOpen = await ffGetOpenTimeEntryForStaff(staffId, salonId);
+  if (alreadyOpen && alreadyOpen.id) {
+    const err = new Error("This staff member is already clocked in. Clock out before starting another shift.");
+    err.code = "time-clock/already-open";
+    err.openEntry = alreadyOpen;
+    throw err;
+  }
+
   const clockInAtCoerced = _ffCoerceTimestamp(input.clockInAt);
   const clockInAt = clockInAtCoerced || serverTimestamp();
 

@@ -75,22 +75,22 @@ function renderList() {
     const isActive = loc.isActive !== false;
     return `
       <div class="ff-loc-row" data-id="${escapeHtml(id)}"
-           style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:${isActive ? "#fff" : "#f9fafb"};">
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:14px;font-weight:600;color:#111827;display:flex;align-items:center;gap:8px;">
-            <span>${escapeHtml(name)}</span>
-            ${isActive ? "" : '<span style="font-size:11px;font-weight:500;color:#6b7280;background:#e5e7eb;padding:2px 8px;border-radius:999px;">Inactive</span>'}
+           style="display:flex;align-items:center;gap:8px;padding:4px 10px;margin-bottom:3px;border:1px solid var(--border, #e5e7eb);border-radius:6px;background:#f9fafb;transition:background 0.15s, opacity 0.15s;">
+        <div style="width:6px;height:6px;border-radius:50%;background:${isActive ? "#10b981" : "#9ca3af"};flex-shrink:0;" title="${isActive ? "Active" : "Inactive"}"></div>
+        <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;">
+          <div style="font-size:11px;font-weight:500;color:${isActive ? "#111827" : "#9ca3af"};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${isActive ? "" : "text-decoration:line-through;"}">
+            ${escapeHtml(name)}
           </div>
-          ${address ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">${escapeHtml(address)}</div>` : ""}
+          ${address ? `<div style="font-size:10px;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(address)}</div>` : ""}
         </div>
         <button type="button" class="ff-loc-toggle" data-id="${escapeHtml(id)}" data-active="${isActive}"
                 title="${isActive ? "Deactivate" : "Reactivate"}"
-                style="border:none;background:none;cursor:pointer;padding:6px 10px;border-radius:6px;font-size:12px;font-weight:500;color:${isActive ? "#b91c1c" : "#15803d"};">
+                style="border:1px solid ${isActive ? "#fecaca" : "#10b981"};background:${isActive ? "#fff" : "#d1fae5"};cursor:pointer;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:${isActive ? "#b91c1c" : "#065f46"};">
           ${isActive ? "Deactivate" : "Reactivate"}
         </button>
         <button type="button" class="ff-loc-edit" data-id="${escapeHtml(id)}"
                 title="Edit"
-                style="border:1px solid #d1d5db;background:#fff;cursor:pointer;padding:6px 12px;border-radius:999px;font-size:12px;font-weight:500;color:#374151;">
+                style="border:1px solid #a78bfa;background:#ede9fe;cursor:pointer;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:#7c3aed;">
           Edit
         </button>
       </div>`;

@@ -528,6 +528,18 @@ function canViewTicketsArchivedTab() {
   return getTicketsStaffPermissions().tickets_archived === true;
 }
 
+function canCurrentUserCloseTickets() {
+  if (!currentUserProfile) return false;
+  const role = (currentUserProfile.role || '').toLowerCase();
+  if (['owner', 'admin', 'manager'].includes(role)) return true;
+  try {
+    const staff = _ticketsCurrentStaffRow();
+    return !!(staff && (staff.isManager === true || staff.isAdmin === true));
+  } catch (_) {
+    return false;
+  }
+}
+
 function updateTicketsTabsVisibility() {
   const archivedTab = document.getElementById('ticketsArchivedTab');
   const summaryTab = document.getElementById('ticketsSummaryTab');
@@ -1019,6 +1031,13 @@ async function voidTicket(ticketId) {
 
 async function archiveTicket(ticketId) {
   await updateTicket(ticketId, { status: 'ARCHIVED', archivedByUid: currentUserProfile.uid, _action: 'archived' });
+}
+
+async function setTicketServiceUpgrade(ticketId, enabled) {
+  await updateTicket(ticketId, {
+    serviceUpgrade: enabled === true,
+    _action: enabled ? 'service_upgrade_marked' : 'service_upgrade_cleared'
+  });
 }
 
 /** Does not remove ticketSummaries; marks matching rows when the live ticket is permanently deleted. */
@@ -2046,6 +2065,9 @@ function renderTicketsList() {
     const customerApprovedBadgeHtml = (t.customerApprovedPrice === true)
       ? '<span class="ticket-customer-approved-badge" title="Customer approved the price">Approved</span>'
       : '';
+    const serviceUpgradeBadgeHtml = (t.serviceUpgrade === true)
+      ? '<span class="ticket-customer-approved-badge" title="Service upgrade marked" style="background:#7c3aed;">Upgrade</span>'
+      : '';
     const technicianAvatarUrl = getTicketTechnicianAvatarUrl(t);
     const initialEsc = escapeHtml(initial);
     const avatarLoadedAttr = technicianAvatarUrl ? '0' : '1';
@@ -2082,6 +2104,7 @@ function renderTicketsList() {
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
           <span class="ticket-status-badge ${sk}">${statusLabel}</span>
+          ${serviceUpgradeBadgeHtml}
           ${customerApprovedBadgeHtml}
           ${editedBadgeHtml}
         </div>
@@ -2192,9 +2215,7 @@ function openTicketModal(ticketId, appointmentData = null) {
     }
 
     // Admin/manager/owner viewing a READY ticket → simplified view with Close Ticket only
-    const profileRole = (currentUserProfile?.role || '').toLowerCase();
-    const isAdminOrManager = ['owner', 'admin', 'manager'].includes(profileRole);
-    if (isAdminOrManager && s === 'READY_FOR_CHECKOUT') {
+    if (canCurrentUserCloseTickets() && s === 'READY_FOR_CHECKOUT') {
       if (!t.seenByFrontDeskAt) {
         _ticketsOpenedThisSession.add(t.id);
         t.seenByFrontDeskAt = true;
@@ -2324,6 +2345,8 @@ function openAdminTicketView(t) {
     }
   }
 
+  setupTicketServiceUpgradeControl(t, canCurrentUserCloseTickets());
+
   // Hide all action buttons except Close
   ['ticketSendNewBtn','ticketSaveBtn','ticketFinalizeBtn','ticketArchiveBtn',
    'ticketDeleteBtn','ticketAsIsBtn'].forEach(id => {
@@ -2431,6 +2454,9 @@ function openTicketDetailsModal(t) {
     diffHtml = `<div style="margin-top:16px;"><h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#374151;">Changes vs booked</h3><div style="background:#f9fafb;border-radius:8px;padding:12px;">${parts.join('')}</div></div>`;
   }
   const asIsHtml = (t.asIs && t.asIsMessage) ? `<div style="margin-top:16px;font-size:13px;color:#059669;background:#d1fae5;padding:10px 12px;border-radius:8px;"><strong>AS IS:</strong> ${escapeHtml(t.asIsMessage)}</div>` : '';
+  const serviceUpgradeHtml = t.serviceUpgrade === true
+    ? `<div style="margin-top:16px;font-size:13px;color:#5b21b6;background:#f3e8ff;border:1px solid #e9d5ff;padding:10px 12px;border-radius:8px;font-weight:700;">Service Upgrade marked</div>`
+    : '';
   contentEl.innerHTML = `
     <div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:16px;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
@@ -2443,6 +2469,7 @@ function openTicketDetailsModal(t) {
     <div style="margin-bottom:16px;"><h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#374151;">Performed services</h3>${performedHtml || '<div style="color:#9ca3af;font-size:13px;">None</div>'}${totalHtml}</div>
     ${diffHtml}
     ${asIsHtml}
+    ${serviceUpgradeHtml}
   `;
   const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
   let actionsHtml = '';
@@ -2505,6 +2532,11 @@ function resetTicketForm() {
     sendNewBtn.onclick = () => doSendNewTicket();
   }
   if (asIsBtn) asIsBtn.style.display = 'none';
+  const upgradeWrap = document.getElementById('ticketServiceUpgradeWrap');
+  const upgradeBtn = document.getElementById('ticketServiceUpgradeBtn');
+  if (upgradeWrap) upgradeWrap.style.display = 'none';
+  if (upgradeBtn) upgradeBtn.onclick = null;
+  paintTicketServiceUpgradeButton(false);
   // Collapse all service category sections when opening a new ticket
   const picker = document.getElementById('ticketServicePickerContainer');
   if (picker) {
@@ -2586,23 +2618,8 @@ function populateTicketForm(t) {
   const canViewTicket = canSeeTicket(t);
   const canSaveEdits = (isCreator || canViewTicket) && (t.status === 'OPEN' || t.status === 'READY_FOR_CHECKOUT');
   const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
-  // Only manager/admin/owner can close ticket; technicians must not see Close button (use role + staff isManager/isAdmin)
-  let canCloseTicket = false;
-  if (currentUserProfile) {
-    const role = (currentUserProfile.role || '').toLowerCase();
-    if (['owner', 'admin', 'manager'].includes(role)) canCloseTicket = true;
-    if (!canCloseTicket) {
-      try {
-        const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
-        const staffList = store?.staff || [];
-        const staff = staffList.find(s =>
-          (currentUserProfile.staffId && s.id === currentUserProfile.staffId) ||
-          (currentUserProfile.email && s.email && String(s.email).toLowerCase() === String(currentUserProfile.email).toLowerCase())
-        );
-        if (staff && (staff.isManager === true || staff.isAdmin === true)) canCloseTicket = true;
-      } catch (_) {}
-    }
-  }
+  // Only manager/admin/owner can close ticket; technicians must not see Close button.
+  const canCloseTicket = canCurrentUserCloseTickets();
   const finalizeBtn = document.getElementById('ticketFinalizeBtn');
   const closeBtn = document.getElementById('ticketCloseBtn');
   const archiveBtn = document.getElementById('ticketArchiveBtn');
@@ -2624,6 +2641,7 @@ function populateTicketForm(t) {
   if (closeBtn) closeBtn.onclick = () => doCloseTicket(t.id);
   if (archiveBtn) archiveBtn.onclick = async () => { try { await archiveTicket(t.id); showToast('Ticket archived', 'success'); closeTicketModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
   if (deleteBtn) deleteBtn.onclick = async () => { const ok = await ticketConfirm('Permanently delete this ticket? This cannot be undone.', 'Delete ticket'); if (!ok) return; try { await deleteTicketPermanently(t.id); showToast('Ticket deleted', 'success'); closeTicketModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
+  setupTicketServiceUpgradeControl(t, canCloseTicket);
   setupTicketFormToggles();
 }
 
@@ -2777,6 +2795,43 @@ function updateTicketTotal(lines) {
       if (cb) cb.checked = false;
     }
   }
+}
+
+function paintTicketServiceUpgradeButton(enabled) {
+  const btn = document.getElementById('ticketServiceUpgradeBtn');
+  const val = document.getElementById('ticketServiceUpgradeValue');
+  if (val) val.value = enabled ? 'true' : 'false';
+  if (!btn) return;
+  btn.textContent = enabled ? 'Service Upgrade ✓' : 'Upgrade Service';
+  btn.style.background = enabled ? '#f3e8ff' : '#fff';
+  btn.style.borderColor = enabled ? '#7c3aed' : '#e9d5ff';
+  btn.style.color = enabled ? '#5b21b6' : '#7c3aed';
+}
+
+function setupTicketServiceUpgradeControl(ticket, canUse) {
+  const wrap = document.getElementById('ticketServiceUpgradeWrap');
+  const btn = document.getElementById('ticketServiceUpgradeBtn');
+  if (!wrap || !btn) return;
+  const show = !!(canUse && ticket && String(ticket.status || '').toUpperCase() === 'READY_FOR_CHECKOUT');
+  wrap.style.display = show ? 'block' : 'none';
+  paintTicketServiceUpgradeButton(ticket && ticket.serviceUpgrade === true);
+  btn.onclick = null;
+  if (!show) return;
+  btn.onclick = async () => {
+    const next = !(document.getElementById('ticketServiceUpgradeValue')?.value === 'true');
+    btn.disabled = true;
+    try {
+      paintTicketServiceUpgradeButton(next);
+      await setTicketServiceUpgrade(ticket.id, next);
+      ticket.serviceUpgrade = next;
+      showToast(next ? 'Service upgrade marked' : 'Service upgrade removed', 'success');
+    } catch (e) {
+      paintTicketServiceUpgradeButton(!next);
+      showToast(e?.message || 'Could not update service upgrade', 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  };
 }
 
 async function saveTicket() {
