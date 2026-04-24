@@ -432,6 +432,8 @@ export function goToInbox(onReady) {
   if (ticketsScreenNav) ticketsScreenNav.style.display = 'none';
   const scheduleScreenNav = document.getElementById('scheduleScreen');
   if (scheduleScreenNav) scheduleScreenNav.style.display = 'none';
+  const timeClockScreenInbox = document.getElementById('timeClockScreen');
+  if (timeClockScreenInbox) timeClockScreenInbox.style.display = 'none';
   
   // Show inbox shell but hide content until ready (avoids flash of empty "My Requests")
   if (inboxScreen) {

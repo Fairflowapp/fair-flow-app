@@ -3512,10 +3512,11 @@ export function goToTickets() {
   const mediaScreen = document.getElementById('mediaScreen');
   const trainingScreen = document.getElementById('trainingScreen');
   const scheduleScreen = document.getElementById('scheduleScreen');
+  const timeClockScreenTk = document.getElementById('timeClockScreen');
   const ticketsScreen = document.getElementById('ticketsScreen');
 
   const manageQueueScreen = document.getElementById('manageQueueScreen');
-  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen, trainingScreen, scheduleScreen, manageQueueScreen].forEach(el => {
+  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen, trainingScreen, scheduleScreen, timeClockScreenTk, manageQueueScreen].forEach(el => {
     if (el) el.style.display = 'none';
   });
   if (wrap) wrap.style.display = 'none';

@@ -678,6 +678,147 @@ function ffSaveTaskSettings(taskReminders, taskNotes, showIncompleteTasksBadge) 
     .catch((e) => console.warn("[SettingsCloud] save task settings failed", e));
 }
 
+// ─── Time Clock Settings (Stage 3) ───────────────────────────────────────────
+// Stored at: salons/{salonId}/settings/timeClock
+//
+// Stage 3 scope (deliberately small):
+//   { workweekStartDay: "sunday" | "monday",
+//     standardHours: { weekly: number, daily: number },
+//     overtime: { enabled: boolean, weeklyThreshold: number, dailyThreshold: number, multiplier: number },
+//     updatedAt: serverTimestamp(), updatedBy: uid }
+//
+// NOT included yet: double-time, rounding, breaks, per-location overrides.
+// Those will be added in later stages with their own schema migrations.
+
+const FF_TIME_CLOCK_DEFAULTS = Object.freeze({
+  workweekStartDay: "monday",
+  standardHours: { weekly: 40, daily: 8 },
+  overtime: { enabled: true, weeklyThreshold: 40, dailyThreshold: 8, multiplier: 1.5 },
+});
+
+function ffCloneTimeClockDefaults() {
+  return {
+    workweekStartDay: FF_TIME_CLOCK_DEFAULTS.workweekStartDay,
+    standardHours: Object.assign({}, FF_TIME_CLOCK_DEFAULTS.standardHours),
+    overtime: Object.assign({}, FF_TIME_CLOCK_DEFAULTS.overtime),
+  };
+}
+
+function ffNormalizeTimeClockSettings(raw) {
+  const r = (raw && typeof raw === "object") ? raw : {};
+  const sh = (r.standardHours && typeof r.standardHours === "object") ? r.standardHours : {};
+  const ot = (r.overtime && typeof r.overtime === "object") ? r.overtime : {};
+  const numOrDefault = (v, def) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : def;
+  };
+  const multiplierOrDefault = (v, def) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 1 ? n : def;
+  };
+  const workweekStartDay =
+    (raw && (raw.workweekStartDay === "sunday" || raw.workweekStartDay === "monday"))
+      ? raw.workweekStartDay
+      : FF_TIME_CLOCK_DEFAULTS.workweekStartDay;
+  return {
+    workweekStartDay: workweekStartDay,
+    standardHours: {
+      weekly: numOrDefault(sh.weekly, FF_TIME_CLOCK_DEFAULTS.standardHours.weekly),
+      daily:  numOrDefault(sh.daily,  FF_TIME_CLOCK_DEFAULTS.standardHours.daily),
+    },
+    overtime: {
+      enabled: ot.enabled === true,
+      weeklyThreshold: numOrDefault(ot.weeklyThreshold, FF_TIME_CLOCK_DEFAULTS.overtime.weeklyThreshold),
+      dailyThreshold:  numOrDefault(ot.dailyThreshold,  FF_TIME_CLOCK_DEFAULTS.overtime.dailyThreshold),
+      multiplier:      multiplierOrDefault(ot.multiplier, FF_TIME_CLOCK_DEFAULTS.overtime.multiplier),
+    },
+  };
+}
+
+function settingsTimeClockRef(salonId) {
+  return doc(db, `salons/${salonId}/settings`, "timeClock");
+}
+
+// Single-flight flag: prevents two concurrent load calls from both trying to
+// seed defaults into Firestore. The first caller owns the seed; everyone
+// else reuses its promise.
+let _timeClockLoadPromise = null;
+// Tracks whether we've already created the default doc this session. Saves a
+// redundant getDoc → setDoc round-trip if the user re-opens the tab after
+// the initial seed.
+let _timeClockSeeded = false;
+
+/**
+ * Load Time Clock Settings from Firestore.
+ * - If the doc doesn't exist, seed it ONCE with defaults (and stamp
+ *   updatedAt + updatedBy), then return those defaults.
+ * - If it does exist, return the normalized data.
+ * Safe to call repeatedly — concurrent calls share a single promise.
+ */
+async function ffLoadTimeClockSettings() {
+  if (_timeClockLoadPromise) return _timeClockLoadPromise;
+  _timeClockLoadPromise = (async () => {
+    try {
+      const salonId = _salonId || await getSalonId();
+      if (!salonId) return ffCloneTimeClockDefaults();
+      const ref = settingsTimeClockRef(salonId);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        _timeClockSeeded = true;
+        return ffNormalizeTimeClockSettings(snap.data());
+      }
+      // First-time seed. Use setDoc (no merge) since we're creating the doc
+      // from scratch with a clean default shape. If two tabs race here both
+      // writes will produce identical content, so the race is harmless.
+      if (!_timeClockSeeded) {
+        _timeClockSeeded = true;
+        const defaults = ffCloneTimeClockDefaults();
+        const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
+        try {
+          await setDoc(ref, Object.assign({}, defaults, {
+            updatedAt: serverTimestamp(),
+            updatedBy: uid,
+          }));
+        } catch (seedErr) {
+          console.warn("[SettingsCloud] timeClock seed failed (non-fatal)", seedErr);
+        }
+        return defaults;
+      }
+      return ffCloneTimeClockDefaults();
+    } catch (e) {
+      console.warn("[SettingsCloud] ffLoadTimeClockSettings failed", e);
+      return ffCloneTimeClockDefaults();
+    } finally {
+      // Clear the single-flight lock after the current microtask. Next call
+      // will do a fresh read (so UI updates after a save are reflected).
+      setTimeout(() => { _timeClockLoadPromise = null; }, 0);
+    }
+  })();
+  return _timeClockLoadPromise;
+}
+
+/**
+ * Save Time Clock Settings. Accepts a full settings object; we normalize it
+ * and write with { merge: true } so other fields on the doc (future additions)
+ * are not clobbered. Returns true/false for UI feedback.
+ */
+async function ffSaveTimeClockSettings(settings) {
+  try {
+    const salonId = _salonId || await getSalonId();
+    if (!salonId) return false;
+    const normalized = ffNormalizeTimeClockSettings(settings);
+    const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
+    await setDoc(settingsTimeClockRef(salonId), Object.assign({}, normalized, {
+      updatedAt: serverTimestamp(),
+      updatedBy: uid,
+    }), { merge: true });
+    return true;
+  } catch (e) {
+    console.warn("[SettingsCloud] ffSaveTimeClockSettings failed", e);
+    return false;
+  }
+}
+
 /** Media → category list for Upload Work dropdown (stored on settings/main). */
 function ffSaveMediaCategories(mediaCategories) {
   if (!_salonId) return;
@@ -1025,4 +1166,6 @@ if (typeof window !== "undefined") {
   window.ffGetCurrencySymbol = ffGetCurrencySymbol;
   window.ffFormatCurrency = ffFormatCurrency;
   window.ffSupportedCurrencies = FF_SUPPORTED_CURRENCIES.slice();
+  window.ffLoadTimeClockSettings = ffLoadTimeClockSettings;
+  window.ffSaveTimeClockSettings = ffSaveTimeClockSettings;
 }

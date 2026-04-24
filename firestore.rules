@@ -1047,6 +1047,52 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ===== TIME CLOCK ENTRIES =====
+    // salons/{salonId}/timeEntries/{entryId}
+    //
+    // Source of truth for ACTUAL worked time (not the schedule). An entry
+    // records a clock-in/out pair for a staff member at a specific
+    // location. Entries are decoupled from shifts — `linkedShiftId` is an
+    // opaque string, never joined.
+    //
+    // Stage-1 permissions:
+    //   - Read:   managers/admin/owner see everything; regular staff see
+    //             only entries where resource.data.staffId matches their
+    //             own staffId.
+    //   - Create: managers/admin/owner can create for anyone; regular
+    //             staff can create only for themselves. In both cases the
+    //             entry must start as an OPEN, un-closed record to prevent
+    //             a client from writing a back-dated "closed" entry past
+    //             the manager-only update gate.
+    //   - Update: managers/admin/owner only. Close / void / edit helpers
+    //             will be added in a follow-up and will ride on this gate.
+    //   - Delete: never. Invalidation uses status: "void" instead.
+    match /salons/{salonId}/timeEntries/{entryId} {
+      allow read: if belongsToSalon(salonId)
+        && (
+          isManager(salonId)
+          || matchesOwnStaffId(salonId, resource.data.staffId)
+        );
+
+      allow create: if belongsToSalon(salonId)
+        && request.resource.data.salonId == salonId
+        && request.resource.data.locationId is string
+        && request.resource.data.locationId != ''
+        && request.resource.data.staffId is string
+        && request.resource.data.staffId != ''
+        && request.resource.data.status == 'open'
+        && request.resource.data.clockOutAt == null
+        && (
+          isManager(salonId)
+          || matchesOwnStaffId(salonId, request.resource.data.staffId)
+        );
+
+      allow update: if belongsToSalon(salonId)
+        && isManager(salonId);
+
+      allow delete: if false;
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;

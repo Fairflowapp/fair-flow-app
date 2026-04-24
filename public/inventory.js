@@ -12485,6 +12485,7 @@ function hideFullscreenPeersForInventory() {
     "ticketsScreen",
     "trainingScreen",
     "scheduleScreen",
+    "timeClockScreen",
     "userProfileScreen",
     "myProfileScreen",
     "manageQueueScreen",

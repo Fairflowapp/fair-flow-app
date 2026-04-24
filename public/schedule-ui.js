@@ -3589,9 +3589,153 @@ if (typeof window !== "undefined") {
   window.ffDownloadMyShiftsIcs = downloadMyShiftsIcsForCurrentWeek;
 }
 
+// --- Stage 5 background wiring: weekly hours debug log for the authed user ---
+// Purely informational. Reads the same shifts that feed the Add-to-calendar
+// flow (active draft + myShiftsFromOtherLocs), converts them to the shape the
+// Time Clock engine expects, and console.logs the {total, regular, overtime}
+// breakdown. NO UI and NO Firestore writes. De-duplicated by week + shift
+// fingerprint so the console is not spammed on every render.
+let _ffLastHoursDebugKey = null;
+
+function _ffAdaptAssignmentToShift(dateKey, startTime, endTime) {
+  if (!dateKey || typeof dateKey !== "string") return null;
+  if (!startTime || !endTime) return null;
+  const st = String(startTime).trim();
+  const et = String(endTime).trim();
+  // Build local datetime strings (no timezone suffix → parsed as local).
+  const start = `${dateKey}T${st.length === 4 ? "0" + st : st}:00`;
+  const end = `${dateKey}T${et.length === 4 ? "0" + et : et}:00`;
+  return { start, end, _raw: { dateKey, startTime: st, endTime: et } };
+}
+
+function _ffCollectAuthedUserWeeklyShifts() {
+  const mySid = String(getAuthedStaffIdForSchedule() || "").trim();
+  if (!mySid) return { shifts: [], skipped: [], staffId: null };
+
+  const draft = schedulePreviewState?.draft || {};
+  const days = Array.isArray(draft.days) ? draft.days : [];
+  const otherMap = (schedulePreviewState?.myShiftsFromOtherLocs instanceof Map)
+    ? schedulePreviewState.myShiftsFromOtherLocs
+    : new Map();
+
+  const shifts = [];
+  const skipped = [];
+
+  // Active-location draft.
+  days.forEach((day) => {
+    if (!day || !day.date) return;
+    const bs = day.businessStatus || { isOpen: true };
+    if (bs.isOpen === false) return;
+    const assignments = Array.isArray(day.assignments) ? day.assignments : [];
+    assignments.forEach((a) => {
+      if (!a) return;
+      const sameStaff =
+        (a.staffId && String(a.staffId) === mySid) ||
+        (a.uid && String(a.uid) === mySid);
+      if (!sameStaff) return;
+      const shift = _ffAdaptAssignmentToShift(day.date, a.startTime, a.endTime);
+      if (shift) shifts.push(shift);
+      else skipped.push({
+        source: "active",
+        dateKey: day.date,
+        startTime: a.startTime ?? null,
+        endTime: a.endTime ?? null,
+        reason: "missing or invalid start/end",
+      });
+    });
+  });
+
+  // Other locations (unified My-shifts cross-loc view).
+  otherMap.forEach((arr, dateKey) => {
+    if (!Array.isArray(arr)) return;
+    arr.forEach((s) => {
+      if (!s) return;
+      const shift = _ffAdaptAssignmentToShift(dateKey, s.startTime, s.endTime);
+      if (shift) shifts.push(shift);
+      else skipped.push({
+        source: "other",
+        locationName: s.locationName || null,
+        dateKey,
+        startTime: s.startTime ?? null,
+        endTime: s.endTime ?? null,
+        reason: "missing or invalid start/end",
+      });
+    });
+  });
+
+  return { shifts, skipped, staffId: mySid };
+}
+
+function _ffResolveAuthedStaffNameForDebug(mySid) {
+  try {
+    const list = Array.isArray(schedulePreviewState?.staffList) ? schedulePreviewState.staffList : [];
+    const st = list.find((x) => getScheduleStaffKey(x) === mySid) || null;
+    if (!st) return null;
+    return (
+      st.name ||
+      st.displayName ||
+      [st.firstName, st.lastName].filter(Boolean).join(" ").trim() ||
+      null
+    );
+  } catch (_e) {
+    return null;
+  }
+}
+
+function _ffDebugLogAuthedUserWeeklyHours() {
+  try {
+    if (typeof window === "undefined") return;
+    if (typeof window.ffComputeWeeklyShiftHoursSummary !== "function") return;
+    const { shifts, skipped, staffId } = _ffCollectAuthedUserWeeklyShifts();
+    if (!staffId) return;
+
+    const weekRange = schedulePreviewState?.weekRange || {};
+    const weekKey = weekRange.startDate || "week?";
+    const shiftKey = shifts
+      .map((s) => `${s._raw?.dateKey}|${s._raw?.startTime}|${s._raw?.endTime}`)
+      .sort()
+      .join(",");
+    const key = `${weekKey}|${staffId}|${shifts.length}:${shiftKey}|${skipped.length}`;
+    if (key === _ffLastHoursDebugKey) return;
+    _ffLastHoursDebugKey = key;
+
+    const loadSettings = typeof window.ffLoadTimeClockSettings === "function"
+      ? window.ffLoadTimeClockSettings()
+      : Promise.resolve(null);
+
+    Promise.resolve(loadSettings)
+      .then((settings) => {
+        const summary = window.ffComputeWeeklyShiftHoursSummary(shifts, settings);
+        const staffName = _ffResolveAuthedStaffNameForDebug(staffId);
+        console.groupCollapsed(
+          `%c[TimeClockEngine] Weekly hours · ${staffName || staffId} · ${weekKey}`,
+          "color:#5b21b6;font-weight:600;"
+        );
+        console.log("staffId:          ", staffId);
+        if (staffName) console.log("name:             ", staffName);
+        console.log("weekStart:        ", weekKey);
+        console.log("totalWorkedHours: ", summary.totalWorkedHours);
+        console.log("regularHours:     ", summary.regularHours);
+        console.log("overtimeHours:    ", summary.overtimeHours);
+        console.log("shifts counted:   ", shifts.length);
+        console.log("shifts skipped:   ", skipped.length);
+        if (skipped.length) console.log("skipped details: ", skipped);
+        console.log("settings used:    ", settings);
+        console.groupEnd();
+      })
+      .catch((e) => {
+        console.warn("[TimeClockEngine] debug log failed", e);
+      });
+  } catch (e) {
+    console.warn("[TimeClockEngine] debug log failed", e);
+  }
+}
+
 function renderScheduleSummary(validation, days) {
   const summaryBar = document.getElementById("scheduleSummaryBar");
   if (!summaryBar) return;
+
+  _ffDebugLogAuthedUserWeeklyHours();
 
   // Show the "Add to calendar" button whenever the authed user is looking at
   // their own shifts — either an editor in "my_shifts" mode or a read-only
@@ -4739,6 +4883,7 @@ export async function goToSchedule() {
     "trainingScreen",
     "userProfileScreen",
     "manageQueueScreen",
+    "timeClockScreen",
   ];
   screenIdsToHide.forEach((id) => {
     const el = document.getElementById(id);

@@ -44,7 +44,7 @@
   console.log('[BUILD MARKER] index.html loaded at', new Date().toISOString());
   window.goToChat = window.goToChat || function() {
     if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
-    ['tasksScreen','inboxScreen','mediaScreen','trainingScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    ['tasksScreen','inboxScreen','mediaScreen','trainingScreen','timeClockScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     ['.joinBar','.wrap'].forEach(function(sel){var el=document.querySelector(sel);if(el)el.style.display='none';});
     var cs=document.getElementById('chatScreen');if(cs){cs.style.display='flex';cs.classList.remove('chat-mobile-open');}
     document.querySelectorAll('.btn-pill').forEach(function(b){b.classList.remove('active');});
@@ -69,7 +69,7 @@
   };
   window.goToMedia = window.goToMedia || function() {
     if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
-    ['tasksScreen','inboxScreen','trainingScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    ['tasksScreen','inboxScreen','trainingScreen','timeClockScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     var chatScreen=document.getElementById('chatScreen');if(chatScreen)chatScreen.style.display='none';
     var scheduleScreen=document.getElementById('scheduleScreen');if(scheduleScreen)scheduleScreen.style.display='none';
     var joinBar=document.querySelector('.joinBar');if(joinBar)joinBar.style.display='none';
@@ -152,6 +152,7 @@ body.ff-logged-out #inboxScreen,
 body.ff-logged-out #tasksScreen,
 body.ff-logged-out #trainingScreen,
 body.ff-logged-out #scheduleScreen,
+body.ff-logged-out #timeClockScreen,
 body.ff-logged-out #inventoryScreen,
 body.ff-logged-out #ff-onboarding-wizard {
   display: none !important;
@@ -2229,6 +2230,7 @@ dialog footer button, .code-dialog footer button {
 .header .toolbar #mediaBtn.active,
 .header .toolbar #inventoryNavBtn.active,
 .header .toolbar #scheduleBtn.active,
+.header .toolbar #timeClockBtn.active,
 .header .toolbar #trainingBtn.active,
 .header .toolbar #chatBtn.active {
   background: rgba(255, 255, 255, 0.14) !important;
@@ -2252,6 +2254,7 @@ dialog footer button, .code-dialog footer button {
 .header .toolbar #mediaBtn.active .nav-icon svg,
 .header .toolbar #inventoryNavBtn.active .nav-icon svg,
 .header .toolbar #scheduleBtn.active .nav-icon svg,
+.header .toolbar #timeClockBtn.active .nav-icon svg,
 .header .toolbar #trainingBtn.active .nav-icon svg,
 .header .toolbar #chatBtn.active .nav-icon svg {
   stroke: #ffffff !important;
@@ -3042,6 +3045,16 @@ dialog footer button, .code-dialog footer button {
                 </div>
               </div>
             </div>
+            <div class="apps-panel-item" data-app="time-clock" style="cursor:pointer;" title="Clock in and out">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path><circle cx="12" cy="12" r="1" fill="#111827" stroke="none"></circle></svg>
+                </div>
+                <div>
+                  <div>Time Clock</div>
+                </div>
+              </div>
+            </div>
             <div class="apps-panel-item" data-app="history" style="cursor:pointer;">
               <div class="apps-panel-item__content">
                 <div>
@@ -3225,6 +3238,7 @@ dialog footer button, .code-dialog footer button {
           <button class="user-profile-menu-item" data-section="locations" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Locations</button>
           <button class="user-profile-menu-item" data-section="technician-types" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Staff Setup</button>
           <button class="user-profile-menu-item" data-section="schedule" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Schedule</button>
+          <button class="user-profile-menu-item" data-section="time-clock-settings" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Time Clock Settings</button>
           <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Notifications</button>
           <button class="user-profile-menu-item" data-section="preferences" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Preferences</button>
           <button class="user-profile-menu-item" data-section="media-categories" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Media Categories</button>
@@ -3537,7 +3551,100 @@ dialog footer button, .code-dialog footer button {
             </div>
           </div>
         </div>
-        
+
+        <!-- Time Clock Settings Card (Owner / Admin only) -->
+        <!-- Stage 2: UI-only skeleton. No persistence yet — values shown are
+             local defaults that reset on reload. A future stage will hook this
+             up to Firestore and the payroll engine. -->
+        <div id="userProfileCardTimeClockSettings" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Time Clock Settings</h3>
+          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;line-height:1.45;">Configure how working hours and overtime are counted. These rules will feed into staff timesheets and payroll.</p>
+
+          <div style="display:flex;flex-direction:column;gap:14px;">
+
+            <!-- Workweek starts on -->
+            <div style="padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+              <label style="display:block;font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Workweek starts on</label>
+              <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:8px;">The day timesheets and weekly overtime counters reset on.</div>
+              <div id="tcWorkweekStartGroup" role="radiogroup" style="display:inline-flex;border:1px solid #d1d5db;border-radius:8px;overflow:hidden;background:#fff;">
+                <label style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;cursor:pointer;font-size:12px;color:#374151;border-right:1px solid #d1d5db;">
+                  <input type="radio" name="tcWorkweekStart" value="sunday" checked style="accent-color:#7c3aed;"> Sunday
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;cursor:pointer;font-size:12px;color:#374151;">
+                  <input type="radio" name="tcWorkweekStart" value="monday" style="accent-color:#7c3aed;"> Monday
+                </label>
+              </div>
+            </div>
+
+            <!-- Weekly + Daily standard hours (side-by-side on wider screens) -->
+            <div style="display:flex;gap:12px;flex-wrap:wrap;">
+              <div style="flex:1;min-width:180px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+                <label for="tcWeeklyStandardHours" style="display:block;font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Weekly standard hours</label>
+                <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:6px;">Full-time target per week before overtime.</div>
+                <div style="display:inline-flex;align-items:center;border:1px solid #d1d5db;border-radius:8px;background:#fff;overflow:hidden;">
+                  <input type="number" id="tcWeeklyStandardHours" value="40" min="0" step="0.5" inputmode="decimal" style="width:100px;padding:7px 10px;border:none;outline:none;font-size:13px;font-family:inherit;background:#fff;"/>
+                  <span style="padding:0 10px;font-size:12px;color:#6b7280;background:#f9fafb;border-left:1px solid #d1d5db;height:32px;display:flex;align-items:center;">hrs</span>
+                </div>
+              </div>
+              <div style="flex:1;min-width:180px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+                <label for="tcDailyStandardHours" style="display:block;font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Daily standard hours</label>
+                <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:6px;">Typical shift length for a single day.</div>
+                <div style="display:inline-flex;align-items:center;border:1px solid #d1d5db;border-radius:8px;background:#fff;overflow:hidden;">
+                  <input type="number" id="tcDailyStandardHours" value="8" min="0" step="0.5" inputmode="decimal" style="width:100px;padding:7px 10px;border:none;outline:none;font-size:13px;font-family:inherit;background:#fff;"/>
+                  <span style="padding:0 10px;font-size:12px;color:#6b7280;background:#f9fafb;border-left:1px solid #d1d5db;height:32px;display:flex;align-items:center;">hrs</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Enable overtime (toggle + reveal block) -->
+            <div style="padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+              <div style="display:flex;align-items:flex-start;gap:12px;">
+                <!-- Toggle uses the same visual language as the Earnings Rules tab for consistency. -->
+                <label style="position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;">
+                  <input type="checkbox" id="tcOvertimeEnabled" style="opacity:0;width:0;height:0;position:absolute;"/>
+                  <span id="tcOvertimeEnabledPill" style="width:36px;height:20px;border-radius:999px;background:#d1d5db;position:relative;transition:background 0.18s ease;display:inline-block;">
+                    <span id="tcOvertimeEnabledKnob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.18);transition:left 0.18s ease;"></span>
+                  </span>
+                </label>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:13px;font-weight:600;color:#111827;">Enable overtime</div>
+                  <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-top:2px;">Pay extra when staff exceed the weekly or daily thresholds below. Thresholds remain saved even when this is off.</div>
+                </div>
+              </div>
+
+              <!-- Overtime details — shown only when the toggle is on. -->
+              <div id="tcOvertimeFields" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #e5e7eb;flex-direction:column;gap:10px;">
+                <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                  <div style="flex:1;min-width:180px;">
+                    <label for="tcWeeklyOvertimeThreshold" style="display:block;font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Weekly overtime threshold</label>
+                    <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:6px;">Hours in a week before overtime kicks in.</div>
+                    <div style="display:inline-flex;align-items:center;border:1px solid #d1d5db;border-radius:8px;background:#fff;overflow:hidden;">
+                      <input type="number" id="tcWeeklyOvertimeThreshold" value="40" min="0" step="0.5" inputmode="decimal" style="width:100px;padding:7px 10px;border:none;outline:none;font-size:13px;font-family:inherit;background:#fff;"/>
+                      <span style="padding:0 10px;font-size:12px;color:#6b7280;background:#f9fafb;border-left:1px solid #d1d5db;height:32px;display:flex;align-items:center;">hrs</span>
+                    </div>
+                  </div>
+                  <div style="flex:1;min-width:180px;">
+                    <label for="tcDailyOvertimeThreshold" style="display:block;font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Daily overtime threshold</label>
+                    <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:6px;">Hours in a single day before overtime kicks in.</div>
+                    <div style="display:inline-flex;align-items:center;border:1px solid #d1d5db;border-radius:8px;background:#fff;overflow:hidden;">
+                      <input type="number" id="tcDailyOvertimeThreshold" value="8" min="0" step="0.5" inputmode="decimal" style="width:100px;padding:7px 10px;border:none;outline:none;font-size:13px;font-family:inherit;background:#fff;"/>
+                      <span style="padding:0 10px;font-size:12px;color:#6b7280;background:#f9fafb;border-left:1px solid #d1d5db;height:32px;display:flex;align-items:center;">hrs</span>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label for="tcOvertimeMultiplier" style="display:block;font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Overtime multiplier</label>
+                  <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:6px;">Rate paid for overtime hours. e.g. 1.5 = time-and-a-half, 2 = double-time. Minimum 1.</div>
+                  <div style="display:inline-flex;align-items:center;border:1px solid #d1d5db;border-radius:8px;background:#fff;overflow:hidden;">
+                    <input type="number" id="tcOvertimeMultiplier" value="1.5" min="1" step="0.1" inputmode="decimal" style="width:100px;padding:7px 10px;border:none;outline:none;font-size:13px;font-family:inherit;background:#fff;"/>
+                    <span style="padding:0 10px;font-size:12px;color:#6b7280;background:#f9fafb;border-left:1px solid #d1d5db;height:32px;display:flex;align-items:center;">\u00D7</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Billing Card -->
         <div id="userProfileCardBilling" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <!-- Billing Overview -->
@@ -5952,6 +6059,7 @@ if (typeof document !== 'undefined') {
     if (typeof window.ffSyncUserProfileLocationsMenuVisibility === 'function') window.ffSyncUserProfileLocationsMenuVisibility();
     if (typeof window.ffSyncUserProfileScheduleMenuVisibility === 'function') window.ffSyncUserProfileScheduleMenuVisibility();
     if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') window.ffSyncUserProfilePreferencesMenuVisibility();
+    if (typeof window.ffSyncUserProfileTimeClockSettingsMenuVisibility === 'function') window.ffSyncUserProfileTimeClockSettingsMenuVisibility();
     if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
     if (typeof window.ffApplyHistoryActionButtonsVisibility === 'function') window.ffApplyHistoryActionButtonsVisibility();
     if (typeof ffRefreshTasksPermissionControls === 'function') ffRefreshTasksPermissionControls();
@@ -6624,6 +6732,7 @@ function ffUpdateMainNavTabVisibility() {
     'mediaBtn',
     'inventoryNavBtn',
     'scheduleBtn',
+    'timeClockBtn',
     'trainingBtn',
     'settingsBtn'
   ];
@@ -6672,6 +6781,15 @@ function ffUpdateMainNavTabVisibility() {
     }
   }
   setNavElVisible(document.getElementById('scheduleBtn'), scheduleOk);
+  const sidTimeClock = (
+    window.__ff_authedStaffId
+    || (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : '')
+    || ''
+  ).toString().trim();
+  // Time Clock is visible to either (a) an account linked to a staff profile
+  // or (b) an admin/owner (so they can open the kiosk and the Manage view).
+  const tcAdmin = (typeof window !== 'undefined' && window.ff_is_admin_cached === true);
+  setNavElVisible(document.getElementById('timeClockBtn'), sidTimeClock.length > 0 || tcAdmin);
   setNavElVisible(document.getElementById('trainingBtn'), tabUnlessExplicitOff('training_view'));
   setNavElVisible(document.getElementById('settingsBtn'), tabUnlessExplicitOff('settings_view'));
   ffUpdateAppsPanelPermissionVisibility();
@@ -6737,6 +6855,23 @@ function ffUpdateAppsPanelPermissionVisibility() {
   setAppsTileVisible('.apps-panel-item[data-app="settings"]:not([data-staff])', tabUnlessExplicitOff('settings_view'));
   setAppsTileVisible('.apps-panel-item[data-app="settings"][data-staff="true"]', typeof ffCurrentUserHasStaffViewPermission === 'function' && ffCurrentUserHasStaffViewPermission());
   setAppsTileVisible('.apps-panel-item[data-app="history"]', typeof ffCurrentUserHasHistoryViewPermission === 'function' && ffCurrentUserHasHistoryViewPermission());
+  // Time Clock tile: PIN-based kiosk, so visible to staff-linked accounts
+  // AND to admins/owners (the latter need access for the Manage view).
+  (function () {
+    let hasStaff = false;
+    try {
+      if (typeof window.ffHasLinkedStaffIdForTimeClock === 'function') {
+        hasStaff = window.ffHasLinkedStaffIdForTimeClock() === true;
+      } else {
+        const sid = (window.__ff_authedStaffId
+          || (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : '')
+          || '').toString().trim();
+        hasStaff = sid.length > 0;
+      }
+    } catch (_) {}
+    const tcAdmin = (typeof window !== 'undefined' && window.ff_is_admin_cached === true);
+    setAppsTileVisible('.apps-panel-item[data-app="time-clock"]', hasStaff || tcAdmin);
+  })();
 
   // Locations management now lives under Settings → Locations, not as a
   // standalone Apps tile. Visibility is handled inside the User Profile screen.
@@ -6757,6 +6892,7 @@ function ffIsFullscreenModuleCoveringQueue() {
     'ticketsScreen',
     'trainingScreen',
     'scheduleScreen',
+    'timeClockScreen',
     'inventoryScreen',
     'userProfileScreen',
     'myProfileScreen',
@@ -9504,6 +9640,8 @@ function goToQueue() {
   if (ticketsScreenQueue) ticketsScreenQueue.style.display = 'none';
   const scheduleScreenQueue = document.getElementById('scheduleScreen');
   if (scheduleScreenQueue) scheduleScreenQueue.style.display = 'none';
+  const timeClockScreenQueue = document.getElementById('timeClockScreen');
+  if (timeClockScreenQueue) timeClockScreenQueue.style.display = 'none';
   
   // Hide Manage Queue screen if visible
   const manageQueueScreen = document.getElementById('manageQueueScreen');
@@ -9580,6 +9718,75 @@ function goToQueue() {
     }
   } catch (e) {}
 }
+
+/**
+ * Time Clock — full-screen route (peer to Schedule / Tasks). Not part of Settings.
+ */
+function goToTimeClock() {
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try { window.ffCloseGlobalBlockingOverlays(); } catch (e) {}
+  }
+  if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
+  // Time Clock is now a PIN-gated kiosk: anyone at the screen can clock in/out
+  // by entering their own PIN, so the current account does NOT need to be
+  // linked to a staff profile. The Manage view is still admin/owner only and
+  // is gated inside the renderer.
+  // Ensure admin status is resolved so the "Manage Time Cards" link is
+  // rendered on first paint for owner/admin accounts.
+  try {
+    if (window.ff_is_admin_cached === null && typeof window.isCurrentUserOwner === 'function') {
+      window.isCurrentUserOwner().then((isAdmin) => {
+        window.ff_is_admin_cached = isAdmin === true;
+        if (document.getElementById('timeClockScreen')
+            && document.getElementById('timeClockScreen').style.display !== 'none'
+            && typeof window.ffInitTimeClockUI === 'function'
+            && window.__ffTCState && window.__ffTCState.view === 'clock') {
+          window.ffInitTimeClockUI();
+        }
+      }).catch(() => {});
+    }
+  } catch (_) {}
+  if (window.__ffTCState) {
+    // Always enter through the PIN view — never land straight in Confirm.
+    if (window.__ffTCState.view !== 'manage') window.__ffTCState.view = 'clock';
+    window.__ffTCState.confirmStaff = null;
+    window.__ffTCState.confirmOpenEntry = null;
+  }
+  const screenIds = [
+    'tasksScreen', 'inboxScreen', 'chatScreen', 'mediaScreen', 'ticketsScreen', 'trainingScreen',
+    'userProfileScreen', 'myProfileScreen', 'manageQueueScreen', 'scheduleScreen', 'inventoryScreen'
+  ];
+  screenIds.forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  const ownerView = document.getElementById('owner-view');
+  const joinBar = document.getElementById('joinBar');
+  const queueControls = document.getElementById('queueControls');
+  const wrap = document.querySelector('.wrap');
+  if (ownerView) ownerView.style.display = 'none';
+  if (joinBar) joinBar.style.display = 'none';
+  if (queueControls) queueControls.style.display = 'none';
+  if (wrap) wrap.style.display = 'none';
+  const screen = document.getElementById('timeClockScreen');
+  if (screen) screen.style.display = 'flex';
+  document.querySelectorAll('.btn-pill').forEach(function (b) { b.classList.remove('active'); });
+  const tcb = document.getElementById('timeClockBtn');
+  if (tcb) tcb.classList.add('active');
+  if (typeof window.ffInitTimeClockUI === 'function') window.ffInitTimeClockUI();
+}
+window.goToTimeClock = goToTimeClock;
+
+function hideTimeClockScreen() {
+  const s = document.getElementById('timeClockScreen');
+  if (s) s.style.display = 'none';
+  const tcb = document.getElementById('timeClockBtn');
+  if (tcb) tcb.classList.remove('active');
+  if (window.__ffTCClockTick) { try { clearInterval(window.__ffTCClockTick); } catch (e) {} window.__ffTCClockTick = null; }
+  if (window.__ffTCKbHandler) { try { document.removeEventListener('keydown', window.__ffTCKbHandler); } catch (e) {} window.__ffTCKbHandler = null; }
+  if (window.__ffTCMgEscHandler) { try { document.removeEventListener('keydown', window.__ffTCMgEscHandler); } catch (e) {} window.__ffTCMgEscHandler = null; }
+}
+window.hideTimeClockScreen = hideTimeClockScreen;
 
 // Training Library (MVP): local state only, no Firestore yet.
 const trainingItems = [];
@@ -12982,6 +13189,8 @@ async function goToTraining() {
   const mediaScreen = document.getElementById('mediaScreen');
   const ticketsScreen = document.getElementById('ticketsScreen');
   const scheduleScreen = document.getElementById('scheduleScreen');
+  const timeClockScreenTc = document.getElementById('timeClockScreen');
+  const inventoryScreenTc = document.getElementById('inventoryScreen');
   const userProfileScreen = document.getElementById('userProfileScreen');
   const manageQueueScreen = document.getElementById('manageQueueScreen');
   const ownerView = document.getElementById('owner-view');
@@ -12996,6 +13205,8 @@ async function goToTraining() {
   if (mediaScreen) mediaScreen.style.display = 'none';
   if (ticketsScreen) ticketsScreen.style.display = 'none';
   if (scheduleScreen) scheduleScreen.style.display = 'none';
+  if (timeClockScreenTc) timeClockScreenTc.style.display = 'none';
+  if (inventoryScreenTc) inventoryScreenTc.style.display = 'none';
   if (userProfileScreen) userProfileScreen.style.display = 'none';
   if (manageQueueScreen) manageQueueScreen.style.display = 'none';
   if (ownerView) ownerView.style.display = 'none';
@@ -13512,6 +13723,11 @@ function ffUserShouldRouteToMyProfileOnly() {
 window.ffUserShouldRouteToMyProfileOnly = ffUserShouldRouteToMyProfileOnly;
 
 function goToUserProfile(section) {
+  // Time Clock is a standalone full-screen module (not Settings / User Profile).
+  if (String(section || '').trim() === 'time-clock' && typeof window.goToTimeClock === 'function') {
+    window.goToTimeClock();
+    return;
+  }
   if (typeof ffUserShouldRouteToMyProfileOnly === 'function' && ffUserShouldRouteToMyProfileOnly()) {
     if (typeof goToMyProfile === 'function') {
       goToMyProfile();
@@ -13618,6 +13834,7 @@ function goToUserProfile(section) {
   const inboxScreenEl = document.getElementById('inboxScreen');
   const ticketsScreenEl = document.getElementById('ticketsScreen');
   const scheduleScreenEl = document.getElementById('scheduleScreen');
+  const timeClockScreenEl = document.getElementById('timeClockScreen');
   const inventoryScreenEl = document.getElementById('inventoryScreen');
   if (tasksScreen && tasksScreen.style.display !== 'none') {
     previousView = 'tasks';
@@ -13629,6 +13846,8 @@ function goToUserProfile(section) {
     previousView = 'inbox';
   } else if (ticketsScreenEl && ticketsScreenEl.style.display !== 'none') {
     previousView = 'tickets';
+  } else if (timeClockScreenEl && timeClockScreenEl.style.display !== 'none') {
+    previousView = 'timeClock';
   } else if (scheduleScreenEl && scheduleScreenEl.style.display !== 'none') {
     previousView = 'schedule';
   } else if (inventoryScreenEl && inventoryScreenEl.style.display !== 'none') {
@@ -13655,6 +13874,7 @@ function goToUserProfile(section) {
   if (scheduleScreenEl && !keepScheduleUnderSettings) {
     scheduleScreenEl.style.display = 'none';
   }
+  if (timeClockScreenEl) timeClockScreenEl.style.display = 'none';
 
   const trainingScreenGoProf = document.getElementById('trainingScreen');
   if (trainingScreenGoProf) trainingScreenGoProf.style.display = 'none';
@@ -13700,6 +13920,9 @@ function goToUserProfile(section) {
   }
   if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') {
     window.ffSyncUserProfilePreferencesMenuVisibility();
+  }
+  if (typeof window.ffSyncUserProfileTimeClockSettingsMenuVisibility === 'function') {
+    window.ffSyncUserProfileTimeClockSettingsMenuVisibility();
   }
 
   // Load avatar from localStorage when User Profile screen is shown
@@ -13784,6 +14007,7 @@ function goToMyProfile() {
   const inboxScreenEl = document.getElementById('inboxScreen');
   const ticketsScreenEl = document.getElementById('ticketsScreen');
   const scheduleScreenEl = document.getElementById('scheduleScreen');
+  const timeClockScreenElMyProf = document.getElementById('timeClockScreen');
   const inventoryScreenElMyProf = document.getElementById('inventoryScreen');
   if (tasksScreen && tasksScreen.style.display !== 'none') {
     previousView = 'tasks';
@@ -13795,6 +14019,8 @@ function goToMyProfile() {
     previousView = 'inbox';
   } else if (ticketsScreenEl && ticketsScreenEl.style.display !== 'none') {
     previousView = 'tickets';
+  } else if (timeClockScreenElMyProf && timeClockScreenElMyProf.style.display !== 'none') {
+    previousView = 'timeClock';
   } else if (scheduleScreenEl && scheduleScreenEl.style.display !== 'none') {
     previousView = 'schedule';
   } else if (inventoryScreenElMyProf && inventoryScreenElMyProf.style.display !== 'none') {
@@ -13813,6 +14039,7 @@ function goToMyProfile() {
   if (inboxScreenEl) inboxScreenEl.style.display = 'none';
   if (mediaScreenEl) mediaScreenEl.style.display = 'none';
   if (ticketsScreenEl) ticketsScreenEl.style.display = 'none';
+  if (timeClockScreenElMyProf) timeClockScreenElMyProf.style.display = 'none';
   if (scheduleScreenEl) scheduleScreenEl.style.display = 'none';
   if (inventoryScreenElMyProf) inventoryScreenElMyProf.style.display = 'none';
   const trainingScreenGo = document.getElementById('trainingScreen');
@@ -14281,6 +14508,8 @@ function goBackFromUserProfile() {
     window.goToTickets();
   } else if (previousView === 'schedule' && typeof window.goToSchedule === 'function') {
     window.goToSchedule();
+  } else if (previousView === 'timeClock' && typeof window.goToTimeClock === 'function') {
+    window.goToTimeClock();
   } else if (previousView === 'inventory' && typeof window.goToInventory === 'function') {
     window.goToInventory();
   } else {
@@ -14298,6 +14527,13 @@ if (queueBtn) {
   if (ownerView && ownerView.style.display !== 'none' && qn && typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess()) {
     qn.classList.add('active');
   }
+}
+const timeClockNavBtn = document.getElementById('timeClockBtn');
+if (timeClockNavBtn && !timeClockNavBtn.__ffBound) {
+  timeClockNavBtn.__ffBound = true;
+  timeClockNavBtn.addEventListener('click', function () {
+    if (typeof window.goToTimeClock === 'function') window.goToTimeClock();
+  });
 }
 
 function renderSettings(){
@@ -17509,7 +17745,7 @@ function removeBlockingOverlays() {
     // Full-screen app panels — never force pointer-events:none (breaks Tickets/Tasks/Inbox when hidden then shown).
     const APP_SCREEN_IDS = new Set([
       'ticketsScreen', 'tasksScreen', 'inboxScreen', 'mediaScreen', 'chatScreen',
-      'scheduleScreen', 'trainingScreen'
+      'scheduleScreen', 'timeClockScreen', 'trainingScreen'
     ]);
     const SKIP_POINTER_EVENTS_FIX_IDS = new Set(['appsOverlayBackdrop', 'appsPanel']);
     
@@ -19852,7 +20088,7 @@ function openTasks() {
     }
 
     // Hide any other fullscreen peer modules so Tasks isn't rendered over another screen.
-    ['chatScreen','inboxScreen','mediaScreen','ticketsScreen','trainingScreen','scheduleScreen','inventoryScreen','myProfileScreen','manageQueueScreen']
+    ['chatScreen','inboxScreen','mediaScreen','ticketsScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','myProfileScreen','manageQueueScreen']
       .forEach(function(id){ var el = document.getElementById(id); if (el) el.style.display = 'none'; });
     
     // Hide main content and Queue-specific controls (joinBar and queueControls)
@@ -26135,6 +26371,11 @@ function initializeAppsPanel() {
               openHistoryModal();
             }
             break;
+          case 'time-clock':
+            if (typeof window.goToTimeClock === 'function') {
+              window.goToTimeClock();
+            }
+            break;
           case 'settings':
             if (typeof goToUserProfile === 'function') {
               goToUserProfile('schedule');
@@ -27799,14 +28040,27 @@ function initializeAppsPanel() {
         });
       }
       
-      // Render right-side navigation
+      // Render right-side navigation. Earnings Rules is gated to
+      // owner/admin only — managers and staff never see the tab. We
+      // intentionally check by role rather than a new permission key so
+      // the sensitive compensation data can't be accidentally exposed
+      // by toggling a permission.
       const navEl = document.getElementById('staffDetailsNav');
+      const canSeeEarningsTab = (typeof window.ffCurrentUserCanSeeEarningsRules === 'function')
+        ? window.ffCurrentUserCanSeeEarningsRules()
+        : true;
       if (navEl) {
-        const tabs = ['details', 'schedule', 'locations', 'notifications', 'permissions', 'documents'];
-        const labels = ['Details', 'Schedule', 'Locations', 'Notifications', 'Permissions', 'Documents'];
-        navEl.innerHTML = tabs.map(function(tab, idx) {
+        const baseTabs = ['details', 'schedule', 'locations', 'permissions'];
+        const baseLabels = ['Details', 'Schedule', 'Locations', 'Permissions'];
+        if (canSeeEarningsTab) {
+          baseTabs.push('earnings');
+          baseLabels.push('Earnings Rules');
+        }
+        baseTabs.push('documents');
+        baseLabels.push('Documents');
+        navEl.innerHTML = baseTabs.map(function(tab, idx) {
           const isActive = currentTab === tab;
-          return `<button type="button" class="staff-nav-item${isActive ? ' is-active' : ''}" data-tab="${tab}" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;transition:background 0.15s ease,color 0.15s ease;">${labels[idx]}</button>`;
+          return `<button type="button" class="staff-nav-item${isActive ? ' is-active' : ''}" data-tab="${tab}" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;transition:background 0.15s ease,color 0.15s ease;">${baseLabels[idx]}</button>`;
         }).join('');
         
         navEl.querySelectorAll('.staff-nav-item').forEach(function(btn) {
@@ -27817,7 +28071,8 @@ function initializeAppsPanel() {
         });
       }
       
-      const validTabs = ['details', 'schedule', 'locations', 'notifications', 'permissions', 'documents'];
+      const validTabs = ['details', 'schedule', 'locations', 'permissions', 'documents'];
+      if (canSeeEarningsTab) validTabs.push('earnings');
       if (!validTabs.includes(currentTab)) currentTab = 'details';
       switchTab(currentTab);
       
@@ -27862,14 +28117,27 @@ function initializeAppsPanel() {
     const detailsContent = panel('staffDetailsTabContent');
     const scheduleContent = panel('staffScheduleTabContent');
     const locationsContent = panel('staffLocationsTabContent');
-    const notificationsContent = panel('staffNotificationsTabContent');
     const permissionsContent = panel('staffPermissionsTabContent');
+    const earningsContent = panel('staffEarningsTabContent');
     const documentsContent = panel('staffDocumentsTabContent');
 
     if (detailsContent) detailsContent.style.display = tab === 'details' ? 'block' : 'none';
     if (scheduleContent) scheduleContent.style.display = tab === 'schedule' ? 'block' : 'none';
     if (locationsContent) locationsContent.style.display = tab === 'locations' ? 'block' : 'none';
-    if (notificationsContent) notificationsContent.style.display = tab === 'notifications' ? 'block' : 'none';
+    if (earningsContent) {
+      const canSeeEarningsNow = (typeof window.ffCurrentUserCanSeeEarningsRules === 'function')
+        ? window.ffCurrentUserCanSeeEarningsRules()
+        : false;
+      const showEarningsNow = tab === 'earnings' && canSeeEarningsNow;
+      earningsContent.style.display = showEarningsNow ? 'block' : 'none';
+      if (showEarningsNow && selectedStaffId) {
+        const staffData = ffGetStaffStore();
+        const staff = staffData.staff.find(s => s.id === selectedStaffId);
+        if (staff && typeof renderEarningsRulesTab === 'function') {
+          renderEarningsRulesTab(staff);
+        }
+      }
+    }
     if ((tab === 'details' || tab === 'schedule') && selectedStaffId) {
       const staffData = ffGetStaffStore();
       const staff = staffData.staff.find(s => s.id === selectedStaffId);
@@ -28449,6 +28717,7 @@ function initializeAppsPanel() {
           if (typeof window.ffSyncUserProfileLocationsMenuVisibility === 'function') window.ffSyncUserProfileLocationsMenuVisibility();
           if (typeof window.ffSyncUserProfileScheduleMenuVisibility === 'function') window.ffSyncUserProfileScheduleMenuVisibility();
           if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') window.ffSyncUserProfilePreferencesMenuVisibility();
+          if (typeof window.ffSyncUserProfileTimeClockSettingsMenuVisibility === 'function') window.ffSyncUserProfileTimeClockSettingsMenuVisibility();
           if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
           if (typeof window.updateMediaScreenTabsForRole === 'function') window.updateMediaScreenTabsForRole();
           if (typeof window.refreshMediaWorksList === 'function') window.refreshMediaWorksList();
@@ -28487,6 +28756,334 @@ function initializeAppsPanel() {
       };
     });
   }
+
+  /**
+   * Salon-wide currency helpers. Reads from `window.settings.preferences.currency`
+   * (ISO code like "USD" / "ILS" / "EUR"). If no currency is set we fall back to
+   * "USD" so inputs still render with a symbol. Helpers are intentionally small
+   * and local — the Earnings Rules tab only needs display + a light label.
+   */
+  function ffGetSalonCurrencyCode() {
+    try {
+      const cur = (window.settings && window.settings.preferences && typeof window.settings.preferences.currency === 'string')
+        ? String(window.settings.preferences.currency).trim().toUpperCase()
+        : '';
+      return cur || 'USD';
+    } catch (_) { return 'USD'; }
+  }
+
+  function ffGetSalonCurrencySymbol() {
+    const code = ffGetSalonCurrencyCode();
+    const map = { USD: '$', ILS: '\u20AA', EUR: '\u20AC', GBP: '\u00A3', CAD: 'CA$', AUD: 'A$', MXN: 'MX$', BRL: 'R$', INR: '\u20B9', JPY: '\u00A5', CNY: '\u00A5' };
+    return map[code] || code + ' ';
+  }
+
+  /** Normalize any raw earningsRules value from Firestore into a safe shape.
+   *  Missing keys default to disabled / zero so the UI never breaks. */
+  function ffNormalizeStaffEarningsRules(raw) {
+    const r = (raw && typeof raw === 'object') ? raw : {};
+    const svc = (r.serviceCommission && typeof r.serviceCommission === 'object') ? r.serviceCommission : {};
+    const hr = (r.hourly && typeof r.hourly === 'object') ? r.hourly : {};
+    const clampPct = function(v) {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return 0;
+      return Math.max(0, Math.min(100, n));
+    };
+    const clampPay = function(v) {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0) return 0;
+      return Math.round(n * 100) / 100;
+    };
+    return {
+      serviceCommission: {
+        enabled: svc.enabled === true,
+        basicPercent: clampPct(svc.basicPercent),
+      },
+      hourly: {
+        enabled: hr.enabled === true,
+        ratePerHour: clampPay(hr.ratePerHour),
+        greaterOf: hr.greaterOf === true,
+      },
+      updatedAt: (typeof r.updatedAt === 'number' && Number.isFinite(r.updatedAt)) ? r.updatedAt : null,
+    };
+  }
+
+  /** Persist earnings rules on the given staff record and sync to the cloud. */
+  function ffSaveStaffEarningsRules(staffId, rules) {
+    if (!staffId) return;
+    const store = (typeof ffGetStaffStore === 'function') ? ffGetStaffStore() : null;
+    if (!store || !Array.isArray(store.staff)) return;
+    const idx = store.staff.findIndex(function(s) { return s && s.id === staffId; });
+    if (idx === -1) return;
+    const next = ffNormalizeStaffEarningsRules(rules);
+    next.updatedAt = Date.now();
+    store.staff[idx].earningsRules = next;
+    if (typeof ffSaveStaffStore === 'function') ffSaveStaffStore(store);
+  }
+
+  /**
+   * Render the Earnings Rules tab for a staff member. Mirrors Mangomint's
+   * Compensation layout (two stacked cards: Service Commission + Hourly)
+   * but scoped to the MVP: Basic % only for service commission and a flat
+   * hourly rate with an optional "greater-of" toggle. Time Block will later
+   * read these values via the window helpers defined at the end of this
+   * function. Toggles auto-save on every interaction — no explicit Save
+   * button, mirroring the Permissions tab pattern.
+   */
+  function renderEarningsRulesTab(staff) {
+    const container = document.getElementById('staffEarningsTabContent');
+    if (!container) return;
+    const rules = ffNormalizeStaffEarningsRules(staff && staff.earningsRules);
+    const currencyCode = ffGetSalonCurrencyCode();
+    const currencySym = ffGetSalonCurrencySymbol();
+    const svcOn = rules.serviceCommission.enabled;
+    const hourlyOn = rules.hourly.enabled;
+
+    // Color tokens match the rest of the staff modal (purple primary) and
+    // Mangomint's visual tone: soft cards, subtle borders, toggles in corner.
+    const cardStyle =
+      'background:#fff;border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,0.03);';
+    const subtle = 'font-size:12px;color:#6b7280;line-height:1.45;';
+
+    const toggleHtml = function(id, on) {
+      return `
+        <label style="position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;" title="${on ? 'Enabled' : 'Disabled'}">
+          <input type="checkbox" id="${id}" ${on ? 'checked' : ''} style="opacity:0;width:0;height:0;position:absolute;"/>
+          <span data-toggle-for="${id}" style="width:36px;height:20px;border-radius:999px;background:${on ? '#7c3aed' : '#d1d5db'};position:relative;transition:background 0.18s ease;display:inline-block;">
+            <span style="position:absolute;top:2px;left:${on ? '18px' : '2px'};width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.18);transition:left 0.18s ease;"></span>
+          </span>
+        </label>
+      `;
+    };
+
+    const serviceCard = `
+      <div style="${cardStyle}">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          ${toggleHtml('ffEarningsServiceToggle', svcOn)}
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14px;font-weight:600;color:#111827;margin-bottom:2px;">Service Commission</div>
+            <div style="${subtle}">Compensation is calculated as a percentage of service sales.</div>
+          </div>
+        </div>
+        <div id="ffEarningsServiceBody" style="display:${svcOn ? 'block' : 'none'};margin-top:16px;padding-top:16px;border-top:1px solid #f3f4f6;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <div style="width:16px;height:16px;border-radius:50%;border:2px solid #7c3aed;background:#fff;flex-shrink:0;position:relative;">
+              <span style="position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:#7c3aed;"></span>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:#111827;line-height:1.3;">Basic Service Commission</div>
+              <div style="font-size:11px;color:#6b7280;line-height:1.3;">A flat percentage of total sales.</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:12px;margin-left:24px;">
+            <label for="ffEarningsServicePercent" style="font-size:12px;color:#374151;font-weight:500;">Commission %</label>
+            <div style="display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:8px;background:#fff;overflow:hidden;">
+              <input type="number" id="ffEarningsServicePercent" value="${rules.serviceCommission.basicPercent}" min="0" max="100" step="0.5" inputmode="decimal" placeholder="10" style="width:80px;padding:7px 10px;border:none;outline:none;font-size:13px;font-family:inherit;background:#fff;text-align:right;"/>
+              <span style="padding:0 10px;font-size:13px;color:#6b7280;background:#f9fafb;border-left:1px solid var(--border);height:32px;display:flex;align-items:center;">%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const hourlyCard = `
+      <div style="${cardStyle}">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          ${toggleHtml('ffEarningsHourlyToggle', hourlyOn)}
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14px;font-weight:600;color:#111827;margin-bottom:2px;">Hourly</div>
+            <div style="${subtle}">Compensation is calculated using a flat rate per hour.</div>
+          </div>
+        </div>
+        <div id="ffEarningsHourlyBody" style="display:${hourlyOn ? 'block' : 'none'};margin-top:16px;padding-top:16px;border-top:1px solid #f3f4f6;">
+          <div style="margin-bottom:14px;">
+            <label for="ffEarningsHourlyRate" style="display:block;font-size:12px;color:#374151;font-weight:500;margin-bottom:6px;">Amount per hour <span style="color:#9ca3af;font-weight:400;">(${escapeHtml(currencyCode)})</span></label>
+            <div style="display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:8px;background:#fff;overflow:hidden;">
+              <span style="padding:0 10px;font-size:13px;color:#6b7280;background:#f9fafb;border-right:1px solid var(--border);height:32px;display:flex;align-items:center;">${escapeHtml(currencySym)}</span>
+              <input type="number" id="ffEarningsHourlyRate" value="${rules.hourly.ratePerHour}" min="0" step="0.5" inputmode="decimal" placeholder="20" style="width:120px;padding:7px 10px;border:none;outline:none;font-size:13px;font-family:inherit;background:#fff;"/>
+            </div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:12px;padding-top:12px;border-top:1px solid #f3f4f6;">
+            ${toggleHtml('ffEarningsGreaterOfToggle', rules.hourly.greaterOf)}
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:2px;">Enable greater-of calculation</div>
+              <div style="font-size:11px;color:#6b7280;line-height:1.4;">Staff member will be compensated based on the higher value between their hourly rate and commission earnings.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = `
+      <div style="padding:4px 4px 16px 4px;">
+        <div style="margin-bottom:14px;">
+          <h3 style="margin:0 0 4px 0;font-size:16px;font-weight:700;color:#111827;">Earnings Rules</h3>
+          <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.45;">Define how this staff member is paid. These values will feed into Time Block and future payroll reports. All amounts are in <strong>${escapeHtml(currencyCode)}</strong> (set in business preferences).</p>
+        </div>
+        ${serviceCard}
+        ${hourlyCard}
+        <div id="ffEarningsSavedHint" aria-live="polite" style="font-size:11px;color:#10b981;font-weight:600;height:14px;margin-top:6px;opacity:0;transition:opacity 0.2s ease;">Saved</div>
+      </div>
+    `;
+
+    // Wire: every control auto-saves via the central save helper and shows
+    // a tiny "Saved" flash so the user knows it persisted.
+    const hint = container.querySelector('#ffEarningsSavedHint');
+    const flashSaved = function() {
+      if (!hint) return;
+      hint.style.opacity = '1';
+      clearTimeout(container.__ffEarningsHintTimer);
+      container.__ffEarningsHintTimer = setTimeout(function() { hint.style.opacity = '0'; }, 1200);
+    };
+    const readCurrentRules = function() {
+      const svcToggle = container.querySelector('#ffEarningsServiceToggle');
+      const svcPct = container.querySelector('#ffEarningsServicePercent');
+      const hrToggle = container.querySelector('#ffEarningsHourlyToggle');
+      const hrRate = container.querySelector('#ffEarningsHourlyRate');
+      const greater = container.querySelector('#ffEarningsGreaterOfToggle');
+      return {
+        serviceCommission: {
+          enabled: !!(svcToggle && svcToggle.checked),
+          basicPercent: Number(svcPct && svcPct.value) || 0,
+        },
+        hourly: {
+          enabled: !!(hrToggle && hrToggle.checked),
+          ratePerHour: Number(hrRate && hrRate.value) || 0,
+          greaterOf: !!(greater && greater.checked),
+        },
+      };
+    };
+    const persist = function() {
+      ffSaveStaffEarningsRules(staff.id, readCurrentRules());
+      flashSaved();
+    };
+
+    // Toggle visuals (swap pill colors + knob position) stay in sync with the
+    // hidden checkbox, and toggling the main enable flips the body visibility.
+    const wireToggleVisual = function(inputId) {
+      const cb = container.querySelector('#' + inputId);
+      const pill = container.querySelector('[data-toggle-for="' + inputId + '"]');
+      if (!cb || !pill) return;
+      const sync = function() {
+        pill.style.background = cb.checked ? '#7c3aed' : '#d1d5db';
+        const knob = pill.querySelector('span');
+        if (knob) knob.style.left = cb.checked ? '18px' : '2px';
+      };
+      pill.addEventListener('click', function(e) {
+        e.preventDefault();
+        cb.checked = !cb.checked;
+        sync();
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      cb.addEventListener('change', sync);
+    };
+    wireToggleVisual('ffEarningsServiceToggle');
+    wireToggleVisual('ffEarningsHourlyToggle');
+    wireToggleVisual('ffEarningsGreaterOfToggle');
+
+    // Enable/disable body reveal + persist on every change.
+    const svcToggleEl = container.querySelector('#ffEarningsServiceToggle');
+    const svcBody = container.querySelector('#ffEarningsServiceBody');
+    if (svcToggleEl && svcBody) {
+      svcToggleEl.addEventListener('change', function() {
+        svcBody.style.display = svcToggleEl.checked ? 'block' : 'none';
+        persist();
+      });
+    }
+    const hrToggleEl = container.querySelector('#ffEarningsHourlyToggle');
+    const hrBody = container.querySelector('#ffEarningsHourlyBody');
+    if (hrToggleEl && hrBody) {
+      hrToggleEl.addEventListener('change', function() {
+        hrBody.style.display = hrToggleEl.checked ? 'block' : 'none';
+        persist();
+      });
+    }
+    const greaterEl = container.querySelector('#ffEarningsGreaterOfToggle');
+    if (greaterEl) greaterEl.addEventListener('change', persist);
+
+    // Numeric inputs: clamp on blur, persist on blur (avoid thrashing Firestore
+    // on every keystroke while still guaranteeing the last value wins).
+    const svcPctEl = container.querySelector('#ffEarningsServicePercent');
+    if (svcPctEl) {
+      svcPctEl.addEventListener('blur', function() {
+        let n = Number(svcPctEl.value);
+        if (!Number.isFinite(n)) n = 0;
+        n = Math.max(0, Math.min(100, n));
+        svcPctEl.value = n;
+        persist();
+      });
+    }
+    const hrRateEl = container.querySelector('#ffEarningsHourlyRate');
+    if (hrRateEl) {
+      hrRateEl.addEventListener('blur', function() {
+        let n = Number(hrRateEl.value);
+        if (!Number.isFinite(n) || n < 0) n = 0;
+        n = Math.round(n * 100) / 100;
+        hrRateEl.value = n;
+        persist();
+      });
+    }
+  }
+
+  /**
+   * Earnings Rules gating — OWNER / ADMIN ONLY. Managers and other staff
+   * never see the tab, even if they have `staff_manage`. Money / payroll
+   * data is sensitive enough to deserve a stricter gate than general staff
+   * management. Checks the authed user's role via the same sources the
+   * rest of the app uses (staff record flags + user/actor role fallbacks).
+   */
+  window.ffCurrentUserCanSeeEarningsRules = function() {
+    try {
+      // 1) Look up the currently-authed staff record and check admin flag.
+      if (typeof window.ffGetStaffStore === 'function') {
+        const store = window.ffGetStaffStore();
+        const list = store && Array.isArray(store.staff) ? store.staff : [];
+        const sid = (window.__ff_authedStaffId
+          || (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null)
+          || '').toString().trim();
+        if (sid) {
+          const me = list.find(function(s) {
+            const id = String((s && (s.id || s.staffId)) || '').trim();
+            return id && (id === sid || id.toLowerCase() === sid.toLowerCase());
+          });
+          if (me && me.isAdmin === true) return true;
+        }
+      }
+      // 2) Fall back to the global user/actor role set at login / PIN time.
+      const roleFromUser = (typeof window !== 'undefined' && window.__ff_user_role) ? window.__ff_user_role : '';
+      const roleFromActor = (typeof window !== 'undefined' && window.__ff_actorRole)
+        ? window.__ff_actorRole
+        : (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_role') : null) || '';
+      const lower = String(roleFromUser || roleFromActor).toLowerCase();
+      if (lower === 'admin' || lower === 'owner') return true;
+      return false;
+    } catch (_) { return false; }
+  };
+
+  // Expose helpers on window so Time Block / payroll modules (added later)
+  // can read a staff member's compensation rules without reaching into the
+  // store directly. Never throws — returns sensible defaults if the staff
+  // record or rules are missing.
+  window.ffStaffEarningsRulesFor = function(staffId) {
+    try {
+      const store = (typeof ffGetStaffStore === 'function') ? ffGetStaffStore() : null;
+      const list = store && Array.isArray(store.staff) ? store.staff : [];
+      const s = list.find(function(x) { return x && x.id === staffId; });
+      return ffNormalizeStaffEarningsRules(s && s.earningsRules);
+    } catch (_) { return ffNormalizeStaffEarningsRules(null); }
+  };
+  window.ffGetStaffHourlyRate = function(staffId) {
+    const r = window.ffStaffEarningsRulesFor(staffId);
+    return r.hourly.enabled ? Number(r.hourly.ratePerHour) || 0 : 0;
+  };
+  window.ffGetStaffServiceCommissionPct = function(staffId) {
+    const r = window.ffStaffEarningsRulesFor(staffId);
+    return r.serviceCommission.enabled ? Number(r.serviceCommission.basicPercent) || 0 : 0;
+  };
+  window.ffGetStaffGreaterOfEnabled = function(staffId) {
+    const r = window.ffStaffEarningsRulesFor(staffId);
+    return r.hourly.enabled && r.hourly.greaterOf === true;
+  };
 
   function renderScheduleTab(staff, editMode) {
     const scheduleContent = document.getElementById('staffScheduleTabContent');
@@ -29152,13 +29749,7 @@ function initializeAppsPanel() {
 
     container.innerHTML = `
       <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px;max-width:420px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <h3 style="margin:0;font-size:14px;font-weight:600;color:#111827;">Locations</h3>
-          <div style="display:flex;gap:6px;">
-            <button type="button" id="ffStaffLocationsSaveBtn" style="padding:5px 12px;background:#7c3aed;border:1px solid #7c3aed;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer;">Save</button>
-            <button type="button" id="ffStaffLocationsResetBtn" style="padding:5px 12px;background:#f3f4f6;border:1px solid var(--border);border-radius:6px;color:#374151;font-size:11px;font-weight:500;cursor:pointer;">Reset</button>
-          </div>
-        </div>
+        <h3 style="margin:0 0 4px 0;font-size:14px;font-weight:600;color:#111827;">Locations</h3>
         <p style="margin:0 0 10px 0;font-size:11px;color:#6b7280;line-height:1.45;">
           Turn on the locations where this staff member works and should be visible. At least one location is required.
         </p>
@@ -29170,29 +29761,45 @@ function initializeAppsPanel() {
             </div>
           </div>
 
-          <div id="ffStaffLocationsFeedback" role="status" style="min-height:16px;font-size:11px;line-height:1.35;"></div>
+          <div id="ffStaffLocationsFeedback" role="status" aria-live="polite" style="min-height:16px;font-size:11px;line-height:1.35;"></div>
         </div>
       </div>
     `;
 
-    const resetBtn = document.getElementById('ffStaffLocationsResetBtn');
-    if (resetBtn) {
-      resetBtn.onclick = function () {
-        const fresh = ffGetStaffStore();
-        const live = fresh.staff.find(function (s) { return s.id === selectedStaffId; });
-        if (live) renderLocationsTab(live);
-      };
-    }
-
-    const saveBtn = document.getElementById('ffStaffLocationsSaveBtn');
-    if (saveBtn) {
-      saveBtn.onclick = function () {
-        saveStaffLocations();
-      };
-    }
+    // Auto-save: every toggle change persists immediately. If the user
+    // tries to turn off the only remaining location, revert the flip and
+    // flash a short error — matches the behavior users expect from a
+    // pure-toggle screen (no Save/Reset affordance).
+    const extraInputs = container.querySelectorAll('#ffStaffLocationsExtraList input.ff-staff-loc-extra');
+    const feedbackEl = container.querySelector('#ffStaffLocationsFeedback');
+    const flashFeedback = function (msg, color) {
+      if (!feedbackEl) return;
+      feedbackEl.textContent = msg;
+      feedbackEl.style.color = color;
+      clearTimeout(container.__ffLocFeedbackTimer);
+      container.__ffLocFeedbackTimer = setTimeout(function () {
+        if (feedbackEl.textContent === msg) feedbackEl.textContent = '';
+      }, 1500);
+    };
+    extraInputs.forEach(function (inp) {
+      inp.addEventListener('change', function () {
+        // Guard: keep at least one location on. Revert the toggle that
+        // was just turned off, don't persist the change, and nudge the
+        // user instead of silently failing.
+        const stillOn = Array.prototype.filter.call(extraInputs, function (x) { return x.checked; }).length;
+        if (stillOn < 1) {
+          inp.checked = true;
+          flashFeedback('At least one location is required.', '#b91c1c');
+          return;
+        }
+        saveStaffLocations({ silent: false, skipReRender: true });
+      });
+    });
   }
 
-  function saveStaffLocations() {
+  function saveStaffLocations(opts) {
+    const options = (opts && typeof opts === 'object') ? opts : {};
+    const skipReRender = options.skipReRender === true;
     const feedback = document.getElementById('ffStaffLocationsFeedback');
     function showErr(msg) {
       if (feedback) {
@@ -29203,10 +29810,14 @@ function initializeAppsPanel() {
       }
     }
     function showOk(msg) {
-      if (feedback) {
-        feedback.textContent = msg;
-        feedback.style.color = '#047857';
-      }
+      if (!feedback) return;
+      feedback.textContent = msg;
+      feedback.style.color = '#047857';
+      // Auto-fade the confirmation so the toggles stay the focus.
+      clearTimeout(feedback.__ffFadeTimer);
+      feedback.__ffFadeTimer = setTimeout(function () {
+        if (feedback.textContent === msg) feedback.textContent = '';
+      }, 1500);
     }
 
     if (!selectedStaffId) return;
@@ -29265,12 +29876,17 @@ function initializeAppsPanel() {
     });
 
     ffSaveStaffStore(store);
-    showOk('Locations saved.');
+    showOk('Saved');
 
-    // Re-render the tab AND the sidebar list, so the location filter
-    // reflects the change immediately (otherwise the staff still shows up
-    // under the wrong active location until a manual refresh).
-    renderLocationsTab(store.staff[idx]);
+    // Re-render the sidebar list so the location filter reflects the
+    // change immediately (otherwise the staff still shows up under the
+    // wrong active location until a manual refresh). We skip re-rendering
+    // the Locations panel itself when the save came from a toggle flip
+    // (auto-save) — the checkbox already shows the correct state and a
+    // full re-render would make the toggle animation jump.
+    if (!skipReRender) {
+      renderLocationsTab(store.staff[idx]);
+    }
     if (typeof renderStaffList === 'function') {
       try { renderStaffList(); } catch (_) {}
     }
@@ -30182,7 +30798,7 @@ function initializeAppsPanel() {
       updateArchiveToggleUI();
 
       if (jumpToStaffId) {
-        currentTab = ['details', 'schedule', 'locations', 'notifications', 'permissions', 'documents'].indexOf(jumpToTab) >= 0 ? jumpToTab : 'schedule';
+        currentTab = ['details', 'schedule', 'locations', 'permissions', 'earnings', 'documents'].indexOf(jumpToTab) >= 0 ? jumpToTab : 'schedule';
       }
 
       const afterStaffListReady = function() {
@@ -31912,6 +32528,2067 @@ function initializeUserProfileMenu() {
   window.ffSyncUserProfilePreferencesMenuVisibility = ffSyncUserProfilePreferencesMenuVisibility;
   ffSyncUserProfilePreferencesMenuVisibility();
 
+  // Time Clock Settings — OWNER OR ADMIN. Broader than the other Settings
+  // sections (which are owner-only) because Time Clock is an operational
+  // module multiple admins typically manage. Managers and staff are hidden.
+  function ffIsCurrentUserOwnerOrAdminForSettings() {
+    try {
+      if (ffIsCurrentUserOwnerForSettings()) return true;
+      const role = String(
+        (typeof window !== 'undefined' && window.__ff_user_role) || ''
+      ).toLowerCase();
+      if (role === 'admin' || role === 'owner') return true;
+      // Fallback to the authed staff record's isAdmin flag (PIN-login path).
+      if (typeof window.ffGetStaffStore === 'function') {
+        const store = window.ffGetStaffStore();
+        const list = (store && Array.isArray(store.staff)) ? store.staff : [];
+        const sid = (window.__ff_authedStaffId
+          || (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null)
+          || '').toString().trim();
+        if (sid) {
+          const me = list.find(function (s) {
+            const id = String((s && (s.id || s.staffId)) || '').trim();
+            return id && (id === sid || id.toLowerCase() === sid.toLowerCase());
+          });
+          if (me && me.isAdmin === true) return true;
+        }
+      }
+      return false;
+    } catch (_) { return false; }
+  }
+  function ffSyncUserProfileTimeClockSettingsMenuVisibility() {
+    try {
+      const btn = document.querySelector('.user-profile-menu-item[data-section="time-clock-settings"]');
+      if (!btn) return;
+      btn.style.display = ffIsCurrentUserOwnerOrAdminForSettings() ? '' : 'none';
+    } catch (e) {
+      console.warn('[User Profile] ffSyncUserProfileTimeClockSettingsMenuVisibility', e);
+    }
+  }
+  window.ffSyncUserProfileTimeClockSettingsMenuVisibility = ffSyncUserProfileTimeClockSettingsMenuVisibility;
+  ffSyncUserProfileTimeClockSettingsMenuVisibility();
+
+  // Time Clock (staff clock-in/out) — visible to ANY user linked to a staff
+  // profile. That is the signal for "this account represents a worker";
+  // owner-only accounts without a staff profile don't need a clock button.
+  function ffHasLinkedStaffIdForTimeClock() {
+    try {
+      const sid = (
+        window.__ff_authedStaffId
+        || (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : '')
+        || ''
+      ).toString().trim();
+      return sid.length > 0;
+    } catch (_) { return false; }
+  }
+  window.ffHasLinkedStaffIdForTimeClock = ffHasLinkedStaffIdForTimeClock;
+
+  /**
+   * Time Clock Settings — Stage 4 init: permission gate + labels already
+   * in the HTML, validation with defaults, and Saving.../Saved/Error
+   * feedback. Loads from / saves to Firestore via window.ffLoadTimeClockSettings
+   * and window.ffSaveTimeClockSettings (defined in settings-cloud.js).
+   * Idempotent — every element is guarded with a __ffTCBound flag so
+   * re-entering the tab does not double-bind listeners.
+   *
+   * Validation philosophy:
+   *   - Hours are clamped to >= 0 in the UI AND re-clamped by
+   *     ffNormalizeTimeClockSettings() server-side.
+   *   - Multiplier is clamped to >= 1 in both places.
+   *   - Empty / NaN inputs fall back to the same defaults the seed uses,
+   *     never to 0 (which would silently disable overtime).
+   *   - When overtime is disabled, the three threshold/multiplier fields
+   *     are hidden but their values are still included in the save payload
+   *     so re-enabling later restores the user's previous numbers.
+   */
+  const FF_TC_UI_DEFAULTS = {
+    workweekStartDay: 'monday',
+    standardHours: { weekly: 40, daily: 8 },
+    overtime: { enabled: true, weeklyThreshold: 40, dailyThreshold: 8, multiplier: 1.5 },
+  };
+  function ffInitTimeClockSettingsUI() {
+    try {
+      const card = document.getElementById('userProfileCardTimeClockSettings');
+      if (!card) return;
+
+      // ── 1. Permission gate (defense in depth) ─────────────────────────
+      // handleMenuClick already bounces non-owner/admin users to 'password',
+      // but if somehow this init is reached (devtools, stale state, future
+      // deep-linking), swap the card content for a no-permission notice
+      // and stop — no load, no bindings.
+      const canSee = (typeof window.ffIsCurrentUserOwnerOrAdminForSettings === 'function')
+        ? window.ffIsCurrentUserOwnerOrAdminForSettings()
+        : true;
+      if (!canSee) {
+        card.innerHTML = `
+          <h3 style="margin:0 0 8px 0;font-size:15px;font-weight:600;color:#111827;">Time Clock Settings</h3>
+          <div style="padding:14px 16px;border:1px solid #fde68a;background:#fffbeb;border-radius:10px;color:#92400e;font-size:12px;line-height:1.5;">
+            You don\u2019t have permission to view these settings. Ask an owner or admin for access.
+          </div>
+        `;
+        return;
+      }
+
+      // ── 2. Element lookups ────────────────────────────────────────────
+      const toggle = card.querySelector('#tcOvertimeEnabled');
+      const pill = card.querySelector('#tcOvertimeEnabledPill');
+      const knob = card.querySelector('#tcOvertimeEnabledKnob');
+      const fields = card.querySelector('#tcOvertimeFields');
+      const weeklyStdEl = card.querySelector('#tcWeeklyStandardHours');
+      const dailyStdEl = card.querySelector('#tcDailyStandardHours');
+      const weeklyOtEl = card.querySelector('#tcWeeklyOvertimeThreshold');
+      const dailyOtEl = card.querySelector('#tcDailyOvertimeThreshold');
+      const multEl = card.querySelector('#tcOvertimeMultiplier');
+      const workweekRadios = card.querySelectorAll('input[name="tcWorkweekStart"]');
+      if (!toggle || !pill || !knob || !fields) return;
+
+      const applyOvertimeVisibility = function () {
+        const on = !!toggle.checked;
+        fields.style.display = on ? 'flex' : 'none';
+        pill.style.background = on ? '#7c3aed' : '#d1d5db';
+        knob.style.left = on ? '18px' : '2px';
+      };
+
+      // Drop any stale "not saved yet" hint left over from Stage 2.
+      const staleHint = Array.prototype.find.call(card.querySelectorAll('p'), function (p) {
+        return /not saved yet/i.test(p.textContent || '');
+      });
+      if (staleHint) staleHint.remove();
+
+      // ── 3. Validation helpers ─────────────────────────────────────────
+      // These apply in the UI layer; the same checks (plus the Firestore
+      // shape guarantee) run again inside ffNormalizeTimeClockSettings()
+      // before any write actually hits the doc.
+      const clampHours = function (raw, fallback) {
+        const n = Number(raw);
+        if (!Number.isFinite(n)) return fallback;
+        return n < 0 ? 0 : n;
+      };
+      const clampMultiplier = function (raw, fallback) {
+        const n = Number(raw);
+        if (!Number.isFinite(n)) return fallback;
+        return n < 1 ? 1 : n;
+      };
+      const fallbackForField = function (el) {
+        if (el === weeklyStdEl) return FF_TC_UI_DEFAULTS.standardHours.weekly;
+        if (el === dailyStdEl)  return FF_TC_UI_DEFAULTS.standardHours.daily;
+        if (el === weeklyOtEl)  return FF_TC_UI_DEFAULTS.overtime.weeklyThreshold;
+        if (el === dailyOtEl)   return FF_TC_UI_DEFAULTS.overtime.dailyThreshold;
+        if (el === multEl)      return FF_TC_UI_DEFAULTS.overtime.multiplier;
+        return 0;
+      };
+
+      // Read the current UI values, applying UI-level validation so we
+      // never send NaN / empty strings / negatives to Firestore. Hidden
+      // overtime fields are read as-is (by design: their values persist
+      // when overtime is off).
+      const readCurrentSettings = function () {
+        let workweek = FF_TC_UI_DEFAULTS.workweekStartDay;
+        workweekRadios.forEach(function (r) { if (r.checked) workweek = r.value; });
+        if (workweek !== 'sunday' && workweek !== 'monday') workweek = FF_TC_UI_DEFAULTS.workweekStartDay;
+        return {
+          workweekStartDay: workweek,
+          standardHours: {
+            weekly: clampHours(weeklyStdEl && weeklyStdEl.value, FF_TC_UI_DEFAULTS.standardHours.weekly),
+            daily:  clampHours(dailyStdEl  && dailyStdEl.value,  FF_TC_UI_DEFAULTS.standardHours.daily),
+          },
+          overtime: {
+            enabled: !!toggle.checked,
+            weeklyThreshold: clampHours(weeklyOtEl && weeklyOtEl.value, FF_TC_UI_DEFAULTS.overtime.weeklyThreshold),
+            dailyThreshold:  clampHours(dailyOtEl  && dailyOtEl.value,  FF_TC_UI_DEFAULTS.overtime.dailyThreshold),
+            multiplier:      clampMultiplier(multEl && multEl.value,    FF_TC_UI_DEFAULTS.overtime.multiplier),
+          },
+        };
+      };
+
+      const hydrateUI = function (s) {
+        if (!s || typeof s !== 'object') return;
+        workweekRadios.forEach(function (r) { r.checked = (r.value === s.workweekStartDay); });
+        if (weeklyStdEl) weeklyStdEl.value = (s.standardHours && s.standardHours.weekly) ?? FF_TC_UI_DEFAULTS.standardHours.weekly;
+        if (dailyStdEl)  dailyStdEl.value  = (s.standardHours && s.standardHours.daily)  ?? FF_TC_UI_DEFAULTS.standardHours.daily;
+        toggle.checked = !!(s.overtime && s.overtime.enabled);
+        if (weeklyOtEl) weeklyOtEl.value = (s.overtime && s.overtime.weeklyThreshold) ?? FF_TC_UI_DEFAULTS.overtime.weeklyThreshold;
+        if (dailyOtEl)  dailyOtEl.value  = (s.overtime && s.overtime.dailyThreshold)  ?? FF_TC_UI_DEFAULTS.overtime.dailyThreshold;
+        if (multEl)     multEl.value     = (s.overtime && s.overtime.multiplier)      ?? FF_TC_UI_DEFAULTS.overtime.multiplier;
+        applyOvertimeVisibility();
+      };
+
+      // ── 4. 3-state save feedback (Saving.../Saved/Error) ──────────────
+      // A single <div> switches text + color. Saving + Error persist until
+      // resolved; Saved fades after ~1.2s. Not debounced because saves are
+      // triggered only on change/blur, not per-keystroke.
+      let hintEl = card.querySelector('#tcSaveHint');
+      if (!hintEl) {
+        hintEl = document.createElement('div');
+        hintEl.id = 'tcSaveHint';
+        hintEl.setAttribute('aria-live', 'polite');
+        hintEl.style.cssText = 'font-size:11px;font-weight:600;margin-top:8px;min-height:14px;transition:color 0.15s ease,opacity 0.2s ease;';
+        card.appendChild(hintEl);
+      }
+      const setHint = function (state) {
+        clearTimeout(card.__ffTCHintTimer);
+        hintEl.style.opacity = '1';
+        if (state === 'saving') {
+          hintEl.textContent = 'Saving\u2026';
+          hintEl.style.color = '#6b7280';
+        } else if (state === 'saved') {
+          hintEl.textContent = 'Saved';
+          hintEl.style.color = '#10b981';
+          card.__ffTCHintTimer = setTimeout(function () { hintEl.style.opacity = '0'; }, 1200);
+        } else if (state === 'error') {
+          hintEl.textContent = 'Couldn\u2019t save. Please try again.';
+          hintEl.style.color = '#b91c1c';
+        } else {
+          hintEl.textContent = '';
+          hintEl.style.opacity = '0';
+        }
+      };
+
+      // Track the latest save so an older slow save can't overwrite a
+      // newer faster one's final state (e.g., network blip on save #1,
+      // fast success on save #2 — don't flash Error after Saved).
+      let saveSeq = 0;
+      const persist = function () {
+        if (typeof window.ffSaveTimeClockSettings !== 'function') return;
+        const mySeq = ++saveSeq;
+        const snapshot = readCurrentSettings();
+        setHint('saving');
+        Promise.resolve(window.ffSaveTimeClockSettings(snapshot))
+          .then(function (ok) {
+            if (mySeq !== saveSeq) return; // stale
+            setHint(ok ? 'saved' : 'error');
+          })
+          .catch(function () {
+            if (mySeq !== saveSeq) return;
+            setHint('error');
+          });
+      };
+
+      // ── 5. Bind listeners (guarded against double-binding) ────────────
+      if (!pill.__ffTCBound) {
+        pill.__ffTCBound = true;
+        pill.addEventListener('click', function (e) {
+          e.preventDefault();
+          toggle.checked = !toggle.checked;
+          toggle.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      }
+      if (!toggle.__ffTCBound) {
+        toggle.__ffTCBound = true;
+        toggle.addEventListener('change', function () {
+          applyOvertimeVisibility();
+          persist();
+        });
+      }
+      workweekRadios.forEach(function (r) {
+        if (r.__ffTCBound) return;
+        r.__ffTCBound = true;
+        r.addEventListener('change', persist);
+      });
+      [weeklyStdEl, dailyStdEl, weeklyOtEl, dailyOtEl, multEl].forEach(function (el) {
+        if (!el || el.__ffTCBound) return;
+        el.__ffTCBound = true;
+        // On blur/change: normalize the displayed value (so users see what
+        // was actually saved) and persist. Empty / NaN → field-specific
+        // default; negative → 0; multiplier < 1 → 1.
+        const clampAndSave = function () {
+          const fallback = fallbackForField(el);
+          const clamper = (el === multEl) ? clampMultiplier : clampHours;
+          const clamped = clamper(el.value, fallback);
+          el.value = clamped;
+          persist();
+        };
+        el.addEventListener('blur', clampAndSave);
+        el.addEventListener('change', clampAndSave);
+      });
+
+      // ── 6. Load from Firestore (or seed defaults on first-ever open) ──
+      if (card.__ffTCLoading) { applyOvertimeVisibility(); return; }
+      card.__ffTCLoading = true;
+      if (typeof window.ffLoadTimeClockSettings === 'function') {
+        window.ffLoadTimeClockSettings().then(function (settings) {
+          hydrateUI(settings);
+        }).catch(function (e) {
+          console.warn('[Time Clock Settings] load failed, using UI defaults', e);
+          applyOvertimeVisibility();
+          setHint('error');
+        }).finally(function () {
+          card.__ffTCLoading = false;
+        });
+      } else {
+        applyOvertimeVisibility();
+        card.__ffTCLoading = false;
+      }
+    } catch (e) {
+      console.warn('[Time Clock Settings] init failed', e);
+    }
+  }
+  window.ffInitTimeClockSettingsUI = ffInitTimeClockSettingsUI;
+
+  /**
+   * Time Clock — Mangomint-style kiosk UI.
+   *
+   * Views:
+   *   - 'clock'   : Location dropdown + PIN entry + Next button (default).
+   *                 Anyone with a valid staff PIN can Clock In / Out from
+   *                 this screen — the current app user does NOT need to be
+   *                 the staff member.
+   *   - 'confirm' : After valid PIN, shows "Hi, <Name>" and a single
+   *                 Clock In OR Clock Out action depending on whether that
+   *                 staff member already has an open entry.
+   *   - 'manage'  : Admin/owner/manager only. Table of recent time cards
+   *                 with filters (Location, Staff, Time period) and an
+   *                 Add Time Card button that opens a side drawer.
+   *
+   * State is stored on window.__ffTCState so returning to the Time Clock
+   * screen from elsewhere restores the view consistently.
+   */
+  window.__ffTCState = window.__ffTCState || {
+    view: 'clock',
+    selectedLocationId: null,  // remembered between kiosk uses
+    confirmStaff: null,        // staff object after successful PIN
+    confirmOpenEntry: null,    // open entry snapshot (if any) for confirmStaff
+    manage: {
+      mode: 'cards',           // 'cards' | 'summary'
+      filterLocationId: '',    // '' = all
+      filterStaffIds: [],      // [] = all, otherwise one-or-more staff ids
+      filterPeriod: 'all',     // 'today' | 'week' | 'lastweek' | 'last2weeks' | 'month' | 'all' | 'custom'
+      customFrom: null,        // YYYY-MM-DD when filterPeriod === 'custom'
+      customTo: null,
+      sortBy: 'day',
+      rows: null,              // cached rows
+      optionsOpen: false,
+      addFormOpen: false,
+    },
+  };
+
+  function _ffTCCurrentUserIsAdmin() {
+    try { return window.ff_is_admin_cached === true; } catch (_) { return false; }
+  }
+
+  function _ffTCDefaultLocationId() {
+    const st = window.__ffTCState;
+    if (st && st.selectedLocationId) return String(st.selectedLocationId);
+    try {
+      if (typeof window.ffGetActiveLocationId === 'function') {
+        const v = window.ffGetActiveLocationId();
+        if (v) return String(v);
+      }
+    } catch (_) {}
+    try {
+      const all = typeof window.ffGetActiveLocations === 'function' ? window.ffGetActiveLocations() : [];
+      if (all && all.length && all[0] && all[0].id) return String(all[0].id);
+    } catch (_) {}
+    return '';
+  }
+
+  function _ffTCActiveLocations() {
+    try {
+      if (typeof window.ffGetActiveLocations === 'function') {
+        const list = window.ffGetActiveLocations() || [];
+        return list.filter((l) => l && l.id);
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  function _ffTCStaffList() {
+    try {
+      if (typeof window.ffGetStaffStore === 'function') {
+        const store = window.ffGetStaffStore();
+        const list = (store && Array.isArray(store.staff)) ? store.staff : [];
+        return list.filter((s) => s && s.id && s.isArchived !== true);
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  function _ffTCFormatTime(ts) {
+    try {
+      const d = (ts && typeof ts.toDate === 'function') ? ts.toDate()
+              : (ts instanceof Date ? ts : null);
+      if (!d) return '—';
+      return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    } catch (_) { return '—'; }
+  }
+
+  function _ffTCFormatDay(ts) {
+    try {
+      const d = (ts && typeof ts.toDate === 'function') ? ts.toDate()
+              : (ts instanceof Date ? ts : null);
+      if (!d) return '—';
+      return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    } catch (_) { return '—'; }
+  }
+
+  function _ffTCFormatDuration(minutes) {
+    const m = Number(minutes);
+    if (!isFinite(m) || m <= 0) return '—';
+    const h = Math.floor(m / 60);
+    const mm = Math.round(m % 60);
+    if (h && mm) return h + ' hr ' + mm + ' min';
+    if (h) return h + ' hr';
+    return mm + ' min';
+  }
+
+  function _ffTCEscape(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Entry point. Rebuilds the current view into #timeClockScreenContent.
+   */
+  function ffInitTimeClockUI() {
+    try {
+      const content = document.getElementById('timeClockScreenContent');
+      if (!content) return;
+      const view = (window.__ffTCState && window.__ffTCState.view) || 'clock';
+      if (view === 'manage') {
+        _ffTCRenderManageView(content);
+      } else if (view === 'confirm') {
+        _ffTCRenderConfirmView(content);
+      } else {
+        _ffTCRenderClockPinView(content);
+      }
+    } catch (e) {
+      console.warn('[Time Clock UI] init failed', e);
+    }
+  }
+  window.ffInitTimeClockUI = ffInitTimeClockUI;
+
+  // Layout helper — widens the content area for the Manage view since the
+  // table needs much more horizontal room than the PIN card.
+  function _ffTCSetWideLayout(wide) {
+    const el = document.getElementById('timeClockScreenContent');
+    if (!el) return;
+    if (wide) {
+      el.style.maxWidth = 'none';
+      el.style.padding = '16px 24px 24px';
+    } else {
+      el.style.maxWidth = '520px';
+      el.style.padding = '20px 16px 28px';
+    }
+  }
+
+  // ──────────────────────────── View 1: PIN kiosk ─────────────────────────
+  // Custom design: live clock header, unified location picker (pill button
+  // that opens a popover with search), 4-dot PIN indicator, and a 3×4
+  // numeric keypad. The picker scales from 2 to 20+ locations without
+  // breaking the layout. Keyboard (0-9 / Backspace / Enter) works on
+  // desktop for power users.
+  function _ffTCRenderClockPinView(container) {
+    _ffTCSetWideLayout(false);
+    const locs = _ffTCActiveLocations();
+    const defLoc = _ffTCDefaultLocationId();
+    const showManage = _ffTCCurrentUserIsAdmin();
+
+    const keyBtn = (label, val, kind) => `
+      <button type="button" class="tc-key" data-key="${_ffTCEscape(val)}" data-kind="${kind || 'num'}"
+        style="height:58px;border-radius:14px;border:1px solid ${kind === 'enter' ? '#4c1d95' : '#e5e7eb'};background:${kind === 'enter' ? 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)' : '#fff'};color:${kind === 'enter' ? '#fff' : '#111827'};font-size:${kind === 'num' ? '20px' : '14px'};font-weight:${kind === 'num' ? '600' : '700'};letter-spacing:${kind === 'enter' ? '0.04em' : '0'};cursor:pointer;transition:all 0.1s ease;box-shadow:${kind === 'enter' ? '0 4px 12px rgba(123,63,228,0.35)' : '0 1px 2px rgba(0,0,0,0.04)'};user-select:none;">${label}</button>
+    `;
+
+    container.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:18px;">
+        <!-- Live clock + date -->
+        <div style="text-align:center;margin-top:4px;">
+          <div id="tcKioskClockTime" style="font-size:40px;font-weight:800;color:#111827;letter-spacing:-0.02em;font-variant-numeric:tabular-nums;line-height:1;">&nbsp;</div>
+          <div id="tcKioskClockDate" style="margin-top:6px;font-size:12px;color:#6b7280;font-weight:500;letter-spacing:0.02em;text-transform:uppercase;">&nbsp;</div>
+        </div>
+
+        <!-- Card -->
+        <div style="background:#fff;border:1px solid rgba(229,231,235,0.9);border-radius:22px;box-shadow:0 10px 32px -12px rgba(123,63,228,0.15), 0 2px 6px rgba(0,0,0,0.04);padding:22px 22px 24px;width:100%;max-width:420px;box-sizing:border-box;position:relative;">
+          <!-- Location picker (unified: works for 1-to-many locations) -->
+          <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Location</div>
+          <div style="position:relative;margin-bottom:22px;">
+            <button id="tcKioskLocBtn" type="button"
+              style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;border-radius:12px;border:1px solid #e5e7eb;background:#f9fafb;color:#111827;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s ease;">
+              <span style="display:inline-flex;align-items:center;gap:8px;min-width:0;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7b3fe4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                <span id="tcKioskLocName" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">&nbsp;</span>
+              </span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            <div id="tcKioskLocPanel" style="display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:20;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 28px -6px rgba(17,24,39,0.18);overflow:hidden;">
+              <div style="padding:8px;border-bottom:1px solid #f3f4f6;">
+                <div style="position:relative;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                  <input id="tcKioskLocSearch" type="text" placeholder="Search location…" autocomplete="off"
+                    style="width:100%;padding:8px 10px 8px 30px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;outline:none;box-sizing:border-box;background:#f9fafb;"/>
+                </div>
+              </div>
+              <div id="tcKioskLocList" style="max-height:240px;overflow-y:auto;padding:4px;"></div>
+            </div>
+          </div>
+
+          <!-- PIN dots -->
+          <div style="text-align:center;margin-bottom:6px;font-size:11px;color:#9ca3af;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;">Enter your PIN</div>
+          <div id="tcKioskDots" style="display:flex;justify-content:center;gap:14px;margin:10px 0 18px;" aria-live="polite"></div>
+
+          <!-- Keypad -->
+          <div id="tcKioskPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+            ${keyBtn('1','1','num')}${keyBtn('2','2','num')}${keyBtn('3','3','num')}
+            ${keyBtn('4','4','num')}${keyBtn('5','5','num')}${keyBtn('6','6','num')}
+            ${keyBtn('7','7','num')}${keyBtn('8','8','num')}${keyBtn('9','9','num')}
+            ${keyBtn('Clear','clear','clear')}${keyBtn('0','0','num')}${keyBtn('Enter','enter','enter')}
+          </div>
+
+          <div id="tcKioskError" style="min-height:16px;margin-top:10px;font-size:12px;color:#b91c1c;text-align:center;"></div>
+        </div>
+
+        ${showManage ? `
+          <button id="tcKioskManageLink" type="button" style="background:none;border:none;font-size:12px;color:#6b7280;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;transition:background 0.15s ease;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+            Manage Time Cards
+          </button>
+        ` : ''}
+      </div>
+    `;
+
+    // ─── live clock ────────────────────────────────────────────────────
+    const timeEl = container.querySelector('#tcKioskClockTime');
+    const dateEl = container.querySelector('#tcKioskClockDate');
+    function tick() {
+      try {
+        const now = new Date();
+        if (timeEl) timeEl.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        if (dateEl) dateEl.textContent = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+      } catch (_) {}
+    }
+    tick();
+    if (window.__ffTCClockTick) { try { clearInterval(window.__ffTCClockTick); } catch (_) {} }
+    window.__ffTCClockTick = setInterval(tick, 1000);
+
+    // ─── unified location picker ───────────────────────────────────────
+    let selectedLoc = String(defLoc || (locs[0] && locs[0].id) || '');
+    const locBtn = container.querySelector('#tcKioskLocBtn');
+    const locNameEl = container.querySelector('#tcKioskLocName');
+    const locPanel = container.querySelector('#tcKioskLocPanel');
+    const locSearch = container.querySelector('#tcKioskLocSearch');
+    const locList = container.querySelector('#tcKioskLocList');
+
+    const locById = {};
+    locs.forEach((l) => { locById[String(l.id)] = l; });
+
+    const paintLocLabel = () => {
+      const l = locById[String(selectedLoc)];
+      if (locNameEl) locNameEl.textContent = (l && l.name) ? l.name : (locs.length ? 'Select location' : 'No locations');
+    };
+
+    const renderLocList = (query) => {
+      if (!locList) return;
+      const q = String(query || '').trim().toLowerCase();
+      const filtered = !q
+        ? locs
+        : locs.filter((l) => (String(l.name || '').toLowerCase().includes(q)
+                            || String(l.id || '').toLowerCase().includes(q)));
+      if (!filtered.length) {
+        locList.innerHTML = `<div style="padding:14px;text-align:center;color:#9ca3af;font-size:12px;">No matches</div>`;
+        return;
+      }
+      locList.innerHTML = filtered.map((l) => {
+        const active = String(l.id) === String(selectedLoc);
+        return `
+          <button type="button" data-loc-id="${_ffTCEscape(l.id)}"
+            style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:none;background:${active ? '#f3e8ff' : 'transparent'};color:${active ? '#5b21b6' : '#111827'};font-size:13px;font-weight:${active ? '600' : '500'};cursor:pointer;border-radius:8px;text-align:left;">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_ffTCEscape(l.name || l.id)}</span>
+            ${active ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7b3fe4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}
+          </button>
+        `;
+      }).join('');
+      locList.querySelectorAll('button[data-loc-id]').forEach((b) => {
+        b.addEventListener('mouseenter', () => {
+          if (String(b.getAttribute('data-loc-id')) !== String(selectedLoc)) b.style.background = '#f9fafb';
+        });
+        b.addEventListener('mouseleave', () => {
+          if (String(b.getAttribute('data-loc-id')) !== String(selectedLoc)) b.style.background = 'transparent';
+        });
+        b.addEventListener('click', () => {
+          selectedLoc = String(b.getAttribute('data-loc-id'));
+          window.__ffTCState.selectedLocationId = selectedLoc;
+          paintLocLabel();
+          closeLocPanel();
+        });
+      });
+    };
+
+    const openLocPanel = () => {
+      if (!locPanel) return;
+      locPanel.style.display = 'block';
+      if (locBtn) { locBtn.style.background = '#fff'; locBtn.style.borderColor = '#c7d2fe'; }
+      if (locSearch) { locSearch.value = ''; renderLocList(''); setTimeout(() => { try { locSearch.focus(); } catch (_) {} }, 30); }
+      setTimeout(() => document.addEventListener('click', onDocClick, { once: true }), 0);
+    };
+    const closeLocPanel = () => {
+      if (!locPanel) return;
+      locPanel.style.display = 'none';
+      if (locBtn) { locBtn.style.background = '#f9fafb'; locBtn.style.borderColor = '#e5e7eb'; }
+    };
+    const onDocClick = (ev) => {
+      if (!locPanel || locPanel.style.display === 'none') return;
+      if (locBtn && (locBtn.contains(ev.target) || locPanel.contains(ev.target))) {
+        // Re-arm listener; stay open.
+        setTimeout(() => document.addEventListener('click', onDocClick, { once: true }), 0);
+        return;
+      }
+      closeLocPanel();
+    };
+
+    paintLocLabel();
+    if (locBtn) {
+      locBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (locPanel && locPanel.style.display === 'block') closeLocPanel(); else openLocPanel();
+      });
+    }
+    if (locSearch) {
+      locSearch.addEventListener('input', () => renderLocList(locSearch.value));
+      locSearch.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLocPanel(); });
+    }
+
+    // ─── PIN state + dots renderer ─────────────────────────────────────
+    const dotsEl = container.querySelector('#tcKioskDots');
+    const errEl = container.querySelector('#tcKioskError');
+    let pinBuf = '';
+    const MAX_PIN = 8;
+    const MIN_DOTS = 4;
+    const paintDots = () => {
+      if (!dotsEl) return;
+      const shown = Math.max(MIN_DOTS, pinBuf.length);
+      let html = '';
+      for (let i = 0; i < shown; i++) {
+        const filled = i < pinBuf.length;
+        html += `<span style="width:14px;height:14px;border-radius:50%;background:${filled ? 'linear-gradient(135deg,#7b3fe4,#5b21b6)' : 'transparent'};border:2px solid ${filled ? 'transparent' : '#d1d5db'};transition:all 0.1s ease;"></span>`;
+      }
+      dotsEl.innerHTML = html;
+    };
+    paintDots();
+
+    // ─── keypad handlers ───────────────────────────────────────────────
+    const submit = () => {
+      if (errEl) errEl.textContent = '';
+      if (!selectedLoc) { if (errEl) errEl.textContent = 'Please select a location.'; return; }
+      if (pinBuf.length < MIN_DOTS) { if (errEl) errEl.textContent = 'PIN must be at least 4 digits.'; return; }
+      _ffTCHandlePinSubmit(pinBuf, selectedLoc).catch((e) => {
+        console.warn('[Time Clock] PIN submit failed', e);
+        if (errEl) errEl.textContent = 'Something went wrong. Please try again.';
+      });
+    };
+
+    const press = (key) => {
+      if (errEl) errEl.textContent = '';
+      if (key === 'clear') { pinBuf = ''; paintDots(); return; }
+      if (key === 'back') { pinBuf = pinBuf.slice(0, -1); paintDots(); return; }
+      if (key === 'enter') { submit(); return; }
+      if (/^\d$/.test(key) && pinBuf.length < MAX_PIN) {
+        pinBuf += key;
+        paintDots();
+      }
+    };
+
+    container.querySelectorAll('.tc-key').forEach((btn) => {
+      const kind = btn.getAttribute('data-kind');
+      btn.addEventListener('mousedown', () => { btn.style.transform = 'scale(0.96)'; });
+      btn.addEventListener('mouseup', () => { btn.style.transform = 'scale(1)'; });
+      btn.addEventListener('mouseleave', () => { btn.style.transform = 'scale(1)'; });
+      btn.addEventListener('click', () => press(btn.getAttribute('data-key')));
+    });
+
+    // Keyboard support (desktop). Bypass when the user is typing inside an
+    // input or textarea (e.g. the location search) so their keystrokes are
+    // not stolen by the keypad.
+    const kbHandler = (e) => {
+      if (!document.getElementById('timeClockScreen') || document.getElementById('timeClockScreen').style.display === 'none') return;
+      if (window.__ffTCState && window.__ffTCState.view !== 'clock') return;
+      const t = e.target;
+      const tag = t && t.tagName ? String(t.tagName).toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea' || (t && t.isContentEditable)) return;
+      if (/^\d$/.test(e.key)) { press(e.key); e.preventDefault(); }
+      else if (e.key === 'Backspace') { press('back'); e.preventDefault(); }
+      else if (e.key === 'Enter') { press('enter'); e.preventDefault(); }
+      else if (e.key === 'Escape') { press('clear'); e.preventDefault(); }
+    };
+    if (window.__ffTCKbHandler) { try { document.removeEventListener('keydown', window.__ffTCKbHandler); } catch (_) {} }
+    window.__ffTCKbHandler = kbHandler;
+    document.addEventListener('keydown', kbHandler);
+
+    // Manage link
+    const manageLink = container.querySelector('#tcKioskManageLink');
+    if (manageLink) {
+      manageLink.addEventListener('mouseenter', () => { manageLink.style.background = '#f3e8ff'; });
+      manageLink.addEventListener('mouseleave', () => { manageLink.style.background = 'transparent'; });
+      manageLink.addEventListener('click', () => {
+        window.__ffTCState.view = 'manage';
+        ffInitTimeClockUI();
+      });
+    }
+  }
+
+  async function _ffTCHandlePinSubmit(pin, locationId) {
+    const errEl = document.getElementById('tcKioskError');
+    // Validate PIN against staff roster.
+    let staff = null;
+    try {
+      if (typeof window.ffAuthByPin === 'function') {
+        const res = window.ffAuthByPin(pin);
+        if (res && res.ok && res.staff) staff = res.staff;
+      }
+    } catch (_) {}
+    if (!staff) {
+      if (errEl) errEl.textContent = 'Invalid PIN. Please try again.';
+      return;
+    }
+    // Soft-check location assignment — warn but don't block, so a staff
+    // member can still clock in at a covering shift at another branch.
+    const allowed = Array.isArray(staff.allowedLocationIds)
+      ? staff.allowedLocationIds.map((x) => String(x))
+      : [];
+    if (allowed.length && !allowed.includes(String(locationId))) {
+      // Not an error — just remembered; store clock-in at this location regardless.
+    }
+    // Look up their current open entry (if any) to decide Clock In vs Out.
+    let openEntry = null;
+    try {
+      if (typeof window.ffGetOpenTimeEntryForStaff === 'function') {
+        openEntry = await window.ffGetOpenTimeEntryForStaff(staff.id);
+      }
+    } catch (e) {
+      console.warn('[Time Clock] open entry lookup failed', e);
+    }
+    window.__ffTCState.selectedLocationId = locationId;
+    window.__ffTCState.confirmStaff = { id: staff.id, name: staff.name || 'Staff', pin: null };
+    window.__ffTCState.confirmOpenEntry = openEntry || null;
+    window.__ffTCState.view = 'confirm';
+    ffInitTimeClockUI();
+  }
+
+  // ────────────────────── View 2: Confirm Clock In/Out ────────────────────
+  // Redesigned: avatar circle with initials, greeting headline, prominent
+  // status pill, and a single gradient primary button. Matches the kiosk
+  // card style from View 1 (rounded-22, soft shadow, gradient accents).
+  function _ffTCRenderConfirmView(container) {
+    _ffTCSetWideLayout(false);
+    // Stop the live clock tick from the PIN view — this view is static.
+    if (window.__ffTCClockTick) { try { clearInterval(window.__ffTCClockTick); } catch (_) {} window.__ffTCClockTick = null; }
+    if (window.__ffTCKbHandler) { try { document.removeEventListener('keydown', window.__ffTCKbHandler); } catch (_) {} window.__ffTCKbHandler = null; }
+
+    const st = window.__ffTCState;
+    const staff = st && st.confirmStaff;
+    if (!staff) {
+      st.view = 'clock';
+      ffInitTimeClockUI();
+      return;
+    }
+    const openEntry = st.confirmOpenEntry;
+    const locId = st.selectedLocationId || _ffTCDefaultLocationId();
+    const locName = (function () {
+      try {
+        const map = typeof window.ffLocationsById === 'function' ? window.ffLocationsById() : {};
+        const l = map && map[locId];
+        return (l && l.name) ? l.name : locId;
+      } catch (_) { return locId; }
+    })();
+    const isOut = !!openEntry;
+    const primaryLabel = isOut ? 'Clock Out' : 'Clock In';
+    const since = isOut ? _ffTCFormatTime(openEntry.clockInAt) : '';
+    const initials = String(staff.name || '?').trim().split(/\s+/).slice(0, 2).map((s) => s.charAt(0).toUpperCase()).join('') || '?';
+    const primaryGrad = isOut
+      ? 'linear-gradient(135deg,#ef4444 0%,#dc2626 100%)'
+      : 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)';
+    const primaryShadow = isOut
+      ? '0 6px 18px rgba(220,38,38,0.35)'
+      : '0 6px 18px rgba(123,63,228,0.35)';
+    const pillBg = isOut ? '#ecfdf5' : '#f3e8ff';
+    const pillColor = isOut ? '#047857' : '#5b21b6';
+    const pillDot = isOut ? '#10b981' : '#7b3fe4';
+    const pillText = isOut ? `Clocked in since ${since}` : 'Ready to start your shift';
+
+    container.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:18px;padding-top:6px;">
+        <!-- Card -->
+        <div style="background:#fff;border:1px solid rgba(229,231,235,0.9);border-radius:22px;box-shadow:0 10px 32px -12px rgba(123,63,228,0.15), 0 2px 6px rgba(0,0,0,0.04);padding:28px 24px;width:100%;max-width:420px;box-sizing:border-box;text-align:center;">
+          <!-- Avatar -->
+          <div style="margin:0 auto 14px;width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%);color:#fff;font-size:26px;font-weight:700;display:flex;align-items:center;justify-content:center;letter-spacing:0.02em;box-shadow:0 6px 18px rgba(123,63,228,0.3);">${_ffTCEscape(initials)}</div>
+
+          <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">${_ffTCEscape(locName)}</div>
+          <div style="font-size:22px;font-weight:800;color:#111827;margin-top:4px;letter-spacing:-0.01em;">Hi, ${_ffTCEscape(staff.name)}</div>
+
+          <!-- Status pill -->
+          <div style="margin:14px auto 0;display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;background:${pillBg};color:${pillColor};font-size:12px;font-weight:600;">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pillDot};box-shadow:0 0 0 3px ${pillDot}22;"></span>
+            ${_ffTCEscape(pillText)}
+          </div>
+
+          <div id="tcConfirmMsg" style="min-height:18px;font-size:12px;color:#6b7280;margin:14px 0 0;"></div>
+
+          <button id="tcConfirmAction" type="button" style="margin-top:16px;width:100%;padding:14px 0;background:${primaryGrad};color:#fff;border:none;border-radius:14px;font-size:15px;font-weight:700;letter-spacing:0.02em;cursor:pointer;box-shadow:${primaryShadow};transition:transform 0.1s ease, opacity 0.15s ease;">${primaryLabel}</button>
+          <button id="tcConfirmCancel" type="button" style="margin-top:10px;width:100%;padding:11px 0;background:transparent;color:#6b7280;border:none;border-radius:10px;font-size:13px;font-weight:500;cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+    `;
+
+    const cancelBtn = container.querySelector('#tcConfirmCancel');
+    const actionBtn = container.querySelector('#tcConfirmAction');
+    const msg = container.querySelector('#tcConfirmMsg');
+
+    if (cancelBtn) cancelBtn.addEventListener('click', () => {
+      window.__ffTCState.confirmStaff = null;
+      window.__ffTCState.confirmOpenEntry = null;
+      window.__ffTCState.view = 'clock';
+      ffInitTimeClockUI();
+    });
+
+    if (actionBtn) actionBtn.addEventListener('click', async () => {
+      actionBtn.disabled = true;
+      actionBtn.style.opacity = '0.6';
+      if (msg) { msg.style.color = '#6b7280'; msg.textContent = isOut ? 'Clocking out…' : 'Clocking in…'; }
+      try {
+        if (isOut) {
+          if (typeof window.ffCloseTimeEntry !== 'function') throw new Error('ffCloseTimeEntry is not loaded');
+          await window.ffCloseTimeEntry({ entryId: openEntry.id });
+        } else {
+          if (typeof window.ffCreateTimeEntry !== 'function') throw new Error('ffCreateTimeEntry is not loaded');
+          await window.ffCreateTimeEntry({ staffId: staff.id, locationId: locId || 'default' });
+        }
+        if (msg) { msg.style.color = '#047857'; msg.textContent = isOut ? 'Clocked out. See you next shift!' : 'Clocked in. Have a great shift!'; }
+        setTimeout(() => {
+          window.__ffTCState.confirmStaff = null;
+          window.__ffTCState.confirmOpenEntry = null;
+          window.__ffTCState.view = 'clock';
+          ffInitTimeClockUI();
+        }, 1400);
+      } catch (e) {
+        console.warn('[Time Clock] confirm action failed', e);
+        if (msg) { msg.style.color = '#b91c1c'; msg.textContent = 'Error: ' + (e && e.message ? e.message : String(e)); }
+        actionBtn.disabled = false;
+        actionBtn.style.opacity = '1';
+      }
+    });
+  }
+
+  // ───────────────── Manage view: period range + settings cache ────────────
+  // A period id + optional custom YYYY-MM-DD pair resolves into the
+  // inclusive/exclusive {from, to} window the list query should use.
+  // `to === null` means "up to now".
+  function _ffTCComputePeriodRange(period, customFrom, customTo) {
+    const now = new Date();
+    const startOfDay = (d) => { const c = new Date(d); c.setHours(0,0,0,0); return c; };
+    const wwStart = (window.__ffTCCachedSettings && window.__ffTCCachedSettings.workweekStartDay) || 'monday';
+    const startOfWorkweek = (d) => {
+      const c = startOfDay(d);
+      const day = c.getDay(); // 0=Sun ... 6=Sat
+      const wwIdx = wwStart === 'sunday' ? 0 : 1;
+      const diff = (day - wwIdx + 7) % 7;
+      c.setDate(c.getDate() - diff);
+      return c;
+    };
+    if (period === 'today') {
+      const from = startOfDay(now);
+      const to = new Date(from.getTime() + 86400000);
+      return { from, to, label: 'Today' };
+    }
+    if (period === 'week') {
+      const from = startOfWorkweek(now);
+      const to = new Date(from.getTime() + 7 * 86400000);
+      return { from, to, label: 'This week' };
+    }
+    if (period === 'lastweek') {
+      const thisStart = startOfWorkweek(now);
+      const from = new Date(thisStart.getTime() - 7 * 86400000);
+      return { from, to: thisStart, label: 'Last week' };
+    }
+    if (period === 'last2weeks') {
+      const thisStart = startOfWorkweek(now);
+      const from = new Date(thisStart.getTime() - 14 * 86400000);
+      return { from, to: thisStart, label: 'Last 2 weeks' };
+    }
+    if (period === 'month') {
+      const from = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { from, to: null, label: 'This month' };
+    }
+    if (period === 'custom' && customFrom && customTo) {
+      const from = new Date(customFrom + 'T00:00:00');
+      const toDate = new Date(customTo + 'T00:00:00');
+      const to = new Date(toDate.getTime() + 86400000);
+      return { from, to, label: 'Custom' };
+    }
+    return { from: null, to: null, label: 'All time' };
+  }
+
+  // Lazy-loaded Time Clock settings (workweek start, overtime rules). Cached
+  // on window so re-renders of the Manage view don't refetch every time.
+  function _ffTCEnsureSettingsCached() {
+    if (window.__ffTCCachedSettings) return Promise.resolve(window.__ffTCCachedSettings);
+    if (window.__ffTCSettingsPending) return window.__ffTCSettingsPending;
+    const fallback = {
+      workweekStartDay: 'monday',
+      standardHours: { weekly: 40, daily: 8 },
+      overtime: { enabled: true, weeklyThreshold: 40, dailyThreshold: 8, multiplier: 1.5 },
+    };
+    if (typeof window.ffLoadTimeClockSettings !== 'function') {
+      window.__ffTCCachedSettings = fallback;
+      return Promise.resolve(fallback);
+    }
+    window.__ffTCSettingsPending = window.ffLoadTimeClockSettings().then((s) => {
+      window.__ffTCCachedSettings = s || fallback;
+      window.__ffTCSettingsPending = null;
+      return window.__ffTCCachedSettings;
+    }).catch(() => {
+      window.__ffTCCachedSettings = fallback;
+      window.__ffTCSettingsPending = null;
+      return fallback;
+    });
+    return window.__ffTCSettingsPending;
+  }
+
+  // Currency formatter — reads the salon currency when available.
+  function _ffTCFormatMoney(amount) {
+    const n = Number(amount);
+    if (!isFinite(n)) return '—';
+    try {
+      const code = (typeof window.ffGetSalonCurrencyCode === 'function')
+        ? window.ffGetSalonCurrencyCode() : 'USD';
+      return new Intl.NumberFormat(undefined, { style: 'currency', currency: code || 'USD' }).format(n);
+    } catch (_) {
+      const sym = (typeof window.ffGetSalonCurrencySymbol === 'function')
+        ? window.ffGetSalonCurrencySymbol() : '$';
+      return sym + n.toFixed(2);
+    }
+  }
+
+  // Group time entries by staff, then by workweek, and compute per-staff
+  // totals (hours + pay) using each staff's Earnings Rules + TC settings.
+  function _ffTCComputeSummaryRows(rows, tcSettings, staffById) {
+    const settings = tcSettings || {};
+    const otMultiplier = (settings.overtime && Number(settings.overtime.multiplier)) || 1.5;
+    const wwStart = settings.workweekStartDay === 'sunday' ? 0 : 1;
+    const startOfDay = (d) => { const c = new Date(d); c.setHours(0,0,0,0); return c; };
+    const wwStartOf = (d) => {
+      const c = startOfDay(d);
+      const diff = (c.getDay() - wwStart + 7) % 7;
+      c.setDate(c.getDate() - diff);
+      return c;
+    };
+
+    // Staff → { weeks: { wkKey → hours }, entryCount, openCount }
+    const byStaff = new Map();
+    (rows || []).forEach((r) => {
+      if (!r || r.status === 'void') return;
+      const sid = String(r.staffId || '');
+      if (!sid) return;
+      let bucket = byStaff.get(sid);
+      if (!bucket) {
+        bucket = { weeks: {}, entryCount: 0, openCount: 0, closedCount: 0 };
+        byStaff.set(sid, bucket);
+      }
+      bucket.entryCount += 1;
+      if (r.status === 'open') { bucket.openCount += 1; return; }
+      bucket.closedCount += 1;
+      const dm = Number(r.durationMinutes);
+      if (!isFinite(dm) || dm <= 0) return;
+      const ts = (r.clockInAt && typeof r.clockInAt.toDate === 'function')
+        ? r.clockInAt.toDate()
+        : (r.clockInAt instanceof Date ? r.clockInAt : null);
+      if (!ts) return;
+      const wkKey = wwStartOf(ts).toISOString().slice(0, 10);
+      bucket.weeks[wkKey] = (bucket.weeks[wkKey] || 0) + (dm / 60);
+    });
+
+    const out = [];
+    byStaff.forEach((bucket, sid) => {
+      let regular = 0, overtime = 0, total = 0;
+      Object.values(bucket.weeks).forEach((hours) => {
+        total += hours;
+        if (typeof window.ffComputeWeeklyHoursBreakdown === 'function') {
+          const split = window.ffComputeWeeklyHoursBreakdown(hours, settings) || {};
+          regular += Number(split.regularHours) || 0;
+          overtime += Number(split.overtimeHours) || 0;
+        } else {
+          regular += hours;
+        }
+      });
+      const staff = staffById[sid] || {};
+      const rules = (staff && staff.earningsRules && staff.earningsRules.hourly) || {};
+      const rateEnabled = rules.enabled === true;
+      const rate = rateEnabled ? (Number(rules.ratePerHour) || 0) : 0;
+      const regularPay = rateEnabled ? regular * rate : 0;
+      const overtimePay = rateEnabled ? overtime * rate * otMultiplier : 0;
+      out.push({
+        staffId: sid,
+        staff,
+        totalHours: total,
+        regularHours: regular,
+        overtimeHours: overtime,
+        rate,
+        rateEnabled,
+        regularPay,
+        overtimePay,
+        totalPay: regularPay + overtimePay,
+        openCount: bucket.openCount,
+        closedCount: bucket.closedCount,
+      });
+    });
+
+    out.sort((a, b) => {
+      const an = ((a.staff && a.staff.name) || '').toLowerCase();
+      const bn = ((b.staff && b.staff.name) || '').toLowerCase();
+      return an.localeCompare(bn);
+    });
+    return out;
+  }
+
+  // ────────────────────── View 3: Manage Time Cards ───────────────────────
+  // Redesigned to match the kiosk: gradient accents, rounded-22 cards,
+  // soft shadows, and generous top spacing so nothing is pinned against
+  // the app header.
+  function _ffTCRenderManageView(container) {
+    if (!_ffTCCurrentUserIsAdmin()) {
+      // Defense in depth: bounce non-admins back to kiosk.
+      window.__ffTCState.view = 'clock';
+      ffInitTimeClockUI();
+      return;
+    }
+    _ffTCSetWideLayout(true);
+    // Clean up kiosk-only global listeners when entering Manage view.
+    if (window.__ffTCClockTick) { try { clearInterval(window.__ffTCClockTick); } catch (_) {} window.__ffTCClockTick = null; }
+    if (window.__ffTCKbHandler) { try { document.removeEventListener('keydown', window.__ffTCKbHandler); } catch (_) {} window.__ffTCKbHandler = null; }
+
+    const st = window.__ffTCState.manage;
+    // Migrate legacy single-staff filter to the new multi-select shape so
+    // existing in-memory state survives across page reloads without a crash.
+    if (st && typeof st.filterStaffId !== 'undefined') {
+      if (!Array.isArray(st.filterStaffIds)) {
+        st.filterStaffIds = st.filterStaffId ? [String(st.filterStaffId)] : [];
+      }
+      delete st.filterStaffId;
+    }
+    if (!Array.isArray(st.filterStaffIds)) st.filterStaffIds = [];
+    const locs = _ffTCActiveLocations();
+    const staffList = _ffTCStaffList();
+    const locById = {}; locs.forEach((l) => { locById[String(l.id)] = l; });
+    const staffById = {}; staffList.forEach((s) => { staffById[String(s.id)] = s; });
+
+    container.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px;height:100%;max-width:1280px;margin:0 auto;width:100%;padding-top:0;">
+        <div id="tcMSummary" style="display:none;"></div>
+
+        <!-- Unified toolbar: Clock + Location + Period on left, Mode + Filters + Add on right -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <button id="tcManageBack" type="button" aria-label="Back to clock"
+            style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:6px 12px;font-size:11px;color:#374151;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:all 0.15s ease;flex-shrink:0;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            Clock
+          </button>
+          <div id="tcMQuickLocWrap" style="position:relative;"></div>
+          <div id="tcMPeriodWrap" style="position:relative;">
+            ${(() => {
+              const periodLabels = {
+                today: 'Today', week: 'This week', lastweek: 'Last week',
+                last2weeks: 'Last 2 weeks', month: 'This month', all: 'All time',
+              };
+              const isCustom = st.filterPeriod === 'custom';
+              const label = isCustom
+                ? (st.customFrom && st.customTo ? (st.customFrom + ' → ' + st.customTo) : 'Custom range')
+                : (periodLabels[st.filterPeriod] || 'All time');
+              const active = st.filterPeriod !== 'all';
+              return `
+                <button id="tcMPeriodBtn" type="button"
+                  style="display:inline-flex;align-items:center;gap:6px;background:${active ? 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)' : '#fff'};border:1px solid ${active ? 'transparent' : '#e5e7eb'};border-radius:999px;padding:6px 12px;font-size:11px;font-weight:600;color:${active ? '#fff' : '#6b7280'};cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                  <span>${_ffTCEscape(label)}</span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </button>`;
+            })()}
+            <div id="tcMPeriodPanel" style="display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:50;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 28px -6px rgba(17,24,39,0.18);padding:4px;min-width:200px;">
+              ${[
+                { id: 'today', label: 'Today' },
+                { id: 'week', label: 'This week' },
+                { id: 'lastweek', label: 'Last week' },
+                { id: 'last2weeks', label: 'Last 2 weeks' },
+                { id: 'month', label: 'This month' },
+                { id: 'all', label: 'All time' },
+              ].map((p) => {
+                const isActive = st.filterPeriod === p.id;
+                return `<button type="button" class="tc-period-opt" data-period="${p.id}"
+                  style="width:100%;text-align:left;padding:8px 10px;border:none;background:${isActive ? '#f3e8ff' : 'transparent'};color:${isActive ? '#5b21b6' : '#111827'};font-size:12px;font-weight:${isActive ? '600' : '500'};border-radius:8px;cursor:pointer;">${p.label}</button>`;
+              }).join('')}
+              <div style="height:1px;background:#f3f4f6;margin:4px 6px;"></div>
+              <button type="button" id="tcMPeriodCustomOpt"
+                style="width:100%;text-align:left;padding:8px 10px;border:none;background:${st.filterPeriod === 'custom' ? '#f3e8ff' : 'transparent'};color:${st.filterPeriod === 'custom' ? '#5b21b6' : '#111827'};font-size:12px;font-weight:${st.filterPeriod === 'custom' ? '600' : '500'};border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                Custom range…
+              </button>
+            </div>
+            <div id="tcMCustomPanel" style="display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:51;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 28px -6px rgba(17,24,39,0.18);padding:12px;min-width:260px;">
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <label style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">From
+                  <input id="tcMCustomFrom" type="date" value="${st.customFrom || ''}" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;"/>
+                </label>
+                <label style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">To
+                  <input id="tcMCustomTo" type="date" value="${st.customTo || ''}" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;"/>
+                </label>
+                <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:4px;">
+                  <button id="tcMCustomCancel" type="button" style="background:#f3f4f6;border:none;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:600;color:#374151;cursor:pointer;">Cancel</button>
+                  <button id="tcMCustomApply" type="button" style="background:linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%);border:none;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;color:#fff;cursor:pointer;">Apply</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          ${st.filterStaffIds.length ? `
+            <button id="tcMClearStaff" type="button" style="display:inline-flex;align-items:center;gap:6px;background:#f3e8ff;border:none;border-radius:999px;padding:6px 12px;font-size:11px;font-weight:600;color:#5b21b6;cursor:pointer;" title="Click to clear">
+              ${_ffTCEscape(
+                st.filterStaffIds.length === 1
+                  ? ((staffById[st.filterStaffIds[0]] && staffById[st.filterStaffIds[0]].name) || 'Staff')
+                  : (st.filterStaffIds.length + ' staff selected')
+              )}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          ` : ''}
+
+          <!-- Right-aligned actions: mode / filters / add -->
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto;">
+            <div id="tcMModeToggle" style="display:inline-flex;gap:4px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
+              ${['cards','summary'].map((mv) => `
+                <button type="button" class="tc-mode-pill" data-mode="${mv}"
+                  style="border:none;border-radius:999px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;background:${st.mode === mv ? 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)' : 'transparent'};color:${st.mode === mv ? '#fff' : '#6b7280'};letter-spacing:0.02em;transition:all 0.15s ease;">${mv === 'cards' ? 'Time Cards' : 'Summary'}</button>
+              `).join('')}
+            </div>
+            <button id="tcMOptions" type="button"
+              style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:6px 12px;font-size:11px;color:#374151;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:all 0.15s ease;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="7" y1="12" x2="17" y2="12"></line><line x1="10" y1="18" x2="14" y2="18"></line></svg>
+              Filters
+            </button>
+            ${st.mode === 'cards' ? `
+              <button id="tcManageAdd" type="button"
+                style="display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%);color:#fff;border:none;border-radius:999px;padding:7px 14px;font-size:11px;font-weight:700;letter-spacing:0.02em;cursor:pointer;box-shadow:0 6px 16px -4px rgba(123,63,228,0.45);transition:transform 0.1s ease;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                Add Time Card
+              </button>
+            ` : ''}
+          </div>
+        </div>
+
+        <!-- Table card -->
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;background:#fff;border:1px solid rgba(229,231,235,0.9);border-radius:18px;box-shadow:0 10px 32px -16px rgba(123,63,228,0.12), 0 2px 6px rgba(0,0,0,0.04);overflow:hidden;">
+          <div id="tcMTableScroll" style="flex:1;min-height:0;overflow:auto;">
+            <table id="tcMTable" style="width:100%;border-collapse:collapse;font-size:12px;color:#111827;">
+              <thead id="tcMThead" style="position:sticky;top:0;background:linear-gradient(180deg,#f9fafb 0%,#f3f4f6 100%);z-index:1;"></thead>
+              <tbody id="tcMTableBody">
+                <tr><td style="padding:36px;text-align:center;color:#9ca3af;font-size:13px;">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Backdrop (shared: options + add drawer) -->
+      <div id="tcMBackdrop" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:rgba(17,24,39,0.35);z-index:399;"></div>
+
+      <!-- Options side panel -->
+      <div id="tcMOptionsPanel" style="display:none;position:fixed;top:var(--header-h,60px);right:0;bottom:0;width:340px;background:#fff;box-shadow:-12px 0 32px -8px rgba(17,24,39,0.18);z-index:400;flex-direction:column;">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#ffffff;color:#111827;border-bottom:1px solid #e5e7eb;">
+          <button id="tcMOptionsClose" type="button" aria-label="Close filters" style="background:#f3f4f6;color:#111827;border:none;border-radius:6px;width:22px;height:22px;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;padding:0;">×</button>
+          <div style="font-size:13px;font-weight:700;letter-spacing:-0.01em;color:#111827;">Filters</div>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:22px;">
+          <div>
+            <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Filters</div>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Location
+                <select id="tcMOptLoc" style="padding:9px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#f9fafb;font-size:13px;color:#111827;font-weight:500;text-transform:none;letter-spacing:0;outline:none;">
+                  <option value="">All locations</option>
+                  ${locs.map((l) => `<option value="${_ffTCEscape(l.id)}"${String(st.filterLocationId) === String(l.id) ? ' selected' : ''}>${_ffTCEscape(l.name || l.id)}</option>`).join('')}
+                </select>
+              </label>
+              <div style="display:flex;flex-direction:column;gap:6px;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span>Staff</span>
+                  ${st.filterStaffIds.length ? `<button id="tcMOptStaffClear" type="button" style="background:none;border:none;color:#7b3fe4;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;padding:0;">Clear</button>` : ''}
+                </div>
+                <div id="tcMOptStaffWrap" style="position:relative;">
+                  <button id="tcMOptStaff" type="button"
+                    style="width:100%;padding:9px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#f9fafb;font-size:13px;color:#111827;font-weight:500;text-transform:none;letter-spacing:0;outline:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;">
+                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${
+                      st.filterStaffIds.length === 0
+                        ? 'All Staff'
+                        : (st.filterStaffIds.length === 1
+                            ? _ffTCEscape((staffById[st.filterStaffIds[0]] && staffById[st.filterStaffIds[0]].name) || 'Staff')
+                            : (st.filterStaffIds.length + ' selected'))
+                    }</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </button>
+                  <div id="tcMOptStaffPanel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 12px 28px -6px rgba(17,24,39,0.18);z-index:60;max-height:260px;overflow-y:auto;padding:4px;">
+                    <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;border-bottom:1px solid #f3f4f6;font-size:12px;color:#111827;font-weight:600;text-transform:none;letter-spacing:0;">
+                      <input type="checkbox" id="tcMOptStaffAll" ${st.filterStaffIds.length === 0 ? 'checked' : ''} style="width:14px;height:14px;accent-color:#7b3fe4;cursor:pointer;"/>
+                      All Staff
+                    </label>
+                    ${staffList.map((s) => {
+                      const checked = st.filterStaffIds.indexOf(String(s.id)) !== -1;
+                      return `
+                        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;font-size:12px;color:#111827;font-weight:500;text-transform:none;letter-spacing:0;">
+                          <input type="checkbox" class="tcMOptStaffBox" data-sid="${_ffTCEscape(s.id)}" ${checked ? 'checked' : ''} style="width:14px;height:14px;accent-color:#7b3fe4;cursor:pointer;"/>
+                          ${_ffTCEscape(s.name || s.id)}
+                        </label>`;
+                    }).join('')}
+                  </div>
+                </div>
+              </div>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Time period
+                <select id="tcMOptPeriod" style="padding:9px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#f9fafb;font-size:13px;color:#111827;font-weight:500;text-transform:none;letter-spacing:0;outline:none;">
+                  <option value="today"${st.filterPeriod === 'today' ? ' selected' : ''}>Today</option>
+                  <option value="week"${st.filterPeriod === 'week' ? ' selected' : ''}>This Week</option>
+                  <option value="lastweek"${st.filterPeriod === 'lastweek' ? ' selected' : ''}>Last Week</option>
+                  <option value="last2weeks"${st.filterPeriod === 'last2weeks' ? ' selected' : ''}>Last 2 Weeks</option>
+                  <option value="month"${st.filterPeriod === 'month' ? ' selected' : ''}>This Month</option>
+                  <option value="all"${st.filterPeriod === 'all' ? ' selected' : ''}>All Time</option>
+                  ${st.filterPeriod === 'custom' ? `<option value="custom" selected>Custom (${st.customFrom || ''} → ${st.customTo || ''})</option>` : ''}
+                </select>
+              </label>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Rows</div>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Sort by
+              <select id="tcMOptSort" style="padding:9px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#f9fafb;font-size:13px;color:#111827;font-weight:500;text-transform:none;letter-spacing:0;outline:none;">
+                <option value="day"${st.sortBy === 'day' ? ' selected' : ''}>Day</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add Time Card side drawer -->
+      <div id="tcMAddDrawer" style="display:none;position:fixed;top:var(--header-h,60px);right:0;bottom:0;width:320px;background:#fff;box-shadow:-12px 0 32px -8px rgba(17,24,39,0.18);z-index:400;flex-direction:column;"></div>
+      <style>
+        #tcMAddDrawer input[type="number"]::-webkit-outer-spin-button,
+        #tcMAddDrawer input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        #tcMAddDrawer input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+      </style>
+    `;
+
+    // Quick location filter (styled like kiosk picker, inline-right)
+    const quickLocWrap = container.querySelector('#tcMQuickLocWrap');
+    if (quickLocWrap) {
+      const current = st.filterLocationId ? (locById[st.filterLocationId] && locById[st.filterLocationId].name) || 'Location' : 'All locations';
+      quickLocWrap.innerHTML = `
+        <button id="tcMQuickLocBtn" type="button"
+          style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:6px 12px;font-size:11px;font-weight:600;color:${st.filterLocationId ? '#5b21b6' : '#6b7280'};cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+          <span>${_ffTCEscape(current)}</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+        <div id="tcMQuickLocPanel" style="display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:220px;z-index:50;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 28px -6px rgba(17,24,39,0.18);overflow:hidden;padding:4px;max-height:280px;overflow-y:auto;"></div>
+      `;
+      const qBtn = container.querySelector('#tcMQuickLocBtn');
+      const qPanel = container.querySelector('#tcMQuickLocPanel');
+      const renderPanel = () => {
+        const opts = [{ id: '', name: 'All locations' }].concat(locs.map((l) => ({ id: l.id, name: l.name || l.id })));
+        qPanel.innerHTML = opts.map((o) => {
+          const active = String(o.id) === String(st.filterLocationId || '');
+          return `<button type="button" data-lid="${_ffTCEscape(o.id)}" style="width:100%;text-align:left;padding:8px 10px;border:none;background:${active ? '#f3e8ff' : 'transparent'};color:${active ? '#5b21b6' : '#111827'};font-size:12px;font-weight:${active ? '600' : '500'};border-radius:8px;cursor:pointer;">${_ffTCEscape(o.name)}</button>`;
+        }).join('');
+        qPanel.querySelectorAll('button[data-lid]').forEach((b) => {
+          b.addEventListener('click', () => {
+            st.filterLocationId = b.getAttribute('data-lid') || '';
+            qPanel.style.display = 'none';
+            _ffTCRenderManageView(container);
+          });
+        });
+      };
+      if (qBtn && qPanel) {
+        qBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (qPanel.style.display === 'block') { qPanel.style.display = 'none'; return; }
+          renderPanel();
+          qPanel.style.display = 'block';
+          setTimeout(() => document.addEventListener('click', function onDoc(ev) {
+            if (qBtn.contains(ev.target) || qPanel.contains(ev.target)) {
+              document.addEventListener('click', onDoc, { once: true });
+              return;
+            }
+            qPanel.style.display = 'none';
+          }, { once: true }), 0);
+        });
+      }
+    }
+
+    // Mode toggle (Time Cards / Summary)
+    container.querySelectorAll('.tc-mode-pill').forEach((p) => {
+      p.addEventListener('click', () => {
+        const m = p.getAttribute('data-mode') || 'cards';
+        if (st.mode === m) return;
+        st.mode = m;
+        _ffTCRenderManageView(container);
+      });
+    });
+
+    // Period dropdown (unified pill with menu: preset periods + Custom range).
+    const periodBtn = container.querySelector('#tcMPeriodBtn');
+    const periodPanel = container.querySelector('#tcMPeriodPanel');
+    const customPanel = container.querySelector('#tcMCustomPanel');
+    const customCancel = container.querySelector('#tcMCustomCancel');
+    const customApply = container.querySelector('#tcMCustomApply');
+    const closePeriodPanels = () => {
+      if (periodPanel) periodPanel.style.display = 'none';
+      if (customPanel) customPanel.style.display = 'none';
+    };
+    if (periodBtn && periodPanel) {
+      periodBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const showing = periodPanel.style.display === 'block' || (customPanel && customPanel.style.display === 'block');
+        if (showing) { closePeriodPanels(); return; }
+        periodPanel.style.display = 'block';
+        setTimeout(() => document.addEventListener('click', function onDoc(ev) {
+          if (periodBtn.contains(ev.target) || periodPanel.contains(ev.target) || (customPanel && customPanel.contains(ev.target))) {
+            document.addEventListener('click', onDoc, { once: true });
+            return;
+          }
+          closePeriodPanels();
+        }, { once: true }), 0);
+      });
+    }
+    container.querySelectorAll('.tc-period-opt').forEach((opt) => {
+      opt.addEventListener('click', () => {
+        st.filterPeriod = opt.getAttribute('data-period') || 'all';
+        closePeriodPanels();
+        _ffTCRenderManageView(container);
+      });
+    });
+    const customOpt = container.querySelector('#tcMPeriodCustomOpt');
+    if (customOpt && customPanel && periodPanel) {
+      customOpt.addEventListener('click', () => {
+        periodPanel.style.display = 'none';
+        customPanel.style.display = 'block';
+      });
+    }
+    if (customCancel) customCancel.addEventListener('click', () => closePeriodPanels());
+    if (customApply) customApply.addEventListener('click', () => {
+      const from = container.querySelector('#tcMCustomFrom');
+      const to = container.querySelector('#tcMCustomTo');
+      const fv = from && from.value; const tv = to && to.value;
+      if (!fv || !tv) return;
+      if (fv > tv) return;
+      st.customFrom = fv; st.customTo = tv; st.filterPeriod = 'custom';
+      closePeriodPanels();
+      _ffTCRenderManageView(container);
+    });
+
+    // Staff chip clear (top quick-filter row)
+    const clearStaffBtn = container.querySelector('#tcMClearStaff');
+    if (clearStaffBtn) clearStaffBtn.addEventListener('click', () => {
+      st.filterStaffIds = [];
+      _ffTCRenderManageView(container);
+    });
+
+    // Wiring
+    const backBtn = container.querySelector('#tcManageBack');
+    if (backBtn) backBtn.addEventListener('click', () => {
+      window.__ffTCState.view = 'clock';
+      ffInitTimeClockUI();
+    });
+
+    const addBtn = container.querySelector('#tcManageAdd');
+    if (addBtn) addBtn.addEventListener('click', () => _ffTCOpenAddDrawer());
+
+    const optsBtn = container.querySelector('#tcMOptions');
+    const optsPanel = container.querySelector('#tcMOptionsPanel');
+    const optsClose = container.querySelector('#tcMOptionsClose');
+    const backdrop = container.querySelector('#tcMBackdrop');
+    const addDrawer = container.querySelector('#tcMAddDrawer');
+
+    const closeAllOverlays = () => {
+      if (optsPanel) optsPanel.style.display = 'none';
+      if (addDrawer) { addDrawer.style.display = 'none'; addDrawer.innerHTML = ''; }
+      if (backdrop) backdrop.style.display = 'none';
+    };
+    const openOptsPanel = () => {
+      if (!optsPanel) return;
+      optsPanel.style.display = 'flex';
+      if (backdrop) backdrop.style.display = 'block';
+    };
+    if (optsBtn) optsBtn.addEventListener('click', openOptsPanel);
+    if (optsClose) optsClose.addEventListener('click', closeAllOverlays);
+    if (backdrop) backdrop.addEventListener('click', closeAllOverlays);
+
+    // ESC to close drawers
+    if (window.__ffTCMgEscHandler) { try { document.removeEventListener('keydown', window.__ffTCMgEscHandler); } catch (_) {} }
+    window.__ffTCMgEscHandler = (e) => {
+      if (e.key !== 'Escape') return;
+      const anyOpen = (optsPanel && optsPanel.style.display !== 'none')
+                   || (addDrawer && addDrawer.style.display !== 'none');
+      if (anyOpen) { e.preventDefault(); closeAllOverlays(); }
+    };
+    document.addEventListener('keydown', window.__ffTCMgEscHandler);
+
+    const optLoc = container.querySelector('#tcMOptLoc');
+    const optPeriod = container.querySelector('#tcMOptPeriod');
+    if (optLoc) optLoc.addEventListener('change', () => {
+      st.filterLocationId = optLoc.value || '';
+      _ffTCRenderManageView(container);
+    });
+    if (optPeriod) optPeriod.addEventListener('change', () => {
+      st.filterPeriod = optPeriod.value || 'all';
+      _ffTCRenderManageView(container);
+    });
+
+    // Staff multi-select: button toggles a checkbox panel. "All Staff" is
+    // equivalent to "no filter" and clears the selection. Individual rows
+    // toggle their own id in/out of st.filterStaffIds. We re-render on
+    // close (panel blur / outside click) so the pill + table stay in sync.
+    const optStaffBtn = container.querySelector('#tcMOptStaff');
+    const optStaffPanel = container.querySelector('#tcMOptStaffPanel');
+    const optStaffAll = container.querySelector('#tcMOptStaffAll');
+    const optStaffClear = container.querySelector('#tcMOptStaffClear');
+    let staffSelectionDirty = false;
+    if (optStaffBtn && optStaffPanel) {
+      optStaffBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const showing = optStaffPanel.style.display === 'block';
+        optStaffPanel.style.display = showing ? 'none' : 'block';
+        if (!showing) {
+          setTimeout(() => document.addEventListener('click', function onDoc(ev) {
+            if (optStaffBtn.contains(ev.target) || optStaffPanel.contains(ev.target)) {
+              document.addEventListener('click', onDoc, { once: true });
+              return;
+            }
+            optStaffPanel.style.display = 'none';
+            if (staffSelectionDirty) {
+              staffSelectionDirty = false;
+              _ffTCRenderManageView(container);
+            }
+          }, { once: true }), 0);
+        } else if (staffSelectionDirty) {
+          staffSelectionDirty = false;
+          _ffTCRenderManageView(container);
+        }
+      });
+    }
+    if (optStaffAll) optStaffAll.addEventListener('change', () => {
+      if (optStaffAll.checked) {
+        st.filterStaffIds = [];
+        optStaffPanel.querySelectorAll('.tcMOptStaffBox').forEach((b) => { b.checked = false; });
+      } else {
+        optStaffAll.checked = true; // "All" can't be unchecked directly
+      }
+      staffSelectionDirty = true;
+    });
+    container.querySelectorAll('.tcMOptStaffBox').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const sid = String(cb.getAttribute('data-sid') || '');
+        if (!sid) return;
+        const idx = st.filterStaffIds.indexOf(sid);
+        if (cb.checked && idx === -1) st.filterStaffIds.push(sid);
+        if (!cb.checked && idx !== -1) st.filterStaffIds.splice(idx, 1);
+        if (optStaffAll) optStaffAll.checked = st.filterStaffIds.length === 0;
+        staffSelectionDirty = true;
+      });
+    });
+    if (optStaffClear) optStaffClear.addEventListener('click', () => {
+      st.filterStaffIds = [];
+      _ffTCRenderManageView(container);
+    });
+
+    _ffTCReloadManageRows();
+  }
+
+  async function _ffTCReloadManageRows() {
+    const body = document.getElementById('tcMTableBody');
+    const thead = document.getElementById('tcMThead');
+    if (!body) return;
+    const st = window.__ffTCState.manage;
+    const locs = _ffTCActiveLocations();
+    const staffList = _ffTCStaffList();
+    const locById = {}; locs.forEach((l) => { locById[String(l.id)] = l; });
+    const staffById = {}; staffList.forEach((s) => { staffById[String(s.id)] = s; });
+
+    // Ensure time-clock settings are loaded (needed for workweek start +
+    // overtime breakdown + multiplier). Swallow failures — helper uses a
+    // safe fallback if Firestore is unreachable.
+    let tcSettings = window.__ffTCCachedSettings;
+    if (!tcSettings) {
+      try { tcSettings = await _ffTCEnsureSettingsCached(); } catch (_) { tcSettings = null; }
+    }
+
+    // Build thead based on current mode. Cards mode = per-entry columns;
+    // Summary mode = per-staff roll-up with hours + pay columns.
+    const thStyle = 'text-align:left;padding:8px 12px;font-weight:600;font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;';
+    const thRight = thStyle.replace('text-align:left', 'text-align:right');
+    const cardsCols = 6;
+    const summaryCols = 6;
+    if (thead) {
+      if (st.mode === 'summary') {
+        thead.innerHTML = `
+          <tr>
+            <th style="${thStyle}">Staff</th>
+            <th style="${thRight}">Total hours</th>
+            <th style="${thRight}">Regular</th>
+            <th style="${thRight}">Overtime</th>
+            <th style="${thRight}">Rate</th>
+            <th style="${thRight}">Total pay</th>
+          </tr>`;
+      } else {
+        thead.innerHTML = `
+          <tr>
+            <th style="${thStyle}">Day</th>
+            <th style="${thStyle}">Staff</th>
+            <th style="${thStyle}">Clock-in</th>
+            <th style="${thStyle}">Clock-out</th>
+            <th style="${thStyle}">Location</th>
+            <th style="${thRight}">Paid Hours</th>
+          </tr>`;
+      }
+    }
+    const loadingCols = st.mode === 'summary' ? summaryCols : cardsCols;
+    body.innerHTML = `<tr><td colspan="${loadingCols}" style="padding:20px;text-align:center;color:#6b7280;">Loading…</td></tr>`;
+
+    const range = _ffTCComputePeriodRange(st.filterPeriod, st.customFrom, st.customTo);
+    const from = range.from || undefined;
+    const to = range.to || undefined;
+
+    let rows = [];
+    try {
+      if (typeof window.ffListTimeEntriesForSalon === 'function') {
+        // When exactly one staff id is selected we can push the filter to
+        // the server for efficiency. For 0 or 2+ selections we fetch all
+        // and filter client-side below.
+        const singleStaff = (Array.isArray(st.filterStaffIds) && st.filterStaffIds.length === 1)
+          ? st.filterStaffIds[0]
+          : undefined;
+        rows = await window.ffListTimeEntriesForSalon({
+          locationId: st.filterLocationId || undefined,
+          staffId: singleStaff,
+          from,
+          statuses: ['open', 'closed'],
+          maxResults: 500,
+        });
+      }
+    } catch (e) {
+      console.warn('[Time Clock Manage] list failed', e);
+    }
+    // Apply the period upper bound client-side when set (the list helper
+    // only supports a `from` cursor today).
+    if (to) {
+      rows = rows.filter((r) => {
+        const ts = (r && r.clockInAt && typeof r.clockInAt.toDate === 'function')
+          ? r.clockInAt.toDate()
+          : (r && r.clockInAt instanceof Date ? r.clockInAt : null);
+        return ts ? ts < to : true;
+      });
+    }
+    // Multi-staff filter applied client-side (2+ selections).
+    if (Array.isArray(st.filterStaffIds) && st.filterStaffIds.length >= 2) {
+      const set = new Set(st.filterStaffIds.map(String));
+      rows = rows.filter((r) => set.has(String(r.staffId || '')));
+    }
+    st.rows = rows;
+
+    // Summary line in the page header
+    const summary = document.getElementById('tcMSummary');
+    if (summary) {
+      const open = rows.filter((r) => r.status === 'open').length;
+      const total = rows.length;
+      let totalMin = 0;
+      rows.forEach((r) => { if (typeof r.durationMinutes === 'number') totalMin += r.durationMinutes; });
+      const totalStr = totalMin > 0 ? _ffTCFormatDuration(totalMin) : '0 min';
+      summary.textContent = `${total} time card${total === 1 ? '' : 's'} · ${totalStr} total${open ? ` · ${open} currently clocked in` : ''}`;
+    }
+
+    if (!rows.length) {
+      const emptyCols = st.mode === 'summary' ? 6 : 6;
+      body.innerHTML = `
+        <tr><td colspan="${emptyCols}" style="padding:56px 20px;text-align:center;">
+          <div style="display:inline-flex;flex-direction:column;align-items:center;gap:10px;color:#9ca3af;">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#c7d2fe" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <div style="font-size:13px;font-weight:600;color:#6b7280;">${st.mode === 'summary' ? 'No hours in this period' : 'No time cards yet'}</div>
+            <div style="font-size:12px;color:#9ca3af;">${st.mode === 'summary' ? 'Try expanding the time period or removing filters.' : 'Time cards will appear here once staff start clocking in.'}</div>
+          </div>
+        </td></tr>`;
+      return;
+    }
+
+    // ───────────── Summary mode ─────────────
+    if (st.mode === 'summary') {
+      _ffTCRenderSummaryBody(body, rows, staffById, tcSettings);
+      return;
+    }
+
+    const colorFor = (id) => {
+      const palette = ['#7b3fe4','#5b21b6','#0891b2','#059669','#d97706','#db2777','#dc2626','#7c3aed'];
+      let h = 0; const s = String(id || '?');
+      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      return palette[h % palette.length];
+    };
+
+    body.innerHTML = rows.map((r, idx) => {
+      const staff = staffById[String(r.staffId || '')];
+      const loc = locById[String(r.locationId || '')];
+      const staffName = (staff && staff.name) ? staff.name : (r.staffId || '—');
+      const locName = (loc && loc.name) ? loc.name : (r.locationId || '—');
+      const day = _ffTCFormatDay(r.clockInAt);
+      const ci = _ffTCFormatTime(r.clockInAt);
+      const co = r.clockOutAt ? _ffTCFormatTime(r.clockOutAt) : '';
+      const dur = _ffTCFormatDuration(r.durationMinutes);
+      const isOpen = r.status === 'open';
+      const initials = String(staffName).trim().split(/\s+/).slice(0, 2).map((s) => s.charAt(0).toUpperCase()).join('') || '?';
+      const avatarColor = colorFor(r.staffId);
+      // Try to resolve a linked user/profile photo; fall back to initials circle.
+      let avatarUrl = '';
+      try {
+        const rawUrl = String((staff && (staff.photoURL || staff.photoUrl || staff.avatarUrl)) || '').trim();
+        if (typeof window.ffGetAvatarUrlForUser === 'function') {
+          avatarUrl = window.ffGetAvatarUrlForUser({
+            uid: staff && staff.uid,
+            staffId: (staff && staff.id) || r.staffId,
+            photoURL: rawUrl,
+            avatarUrl: rawUrl,
+            name: staffName,
+          }) || rawUrl || '';
+        } else {
+          avatarUrl = rawUrl;
+        }
+      } catch (_) { avatarUrl = ''; }
+      const initialsCircle = `<span style="width:22px;height:22px;border-radius:50%;background:${avatarColor};color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;letter-spacing:0.02em;flex-shrink:0;">${_ffTCEscape(initials)}</span>`;
+      const avatarHtml = avatarUrl
+        ? `<span style="position:relative;width:22px;height:22px;border-radius:50%;overflow:hidden;flex-shrink:0;background:${avatarColor};display:inline-flex;align-items:center;justify-content:center;"><img src="${_ffTCEscape(avatarUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" onerror="this.style.display='none';var n=this.nextElementSibling;if(n)n.style.display='inline-flex';"><span style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;letter-spacing:0.02em;">${_ffTCEscape(initials)}</span></span>`
+        : initialsCircle;
+      return `
+        <tr data-entry-id="${_ffTCEscape(r.id)}" class="tc-row-clickable" style="border-bottom:1px solid #f3f4f6;transition:background 0.12s ease;cursor:pointer;" onmouseover="this.style.background='#faf7ff'" onmouseout="this.style.background='transparent'">
+          <td style="padding:9px 12px;color:#374151;font-weight:500;white-space:nowrap;font-size:12px;">${_ffTCEscape(day)}</td>
+          <td style="padding:9px 12px;font-size:12px;">
+            <div style="display:inline-flex;align-items:center;gap:8px;">
+              ${avatarHtml}
+              <span style="color:#111827;font-weight:500;">${_ffTCEscape(staffName)}</span>
+            </div>
+          </td>
+          <td style="padding:9px 12px;color:#111827;font-variant-numeric:tabular-nums;font-size:12px;">${_ffTCEscape(ci)}</td>
+          <td style="padding:9px 12px;color:#111827;font-variant-numeric:tabular-nums;font-size:12px;">${
+            isOpen
+              ? `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:#ecfdf5;color:#047857;font-size:10px;font-weight:600;">
+                  <span style="width:5px;height:5px;border-radius:50%;background:#10b981;box-shadow:0 0 0 3px #10b98122;"></span>Still clocked in
+                </span>`
+              : _ffTCEscape(co || '—')
+          }</td>
+          <td style="padding:9px 12px;color:#6b7280;font-size:12px;">${_ffTCEscape(locName)}</td>
+          <td style="padding:9px 12px;text-align:right;color:#111827;font-weight:600;font-variant-numeric:tabular-nums;font-size:12px;">${_ffTCEscape(dur)}</td>
+        </tr>
+      `;
+    }).join('');
+
+    // Row click opens the drawer in edit mode, prefilled from the row's
+    // data. We look up the entry object from the last-loaded list so we
+    // can pass real Timestamps (not the string-formatted display values).
+    try {
+      const rowsById = {};
+      rows.forEach((rr) => { if (rr && rr.id) rowsById[String(rr.id)] = rr; });
+      body.querySelectorAll('tr.tc-row-clickable').forEach((tr) => {
+        tr.addEventListener('click', () => {
+          const id = tr.getAttribute('data-entry-id');
+          const entry = id ? rowsById[String(id)] : null;
+          if (entry) _ffTCOpenAddDrawer(entry);
+        });
+      });
+    } catch (_) {}
+  }
+
+  // Render the per-staff Summary view. Each row is a staff with regular/OT
+  // hours and pay, computed via ffComputeWeeklyHoursBreakdown grouped by the
+  // configured workweek start day. A totals row shows the grand total; a
+  // badge appears for staff without a valid hourly rate.
+  function _ffTCRenderSummaryBody(body, rows, staffById, tcSettings) {
+    const summary = _ffTCComputeSummaryRows(rows, tcSettings, staffById);
+    if (!summary.length) {
+      body.innerHTML = `
+        <tr><td colspan="6" style="padding:56px 20px;text-align:center;">
+          <div style="display:inline-flex;flex-direction:column;align-items:center;gap:10px;color:#9ca3af;">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#c7d2fe" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <div style="font-size:13px;font-weight:600;color:#6b7280;">No hours in this period</div>
+          </div>
+        </td></tr>`;
+      return;
+    }
+
+    const fmtHrs = (h) => {
+      const n = Number(h) || 0;
+      if (n === 0) return '0 h';
+      const hh = Math.floor(n);
+      const mm = Math.round((n - hh) * 60);
+      if (hh === 0) return `${mm} m`;
+      if (mm === 0) return `${hh} h`;
+      return `${hh} h ${mm} m`;
+    };
+    const colorFor = (id) => {
+      const palette = ['#7b3fe4','#5b21b6','#0891b2','#059669','#d97706','#db2777','#dc2626','#7c3aed'];
+      let h = 0; const s = String(id || '?');
+      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      return palette[h % palette.length];
+    };
+
+    let gTotal = 0, gReg = 0, gOt = 0, gPay = 0;
+    let anyMissingRate = false;
+
+    const htmlRows = summary.map((row) => {
+      const staff = row.staff || {};
+      const name = staff.name || row.staffId;
+      const initials = String(name).trim().split(/\s+/).slice(0, 2).map((s) => s.charAt(0).toUpperCase()).join('') || '?';
+      const avatarColor = colorFor(row.staffId);
+      let avatarUrl = '';
+      try {
+        const rawUrl = String((staff.photoURL || staff.photoUrl || staff.avatarUrl) || '').trim();
+        if (typeof window.ffGetAvatarUrlForUser === 'function') {
+          avatarUrl = window.ffGetAvatarUrlForUser({
+            uid: staff.uid, staffId: staff.id || row.staffId,
+            photoURL: rawUrl, avatarUrl: rawUrl, name,
+          }) || rawUrl || '';
+        } else {
+          avatarUrl = rawUrl;
+        }
+      } catch (_) { avatarUrl = ''; }
+      const initialsCircle = `<span style="width:22px;height:22px;border-radius:50%;background:${avatarColor};color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;letter-spacing:0.02em;flex-shrink:0;">${_ffTCEscape(initials)}</span>`;
+      const avatarHtml = avatarUrl
+        ? `<span style="position:relative;width:22px;height:22px;border-radius:50%;overflow:hidden;flex-shrink:0;background:${avatarColor};display:inline-flex;align-items:center;justify-content:center;"><img src="${_ffTCEscape(avatarUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" onerror="this.style.display='none';var n=this.nextElementSibling;if(n)n.style.display='inline-flex';"><span style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;letter-spacing:0.02em;">${_ffTCEscape(initials)}</span></span>`
+        : initialsCircle;
+
+      gTotal += row.totalHours;
+      gReg += row.regularHours;
+      gOt += row.overtimeHours;
+      gPay += row.totalPay;
+
+      const rateMissing = !row.rateEnabled || row.rate <= 0;
+      if (rateMissing) anyMissingRate = true;
+      const rateCell = rateMissing
+        ? `<span title="No hourly rate configured in Earnings Rules" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:600;">No rate</span>`
+        : `<span>${_ffTCEscape(_ffTCFormatMoney(row.rate))}/hr</span>`;
+
+      const openNote = row.openCount > 0
+        ? `<span title="Open entries are not yet counted in pay" style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:#ecfdf5;color:#047857;font-size:10px;font-weight:600;">${row.openCount} open</span>`
+        : '';
+
+      const otLabel = row.overtimeHours > 0
+        ? `<span style="color:#b45309;">${_ffTCEscape(fmtHrs(row.overtimeHours))}</span>`
+        : `<span style="color:#9ca3af;">${_ffTCEscape(fmtHrs(row.overtimeHours))}</span>`;
+
+      return `
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:9px 12px;font-size:12px;">
+            <div style="display:inline-flex;align-items:center;gap:8px;">
+              ${avatarHtml}
+              <span style="color:#111827;font-weight:500;">${_ffTCEscape(name)}</span>
+              ${openNote}
+            </div>
+          </td>
+          <td style="padding:9px 12px;text-align:right;color:#111827;font-weight:600;font-variant-numeric:tabular-nums;font-size:12px;">${_ffTCEscape(fmtHrs(row.totalHours))}</td>
+          <td style="padding:9px 12px;text-align:right;color:#374151;font-variant-numeric:tabular-nums;font-size:12px;">${_ffTCEscape(fmtHrs(row.regularHours))}</td>
+          <td style="padding:9px 12px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;">${otLabel}</td>
+          <td style="padding:9px 12px;text-align:right;color:#6b7280;font-variant-numeric:tabular-nums;font-size:12px;">${rateCell}</td>
+          <td style="padding:9px 12px;text-align:right;color:#111827;font-weight:700;font-variant-numeric:tabular-nums;font-size:12px;">${rateMissing ? '<span style="color:#9ca3af;">—</span>' : _ffTCEscape(_ffTCFormatMoney(row.totalPay))}</td>
+        </tr>`;
+    }).join('');
+
+    const totalsRow = `
+      <tr style="background:linear-gradient(180deg,#faf5ff 0%,#f3e8ff 100%);border-top:2px solid #ddd6fe;">
+        <td style="padding:9px 12px;color:#5b21b6;font-weight:700;letter-spacing:0.02em;text-transform:uppercase;font-size:10px;">Grand total</td>
+        <td style="padding:9px 12px;text-align:right;color:#1f2937;font-weight:800;font-variant-numeric:tabular-nums;font-size:12px;">${_ffTCEscape(fmtHrs(gTotal))}</td>
+        <td style="padding:9px 12px;text-align:right;color:#374151;font-variant-numeric:tabular-nums;font-size:12px;">${_ffTCEscape(fmtHrs(gReg))}</td>
+        <td style="padding:9px 12px;text-align:right;color:${gOt > 0 ? '#b45309' : '#9ca3af'};font-variant-numeric:tabular-nums;font-size:12px;">${_ffTCEscape(fmtHrs(gOt))}</td>
+        <td style="padding:9px 12px;"></td>
+        <td style="padding:9px 12px;text-align:right;color:#5b21b6;font-weight:800;font-variant-numeric:tabular-nums;font-size:12px;">${_ffTCEscape(_ffTCFormatMoney(gPay))}</td>
+      </tr>`;
+
+    const warningRow = anyMissingRate
+      ? `<tr><td colspan="6" style="padding:8px 12px;background:#fffbeb;color:#92400e;font-size:10px;border-top:1px solid #fde68a;">
+          Some staff don't have an hourly rate configured in <b>Earnings Rules</b>. Their pay is shown as "—" and not included in the grand total.
+        </td></tr>`
+      : '';
+
+    body.innerHTML = htmlRows + totalsRow + warningRow;
+  }
+
+  // ────────────────────── View 4: Add/Edit Time Card drawer ──────────────
+  // When `entry` is provided (with at least an `id`), the drawer opens in
+  // EDIT mode: title, button label, and submit handler switch from
+  // create-new to update-existing. All fields are prefilled from `entry`.
+  function _ffTCOpenAddDrawer(entry) {
+    const drawer = document.getElementById('tcMAddDrawer');
+    if (!drawer) return;
+    const isEdit = !!(entry && entry.id);
+    const backdrop = document.getElementById('tcMBackdrop');
+    if (backdrop) backdrop.style.display = 'block';
+    const locs = _ffTCActiveLocations();
+    const staffList = _ffTCStaffList();
+
+    // Resolve prefill timestamps/values. In Add mode we default to "now",
+    // in Edit mode we read from the entry.
+    const now = new Date();
+    let inDate = now;
+    let outDate = null;
+    let dayISO = now.toISOString().slice(0, 10);
+    let locPrefill = window.__ffTCState.manage.filterLocationId || _ffTCDefaultLocationId();
+    let staffPrefill = '';
+    let notesPrefill = '';
+    if (isEdit) {
+      try {
+        const ci = entry.clockInAt;
+        const co = entry.clockOutAt;
+        inDate = (ci && typeof ci.toDate === 'function') ? ci.toDate()
+               : (ci instanceof Date ? ci : now);
+        outDate = (co && typeof co.toDate === 'function') ? co.toDate()
+                : (co instanceof Date ? co : null);
+        // Build YYYY-MM-DD in the user's local time-zone (input[type=date] is local).
+        const y = inDate.getFullYear();
+        const m = String(inDate.getMonth() + 1).padStart(2, '0');
+        const d = String(inDate.getDate()).padStart(2, '0');
+        dayISO = `${y}-${m}-${d}`;
+        locPrefill = String(entry.locationId || locPrefill);
+        staffPrefill = String(entry.staffId || '');
+        notesPrefill = typeof entry.notes === 'string' ? entry.notes : '';
+      } catch (_) {}
+    }
+    const inH12 = ((inDate.getHours() + 11) % 12) + 1;
+    const inMins = String(inDate.getMinutes()).padStart(2, '0');
+    const inAmPm = inDate.getHours() >= 12 ? 'PM' : 'AM';
+    const outH12 = outDate ? (((outDate.getHours() + 11) % 12) + 1) : '';
+    const outMins = outDate ? String(outDate.getMinutes()).padStart(2, '0') : '';
+    const outAmPm = outDate ? (outDate.getHours() >= 12 ? 'PM' : 'AM') : '';
+
+    const fieldStyle = 'padding:6px 9px;border:1px solid #e5e7eb;border-radius:7px;background:#f9fafb;font-size:11px;color:#111827;font-weight:500;outline:none;box-sizing:border-box;width:100%;';
+    const labelStyle = 'display:flex;flex-direction:column;gap:2px;font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;';
+
+    const title = isEdit ? 'Time Card' : 'New Time Card';
+    const submitLabel = isEdit ? 'SAVE CHANGES' : 'ADD TIME CARD';
+
+    drawer.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#ffffff;color:#111827;border-bottom:1px solid #e5e7eb;">
+        <button id="tcAddCancel" type="button" aria-label="Cancel" style="background:#f3f4f6;color:#111827;border:none;border-radius:6px;width:22px;height:22px;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;padding:0;">×</button>
+        <div style="font-size:13px;font-weight:700;letter-spacing:-0.01em;color:#111827;">${_ffTCEscape(title)}</div>
+        ${isEdit && entry.status === 'closed' ? '<span style="margin-left:auto;font-size:9px;font-weight:600;color:#065f46;background:#ecfdf5;padding:3px 8px;border-radius:999px;letter-spacing:0.04em;">CLOSED</span>' : ''}
+        ${isEdit && entry.status === 'open' ? '<span style="margin-left:auto;font-size:9px;font-weight:600;color:#5b21b6;background:#f3e8ff;padding:3px 8px;border-radius:999px;letter-spacing:0.04em;">OPEN</span>' : ''}
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;">
+        <label style="${labelStyle}">Location
+          <select id="tcAddLoc" style="${fieldStyle}">
+            ${locs.map((l) => `<option value="${_ffTCEscape(l.id)}"${String(l.id) === String(locPrefill) ? ' selected' : ''}>${_ffTCEscape(l.name || l.id)}</option>`).join('')}
+          </select>
+        </label>
+        <label style="${labelStyle}">Staff
+          <select id="tcAddStaff" style="${fieldStyle}"${isEdit ? ' disabled' : ''}>
+            <option value="">Select staff</option>
+            ${staffList.map((s) => `<option value="${_ffTCEscape(s.id)}"${String(s.id) === String(staffPrefill) ? ' selected' : ''}>${_ffTCEscape(s.name || s.id)}</option>`).join('')}
+          </select>
+        </label>
+        <label style="${labelStyle}">Day
+          <input id="tcAddDay" type="date" value="${_ffTCEscape(dayISO)}" style="${fieldStyle}"/>
+        </label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end;">
+          <div style="display:flex;flex-direction:column;">
+            <div style="${labelStyle};height:14px;line-height:14px;white-space:nowrap;overflow:hidden;margin-bottom:3px;">Clock-in</div>
+            <div style="display:flex;align-items:center;gap:2px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:7px;background:#f9fafb;height:28px;box-sizing:border-box;">
+              <input id="tcAddInH" type="number" min="1" max="12" value="${inH12}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
+              <span style="color:#9ca3af;font-weight:500;font-size:12px;">:</span>
+              <input id="tcAddInM" type="number" min="0" max="59" value="${inMins}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
+              <select id="tcAddInAM" style="border:none;font-size:10px;color:#6b7280;background:transparent;outline:none;font-weight:500;margin-left:auto;padding:0;">
+                <option value="AM"${inAmPm === 'AM' ? ' selected' : ''}>AM</option>
+                <option value="PM"${inAmPm === 'PM' ? ' selected' : ''}>PM</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;">
+            <div style="${labelStyle};height:14px;line-height:14px;white-space:nowrap;overflow:hidden;margin-bottom:3px;">Clock-out</div>
+            <div style="display:flex;align-items:center;gap:2px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:7px;background:#f9fafb;height:28px;box-sizing:border-box;">
+              <input id="tcAddOutH" type="number" min="1" max="12" placeholder="--" value="${outH12}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
+              <span style="color:#9ca3af;font-weight:500;font-size:12px;">:</span>
+              <input id="tcAddOutM" type="number" min="0" max="59" placeholder="--" value="${outMins}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
+              <select id="tcAddOutAM" style="border:none;font-size:10px;color:#6b7280;background:transparent;outline:none;font-weight:500;margin-left:auto;padding:0;">
+                <option value=""${!outAmPm ? ' selected' : ''}>--</option>
+                <option value="AM"${outAmPm === 'AM' ? ' selected' : ''}>AM</option>
+                <option value="PM"${outAmPm === 'PM' ? ' selected' : ''}>PM</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <label style="${labelStyle}">Notes
+          <input id="tcAddNotes" type="text" placeholder="Enter notes" value="${_ffTCEscape(notesPrefill)}" style="${fieldStyle}"/>
+        </label>
+        <div id="tcAddErr" style="min-height:12px;font-size:10px;color:#b91c1c;"></div>
+        ${isEdit ? `
+          <button id="tcAddVoid" type="button" style="margin-top:4px;background:transparent;color:#b91c1c;border:1px dashed #fecaca;border-radius:7px;padding:7px 0;font-size:10px;font-weight:700;letter-spacing:0.05em;cursor:pointer;">DELETE THIS TIME CARD</button>
+        ` : ''}
+      </div>
+      <div style="padding:8px 12px;border-top:1px solid #f3f4f6;background:#fff;">
+        <button id="tcAddSave" type="button" style="width:100%;background:linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%);color:#fff;border:none;border-radius:8px;padding:8px 0;font-size:11px;font-weight:700;letter-spacing:0.05em;cursor:pointer;box-shadow:0 4px 14px -4px rgba(123,63,228,0.45);transition:opacity 0.15s ease;">${submitLabel}</button>
+      </div>
+    `;
+    drawer.style.display = 'flex';
+
+    const closeDrawer = () => {
+      drawer.style.display = 'none';
+      drawer.innerHTML = '';
+      const bd = document.getElementById('tcMBackdrop');
+      if (bd) bd.style.display = 'none';
+    };
+    const cancel = drawer.querySelector('#tcAddCancel');
+    if (cancel) cancel.addEventListener('click', closeDrawer);
+
+    const save = drawer.querySelector('#tcAddSave');
+    if (save) save.addEventListener('click', () => {
+      if (isEdit) {
+        _ffTCSubmitEditTimeCard(drawer, entry);
+      } else {
+        _ffTCSubmitAddTimeCard(drawer);
+      }
+    });
+
+    const voidBtn = drawer.querySelector('#tcAddVoid');
+    if (voidBtn) voidBtn.addEventListener('click', () => _ffTCSubmitVoidTimeCard(drawer, entry));
+  }
+
+  function _ffTCBuildDateFromParts(dayISO, h12, mm, ampm) {
+    if (!dayISO || !h12 || mm == null || !ampm) return null;
+    const [y, m, d] = String(dayISO).split('-').map((x) => parseInt(x, 10));
+    if (!y || !m || !d) return null;
+    let h = parseInt(h12, 10);
+    const mi = parseInt(mm, 10);
+    if (!isFinite(h) || !isFinite(mi)) return null;
+    if (h < 1 || h > 12 || mi < 0 || mi > 59) return null;
+    if (ampm === 'PM' && h !== 12) h += 12;
+    if (ampm === 'AM' && h === 12) h = 0;
+    const dt = new Date(y, m - 1, d, h, mi, 0, 0);
+    return isFinite(dt.getTime()) ? dt : null;
+  }
+
+  async function _ffTCSubmitAddTimeCard(drawer) {
+    const err = drawer.querySelector('#tcAddErr');
+    const save = drawer.querySelector('#tcAddSave');
+    if (err) { err.style.color = '#b91c1c'; err.textContent = ''; }
+
+    const locId = drawer.querySelector('#tcAddLoc').value.trim();
+    const staffId = drawer.querySelector('#tcAddStaff').value.trim();
+    const dayISO = drawer.querySelector('#tcAddDay').value.trim();
+    const inH = drawer.querySelector('#tcAddInH').value;
+    const inM = drawer.querySelector('#tcAddInM').value;
+    const inAM = drawer.querySelector('#tcAddInAM').value;
+    const outH = drawer.querySelector('#tcAddOutH').value;
+    const outM = drawer.querySelector('#tcAddOutM').value;
+    const outAM = drawer.querySelector('#tcAddOutAM').value;
+    const notes = drawer.querySelector('#tcAddNotes').value.trim();
+
+    if (!locId) { if (err) err.textContent = 'Please choose a location.'; return; }
+    if (!staffId) { if (err) err.textContent = 'Please choose a staff member.'; return; }
+    if (!dayISO) { if (err) err.textContent = 'Please choose a day.'; return; }
+    const inAt = _ffTCBuildDateFromParts(dayISO, inH, inM, inAM);
+    if (!inAt) { if (err) err.textContent = 'Invalid clock-in time.'; return; }
+
+    let outAt = null;
+    if (outH !== '' || outM !== '' || outAM) {
+      outAt = _ffTCBuildDateFromParts(dayISO, outH, outM, outAM);
+      if (!outAt) { if (err) err.textContent = 'Invalid clock-out time.'; return; }
+      if (outAt.getTime() < inAt.getTime()) {
+        // Treat clock-out on next day if earlier than clock-in (overnight shift).
+        outAt = new Date(outAt.getTime() + 24 * 60 * 60 * 1000);
+      }
+    }
+
+    if (save) { save.disabled = true; save.style.opacity = '0.7'; save.textContent = 'SAVING…'; }
+    try {
+      if (typeof window.ffCreateTimeEntry !== 'function') throw new Error('ffCreateTimeEntry not loaded');
+      const created = await window.ffCreateTimeEntry({
+        staffId, locationId: locId, clockInAt: inAt,
+        source: 'admin', notes: notes || null,
+      });
+      if (outAt) {
+        if (typeof window.ffCloseTimeEntry !== 'function') throw new Error('ffCloseTimeEntry not loaded');
+        await window.ffCloseTimeEntry({ entryId: created.id, clockOutAt: outAt });
+      }
+      drawer.style.display = 'none'; drawer.innerHTML = '';
+      const bd = document.getElementById('tcMBackdrop');
+      if (bd) bd.style.display = 'none';
+      _ffTCReloadManageRows();
+      if (window.ffToast && typeof window.ffToast.show === 'function') {
+        window.ffToast.show('Time card added.', { variant: 'success', durationMs: 2000 });
+      }
+    } catch (e) {
+      console.warn('[Time Clock] add failed', e);
+      if (err) err.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+      if (save) { save.disabled = false; save.style.opacity = '1'; save.textContent = 'ADD TIME CARD'; }
+    }
+  }
+
+  async function _ffTCSubmitEditTimeCard(drawer, entry) {
+    const err = drawer.querySelector('#tcAddErr');
+    const save = drawer.querySelector('#tcAddSave');
+    if (err) { err.style.color = '#b91c1c'; err.textContent = ''; }
+    if (!entry || !entry.id) { if (err) err.textContent = 'Missing entry id.'; return; }
+
+    const locId = drawer.querySelector('#tcAddLoc').value.trim();
+    const dayISO = drawer.querySelector('#tcAddDay').value.trim();
+    const inH = drawer.querySelector('#tcAddInH').value;
+    const inM = drawer.querySelector('#tcAddInM').value;
+    const inAM = drawer.querySelector('#tcAddInAM').value;
+    const outH = drawer.querySelector('#tcAddOutH').value;
+    const outM = drawer.querySelector('#tcAddOutM').value;
+    const outAM = drawer.querySelector('#tcAddOutAM').value;
+    const notes = drawer.querySelector('#tcAddNotes').value;
+
+    if (!locId) { if (err) err.textContent = 'Please choose a location.'; return; }
+    if (!dayISO) { if (err) err.textContent = 'Please choose a day.'; return; }
+    const inAt = _ffTCBuildDateFromParts(dayISO, inH, inM, inAM);
+    if (!inAt) { if (err) err.textContent = 'Invalid clock-in time.'; return; }
+
+    let outAt = null;
+    let hasOut = false;
+    if (outH !== '' || outM !== '' || outAM) {
+      hasOut = true;
+      outAt = _ffTCBuildDateFromParts(dayISO, outH, outM, outAM);
+      if (!outAt) { if (err) err.textContent = 'Invalid clock-out time.'; return; }
+      if (outAt.getTime() < inAt.getTime()) {
+        outAt = new Date(outAt.getTime() + 24 * 60 * 60 * 1000);
+      }
+    }
+
+    if (save) { save.disabled = true; save.style.opacity = '0.7'; save.textContent = 'SAVING…'; }
+    try {
+      if (typeof window.ffUpdateTimeEntry !== 'function') throw new Error('ffUpdateTimeEntry not loaded');
+      const patch = { entryId: entry.id, clockInAt: inAt, locationId: locId, notes };
+      // Only include clockOutAt when explicitly provided; passing `null`
+      // would re-open the entry which we only want when the user clears it.
+      if (hasOut) patch.clockOutAt = outAt;
+      else if (entry.clockOutAt) patch.clockOutAt = null;
+      await window.ffUpdateTimeEntry(patch);
+      drawer.style.display = 'none'; drawer.innerHTML = '';
+      const bd = document.getElementById('tcMBackdrop');
+      if (bd) bd.style.display = 'none';
+      _ffTCReloadManageRows();
+      if (window.ffToast && typeof window.ffToast.show === 'function') {
+        window.ffToast.show('Time card updated.', { variant: 'success', durationMs: 2000 });
+      }
+    } catch (e) {
+      console.warn('[Time Clock] update failed', e);
+      if (err) err.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+      if (save) { save.disabled = false; save.style.opacity = '1'; save.textContent = 'SAVE CHANGES'; }
+    }
+  }
+
+  async function _ffTCSubmitVoidTimeCard(drawer, entry) {
+    const err = drawer.querySelector('#tcAddErr');
+    if (!entry || !entry.id) return;
+    if (!window.confirm('Delete this time card? It will be marked as void and removed from totals.')) return;
+    if (err) err.textContent = '';
+    try {
+      if (typeof window.ffUpdateTimeEntry !== 'function') throw new Error('ffUpdateTimeEntry not loaded');
+      await window.ffUpdateTimeEntry({ entryId: entry.id, status: 'void' });
+      drawer.style.display = 'none'; drawer.innerHTML = '';
+      const bd = document.getElementById('tcMBackdrop');
+      if (bd) bd.style.display = 'none';
+      _ffTCReloadManageRows();
+      if (window.ffToast && typeof window.ffToast.show === 'function') {
+        window.ffToast.show('Time card deleted.', { variant: 'success', durationMs: 2000 });
+      }
+    } catch (e) {
+      console.warn('[Time Clock] void failed', e);
+      if (err) err.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+    }
+  }
+
   // Menu item click handler
   function handleMenuClick(section) {
     // Expose for external use
@@ -31922,6 +34599,11 @@ function initializeUserProfileMenu() {
     // menu buttons for non-owners.
     const ownerOnlySections = ['billing', 'locations', 'schedule', 'preferences'];
     if (ownerOnlySections.indexOf(section) !== -1 && !ffIsCurrentUserOwnerForSettings()) {
+      section = 'password';
+    }
+    // Time Clock Settings — owner OR admin only (broader than the other
+    // owner-only sections). Hidden for managers / staff even via deep link.
+    if (section === 'time-clock-settings' && !ffIsCurrentUserOwnerOrAdminForSettings()) {
       section = 'password';
     }
     // Update menu item active states (purple tint via .user-profile-menu-item--active; see CSS)
@@ -31947,7 +34629,8 @@ function initializeUserProfileMenu() {
       'preferences': 'userProfileCardPreferences',
       'schedule': 'userProfileCardSchedule',
       'billing': 'userProfileCardBilling',
-      'locations': 'userProfileCardLocations'
+      'locations': 'userProfileCardLocations',
+      'time-clock-settings': 'userProfileCardTimeClockSettings'
     };
     
     const cardId = sectionToCardId[section] || `userProfileCard${section.charAt(0).toUpperCase() + section.slice(1)}`;
@@ -32019,6 +34702,11 @@ function initializeUserProfileMenu() {
       // but we also trigger a one-shot render here so the list paints immediately.
       if (section === 'locations' && typeof window.ffRenderLocationsSettings === 'function') {
         window.ffRenderLocationsSettings();
+      }
+      // Time Clock Settings — Stage 2 UI init (wire overtime toggle). Safe to
+      // call on every open because the init function is idempotent.
+      if (section === 'time-clock-settings' && typeof window.ffInitTimeClockSettingsUI === 'function') {
+        window.ffInitTimeClockSettingsUI();
       }
     }
   }
@@ -40794,12 +43482,10 @@ function hookSettingsGuard_DISABLED(){
               <div id="staffLocationsTabContent" style="display:none;padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
                 <p style="color:#6b7280;font-size:13px;margin:0;">Coming soon.</p>
               </div>
-              <div id="staffNotificationsTabContent" style="display:none;padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-                <p style="color:#6b7280;font-size:13px;margin:0;">Coming soon.</p>
-              </div>
               <div id="staffPermissionsTabContent" style="display:none;padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
                 <p style="color:#6b7280;font-size:13px;margin:0;">Coming soon.</p>
               </div>
+              <div id="staffEarningsTabContent" style="display:none;min-width:0;"></div>
               <div id="staffDocumentsTabContent" style="display:none;min-width:0;"></div>
             </div>
           </div>
@@ -40968,7 +43654,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260420_cross_loc_busy"></script>
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
-  <script type="module" src="/schedule-ui.js?v=20260420_unified_my_shifts_v1"></script>
+  <script type="module" src="/schedule-ui.js?v=20260423_tc_fullscreen_r1"></script>
   <script type="module" src="/inbox.js?v=20260420_inv_draftpicker_v123"></script>
   <script type="module" src="/chat.js?v=20260420_chat_settings_loc"></script>
   <script type="module" src="/staff-cloud.js?v=20260415_ff_toast"></script>
@@ -40977,7 +43663,9 @@ function hookSettingsGuard_DISABLED(){
   <script src="/location-switcher.js?v=20260420_switcher_mangomint_v1"></script>
   <script type="module" src="/staff-documents.js?v=20260412_doc_meta_edit"></script>
   <script type="module" src="/staff-call-cloud.js?v=20260412_staffcall_accept_ui"></script>
-  <script type="module" src="/settings-cloud.js?v=20260420_salon_currency_v2"></script>
+  <script type="module" src="/settings-cloud.js?v=20260420_time_clock_v1"></script>
+  <script src="/time-clock-engine.js?v=20260420_tc_engine_v2_shifts"></script>
+  <script type="module" src="/time-clock-entries.js?v=20260423_tc_onerow_r1"></script>
   <script type="module" src="/queue-cloud.js?v=20260420_per_location_v1"></script>
   <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
   <script type="module" src="/tickets.js?v=20260420_tickets_gear_next_to_summary"></script>
@@ -42201,6 +44889,13 @@ function hookSettingsGuard_DISABLED(){
     <div id="schedulePreviewEmpty" style="display:none;max-width:1200px;margin:0 auto;padding:24px;border:1px dashed #d1d5db;border-radius:16px;background:#fff;color:#6b7280;font-size:14px;text-align:center;">No schedule preview available for this week.</div>
     <div id="scheduleCrossLocConflictBanner" style="display:none;max-width:1400px;margin:0 auto 10px;padding:12px 14px;border:1px solid #fcd34d;background:#fffbeb;border-radius:12px;color:#92400e;font-size:13px;line-height:1.45;"></div>
     <div id="scheduleBoard" style="max-width:1400px;margin:0 auto;display:grid;gap:6px;"></div>
+  </div>
+</div>
+
+<!-- Time Clock — full-screen module (not under Settings). -->
+<div id="timeClockScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#ffffff;z-index:300;flex-direction:column;overflow:hidden;">
+  <div id="timeClockScreenContent" style="flex:1;overflow-y:auto;padding:20px 16px 24px;max-width:520px;width:100%;margin:0 auto;box-sizing:border-box;">
+    <div style="color:#6b7280;font-size:13px;">Loading&hellip;</div>
   </div>
 </div>
 

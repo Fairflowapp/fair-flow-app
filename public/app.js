@@ -963,6 +963,7 @@ const FF_FULLSCREEN_MODULE_IDS = [
   "chatScreen",
   "trainingScreen",
   "scheduleScreen",
+  "timeClockScreen",
 ];
 
 function showLoginScreen() {
