@@ -33,7 +33,6 @@ let ticketsUnsubscribe = null;
 let _ticketsDataReady = false; // cache flag — skip Firestore re-fetch on repeat visits
 let currentTicketsTab = 'ready';
 let editingTicketId = null;
-let ticketFormAsIsMode = false;
 /** When set, opening this ticket (e.g. from list) must not show Ticket Details – we just closed it. */
 let _justClosedTicketId = null;
 /** Cache for member avatars (uid/staffId -> { avatarUrl, avatarUpdatedAtMs }) for ticket list. */
@@ -176,9 +175,306 @@ function getTicketTechnicianAvatarUrl(t) {
 let _ffCatalogLegacyWiped = false;
 let _rawServices = [];
 let _rawCategories = [];
+let _rawSharedServices = [];
+let _rawSharedCategories = [];
+let _rawServiceOverrides = {};
+let _catalogSource = 'unknown'; // 'shared' | 'location' | 'unknown'
+let _ffCatalogModalMode = 'location'; // 'location' | 'shared'
 let _servicesUnsub = null;
 let _serviceCatsUnsub = null;
 let _catalogSubSalonId = null;
+
+function getTicketsAccountId() {
+  const candidates = [
+    currentUserProfile?.accountId,
+    currentUserProfile?.accountID,
+    currentUserProfile?.account_id,
+    currentUserProfile?.salonId,
+    (typeof window !== 'undefined' ? window.currentAccountId : null),
+    (typeof window !== 'undefined' ? window.accountId : null),
+    (typeof window !== 'undefined' ? window.currentSalonId : null)
+  ];
+  for (const v of candidates) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+function normalizeSharedCategoryName(category) {
+  const s = String(category || '').trim();
+  return s || 'Other';
+}
+
+function sharedCategoryId(category) {
+  return `shared:${normalizeSharedCategoryName(category).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'other'}`;
+}
+
+function sharedServiceCatalogDocRef(accountId) {
+  return doc(db, `accounts/${accountId}/shared/serviceCatalog`);
+}
+
+function sharedServiceCatalogItemsRef(accountId) {
+  return collection(db, `accounts/${accountId}/shared/serviceCatalog/items`);
+}
+
+function sharedServiceCategoriesDocRef(accountId) {
+  return doc(db, `accounts/${accountId}/shared/serviceCategories`);
+}
+
+function sharedServiceCategoryItemsRef(accountId) {
+  return collection(db, `accounts/${accountId}/shared/serviceCategories/items`);
+}
+
+async function ensureSharedServiceCatalogDoc(accountId) {
+  if (!accountId) return;
+  await setDoc(sharedServiceCatalogDocRef(accountId), {}, { merge: true });
+}
+
+async function ensureSharedServiceCategoriesDoc(accountId) {
+  if (!accountId) return;
+  await setDoc(sharedServiceCategoriesDocRef(accountId), {}, { merge: true });
+}
+
+async function loadSharedServiceOverrides(accountId, locationId) {
+  _rawServiceOverrides = {};
+  if (!accountId || !locationId) return {};
+  try {
+    const snap = await getDocs(collection(db, `accounts/${accountId}/locations/${locationId}/serviceOverrides`));
+    snap.docs.forEach((d) => {
+      const data = d.data() || {};
+      const price = Number(data.price);
+      if (Number.isFinite(price)) _rawServiceOverrides[d.id] = { price };
+    });
+  } catch (e) {
+    console.warn('[SharedServices] overrides load failed', e);
+  }
+  return _rawServiceOverrides;
+}
+
+function applySharedServiceCatalog() {
+  const categoryMap = new Map();
+  _rawSharedCategories.forEach((c, idx) => {
+    const name = normalizeSharedCategoryName(c?.name);
+    const categoryId = sharedCategoryId(name);
+    if (!categoryMap.has(categoryId)) {
+      categoryMap.set(categoryId, {
+        id: categoryId,
+        name,
+        sortOrder: Number.isFinite(Number(c?.sortOrder)) ? Number(c.sortOrder) : idx,
+        isSharedCategory: true
+      });
+    }
+  });
+  salonServices = _rawSharedServices
+    .filter((s) => s && s.active !== false)
+    .map((s, idx) => {
+      const categoryName = normalizeSharedCategoryName(s.category);
+      const categoryId = sharedCategoryId(categoryName);
+      if (!categoryMap.has(categoryId)) {
+        categoryMap.set(categoryId, { id: categoryId, name: categoryName, sortOrder: categoryMap.size, isSharedCategory: true });
+      }
+      const override = _rawServiceOverrides[s.id];
+      const defaultPrice = Number(s.defaultPrice) || 0;
+      const finalPrice = override && Number.isFinite(Number(override.price))
+        ? Number(override.price)
+        : defaultPrice;
+      if (override) console.log('[SharedServices] override applied', { serviceId: s.id, locationId: getActiveLocationIdForTickets(), price: finalPrice });
+      return {
+        id: s.id,
+        name: String(s.name || '').trim(),
+        defaultPrice: finalPrice,
+        sharedDefaultPrice: defaultPrice,
+        category: categoryName,
+        categoryId,
+        active: s.active !== false,
+        sortOrder: Number.isFinite(Number(s.sortOrder)) ? Number(s.sortOrder) : idx,
+        isSharedService: true
+      };
+    })
+    .filter((s) => s.name)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  serviceCategories = Array.from(categoryMap.values()).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+}
+
+function getSharedServicesForCatalogManager() {
+  const categoryMap = new Map();
+  _rawSharedCategories.forEach((c, idx) => {
+    const name = normalizeSharedCategoryName(c?.name);
+    const id = sharedCategoryId(name);
+    categoryMap.set(id, {
+      id,
+      docId: c?.id || id,
+      name,
+      sortOrder: Number.isFinite(Number(c?.sortOrder)) ? Number(c.sortOrder) : idx,
+      isSharedCategory: true
+    });
+  });
+  const services = _rawSharedServices
+    .map((s, idx) => {
+      const categoryName = normalizeSharedCategoryName(s.category);
+      const categoryId = sharedCategoryId(categoryName);
+      if (!categoryMap.has(categoryId)) {
+        categoryMap.set(categoryId, { id: categoryId, name: categoryName, sortOrder: categoryMap.size, isSharedCategory: true });
+      }
+      const override = _rawServiceOverrides[s.id];
+      const defaultPrice = Number(s.defaultPrice) || 0;
+      const hasOverride = override && Number.isFinite(Number(override.price));
+      return {
+        id: s.id,
+        name: String(s.name || '').trim(),
+        defaultPrice: hasOverride ? Number(override.price) : defaultPrice,
+        sharedDefaultPrice: defaultPrice,
+        category: categoryName,
+        categoryId,
+        active: s.active !== false,
+        sortOrder: Number.isFinite(Number(s.sortOrder)) ? Number(s.sortOrder) : idx,
+        isSharedService: true,
+        hasOverride,
+        overridePrice: hasOverride ? Number(override.price) : null
+      };
+    })
+    .filter((s) => s.name)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  return {
+    services,
+    categories: Array.from(categoryMap.values()).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
+  };
+}
+
+function getLocationServicesForCatalogManager() {
+  return {
+    services: _rawServices
+      .filter(_ffServiceMatchesActiveLocation)
+      .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)),
+    categories: _rawCategories
+      .filter(_ffServiceMatchesActiveLocation)
+      .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
+  };
+}
+
+async function loadSharedCatalogForManager() {
+  const accountId = getTicketsAccountId();
+  if (!accountId) return { services: [], categories: [] };
+  const [serviceSnap, categorySnap] = await Promise.all([
+    getDocs(sharedServiceCatalogItemsRef(accountId)),
+    getDocs(sharedServiceCategoryItemsRef(accountId)).catch(() => ({ docs: [] }))
+  ]);
+  _rawSharedServices = serviceSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  _rawSharedCategories = categorySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  await loadSharedServiceOverrides(accountId, getActiveLocationIdForTickets());
+  return getSharedServicesForCatalogManager();
+}
+
+async function loadLocationCatalogForManager() {
+  if (!currentUserProfile?.salonId) return { services: [], categories: [] };
+  await _ffWipeLegacyCatalogOnce();
+  const [svcSnap, catSnap] = await Promise.all([
+    getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`)),
+    getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`))
+  ]);
+  _rawServices = svcSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  _rawCategories = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  _applyCatalogFilter();
+  return getLocationServicesForCatalogManager();
+}
+
+async function saveSharedService(service) {
+  const accountId = getTicketsAccountId();
+  if (!accountId) throw new Error('No account');
+  const payload = {
+    name: String(service.name || '').trim(),
+    category: normalizeSharedCategoryName(service.category),
+    defaultPrice: Number(service.defaultPrice) || 0,
+    active: service.active !== false,
+    updatedAt: serverTimestamp()
+  };
+  if (service.id) {
+    await ensureSharedServiceCatalogDoc(accountId);
+    await setDoc(doc(sharedServiceCatalogItemsRef(accountId), service.id), payload, { merge: true });
+    console.log('[SharedServicesUI] saved shared service', { serviceId: service.id });
+    return service.id;
+  }
+  await ensureSharedServiceCatalogDoc(accountId);
+  const ref = await addDoc(sharedServiceCatalogItemsRef(accountId), {
+    ...payload,
+    createdAt: serverTimestamp()
+  });
+  console.log('[SharedServicesUI] saved shared service', { serviceId: ref.id });
+  return ref.id;
+}
+
+async function saveSharedServiceCategory(cat) {
+  const accountId = getTicketsAccountId();
+  if (!accountId) throw new Error('No account');
+  const payload = {
+    name: normalizeSharedCategoryName(cat.name),
+    sortOrder: Number(cat.sortOrder) || 0,
+    updatedAt: serverTimestamp()
+  };
+  await ensureSharedServiceCategoriesDoc(accountId);
+  if (cat.id) {
+    await setDoc(doc(sharedServiceCategoryItemsRef(accountId), cat.id), payload, { merge: true });
+    return cat.id;
+  }
+  const categoryId = sharedCategoryId(payload.name);
+  await setDoc(doc(sharedServiceCategoryItemsRef(accountId), categoryId), {
+    ...payload,
+    createdAt: serverTimestamp()
+  });
+  return categoryId;
+}
+
+async function deleteSharedServiceCategory(categoryId) {
+  const accountId = getTicketsAccountId();
+  if (!accountId || !categoryId) return;
+  await deleteDoc(doc(sharedServiceCategoryItemsRef(accountId), categoryId));
+}
+
+async function saveSharedServiceOverride(serviceId, price) {
+  const accountId = getTicketsAccountId();
+  const locationId = getActiveLocationIdForTickets();
+  if (!accountId || !locationId || !serviceId) throw new Error('No location');
+  await setDoc(doc(db, `accounts/${accountId}/locations/${locationId}/serviceOverrides`, serviceId), {
+    price: Number(price) || 0,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+  console.log('[SharedServicesUI] saved override', { serviceId, locationId, price: Number(price) || 0 });
+}
+
+async function removeSharedServiceOverride(serviceId) {
+  const accountId = getTicketsAccountId();
+  const locationId = getActiveLocationIdForTickets();
+  if (!accountId || !locationId || !serviceId) return;
+  await deleteDoc(doc(db, `accounts/${accountId}/locations/${locationId}/serviceOverrides`, serviceId));
+  console.log('[SharedServicesUI] removed override', { serviceId, locationId });
+}
+
+async function tryLoadSharedServiceCatalog() {
+  const accountId = getTicketsAccountId();
+  if (!accountId) return false;
+  try {
+    const [serviceSnap, categorySnap] = await Promise.all([
+      getDocs(sharedServiceCatalogItemsRef(accountId)),
+      getDocs(sharedServiceCategoryItemsRef(accountId)).catch(() => ({ docs: [] }))
+    ]);
+    const rows = serviceSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (!rows.length) {
+      console.log('[SharedServices] fallback to location');
+      return false;
+    }
+    _catalogSource = 'shared';
+    _rawSharedServices = rows;
+    _rawSharedCategories = categorySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    await loadSharedServiceOverrides(accountId, getActiveLocationIdForTickets());
+    applySharedServiceCatalog();
+    console.log('[SharedServices] loaded from shared');
+    return true;
+  } catch (e) {
+    console.warn('[SharedServices] shared load failed', e);
+    console.log('[SharedServices] fallback to location');
+    return false;
+  }
+}
 
 async function _ffWipeLegacyCatalogOnce() {
   if (_ffCatalogLegacyWiped) return;
@@ -228,6 +524,10 @@ function _ffServiceMatchesActiveLocation(s) {
  *  current active branch. Safe to call from any event (snapshot arrival,
  *  location change, manual refresh). */
 function _applyCatalogFilter() {
+  if (_catalogSource === 'shared') {
+    applySharedServiceCatalog();
+    return;
+  }
   salonServices = _rawServices
     .filter(_ffServiceMatchesActiveLocation)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
@@ -252,6 +552,7 @@ function _onCatalogSnapshot() {
 /** Live subscribe to services + serviceCategories for the current salon.
  *  Idempotent; switching salon auto-rebinds. */
 function subscribeServiceCatalog() {
+  if (_catalogSource === 'shared') return;
   const salonId = currentUserProfile?.salonId;
   if (!salonId) return;
   if (_catalogSubSalonId === salonId && (_servicesUnsub || _serviceCatsUnsub)) return;
@@ -282,6 +583,11 @@ function subscribeServiceCatalog() {
 
 async function loadServices() {
   if (!currentUserProfile?.salonId) return [];
+  if (_catalogSource !== 'location') {
+    const sharedLoaded = await tryLoadSharedServiceCatalog();
+    if (sharedLoaded) return salonServices;
+    _catalogSource = 'location';
+  }
   // Make sure live subscriptions are running; they will refresh the UI the
   // moment new data arrives.
   subscribeServiceCatalog();
@@ -335,6 +641,14 @@ async function deleteService(serviceId) {
 // =====================
 async function loadServiceCategories() {
   if (!currentUserProfile?.salonId) return [];
+  if (_catalogSource === 'unknown') {
+    await loadServices();
+    return serviceCategories;
+  }
+  if (_catalogSource === 'shared') {
+    applySharedServiceCatalog();
+    return serviceCategories;
+  }
   subscribeServiceCatalog();
   try {
     if (_rawCategories.length === 0) {
@@ -2299,20 +2613,6 @@ function openAdminTicketView(t) {
     if (custWrap) custWrap.style.display = 'none';
   }
 
-  // AS IS message
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsMsgText  = document.getElementById('ticketAsIsMessageText');
-  if (asIsMsgBlock && asIsMsgText) {
-    if (t.asIs && t.asIsMessage) {
-      asIsMsgText.textContent = t.asIsMessage;
-      asIsMsgBlock.style.display = 'block';
-    } else {
-      asIsMsgBlock.style.display = 'none';
-    }
-  }
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
-
   // Show total
   const totalBlock = document.getElementById('ticketTotalBlock');
   const totalAmt   = document.getElementById('ticketTotalAmount');
@@ -2349,7 +2649,7 @@ function openAdminTicketView(t) {
 
   // Hide all action buttons except Close
   ['ticketSendNewBtn','ticketSaveBtn','ticketFinalizeBtn','ticketArchiveBtn',
-   'ticketDeleteBtn','ticketAsIsBtn'].forEach(id => {
+   'ticketDeleteBtn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -2509,16 +2809,11 @@ function resetTicketForm() {
   set('ticketLinesData', el => { el.value = '[]'; });
   set('ticketAsBookedBlock', el => { el.style.display = 'none'; });
   set('ticketAsBookedNone', el => { el.style.display = 'block'; });
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsMsgBlock) asIsMsgBlock.style.display = 'none';
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
   set('ticketCustomerPriceApproved', el => { el.checked = false; });
   set('ticketAdminPriceApprovalBlock', el => { el.style.display = 'none'; el.innerHTML = ''; });
   const finalizeBtn = document.getElementById('ticketFinalizeBtn');
   const closeBtn = document.getElementById('ticketCloseBtn');
   const sendNewBtn = document.getElementById('ticketSendNewBtn');
-  const asIsBtn = document.getElementById('ticketAsIsBtn');
   const saveBtn = document.getElementById('ticketSaveBtn');
   const archiveBtn = document.getElementById('ticketArchiveBtn');
   const deleteBtn = document.getElementById('ticketDeleteBtn');
@@ -2531,7 +2826,6 @@ function resetTicketForm() {
     sendNewBtn.style.display = 'inline-block';
     sendNewBtn.onclick = () => doSendNewTicket();
   }
-  if (asIsBtn) asIsBtn.style.display = 'none';
   const upgradeWrap = document.getElementById('ticketServiceUpgradeWrap');
   const upgradeBtn = document.getElementById('ticketServiceUpgradeBtn');
   if (upgradeWrap) upgradeWrap.style.display = 'none';
@@ -2592,19 +2886,6 @@ function populateTicketForm(t) {
   if (customerToggle) customerToggle.style.display = isReadOnly ? 'none' : '';
   if (customerInput) customerInput.readOnly = isReadOnly;
   updateTicketTotal(lines);
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsMsgText = document.getElementById('ticketAsIsMessageText');
-  if (asIsMsgBlock && asIsMsgText) {
-    if (t.asIs && t.asIsMessage) {
-      asIsMsgText.textContent = t.asIsMessage;
-      asIsMsgBlock.style.display = 'block';
-    } else {
-      asIsMsgBlock.style.display = 'none';
-    }
-  }
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
-
   const isCreator = currentUserProfile && (
     t.createdByUid === currentUserProfile.uid ||
     t.technicianStaffId === currentUserProfile.staffId ||
@@ -2625,14 +2906,12 @@ function populateTicketForm(t) {
   const archiveBtn = document.getElementById('ticketArchiveBtn');
   const deleteBtn = document.getElementById('ticketDeleteBtn');
   const sendNewBtn = document.getElementById('ticketSendNewBtn');
-  const asIsBtn = document.getElementById('ticketAsIsBtn');
   const saveBtn = document.getElementById('ticketSaveBtn');
   if (finalizeBtn) finalizeBtn.style.display = (t.status === 'OPEN') ? 'inline-block' : 'none';
   if (closeBtn) closeBtn.style.display = (t.status === 'READY_FOR_CHECKOUT' && canCloseTicket) ? 'inline-block' : 'none';
   if (archiveBtn) archiveBtn.style.display = (t.status === 'CLOSED' || t.status === 'VOID') && isAdminOrOwner ? 'inline-block' : 'none';
   if (deleteBtn) deleteBtn.style.display = t.status === 'ARCHIVED' && isAdminOrOwner ? 'inline-block' : 'none';
   if (sendNewBtn) sendNewBtn.style.display = 'none';
-  if (asIsBtn) asIsBtn.style.display = 'none';
   if (saveBtn) {
     saveBtn.style.display = canSaveEdits ? 'inline-block' : 'none';
     saveBtn.textContent = t.status === 'READY_FOR_CHECKOUT' ? 'Save changes' : 'Save';
@@ -2788,7 +3067,7 @@ function updateTicketTotal(lines) {
   const priceWrap = document.getElementById('ticketCustomerPriceApprovedWrap');
   if (priceWrap && sendNewBtn) {
     const isNewTicketFlow = sendNewBtn.style.display !== 'none';
-    const showApproval = isNewTicketFlow && (arr.length > 0 || ticketFormAsIsMode);
+    const showApproval = isNewTicketFlow && arr.length > 0;
     priceWrap.style.display = showApproval ? 'block' : 'none';
     if (!showApproval) {
       const cb = document.getElementById('ticketCustomerPriceApproved');
@@ -2876,71 +3155,14 @@ async function saveTicket() {
   }
 }
 
-/** Called from modal AS IS button. Uses stored appointment if opened with one, else null. */
-async function doSendAsIsFromModal() {
-  if (!currentUserProfile?.salonId) {
-    showToast('Please wait – user profile loading…', 'error');
-    return;
-  }
-  const appointmentData = window._ticketModalAppointmentData || null;
-  const customerEl = document.getElementById('ticketCustomerName');
-  const customerName = customerEl ? customerEl.value.trim() : '';
-  const ok = await doSendAsIsTicket(appointmentData, customerName);
-  if (ok) closeTicketModal();
-}
-
-/** Quick AS IS: no manual entry. With appointment: copy As Booked to Performed. Without: empty performed. */
-async function doSendAsIsTicket(appointmentData = null, customerName = '') {
-  const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
-  let performedLines = [];
-  let appointmentId = null;
-  const cust = (customerName || appointmentData?.customerName || '').trim();
-  if (appointmentData && Array.isArray(appointmentData.services) && appointmentData.services.length > 0) {
-    appointmentId = appointmentData.id || null;
-    performedLines = (appointmentData.services || []).map(s => ({
-      serviceId: s.id || null,
-      serviceName: s.name || s.serviceName,
-      catalogPrice: Number(s.price) || 0,
-      ticketPrice: Number(s.price) || 0,
-      isOverride: false,
-      note: null
-    }));
-  }
-  const total = performedLines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
-  try {
-    await createTicket({
-      customerName: cust,
-      performedLines,
-      total,
-      forUids,
-      forNames,
-      status: 'READY_FOR_CHECKOUT',
-      asIs: true,
-      appointmentId,
-      appointmentData: appointmentData || null,
-      customerApprovedPrice: getTicketCustomerPriceApprovedFromForm()
-    });
-    showToast('AS IS ticket sent to Front Desk', 'success');
-    return true;
-  } catch (err) {
-    showToast(err?.message || 'Failed', 'error');
-    return false;
-  }
-}
-
 async function doSendNewTicket() {
   const customerNameEl = document.getElementById('ticketCustomerName');
   const customerName = customerNameEl ? customerNameEl.value.trim() : '';
-  if (ticketFormAsIsMode) {
-    const ok = await doSendAsIsFromModal();
-    if (ok) closeTicketModal();
-    return;
-  }
   const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
   const linesEl = document.getElementById('ticketLinesData');
   const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
   if (lines.length === 0) {
-    showToast('Add at least one service or select "Services stay exactly as booked"', 'error');
+    showToast('Add at least one service to send a ticket.', 'error');
     return;
   }
   const total = lines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
@@ -3007,13 +3229,17 @@ const _ffOpenCats = new Set();
  *  auto-expand the first category so the user sees services immediately. */
 let _ffCatalogRenderedOnce = false;
 
-async function openServicesModal() {
+async function openServicesModal(opts = {}) {
   const modal = document.getElementById('servicesModal');
   if (!modal) return;
+  _ffCatalogModalMode = opts && opts.mode === 'shared' ? 'shared' : 'location';
   _ffOpenCats.clear();
   _ffCatalogRenderedOnce = false;
-  // Ensure we have the latest from Firestore scoped to the active branch.
-  await Promise.all([loadServiceCategories(), loadServices()]);
+  if (_ffCatalogModalMode === 'shared') {
+    await loadSharedCatalogForManager();
+  } else {
+    await loadLocationCatalogForManager();
+  }
   renderServicesCatalogV2();
   modal.style.display = 'flex';
 }
@@ -3028,9 +3254,38 @@ function closeServicesModal() {
 function renderServicesCatalogV2() {
   const list = document.getElementById('servicesCatalogV2List');
   if (!list) return;
+  const sourceBadge = document.getElementById('servicesCatalogSourceBadge');
+  const sourceHelp = document.getElementById('servicesCatalogSourceHelp');
+  const addSharedBtn = document.getElementById('servicesCatalogAddSharedBtn');
+  const addCategoryBtn = document.getElementById('servicesCatalogAddCategoryBtn');
+  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const catalogData = isSharedCatalog
+    ? getSharedServicesForCatalogManager()
+    : getLocationServicesForCatalogManager();
+  const catalogServices = catalogData.services || [];
+  const catalogCategories = catalogData.categories || [];
 
-  if (!_ffCatalogRenderedOnce && _ffOpenCats.size === 0 && serviceCategories.length > 0) {
-    _ffOpenCats.add(serviceCategories[0].id);
+  if (sourceBadge) {
+    sourceBadge.textContent = isSharedCatalog ? 'Shared Service Catalog' : 'Location Service Catalog';
+    sourceBadge.style.background = isSharedCatalog ? '#ede9fe' : '#eef2ff';
+    sourceBadge.style.color = isSharedCatalog ? '#5b21b6' : '#3730a3';
+  }
+  if (sourceHelp) {
+    sourceHelp.textContent = isSharedCatalog
+      ? 'Services are shared for the account. Prices can be overridden for the active location.'
+      : 'Categories and services are saved for the active location only.';
+  }
+  if (addSharedBtn) {
+    addSharedBtn.style.display = 'none';
+    addSharedBtn.textContent = '+ Add Shared Service';
+  }
+  if (addCategoryBtn) {
+    addCategoryBtn.style.display = 'inline-block';
+    addCategoryBtn.textContent = isSharedCatalog ? '+ Add Shared Category' : '+ Add Category';
+  }
+
+  if (!_ffCatalogRenderedOnce && _ffOpenCats.size === 0 && catalogCategories.length > 0) {
+    _ffOpenCats.add(catalogCategories[0].id);
   }
   _ffCatalogRenderedOnce = true;
 
@@ -3038,9 +3293,9 @@ function renderServicesCatalogV2() {
   // category id that no longer exists) land in a virtual "Other" bucket,
   // shown only when it actually has services.
   const grouped = new Map();
-  serviceCategories.forEach((c) => grouped.set(c.id, { id: c.id, name: c.name, services: [] }));
+  catalogCategories.forEach((c) => grouped.set(c.id, { id: c.id, name: c.name, services: [], isSharedCategory: !!c.isSharedCategory }));
   const orphans = [];
-  salonServices.forEach((s) => {
+  catalogServices.forEach((s) => {
     const bucket = s.categoryId && grouped.has(s.categoryId) ? grouped.get(s.categoryId) : null;
     if (bucket) bucket.services.push(s);
     else orphans.push(s);
@@ -3048,10 +3303,14 @@ function renderServicesCatalogV2() {
   if (orphans.length) grouped.set('__other__', { id: '__other__', name: 'Other', services: orphans });
 
   if (grouped.size === 0) {
+    const emptyTitle = isSharedCatalog ? 'No shared categories yet' : 'No categories yet';
+    const emptyBody = isSharedCatalog
+      ? 'Start by adding a shared category, then add shared services under it.'
+      : 'Start by adding a category (e.g. <em>Manicure</em>, <em>Pedicure</em>, <em>Massage</em>), then add services under it with their prices.';
     list.innerHTML = `
       <div style="padding:36px 20px;color:#6b7280;text-align:center;font-size:14px;line-height:1.5;">
-        <div style="font-size:15px;color:#111;font-weight:600;margin-bottom:6px;">No categories yet</div>
-        <div>Start by adding a category (e.g. <em>Manicure</em>, <em>Pedicure</em>, <em>Massage</em>), then add services under it with their prices.</div>
+        <div style="font-size:15px;color:#111;font-weight:600;margin-bottom:6px;">${emptyTitle}</div>
+        <div>${emptyBody}</div>
       </div>`;
     return;
   }
@@ -3068,12 +3327,14 @@ function renderServicesCatalogV2() {
     // The HEADER itself is draggable for categories (so services inside
     // don't accidentally pick up the category drag). Services have their
     // own draggable row below.
-    const headDraggable = isOther ? '' : `draggable="true" data-drag-kind="category" data-cat-id="${escapeHtml(cat.id)}"`;
-    html += `<div class="ffcat-head" ${headDraggable} role="button" tabindex="0" title="${isOther ? '' : 'Drag to reorder'}" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:${isOther ? 'pointer' : 'grab'};background:#f9fafb;user-select:none;">`;
+    const canEditCategory = !isOther;
+    const canDragCategory = canEditCategory && !isSharedCatalog;
+    const headDraggable = canDragCategory ? `draggable="true" data-drag-kind="category" data-cat-id="${escapeHtml(cat.id)}"` : '';
+    html += `<div class="ffcat-head" ${headDraggable} role="button" tabindex="0" title="${canDragCategory ? 'Drag to reorder' : ''}" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:${canDragCategory ? 'grab' : 'pointer'};background:#f9fafb;user-select:none;">`;
     html += `<span class="ffcat-arrow" style="font-size:12px;color:#6b7280;width:10px;display:inline-block;">${arrow}</span>`;
     html += `<span style="font-weight:600;color:#111;font-size:13px;flex:1;line-height:1.25;">${escapeHtml(cat.name)}</span>`;
     html += `<span style="color:#9ca3af;font-size:11px;">${count}</span>`;
-    if (!isOther) {
+    if (canEditCategory) {
       html += `<button type="button" class="ffcat-menu-btn" data-cat-id="${escapeHtml(cat.id)}" title="Category actions" style="border:none;background:none;padding:2px 4px;cursor:pointer;line-height:0;border-radius:4px;">${dotsSvg}</button>`;
     }
     html += `</div>`;
@@ -3084,15 +3345,28 @@ function renderServicesCatalogV2() {
       cat.services.forEach((s) => {
         // Services that landed in the virtual "Other" bucket have no real
         // parent category — drag them only to re-home into a real one.
-        html += `<div class="ffsvc-row" draggable="true" data-drag-kind="service" data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" title="Drag to reorder / move" style="display:flex;align-items:center;gap:8px;padding:5px 10px 5px 18px;border-bottom:1px solid #f3f4f6;cursor:grab;">`;
+        const canDragService = !isSharedCatalog;
+        const serviceDragAttrs = canDragService ? `draggable="true" data-drag-kind="service"` : '';
+        const serviceOpacity = s.active === false ? 'opacity:0.62;' : '';
+        const priceBadge = isSharedCatalog && s.hasOverride
+          ? `<span style="padding:2px 6px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:10px;font-weight:700;white-space:nowrap;">Override: ${ffTicketMoney(s.overridePrice || 0)}</span>`
+          : (isSharedCatalog ? `<span style="padding:2px 6px;border-radius:999px;background:#f3f4f6;color:#4b5563;font-size:10px;font-weight:700;white-space:nowrap;">Default</span>` : '');
+        const inactiveBadge = isSharedCatalog && s.active === false
+          ? `<span style="padding:2px 6px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:10px;font-weight:700;white-space:nowrap;">Inactive</span>`
+          : '';
+        html += `<div class="ffsvc-row" ${serviceDragAttrs} data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" title="${canDragService ? 'Drag to reorder / move' : ''}" style="display:flex;align-items:center;gap:8px;padding:5px 10px 5px 18px;border-bottom:1px solid #f3f4f6;cursor:${canDragService ? 'grab' : 'default'};${serviceOpacity}">`;
         html += `<span style="font-weight:500;color:#111;font-size:12px;flex:1;line-height:1.25;">${escapeHtml(s.name)}</span>`;
+        html += priceBadge;
+        html += inactiveBadge;
         html += `<span style="color:#374151;font-size:12px;font-variant-numeric:tabular-nums;">${ffTicketMoney(s.defaultPrice || 0)}</span>`;
         html += `<button type="button" class="ffsvc-menu-btn" data-svc-id="${escapeHtml(s.id)}" title="Service actions" style="border:none;background:none;padding:2px 4px;cursor:pointer;line-height:0;border-radius:4px;">${dotsSvg}</button>`;
         html += `</div>`;
       });
     }
     if (!isOther) {
-      html += `<div style="padding:4px 6px;"><button type="button" class="ffcat-addsvc-btn" data-cat-id="${escapeHtml(cat.id)}" style="background:none;border:none;color:#7c3aed;font-weight:600;font-size:12px;padding:4px 6px;cursor:pointer;text-align:left;">+ Add service</button></div>`;
+      const addMode = isSharedCatalog ? 'shared' : 'location';
+      const addLabel = isSharedCatalog ? '+ Add Shared Service' : '+ Add service';
+      html += `<div style="padding:4px 6px;"><button type="button" class="ffcat-addsvc-btn" data-cat-id="${escapeHtml(cat.id)}" data-add-mode="${addMode}" style="background:none;border:none;color:#7c3aed;font-weight:600;font-size:12px;padding:4px 6px;cursor:pointer;text-align:left;">${addLabel}</button></div>`;
     }
     html += `</div></div>`;
   }
@@ -3124,7 +3398,12 @@ function renderServicesCatalogV2() {
       e.stopPropagation();
       const catId = btn.getAttribute('data-cat-id');
       _ffOpenCats.add(catId);
-      _ffCatalogEditorOpen({ mode: 'service-add', categoryId: catId });
+      if (btn.getAttribute('data-add-mode') === 'shared') {
+        const cat = getSharedServicesForCatalogManager().categories.find((c) => c.id === catId);
+        _ffCatalogEditorOpen({ mode: 'shared-service-add', categoryName: cat?.name || '' });
+      } else {
+        _ffCatalogEditorOpen({ mode: 'service-add', categoryId: catId });
+      }
     });
   });
   // Wire: service action menu
@@ -3140,8 +3419,33 @@ function renderServicesCatalogV2() {
 /** Small popover menu for a category row. */
 function _ffShowCategoryMenu(anchorBtn, catId) {
   _ffCloseAllPopovers();
-  const cat = serviceCategories.find((c) => c.id === catId);
+  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const catalogData = isSharedCatalog ? getSharedServicesForCatalogManager() : getLocationServicesForCatalogManager();
+  const cat = catalogData.categories.find((c) => c.id === catId);
   if (!cat) return;
+  if (isSharedCatalog) {
+    const pop = _ffBuildPopover(anchorBtn, [
+      { label: 'Rename shared category', onClick: () => _ffCatalogEditorOpen({ mode: 'shared-category-edit', categoryId: catId }) },
+      { label: 'Delete shared category', danger: true, onClick: async () => {
+        const count = catalogData.services.filter((s) => s.categoryId === catId).length;
+        if (count > 0) {
+          showToast(`Cannot delete: ${count} shared service(s) use this category.`, 'error');
+          return;
+        }
+        const ok = await ticketConfirm(`Delete "${cat.name}"?`, 'Delete shared category');
+        if (!ok) return;
+        try {
+          await deleteSharedServiceCategory(cat.docId || catId);
+          await loadSharedCatalogForManager();
+          _ffOpenCats.delete(catId);
+          renderServicesCatalogV2();
+          showToast('Shared category deleted', 'success');
+        } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+      }},
+    ]);
+    document.body.appendChild(pop);
+    return;
+  }
   const pop = _ffBuildPopover(anchorBtn, [
     { label: 'Rename category', onClick: () => _ffCatalogEditorOpen({ mode: 'category-edit', categoryId: catId }) },
     { label: 'Delete category', danger: true, onClick: async () => {
@@ -3163,11 +3467,19 @@ function _ffShowCategoryMenu(anchorBtn, catId) {
 /** Small popover menu for a service row. */
 function _ffShowServiceMenu(anchorBtn, svcId) {
   _ffCloseAllPopovers();
-  const svc = salonServices.find((s) => s.id === svcId);
+  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const svc = isSharedCatalog
+    ? getSharedServicesForCatalogManager().services.find((s) => s.id === svcId)
+    : salonServices.find((s) => s.id === svcId);
   if (!svc) return;
   const items = [
-    { label: 'Edit service', onClick: () => _ffCatalogEditorOpen({ mode: 'service-edit', serviceId: svcId }) },
+    { label: 'Edit service', onClick: () => _ffCatalogEditorOpen({ mode: isSharedCatalog ? 'shared-service-edit' : 'service-edit', serviceId: svcId }) },
   ];
+  if (isSharedCatalog) {
+    const pop = _ffBuildPopover(anchorBtn, items);
+    document.body.appendChild(pop);
+    return;
+  }
   // Offer a "Move to…" shortcut for keyboards / touch devices where HTML5
   // drag-and-drop isn't available. Only appears when there's somewhere
   // meaningful to move to (another real category).
@@ -3419,7 +3731,14 @@ function _ffCatalogEditorOpen(opts) {
   const wrapPrice = document.getElementById('servicesCatalogEditorPriceWrap');
   const nameInp = document.getElementById('servicesCatalogEditorName');
   const catSel = document.getElementById('servicesCatalogEditorCategory');
+  const catTextInp = document.getElementById('servicesCatalogEditorCategoryText');
   const priceInp = document.getElementById('servicesCatalogEditorPrice');
+  const activeWrap = document.getElementById('servicesCatalogEditorActiveWrap');
+  const activeInp = document.getElementById('servicesCatalogEditorActive');
+  const overrideWrap = document.getElementById('servicesCatalogOverrideWrap');
+  const overrideDefault = document.getElementById('servicesCatalogOverrideDefault');
+  const overrideCustom = document.getElementById('servicesCatalogOverrideCustom');
+  const overridePriceInp = document.getElementById('servicesCatalogOverridePrice');
   const saveBtn = document.getElementById('servicesCatalogEditorSave');
   if (!title || !nameInp || !saveBtn) return;
 
@@ -3430,41 +3749,85 @@ function _ffCatalogEditorOpen(opts) {
   nameInp.placeholder = '';
   priceInp.value = '';
   catSel.innerHTML = '';
+  if (catSel) catSel.style.display = 'block';
+  if (catTextInp) { catTextInp.style.display = 'none'; catTextInp.value = ''; }
+  if (activeWrap) activeWrap.style.display = 'none';
+  if (activeInp) activeInp.checked = true;
+  if (overrideWrap) overrideWrap.style.display = 'none';
+  if (overrideDefault) overrideDefault.checked = true;
+  if (overrideCustom) overrideCustom.checked = false;
+  if (overridePriceInp) { overridePriceInp.style.display = 'none'; overridePriceInp.value = ''; }
   saveBtn.disabled = false;
   saveBtn.style.opacity = '1';
 
   const ctx = { ...opts };
 
-  if (opts.mode === 'category-add') {
-    title.textContent = 'New category';
+  if (opts.mode === 'category-add' || opts.mode === 'shared-category-add') {
+    title.textContent = opts.mode === 'shared-category-add' ? 'New shared category' : 'New category';
     nameInp.placeholder = 'Category name (e.g. Manicure)';
-  } else if (opts.mode === 'category-edit') {
-    const c = serviceCategories.find((x) => x.id === opts.categoryId);
+  } else if (opts.mode === 'category-edit' || opts.mode === 'shared-category-edit') {
+    const c = opts.mode === 'shared-category-edit'
+      ? getSharedServicesForCatalogManager().categories.find((x) => x.id === opts.categoryId)
+      : serviceCategories.find((x) => x.id === opts.categoryId);
     if (!c) return;
-    title.textContent = 'Rename category';
+    title.textContent = opts.mode === 'shared-category-edit' ? 'Rename shared category' : 'Rename category';
     nameInp.placeholder = 'Category name';
     nameInp.value = c.name || '';
     ctx.existing = c;
-  } else if (opts.mode === 'service-add' || opts.mode === 'service-edit') {
-    title.textContent = opts.mode === 'service-add' ? 'New service' : 'Edit service';
+  } else if (opts.mode === 'service-add' || opts.mode === 'service-edit' || opts.mode === 'shared-service-add' || opts.mode === 'shared-service-edit') {
+    const isSharedServiceMode = opts.mode === 'shared-service-add' || opts.mode === 'shared-service-edit';
+    title.textContent = opts.mode === 'service-add' || opts.mode === 'shared-service-add' ? 'New service' : 'Edit service';
     nameInp.placeholder = 'Service name (e.g. Gel Full Set)';
     wrapCat.style.display = 'block';
     wrapPrice.style.display = 'block';
-    priceInp.placeholder = `Default price (${ffTicketCurSym()})`;
-    // Populate category dropdown
-    let optsHtml = '';
-    serviceCategories.forEach((c) => { optsHtml += `<option value="${c.id}">${escapeHtml(c.name)}</option>`; });
-    catSel.innerHTML = optsHtml;
-    if (opts.mode === 'service-edit') {
-      const s = salonServices.find((x) => x.id === opts.serviceId);
+    priceInp.placeholder = isSharedServiceMode ? `Default price (${ffTicketCurSym()})` : `Default price (${ffTicketCurSym()})`;
+    if (isSharedServiceMode) {
+      if (catSel) catSel.style.display = 'none';
+      if (catTextInp) {
+        catTextInp.style.display = 'block';
+        catTextInp.placeholder = 'Category (e.g. Manicure)';
+        catTextInp.value = opts.categoryName || '';
+      }
+      if (activeWrap) activeWrap.style.display = 'flex';
+      if (overrideWrap && opts.mode === 'shared-service-edit') overrideWrap.style.display = 'block';
+      const syncOverrideInput = () => {
+        if (!overridePriceInp) return;
+        overridePriceInp.style.display = overrideCustom?.checked ? 'block' : 'none';
+      };
+      if (overrideDefault) overrideDefault.onchange = syncOverrideInput;
+      if (overrideCustom) overrideCustom.onchange = syncOverrideInput;
+    } else {
+      // Populate category dropdown for the existing location fallback catalog.
+      let optsHtml = '';
+      serviceCategories.forEach((c) => { optsHtml += `<option value="${c.id}">${escapeHtml(c.name)}</option>`; });
+      catSel.innerHTML = optsHtml;
+    }
+    if (opts.mode === 'service-edit' || opts.mode === 'shared-service-edit') {
+      const s = isSharedServiceMode
+        ? getSharedServicesForCatalogManager().services.find((x) => x.id === opts.serviceId)
+        : salonServices.find((x) => x.id === opts.serviceId);
       if (!s) return;
+      if (isSharedServiceMode) console.log('[SharedServicesUI] editing shared service', { serviceId: s.id });
       nameInp.value = s.name || '';
-      priceInp.value = s.defaultPrice != null ? String(s.defaultPrice) : '';
-      if (s.categoryId && serviceCategories.some((c) => c.id === s.categoryId)) {
+      priceInp.value = isSharedServiceMode
+        ? (s.sharedDefaultPrice != null ? String(s.sharedDefaultPrice) : '')
+        : (s.defaultPrice != null ? String(s.defaultPrice) : '');
+      if (isSharedServiceMode) {
+        if (catTextInp) catTextInp.value = s.category || '';
+        if (activeInp) activeInp.checked = s.active !== false;
+        if (s.hasOverride) {
+          if (overrideCustom) overrideCustom.checked = true;
+          if (overrideDefault) overrideDefault.checked = false;
+          if (overridePriceInp) {
+            overridePriceInp.value = String(s.overridePrice ?? '');
+            overridePriceInp.style.display = 'block';
+          }
+        }
+      } else if (s.categoryId && serviceCategories.some((c) => c.id === s.categoryId)) {
         catSel.value = s.categoryId;
       }
       ctx.existing = s;
-    } else {
+    } else if (!isSharedServiceMode) {
       if (opts.categoryId && serviceCategories.some((c) => c.id === opts.categoryId)) {
         catSel.value = opts.categoryId;
       }
@@ -3485,7 +3848,11 @@ function _ffCatalogEditorClose() {
 async function _ffCatalogEditorSubmit(ctx) {
   const nameInp = document.getElementById('servicesCatalogEditorName');
   const catSel = document.getElementById('servicesCatalogEditorCategory');
+  const catTextInp = document.getElementById('servicesCatalogEditorCategoryText');
   const priceInp = document.getElementById('servicesCatalogEditorPrice');
+  const activeInp = document.getElementById('servicesCatalogEditorActive');
+  const overrideCustom = document.getElementById('servicesCatalogOverrideCustom');
+  const overridePriceInp = document.getElementById('servicesCatalogOverridePrice');
   const saveBtn = document.getElementById('servicesCatalogEditorSave');
   const name = String(nameInp?.value || '').trim();
   const flashErr = (el) => {
@@ -3509,6 +3876,30 @@ async function _ffCatalogEditorSubmit(ctx) {
       await saveServiceCategory({ id: c.id, name, sortOrder: c.sortOrder });
       await Promise.all([loadServiceCategories(), loadServices()]);
       showToast('Updated', 'success');
+    } else if (ctx.mode === 'shared-category-add') {
+      const data = getSharedServicesForCatalogManager();
+      const categoryId = await saveSharedServiceCategory({ name, sortOrder: data.categories.length });
+      await loadSharedCatalogForManager();
+      _ffOpenCats.add(categoryId);
+      showToast('Shared category added', 'success');
+    } else if (ctx.mode === 'shared-category-edit') {
+      const c = ctx.existing;
+      const oldName = normalizeSharedCategoryName(c.name);
+      const newName = normalizeSharedCategoryName(name);
+      await saveSharedServiceCategory({ id: c.docId || c.id, name: newName, sortOrder: c.sortOrder });
+      if (oldName !== newName) {
+        const affected = _rawSharedServices.filter((s) => normalizeSharedCategoryName(s.category) === oldName);
+        await Promise.all(affected.map((s) => saveSharedService({
+          id: s.id,
+          name: s.name,
+          category: newName,
+          defaultPrice: s.defaultPrice,
+          active: s.active !== false
+        })));
+      }
+      await loadSharedCatalogForManager();
+      _ffOpenCats.add(sharedCategoryId(newName));
+      showToast('Shared category updated', 'success');
     } else if (ctx.mode === 'service-add') {
       const categoryId = catSel?.value || null;
       const defaultPrice = parseFloat(priceInp?.value) || 0;
@@ -3524,6 +3915,32 @@ async function _ffCatalogEditorSubmit(ctx) {
       await Promise.all([loadServiceCategories(), loadServices()]);
       if (categoryId) _ffOpenCats.add(categoryId);
       showToast('Updated', 'success');
+    } else if (ctx.mode === 'shared-service-add' || ctx.mode === 'shared-service-edit') {
+      const s = ctx.existing || {};
+      const category = normalizeSharedCategoryName(catTextInp?.value || s.category || '');
+      const defaultPrice = parseFloat(priceInp?.value) || 0;
+      const overridePrice = parseFloat(overridePriceInp?.value);
+      if (ctx.mode === 'shared-service-edit' && overrideCustom?.checked && !Number.isFinite(overridePrice)) {
+        flashErr(overridePriceInp);
+        return;
+      }
+      const serviceId = await saveSharedService({
+        id: s.id,
+        name,
+        category,
+        defaultPrice,
+        active: activeInp ? activeInp.checked : true
+      });
+      if (ctx.mode === 'shared-service-edit') {
+        if (overrideCustom?.checked) {
+          await saveSharedServiceOverride(serviceId, overridePrice);
+        } else {
+          await removeSharedServiceOverride(serviceId);
+        }
+      }
+      await loadSharedCatalogForManager();
+      _ffOpenCats.add(sharedCategoryId(category));
+      showToast(ctx.mode === 'shared-service-add' ? 'Shared service added' : 'Shared service updated', 'success');
     }
     _ffCatalogEditorClose();
     renderServicesCatalogV2();
@@ -3537,7 +3954,12 @@ async function _ffCatalogEditorSubmit(ctx) {
 
 /** Entry from header "+ Add Category" button. */
 function addServiceCategoryV2() {
-  _ffCatalogEditorOpen({ mode: 'category-add' });
+  _ffCatalogEditorOpen({ mode: _ffCatalogModalMode === 'shared' ? 'shared-category-add' : 'category-add' });
+}
+
+/** Entry from header "+ Add Shared Service" button. */
+function addSharedServiceV2() {
+  _ffCatalogEditorOpen({ mode: 'shared-service-add' });
 }
 
 // =====================
@@ -3645,38 +4067,7 @@ export function goToTickets() {
   }
 }
 
-const AS_IS_OPTION_VALUE = '__as_is__';
-const AS_IS_OPTION_LABEL = 'Services stay exactly as booked — no changes';
-
-function doAsIsSelect() {
-  ticketFormAsIsMode = true;
-  document.getElementById('ticketLinesData').value = '[]';
-  document.getElementById('ticketPerformedList').innerHTML = '';
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsMsgText = document.getElementById('ticketAsIsMessageText');
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsMsgBlock && asIsMsgText) {
-    asIsMsgText.textContent = 'Service matches system billing';
-    asIsMsgBlock.style.display = 'block';
-    if (asIsClearBtn) {
-      asIsClearBtn.style.display = 'inline-block';
-      asIsClearBtn.onclick = () => {
-        ticketFormAsIsMode = false;
-        asIsMsgBlock.style.display = 'none';
-        asIsClearBtn.style.display = 'none';
-        updateTicketDiff();
-      };
-    }
-  }
-  updateTicketDiff();
-}
-
 function doServiceSelect(svc) {
-  ticketFormAsIsMode = false;
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsMsgBlock) asIsMsgBlock.style.display = 'none';
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
   if (svc) addServiceToTicket(svc);
 }
 
@@ -3684,7 +4075,7 @@ async function setupTicketsUI() {
   const container = document.getElementById('ticketServicePickerContainer');
   if (!container) return;
   const grouped = getServicesGroupedByCategory();
-  let html = `<div style="padding:6px 8px;background:#f0fdf4;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:600;color:#166534;cursor:pointer;" onclick="window.ffDoAsIsSelect && window.ffDoAsIsSelect()">✓ ${AS_IS_OPTION_LABEL}</div>`;
+  let html = '';
   Object.entries(grouped).forEach(([key, data], idx) => {
     const label = escapeHtml(data.label || 'Other');
     html += `<div class="ticket-category-section" data-cat-idx="${idx}" style="border-bottom:1px solid #e5e7eb;">`;
@@ -3703,7 +4094,6 @@ async function setupTicketsUI() {
       doServiceSelect(svc);
     };
   });
-  window.ffDoAsIsSelect = doAsIsSelect;
   container.querySelectorAll('.ticket-category-header').forEach((header) => {
     header.onclick = () => {
       const section = header.closest('.ticket-category-section');
@@ -3748,14 +4138,13 @@ export function initTickets() {
   const newBtn = document.getElementById('ticketsNewBtn');
   if (newBtn) newBtn.onclick = () => openTicketModal();
   window.goToTickets = goToTickets;
-  window.doSendAsIsTicket = doSendAsIsTicket;
-  window.doSendAsIsFromModal = doSendAsIsFromModal;
   window.closeTicketModal = closeTicketModal;
   window.closeTicketDetailsModal = closeTicketDetailsModal;
   window.saveTicket = saveTicket;
   window.closeServicesModal = closeServicesModal;
   window.openServicesModal = openServicesModal;
   window.addServiceCategoryV2 = addServiceCategoryV2;
+  window.addSharedServiceV2 = addSharedServiceV2;
   window.ffCloseCatalogEditor = _ffCatalogEditorClose;
   window.updateTicketsNavBadge = updateTicketsNavBadge;
   window.ffRefreshTicketsTabVisibility = () => {
@@ -3790,14 +4179,23 @@ export function initTickets() {
       // doc for the salon — re-apply the filter against the new active
       // branch (no Firestore roundtrip), then refresh anything on screen.
       try {
-        _applyCatalogFilter();
-        setupTicketsUI();
-        const modal = document.getElementById('servicesModal');
-        if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
-          _ffOpenCats.clear();
-          _ffCatalogRenderedOnce = false;
-          renderServicesCatalogV2();
-        }
+        const refreshCatalogForLocation = async () => {
+          if (_catalogSource === 'shared') {
+            await loadSharedServiceOverrides(getTicketsAccountId(), getActiveLocationIdForTickets());
+          }
+          _applyCatalogFilter();
+          setupTicketsUI();
+          if (_ffCatalogModalMode === 'shared') {
+            await loadSharedCatalogForManager();
+          }
+          const modal = document.getElementById('servicesModal');
+          if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
+            _ffOpenCats.clear();
+            _ffCatalogRenderedOnce = false;
+            renderServicesCatalogV2();
+          }
+        };
+        refreshCatalogForLocation().catch((e) => console.warn('[SharedServices] location refresh failed', e));
       } catch (_) {}
     });
   }

@@ -187,6 +187,60 @@ function _itemMatchesLocation(item, locKey) {
   return (v || CHAT_DEFAULT_LOC_KEY) === k;
 }
 
+function getChatAccountId() {
+  const candidates = [
+    chatUserProfile?.accountId,
+    chatUserProfile?.accountID,
+    chatUserProfile?.account_id,
+    chatUserProfile?.salonId,
+    (typeof window !== 'undefined' ? window.currentAccountId : null),
+    (typeof window !== 'undefined' ? window.accountId : null),
+    (typeof window !== 'undefined' ? window.currentSalonId : null)
+  ];
+  for (const v of candidates) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+async function loadSharedChatTemplates() {
+  const accountId = getChatAccountId();
+  if (!accountId) return [];
+  try {
+    const snap = await getDocs(collection(db, `accounts/${accountId}/shared/chatTemplates/items`));
+    return snap.docs
+      .map(d => ({ id: `shared:${d.id}`, sharedTemplateId: d.id, isSharedTemplate: true, ...d.data() }))
+      .filter(t => t.active !== false)
+      .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  } catch (e) {
+    console.warn('[SharedChat] load templates failed', e);
+    return [];
+  }
+}
+
+async function loadSharedChatFlows() {
+  const accountId = getChatAccountId();
+  if (!accountId) return [];
+  try {
+    const snap = await getDocs(collection(db, `accounts/${accountId}/shared/chatFlows/items`));
+    return snap.docs
+      .map(d => ({ id: `shared:${d.id}`, sharedFlowId: d.id, isSharedFlow: true, ...d.data() }))
+      .filter(f => f.active !== false && (f.status || 'active') !== 'archived')
+      .map(f => ({
+        ...f,
+        steps: Array.isArray(f.steps)
+          ? f.steps
+              .map(s => ({ ...s, options: Array.isArray(s.options) ? s.options : [] }))
+              .sort((a, b) => (a.order || 0) - (b.order || 0))
+          : []
+      }))
+      .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  } catch (e) {
+    console.warn('[SharedChat] load flows failed', e);
+    return [];
+  }
+}
+
 /**
  * True when the given member/user row is allowed to work in the active location.
  *
@@ -539,25 +593,28 @@ async function loadChatSalonUsers() {
 async function loadChatTemplates() {
   if (!chatUserProfile?.salonId) return;
   const locKey = _activeLocKey();
+  const sharedTemplates = await loadSharedChatTemplates();
   try {
     const snap = await getDocs(query(
       collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
       orderBy('order','asc')
     ));
-    chatTemplates = snap.docs
+    const localTemplates = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .filter(t => _itemMatchesLocation(t, locKey));
+    chatTemplates = [...sharedTemplates, ...localTemplates];
   } catch (e) {
     console.warn('[Chat] loadChatTemplates orderBy failed, retrying without order', e?.code, e?.message);
     try {
       const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`));
-      chatTemplates = snap.docs
+      const localTemplates = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
         .filter(t => _itemMatchesLocation(t, locKey))
         .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+      chatTemplates = [...sharedTemplates, ...localTemplates];
     } catch (e2) {
       console.error('[Chat] loadChatTemplates error', e2);
-      chatTemplates = [];
+      chatTemplates = sharedTemplates;
     }
   }
 }
@@ -565,6 +622,7 @@ async function loadChatTemplates() {
 async function loadChatFlows() {
   if (!chatUserProfile?.salonId) return;
   const locKey = _activeLocKey();
+  const sharedFlows = await loadSharedChatFlows();
   try {
     const flowsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows`));
     const flows = [];
@@ -582,8 +640,8 @@ async function loadChatFlows() {
       flowData.steps.sort((a,b) => (a.order||0) - (b.order||0));
       if ((flowData.status || 'active') !== 'archived') flows.push(flowData);
     }
-    chatFlows = flows;
-  } catch(e) { chatFlows = []; }
+    chatFlows = [...sharedFlows, ...flows];
+  } catch(e) { chatFlows = sharedFlows; }
 }
 
 // ─── Conversation List Subscription (PRIVATE) ──────────────────────────────────
@@ -1946,51 +2004,52 @@ window._chatFlowUnlinkStep = function(stepId, optIdx) {
   _renderFlowBuilder();
 };
 
-// Collect steps from tree DOM (depth-first, root first)
+function _chatDirectChildrenByClass(node, className) {
+  return Array.from(node?.children || []).filter(child =>
+    child.classList && child.classList.contains(className)
+  );
+}
+
+function _chatDirectChildByClass(node, className) {
+  return _chatDirectChildrenByClass(node, className)[0] || null;
+}
+
+// Collect steps from the flat builder DOM, preserving the visible question order.
 function _collectStepsFromTreeDOM() {
   const steps = [];
-  const seen = new Set();
-  function collect(node) {
-    if (!node || node.classList?.contains?.('chat-flow-answer-block')) return;
+  document.querySelectorAll?.('#chatFlowStepsList > .chat-flow-node').forEach(node => {
     const stepId = node.getAttribute?.('data-step-id');
-    if (!stepId || seen.has(stepId)) return;
-    seen.add(stepId);
+    if (!stepId) return;
     const promptEl = node.querySelector?.('.chat-flow-step-prompt');
     const prompt = (promptEl?.value ?? '').trim();
     const options = [];
-    const nestedNodes = [];
-    const optsContainer = node.querySelector?.('.chat-flow-options');
-    if (optsContainer) {
-      Array.from(optsContainer.children || []).filter(c => c.classList?.contains?.('chat-flow-answer-block')).forEach((block, oidx) => {
-        const labelEl = block.querySelector?.('.chat-flow-opt-label');
-        const label = (labelEl?.value ?? '').trim();
-        const nestedNode = block.querySelector?.('.chat-flow-node');
-        const nextStepId = nestedNode?.getAttribute?.('data-step-id') || null;
-        const existingStep = chatFlowDraft?.steps?.find(s => s.id === stepId);
-        const existingOpt = existingStep?.options?.[oidx];
-        options.push({
-          id: existingOpt?.id || 'o' + Date.now() + '_' + oidx,
-          label,
-          nextStepId: nextStepId || null,
-          finish: !nextStepId
-        });
-        if (nestedNode) nestedNodes.push(nestedNode);
+    const optsContainer = _chatDirectChildByClass(node, 'chat-flow-options');
+    const existingStep = chatFlowDraft?.steps?.find(s => s.id === stepId);
+    _chatDirectChildrenByClass(optsContainer, 'chat-flow-answer-block').forEach((block, oidx) => {
+      const labelEl = block.querySelector?.('.chat-flow-opt-label');
+      const nextEl = block.querySelector?.('.chat-flow-next-select');
+      const label = (labelEl?.value ?? '').trim();
+      const nextStepId = (nextEl?.value ?? '').trim();
+      const existingOpt = existingStep?.options?.[oidx];
+      options.push({
+        id: existingOpt?.id || 'o' + Date.now() + '_' + oidx,
+        label,
+        nextStepId: nextStepId || null,
+        finish: !nextStepId
       });
-    }
+    });
     steps.push({ id: stepId, prompt, order: steps.length, options });
-    nestedNodes.forEach(n => collect(n));
-  }
-  document.querySelectorAll?.('#chatFlowStepsList > .chat-flow-node').forEach(collect);
+  });
   return steps;
 }
 
-// Sync current form values from DOM into chatFlowDraft (tree structure)
+// Sync current form values from DOM into chatFlowDraft.
 function _syncFlowDraftFromUI() {
   if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
   chatFlowDraft.title = document.getElementById('chatFlowTitle')?.value ?? '';
   chatFlowDraft.allowedSenders = ['technician','manager','admin'].filter((_, i) =>
     document.getElementById(['chatFlowSenderTech','chatFlowSenderMgr','chatFlowSenderAdmin'][i])?.checked);
-  const treeNodes = document.querySelectorAll?.('.chat-flow-node');
+  const treeNodes = document.querySelectorAll?.('#chatFlowStepsList > .chat-flow-node');
   if (treeNodes?.length) {
     chatFlowDraft.steps = _collectStepsFromTreeDOM();
   }
@@ -2004,38 +2063,7 @@ function _collectFlowDraftFromUI() {
     document.getElementById(['chatFlowSenderTech','chatFlowSenderMgr','chatFlowSenderAdmin'][i])?.checked);
   const treeNodes = document.querySelectorAll?.('#chatFlowStepsList > .chat-flow-node');
   if (!treeNodes?.length) return null;
-  const steps = [];
-  const stepIds = new Set();
-  function collect(node) {
-    const stepId = node.getAttribute?.('data-step-id');
-    if (!stepId || stepIds.has(stepId)) return;
-    stepIds.add(stepId);
-    const promptEl = node.querySelector?.('.chat-flow-step-prompt');
-    const prompt = (promptEl?.value ?? '').trim();
-    const options = [];
-    const nestedNodes = [];
-    const optsContainer = node.querySelector?.('.chat-flow-options');
-    if (optsContainer) {
-      Array.from(optsContainer.children || []).filter(c => c.classList?.contains?.('chat-flow-answer-block')).forEach((block) => {
-        const labelEl = block.querySelector?.('.chat-flow-opt-label');
-        const label = (labelEl?.value ?? '').trim();
-        const nestedNode = block.querySelector?.('.chat-flow-node');
-        const nextStepId = nestedNode?.getAttribute?.('data-step-id') || null;
-        const step = chatFlowDraft.steps.find(s => s.id === stepId);
-        const oidx = options.length;
-        options.push({
-          id: step?.options?.[oidx]?.id || 'o' + Date.now() + oidx,
-          label,
-          nextStepId: nextStepId || null,
-          finish: !nextStepId
-        });
-        if (nestedNode) nestedNodes.push(nestedNode);
-      });
-    }
-    steps.push({ id: stepId, prompt, order: steps.length, options });
-    nestedNodes.forEach(n => collect(n));
-  }
-  treeNodes.forEach(n => collect(n));
+  const steps = _collectStepsFromTreeDOM();
   if (steps.length === 0) return null;
   const root = steps[0];
   if (!root?.prompt?.trim()) { alert('Please fill in the first question.'); return null; }
@@ -2186,6 +2214,10 @@ window.editChatFlow = function(id) {
   if (!_chatManageAllowed()) return;
   const f = chatFlows.find(x => x.id === id);
   if (!f) return;
+  if (f.isSharedFlow) {
+    alert('Shared flows are managed in Settings → Shared Setup.');
+    return;
+  }
   chatEditingFlowId = id;
   let stepList = (f.steps || []).map(s => ({
     id: s.id,
@@ -2221,6 +2253,10 @@ window.editChatFlow = function(id) {
 window.deleteChatFlow = async function(id) {
   if (!_chatManageAllowed()) return;
   const flow = chatFlows.find(x => x.id === id);
+  if (flow?.isSharedFlow) {
+    alert('Shared flows are managed in Settings → Shared Setup.');
+    return;
+  }
   const titleStr = flow?.title ? `"${flow.title}"` : 'this flow';
   if (!confirm(`Delete ${titleStr}?`)) return;
   try {
@@ -2301,48 +2337,57 @@ function _renderFlowBuilder() {
   if (!list) return;
   const steps = chatFlowDraft?.steps || [];
 
-  function renderStepNode(s, depth, parentStepId, parentOptIdx) {
+  function stepOptionsHtml(currentStepId, selectedId) {
+    let html = '<option value="">End flow</option>';
+    steps.forEach((candidate, idx) => {
+      if (candidate.id === currentStepId) return;
+      const label = `Question ${idx + 1}${candidate.prompt ? ': ' + candidate.prompt : ''}`;
+      html += `<option value="${escHtml(candidate.id)}"${candidate.id === selectedId ? ' selected' : ''}>${escHtml(label)}</option>`;
+    });
+    return html;
+  }
+
+  function renderStepNode(s, idx) {
     if (!s) return '';
-    const indent = depth * 20;
     const opts = s.options || [];
-    const isNested = parentStepId != null;
     return `
-    <div class="chat-flow-node" data-step-id="${escHtml(s.id)}" data-depth="${depth}" style="margin-left:${indent}px;margin-bottom:1px;">
-      <div style="display:flex;gap:4px;align-items:center;padding:3px 6px;border-left:2px solid #c4b5fd;border-radius:2px;background:#faf5ff;margin-bottom:2px;">
-        <span style="font-size:10px;font-weight:600;color:#7c3aed;">Q</span>
-        <input type="text" class="chat-flow-step-prompt" data-step-id="${escHtml(s.id)}" placeholder="Question..." value="${escHtml(s.prompt||'')}"
-          style="flex:1;padding:2px 5px;border:1px solid #e5e7eb;border-radius:2px;font-size:11px;min-width:0;">
-        ${isNested ? `<button type="button" onclick="window._chatFlowUnlinkStep('${escHtml(parentStepId)}',${parentOptIdx})" title="Remove branch" style="padding:1px 4px;font-size:9px;color:#6b7280;background:#f3f4f6;border:none;border-radius:2px;cursor:pointer;">−</button>` : `<button type="button" onclick="window._chatFlowRemoveStepById('${escHtml(s.id)}')" title="Delete" style="padding:1px 5px;font-size:9px;color:#b91c1c;background:#fef2f2;border:none;border-radius:2px;cursor:pointer;">×</button>`}
+    <div class="chat-flow-node" data-step-id="${escHtml(s.id)}" data-depth="0" style="margin-bottom:10px;padding:10px;border:1px solid #ede9fe;border-radius:12px;background:#faf5ff;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;">
+        <span style="font-size:12px;font-weight:800;color:#7c3aed;">Question ${idx + 1}</span>
+        <button type="button" onclick="window._chatFlowRemoveStepById('${escHtml(s.id)}')" title="Remove question" style="padding:3px 7px;font-size:12px;color:#b91c1c;background:#fef2f2;border:none;border-radius:6px;cursor:pointer;">Remove</button>
       </div>
-      <div class="chat-flow-options" data-step-id="${escHtml(s.id)}" style="margin-left:12px;">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+        <input type="text" class="chat-flow-step-prompt" data-step-id="${escHtml(s.id)}" placeholder="Question..." value="${escHtml(s.prompt||'')}"
+          style="flex:1;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;min-width:0;background:#fff;">
+      </div>
+      <div class="chat-flow-options" data-step-id="${escHtml(s.id)}" style="display:flex;flex-direction:column;gap:6px;">
         ${opts.map((o, oidx) => {
-          const nextStep = o.nextStepId ? steps.find(x => x.id === o.nextStepId) : null;
           return `
-          <div class="chat-flow-answer-block" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" style="margin-bottom:1px;">
-            <div class="chat-flow-option-row" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:2px 0;">
-              <span style="color:#059669;font-size:10px;">→</span>
-              <input type="text" class="chat-flow-opt-label" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" placeholder="Answer" value="${escHtml(o.label||'')}" style="min-width:70px;padding:2px 5px;border:1px solid #e5e7eb;border-radius:2px;font-size:11px;">
-              ${nextStep
-                ? `<button type="button" onclick="window._chatFlowUnlinkStep('${escHtml(s.id)}',${oidx})" title="Remove branch" style="padding:1px 4px;font-size:9px;color:#6b7280;background:#f3f4f6;border:none;border-radius:2px;cursor:pointer;">−</button>`
-                : `<button type="button" onclick="window._chatFlowAddStepAndLinkById('${escHtml(s.id)}',${oidx})" style="padding:1px 5px;font-size:9px;color:#7c3aed;background:#ede9fe;border:none;border-radius:2px;cursor:pointer;">↳ Add next question</button>`}
-              <button type="button" onclick="window._chatFlowRemoveOptionByIdx('${escHtml(s.id)}',${oidx})" title="Remove answer" style="padding:1px 4px;color:#9ca3af;cursor:pointer;font-size:9px;background:none;border:none;">×</button>
-            </div>
-            ${nextStep ? `<div style="margin-left:16px;margin-top:1px;border-left:1px solid #e5e7eb;">${renderStepNode(nextStep, depth + 1, s.id, oidx)}</div>` : ''}
+          <div class="chat-flow-answer-block" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(140px,190px) auto auto;gap:6px;align-items:center;">
+            <input type="text" class="chat-flow-opt-label" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" placeholder="Answer" value="${escHtml(o.label||'')}" style="min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;">
+            <select class="chat-flow-next-select" style="min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;">
+              ${stepOptionsHtml(s.id, o.nextStepId || '')}
+            </select>
+            <button type="button" onclick="window._chatFlowAddStepAndLinkById('${escHtml(s.id)}',${oidx})" style="padding:6px 8px;font-size:11px;font-weight:800;color:#7c3aed;background:#ede9fe;border:none;border-radius:7px;cursor:pointer;white-space:nowrap;">+ Next question</button>
+            <button type="button" onclick="window._chatFlowRemoveOptionByIdx('${escHtml(s.id)}',${oidx})" title="Remove answer" style="padding:6px 8px;color:#9ca3af;cursor:pointer;font-size:12px;background:#fff;border:none;border-radius:7px;">×</button>
           </div>
           `;
         }).join('')}
-        <button type="button" class="chat-flow-add-opt" data-step-id="${escHtml(s.id)}" onclick="window._chatFlowAddOptionById('${escHtml(s.id)}')" style="margin:1px 0;padding:1px 5px;font-size:9px;color:#7c3aed;background:none;border:none;cursor:pointer;">+ Add answer</button>
+        <button type="button" class="chat-flow-add-opt" data-step-id="${escHtml(s.id)}" onclick="window._chatFlowAddOptionById('${escHtml(s.id)}')" style="align-self:flex-start;padding:5px 8px;font-size:11px;font-weight:800;color:#7c3aed;background:#ede9fe;border:none;border-radius:7px;cursor:pointer;">+ Add answer</button>
       </div>
     </div>
     `;
   }
 
-  const rootStep = steps[0];
-  const stepHtml = rootStep ? renderStepNode(rootStep, 0, null, null) : '';
-  list.innerHTML = stepHtml || '<div style="color:#9ca3af;font-size:12px;padding:8px;">No questions yet. Click "+ Add first question" below.</div>';
+  list.innerHTML = steps.length
+    ? steps.map(renderStepNode).join('')
+    : '<div style="color:#9ca3af;font-size:12px;padding:8px;">No questions yet. Click "+ Add first question" below.</div>';
 
   const addBtn = document.getElementById('chatFlowAddStepBtn');
-  if (addBtn) addBtn.style.display = steps.length ? 'none' : 'inline-block';
+  if (addBtn) {
+    addBtn.style.display = 'inline-block';
+    addBtn.textContent = steps.length ? '+ Add question' : '+ Add first question';
+  }
 }
 
 function _renderTmplList() {
@@ -2417,6 +2462,11 @@ window._setChatTmplDetailsOpen = _setChatTmplDetailsOpen;
 
 window.editChatTemplate = function(id) {
   if (!_chatManageAllowed()) return;
+  if (String(id || '').startsWith('shared:')) {
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert('Shared templates are managed in Settings → Shared Setup.');
+    else alert('Shared templates are managed in Settings → Shared Setup.');
+    return;
+  }
   const t = chatTemplates.find(x => x.id === id);
   if (!t) return;
   chatEditingTmplId = id;
@@ -2490,6 +2540,11 @@ window.saveChatTemplate = async function() {
 };
 window.deleteChatTemplate = async function(id) {
   if (!_chatManageAllowed()) return;
+  if (String(id || '').startsWith('shared:')) {
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert('Shared templates are managed in Settings → Shared Setup.');
+    else alert('Shared templates are managed in Settings → Shared Setup.');
+    return;
+  }
   const tmpl = chatTemplates.find(x => x.id === id);
   const titleStr = tmpl?.title ? `"${tmpl.title}"` : 'this template';
   if (!confirm(`Delete ${titleStr}?`)) return;
@@ -2504,6 +2559,14 @@ window.deleteChatTemplate = async function(id) {
     if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
     else alert(msg);
   }
+};
+
+window.ffReloadChatTemplates = async function() {
+  await loadChatTemplates();
+  await loadChatFlows();
+  _renderTmplList();
+  _renderFlowsAdminList();
+  renderSendOptions();
 };
 
 // ─── Settings Section ──────────────────────────────────────────────────────────

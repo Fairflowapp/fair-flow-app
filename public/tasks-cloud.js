@@ -16,7 +16,7 @@
  *     tombstone, alertWindows, enforceSelectSettings, autoResetState, updatedAt }
  */
 
-import { doc, getDoc, getDocFromServer, setDoc, deleteDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc, deleteDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "./app.js?v=20260411_chat_reminder_attrfix";
 
@@ -111,6 +111,78 @@ function tasksStateRef(salonId, locationId) {
   return doc(db, `salons/${salonId}/tasksState`, tasksStateDocIdFor(locationId));
 }
 
+function sharedTaskTemplatesRef(accountId) {
+  return collection(db, `accounts/${accountId}/shared/taskTemplates/items`);
+}
+
+function mapSharedTaskTemplateToCatalogTask(template) {
+  if (!template || template.active === false) return null;
+  const tab = TABS.includes(template.tab) ? template.tab : "opening";
+  const id = `shared:${template.id}`;
+  const task = {
+    id,
+    taskId: id,
+    title: String(template.title || "").trim(),
+    instructions: String(template.instructions || "").trim(),
+    assignTo: template.assignTo || "all",
+    technicianTypes: Array.isArray(template.technicianTypes) ? template.technicianTypes : [],
+    sharedTemplateId: template.id,
+    isSharedTemplate: true
+  };
+  const schedule = template.schedule && typeof template.schedule === "object" ? template.schedule : null;
+  if (tab === "weekly") {
+    task.scheduleWeekdays = schedule?.weekday ? [schedule.weekday] : "any";
+  } else if (tab === "monthly") {
+    task.scheduleDayOfMonth = schedule?.day || "any";
+  } else if (tab === "yearly") {
+    task.scheduleMonth = Number(schedule?.month) || null;
+    task.scheduleDay = Number(schedule?.day) || null;
+  }
+  if (!task.title) return null;
+  return { tab, task };
+}
+
+async function loadSharedTaskCatalog(accountId) {
+  if (!accountId) return {};
+  try {
+    const snap = await getDocs(sharedTaskTemplatesRef(accountId));
+    const catalog = {};
+    TABS.forEach((tab) => { catalog[tab] = []; });
+    snap.docs.forEach((d) => {
+      const mapped = mapSharedTaskTemplateToCatalogTask({ id: d.id, ...d.data() });
+      if (!mapped) return;
+      catalog[mapped.tab].push(mapped.task);
+    });
+    TABS.forEach((tab) => {
+      catalog[tab].sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")));
+    });
+    return catalog;
+  } catch (e) {
+    console.warn("[SharedTasks] load templates failed", e);
+    return {};
+  }
+}
+
+async function mergeSharedTaskTemplatesIntoState(state, accountId) {
+  const base = state || emptyCloudState();
+  const sharedCatalog = await loadSharedTaskCatalog(accountId);
+  const mergedCatalog = { ...(base.catalog || {}) };
+  TABS.forEach((tab) => {
+    const localList = Array.isArray(mergedCatalog[tab]) ? mergedCatalog[tab] : [];
+    const byId = new Map();
+    localList.forEach((task) => {
+      const key = String(task?.taskId || task?.id || "").trim();
+      if (key) byId.set(key, task);
+    });
+    (sharedCatalog[tab] || []).forEach((task) => {
+      const key = String(task.taskId || task.id || "").trim();
+      if (key) byId.set(key, { ...(byId.get(key) || {}), ...task });
+    });
+    mergedCatalog[tab] = Array.from(byId.values());
+  });
+  return { ...base, catalog: mergedCatalog };
+}
+
 let _firstSnapshot = true;
 
 function stateHasData(state) {
@@ -197,7 +269,7 @@ function subscribe(salonId, locationId) {
 
   const ref = tasksStateRef(salonId, locationId);
   const logTag = locationId ? `loc=${locationId}` : "default";
-  _unsubscribe = onSnapshot(ref, (snap) => {
+  _unsubscribe = onSnapshot(ref, async (snap) => {
     if (!_applyState) return;
 
     // NOTE: We deliberately do NOT push local state → cloud when the salon is empty.
@@ -211,7 +283,7 @@ function subscribe(salonId, locationId) {
     // Each branch is "its own business" and starts fresh.
     if (!snap.exists()) {
       try {
-        _applyState(emptyCloudState());
+        _applyState(await mergeSharedTaskTemplatesIntoState(emptyCloudState(), salonId));
         if (typeof _onRefresh === "function") _onRefresh();
       } catch (e) {
         console.warn("[TasksCloud] clear-local-on-empty-cloud failed", e, logTag);
@@ -224,7 +296,7 @@ function subscribe(salonId, locationId) {
 
     if (typeof window !== "undefined") window.__ffTasksApplyingRemote = true;
     try {
-      _applyState(data);
+      _applyState(await mergeSharedTaskTemplatesIntoState(data, salonId));
       if (typeof _onRefresh === "function") _onRefresh();
     } finally {
       if (typeof window !== "undefined") window.__ffTasksApplyingRemote = false;
@@ -353,12 +425,20 @@ export function tasksCloudRefresh() {
   if (!_salonId || !_applyState) return Promise.resolve();
   if (typeof window !== "undefined" && window.__ffTasksLastLocalWrite != null && (Date.now() - window.__ffTasksLastLocalWrite) < 12000) return Promise.resolve();
   const ref = tasksStateRef(_salonId, _locationId);
-  return getDocFromServer(ref).then((snap) => {
+  return getDocFromServer(ref).then(async (snap) => {
     if (snap.exists()) {
       if (typeof window !== "undefined" && window.__ffTasksLastLocalWrite != null && (Date.now() - window.__ffTasksLastLocalWrite) < 12000) return;
       window.__ffTasksApplyingRemote = true;
       try {
-        _applyState(snap.data());
+        _applyState(await mergeSharedTaskTemplatesIntoState(snap.data(), _salonId));
+        if (typeof _onRefresh === "function") _onRefresh();
+      } finally {
+        window.__ffTasksApplyingRemote = false;
+      }
+    } else {
+      window.__ffTasksApplyingRemote = true;
+      try {
+        _applyState(await mergeSharedTaskTemplatesIntoState(emptyCloudState(), _salonId));
         if (typeof _onRefresh === "function") _onRefresh();
       } finally {
         window.__ffTasksApplyingRemote = false;

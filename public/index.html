@@ -84,7 +84,7 @@
       return window.goToInventory();
     }
     try {
-      await import('/inventory.js?v=20260420_inv_race_fix');
+      await import('/inventory.js?v=20260425_import_shared_inventory_catalog_r1');
     } catch (e) {
       console.error('[Inventory mock] load failed', e);
       return;
@@ -3331,8 +3331,9 @@ dialog footer button, .code-dialog footer button {
         <nav style="display:flex;flex-direction:column;gap:4px;">
           <button class="user-profile-menu-item" data-section="preferences" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Preferences</button>
           <button class="user-profile-menu-item" data-section="locations" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Locations</button>
+          <button class="user-profile-menu-item" data-section="shared-setup" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Shared Setup</button>
           <button class="user-profile-menu-item" data-section="schedule" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Schedule</button>
-          <button class="user-profile-menu-item" data-section="time-clock-settings" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Time Clock Settings</button>
+          <button class="user-profile-menu-item" data-section="time-clock-settings" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Time Clock</button>
           <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Notifications</button>
           <button class="user-profile-menu-item" data-section="billing" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Billing</button>
           <button class="user-profile-menu-item" data-section="password" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Password</button>
@@ -3379,6 +3380,289 @@ dialog footer button, .code-dialog footer button {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
             Add new location
           </button>
+        </div>
+
+        <!-- Shared Setup Card -->
+        <div id="userProfileCardSharedSetup" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Shared Setup</h3>
+          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;line-height:1.45;">Manage shared data across all locations. Changes here affect all locations unless overridden.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+            <button type="button" onclick="window.ffOpenSharedSetupServiceCatalog && window.ffOpenSharedSetupServiceCatalog()" style="padding:12px 14px;border:1px solid #e9d5ff;background:#faf5ff;color:#5b21b6;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;text-align:left;">Manage Service Catalog</button>
+            <button type="button" onclick="window.ffOpenSharedTaskTemplates && window.ffOpenSharedTaskTemplates()" style="padding:12px 14px;border:1px solid #e9d5ff;background:#fff;color:#5b21b6;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;text-align:left;">Manage Task Templates</button>
+            <button type="button" onclick="window.ffOpenSharedInventoryCatalog && window.ffOpenSharedInventoryCatalog()" style="padding:12px 14px;border:1px solid #e9d5ff;background:#fff;color:#5b21b6;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;text-align:left;">Manage Inventory Catalog</button>
+            <button type="button" onclick="window.ffOpenSharedChatTemplates && window.ffOpenSharedChatTemplates()" style="padding:12px 14px;border:1px solid #e9d5ff;background:#fff;color:#5b21b6;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;text-align:left;">Manage Chat Templates</button>
+          </div>
+        </div>
+
+        <div id="sharedTaskTemplatesModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:200002;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+          <div style="width:100%;max-width:640px;max-height:86vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(15,23,42,0.26);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px 14px;border-bottom:1px solid #e5e7eb;">
+              <div>
+                <h3 style="margin:0;font-size:18px;font-weight:800;color:#111827;">Task Templates</h3>
+                <p style="margin:6px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Task templates created here are available to all locations. Each location keeps its own task status.</p>
+              </div>
+              <button type="button" onclick="window.ffCloseSharedTaskTemplates && window.ffCloseSharedTaskTemplates()" style="border:none;background:none;color:#6b7280;font-size:24px;line-height:1;cursor:pointer;">×</button>
+            </div>
+            <div style="padding:14px 20px;display:flex;justify-content:flex-end;border-bottom:1px solid #f3f4f6;">
+              <button type="button" onclick="window.ffOpenSharedTaskTemplateEditor && window.ffOpenSharedTaskTemplateEditor()" style="padding:9px 14px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:13px;font-weight:800;cursor:pointer;">+ Add Task Template</button>
+            </div>
+            <div id="sharedTaskTemplatesList" style="padding:14px 20px 20px;overflow-y:auto;min-height:180px;"></div>
+          </div>
+        </div>
+
+        <div id="sharedTaskTemplateEditorModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.35);z-index:200003;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+          <div style="width:100%;max-width:460px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(15,23,42,0.25);padding:18px;box-sizing:border-box;" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;">
+              <h3 id="sharedTaskTemplateEditorTitle" style="margin:0;font-size:16px;font-weight:800;color:#111827;">New task template</h3>
+              <button type="button" onclick="window.ffCloseSharedTaskTemplateEditor && window.ffCloseSharedTaskTemplateEditor()" style="background:none;border:none;cursor:pointer;font-size:20px;color:#6b7280;line-height:1;">×</button>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <input id="sharedTaskTemplateTitle" type="text" placeholder="Task name" autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+              <select id="sharedTaskTemplateTab" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;background:#fff;">
+                <option value="opening">Opening</option>
+                <option value="closing">Closing</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+              <div id="sharedTaskTemplateScheduleWrap" style="display:none;border:1px solid #e9d5ff;background:#faf5ff;border-radius:10px;padding:10px 12px;">
+                <label id="sharedTaskTemplateScheduleLabel" style="display:block;font-size:12px;font-weight:800;color:#5b21b6;margin-bottom:8px;">Schedule</label>
+                <select id="sharedTaskTemplateWeekday" style="display:none;width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff;">
+                  <option value="monday">Monday</option>
+                  <option value="tuesday">Tuesday</option>
+                  <option value="wednesday">Wednesday</option>
+                  <option value="thursday">Thursday</option>
+                  <option value="friday">Friday</option>
+                  <option value="saturday">Saturday</option>
+                  <option value="sunday">Sunday</option>
+                </select>
+                <select id="sharedTaskTemplateMonthDay" style="display:none;width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff;"></select>
+                <div id="sharedTaskTemplateYearlyFields" style="display:none;grid-template-columns:1fr 1fr;gap:8px;">
+                  <select id="sharedTaskTemplateMonth" style="width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff;">
+                    <option value="1">January</option>
+                    <option value="2">February</option>
+                    <option value="3">March</option>
+                    <option value="4">April</option>
+                    <option value="5">May</option>
+                    <option value="6">June</option>
+                    <option value="7">July</option>
+                    <option value="8">August</option>
+                    <option value="9">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                  </select>
+                  <select id="sharedTaskTemplateYearDay" style="width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff;"></select>
+                </div>
+              </div>
+              <textarea id="sharedTaskTemplateInstructions" placeholder="Instructions" rows="4" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;resize:vertical;font-family:inherit;"></textarea>
+              <select id="sharedTaskTemplateAssignTo" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;background:#fff;">
+                <option value="all">All</option>
+                <option value="admin">Admin</option>
+                <option value="manager">Manager</option>
+                <option value="technicians">Service Providers</option>
+              </select>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#374151;cursor:pointer;">
+                <input id="sharedTaskTemplateActive" type="checkbox" checked style="accent-color:#7c3aed;">
+                <span>Active</span>
+              </label>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+              <button type="button" onclick="window.ffCloseSharedTaskTemplateEditor && window.ffCloseSharedTaskTemplateEditor()" style="padding:8px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+              <button type="button" id="sharedTaskTemplateSaveBtn" onclick="window.ffSaveSharedTaskTemplate && window.ffSaveSharedTaskTemplate()" style="padding:8px 16px;border:none;border-radius:10px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="sharedChatTemplatesModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:200002;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+          <div style="width:100%;max-width:640px;max-height:86vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(15,23,42,0.26);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px 14px;border-bottom:1px solid #e5e7eb;">
+              <div>
+                <h3 style="margin:0;font-size:18px;font-weight:800;color:#111827;">Chat Messages</h3>
+                <p style="margin:6px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Chat templates and flows created here are available to all locations.</p>
+              </div>
+              <button type="button" onclick="window.ffCloseSharedChatTemplates && window.ffCloseSharedChatTemplates()" style="border:none;background:none;color:#6b7280;font-size:24px;line-height:1;cursor:pointer;">×</button>
+            </div>
+            <div style="display:flex;gap:0;border-bottom:1px solid #e5e7eb;padding:0 20px;background:#f9fafb;">
+              <button type="button" id="sharedChatTabTemplates" onclick="window.ffSharedChatTab && window.ffSharedChatTab('templates')" class="chat-settings-tab active" style="padding:12px 20px;font-size:13px;font-weight:700;color:#6b7280;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;margin-bottom:-1px;">Templates</button>
+              <button type="button" id="sharedChatTabFlows" onclick="window.ffSharedChatTab && window.ffSharedChatTab('flows')" class="chat-settings-tab" style="padding:12px 20px;font-size:13px;font-weight:700;color:#6b7280;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;margin-bottom:-1px;">Flows</button>
+            </div>
+            <div id="sharedChatTemplatesPane" style="display:flex;flex-direction:column;min-height:0;">
+              <div style="padding:14px 20px;display:flex;justify-content:flex-end;border-bottom:1px solid #f3f4f6;">
+                <button type="button" onclick="window.ffOpenSharedChatTemplateEditor && window.ffOpenSharedChatTemplateEditor()" style="padding:9px 14px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:13px;font-weight:800;cursor:pointer;">+ Add Chat Template</button>
+              </div>
+              <div id="sharedChatTemplatesList" style="padding:14px 20px 20px;overflow-y:auto;min-height:180px;"></div>
+            </div>
+            <div id="sharedChatFlowsPane" style="display:none;flex-direction:column;min-height:0;">
+              <div style="padding:14px 20px;display:flex;justify-content:flex-end;border-bottom:1px solid #f3f4f6;">
+                <button type="button" onclick="window.ffOpenSharedChatFlowEditor && window.ffOpenSharedChatFlowEditor()" style="padding:9px 14px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:13px;font-weight:800;cursor:pointer;">+ Add Flow</button>
+              </div>
+              <div id="sharedChatFlowsList" style="padding:14px 20px 20px;overflow-y:auto;min-height:180px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="sharedChatTemplateEditorModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.35);z-index:200003;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+          <div style="width:100%;max-width:460px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(15,23,42,0.25);padding:18px;box-sizing:border-box;" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;">
+              <h3 id="sharedChatTemplateEditorTitle" style="margin:0;font-size:16px;font-weight:800;color:#111827;">New chat template</h3>
+              <button type="button" onclick="window.ffCloseSharedChatTemplateEditor && window.ffCloseSharedChatTemplateEditor()" style="background:none;border:none;cursor:pointer;font-size:20px;color:#6b7280;line-height:1;">×</button>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <input id="sharedChatTemplateTitle" type="text" placeholder="Template title" autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+              <textarea id="sharedChatTemplateMessage" placeholder="Message" rows="4" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;resize:vertical;font-family:inherit;"></textarea>
+              <div style="border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;">
+                <div style="font-size:12px;font-weight:800;color:#374151;margin-bottom:8px;">Who can send this template?</div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#374151;cursor:pointer;"><input id="sharedChatSenderSP" type="checkbox" value="technician" style="accent-color:#7c3aed;"> Service Providers</label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#374151;cursor:pointer;"><input id="sharedChatSenderManager" type="checkbox" value="manager" style="accent-color:#7c3aed;"> Managers</label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#374151;cursor:pointer;"><input id="sharedChatSenderAdmin" type="checkbox" value="admin" style="accent-color:#7c3aed;"> Admin</label>
+                </div>
+                <div style="font-size:11px;color:#9ca3af;margin-top:6px;">Leave all unchecked to allow everyone.</div>
+              </div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#374151;cursor:pointer;">
+                <input id="sharedChatTemplateActive" type="checkbox" checked style="accent-color:#7c3aed;">
+                <span>Active</span>
+              </label>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+              <button type="button" onclick="window.ffCloseSharedChatTemplateEditor && window.ffCloseSharedChatTemplateEditor()" style="padding:8px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+              <button type="button" id="sharedChatTemplateSaveBtn" onclick="window.ffSaveSharedChatTemplate && window.ffSaveSharedChatTemplate()" style="padding:8px 16px;border:none;border-radius:10px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="sharedChatFlowEditorModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.35);z-index:200003;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+          <div style="width:100%;max-width:620px;max-height:86vh;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(15,23,42,0.25);padding:18px;box-sizing:border-box;overflow-y:auto;" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;">
+              <h3 id="sharedChatFlowEditorTitle" style="margin:0;font-size:16px;font-weight:800;color:#111827;">New chat flow</h3>
+              <button type="button" onclick="window.ffCloseSharedChatFlowEditor && window.ffCloseSharedChatFlowEditor()" style="background:none;border:none;cursor:pointer;font-size:20px;color:#6b7280;line-height:1;">×</button>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <input id="sharedChatFlowTitle" type="text" placeholder="Flow title" autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+              <div style="border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;">
+                <div style="font-size:12px;font-weight:800;color:#374151;margin-bottom:8px;">Who can send this flow?</div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#374151;cursor:pointer;"><input id="sharedChatFlowSenderSP" type="checkbox" value="technician" style="accent-color:#7c3aed;"> Service Providers</label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#374151;cursor:pointer;"><input id="sharedChatFlowSenderManager" type="checkbox" value="manager" style="accent-color:#7c3aed;"> Managers</label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#374151;cursor:pointer;"><input id="sharedChatFlowSenderAdmin" type="checkbox" value="admin" style="accent-color:#7c3aed;"> Admin</label>
+                </div>
+                <div style="font-size:11px;color:#9ca3af;margin-top:6px;">Leave all unchecked to allow everyone.</div>
+              </div>
+              <div style="border-top:1px solid #f3f4f6;padding-top:10px;">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px;">
+                  <div style="font-size:12px;font-weight:800;color:#374151;">Decision Tree</div>
+                  <div style="font-size:11px;color:#9ca3af;">Build a path: answer → next question. Leave "End flow" when that answer should send.</div>
+                </div>
+                <div id="sharedChatFlowStepsList"></div>
+                <button type="button" id="sharedChatFlowAddStepBtn" onclick="window.ffSharedChatFlowAddStep && window.ffSharedChatFlowAddStep()" style="margin-top:8px;padding:7px 12px;border:1px dashed #a78bfa;border-radius:8px;background:#f5f3ff;color:#7c3aed;font-size:12px;font-weight:700;cursor:pointer;">+ Add first question</button>
+              </div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#374151;cursor:pointer;">
+                <input id="sharedChatFlowActive" type="checkbox" checked style="accent-color:#7c3aed;">
+                <span>Active</span>
+              </label>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+              <button type="button" onclick="window.ffCloseSharedChatFlowEditor && window.ffCloseSharedChatFlowEditor()" style="padding:8px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+              <button type="button" id="sharedChatFlowSaveBtn" onclick="window.ffSaveSharedChatFlow && window.ffSaveSharedChatFlow()" style="padding:8px 16px;border:none;border-radius:10px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="sharedInventoryCatalogModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:200002;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+          <div style="width:100%;max-width:920px;max-height:88vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(15,23,42,0.26);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px 14px;border-bottom:1px solid #e5e7eb;">
+              <div>
+                <h3 style="margin:0;font-size:18px;font-weight:800;color:#111827;">Inventory Catalog</h3>
+                <p style="margin:6px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Shared categories, subcategories, and item names for all locations. Each location keeps its own stock and current counts.</p>
+              </div>
+              <button type="button" onclick="window.ffCloseSharedInventoryCatalog && window.ffCloseSharedInventoryCatalog()" style="border:none;background:none;color:#6b7280;font-size:24px;line-height:1;cursor:pointer;">×</button>
+            </div>
+            <div style="display:grid;grid-template-columns:220px 240px minmax(0,1fr);min-height:420px;overflow:hidden;">
+              <div style="border-right:1px solid #f3f4f6;display:flex;flex-direction:column;min-height:0;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid #f3f4f6;">
+                  <div style="font-size:13px;font-weight:800;color:#111827;">Categories</div>
+                  <button type="button" onclick="window.ffSharedInvAddCategory && window.ffSharedInvAddCategory()" style="padding:6px 9px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:11px;font-weight:800;cursor:pointer;">+ Add</button>
+                </div>
+                <div id="sharedInventoryCategoriesList" style="padding:10px;overflow-y:auto;min-height:0;flex:1;"></div>
+              </div>
+              <div style="border-right:1px solid #f3f4f6;display:flex;flex-direction:column;min-height:0;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid #f3f4f6;">
+                  <div style="font-size:13px;font-weight:800;color:#111827;">Subcategories</div>
+                  <button type="button" onclick="window.ffSharedInvAddSubcategory && window.ffSharedInvAddSubcategory()" style="padding:6px 9px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:11px;font-weight:800;cursor:pointer;">+ Add</button>
+                </div>
+                <div id="sharedInventorySubcategoriesList" style="padding:10px;overflow-y:auto;min-height:0;flex:1;"></div>
+              </div>
+              <div style="display:flex;flex-direction:column;min-height:0;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid #f3f4f6;">
+                  <div>
+                    <div style="font-size:13px;font-weight:800;color:#111827;">Items</div>
+                    <div id="sharedInventoryItemsHint" style="margin-top:2px;font-size:11px;color:#9ca3af;">Select a subcategory to manage item names.</div>
+                  </div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+                    <button type="button" onclick="window.ffOpenSharedInvItemEditor && window.ffOpenSharedInvItemEditor()" style="padding:7px 10px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:11px;font-weight:800;cursor:pointer;">+ Add Item</button>
+                    <button type="button" onclick="window.ffOpenSharedInvBulkItems && window.ffOpenSharedInvBulkItems()" style="padding:7px 10px;border:1px solid #ddd6fe;border-radius:999px;background:#f5f3ff;color:#5b21b6;font-size:11px;font-weight:800;cursor:pointer;">Bulk Add</button>
+                  </div>
+                </div>
+                <div id="sharedInventoryItemsList" style="padding:12px 14px;overflow-y:auto;min-height:0;flex:1;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="sharedInventoryItemEditorModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.35);z-index:200003;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+          <div style="width:100%;max-width:460px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(15,23,42,0.25);padding:18px;box-sizing:border-box;" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;">
+              <h3 id="sharedInventoryItemEditorTitle" style="margin:0;font-size:16px;font-weight:800;color:#111827;">New inventory item</h3>
+              <button type="button" onclick="window.ffCloseSharedInvItemEditor && window.ffCloseSharedInvItemEditor()" style="background:none;border:none;cursor:pointer;font-size:20px;color:#6b7280;line-height:1;">×</button>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <input id="sharedInventoryItemName" type="text" placeholder="Item name" autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+              <input id="sharedInventoryItemCode" type="text" placeholder="Code (optional)" autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+              <input id="sharedInventoryItemDefaultPrice" type="number" min="0" step="0.01" placeholder="Default price (optional)" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#374151;cursor:pointer;">
+                <input id="sharedInventoryItemActive" type="checkbox" checked style="accent-color:#7c3aed;">
+                <span>Active</span>
+              </label>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+              <button type="button" onclick="window.ffCloseSharedInvItemEditor && window.ffCloseSharedInvItemEditor()" style="padding:8px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+              <button type="button" id="sharedInventoryItemSaveBtn" onclick="window.ffSaveSharedInvItem && window.ffSaveSharedInvItem()" style="padding:8px 16px;border:none;border-radius:10px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="sharedInventoryNameEditorModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.35);z-index:200003;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+          <div style="width:100%;max-width:420px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(15,23,42,0.25);padding:18px;box-sizing:border-box;" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;">
+              <div>
+                <h3 id="sharedInventoryNameEditorTitle" style="margin:0;font-size:16px;font-weight:800;color:#111827;">New category</h3>
+                <p id="sharedInventoryNameEditorHint" style="margin:5px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Add a shared inventory category.</p>
+              </div>
+              <button type="button" onclick="window.ffCloseSharedInvNameEditor && window.ffCloseSharedInvNameEditor()" style="background:none;border:none;cursor:pointer;font-size:20px;color:#6b7280;line-height:1;">×</button>
+            </div>
+            <label id="sharedInventoryNameEditorLabel" for="sharedInventoryNameInput" style="display:block;font-size:12px;font-weight:800;color:#374151;margin-bottom:6px;">Category name</label>
+            <input id="sharedInventoryNameInput" type="text" autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+              <button type="button" onclick="window.ffCloseSharedInvNameEditor && window.ffCloseSharedInvNameEditor()" style="padding:8px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+              <button type="button" id="sharedInventoryNameSaveBtn" onclick="window.ffSaveSharedInvName && window.ffSaveSharedInvName()" style="padding:8px 16px;border:none;border-radius:10px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="sharedInventoryBulkModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.35);z-index:200003;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+          <div style="width:100%;max-width:560px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(15,23,42,0.25);padding:18px;box-sizing:border-box;" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;">
+              <h3 style="margin:0;font-size:16px;font-weight:800;color:#111827;">Bulk add items</h3>
+              <button type="button" onclick="window.ffCloseSharedInvBulkItems && window.ffCloseSharedInvBulkItems()" style="background:none;border:none;cursor:pointer;font-size:20px;color:#6b7280;line-height:1;">×</button>
+            </div>
+            <p style="margin:0 0 10px;font-size:12px;color:#6b7280;line-height:1.45;">Paste one item per line. Format: <strong>Name</strong> or <strong>Name, Code, Default Price</strong>.</p>
+            <textarea id="sharedInventoryBulkText" rows="10" placeholder="Bubble Bath, OPI-001, 8.50&#10;Funny Bunny, OPI-002, 8.50" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;resize:vertical;font-family:inherit;"></textarea>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+              <button type="button" onclick="window.ffCloseSharedInvBulkItems && window.ffCloseSharedInvBulkItems()" style="padding:8px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+              <button type="button" id="sharedInventoryBulkSaveBtn" onclick="window.ffSaveSharedInvBulkItems && window.ffSaveSharedInvBulkItems()" style="padding:8px 16px;border:none;border-radius:10px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Add Items</button>
+            </div>
+          </div>
         </div>
 
         <!-- Password Card -->
@@ -3718,7 +4002,7 @@ dialog footer button, .code-dialog footer button {
              local defaults that reset on reload. A future stage will hook this
              up to Firestore and the payroll engine. -->
         <div id="userProfileCardTimeClockSettings" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Time Clock Settings</h3>
+          <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Time Clock</h3>
           <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;line-height:1.45;">Configure how working hours and overtime are counted. These rules will feed into staff timesheets and payroll.</p>
 
           <div style="display:flex;flex-direction:column;gap:14px;">
@@ -6275,6 +6559,7 @@ if (typeof document !== 'undefined') {
     if (typeof window.ffScheduleRefreshPermissionChrome === 'function') window.ffScheduleRefreshPermissionChrome();
     if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') window.ffSyncUserProfileBillingMenuVisibility();
     if (typeof window.ffSyncUserProfileLocationsMenuVisibility === 'function') window.ffSyncUserProfileLocationsMenuVisibility();
+    if (typeof window.ffSyncUserProfileSharedSetupMenuVisibility === 'function') window.ffSyncUserProfileSharedSetupMenuVisibility();
     if (typeof window.ffSyncUserProfileScheduleMenuVisibility === 'function') window.ffSyncUserProfileScheduleMenuVisibility();
     if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') window.ffSyncUserProfilePreferencesMenuVisibility();
     if (typeof window.ffSyncUserProfileTimeClockSettingsMenuVisibility === 'function') window.ffSyncUserProfileTimeClockSettingsMenuVisibility();
@@ -14323,6 +14608,9 @@ function goToUserProfile(section) {
   }
   if (typeof window.ffSyncUserProfileLocationsMenuVisibility === 'function') {
     window.ffSyncUserProfileLocationsMenuVisibility();
+  }
+  if (typeof window.ffSyncUserProfileSharedSetupMenuVisibility === 'function') {
+    window.ffSyncUserProfileSharedSetupMenuVisibility();
   }
   if (typeof window.ffSyncUserProfileScheduleMenuVisibility === 'function') {
     window.ffSyncUserProfileScheduleMenuVisibility();
@@ -23599,10 +23887,11 @@ function addTaskToDraft() {
     const name = (nameEl?.value || '').trim();
     const info = (infoEl?.value || '').trim();
     
-    // Clear previous error
+    // Clear previous feedback/error
     if (errorEl) {
       errorEl.style.display = 'none';
       errorEl.textContent = '';
+      errorEl.style.color = '#dc2626';
     }
     
     // Validation
@@ -23695,6 +23984,26 @@ function addTaskToDraft() {
     
     // Re-render main screen list
     renderTasksList(window.currentTasksTab);
+
+    // Close the add form after a successful add so it does not look like a
+    // second blank task failed validation.
+    const formWrap = document.getElementById('tasksAddFormWrap');
+    if (formWrap) formWrap.style.display = 'none';
+    const toggleBtn = document.getElementById('tasksModalToggleForm');
+    if (toggleBtn) toggleBtn.textContent = '+ Add another task';
+    if (errorEl) {
+      errorEl.textContent = 'Task added';
+      errorEl.style.color = '#16a34a';
+      errorEl.style.display = 'block';
+      setTimeout(() => {
+        if (errorEl.textContent === 'Task added') {
+          errorEl.style.display = 'none';
+          errorEl.textContent = '';
+          errorEl.style.color = '#dc2626';
+        }
+      }, 2200);
+    }
+    if (typeof showToast === 'function') showToast('Task added', 'success');
     
     console.log('[Tasks] Task added and saved for tab:', tab, 'assignTo:', taskObj.assignTo, 'technicianTypes:', taskObj.technicianTypes);
     
@@ -23788,6 +24097,7 @@ function cancelTasksModalForm() {
     if (errorEl) {
       errorEl.style.display = 'none';
       errorEl.textContent = '';
+      errorEl.style.color = '#dc2626';
     }
     
     // Reset toggle button text
@@ -26340,7 +26650,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260420_chat_settings_loc');
+            const m = await import('/chat.js?v=20260425_regular_flow_builder_r1');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -29252,6 +29562,7 @@ function initializeAppsPanel() {
           if (typeof window.ffScheduleRefreshPermissionChrome === 'function') window.ffScheduleRefreshPermissionChrome();
           if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') window.ffSyncUserProfileBillingMenuVisibility();
           if (typeof window.ffSyncUserProfileLocationsMenuVisibility === 'function') window.ffSyncUserProfileLocationsMenuVisibility();
+          if (typeof window.ffSyncUserProfileSharedSetupMenuVisibility === 'function') window.ffSyncUserProfileSharedSetupMenuVisibility();
           if (typeof window.ffSyncUserProfileScheduleMenuVisibility === 'function') window.ffSyncUserProfileScheduleMenuVisibility();
           if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') window.ffSyncUserProfilePreferencesMenuVisibility();
           if (typeof window.ffSyncUserProfileTimeClockSettingsMenuVisibility === 'function') window.ffSyncUserProfileTimeClockSettingsMenuVisibility();
@@ -33062,6 +33373,1307 @@ function initializeUserProfileMenu() {
   window.ffSyncUserProfileLocationsMenuVisibility = ffSyncUserProfileLocationsMenuVisibility;
   ffSyncUserProfileLocationsMenuVisibility();
 
+  // Shared Setup section — OWNER ONLY. Shared data affects every location
+  // unless a per-location override exists.
+  function ffSyncUserProfileSharedSetupMenuVisibility() {
+    try {
+      const btn = document.querySelector('.user-profile-menu-item[data-section="shared-setup"]');
+      if (!btn) return;
+      btn.style.display = ffIsCurrentUserOwnerForSettings() ? '' : 'none';
+    } catch (e) {
+      console.warn('[User Profile] ffSyncUserProfileSharedSetupMenuVisibility', e);
+    }
+  }
+  window.ffSyncUserProfileSharedSetupMenuVisibility = ffSyncUserProfileSharedSetupMenuVisibility;
+  ffSyncUserProfileSharedSetupMenuVisibility();
+
+  window.ffOpenSharedSetupServiceCatalog = function() {
+    if (typeof window.openServicesModal === 'function') {
+      window.openServicesModal({ mode: 'shared' });
+      return;
+    }
+    if (typeof showToast === 'function') showToast('Service Catalog is still loading. Try again in a moment.', 'error');
+  };
+
+  const FF_SHARED_TASK_TABS = [
+    ['opening', 'Opening'],
+    ['closing', 'Closing'],
+    ['weekly', 'Weekly'],
+    ['monthly', 'Monthly'],
+    ['yearly', 'Yearly']
+  ];
+  let ffSharedTaskTemplatesCache = [];
+  let ffSharedTaskTemplateEditingId = null;
+
+  function ffSharedSetupAccountId() {
+    const candidates = [
+      (typeof window !== 'undefined' ? window.currentAccountId : null),
+      (typeof window !== 'undefined' ? window.accountId : null),
+      (typeof window !== 'undefined' ? window.currentSalonId : null)
+    ];
+    for (const v of candidates) {
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return '';
+  }
+
+  async function ffSharedTaskTemplatesRefs() {
+    const accountId = ffSharedSetupAccountId();
+    if (!accountId) throw new Error('No account');
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    return {
+      accountId,
+      api,
+      rootRef: api.doc(db, `accounts/${accountId}/shared/taskTemplates`),
+      itemsRef: api.collection(db, `accounts/${accountId}/shared/taskTemplates/items`)
+    };
+  }
+
+  async function ffLoadSharedTaskTemplates() {
+    const { api, itemsRef } = await ffSharedTaskTemplatesRefs();
+    const snap = await api.getDocs(itemsRef);
+    ffSharedTaskTemplatesCache = snap.docs
+      .map(function(d) { return { id: d.id, ...d.data() }; })
+      .sort(function(a, b) {
+        return (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0)
+          || String(a.title || '').localeCompare(String(b.title || ''));
+      });
+    return ffSharedTaskTemplatesCache;
+  }
+
+  function ffRenderSharedTaskTemplates() {
+    const list = document.getElementById('sharedTaskTemplatesList');
+    if (!list) return;
+    const assignLabel = function(value) {
+      const v = String(value || 'all');
+      if (v === 'admin') return 'Admin';
+      if (v === 'manager') return 'Manager';
+      if (v === 'technicians') return 'Service Providers';
+      return 'All';
+    };
+    const scheduleLabel = function(t) {
+      const schedule = t && t.schedule && typeof t.schedule === 'object' ? t.schedule : {};
+      const tab = String(t?.tab || '');
+      const weekdays = {
+        monday: 'Monday',
+        tuesday: 'Tuesday',
+        wednesday: 'Wednesday',
+        thursday: 'Thursday',
+        friday: 'Friday',
+        saturday: 'Saturday',
+        sunday: 'Sunday'
+      };
+      const months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      if (tab === 'weekly') return weekdays[schedule.weekday] ? `Every ${weekdays[schedule.weekday]}` : '';
+      if (tab === 'monthly') return schedule.day === 'last' ? 'Every month on the last day' : (schedule.day ? `Every month on day ${schedule.day}` : '');
+      if (tab === 'yearly') return schedule.month && schedule.day ? `Every year on ${months[Number(schedule.month)] || 'Month'} ${schedule.day}` : '';
+      return '';
+    };
+    const byTab = {};
+    FF_SHARED_TASK_TABS.forEach(function(pair) { byTab[pair[0]] = []; });
+    ffSharedTaskTemplatesCache.forEach(function(t) {
+      const tab = byTab[t.tab] ? t.tab : 'opening';
+      byTab[tab].push(t);
+    });
+    let html = '';
+    FF_SHARED_TASK_TABS.forEach(function(pair) {
+      const key = pair[0];
+      const label = pair[1];
+      const rows = byTab[key] || [];
+      html += `<div style="border:1px solid #e5e7eb;border-radius:12px;margin-bottom:10px;overflow:hidden;background:#fff;">`;
+      html += `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;background:#f9fafb;border-bottom:1px solid #f3f4f6;">`;
+      html += `<div style="font-size:13px;font-weight:800;color:#111827;">${label}</div>`;
+      html += `<div style="font-size:11px;color:#9ca3af;font-weight:700;">${rows.length}</div>`;
+      html += `</div>`;
+      if (!rows.length) {
+        html += `<div style="padding:12px;color:#9ca3af;font-size:12px;">No templates yet.</div>`;
+      } else {
+        rows.forEach(function(t) {
+          const inactive = t.active === false;
+          html += `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-top:1px solid #f3f4f6;${inactive ? 'opacity:0.62;' : ''}">`;
+          html += `<div style="flex:1;min-width:0;">`;
+          html += `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">`;
+          html += `<span style="font-size:13px;font-weight:700;color:#111827;">${escapeHtml(t.title || 'Untitled')}</span>`;
+          html += `<span style="padding:2px 6px;border-radius:999px;background:#f3f4f6;color:#4b5563;font-size:10px;font-weight:800;">${escapeHtml(assignLabel(t.assignTo))}</span>`;
+          const when = scheduleLabel(t);
+          if (when) html += `<span style="padding:2px 6px;border-radius:999px;background:#ede9fe;color:#5b21b6;font-size:10px;font-weight:800;">${escapeHtml(when)}</span>`;
+          if (inactive) html += `<span style="padding:2px 6px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:10px;font-weight:800;">Inactive</span>`;
+          html += `</div>`;
+          if (t.instructions) html += `<div style="margin-top:4px;font-size:12px;color:#6b7280;line-height:1.35;">${escapeHtml(t.instructions)}</div>`;
+          html += `</div>`;
+          html += `<div style="display:flex;gap:6px;flex-shrink:0;">`;
+          html += `<button type="button" data-shared-task-edit="${escapeHtml(t.id)}" style="padding:6px 9px;border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Edit</button>`;
+          html += `<button type="button" data-shared-task-deactivate="${escapeHtml(t.id)}" style="padding:6px 9px;border:1px solid #fee2e2;background:#fff;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Deactivate</button>`;
+          html += `</div></div>`;
+        });
+      }
+      html += `</div>`;
+    });
+    list.innerHTML = html;
+    list.querySelectorAll('[data-shared-task-edit]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        window.ffOpenSharedTaskTemplateEditor(btn.getAttribute('data-shared-task-edit'));
+      });
+    });
+    list.querySelectorAll('[data-shared-task-deactivate]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        window.ffDeactivateSharedTaskTemplate(btn.getAttribute('data-shared-task-deactivate'));
+      });
+    });
+  }
+
+  window.ffOpenSharedTaskTemplates = async function() {
+    const modal = document.getElementById('sharedTaskTemplatesModal');
+    if (!modal) return;
+    console.log('[SharedTasksUI] opened');
+    modal.style.display = 'flex';
+    const list = document.getElementById('sharedTaskTemplatesList');
+    if (list) list.innerHTML = '<div style="padding:24px;text-align:center;color:#9ca3af;font-size:13px;">Loading...</div>';
+    try {
+      await ffLoadSharedTaskTemplates();
+      ffRenderSharedTaskTemplates();
+    } catch (e) {
+      if (list) list.innerHTML = '<div style="padding:24px;text-align:center;color:#b91c1c;font-size:13px;">Failed to load task templates.</div>';
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load task templates', 'error');
+    }
+  };
+
+  window.ffCloseSharedTaskTemplates = function() {
+    const modal = document.getElementById('sharedTaskTemplatesModal');
+    if (modal) modal.style.display = 'none';
+    window.ffCloseSharedTaskTemplateEditor();
+  };
+
+  window.ffOpenSharedTaskTemplateEditor = function(templateId) {
+    const modal = document.getElementById('sharedTaskTemplateEditorModal');
+    if (!modal) return;
+    const item = templateId ? ffSharedTaskTemplatesCache.find(function(t) { return t.id === templateId; }) : null;
+    ffSharedTaskTemplateEditingId = item ? item.id : null;
+    const titleEl = document.getElementById('sharedTaskTemplateEditorTitle');
+    const titleInput = document.getElementById('sharedTaskTemplateTitle');
+    const tabInput = document.getElementById('sharedTaskTemplateTab');
+    const instructionsInput = document.getElementById('sharedTaskTemplateInstructions');
+    const assignInput = document.getElementById('sharedTaskTemplateAssignTo');
+    const activeInput = document.getElementById('sharedTaskTemplateActive');
+    const weekdayInput = document.getElementById('sharedTaskTemplateWeekday');
+    const monthDayInput = document.getElementById('sharedTaskTemplateMonthDay');
+    const monthInput = document.getElementById('sharedTaskTemplateMonth');
+    const yearDayInput = document.getElementById('sharedTaskTemplateYearDay');
+    ffEnsureSharedTaskScheduleOptions();
+    if (titleEl) titleEl.textContent = item ? 'Edit task template' : 'New task template';
+    if (titleInput) titleInput.value = item?.title || '';
+    if (tabInput) tabInput.value = item?.tab || 'opening';
+    if (instructionsInput) instructionsInput.value = item?.instructions || '';
+    if (assignInput) assignInput.value = item?.assignTo || 'all';
+    if (activeInput) activeInput.checked = item ? item.active !== false : true;
+    const schedule = item?.schedule && typeof item.schedule === 'object' ? item.schedule : {};
+    if (weekdayInput) weekdayInput.value = schedule.weekday || 'monday';
+    if (monthDayInput) monthDayInput.value = String(schedule.day || '1');
+    if (monthInput) monthInput.value = String(schedule.month || '1');
+    if (yearDayInput) yearDayInput.value = String(schedule.day || '1');
+    ffUpdateSharedTaskScheduleFields();
+    modal.style.display = 'flex';
+    setTimeout(function() { try { titleInput && titleInput.focus(); } catch (_) {} }, 30);
+  };
+
+  window.ffCloseSharedTaskTemplateEditor = function() {
+    const modal = document.getElementById('sharedTaskTemplateEditorModal');
+    if (modal) modal.style.display = 'none';
+    ffSharedTaskTemplateEditingId = null;
+  };
+
+  function ffEnsureSharedTaskScheduleOptions() {
+    const monthDayInput = document.getElementById('sharedTaskTemplateMonthDay');
+    const yearDayInput = document.getElementById('sharedTaskTemplateYearDay');
+    const buildDays = function(includeLast) {
+      let html = '';
+      for (let i = 1; i <= 31; i += 1) html += `<option value="${i}">${i}</option>`;
+      if (includeLast) html += '<option value="last">Last day</option>';
+      return html;
+    };
+    if (monthDayInput && !monthDayInput.innerHTML.trim()) monthDayInput.innerHTML = buildDays(true);
+    if (yearDayInput && !yearDayInput.innerHTML.trim()) yearDayInput.innerHTML = buildDays(false);
+  }
+
+  function ffUpdateSharedTaskScheduleFields() {
+    ffEnsureSharedTaskScheduleOptions();
+    const tab = document.getElementById('sharedTaskTemplateTab')?.value || 'opening';
+    const wrap = document.getElementById('sharedTaskTemplateScheduleWrap');
+    const label = document.getElementById('sharedTaskTemplateScheduleLabel');
+    const weekday = document.getElementById('sharedTaskTemplateWeekday');
+    const monthDay = document.getElementById('sharedTaskTemplateMonthDay');
+    const yearly = document.getElementById('sharedTaskTemplateYearlyFields');
+    const showSchedule = tab === 'weekly' || tab === 'monthly' || tab === 'yearly';
+    if (wrap) wrap.style.display = showSchedule ? 'block' : 'none';
+    if (label) {
+      label.textContent = tab === 'weekly'
+        ? 'Repeat weekly on'
+        : (tab === 'monthly' ? 'Repeat monthly on' : 'Repeat yearly on');
+    }
+    if (weekday) weekday.style.display = tab === 'weekly' ? 'block' : 'none';
+    if (monthDay) monthDay.style.display = tab === 'monthly' ? 'block' : 'none';
+    if (yearly) yearly.style.display = tab === 'yearly' ? 'grid' : 'none';
+  }
+
+  function ffGetSharedTaskSchedulePayload(tab) {
+    if (tab === 'weekly') {
+      return { type: 'weekly', weekday: document.getElementById('sharedTaskTemplateWeekday')?.value || 'monday' };
+    }
+    if (tab === 'monthly') {
+      return { type: 'monthly', day: document.getElementById('sharedTaskTemplateMonthDay')?.value || '1' };
+    }
+    if (tab === 'yearly') {
+      return {
+        type: 'yearly',
+        month: Number(document.getElementById('sharedTaskTemplateMonth')?.value || 1),
+        day: Number(document.getElementById('sharedTaskTemplateYearDay')?.value || 1)
+      };
+    }
+    return null;
+  }
+
+  window.ffSaveSharedTaskTemplate = async function() {
+    const titleInput = document.getElementById('sharedTaskTemplateTitle');
+    const tabInput = document.getElementById('sharedTaskTemplateTab');
+    const instructionsInput = document.getElementById('sharedTaskTemplateInstructions');
+    const assignInput = document.getElementById('sharedTaskTemplateAssignTo');
+    const activeInput = document.getElementById('sharedTaskTemplateActive');
+    const saveBtn = document.getElementById('sharedTaskTemplateSaveBtn');
+    const title = String(titleInput?.value || '').trim();
+    if (!title) {
+      if (titleInput) {
+        titleInput.style.borderColor = '#ef4444';
+        titleInput.focus();
+        setTimeout(function() { titleInput.style.borderColor = '#e5e7eb'; }, 1200);
+      }
+      return;
+    }
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
+    try {
+      const { api, rootRef, itemsRef } = await ffSharedTaskTemplatesRefs();
+      await api.setDoc(rootRef, {}, { merge: true });
+      const existing = ffSharedTaskTemplateEditingId
+        ? ffSharedTaskTemplatesCache.find(function(t) { return t.id === ffSharedTaskTemplateEditingId; })
+        : null;
+      const tab = tabInput?.value || 'opening';
+      const payload = {
+        title,
+        tab,
+        instructions: String(instructionsInput?.value || '').trim(),
+        assignTo: assignInput?.value || 'all',
+        technicianTypes: Array.isArray(existing?.technicianTypes) ? existing.technicianTypes : [],
+        schedule: ffGetSharedTaskSchedulePayload(tab),
+        active: activeInput ? activeInput.checked : true,
+        sortOrder: Number.isFinite(Number(existing?.sortOrder)) ? Number(existing.sortOrder) : ffSharedTaskTemplatesCache.length,
+        updatedAt: api.serverTimestamp()
+      };
+      if (ffSharedTaskTemplateEditingId) {
+        await api.setDoc(api.doc(itemsRef, ffSharedTaskTemplateEditingId), payload, { merge: true });
+      } else {
+        await api.addDoc(itemsRef, { ...payload, createdAt: api.serverTimestamp() });
+      }
+      console.log('[SharedTasksUI] saved task template');
+      window.ffCloseSharedTaskTemplateEditor();
+      await ffLoadSharedTaskTemplates();
+      ffRenderSharedTaskTemplates();
+      if (typeof showToast === 'function') showToast('Task template saved', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to save task template', 'error');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+    }
+  };
+
+  window.ffDeactivateSharedTaskTemplate = async function(templateId) {
+    if (!templateId) return;
+    try {
+      const { api, itemsRef } = await ffSharedTaskTemplatesRefs();
+      await api.setDoc(api.doc(itemsRef, templateId), {
+        active: false,
+        updatedAt: api.serverTimestamp()
+      }, { merge: true });
+      console.log('[SharedTasksUI] deactivated task template');
+      await ffLoadSharedTaskTemplates();
+      ffRenderSharedTaskTemplates();
+      if (typeof showToast === 'function') showToast('Task template deactivated', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to deactivate task template', 'error');
+    }
+  };
+
+  let ffSharedChatTemplatesCache = [];
+  let ffSharedChatTemplateEditingId = null;
+
+  async function ffSharedChatTemplatesRefs() {
+    const accountId = ffSharedSetupAccountId();
+    if (!accountId) throw new Error('No account');
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    return {
+      accountId,
+      api,
+      rootRef: api.doc(db, `accounts/${accountId}/shared/chatTemplates`),
+      itemsRef: api.collection(db, `accounts/${accountId}/shared/chatTemplates/items`)
+    };
+  }
+
+  async function ffLoadSharedChatTemplates() {
+    const { api, itemsRef } = await ffSharedChatTemplatesRefs();
+    const snap = await api.getDocs(itemsRef);
+    ffSharedChatTemplatesCache = snap.docs
+      .map(function(d) { return { id: d.id, ...d.data() }; })
+      .sort(function(a, b) {
+        return (Number(a.order) || 0) - (Number(b.order) || 0)
+          || String(a.title || '').localeCompare(String(b.title || ''));
+      });
+    return ffSharedChatTemplatesCache;
+  }
+
+  function ffRenderSharedChatTemplates() {
+    const list = document.getElementById('sharedChatTemplatesList');
+    if (!list) return;
+    const roleLabel = function(value) {
+      const v = String(value || '');
+      if (v === 'admin') return 'Admin';
+      if (v === 'manager') return 'Manager';
+      if (v === 'technician') return 'Service Providers';
+      return v || 'All';
+    };
+    if (!ffSharedChatTemplatesCache.length) {
+      list.innerHTML = '<div style="padding:24px;text-align:center;color:#9ca3af;font-size:13px;">No shared chat templates yet.</div>';
+      return;
+    }
+    let html = '';
+    ffSharedChatTemplatesCache.forEach(function(t) {
+      const inactive = t.active === false;
+      const roles = Array.isArray(t.allowedSenders) && t.allowedSenders.length
+        ? t.allowedSenders.map(roleLabel).join(', ')
+        : 'All';
+      html += `<div style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;margin-bottom:10px;${inactive ? 'opacity:0.62;' : ''}">`;
+      html += `<div style="flex:1;min-width:0;">`;
+      html += `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">`;
+      html += `<span style="font-size:13px;font-weight:800;color:#111827;">${escapeHtml(t.title || 'Untitled')}</span>`;
+      html += `<span style="padding:2px 6px;border-radius:999px;background:#f3f4f6;color:#4b5563;font-size:10px;font-weight:800;">${escapeHtml(roles)}</span>`;
+      if (inactive) html += `<span style="padding:2px 6px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:10px;font-weight:800;">Inactive</span>`;
+      html += `</div>`;
+      if (t.message) html += `<div style="margin-top:4px;font-size:12px;color:#6b7280;line-height:1.35;">${escapeHtml(t.message)}</div>`;
+      html += `</div>`;
+      html += `<div style="display:flex;gap:6px;flex-shrink:0;">`;
+      html += `<button type="button" data-shared-chat-edit="${escapeHtml(t.id)}" style="padding:6px 9px;border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Edit</button>`;
+      html += `<button type="button" data-shared-chat-deactivate="${escapeHtml(t.id)}" style="padding:6px 9px;border:1px solid #fee2e2;background:#fff;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Deactivate</button>`;
+      html += `</div></div>`;
+    });
+    list.innerHTML = html;
+    list.querySelectorAll('[data-shared-chat-edit]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        window.ffOpenSharedChatTemplateEditor(btn.getAttribute('data-shared-chat-edit'));
+      });
+    });
+    list.querySelectorAll('[data-shared-chat-deactivate]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        window.ffDeactivateSharedChatTemplate(btn.getAttribute('data-shared-chat-deactivate'));
+      });
+    });
+  }
+
+  window.ffOpenSharedChatTemplates = async function() {
+    const modal = document.getElementById('sharedChatTemplatesModal');
+    if (!modal) return;
+    console.log('[SharedChatUI] opened');
+    modal.style.display = 'flex';
+    const list = document.getElementById('sharedChatTemplatesList');
+    const flowsList = document.getElementById('sharedChatFlowsList');
+    if (list) list.innerHTML = '<div style="padding:24px;text-align:center;color:#9ca3af;font-size:13px;">Loading...</div>';
+    if (flowsList) flowsList.innerHTML = '<div style="padding:24px;text-align:center;color:#9ca3af;font-size:13px;">Loading...</div>';
+    try {
+      await Promise.all([ffLoadSharedChatTemplates(), ffLoadSharedChatFlows()]);
+      window.ffSharedChatTab('templates');
+      ffRenderSharedChatTemplates();
+    } catch (e) {
+      if (list) list.innerHTML = '<div style="padding:24px;text-align:center;color:#b91c1c;font-size:13px;">Failed to load chat templates.</div>';
+      if (flowsList) flowsList.innerHTML = '<div style="padding:24px;text-align:center;color:#b91c1c;font-size:13px;">Failed to load chat flows.</div>';
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load chat templates', 'error');
+    }
+  };
+
+  window.ffCloseSharedChatTemplates = function() {
+    const modal = document.getElementById('sharedChatTemplatesModal');
+    if (modal) modal.style.display = 'none';
+    window.ffCloseSharedChatTemplateEditor();
+    window.ffCloseSharedChatFlowEditor && window.ffCloseSharedChatFlowEditor();
+  };
+
+  window.ffOpenSharedChatTemplateEditor = function(templateId) {
+    const modal = document.getElementById('sharedChatTemplateEditorModal');
+    if (!modal) return;
+    const item = templateId ? ffSharedChatTemplatesCache.find(function(t) { return t.id === templateId; }) : null;
+    ffSharedChatTemplateEditingId = item ? item.id : null;
+    const titleEl = document.getElementById('sharedChatTemplateEditorTitle');
+    const titleInput = document.getElementById('sharedChatTemplateTitle');
+    const messageInput = document.getElementById('sharedChatTemplateMessage');
+    const activeInput = document.getElementById('sharedChatTemplateActive');
+    if (titleEl) titleEl.textContent = item ? 'Edit chat template' : 'New chat template';
+    if (titleInput) titleInput.value = item?.title || '';
+    if (messageInput) messageInput.value = item?.message || '';
+    ['SP', 'Manager', 'Admin'].forEach(function(key) {
+      const map = { SP: 'technician', Manager: 'manager', Admin: 'admin' };
+      const cb = document.getElementById(`sharedChatSender${key}`);
+      if (cb) cb.checked = Array.isArray(item?.allowedSenders) && item.allowedSenders.includes(map[key]);
+    });
+    if (activeInput) activeInput.checked = item ? item.active !== false : true;
+    modal.style.display = 'flex';
+    setTimeout(function() { try { titleInput && titleInput.focus(); } catch (_) {} }, 30);
+  };
+
+  window.ffCloseSharedChatTemplateEditor = function() {
+    const modal = document.getElementById('sharedChatTemplateEditorModal');
+    if (modal) modal.style.display = 'none';
+    ffSharedChatTemplateEditingId = null;
+  };
+
+  window.ffSaveSharedChatTemplate = async function() {
+    const titleInput = document.getElementById('sharedChatTemplateTitle');
+    const messageInput = document.getElementById('sharedChatTemplateMessage');
+    const activeInput = document.getElementById('sharedChatTemplateActive');
+    const saveBtn = document.getElementById('sharedChatTemplateSaveBtn');
+    const title = String(titleInput?.value || '').trim();
+    const message = String(messageInput?.value || '').trim();
+    if (!title) {
+      if (titleInput) {
+        titleInput.style.borderColor = '#ef4444';
+        titleInput.focus();
+        setTimeout(function() { titleInput.style.borderColor = '#e5e7eb'; }, 1200);
+      }
+      return;
+    }
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
+    try {
+      const { api, rootRef, itemsRef } = await ffSharedChatTemplatesRefs();
+      await api.setDoc(rootRef, {}, { merge: true });
+      const existing = ffSharedChatTemplateEditingId
+        ? ffSharedChatTemplatesCache.find(function(t) { return t.id === ffSharedChatTemplateEditingId; })
+        : null;
+      const allowedSenders = [
+        ['sharedChatSenderSP', 'technician'],
+        ['sharedChatSenderManager', 'manager'],
+        ['sharedChatSenderAdmin', 'admin']
+      ].filter(function(pair) {
+        return document.getElementById(pair[0])?.checked;
+      }).map(function(pair) { return pair[1]; });
+      const payload = {
+        title,
+        message,
+        allowedSenders,
+        active: activeInput ? activeInput.checked : true,
+        order: Number.isFinite(Number(existing?.order)) ? Number(existing.order) : ffSharedChatTemplatesCache.length,
+        updatedAt: api.serverTimestamp()
+      };
+      if (ffSharedChatTemplateEditingId) {
+        await api.setDoc(api.doc(itemsRef, ffSharedChatTemplateEditingId), payload, { merge: true });
+      } else {
+        await api.addDoc(itemsRef, { ...payload, createdAt: api.serverTimestamp() });
+      }
+      console.log('[SharedChatUI] saved chat template');
+      window.ffCloseSharedChatTemplateEditor();
+      await ffLoadSharedChatTemplates();
+      ffRenderSharedChatTemplates();
+      if (typeof window.ffReloadChatTemplates === 'function') window.ffReloadChatTemplates();
+      if (typeof showToast === 'function') showToast('Chat template saved', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to save chat template', 'error');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+    }
+  };
+
+  window.ffDeactivateSharedChatTemplate = async function(templateId) {
+    if (!templateId) return;
+    try {
+      const { api, itemsRef } = await ffSharedChatTemplatesRefs();
+      await api.setDoc(api.doc(itemsRef, templateId), {
+        active: false,
+        updatedAt: api.serverTimestamp()
+      }, { merge: true });
+      console.log('[SharedChatUI] deactivated chat template');
+      await ffLoadSharedChatTemplates();
+      ffRenderSharedChatTemplates();
+      if (typeof window.ffReloadChatTemplates === 'function') window.ffReloadChatTemplates();
+      if (typeof showToast === 'function') showToast('Chat template deactivated', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to deactivate chat template', 'error');
+    }
+  };
+
+  let ffSharedChatFlowsCache = [];
+  let ffSharedChatFlowEditingId = null;
+  let ffSharedChatFlowDraft = null;
+
+  async function ffSharedChatFlowsRefs() {
+    const accountId = ffSharedSetupAccountId();
+    if (!accountId) throw new Error('No account');
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    return {
+      accountId,
+      api,
+      rootRef: api.doc(db, `accounts/${accountId}/shared/chatFlows`),
+      itemsRef: api.collection(db, `accounts/${accountId}/shared/chatFlows/items`)
+    };
+  }
+
+  async function ffLoadSharedChatFlows() {
+    const { api, itemsRef } = await ffSharedChatFlowsRefs();
+    const snap = await api.getDocs(itemsRef);
+    ffSharedChatFlowsCache = snap.docs
+      .map(function(d) { return { id: d.id, ...d.data() }; })
+      .sort(function(a, b) {
+        return (Number(a.order) || 0) - (Number(b.order) || 0)
+          || String(a.title || '').localeCompare(String(b.title || ''));
+      });
+    return ffSharedChatFlowsCache;
+  }
+
+  window.ffSharedChatTab = function(tab) {
+    const templatesPane = document.getElementById('sharedChatTemplatesPane');
+    const flowsPane = document.getElementById('sharedChatFlowsPane');
+    const templatesTab = document.getElementById('sharedChatTabTemplates');
+    const flowsTab = document.getElementById('sharedChatTabFlows');
+    if (templatesPane) templatesPane.style.display = tab === 'flows' ? 'none' : 'flex';
+    if (flowsPane) flowsPane.style.display = tab === 'flows' ? 'flex' : 'none';
+    if (templatesTab) templatesTab.classList.toggle('active', tab !== 'flows');
+    if (flowsTab) flowsTab.classList.toggle('active', tab === 'flows');
+    if (tab === 'flows') ffRenderSharedChatFlows();
+    else ffRenderSharedChatTemplates();
+  };
+
+  function ffSharedChatRoleLabel(value) {
+    const v = String(value || '');
+    if (v === 'admin') return 'Admin';
+    if (v === 'manager') return 'Manager';
+    if (v === 'technician') return 'Service Providers';
+    return v || 'All';
+  }
+
+  function ffRenderSharedChatFlows() {
+    const list = document.getElementById('sharedChatFlowsList');
+    if (!list) return;
+    if (!ffSharedChatFlowsCache.length) {
+      list.innerHTML = '<div style="padding:24px;text-align:center;color:#9ca3af;font-size:13px;">No shared chat flows yet.</div>';
+      return;
+    }
+    let html = '';
+    ffSharedChatFlowsCache.forEach(function(f) {
+      const inactive = f.active === false || f.status === 'archived';
+      const roles = Array.isArray(f.allowedSenders) && f.allowedSenders.length
+        ? f.allowedSenders.map(ffSharedChatRoleLabel).join(', ')
+        : 'All';
+      const stepCount = Array.isArray(f.steps) ? f.steps.length : 0;
+      html += `<div style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;margin-bottom:10px;${inactive ? 'opacity:0.62;' : ''}">`;
+      html += `<div style="flex:1;min-width:0;">`;
+      html += `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">`;
+      html += `<span style="font-size:13px;font-weight:800;color:#111827;">${escapeHtml(f.title || 'Untitled')}</span>`;
+      html += `<span style="padding:2px 6px;border-radius:999px;background:#f3f4f6;color:#4b5563;font-size:10px;font-weight:800;">${escapeHtml(roles)}</span>`;
+      if (inactive) html += `<span style="padding:2px 6px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:10px;font-weight:800;">Inactive</span>`;
+      html += `</div>`;
+      html += `<div style="margin-top:4px;font-size:12px;color:#6b7280;line-height:1.35;">${stepCount} ${stepCount === 1 ? 'question' : 'questions'}</div>`;
+      html += `</div>`;
+      html += `<div style="display:flex;gap:6px;flex-shrink:0;">`;
+      html += `<button type="button" data-shared-chat-flow-edit="${escapeHtml(f.id)}" style="padding:6px 9px;border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Edit</button>`;
+      html += `<button type="button" data-shared-chat-flow-deactivate="${escapeHtml(f.id)}" style="padding:6px 9px;border:1px solid #fee2e2;background:#fff;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Deactivate</button>`;
+      html += `</div></div>`;
+    });
+    list.innerHTML = html;
+    list.querySelectorAll('[data-shared-chat-flow-edit]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        window.ffOpenSharedChatFlowEditor(btn.getAttribute('data-shared-chat-flow-edit'));
+      });
+    });
+    list.querySelectorAll('[data-shared-chat-flow-deactivate]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        window.ffDeactivateSharedChatFlow(btn.getAttribute('data-shared-chat-flow-deactivate'));
+      });
+    });
+  }
+
+  function ffGetDirectChildrenByClass(node, className) {
+    return Array.from(node?.children || []).filter(function(child) {
+      return child.classList && child.classList.contains(className);
+    });
+  }
+
+  function ffGetDirectChildByClass(node, className) {
+    return ffGetDirectChildrenByClass(node, className)[0] || null;
+  }
+
+  function ffFindNestedSharedFlowNode(answerBlock) {
+    const branchWrap = ffGetDirectChildrenByClass(answerBlock, 'ff-shared-flow-branch-wrap')[0];
+    if (!branchWrap) return null;
+    return ffGetDirectChildrenByClass(branchWrap, 'ff-shared-flow-node')[0] || null;
+  }
+
+  function ffRenderSharedChatFlowBuilder(focusStepId) {
+    if (!ffSharedChatFlowDraft) ffSharedChatFlowDraft = { title: '', allowedSenders: [], steps: [] };
+    const list = document.getElementById('sharedChatFlowStepsList');
+    if (!list) return;
+    const editorBox = document.querySelector('#sharedChatFlowEditorModal > div');
+    const previousScrollTop = editorBox ? editorBox.scrollTop : 0;
+    const steps = ffSharedChatFlowDraft.steps || [];
+    const stepOptionsHtml = function(currentStepId, selectedId) {
+      let html = '<option value="">End flow</option>';
+      steps.forEach(function(candidate, idx) {
+        if (candidate.id === currentStepId) return;
+        const label = `Question ${idx + 1}${candidate.prompt ? ': ' + candidate.prompt : ''}`;
+        html += `<option value="${escapeHtml(candidate.id)}"${candidate.id === selectedId ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+      });
+      return html;
+    };
+    const renderStep = function(step, idx) {
+      const opts = step.options || [];
+      return `
+        <div class="ff-shared-flow-node" data-shared-step-id="${escapeHtml(step.id)}" style="margin-bottom:10px;padding:10px;border:1px solid #ede9fe;border-radius:12px;background:#faf5ff;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;">
+            <span style="font-size:12px;font-weight:800;color:#7c3aed;">Question ${idx + 1}</span>
+            <button type="button" onclick="window.ffSharedChatFlowRemoveStep('${escapeHtml(step.id)}')" style="padding:3px 7px;border:none;border-radius:6px;background:#fef2f2;color:#b91c1c;font-size:12px;cursor:pointer;">Remove</button>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+            <input type="text" class="ff-shared-flow-step-prompt" placeholder="Question..." value="${escapeHtml(step.prompt || '')}" style="flex:1;min-width:0;padding:5px 7px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;">
+          </div>
+          <div class="ff-shared-flow-options" style="display:flex;flex-direction:column;gap:6px;">
+            ${opts.map(function(opt, idx) {
+              return `
+                <div class="ff-shared-flow-answer-block" data-shared-opt-idx="${idx}" style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(140px,190px) auto auto;gap:6px;align-items:center;">
+                  <input type="text" class="ff-shared-flow-opt-label" placeholder="Answer" value="${escapeHtml(opt.label || '')}" style="min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;">
+                  <select class="ff-shared-flow-next-select" style="min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;">
+                    ${stepOptionsHtml(step.id, opt.nextStepId || '')}
+                  </select>
+                  <button type="button" onclick="window.ffSharedChatFlowAddStepAndLink('${escapeHtml(step.id)}',${idx})" style="padding:6px 8px;border:none;border-radius:7px;background:#ede9fe;color:#7c3aed;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;">+ Next question</button>
+                  <button type="button" onclick="window.ffSharedChatFlowRemoveOption('${escapeHtml(step.id)}',${idx})" style="padding:6px 8px;border:none;border-radius:7px;background:#fff;color:#9ca3af;font-size:12px;cursor:pointer;">x</button>
+                </div>
+              `;
+            }).join('')}
+            <button type="button" onclick="window.ffSharedChatFlowAddOption('${escapeHtml(step.id)}')" style="align-self:flex-start;padding:5px 8px;border:none;background:#ede9fe;color:#7c3aed;border-radius:7px;font-size:11px;font-weight:800;cursor:pointer;">+ Add answer</button>
+          </div>
+        </div>
+      `;
+    };
+    list.innerHTML = steps.length ? steps.map(renderStep).join('') : '<div style="color:#9ca3af;font-size:12px;padding:8px;">No questions yet. Click "+ Add question" below.</div>';
+    const addBtn = document.getElementById('sharedChatFlowAddStepBtn');
+    if (addBtn) {
+      addBtn.style.display = 'inline-block';
+      addBtn.textContent = steps.length ? '+ Add question' : '+ Add first question';
+    }
+    if (editorBox) editorBox.scrollTop = previousScrollTop;
+    if (focusStepId) {
+      setTimeout(function() {
+        const node = list.querySelector(`[data-shared-step-id="${String(focusStepId).replace(/"/g, '\\"')}"]`);
+        const input = node?.querySelector('.ff-shared-flow-step-prompt');
+        try { input && input.focus(); } catch (_) {}
+      }, 0);
+    }
+  }
+
+  function ffSyncSharedChatFlowDraftFromUI() {
+    if (!ffSharedChatFlowDraft) ffSharedChatFlowDraft = { title: '', allowedSenders: [], steps: [] };
+    ffSharedChatFlowDraft.title = String(document.getElementById('sharedChatFlowTitle')?.value || '');
+    ffSharedChatFlowDraft.allowedSenders = [
+      ['sharedChatFlowSenderSP', 'technician'],
+      ['sharedChatFlowSenderManager', 'manager'],
+      ['sharedChatFlowSenderAdmin', 'admin']
+    ].filter(function(pair) {
+      return document.getElementById(pair[0])?.checked;
+    }).map(function(pair) { return pair[1]; });
+    const roots = document.querySelectorAll('#sharedChatFlowStepsList > .ff-shared-flow-node');
+    const steps = [];
+    roots.forEach(function(node) {
+      const stepId = node?.getAttribute?.('data-shared-step-id');
+      if (!stepId) return;
+      const existing = (ffSharedChatFlowDraft.steps || []).find(function(s) { return s.id === stepId; }) || {};
+      const prompt = String(node.querySelector('.ff-shared-flow-step-prompt')?.value || '').trim();
+      const options = [];
+      const optionsWrap = ffGetDirectChildByClass(node, 'ff-shared-flow-options');
+      const optionBlocks = ffGetDirectChildrenByClass(optionsWrap, 'ff-shared-flow-answer-block');
+      optionBlocks.forEach(function(block, idx) {
+        const label = String(block.querySelector('.ff-shared-flow-opt-label')?.value || '').trim();
+        const nextStepId = String(block.querySelector('.ff-shared-flow-next-select')?.value || '').trim();
+        const existingOpt = (existing.options || [])[idx] || {};
+        options.push({
+          id: existingOpt.id || `o${Date.now()}_${idx}`,
+          label,
+          nextStepId: nextStepId || null,
+          finish: !nextStepId
+        });
+      });
+      steps.push({ id: stepId, prompt, order: steps.length, options });
+    });
+    ffSharedChatFlowDraft.steps = steps;
+  }
+
+  window.ffSharedChatFlowAddStep = function() {
+    ffSyncSharedChatFlowDraftFromUI();
+    const stepId = `s${Date.now()}`;
+    ffSharedChatFlowDraft.steps.push({ id: stepId, prompt: '', order: ffSharedChatFlowDraft.steps.length, options: [{ id: `o${Date.now()}`, label: '', finish: true }] });
+    ffRenderSharedChatFlowBuilder(stepId);
+  };
+
+  window.ffSharedChatFlowRemoveStep = function(stepId) {
+    ffSyncSharedChatFlowDraftFromUI();
+    ffSharedChatFlowDraft.steps = (ffSharedChatFlowDraft.steps || []).filter(function(s) { return s.id !== stepId; });
+    ffSharedChatFlowDraft.steps.forEach(function(s) {
+      (s.options || []).forEach(function(o) {
+        if (o.nextStepId === stepId) { o.nextStepId = null; o.finish = true; }
+      });
+    });
+    ffRenderSharedChatFlowBuilder();
+  };
+
+  window.ffSharedChatFlowAddOption = function(stepId) {
+    ffSyncSharedChatFlowDraftFromUI();
+    const step = (ffSharedChatFlowDraft.steps || []).find(function(s) { return s.id === stepId; });
+    if (!step) return;
+    if (!step.options) step.options = [];
+    step.options.push({ id: `o${Date.now()}`, label: '', finish: true });
+    ffRenderSharedChatFlowBuilder();
+  };
+
+  window.ffSharedChatFlowRemoveOption = function(stepId, optIdx) {
+    ffSyncSharedChatFlowDraftFromUI();
+    const step = (ffSharedChatFlowDraft.steps || []).find(function(s) { return s.id === stepId; });
+    if (!step?.options) return;
+    step.options.splice(optIdx, 1);
+    ffRenderSharedChatFlowBuilder();
+  };
+
+  window.ffSharedChatFlowAddStepAndLink = function(stepId, optIdx) {
+    ffSyncSharedChatFlowDraftFromUI();
+    const step = (ffSharedChatFlowDraft.steps || []).find(function(s) { return s.id === stepId; });
+    const opt = step?.options?.[optIdx];
+    if (!opt) return;
+    const newId = `s${Date.now()}`;
+    ffSharedChatFlowDraft.steps.push({ id: newId, prompt: '', order: ffSharedChatFlowDraft.steps.length, options: [{ id: `o${Date.now()}`, label: '', finish: true }] });
+    opt.nextStepId = newId;
+    opt.finish = false;
+    ffRenderSharedChatFlowBuilder(newId);
+  };
+
+  window.ffSharedChatFlowUnlinkStep = function(stepId, optIdx) {
+    ffSyncSharedChatFlowDraftFromUI();
+    const step = (ffSharedChatFlowDraft.steps || []).find(function(s) { return s.id === stepId; });
+    const opt = step?.options?.[optIdx];
+    if (!opt) return;
+    opt.nextStepId = null;
+    opt.finish = true;
+    ffRenderSharedChatFlowBuilder();
+  };
+
+  window.ffOpenSharedChatFlowEditor = function(flowId) {
+    const modal = document.getElementById('sharedChatFlowEditorModal');
+    if (!modal) return;
+    const item = flowId ? ffSharedChatFlowsCache.find(function(f) { return f.id === flowId; }) : null;
+    ffSharedChatFlowEditingId = item ? item.id : null;
+    ffSharedChatFlowDraft = {
+      title: item?.title || '',
+      allowedSenders: Array.isArray(item?.allowedSenders) ? item.allowedSenders.slice() : [],
+      steps: Array.isArray(item?.steps) ? item.steps.map(function(s) {
+        return { ...s, options: Array.isArray(s.options) ? s.options.map(function(o) { return { ...o }; }) : [] };
+      }) : []
+    };
+    const titleEl = document.getElementById('sharedChatFlowEditorTitle');
+    const titleInput = document.getElementById('sharedChatFlowTitle');
+    const activeInput = document.getElementById('sharedChatFlowActive');
+    if (titleEl) titleEl.textContent = item ? 'Edit chat flow' : 'New chat flow';
+    if (titleInput) titleInput.value = ffSharedChatFlowDraft.title;
+    ['SP', 'Manager', 'Admin'].forEach(function(key) {
+      const map = { SP: 'technician', Manager: 'manager', Admin: 'admin' };
+      const cb = document.getElementById(`sharedChatFlowSender${key}`);
+      if (cb) cb.checked = ffSharedChatFlowDraft.allowedSenders.includes(map[key]);
+    });
+    if (activeInput) activeInput.checked = item ? item.active !== false && item.status !== 'archived' : true;
+    ffRenderSharedChatFlowBuilder();
+    modal.style.display = 'flex';
+    setTimeout(function() { try { titleInput && titleInput.focus(); } catch (_) {} }, 30);
+  };
+
+  window.ffCloseSharedChatFlowEditor = function() {
+    const modal = document.getElementById('sharedChatFlowEditorModal');
+    if (modal) modal.style.display = 'none';
+    ffSharedChatFlowEditingId = null;
+    ffSharedChatFlowDraft = null;
+  };
+
+  window.ffSaveSharedChatFlow = async function() {
+    const titleInput = document.getElementById('sharedChatFlowTitle');
+    const activeInput = document.getElementById('sharedChatFlowActive');
+    const saveBtn = document.getElementById('sharedChatFlowSaveBtn');
+    ffSyncSharedChatFlowDraftFromUI();
+    const title = String(titleInput?.value || '').trim();
+    if (!title) {
+      titleInput?.focus();
+      if (titleInput) titleInput.style.borderColor = '#ef4444';
+      setTimeout(function() { if (titleInput) titleInput.style.borderColor = '#e5e7eb'; }, 1200);
+      return;
+    }
+    const steps = (ffSharedChatFlowDraft?.steps || []).map(function(s, idx) {
+      return {
+        id: s.id,
+        prompt: String(s.prompt || '').trim(),
+        order: idx,
+        options: (s.options || []).map(function(o) {
+          return { id: o.id, label: String(o.label || '').trim(), nextStepId: o.nextStepId || null, finish: !o.nextStepId };
+        })
+      };
+    });
+    if (!steps.length || !steps[0].prompt || !(steps[0].options || []).some(function(o) { return o.label; })) {
+      if (typeof showToast === 'function') showToast('Add a first question with at least one answer.', 'error');
+      return;
+    }
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
+    try {
+      const { api, rootRef, itemsRef } = await ffSharedChatFlowsRefs();
+      await api.setDoc(rootRef, {}, { merge: true });
+      const existing = ffSharedChatFlowEditingId
+        ? ffSharedChatFlowsCache.find(function(f) { return f.id === ffSharedChatFlowEditingId; })
+        : null;
+      const payload = {
+        title,
+        allowedSenders: ffSharedChatFlowDraft.allowedSenders || [],
+        active: activeInput ? activeInput.checked : true,
+        status: activeInput && !activeInput.checked ? 'archived' : 'active',
+        startStepId: steps[0]?.id || null,
+        steps,
+        order: Number.isFinite(Number(existing?.order)) ? Number(existing.order) : ffSharedChatFlowsCache.length,
+        updatedAt: api.serverTimestamp()
+      };
+      if (ffSharedChatFlowEditingId) {
+        await api.setDoc(api.doc(itemsRef, ffSharedChatFlowEditingId), payload, { merge: true });
+      } else {
+        await api.addDoc(itemsRef, { ...payload, createdAt: api.serverTimestamp() });
+      }
+      console.log('[SharedChatUI] saved chat flow');
+      window.ffCloseSharedChatFlowEditor();
+      await ffLoadSharedChatFlows();
+      ffRenderSharedChatFlows();
+      if (typeof window.ffReloadChatTemplates === 'function') window.ffReloadChatTemplates();
+      if (typeof showToast === 'function') showToast('Chat flow saved', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to save chat flow', 'error');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+    }
+  };
+
+  window.ffDeactivateSharedChatFlow = async function(flowId) {
+    if (!flowId) return;
+    try {
+      const { api, itemsRef } = await ffSharedChatFlowsRefs();
+      await api.setDoc(api.doc(itemsRef, flowId), {
+        active: false,
+        status: 'archived',
+        updatedAt: api.serverTimestamp()
+      }, { merge: true });
+      console.log('[SharedChatUI] deactivated chat flow');
+      await ffLoadSharedChatFlows();
+      ffRenderSharedChatFlows();
+      if (typeof window.ffReloadChatTemplates === 'function') window.ffReloadChatTemplates();
+      if (typeof showToast === 'function') showToast('Chat flow deactivated', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to deactivate chat flow', 'error');
+    }
+  };
+
+  let ffSharedInvCategoriesCache = [];
+  let ffSharedInvSubcategoriesCache = [];
+  let ffSharedInvItemsCache = [];
+  let ffSharedInvSelectedCategoryId = null;
+  let ffSharedInvSelectedSubcategoryId = null;
+  let ffSharedInvEditingItemId = null;
+  let ffSharedInvNameEditorKind = null;
+
+  async function ffSharedInventoryRefs() {
+    const accountId = ffSharedSetupAccountId();
+    if (!accountId) throw new Error('No account');
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    return {
+      accountId,
+      api,
+      rootRef: api.doc(db, `accounts/${accountId}/shared/inventoryCatalog`),
+      categoriesRef: api.collection(db, `accounts/${accountId}/shared/inventoryCatalog/categories`)
+    };
+  }
+
+  function ffSharedInvSubcategoriesRef(api, accountId, categoryId) {
+    const db = getTrainingDb();
+    return api.collection(db, `accounts/${accountId}/shared/inventoryCatalog/categories/${categoryId}/subcategories`);
+  }
+
+  function ffSharedInvItemsRef(api, accountId, categoryId, subId) {
+    const db = getTrainingDb();
+    return api.collection(db, `accounts/${accountId}/shared/inventoryCatalog/categories/${categoryId}/subcategories/${subId}/items`);
+  }
+
+  function ffSharedInvSort(a, b) {
+    return (Number(a.sortOrder ?? a.order) || 0) - (Number(b.sortOrder ?? b.order) || 0)
+      || String(a.name || '').localeCompare(String(b.name || ''));
+  }
+
+  async function ffLoadSharedInventoryCatalog() {
+    const { accountId, api, categoriesRef } = await ffSharedInventoryRefs();
+    const catSnap = await api.getDocs(categoriesRef);
+    ffSharedInvCategoriesCache = catSnap.docs.map(function(d) {
+      return { id: d.id, ...d.data() };
+    }).sort(ffSharedInvSort);
+    if (!ffSharedInvSelectedCategoryId || !ffSharedInvCategoriesCache.some(function(c) { return c.id === ffSharedInvSelectedCategoryId; })) {
+      ffSharedInvSelectedCategoryId = ffSharedInvCategoriesCache[0]?.id || null;
+    }
+    ffSharedInvSubcategoriesCache = [];
+    ffSharedInvItemsCache = [];
+    if (ffSharedInvSelectedCategoryId) {
+      const subSnap = await api.getDocs(ffSharedInvSubcategoriesRef(api, accountId, ffSharedInvSelectedCategoryId));
+      ffSharedInvSubcategoriesCache = subSnap.docs.map(function(d) {
+        return { id: d.id, ...d.data() };
+      }).sort(ffSharedInvSort);
+    }
+    if (!ffSharedInvSelectedSubcategoryId || !ffSharedInvSubcategoriesCache.some(function(s) { return s.id === ffSharedInvSelectedSubcategoryId; })) {
+      ffSharedInvSelectedSubcategoryId = ffSharedInvSubcategoriesCache[0]?.id || null;
+    }
+    if (ffSharedInvSelectedCategoryId && ffSharedInvSelectedSubcategoryId) {
+      const itemSnap = await api.getDocs(ffSharedInvItemsRef(api, accountId, ffSharedInvSelectedCategoryId, ffSharedInvSelectedSubcategoryId));
+      ffSharedInvItemsCache = itemSnap.docs.map(function(d) {
+        return { id: d.id, ...d.data() };
+      }).sort(ffSharedInvSort);
+    }
+  }
+
+  function ffRenderSharedInventoryCatalog() {
+    const catsEl = document.getElementById('sharedInventoryCategoriesList');
+    const subsEl = document.getElementById('sharedInventorySubcategoriesList');
+    const itemsEl = document.getElementById('sharedInventoryItemsList');
+    const hintEl = document.getElementById('sharedInventoryItemsHint');
+    if (catsEl) {
+      catsEl.innerHTML = ffSharedInvCategoriesCache.length
+        ? ffSharedInvCategoriesCache.map(function(c) {
+            const active = c.id === ffSharedInvSelectedCategoryId;
+            return `<button type="button" data-shared-inv-cat="${escapeHtml(c.id)}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;padding:9px 10px;border:1px solid ${active ? '#c4b5fd' : '#e5e7eb'};border-radius:10px;background:${active ? '#f5f3ff' : '#fff'};color:#111827;font-size:12px;font-weight:800;cursor:pointer;text-align:left;"><span>${escapeHtml(c.name || 'Untitled')}</span>${c.active === false ? '<span style="font-size:10px;color:#b91c1c;">Inactive</span>' : ''}</button>`;
+          }).join('')
+        : '<div style="padding:18px;text-align:center;color:#9ca3af;font-size:12px;">No categories yet.</div>';
+      catsEl.querySelectorAll('[data-shared-inv-cat]').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          ffSharedInvSelectedCategoryId = btn.getAttribute('data-shared-inv-cat');
+          ffSharedInvSelectedSubcategoryId = null;
+          await ffLoadSharedInventoryCatalog();
+          ffRenderSharedInventoryCatalog();
+        });
+      });
+    }
+    if (subsEl) {
+      subsEl.innerHTML = ffSharedInvSelectedCategoryId
+        ? (ffSharedInvSubcategoriesCache.length
+          ? ffSharedInvSubcategoriesCache.map(function(s) {
+              const active = s.id === ffSharedInvSelectedSubcategoryId;
+              return `<button type="button" data-shared-inv-sub="${escapeHtml(s.id)}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;padding:9px 10px;border:1px solid ${active ? '#c4b5fd' : '#e5e7eb'};border-radius:10px;background:${active ? '#f5f3ff' : '#fff'};color:#111827;font-size:12px;font-weight:800;cursor:pointer;text-align:left;"><span>${escapeHtml(s.name || 'Untitled')}</span>${s.active === false ? '<span style="font-size:10px;color:#b91c1c;">Inactive</span>' : ''}</button>`;
+            }).join('')
+          : '<div style="padding:18px;text-align:center;color:#9ca3af;font-size:12px;">No subcategories yet.</div>')
+        : '<div style="padding:18px;text-align:center;color:#9ca3af;font-size:12px;">Select a category first.</div>';
+      subsEl.querySelectorAll('[data-shared-inv-sub]').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          ffSharedInvSelectedSubcategoryId = btn.getAttribute('data-shared-inv-sub');
+          await ffLoadSharedInventoryCatalog();
+          ffRenderSharedInventoryCatalog();
+        });
+      });
+    }
+    const selectedSub = ffSharedInvSubcategoriesCache.find(function(s) { return s.id === ffSharedInvSelectedSubcategoryId; });
+    if (hintEl) hintEl.textContent = selectedSub ? `Shared item names for ${selectedSub.name || 'this subcategory'}.` : 'Select a subcategory to manage item names.';
+    if (itemsEl) {
+      if (!ffSharedInvSelectedSubcategoryId) {
+        itemsEl.innerHTML = '<div style="padding:28px;text-align:center;color:#9ca3af;font-size:13px;">Select a subcategory first.</div>';
+      } else if (!ffSharedInvItemsCache.length) {
+        itemsEl.innerHTML = '<div style="padding:28px;text-align:center;color:#9ca3af;font-size:13px;">No shared items yet. Add one item or bulk add a list.</div>';
+      } else {
+        itemsEl.innerHTML = ffSharedInvItemsCache.map(function(item) {
+          const inactive = item.active === false;
+          const price = item.defaultPrice != null && item.defaultPrice !== '' ? `$${Number(item.defaultPrice).toFixed(2)}` : 'No price';
+          return `<div style="display:flex;align-items:flex-start;gap:10px;padding:11px 12px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;margin-bottom:8px;${inactive ? 'opacity:0.62;' : ''}"><div style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span style="font-size:13px;font-weight:800;color:#111827;">${escapeHtml(item.name || 'Untitled')}</span>${item.code ? `<span style="padding:2px 6px;border-radius:999px;background:#f3f4f6;color:#4b5563;font-size:10px;font-weight:800;">${escapeHtml(item.code)}</span>` : ''}<span style="padding:2px 6px;border-radius:999px;background:#ecfdf5;color:#047857;font-size:10px;font-weight:800;">${escapeHtml(price)}</span>${inactive ? '<span style="padding:2px 6px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:10px;font-weight:800;">Inactive</span>' : ''}</div></div><div style="display:flex;gap:6px;flex-shrink:0;"><button type="button" data-shared-inv-item-edit="${escapeHtml(item.id)}" style="padding:6px 9px;border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Edit</button><button type="button" data-shared-inv-item-deactivate="${escapeHtml(item.id)}" style="padding:6px 9px;border:1px solid #fee2e2;background:#fff;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Deactivate</button></div></div>`;
+        }).join('');
+        itemsEl.querySelectorAll('[data-shared-inv-item-edit]').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            window.ffOpenSharedInvItemEditor(btn.getAttribute('data-shared-inv-item-edit'));
+          });
+        });
+        itemsEl.querySelectorAll('[data-shared-inv-item-deactivate]').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            window.ffDeactivateSharedInvItem(btn.getAttribute('data-shared-inv-item-deactivate'));
+          });
+        });
+      }
+    }
+  }
+
+  window.ffOpenSharedInventoryCatalog = async function() {
+    const modal = document.getElementById('sharedInventoryCatalogModal');
+    if (!modal) return;
+    console.log('[SharedInventoryUI] opened');
+    modal.style.display = 'flex';
+    const items = document.getElementById('sharedInventoryItemsList');
+    if (items) items.innerHTML = '<div style="padding:28px;text-align:center;color:#9ca3af;font-size:13px;">Loading...</div>';
+    try {
+      await ffLoadSharedInventoryCatalog();
+      ffRenderSharedInventoryCatalog();
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load inventory catalog', 'error');
+    }
+  };
+
+  window.ffCloseSharedInventoryCatalog = function() {
+    const modal = document.getElementById('sharedInventoryCatalogModal');
+    if (modal) modal.style.display = 'none';
+    window.ffCloseSharedInvItemEditor && window.ffCloseSharedInvItemEditor();
+    window.ffCloseSharedInvBulkItems && window.ffCloseSharedInvBulkItems();
+    window.ffCloseSharedInvNameEditor && window.ffCloseSharedInvNameEditor();
+  };
+
+  window.ffOpenSharedInvNameEditor = function(kind) {
+    ffSharedInvNameEditorKind = kind === 'subcategory' ? 'subcategory' : 'category';
+    const title = document.getElementById('sharedInventoryNameEditorTitle');
+    const hint = document.getElementById('sharedInventoryNameEditorHint');
+    const label = document.getElementById('sharedInventoryNameEditorLabel');
+    const input = document.getElementById('sharedInventoryNameInput');
+    if (title) title.textContent = ffSharedInvNameEditorKind === 'subcategory' ? 'New subcategory' : 'New category';
+    if (hint) hint.textContent = ffSharedInvNameEditorKind === 'subcategory'
+      ? 'Add a shared inventory subcategory under the selected category.'
+      : 'Add a shared inventory category.';
+    if (label) label.textContent = ffSharedInvNameEditorKind === 'subcategory' ? 'Subcategory name' : 'Category name';
+    if (input) {
+      input.value = '';
+      input.placeholder = ffSharedInvNameEditorKind === 'subcategory' ? 'e.g. OPI2' : 'e.g. Polish';
+    }
+    const modal = document.getElementById('sharedInventoryNameEditorModal');
+    if (modal) modal.style.display = 'flex';
+    setTimeout(function() { try { input && input.focus(); } catch (_) {} }, 30);
+  };
+
+  window.ffCloseSharedInvNameEditor = function() {
+    const modal = document.getElementById('sharedInventoryNameEditorModal');
+    if (modal) modal.style.display = 'none';
+    ffSharedInvNameEditorKind = null;
+  };
+
+  window.ffSharedInvAddCategory = function() {
+    window.ffOpenSharedInvNameEditor('category');
+  };
+
+  window.ffSharedInvAddSubcategory = function() {
+    if (!ffSharedInvSelectedCategoryId) {
+      if (typeof showToast === 'function') showToast('Select a category first', 'error');
+      return;
+    }
+    window.ffOpenSharedInvNameEditor('subcategory');
+  };
+
+  window.ffSaveSharedInvName = async function() {
+    const input = document.getElementById('sharedInventoryNameInput');
+    const saveBtn = document.getElementById('sharedInventoryNameSaveBtn');
+    const name = String(input?.value || '').trim();
+    if (!name) {
+      input?.focus();
+      if (input) input.style.borderColor = '#ef4444';
+      setTimeout(function() { if (input) input.style.borderColor = '#e5e7eb'; }, 1200);
+      return;
+    }
+    try {
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
+      const { accountId, api, rootRef, categoriesRef } = await ffSharedInventoryRefs();
+      await api.setDoc(rootRef, {}, { merge: true });
+      if (ffSharedInvNameEditorKind === 'subcategory') {
+        const ref = await api.addDoc(ffSharedInvSubcategoriesRef(api, accountId, ffSharedInvSelectedCategoryId), {
+          name,
+          active: true,
+          sortOrder: ffSharedInvSubcategoriesCache.length,
+          createdAt: api.serverTimestamp(),
+          updatedAt: api.serverTimestamp()
+        });
+        ffSharedInvSelectedSubcategoryId = ref.id;
+        console.log('[SharedInventoryUI] saved subcategory');
+      } else {
+        const ref = await api.addDoc(categoriesRef, {
+          name,
+          active: true,
+          sortOrder: ffSharedInvCategoriesCache.length,
+          createdAt: api.serverTimestamp(),
+          updatedAt: api.serverTimestamp()
+        });
+        ffSharedInvSelectedCategoryId = ref.id;
+        ffSharedInvSelectedSubcategoryId = null;
+        console.log('[SharedInventoryUI] saved category');
+      }
+      window.ffCloseSharedInvNameEditor();
+      await ffLoadSharedInventoryCatalog();
+      ffRenderSharedInventoryCatalog();
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to save', 'error');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+    }
+  };
+
+  window.ffOpenSharedInvItemEditor = function(itemId) {
+    if (!ffSharedInvSelectedCategoryId || !ffSharedInvSelectedSubcategoryId) {
+      if (typeof showToast === 'function') showToast('Select a subcategory first', 'error');
+      return;
+    }
+    const item = itemId ? ffSharedInvItemsCache.find(function(x) { return x.id === itemId; }) : null;
+    ffSharedInvEditingItemId = item ? item.id : null;
+    const title = document.getElementById('sharedInventoryItemEditorTitle');
+    const name = document.getElementById('sharedInventoryItemName');
+    const code = document.getElementById('sharedInventoryItemCode');
+    const price = document.getElementById('sharedInventoryItemDefaultPrice');
+    const active = document.getElementById('sharedInventoryItemActive');
+    if (title) title.textContent = item ? 'Edit inventory item' : 'New inventory item';
+    if (name) name.value = item?.name || '';
+    if (code) code.value = item?.code || '';
+    if (price) price.value = item?.defaultPrice != null ? String(item.defaultPrice) : '';
+    if (active) active.checked = item ? item.active !== false : true;
+    const modal = document.getElementById('sharedInventoryItemEditorModal');
+    if (modal) modal.style.display = 'flex';
+    setTimeout(function() { try { name && name.focus(); } catch (_) {} }, 30);
+  };
+
+  window.ffCloseSharedInvItemEditor = function() {
+    const modal = document.getElementById('sharedInventoryItemEditorModal');
+    if (modal) modal.style.display = 'none';
+    ffSharedInvEditingItemId = null;
+  };
+
+  window.ffSaveSharedInvItem = async function() {
+    const nameInput = document.getElementById('sharedInventoryItemName');
+    const codeInput = document.getElementById('sharedInventoryItemCode');
+    const priceInput = document.getElementById('sharedInventoryItemDefaultPrice');
+    const activeInput = document.getElementById('sharedInventoryItemActive');
+    const saveBtn = document.getElementById('sharedInventoryItemSaveBtn');
+    const name = String(nameInput?.value || '').trim();
+    if (!name) {
+      nameInput?.focus();
+      return;
+    }
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
+    try {
+      const { accountId, api } = await ffSharedInventoryRefs();
+      const itemsRef = ffSharedInvItemsRef(api, accountId, ffSharedInvSelectedCategoryId, ffSharedInvSelectedSubcategoryId);
+      const priceRaw = String(priceInput?.value || '').trim();
+      const parsedPrice = priceRaw === '' ? null : Number(priceRaw);
+      const payload = {
+        name,
+        code: String(codeInput?.value || '').trim(),
+        defaultPrice: Number.isFinite(parsedPrice) ? parsedPrice : null,
+        active: activeInput ? activeInput.checked : true,
+        sortOrder: ffSharedInvEditingItemId ? (ffSharedInvItemsCache.find(function(i) { return i.id === ffSharedInvEditingItemId; })?.sortOrder ?? ffSharedInvItemsCache.length) : ffSharedInvItemsCache.length,
+        updatedAt: api.serverTimestamp()
+      };
+      if (ffSharedInvEditingItemId) {
+        await api.setDoc(api.doc(itemsRef, ffSharedInvEditingItemId), payload, { merge: true });
+      } else {
+        await api.addDoc(itemsRef, { ...payload, createdAt: api.serverTimestamp() });
+      }
+      console.log('[SharedInventoryUI] saved item');
+      window.ffCloseSharedInvItemEditor();
+      await ffLoadSharedInventoryCatalog();
+      ffRenderSharedInventoryCatalog();
+      if (typeof showToast === 'function') showToast('Inventory item saved', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to save item', 'error');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+    }
+  };
+
+  window.ffOpenSharedInvBulkItems = function() {
+    if (!ffSharedInvSelectedCategoryId || !ffSharedInvSelectedSubcategoryId) {
+      if (typeof showToast === 'function') showToast('Select a subcategory first', 'error');
+      return;
+    }
+    const text = document.getElementById('sharedInventoryBulkText');
+    if (text) text.value = '';
+    const modal = document.getElementById('sharedInventoryBulkModal');
+    if (modal) modal.style.display = 'flex';
+  };
+
+  window.ffCloseSharedInvBulkItems = function() {
+    const modal = document.getElementById('sharedInventoryBulkModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.ffSaveSharedInvBulkItems = async function() {
+    const text = document.getElementById('sharedInventoryBulkText');
+    const saveBtn = document.getElementById('sharedInventoryBulkSaveBtn');
+    const lines = String(text?.value || '').split(/\r?\n/).map(function(line) { return line.trim(); }).filter(Boolean);
+    if (!lines.length) return;
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
+    try {
+      const { accountId, api } = await ffSharedInventoryRefs();
+      const itemsRef = ffSharedInvItemsRef(api, accountId, ffSharedInvSelectedCategoryId, ffSharedInvSelectedSubcategoryId);
+      let sort = ffSharedInvItemsCache.length;
+      for (const line of lines) {
+        const parts = line.split(',').map(function(part) { return part.trim(); });
+        const name = parts[0] || '';
+        if (!name) continue;
+        const code = parts[1] || '';
+        const priceRaw = parts[2] || '';
+        const parsedPrice = priceRaw === '' ? null : Number(priceRaw);
+        await api.addDoc(itemsRef, {
+          name,
+          code,
+          defaultPrice: Number.isFinite(parsedPrice) ? parsedPrice : null,
+          active: true,
+          sortOrder: sort++,
+          createdAt: api.serverTimestamp(),
+          updatedAt: api.serverTimestamp()
+        });
+      }
+      console.log('[SharedInventoryUI] bulk saved items');
+      window.ffCloseSharedInvBulkItems();
+      await ffLoadSharedInventoryCatalog();
+      ffRenderSharedInventoryCatalog();
+      if (typeof showToast === 'function') showToast('Inventory items added', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to add items', 'error');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+    }
+  };
+
+  window.ffDeactivateSharedInvItem = async function(itemId) {
+    if (!itemId) return;
+    try {
+      const { accountId, api } = await ffSharedInventoryRefs();
+      const itemsRef = ffSharedInvItemsRef(api, accountId, ffSharedInvSelectedCategoryId, ffSharedInvSelectedSubcategoryId);
+      await api.setDoc(api.doc(itemsRef, itemId), {
+        active: false,
+        updatedAt: api.serverTimestamp()
+      }, { merge: true });
+      console.log('[SharedInventoryUI] deactivated item');
+      await ffLoadSharedInventoryCatalog();
+      ffRenderSharedInventoryCatalog();
+      if (typeof showToast === 'function') showToast('Inventory item deactivated', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to deactivate item', 'error');
+    }
+  };
+
+  setTimeout(function() {
+    const tabInput = document.getElementById('sharedTaskTemplateTab');
+    if (tabInput && !tabInput.__ffSharedTaskScheduleBound) {
+      tabInput.__ffSharedTaskScheduleBound = true;
+      tabInput.addEventListener('change', ffUpdateSharedTaskScheduleFields);
+      ffEnsureSharedTaskScheduleOptions();
+      ffUpdateSharedTaskScheduleFields();
+    }
+  }, 0);
+
+  window.ffSharedSetupPlaceholder = function(label) {
+    if (typeof showToast === 'function') showToast(`${label} will be added later.`, 'info');
+  };
+
   // Schedule section — OWNER ONLY. Defines salon-wide hours / working days
   // that shape the rest of the app (Schedule module, Queue auto-reset).
   function ffSyncUserProfileScheduleMenuVisibility() {
@@ -33192,7 +34804,7 @@ function initializeUserProfileMenu() {
         : true;
       if (!canSee) {
         card.innerHTML = `
-          <h3 style="margin:0 0 8px 0;font-size:15px;font-weight:600;color:#111827;">Time Clock Settings</h3>
+          <h3 style="margin:0 0 8px 0;font-size:15px;font-weight:600;color:#111827;">Time Clock</h3>
           <div style="padding:14px 16px;border:1px solid #fde68a;background:#fffbeb;border-radius:10px;color:#92400e;font-size:12px;line-height:1.5;">
             You don\u2019t have permission to view these settings. Ask an owner or admin for access.
           </div>
@@ -35391,7 +37003,7 @@ function initializeUserProfileMenu() {
     // a section via window.__ff_handleMenuClick or a stale deep-link, we
     // bounce them to a safe tab. Visibility sync above already hides the
     // menu buttons for non-owners.
-    const ownerOnlySections = ['billing', 'locations', 'schedule', 'preferences'];
+    const ownerOnlySections = ['billing', 'locations', 'shared-setup', 'schedule', 'preferences'];
     if (ownerOnlySections.indexOf(section) !== -1 && !ffIsCurrentUserOwnerForSettings()) {
       section = 'password';
       __prefSubtab = null;
@@ -35423,6 +37035,7 @@ function initializeUserProfileMenu() {
       'schedule': 'userProfileCardSchedule',
       'billing': 'userProfileCardBilling',
       'locations': 'userProfileCardLocations',
+      'shared-setup': 'userProfileCardSharedSetup',
       'time-clock-settings': 'userProfileCardTimeClockSettings'
     };
     
@@ -35503,6 +37116,9 @@ function initializeUserProfileMenu() {
       // but we also trigger a one-shot render here so the list paints immediately.
       if (section === 'locations' && typeof window.ffRenderLocationsSettings === 'function') {
         window.ffRenderLocationsSettings();
+      }
+      if (section === 'shared-setup') {
+        console.log('[SharedSetup] opened');
       }
       // Time Clock Settings — Stage 2 UI init (wire overtime toggle). Safe to
       // call on every open because the init function is idempotent.
@@ -44532,7 +46148,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/schedule-validator.js?v=20260409_stagger_by_coverage_min"></script>
   <script type="module" src="/schedule-ui.js?v=20260423_tc_fullscreen_r1"></script>
   <script type="module" src="/inbox.js?v=20260420_inv_draftpicker_v123"></script>
-  <script type="module" src="/chat.js?v=20260420_chat_settings_loc"></script>
+  <script type="module" src="/chat.js?v=20260425_regular_flow_builder_r1"></script>
   <script type="module" src="/staff-cloud.js?v=20260415_ff_toast"></script>
   <script type="module" src="/locations-cloud.js?v=20260420_locations_v1"></script>
   <script src="/location-helpers.js?v=20260420_owner_bypass_v1"></script>
@@ -44543,10 +46159,10 @@ function hookSettingsGuard_DISABLED(){
   <script src="/time-clock-engine.js?v=20260420_tc_engine_v2_shifts"></script>
   <script type="module" src="/time-clock-entries.js?v=20260424_tc_single_open_shift_r1"></script>
   <script type="module" src="/queue-cloud.js?v=20260420_per_location_v1"></script>
-  <script type="module" src="/tasks-cloud.js?v=20260312_fix2"></script>
-  <script type="module" src="/tickets.js?v=20260424_ticket_service_upgrade_r1"></script>
+  <script type="module" src="/tasks-cloud.js?v=20260425_shared_task_templates_r1"></script>
+  <script type="module" src="/tickets.js?v=20260425_shared_service_catalog_connect_r1"></script>
   <script type="module" src="/media-upload.js?v=20260420_media_works_per_location"></script>
-  <script type="module" src="/inventory.js?v=20260420_inv_race_fix"></script>
+  <script type="module" src="/inventory.js?v=20260425_import_shared_inventory_catalog_r1"></script>
   <script type="module" src="/onboarding-wizard.js?v=20260420_onboarding_v1"></script>
   <script type="module" src="/locations-manage.js?v=20260424_locations_compact_rows_r1"></script>
 
@@ -45170,11 +46786,6 @@ function hookSettingsGuard_DISABLED(){
       <div id="ticketAsBookedContent" style="display:none;margin-top:8px;"></div>
     </div>
     <div id="ticketAsBookedNone" style="display:block;"></div>
-    <!-- AS IS message -->
-    <div id="ticketAsIsMessageBlock" style="display:none;margin-bottom:12px;background:#d1fae5;border-radius:8px;padding:10px;font-size:13px;color:#065f46;">
-      <strong>AS IS:</strong> <span id="ticketAsIsMessageText"></span>
-      <button id="ticketAsIsClearBtn" style="display:none;margin-left:8px;background:none;border:none;cursor:pointer;font-size:11px;color:#6b7280;">Clear</button>
-    </div>
     <!-- Service picker -->
     <div style="margin-bottom:8px;font-size:13px;font-weight:600;color:#374151;">Add Services Performed</div>
     <div id="ticketServicePickerContainer" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;max-height:220px;overflow-y:auto;"></div>
@@ -45202,7 +46813,6 @@ function hookSettingsGuard_DISABLED(){
     </div>
     <!-- Actions -->
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-      <button id="ticketAsIsBtn" style="display:none;padding:10px 16px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;" onclick="window.doSendAsIsFromModal && window.doSendAsIsFromModal()">AS IS</button>
       <button id="ticketSendNewBtn" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Send to Front Desk</button>
       <button id="ticketSaveBtn" style="display:none;padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;" onclick="window.saveTicket && window.saveTicket()">Save</button>
       <button id="ticketFinalizeBtn" style="display:none;padding:10px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Send to Front Desk</button>
@@ -45234,8 +46844,14 @@ function hookSettingsGuard_DISABLED(){
     </div>
     <div style="padding:14px 16px 16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
-        <div style="font-size:12px;color:#6b7280;line-height:1.4;">Categories and services are saved for the active branch only.</div>
-        <button type="button" onclick="window.addServiceCategoryV2 && window.addServiceCategoryV2()" style="padding:7px 12px;background:#7c3aed;color:#fff;border:none;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;white-space:nowrap;">+ Add Category</button>
+        <div>
+          <div id="servicesCatalogSourceBadge" style="display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;margin-bottom:4px;">Loading services...</div>
+          <div id="servicesCatalogSourceHelp" style="font-size:12px;color:#6b7280;line-height:1.4;">Categories and services are saved for the active branch only.</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+          <button type="button" id="servicesCatalogAddSharedBtn" onclick="window.addSharedServiceV2 && window.addSharedServiceV2()" style="padding:7px 12px;background:#7c3aed;color:#fff;border:none;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;white-space:nowrap;">+ Add Shared Service</button>
+          <button type="button" id="servicesCatalogAddCategoryBtn" onclick="window.addServiceCategoryV2 && window.addServiceCategoryV2()" style="padding:7px 12px;background:#fff;color:#7c3aed;border:1px solid #e9d5ff;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;white-space:nowrap;">+ Add Category</button>
+        </div>
       </div>
       <div id="servicesCatalogV2List" style="max-height:58vh;overflow-y:auto;padding-right:2px;"></div>
     </div>
@@ -45250,9 +46866,26 @@ function hookSettingsGuard_DISABLED(){
           <input id="servicesCatalogEditorName" type="text" autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
           <div id="servicesCatalogEditorCatWrap" style="display:none;">
             <select id="servicesCatalogEditorCategory" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;background:#fff;"></select>
+            <input id="servicesCatalogEditorCategoryText" type="text" placeholder="Category" autocomplete="off" style="display:none;width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
           </div>
           <div id="servicesCatalogEditorPriceWrap" style="display:none;">
             <input id="servicesCatalogEditorPrice" type="number" min="0" step="0.01" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+          </div>
+          <label id="servicesCatalogEditorActiveWrap" style="display:none;align-items:center;gap:8px;font-size:13px;color:#374151;cursor:pointer;">
+            <input id="servicesCatalogEditorActive" type="checkbox" checked style="accent-color:#7c3aed;">
+            <span>Active</span>
+          </label>
+          <div id="servicesCatalogOverrideWrap" style="display:none;border:1px solid #e9d5ff;border-radius:10px;background:#faf5ff;padding:10px 12px;">
+            <div style="font-size:12px;font-weight:700;color:#5b21b6;margin-bottom:8px;">Location price for this branch</div>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#374151;margin-bottom:8px;cursor:pointer;">
+              <input type="radio" name="servicesCatalogOverrideMode" id="servicesCatalogOverrideDefault" value="default" checked style="accent-color:#7c3aed;">
+              <span>Use default price</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#374151;cursor:pointer;">
+              <input type="radio" name="servicesCatalogOverrideMode" id="servicesCatalogOverrideCustom" value="override" style="accent-color:#7c3aed;">
+              <span>Override price for this location</span>
+            </label>
+            <input id="servicesCatalogOverridePrice" type="number" min="0" step="0.01" placeholder="Override price" style="display:none;margin-top:8px;width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;">
           </div>
         </div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">

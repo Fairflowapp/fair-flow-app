@@ -741,6 +741,95 @@ service cloud.firestore {
       allow create, update, delete: if isManager(salonId);
     }
 
+    // Account-level shared setup used by multi-location ticket service catalog.
+    // accountId currently resolves to the salonId for this app, so reuse the
+    // same salon membership helpers while keeping these paths account-scoped.
+    match /accounts/{accountId}/shared/serviceCatalog {
+      allow read: if belongsToSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{serviceId} {
+        allow read: if belongsToSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    match /accounts/{accountId}/shared/serviceCategories {
+      allow read: if belongsToSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{categoryId} {
+        allow read: if belongsToSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    match /accounts/{accountId}/shared/taskTemplates {
+      allow read: if belongsToSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{taskId} {
+        allow read: if belongsToSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    match /accounts/{accountId}/shared/chatTemplates {
+      allow read: if belongsToSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{templateId} {
+        allow read: if belongsToSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    match /accounts/{accountId}/shared/chatFlows {
+      allow read: if belongsToSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{flowId} {
+        allow read: if belongsToSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    match /accounts/{accountId}/shared/inventoryCatalog {
+      allow read: if belongsToSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /categories/{categoryId} {
+        allow read: if belongsToSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+
+        match /subcategories/{subId} {
+          allow read: if belongsToSalon(accountId);
+          allow create, update, delete: if isManager(accountId);
+
+          match /items/{itemId} {
+            allow read: if belongsToSalon(accountId);
+            allow create, update, delete: if isManager(accountId);
+          }
+        }
+      }
+    }
+
+    match /accounts/{accountId}/locations/{locationId}/serviceOverrides/{serviceId} {
+      allow read: if belongsToSalon(accountId);
+      allow create, update, delete: if isManager(accountId);
+    }
+
+    match /accounts/{accountId}/locations/{locationId}/inventoryState/{subId} {
+      allow read: if belongsToSalon(accountId);
+      allow create, update, delete: if isManager(accountId);
+    }
+
     // ===== LOCATIONS =====
     // Physical salon branches / check-in points (name, address, lat/lng, allowed radius, active flag).
     // All salon members can read (needed for UI listings and check-in geofencing);

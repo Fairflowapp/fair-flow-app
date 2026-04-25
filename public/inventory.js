@@ -106,6 +106,8 @@ let _selectedSubcategoryId = null;
 let _categoryTree = [];
 /** Last tree successfully loaded or saved (for Firestore diff on Save). */
 let _persistedCategoryTree = [];
+/** True when the screen is reading account-level shared inventory catalog. */
+let _invUsingSharedCatalog = false;
 let _invCategoriesLoading = false;
 let _invCatLoadError = null;
 let _catSaveBusy = false;
@@ -119,6 +121,7 @@ let _groups = null;
  * @type {InvRow[] | null}
  */
 let _rows = null;
+const SHARED_INV_DEFAULT_GROUP_ID = "default";
 
 /** When set, that group id shows remove confirmation (not one-click delete). */
 let _groupRemoveConfirmId = null;
@@ -351,6 +354,64 @@ async function getSalonId() {
   return salonId || null;
 }
 
+function getInventoryLocationStateId() {
+  return _ffInvActiveLocId() || "default";
+}
+
+function sharedInvCategoriesRef(accountId) {
+  return collection(db, `accounts/${accountId}/shared/inventoryCatalog/categories`);
+}
+
+function sharedInvSubcategoriesRef(accountId, catId) {
+  return collection(db, `accounts/${accountId}/shared/inventoryCatalog/categories/${catId}/subcategories`);
+}
+
+function sharedInvItemsRef(accountId, catId, subId) {
+  return collection(db, `accounts/${accountId}/shared/inventoryCatalog/categories/${catId}/subcategories/${subId}/items`);
+}
+
+function sharedInvStateDocRef(accountId, locationId, subId) {
+  return doc(db, `accounts/${accountId}/locations/${locationId}/inventoryState/${subId}`);
+}
+
+function sharedInvSort(a, b) {
+  return (Number(a.sortOrder ?? a.order) || 0) - (Number(b.sortOrder ?? b.order) || 0)
+    || String(a.name || "").localeCompare(String(b.name || ""));
+}
+
+async function tryLoadSharedInventoryCategories(accountId) {
+  try {
+    const catSnap = await getDocs(sharedInvCategoriesRef(accountId));
+    const rawCats = catSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((c) => c.active !== false)
+      .sort(sharedInvSort);
+    if (!rawCats.length) return false;
+    const tree = await Promise.all(rawCats.map(async (c) => {
+      const subSnap = await getDocs(sharedInvSubcategoriesRef(accountId, c.id));
+      const subs = subSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((s) => s.active !== false)
+        .sort(sharedInvSort);
+      return {
+        id: c.id,
+        name: c.name,
+        subcategories: subs.map((s) => ({ id: s.id, name: s.name })),
+      };
+    }));
+    _invUsingSharedCatalog = true;
+    _categoryTree = tree;
+    _persistedCategoryTree = cloneCategoryTree(tree);
+    _expandedCategoryIds = new Set(tree.map((c) => c.id));
+    ensureValidSubcategorySelection();
+    console.log("[SharedInventory] loaded shared catalog");
+    return true;
+  } catch (e) {
+    console.warn("[SharedInventory] shared catalog unavailable, using location inventory", e?.code, e?.message);
+    return false;
+  }
+}
+
 async function loadInventoryCategoriesFromFirestore() {
   const salonId = await getSalonId();
   if (!salonId) {
@@ -360,6 +421,7 @@ async function loadInventoryCategoriesFromFirestore() {
     return;
   }
   _invCatLoadError = null;
+  _invUsingSharedCatalog = false;
   const catSnap = await getDocs(collection(db, `salons/${salonId}/inventoryCategories`));
   const rawCatsAll = catSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
   const rawCats = rawCatsAll.filter(_ffInvDocInActiveLoc);
@@ -898,6 +960,308 @@ function serializeInventoryRowForFirestore(r) {
   };
 }
 
+function sharedInventoryStateItemsFromRows() {
+  const items = {};
+  for (const r of _rows || []) {
+    const cell = (r.byGroup || {})[SHARED_INV_DEFAULT_GROUP_ID] || {};
+    const defaultPrice = r._sharedDefaultPrice;
+    const priceText = cell.price != null ? String(cell.price).trim() : "";
+    const defaultPriceText = defaultPrice != null && defaultPrice !== "" ? String(defaultPrice) : "";
+    const payload = {
+      number: r.rowNo != null ? String(r.rowNo) : "",
+      supplier: r.supplier != null ? String(r.supplier) : "",
+      url: r.url != null ? String(r.url) : "",
+      stock: typeof cell.stock === "number" ? cell.stock : parseNum(cell.stock),
+      current: typeof cell.current === "number" ? cell.current : parseNum(cell.current),
+    };
+    if (r.code != null && String(r.code) !== String(r._sharedDefaultCode || "")) {
+      payload.codeOverride = String(r.code);
+    }
+    if (priceText !== "" && priceText !== defaultPriceText) {
+      payload.priceOverride = priceText;
+    }
+    items[r.id] = payload;
+  }
+  return items;
+}
+
+async function buildSharedInventoryTableData(accountId, catId, subId) {
+  const itemSnap = await getDocs(sharedInvItemsRef(accountId, catId, subId));
+  const items = itemSnap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((item) => item.active !== false)
+    .sort(sharedInvSort);
+  const locId = getInventoryLocationStateId();
+  const stateSnap = await getDoc(sharedInvStateDocRef(accountId, locId, subId));
+  const state = stateSnap.exists() ? stateSnap.data() : {};
+  const localItems = state && state.items && typeof state.items === "object" ? state.items : {};
+  const rows = items.map((item) => {
+    const local = localItems[item.id] && typeof localItems[item.id] === "object" ? localItems[item.id] : {};
+    const priceOverride = local.priceOverride != null && local.priceOverride !== "" ? String(local.priceOverride) : "";
+    const defaultPrice = item.defaultPrice != null && item.defaultPrice !== "" ? String(item.defaultPrice) : "";
+    return {
+      id: item.id,
+      rowNo: local.number != null ? String(local.number) : "",
+      code: local.codeOverride != null ? String(local.codeOverride) : (item.code != null ? String(item.code) : ""),
+      name: item.name != null ? String(item.name) : "",
+      supplier: local.supplier != null ? String(local.supplier) : "",
+      url: local.url != null ? String(local.url) : "",
+      _sharedDefaultCode: item.code != null ? String(item.code) : "",
+      _sharedDefaultPrice: item.defaultPrice != null ? item.defaultPrice : null,
+      byGroup: {
+        [SHARED_INV_DEFAULT_GROUP_ID]: {
+          stock: typeof local.stock === "number" ? local.stock : parseNum(local.stock),
+          current: typeof local.current === "number" ? local.current : parseNum(local.current),
+          price: priceOverride || defaultPrice,
+        },
+      },
+    };
+  });
+  return {
+    groups: [{ id: SHARED_INV_DEFAULT_GROUP_ID, name: "Inventory", order: 0 }],
+    rows: rows.map((r) => serializeInventoryRowForFirestore(r)),
+    _rowsWithSharedMeta: rows,
+  };
+}
+
+async function importSharedItemsIntoCurrentInventorySub() {
+  if (!ensureTableReadyForEdits()) return;
+  const meta = findSubMeta(_selectedSubcategoryId);
+  if (!meta || !_rows || !_groups) return;
+  const accountId = await getSalonId();
+  if (!accountId) return;
+  try {
+    const sharedCatSnap = await getDocs(sharedInvCategoriesRef(accountId));
+    const sharedCats = sharedCatSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((c) => c.active !== false)
+      .sort(sharedInvSort);
+    if (!sharedCats.length) {
+      inventoryOrderDraftToast("No shared inventory catalog yet.", "info");
+      return;
+    }
+
+    let selectedCat = sharedCats.find((c) => String(c.name || "").trim().toLowerCase() === String(meta.category.name || "").trim().toLowerCase()) || sharedCats[0];
+    let subSnap = await getDocs(sharedInvSubcategoriesRef(accountId, selectedCat.id));
+    let sharedSubs = subSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((s) => s.active !== false)
+      .sort(sharedInvSort);
+    if (!sharedSubs.length) {
+      inventoryOrderDraftToast("No shared subcategories in that category.", "info");
+      return;
+    }
+
+    let selectedSub = sharedSubs.find((s) => String(s.name || "").trim().toLowerCase() === String(meta.sub.name || "").trim().toLowerCase());
+    if (!selectedSub) {
+      const list = sharedSubs.map((s, i) => `${i + 1}. ${s.name || "Untitled"}`).join("\n");
+      const raw = prompt(`Choose shared subcategory to import:\n${list}`, "1");
+      const idx = Math.max(0, Math.min(sharedSubs.length - 1, (Number(raw) || 1) - 1));
+      selectedSub = sharedSubs[idx];
+    }
+    if (!selectedSub) return;
+
+    const itemSnap = await getDocs(sharedInvItemsRef(accountId, selectedCat.id, selectedSub.id));
+    const sharedItems = itemSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((item) => item.active !== false)
+      .sort(sharedInvSort);
+    if (!sharedItems.length) {
+      inventoryOrderDraftToast("No shared items to import.", "info");
+      return;
+    }
+
+    const existingKeys = new Set((_rows || []).map((r) => `${String(r.name || "").trim().toLowerCase()}|${String(r.code || "").trim().toLowerCase()}`));
+    let added = 0;
+    for (const item of sharedItems) {
+      const name = String(item.name || "").trim();
+      if (!name) continue;
+      const code = String(item.code || "").trim();
+      const key = `${name.toLowerCase()}|${code.toLowerCase()}`;
+      if (existingKeys.has(key)) continue;
+      existingKeys.add(key);
+      const row = {
+        id: newRowId(),
+        rowNo: "",
+        code,
+        name,
+        url: "",
+        supplier: "",
+        byGroup: {},
+      };
+      for (const g of _groups) {
+        row.byGroup[g.id] = {
+          stock: 0,
+          current: 0,
+          price: item.defaultPrice != null && item.defaultPrice !== "" ? String(item.defaultPrice) : "",
+        };
+      }
+      _rows.push(row);
+      added++;
+    }
+    if (!added) {
+      inventoryOrderDraftToast("All shared items already exist in this subcategory.", "info");
+      return;
+    }
+    await flushInventoryTableToFirestore();
+    mountOrRefreshMockUi();
+    inventoryOrderDraftToast(`Added ${added} shared item${added === 1 ? "" : "s"}.`, "success");
+  } catch (e) {
+    console.error("[Inventory] import shared items failed", e);
+    inventoryOrderDraftToast("Could not import shared items.", "error");
+  }
+}
+
+async function importSharedCatalogIntoCurrentBranch() {
+  const salonId = await getSalonId();
+  if (!salonId) return;
+  const activeLocId = _ffInvActiveLocId();
+  if (!activeLocId) {
+    inventoryOrderDraftToast("Select a location before importing shared inventory.", "error");
+    return;
+  }
+  try {
+    const sharedCatSnap = await getDocs(sharedInvCategoriesRef(salonId));
+    const sharedCats = sharedCatSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((c) => c.active !== false)
+      .sort(sharedInvSort);
+    if (!sharedCats.length) {
+      inventoryOrderDraftToast("No shared inventory catalog yet.", "info");
+      return;
+    }
+
+    const localTree = getCategoryTree();
+    const localCatByName = new Map(localTree.map((c) => [String(c.name || "").trim().toLowerCase(), c]));
+    const localCatCol = collection(db, `salons/${salonId}/inventoryCategories`);
+    let addedCats = 0;
+    let addedSubs = 0;
+    let addedItems = 0;
+
+    for (const sharedCat of sharedCats) {
+      const catName = String(sharedCat.name || "").trim();
+      if (!catName) continue;
+      let localCat = localCatByName.get(catName.toLowerCase());
+      let localCatId = localCat?.id || "";
+      if (!localCatId) {
+        const catRef = doc(localCatCol);
+        await setDoc(catRef, {
+          name: catName,
+          order: localTree.length + addedCats,
+          locationId: activeLocId,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        localCatId = catRef.id;
+        localCat = { id: localCatId, name: catName, subcategories: [] };
+        localCatByName.set(catName.toLowerCase(), localCat);
+        addedCats++;
+      }
+
+      const sharedSubSnap = await getDocs(sharedInvSubcategoriesRef(salonId, sharedCat.id));
+      const sharedSubs = sharedSubSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((s) => s.active !== false)
+        .sort(sharedInvSort);
+      const localSubByName = new Map((localCat.subcategories || []).map((s) => [String(s.name || "").trim().toLowerCase(), s]));
+
+      for (const sharedSub of sharedSubs) {
+        const subName = String(sharedSub.name || "").trim();
+        if (!subName) continue;
+        let localSub = localSubByName.get(subName.toLowerCase());
+        let localSubId = localSub?.id || "";
+        const localSubColPath = `salons/${salonId}/inventoryCategories/${localCatId}/inventorySubcategories`;
+        if (!localSubId) {
+          const subRef = doc(collection(db, localSubColPath));
+          await setDoc(subRef, {
+            name: subName,
+            order: (localCat.subcategories || []).length + addedSubs,
+            locationId: activeLocId,
+            groups: [{ id: SHARED_INV_DEFAULT_GROUP_ID, name: "Inventory", order: 0 }],
+            rows: [],
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          localSubId = subRef.id;
+          localSub = { id: localSubId, name: subName };
+          if (!localCat.subcategories) localCat.subcategories = [];
+          localCat.subcategories.push(localSub);
+          localSubByName.set(subName.toLowerCase(), localSub);
+          addedSubs++;
+        }
+
+        const subRef = doc(db, `${localSubColPath}/${localSubId}`);
+        const localSubSnap = await getDoc(subRef);
+        const localData = localSubSnap.exists() ? (localSubSnap.data() || {}) : {};
+        const groupsRaw = Array.isArray(localData.groups) && localData.groups.length
+          ? localData.groups
+          : [{ id: SHARED_INV_DEFAULT_GROUP_ID, name: "Inventory", order: 0 }];
+        const rowsRaw = Array.isArray(localData.rows) ? localData.rows : [];
+        const existing = new Set(rowsRaw.map((r) => `${String(r.name || "").trim().toLowerCase()}|${String(r.code || "").trim().toLowerCase()}`));
+
+        const sharedItemSnap = await getDocs(sharedInvItemsRef(salonId, sharedCat.id, sharedSub.id));
+        const sharedItems = sharedItemSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((it) => it.active !== false)
+          .sort(sharedInvSort);
+        const newRows = rowsRaw.slice();
+        for (const item of sharedItems) {
+          const itemName = String(item.name || "").trim();
+          if (!itemName) continue;
+          const code = String(item.code || "").trim();
+          const key = `${itemName.toLowerCase()}|${code.toLowerCase()}`;
+          if (existing.has(key)) continue;
+          existing.add(key);
+          const byGroup = {};
+          for (const g of groupsRaw) {
+            const gid = String(g.id || SHARED_INV_DEFAULT_GROUP_ID);
+            byGroup[gid] = {
+              stock: 0,
+              current: 0,
+              price: item.defaultPrice != null && item.defaultPrice !== "" ? String(item.defaultPrice) : "",
+            };
+          }
+          newRows.push({
+            id: newRowId(),
+            rowNo: "",
+            code,
+            name: itemName,
+            supplier: "",
+            url: "",
+            byGroup,
+          });
+          addedItems++;
+        }
+        if (newRows.length !== rowsRaw.length || !localSubSnap.exists()) {
+          await setDoc(subRef, {
+            name: subName,
+            locationId: activeLocId,
+            groups: groupsRaw,
+            rows: newRows,
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+        }
+      }
+    }
+
+    _invCategoriesLoading = true;
+    mountOrRefreshMockUi();
+    await loadInventoryCategoriesFromFirestore();
+    _invCategoriesLoading = false;
+    const firstSub = getCategoryTree().flatMap((c) => c.subcategories || [])[0];
+    if (!_selectedSubcategoryId && firstSub) _selectedSubcategoryId = firstSub.id;
+    _invTableLoadedForSubId = null;
+    prepareInventoryTableStateForMount();
+    mountOrRefreshMockUi();
+    inventoryOrderDraftToast(`Imported shared catalog: ${addedCats} categories, ${addedSubs} subcategories, ${addedItems} items.`, "success");
+  } catch (e) {
+    _invCategoriesLoading = false;
+    console.error("[Inventory] import shared catalog failed", e);
+    inventoryOrderDraftToast("Could not import shared catalog.", "error");
+    mountOrRefreshMockUi();
+  }
+}
+
 function buildFirestoreGroupsFromUi() {
   if (!_groups) return [];
   return _groups.map((g, i) => ({ id: g.id, name: g.label, order: i }));
@@ -1136,6 +1500,17 @@ async function flushInventoryTableToFirestore() {
   if (!_groups || !_rows) return;
   const salonId = await getSalonId();
   if (!salonId) return;
+  if (_invUsingSharedCatalog) {
+    const ref = sharedInvStateDocRef(salonId, getInventoryLocationStateId(), meta.sub.id);
+    await setDoc(ref, {
+      categoryId: meta.category.id,
+      subcategoryId: meta.sub.id,
+      items: sharedInventoryStateItemsFromRows(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    clearInventoryUndoAfterSuccess();
+    return;
+  }
   const ref = doc(db, `salons/${salonId}/inventoryCategories/${meta.category.id}/inventorySubcategories/${meta.sub.id}`);
   await updateDoc(ref, {
     groups: buildFirestoreGroupsFromUi(),
@@ -1162,6 +1537,17 @@ async function loadInventoryTableForSub(catId, subId, seq, key) {
   try {
     const salonId = await getSalonId();
     if (!salonId) throw new Error("No salon");
+    if (_invUsingSharedCatalog) {
+      const data = await buildSharedInventoryTableData(salonId, catId, subId);
+      if (seq !== _invTableLoadSeq) return;
+      _groups = data.groups.map((g) => ({ id: g.id, label: g.name != null ? String(g.name) : "" }));
+      _rows = Array.isArray(data._rowsWithSharedMeta) ? data._rowsWithSharedMeta : (data.rows || []).map((r) => normalizeRowFromFirestore(r));
+      _invColWidths = null;
+      if (seq !== _invTableLoadSeq) return;
+      _invTableLoadedForSubId = key;
+      ensureGroupCellsForRows();
+      return;
+    }
     const ref = doc(db, `salons/${salonId}/inventoryCategories/${catId}/inventorySubcategories/${subId}`);
     const snap = await getDoc(ref);
     if (seq !== _invTableLoadSeq) return;
@@ -1816,6 +2202,13 @@ function sortOrderBuilderLines(lines) {
 }
 
 async function fetchSubcategoryInventoryDoc(salonId, catId, subId) {
+  if (_invUsingSharedCatalog) {
+    const data = await buildSharedInventoryTableData(salonId, catId, subId);
+    return {
+      groups: data.groups,
+      rows: data.rows,
+    };
+  }
   const ref = doc(db, `salons/${salonId}/inventoryCategories/${catId}/inventorySubcategories/${subId}`);
   const snap = await getDoc(ref);
   if (!snap.exists()) return null;
@@ -2975,6 +3368,7 @@ function renderInventoryTableCardHtml() {
   return `<div class="ff-inv2-table-card">
       <div class="ff-inv2-toolbar">
         <button type="button" class="ff-inv2-btn" id="ff-inv2-add-row">+ Add Row</button>
+        <button type="button" class="ff-inv2-btn" id="ff-inv2-add-from-shared">+ Add from Shared</button>
         <button type="button" class="ff-inv2-btn" id="ff-inv2-add-group">+ Add Group</button>
       </div>
       <div class="ff-inv2-table-scroll">
@@ -11722,6 +12116,13 @@ function ensureInventoryScreenDelegates(root) {
       return;
     }
 
+    if (t.closest("[data-inv-import-shared-catalog]")) {
+      ev.preventDefault();
+      _editCellKey = null;
+      void importSharedCatalogIntoCurrentBranch();
+      return;
+    }
+
     if (t.closest("[data-cat-manage-open]")) {
       ev.preventDefault();
       resetCatModalTransientState();
@@ -12210,6 +12611,10 @@ function ensureInventoryScreenDelegates(root) {
       _editCellKey = null;
       addInventoryRow();
       mountOrRefreshMockUi();
+    } else if (t.id === "ff-inv2-add-from-shared") {
+      ev.preventDefault();
+      _editCellKey = null;
+      void importSharedItemsIntoCurrentInventorySub();
     } else if (t.id === "ff-inv2-add-group") {
       ev.preventDefault();
       _editCellKey = null;
@@ -12391,7 +12796,10 @@ function mountOrRefreshMockUi() {
   <aside class="ff-inv2-aside" aria-label="Categories">
     <div class="ff-inv2-aside-head ff-inv2-aside-head-row">
       <span>Categories</span>
-      <button type="button" class="ff-inv2-aside-add" data-cat-manage-open="1">+ Add</button>
+      <span style="display:inline-flex;gap:6px;align-items:center;">
+        <button type="button" class="ff-inv2-aside-add" data-inv-import-shared-catalog="1">Import Shared</button>
+        <button type="button" class="ff-inv2-aside-add" data-cat-manage-open="1">+ Add</button>
+      </span>
     </div>
     ${_ffInvDebugBanner}
     <div class="ff-inv2-aside-body" id="ff-inv2-aside-body">${renderSidebarHtml()}</div>
