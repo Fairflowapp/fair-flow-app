@@ -3,7 +3,7 @@
  * Connects to media-cloud.js.
  */
 
-import { getDoc, getDocs, doc, collection, setDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { getDoc, getDocs, doc, collection, query, where, setDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "./app.js?v=20260411_chat_reminder_attrfix";
 import {
@@ -40,6 +40,7 @@ let currentMediaEmployeeFilter = "all"; // staffId or "all"; only used in TO HAN
 let currentMediaCategoryFilter = "all"; // categoryId or "all"; filter by category
 let mediaCategories = [];
 let unsubMediaCategories = null;
+const MEDIA_UPLOAD_POINTS_DAILY_CAP = 10;
 
 /** Same defaults as Staff → Permissions → Media → "To handle" in index.html */
 function legacyMediaHandleFromStaffDoc(st) {
@@ -745,6 +746,168 @@ function hideUploadMessage() {
   if (el) el.style.display = "none";
 }
 
+function getMediaPointsAccountId() {
+  const candidates = [
+    typeof window !== "undefined" ? window.currentAccountId : "",
+    typeof window !== "undefined" ? window.accountId : "",
+    currentUserProfile?.salonId,
+    typeof window !== "undefined" ? window.currentSalonId : "",
+  ];
+  for (const value of candidates) {
+    const clean = String(value || "").trim();
+    if (clean) return clean;
+  }
+  return "";
+}
+
+function getMediaPointsLocationId(work) {
+  const fromWork = String(work?.locationId || "").trim();
+  if (fromWork) return fromWork;
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
+      const value = window.ffGetActiveLocationId();
+      const clean = String(value || "").trim();
+      if (clean) return clean;
+    }
+  } catch (_) {}
+  return typeof window !== "undefined" && typeof window.__ff_active_location_id === "string"
+    ? window.__ff_active_location_id.trim()
+    : "";
+}
+
+function resolveMediaPointsType(mediaType) {
+  if (mediaType === "before_after") return { key: "beforeAfterUpload", eventType: "image", beforeAfter: true };
+  if (mediaType === "video") return { key: "videoUpload", eventType: "video", beforeAfter: false };
+  return { key: "photoUpload", eventType: "image", beforeAfter: false };
+}
+
+async function sha256File(file) {
+  if (!file || !window.crypto?.subtle) return "";
+  const buffer = await file.arrayBuffer();
+  const hash = await window.crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function hashMediaPointFiles(files, mediaType) {
+  const fileList = Array.isArray(files) ? files : [files].filter(Boolean);
+  if (mediaType === "before_after") {
+    const hashes = await Promise.all(fileList.map((file) => sha256File(file)));
+    return [hashes.filter(Boolean).join(":")].filter(Boolean);
+  }
+  return Promise.all(fileList.map((file) => sha256File(file)));
+}
+
+function mediaPointsTodayKey(date = new Date()) {
+  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+}
+
+function mediaPointsWeekKey(date = new Date()) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const year = d.getUTCFullYear();
+  const yearStart = Date.UTC(year, 0, 1);
+  const week = Math.ceil((((d.getTime() - yearStart) / 86400000) + 1) / 7);
+  return year + "-W" + String(week).padStart(2, "0");
+}
+
+function mediaPointsTimestampDayKey(value) {
+  try {
+    const date = typeof value?.toDate === "function" ? value.toDate() : new Date(value);
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+    return mediaPointsTodayKey(date);
+  } catch (_) {
+    return "";
+  }
+}
+
+async function getTodayMediaUploadPointEvents(accountId, staffId) {
+  const now = new Date();
+  const todayKey = mediaPointsTodayKey(now);
+  const snap = await getDocs(query(
+    collection(db, `accounts/${accountId}/pointsEvents`),
+    where("weekKey", "==", mediaPointsWeekKey(now))
+  ));
+  return snap.docs
+    .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
+    .filter((event) => {
+      if (event.voided === true) return false;
+      if (String(event.type || "") !== "media_upload") return false;
+      if (String(event.sourceModule || "") !== "media") return false;
+      if (String(event.staffId || "") !== staffId) return false;
+      return mediaPointsTimestampDayKey(event.createdAt) === todayKey;
+    });
+}
+
+async function awardMediaUploadPoints({ mediaIds, mediaType, work, fileHashes }) {
+  try {
+    const ids = Array.isArray(mediaIds) ? mediaIds.filter(Boolean) : [mediaIds].filter(Boolean);
+    if (!ids.length) return;
+    const accountId = getMediaPointsAccountId();
+    const locationId = getMediaPointsLocationId(work);
+    const staffId = String(currentUserProfile?.staffId || "").trim();
+    const staffName = String(currentUserProfile?.staffName || "").trim();
+    if (!accountId || !locationId || !staffId) return;
+    if (typeof window.ffGetPointsSettings !== "function" || typeof window.ffCreatePointsEvent !== "function") return;
+
+    console.log("[Points] media upload detected", { mediaIds: ids, staffId, locationId });
+    const resolved = resolveMediaPointsType(mediaType);
+    console.log("[Points] media type resolved", resolved);
+    const settings = await window.ffGetPointsSettings(accountId, locationId);
+    const points = Number(settings?.[resolved.key]);
+    const awardIds = resolved.beforeAfter ? ids.slice(0, 1) : ids;
+    const todayEvents = await getTodayMediaUploadPointEvents(accountId, staffId);
+    const existingHashes = new Set(todayEvents.map((event) => String(event.fileHash || "")).filter(Boolean));
+    const hashList = Array.isArray(fileHashes) ? fileHashes : [];
+    const awardPairs = awardIds.map((mediaId, idx) => ({
+      mediaId,
+      fileHash: String(hashList[idx] || "").trim(),
+    })).filter((pair) => {
+      if (pair.fileHash && existingHashes.has(pair.fileHash)) {
+        console.log("[Points] media duplicate skipped", { mediaId: pair.mediaId, fileHash: pair.fileHash });
+        return false;
+      }
+      return true;
+    });
+    const todayCount = todayEvents.length;
+    const remaining = Math.max(0, MEDIA_UPLOAD_POINTS_DAILY_CAP - todayCount);
+    if (remaining <= 0) {
+      console.log("[Points AntiSpam] daily cap reached", { staffId, cap: MEDIA_UPLOAD_POINTS_DAILY_CAP });
+      return;
+    }
+    const cappedAwardPairs = awardPairs.slice(0, remaining);
+    if (cappedAwardPairs.length < awardPairs.length) {
+      console.log("[Points AntiSpam] daily cap reached", { staffId, cap: MEDIA_UPLOAD_POINTS_DAILY_CAP });
+    }
+
+    await Promise.all(cappedAwardPairs.map(async ({ mediaId, fileHash }) => {
+      const result = await window.ffCreatePointsEvent({
+        accountId,
+        staffId,
+        staffName,
+        locationId,
+        type: "media_upload",
+        sourceModule: "media",
+        sourceId: String(mediaId),
+        points: Number.isFinite(points) ? points : 0,
+        uniquePerSource: true,
+        fileHash,
+        sourceMeta: {
+          mediaType: resolved.eventType,
+          beforeAfter: resolved.beforeAfter,
+        },
+      });
+      if (result?.duplicate) {
+        console.log("[Points] media duplicate skipped", { mediaId });
+      } else if (result?.created) {
+        console.log("[Points] media points added", { mediaId, points: Number.isFinite(points) ? points : 0 });
+      }
+    }));
+  } catch (err) {
+    console.warn("[Points] media upload failed", err);
+  }
+}
+
 function toggleFileInputs() {
   const mediaType = getMediaType();
   const single = document.getElementById("uploadWorkFileSingle");
@@ -911,6 +1074,7 @@ async function doUpload() {
       } else {
         files = document.getElementById("uploadWorkFileInput")?.files?.[0];
       }
+      const fileHashes = await hashMediaPointFiles(files, mediaType);
       const { workId, mediaIds } = await createWorkWithMedia(
         {
           staffId: currentUserProfile.staffId,
@@ -924,6 +1088,12 @@ async function doUpload() {
         files,
         mediaType
       );
+      void awardMediaUploadPoints({
+        mediaIds,
+        mediaType,
+        fileHashes,
+        work: { locationId: typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function" ? window.ffGetActiveLocationId() : "" },
+      });
       showUploadMessage(`Success! Work created. ${mediaIds.length} media item(s) added.`, false);
       userWorks.unshift({ id: workId, categoryIds, categoryNames, categoryId: categoryIds[0], categoryName: categoryNames[0], serviceType: categoryNames[0], caption, status: "active" });
       populateWorksDropdown();
@@ -942,7 +1112,11 @@ async function doUpload() {
       } else {
         files = document.getElementById("uploadWorkFileInput")?.files?.[0];
       }
+      const fileHashes = await hashMediaPointFiles(files, mediaType);
       const mediaIds = await addMediaToExistingWork(workId, files, mediaType);
+      getContentWork(workId)
+        .then((work) => awardMediaUploadPoints({ mediaIds, mediaType, work, fileHashes }))
+        .catch(() => awardMediaUploadPoints({ mediaIds, mediaType, work: null, fileHashes }));
       showUploadMessage(`Success! ${mediaIds.length} media item(s) added.`, false);
       document.getElementById("uploadWorkFileInput").value = "";
       document.getElementById("uploadWorkFileBefore").value = "";

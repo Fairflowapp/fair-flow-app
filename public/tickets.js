@@ -1354,6 +1354,76 @@ async function setTicketServiceUpgrade(ticketId, enabled) {
   });
 }
 
+function getTicketUpgradePointsAccountId() {
+  return String(currentUserProfile?.salonId || (typeof window !== 'undefined' && (window.currentAccountId || window.accountId || window.currentSalonId)) || '').trim();
+}
+
+function getTicketUpgradePointsLocationId(ticket) {
+  const fromTicket = String(ticket?.locationId || '').trim();
+  if (fromTicket) return fromTicket;
+  try {
+    const active = getActiveLocationIdForTickets();
+    if (active) return String(active).trim();
+  } catch (_) {}
+  return 'default';
+}
+
+async function getTicketUpgradePointsValue(accountId, locationId) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetPointsSettings === 'function') {
+      const settings = await window.ffGetPointsSettings(accountId, locationId);
+      const configured = Number(settings?.ticketUpgrade);
+      if (Number.isFinite(configured)) return configured;
+    }
+  } catch (_) {}
+  try {
+    const snap = await getDoc(doc(db, `accounts/${accountId}/settings/points`));
+    const configured = Number((snap.data() || {}).ticketUpgrade);
+    if (Number.isFinite(configured)) return configured;
+  } catch (_) {}
+  return 5;
+}
+
+async function awardTicketUpgradePoints(ticket) {
+  try {
+    if (!ticket || !ticket.id) {
+      console.log('[Ticket Upgrade Points] skipped', { reason: 'missing_ticket' });
+      return;
+    }
+    if (typeof window === 'undefined' || typeof window.ffCreatePointsEvent !== 'function') {
+      console.log('[Ticket Upgrade Points] skipped', { reason: 'points_engine_unavailable', ticketId: ticket.id });
+      return;
+    }
+    const accountId = getTicketUpgradePointsAccountId();
+    const locationId = getTicketUpgradePointsLocationId(ticket);
+    const staffId = String(ticket.technicianStaffId || '').trim();
+    const staffName = String(ticket.technicianName || staffId || '').trim();
+    if (!accountId || !locationId || !staffId) {
+      console.log('[Ticket Upgrade Points] skipped', { reason: 'missing_required_fields', ticketId: ticket.id, accountId, locationId, staffId });
+      return;
+    }
+    const points = await getTicketUpgradePointsValue(accountId, locationId);
+    const result = await window.ffCreatePointsEvent({
+      accountId,
+      staffId,
+      staffName,
+      locationId,
+      type: 'ticket_upgrade',
+      sourceModule: 'tickets',
+      sourceId: String(ticket.id),
+      points,
+      uniquePerSource: true
+    });
+    if (result?.created) {
+      console.log('[Ticket Upgrade Points] awarded', { ticketId: ticket.id, staffId, points });
+    } else {
+      console.log('[Ticket Upgrade Points] skipped', { ticketId: ticket.id, staffId, reason: result?.reason || (result?.duplicate ? 'duplicate' : 'not_created') });
+    }
+  } catch (err) {
+    console.warn('[Ticket Upgrade Points] error', err);
+  }
+}
+
 /** Does not remove ticketSummaries; marks matching rows when the live ticket is permanently deleted. */
 async function markTicketSummariesSourceDeleted(salonId, ticketId) {
   if (!salonId || !ticketId) return;
@@ -3103,6 +3173,9 @@ function setupTicketServiceUpgradeControl(ticket, canUse) {
       paintTicketServiceUpgradeButton(next);
       await setTicketServiceUpgrade(ticket.id, next);
       ticket.serviceUpgrade = next;
+      if (next) {
+        void awardTicketUpgradePoints(ticket);
+      }
       showToast(next ? 'Service upgrade marked' : 'Service upgrade removed', 'success');
     } catch (e) {
       paintTicketServiceUpgradeButton(!next);

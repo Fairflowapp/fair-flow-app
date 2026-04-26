@@ -3022,6 +3022,7 @@ function moveTaskToPending(taskId, workerName) {
             // Update task in ACTIVE: set status='pending' and assignedTo
             task.status = 'pending';
             task.assignedTo = workerName;
+            task.assignedStaffId = String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || task.assignedStaffId || "").trim() || null;
             
             console.log(`[MOVE TO PENDING] Updated task in ACTIVE:`, {
                 tab,
@@ -3054,6 +3055,7 @@ function moveTaskToPending(taskId, workerName) {
                     instructions: task.instructions || task.info || task.details || '',
                     status: 'pending',
                     assignedTo: workerName,
+                    assignedStaffId: String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || task.assignedStaffId || "").trim() || null,
                     assignTo: task.assignTo !== undefined ? task.assignTo : 'all',
                     technicianTypes: task.technicianTypes
                 };
@@ -3148,7 +3150,8 @@ function moveTaskToPending(taskId, workerName) {
                         title: task.title,
                         instructions: task.instructions || task.info || task.details || "",
                         status: "pending",
-                        assignedTo: workerName
+                        assignedTo: workerName,
+                        assignedStaffId: String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || task.assignedStaffId || "").trim() || null
                     };
                     
                     // Add to pending list (runtime state only)
@@ -3197,6 +3200,147 @@ function moveTaskToPending(taskId, workerName) {
 
 // Expose to window for use in index.html
 window.moveTaskToPending = moveTaskToPending;
+
+function getPointsAccountIdForTasks() {
+    const candidates = [
+        window.currentAccountId,
+        window.accountId,
+        window.currentSalonId,
+        typeof currentSalonId !== "undefined" ? currentSalonId : null,
+    ];
+    for (const value of candidates) {
+        if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+}
+
+function getPointsLocationIdForTasks() {
+    try {
+        if (typeof window.ffGetActiveLocationId === "function") {
+            const value = window.ffGetActiveLocationId();
+            if (typeof value === "string" && value.trim()) return value.trim();
+        }
+    } catch (_) {}
+    const fallback = typeof window.__ff_active_location_id === "string" ? window.__ff_active_location_id.trim() : "";
+    return fallback || "";
+}
+
+function getPointsStaffRowsForTasks() {
+    try {
+        const store = ffSafeParseJSON(localStorage.getItem("ff_staff_v1"), {});
+        return Array.isArray(store.staff) ? store.staff : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+function findPointsStaffByNameForTasks(name) {
+    const target = String(name || "").trim().toLowerCase();
+    if (!target) return null;
+    return getPointsStaffRowsForTasks().find((staff) => {
+        const staffName = String(staff?.name || staff?.displayName || staff?.email || "").trim().toLowerCase();
+        return staffName && staffName === target && staff?.isArchived !== true;
+    }) || null;
+}
+
+function getCurrentPointsStaffForTasks() {
+    const staffId = String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || "").trim();
+    if (!staffId) return null;
+    const staff = getPointsStaffRowsForTasks().find((row) => {
+        const rowId = String(row?.id || row?.staffId || "").trim();
+        return rowId && rowId === staffId;
+    });
+    return {
+        staffId,
+        staffName: String(staff?.name || staff?.displayName || window.__ff_authedStaffName || "").trim(),
+        source: "current"
+    };
+}
+
+function resolveTaskPointsStaff({ task, pendingTask, workerName, assignedEmployee }) {
+    const candidates = [task, pendingTask].filter(Boolean);
+    const idFields = ["completedByStaffId", "assignedStaffId", "selectedStaffId", "staffId"];
+    for (const sourceTask of candidates) {
+        for (const field of idFields) {
+            const staffId = String(sourceTask?.[field] || "").trim();
+            if (staffId) {
+                const staff = getPointsStaffRowsForTasks().find((row) => {
+                    const rowId = String(row?.id || row?.staffId || "").trim();
+                    return rowId && rowId === staffId;
+                });
+                const staffName = String(
+                    sourceTask.completedBy ||
+                    sourceTask.assignedTo ||
+                    sourceTask.selectedStaffName ||
+                    staff?.name ||
+                    staff?.displayName ||
+                    workerName ||
+                    ""
+                ).trim();
+                const resolved = { staffId, staffName, source: field };
+                console.log("[Points] resolved staff for task", resolved);
+                return resolved;
+            }
+        }
+    }
+
+    const nameCandidates = [
+        task?.completedBy,
+        task?.assignedTo,
+        task?.selectedStaffName,
+        pendingTask?.completedBy,
+        pendingTask?.assignedTo,
+        pendingTask?.selectedStaffName,
+        assignedEmployee,
+        workerName
+    ];
+    for (const name of nameCandidates) {
+        const staff = findPointsStaffByNameForTasks(name);
+        if (staff) {
+            const resolved = {
+                staffId: String(staff.id || staff.staffId || "").trim(),
+                staffName: String(staff.name || staff.displayName || name || "").trim(),
+                source: "name"
+            };
+            if (resolved.staffId) {
+                console.log("[Points] resolved staff for task", resolved);
+                return resolved;
+            }
+        }
+    }
+
+    const fallback = getCurrentPointsStaffForTasks();
+    if (fallback) console.log("[Points] resolved staff for task", fallback);
+    return fallback || { staffId: "", staffName: String(workerName || "").trim(), source: "none" };
+}
+
+function awardTaskCompletedPoints({ taskId, staffId, staffName }) {
+    try {
+        const accountId = getPointsAccountIdForTasks();
+        const locationId = getPointsLocationIdForTasks();
+        const resolvedStaffId = String(staffId || "").trim();
+        const sourceId = String(taskId || "").trim();
+        if (!accountId || !locationId || !resolvedStaffId || !sourceId) return;
+        if (typeof window.ffGetPointsSettings !== "function" || typeof window.ffCreatePointsEvent !== "function") return;
+        window.ffGetPointsSettings(accountId, locationId)
+            .then((settings) => {
+                const points = Number(settings && settings.taskCompleted);
+                return window.ffCreatePointsEvent({
+                    accountId,
+                    staffId: resolvedStaffId,
+                    staffName: String(staffName || "").trim(),
+                    locationId,
+                    type: "task_completed",
+                    sourceModule: "tasks",
+                    sourceId,
+                    points: Number.isFinite(points) ? points : 0,
+                });
+            })
+            .catch((err) => console.warn("[Points] task_completed failed", err));
+    } catch (err) {
+        console.warn("[Points] task_completed failed", err);
+    }
+}
 
 // Mark task as done (tab-specific storage)
 function markTaskDone(taskId, workerName) {
@@ -3282,6 +3426,13 @@ function markTaskDone(taskId, workerName) {
     });
     
     console.log(`[MARK DONE] Active task index: ${idx}, keyId: ${keyId}`);
+    const sourceTaskForPoints = idx >= 0 ? activeTasks[idx] : pendingTask;
+    const pointsStaff = resolveTaskPointsStaff({
+        task: sourceTaskForPoints,
+        pendingTask,
+        workerName,
+        assignedEmployee
+    });
     
     // For yearly tasks, store in done list with completedYear and scheduleYear
     if (tab === 'yearly') {
@@ -3319,6 +3470,7 @@ function markTaskDone(taskId, workerName) {
             status: 'done',
             completedAt: completionTime,
             completedBy: assignedEmployee,
+            completedByStaffId: pointsStaff.staffId || null,
             completedYear: currentYear,
             scheduleYear: scheduleYear
         };
@@ -3352,6 +3504,7 @@ function markTaskDone(taskId, workerName) {
         activeTasks[idx].status = 'done';
         activeTasks[idx].completedAt = completionTime;
         activeTasks[idx].completedBy = assignedEmployee;
+        activeTasks[idx].completedByStaffId = pointsStaff.staffId || null;
         activeTasks[idx].active = true;
         activeTasks[idx].assignedTo = null;
         
@@ -3376,6 +3529,7 @@ function markTaskDone(taskId, workerName) {
             status: 'done',
             completedAt: completionTime,
             completedBy: assignedEmployee,
+            completedByStaffId: pointsStaff.staffId || null,
             assignedTo: null
         };
         activeTasks.push(newTask);
@@ -3425,6 +3579,12 @@ function markTaskDone(taskId, workerName) {
         role: '-',
         performedBy: '-',
         extra: currentTab ? { tab: currentTab, status: 'done' } : { status: 'done' }
+    });
+
+    awardTaskCompletedPoints({
+        taskId: keyId,
+        staffId: pointsStaff.staffId,
+        staffName: pointsStaff.staffName || assignedEmployee || workerName
     });
     
     console.log(`%c[MARK DONE] COMPLETE`, 'color:green;font-weight:bold', {

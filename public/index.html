@@ -44,7 +44,7 @@
   console.log('[BUILD MARKER] index.html loaded at', new Date().toISOString());
   window.goToChat = window.goToChat || function() {
     if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
-    ['tasksScreen','inboxScreen','mediaScreen','trainingScreen','timeClockScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    ['tasksScreen','inboxScreen','mediaScreen','trainingScreen','timeClockScreen','pointsAppScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     ['.joinBar','.wrap'].forEach(function(sel){var el=document.querySelector(sel);if(el)el.style.display='none';});
     var cs=document.getElementById('chatScreen');if(cs){cs.style.display='flex';cs.classList.remove('chat-mobile-open');}
     document.querySelectorAll('.btn-pill').forEach(function(b){b.classList.remove('active');});
@@ -69,7 +69,7 @@
   };
   window.goToMedia = window.goToMedia || function() {
     if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
-    ['tasksScreen','inboxScreen','trainingScreen','timeClockScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    ['tasksScreen','inboxScreen','trainingScreen','timeClockScreen','pointsAppScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     var chatScreen=document.getElementById('chatScreen');if(chatScreen)chatScreen.style.display='none';
     var scheduleScreen=document.getElementById('scheduleScreen');if(scheduleScreen)scheduleScreen.style.display='none';
     var joinBar=document.querySelector('.joinBar');if(joinBar)joinBar.style.display='none';
@@ -154,6 +154,7 @@ body.ff-logged-out #trainingScreen,
 body.ff-logged-out #scheduleScreen,
 body.ff-logged-out #timeClockScreen,
 body.ff-logged-out #inventoryScreen,
+body.ff-logged-out #pointsAppScreen,
 body.ff-logged-out #ff-onboarding-wizard {
   display: none !important;
   visibility: hidden !important;
@@ -3129,6 +3130,16 @@ dialog footer button, .code-dialog footer button {
                 </div>
               </div>
             </div>
+            <div class="apps-panel-item" data-app="points" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.9 6.1 6.6.9-4.8 4.7 1.1 6.6L12 17.2l-5.8 3.1 1.1-6.6L2.5 9l6.6-.9L12 2z"></path></svg>
+                </div>
+                <div>
+                  <div>Fair Flow Points</div>
+                </div>
+              </div>
+            </div>
             <div class="apps-panel-item" data-app="inventory" style="cursor:pointer;">
               <div class="apps-panel-item__content">
                 <div>
@@ -3386,11 +3397,68 @@ dialog footer button, .code-dialog footer button {
         <div id="userProfileCardSharedSetup" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Shared Setup</h3>
           <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;line-height:1.45;">Manage shared data across all locations. Changes here affect all locations unless overridden.</p>
+          <style>
+            #userProfileCardSharedSetup .shared-setup-action-btn {
+              padding: 12px 14px;
+              border: 1px solid #ddd6fe;
+              background: linear-gradient(135deg, #ffffff 0%, #faf5ff 100%);
+              color: #6d28d9;
+              border-radius: 10px;
+              font-size: 13px;
+              font-weight: 400;
+              cursor: pointer;
+              text-align: left;
+              box-shadow: 0 1px 2px rgba(109, 40, 217, 0.08);
+              transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+            }
+            #userProfileCardSharedSetup .shared-setup-action-btn:hover {
+              background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+              border-color: #c4b5fd;
+              box-shadow: 0 6px 14px rgba(109, 40, 217, 0.12);
+              transform: translateY(-1px);
+            }
+            #userProfileCardSharedSetup .shared-setup-action-btn:active {
+              transform: translateY(0);
+              box-shadow: 0 2px 6px rgba(109, 40, 217, 0.1);
+            }
+          </style>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
-            <button type="button" onclick="window.ffOpenSharedSetupServiceCatalog && window.ffOpenSharedSetupServiceCatalog()" style="padding:12px 14px;border:1px solid #e9d5ff;background:#faf5ff;color:#5b21b6;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;text-align:left;">Manage Service Catalog</button>
-            <button type="button" onclick="window.ffOpenSharedTaskTemplates && window.ffOpenSharedTaskTemplates()" style="padding:12px 14px;border:1px solid #e9d5ff;background:#fff;color:#5b21b6;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;text-align:left;">Manage Task Templates</button>
-            <button type="button" onclick="window.ffOpenSharedInventoryCatalog && window.ffOpenSharedInventoryCatalog()" style="padding:12px 14px;border:1px solid #e9d5ff;background:#fff;color:#5b21b6;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;text-align:left;">Manage Inventory Catalog</button>
-            <button type="button" onclick="window.ffOpenSharedChatTemplates && window.ffOpenSharedChatTemplates()" style="padding:12px 14px;border:1px solid #e9d5ff;background:#fff;color:#5b21b6;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;text-align:left;">Manage Chat Templates</button>
+            <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedSetupServiceCatalog && window.ffOpenSharedSetupServiceCatalog()">Manage Service Catalog</button>
+            <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedTaskTemplates && window.ffOpenSharedTaskTemplates()">Manage Task Templates</button>
+            <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedInventoryCatalog && window.ffOpenSharedInventoryCatalog()">Manage Inventory Catalog</button>
+            <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedChatTemplates && window.ffOpenSharedChatTemplates()">Manage Chat Templates</button>
+            <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenPointsSettings && window.ffOpenPointsSettings()">Manage Points Settings</button>
+          </div>
+        </div>
+
+        <div id="pointsSettingsModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:200002;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()">
+          <div style="width:100%;max-width:560px;max-height:86vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(15,23,42,0.26);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px 14px;border-bottom:1px solid #e5e7eb;">
+              <div>
+                <h3 id="pointsSettingsTitle" style="margin:0;font-size:18px;font-weight:800;color:#111827;">Fair Flow Points</h3>
+                <p id="pointsSettingsSubtitle" style="margin:6px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Configure account-level point values.</p>
+              </div>
+              <button type="button" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()" style="border:none;background:none;color:#6b7280;font-size:24px;line-height:1;cursor:pointer;">×</button>
+            </div>
+            <div style="padding:16px 20px;overflow-y:auto;">
+              <div id="pointsSettingsFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Task Completed<input id="pointsTaskCompleted" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Photo Upload<input id="pointsPhotoUpload" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Video Upload<input id="pointsVideoUpload" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Before/After Upload<input id="pointsBeforeAfterUpload" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Upgrade Service<input id="pointsUpgradeService" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Ticket Upgrade<input id="pointsTicketUpgrade" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue First<input id="pointsQueueFirst" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Second<input id="pointsQueueSecond" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Third<input id="pointsQueueThird" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Join<input id="pointsQueueJoin" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Monthly Goal<input id="pointsMonthlyGoal" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid #f3f4f6;background:#fafafa;">
+              <button type="button" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()" style="padding:8px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+              <button type="button" id="pointsSettingsSaveBtn" onclick="window.ffSavePointsSettings && window.ffSavePointsSettings()" style="padding:8px 16px;border:none;border-radius:10px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Save</button>
+            </div>
           </div>
         </div>
 
@@ -4347,6 +4415,7 @@ dialog footer button, .code-dialog footer button {
               <option value="all">All</option>
               <option value="queue">Queue</option>
               <option value="tasks">Tasks</option>
+              <option value="points">Points</option>
             </select>
           </label>
           <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
@@ -6119,6 +6188,9 @@ function setHistorySourceFilter(value) {
   if (select) {
     select.value = window.__historySourceFilter;
   }
+  if (window.__historySourceFilter === 'points' || window.__historySourceFilter === 'all') {
+    try { ffSyncPointsCorrectionsToHistory(true); } catch (_) {}
+  }
   renderHistory();
 }
 window.setHistorySourceFilter = setHistorySourceFilter;
@@ -6222,11 +6294,33 @@ function syncHistoryWorkerFilterOptions(entries) {
 }
 window.syncHistoryWorkerFilterOptions = syncHistoryWorkerFilterOptions;
 
+function ffIsDeletedPointsHistoryEntry(entry) {
+  if (!entry || typeof entry !== 'object') return false;
+  if (String(entry.source || '').toLowerCase() !== 'points') return false;
+  if (String(entry.correctionEventId || '').trim()) return true;
+  if (String(entry.correctedEventId || '').trim()) return true;
+  if (Number(entry.pointsRemoved) > 0) return true;
+  return String(entry.action || '').toLowerCase().indexOf('points corrected: removed') === 0;
+}
+
+window.__ffPointsCorrectionHistoryEntries = window.__ffPointsCorrectionHistoryEntries || [];
+
 function getFilteredHistoryEntries(options = {}) {
   const { syncWorkerOptions = false, syncActionOptions = false, ignoreActionFilter = false, ignoreWorkerFilter = false, ignoreOrder = false } = options || {};
   const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
   log = logArr;
-  const normalizedEntries = logArr.map(normalizeHistoryEntry);
+  const pointsCorrectionMemory = Array.isArray(window.__ffPointsCorrectionHistoryEntries)
+    ? window.__ffPointsCorrectionHistoryEntries
+    : [];
+  const localCorrectionIds = new Set(logArr
+    .filter(function(entry) { return entry && typeof entry === 'object'; })
+    .map(function(entry) { return String(entry.correctionEventId || '').trim(); })
+    .filter(Boolean));
+  const mergedLogEntries = logArr.concat(pointsCorrectionMemory.filter(function(entry) {
+    const correctionId = String(entry?.correctionEventId || '').trim();
+    return correctionId && !localCorrectionIds.has(correctionId);
+  }));
+  const normalizedEntries = mergedLogEntries.map(normalizeHistoryEntry);
   // Location scope: only show rows that belong to the active branch.
   // Legacy entries without a `locationId` are treated as belonging to the
   // "default" (primary) location so pre-multi-location history stays
@@ -6240,6 +6334,7 @@ function getFilteredHistoryEntries(options = {}) {
   } catch (_) {}
   const sourceFilter = (window.__historySourceFilter || 'all').toLowerCase();
   let rows = normalizedEntries.filter((entry) => {
+    if (sourceFilter === 'points') return true;
     const entryLoc = (entry && typeof entry.locationId === 'string' && entry.locationId.trim())
       ? entry.locationId.trim()
       : 'default';
@@ -6247,6 +6342,9 @@ function getFilteredHistoryEntries(options = {}) {
   });
   if (sourceFilter !== 'all') {
     rows = rows.filter((normalized) => normalized.source.toLowerCase() === sourceFilter);
+  }
+  if (sourceFilter === 'points') {
+    rows = rows.filter(ffIsDeletedPointsHistoryEntry);
   }
   const rangeValue = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
   rows = applyHistoryRangeFilter(rows, rangeValue);
@@ -6272,6 +6370,108 @@ function getFilteredHistoryEntries(options = {}) {
   return rows;
 }
 window.getFilteredHistoryEntries = getFilteredHistoryEntries;
+
+let __ffPointsHistorySyncRunning = false;
+let __ffPointsHistoryLastSyncAt = 0;
+
+function ffPointsHistoryAccountId() {
+  try {
+    if (typeof ffSharedSetupAccountId === 'function') {
+      const id = ffSharedSetupAccountId();
+      if (id) return id;
+    }
+  } catch (_) {}
+  return String(window.currentAccountId || window.accountId || window.currentSalonId || '').trim();
+}
+
+function ffPointCorrectionCreatedDate(event) {
+  try {
+    if (event?.createdAt && typeof event.createdAt.toDate === 'function') return event.createdAt.toDate();
+  } catch (_) {}
+  return new Date();
+}
+
+function ffPointCorrectionHistoryAction(event) {
+  const points = Math.abs(Number(event?.points) || 0);
+  const staffName = String(event?.staffName || event?.staffId || 'Staff').trim() || 'Staff';
+  const reason = String(event?.correctionReason || event?.voidedReason || 'Corrected from points dashboard').trim();
+  const meta = event?.sourceMeta || {};
+  const correctedType = String(meta.correctedType || 'point event').replace(/_/g, ' ');
+  const correctedSource = String(meta.correctedSourceModule || '').trim();
+  return 'Points corrected: removed ' + points + ' point' + (points === 1 ? '' : 's')
+    + ' from ' + staffName
+    + ' for ' + (correctedSource ? correctedSource + ' ' : '') + correctedType
+    + '. Reason: ' + reason;
+}
+
+function ffPointCorrectionHistoryEntryFromEvent(event, correctionId) {
+  const created = ffPointCorrectionCreatedDate(event);
+  const actorName = String(event.correctedByName || event.performedBy || 'Manager').trim() || 'Manager';
+  const actorRole = String(event.correctedByRole || event.role || 'Manager').trim() || 'Manager';
+  const staffName = String(event.staffName || event.staffId || 'Staff').trim() || 'Staff';
+  return {
+    date: typeof formatHistoryDate === 'function' ? formatHistoryDate(created) : created.toLocaleDateString(),
+    time: typeof formatHistoryTime === 'function' ? formatHistoryTime(created) : created.toLocaleTimeString(),
+    action: ffPointCorrectionHistoryAction(event),
+    role: actorRole,
+    performedBy: actorName,
+    worker: staffName,
+    source: 'points',
+    locationId: String(event.locationId || '').trim(),
+    ts: created.getTime(),
+    pointsRemoved: Math.abs(Number(event.points) || 0),
+    correctedEventId: String(event.sourceMeta?.correctedEventId || event.sourceId || '').trim(),
+    correctionEventId: correctionId,
+  };
+}
+
+async function ffSyncPointsCorrectionsToHistory(force = false) {
+  const sourceFilter = String(window.__historySourceFilter || 'all').toLowerCase();
+  if (sourceFilter !== 'all' && sourceFilter !== 'points') return;
+  if (__ffPointsHistorySyncRunning) return;
+  if (!force && Date.now() - __ffPointsHistoryLastSyncAt < 5000) return;
+  const accountId = ffPointsHistoryAccountId();
+  if (!accountId) return;
+  if (typeof getTrainingDb !== 'function' || typeof getTrainingFirestoreApi !== 'function') return;
+  __ffPointsHistorySyncRunning = true;
+  try {
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    const snap = await api.getDocs(api.query(
+      api.collection(db, `accounts/${accountId}/pointsEvents`),
+      api.where('type', '==', 'points_correction')
+    ));
+    const memoryEntries = [];
+    const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+    const existingCorrectionIds = new Set(logArr
+      .filter(function(entry) { return entry && typeof entry === 'object'; })
+      .map(function(entry) { return String(entry.correctionEventId || '').trim(); })
+      .filter(Boolean));
+    let added = 0;
+    snap.docs.forEach(function(docSnap) {
+      const event = { id: docSnap.id, ...(docSnap.data() || {}) };
+      const entry = ffPointCorrectionHistoryEntryFromEvent(event, docSnap.id);
+      memoryEntries.push(entry);
+      if (existingCorrectionIds.has(docSnap.id)) return;
+      logArr.push(entry);
+      existingCorrectionIds.add(docSnap.id);
+      added += 1;
+    });
+    window.__ffPointsCorrectionHistoryEntries = memoryEntries;
+    if (added > 0) {
+      localStorage.setItem('ffv24_log', JSON.stringify(logArr));
+      if (typeof log !== 'undefined') log = logArr;
+      console.log('[PointsApp] synced point corrections to history', { added });
+      if (typeof renderHistory === 'function') renderHistory();
+    }
+    __ffPointsHistoryLastSyncAt = Date.now();
+  } catch (err) {
+    console.warn('[PointsApp] points history sync failed', err);
+  } finally {
+    __ffPointsHistorySyncRunning = false;
+  }
+}
+window.ffSyncPointsCorrectionsToHistory = ffSyncPointsCorrectionsToHistory;
 
 // Helper function to get actor info from latest validated code
 function getHistoryActor() {
@@ -6440,7 +6640,11 @@ function normalizeHistoryEntry(entry) {
       worker: entry.worker || entry.assignedTo || '',
       source: entry.source || 'queue',
       locationId: (typeof entry.locationId === 'string' && entry.locationId.trim()) ? entry.locationId.trim() : '',
-      ts: entry.ts || entry.timestamp || Date.now()
+      ts: entry.ts || entry.timestamp || Date.now(),
+      pointsRemoved: entry.pointsRemoved,
+      correctedEventId: entry.correctedEventId,
+      correctionEventId: entry.correctionEventId,
+      historyKey: entry.historyKey
     };
   }
   
@@ -7341,6 +7545,7 @@ function ffUpdateAppsPanelPermissionVisibility() {
   setAppsTileVisible('.apps-panel-item[data-app="chat"]', tabUnlessExplicitOff('chat_view'));
   setAppsTileVisible('.apps-panel-item[data-app="media"]', tabUnlessExplicitOff('media_view'));
   setAppsTileVisible('.apps-panel-item[data-app="training"]', tabUnlessExplicitOff('training_view'));
+  setAppsTileVisible('.apps-panel-item[data-app="points"]', tabUnlessExplicitOff('points_view'));
   setAppsTileVisible('.apps-panel-item[data-app="inventory"]', tabUnlessExplicitOff('inventory_view'));
 
   let scheduleOk = true;
@@ -7397,6 +7602,7 @@ function ffIsFullscreenModuleCoveringQueue() {
     'scheduleScreen',
     'timeClockScreen',
     'inventoryScreen',
+    'pointsAppScreen',
     'userProfileScreen',
     'myProfileScreen',
     'manageQueueScreen'
@@ -8858,6 +9064,114 @@ function getCurrentStaffPin(staffIdOrName) {
   }
 }
 
+function ffQueuePointsDateKey(date) {
+  const d = date instanceof Date ? date : new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function ffQueuePointsWeekKey(date) {
+  const d = date instanceof Date ? new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())) : new Date();
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const year = d.getUTCFullYear();
+  const yearStart = Date.UTC(year, 0, 1);
+  const week = Math.ceil((((d.getTime() - yearStart) / 86400000) + 1) / 7);
+  return year + '-W' + String(week).padStart(2, '0');
+}
+
+function ffGetQueuePointsAccountId() {
+  if (typeof ffSharedSetupAccountId === 'function') return ffSharedSetupAccountId();
+  const candidates = [window.currentAccountId, window.accountId, window.currentSalonId];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function ffGetQueuePointsLocationId() {
+  try {
+    if (typeof window.ffGetActiveLocationId === 'function') {
+      const value = window.ffGetActiveLocationId();
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+  } catch (_) {}
+  return typeof window.__ff_active_location_id === 'string' ? window.__ff_active_location_id.trim() : '';
+}
+
+function ffQueueJoinSourceId(locationId, staffId, dateKey) {
+  return String(locationId || '').trim() + '_' + String(staffId || '').trim() + '_' + String(dateKey || '').trim();
+}
+
+async function ffAwardQueueJoinPoints({ staffId, staffName }) {
+  try {
+    const accountId = ffGetQueuePointsAccountId();
+    const locationId = ffGetQueuePointsLocationId();
+    const cleanStaffId = String(staffId || '').trim();
+    const cleanStaffName = String(staffName || '').trim();
+    if (!accountId || !locationId || !cleanStaffId) return;
+    if (typeof window.ffGetPointsSettings !== 'function' || typeof window.ffCreatePointsEvent !== 'function') return;
+
+    console.log('[Points] queue join detected', { staffId: cleanStaffId, staffName: cleanStaffName, locationId });
+
+    const now = new Date();
+    const dateKey = ffQueuePointsDateKey(now);
+    const weekKey = ffQueuePointsWeekKey(now);
+    const sourceId = ffQueueJoinSourceId(locationId, cleanStaffId, dateKey);
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    const snap = await api.getDocs(api.query(
+      api.collection(db, `accounts/${accountId}/pointsEvents`),
+      api.where('weekKey', '==', weekKey)
+    ));
+    let sameLocationTodayCount = 0;
+    let alreadyAwarded = false;
+    snap.docs.forEach(function(docSnap) {
+      const event = docSnap.data() || {};
+      if (String(event.type || '') !== 'queue_join') return;
+      if (String(event.sourceModule || '') !== 'queue') return;
+      if (String(event.locationId || '') !== locationId) return;
+      if (!String(event.sourceId || '').endsWith('_' + dateKey)) return;
+      sameLocationTodayCount += 1;
+      if (String(event.staffId || '') === cleanStaffId || String(event.sourceId || '') === sourceId) alreadyAwarded = true;
+    });
+
+    if (alreadyAwarded) {
+      console.log('[Points] queue duplicate skipped', { staffId: cleanStaffId, locationId, dateKey });
+      return;
+    }
+
+    const rank = sameLocationTodayCount + 1;
+    console.log('[Points] queue rank resolved', { staffId: cleanStaffId, locationId, dateKey, rank });
+
+    const settings = await window.ffGetPointsSettings(accountId, locationId);
+    const pointsByRank = rank === 1
+      ? Number(settings.queueFirst)
+      : rank === 2
+        ? Number(settings.queueSecond)
+        : rank === 3
+          ? Number(settings.queueThird)
+          : Number(settings.queueJoin);
+    const points = Number.isFinite(pointsByRank) ? pointsByRank : 0;
+    const result = await window.ffCreatePointsEvent({
+      accountId,
+      staffId: cleanStaffId,
+      staffName: cleanStaffName,
+      locationId,
+      type: 'queue_join',
+      sourceModule: 'queue',
+      sourceId,
+      points
+    });
+    if (result && result.duplicate) {
+      console.log('[Points] queue duplicate skipped', { staffId: cleanStaffId, locationId, dateKey });
+    } else if (result && result.created) {
+      console.log('[Points] queue points added', { staffId: cleanStaffId, locationId, dateKey, rank, points });
+    }
+  } catch (err) {
+    console.warn('[Points] queue join failed', err);
+  }
+}
+
 async function handleJoin(){
   if (window.__ff_joinInProgress) {
     console.warn('[handleJoin] Join already in progress, ignoring duplicate trigger');
@@ -9108,6 +9422,11 @@ async function handleJoin(){
   }
   
   console.log('[handleJoin] Successfully added', selectedTechnicianName, 'to queue');
+
+  ffAwardQueueJoinPoints({
+    staffId,
+    staffName: selectedTechnicianName
+  });
 
   // Join is done directly by worker (Tech action)
   const techActor = getActorForAction({ workerName: selectedTechnicianName });
@@ -10137,6 +10456,11 @@ function goToQueue() {
     inventoryScreenQueue.style.display = 'none';
   }
 
+  const pointsAppScreenQueue = document.getElementById('pointsAppScreen');
+  if (pointsAppScreenQueue) {
+    pointsAppScreenQueue.style.display = 'none';
+  }
+
   // Must hide every screen that ffIsFullscreenModuleCoveringQueue() treats as "covering" the queue;
   // otherwise ffApplyQueueViewGate() defers restoring #joinBar + .wrap and the queue stays blank.
   const ticketsScreenQueue = document.getElementById('ticketsScreen');
@@ -10257,7 +10581,7 @@ function goToTimeClock() {
   }
   const screenIds = [
     'tasksScreen', 'inboxScreen', 'chatScreen', 'mediaScreen', 'ticketsScreen', 'trainingScreen',
-    'userProfileScreen', 'myProfileScreen', 'manageQueueScreen', 'scheduleScreen', 'inventoryScreen'
+    'userProfileScreen', 'myProfileScreen', 'manageQueueScreen', 'scheduleScreen', 'inventoryScreen', 'pointsAppScreen'
   ];
   screenIds.forEach(function (id) {
     const el = document.getElementById(id);
@@ -13694,6 +14018,7 @@ async function goToTraining() {
   const scheduleScreen = document.getElementById('scheduleScreen');
   const timeClockScreenTc = document.getElementById('timeClockScreen');
   const inventoryScreenTc = document.getElementById('inventoryScreen');
+  const pointsAppScreen = document.getElementById('pointsAppScreen');
   const userProfileScreen = document.getElementById('userProfileScreen');
   const manageQueueScreen = document.getElementById('manageQueueScreen');
   const ownerView = document.getElementById('owner-view');
@@ -13710,6 +14035,7 @@ async function goToTraining() {
   if (scheduleScreen) scheduleScreen.style.display = 'none';
   if (timeClockScreenTc) timeClockScreenTc.style.display = 'none';
   if (inventoryScreenTc) inventoryScreenTc.style.display = 'none';
+  if (pointsAppScreen) pointsAppScreen.style.display = 'none';
   if (userProfileScreen) userProfileScreen.style.display = 'none';
   if (manageQueueScreen) manageQueueScreen.style.display = 'none';
   if (ownerView) ownerView.style.display = 'none';
@@ -14530,6 +14856,7 @@ function goToUserProfile(section) {
   const scheduleScreenEl = document.getElementById('scheduleScreen');
   const timeClockScreenEl = document.getElementById('timeClockScreen');
   const inventoryScreenEl = document.getElementById('inventoryScreen');
+  const pointsAppScreenEl = document.getElementById('pointsAppScreen');
   if (tasksScreen && tasksScreen.style.display !== 'none') {
     previousView = 'tasks';
   } else if (chatScreen && chatScreen.style.display !== 'none') {
@@ -14546,6 +14873,8 @@ function goToUserProfile(section) {
     previousView = 'schedule';
   } else if (inventoryScreenEl && inventoryScreenEl.style.display !== 'none') {
     previousView = 'inventory';
+  } else if (pointsAppScreenEl && pointsAppScreenEl.style.display !== 'none') {
+    previousView = 'points';
   } else if (ownerView && ownerView.style.display !== 'none') {
     previousView = 'queue';
   } else {
@@ -14565,6 +14894,7 @@ function goToUserProfile(section) {
   if (mediaScreenEl) mediaScreenEl.style.display = 'none';
   if (ticketsScreenEl) ticketsScreenEl.style.display = 'none';
   if (inventoryScreenEl) inventoryScreenEl.style.display = 'none';
+  if (pointsAppScreenEl) pointsAppScreenEl.style.display = 'none';
   if (scheduleScreenEl && !keepScheduleUnderSettings) {
     scheduleScreenEl.style.display = 'none';
   }
@@ -14709,6 +15039,7 @@ function goToMyProfile() {
   const scheduleScreenEl = document.getElementById('scheduleScreen');
   const timeClockScreenElMyProf = document.getElementById('timeClockScreen');
   const inventoryScreenElMyProf = document.getElementById('inventoryScreen');
+  const pointsAppScreenElMyProf = document.getElementById('pointsAppScreen');
   if (tasksScreen && tasksScreen.style.display !== 'none') {
     previousView = 'tasks';
   } else if (chatScreen && chatScreen.style.display !== 'none') {
@@ -14725,6 +15056,8 @@ function goToMyProfile() {
     previousView = 'schedule';
   } else if (inventoryScreenElMyProf && inventoryScreenElMyProf.style.display !== 'none') {
     previousView = 'inventory';
+  } else if (pointsAppScreenElMyProf && pointsAppScreenElMyProf.style.display !== 'none') {
+    previousView = 'points';
   } else if (ownerView && ownerView.style.display !== 'none') {
     previousView = 'queue';
   } else {
@@ -14742,6 +15075,7 @@ function goToMyProfile() {
   if (timeClockScreenElMyProf) timeClockScreenElMyProf.style.display = 'none';
   if (scheduleScreenEl) scheduleScreenEl.style.display = 'none';
   if (inventoryScreenElMyProf) inventoryScreenElMyProf.style.display = 'none';
+  if (pointsAppScreenElMyProf) pointsAppScreenElMyProf.style.display = 'none';
   const trainingScreenGo = document.getElementById('trainingScreen');
   if (trainingScreenGo) trainingScreenGo.style.display = 'none';
   const manageQueueGo = document.getElementById('manageQueueScreen');
@@ -15212,6 +15546,8 @@ function goBackFromUserProfile() {
     window.goToTimeClock();
   } else if (previousView === 'inventory' && typeof window.goToInventory === 'function') {
     window.goToInventory();
+  } else if (previousView === 'points' && typeof window.goToPointsApp === 'function') {
+    window.goToPointsApp();
   } else {
     // For queue (default or explicit), call the exact same function as QUEUE tab click
     // This ensures full Queue UI initialization and data reload
@@ -18445,7 +18781,7 @@ function removeBlockingOverlays() {
     // Full-screen app panels — never force pointer-events:none (breaks Tickets/Tasks/Inbox when hidden then shown).
     const APP_SCREEN_IDS = new Set([
       'ticketsScreen', 'tasksScreen', 'inboxScreen', 'mediaScreen', 'chatScreen',
-      'scheduleScreen', 'timeClockScreen', 'trainingScreen'
+      'scheduleScreen', 'timeClockScreen', 'trainingScreen', 'pointsAppScreen'
     ]);
     const SKIP_POINTER_EVENTS_FIX_IDS = new Set(['appsOverlayBackdrop', 'appsPanel']);
     
@@ -18878,6 +19214,7 @@ function openHistoryModal() {
     workerSelect.value = window.__historyWorkerFilter || 'all';
   }
   if (typeof ffApplyHistoryActionButtonsVisibility === 'function') ffApplyHistoryActionButtonsVisibility();
+  try { ffSyncPointsCorrectionsToHistory(true); } catch (_) {}
   renderHistory();
 }
 
@@ -20799,7 +21136,7 @@ function openTasks() {
     }
 
     // Hide any other fullscreen peer modules so Tasks isn't rendered over another screen.
-    ['chatScreen','inboxScreen','mediaScreen','ticketsScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','myProfileScreen','manageQueueScreen']
+    ['chatScreen','inboxScreen','mediaScreen','ticketsScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','pointsAppScreen','myProfileScreen','manageQueueScreen']
       .forEach(function(id){ var el = document.getElementById(id); if (el) el.style.display = 'none'; });
     
     // Hide main content and Queue-specific controls (joinBar and queueControls)
@@ -27128,6 +27465,11 @@ function initializeAppsPanel() {
               window.goToTraining();
             }
             break;
+          case 'points':
+            if (typeof window.goToPointsApp === 'function') {
+              window.goToPointsApp();
+            }
+            break;
           case 'history':
             // History is a passive audit log - open directly with no PIN checks
             if (typeof openLog === 'function') {
@@ -33415,6 +33757,813 @@ function initializeUserProfileMenu() {
       if (typeof v === 'string' && v.trim()) return v.trim();
     }
     return '';
+  }
+
+  const FF_POINTS_SETTINGS_DEFAULTS = {
+    taskCompleted: 5,
+    photoUpload: 2,
+    videoUpload: 3,
+    beforeAfterUpload: 4,
+    upgradeService: 10,
+    ticketUpgrade: 5,
+    queueFirst: 10,
+    queueSecond: 7,
+    queueThird: 5,
+    queueJoin: 2,
+    monthlyGoal: 120
+  };
+
+  const FF_POINTS_SETTINGS_FIELDS = [
+    ['taskCompleted', 'pointsTaskCompleted'],
+    ['photoUpload', 'pointsPhotoUpload'],
+    ['videoUpload', 'pointsVideoUpload'],
+    ['beforeAfterUpload', 'pointsBeforeAfterUpload'],
+    ['upgradeService', 'pointsUpgradeService'],
+    ['ticketUpgrade', 'pointsTicketUpgrade'],
+    ['queueFirst', 'pointsQueueFirst'],
+    ['queueSecond', 'pointsQueueSecond'],
+    ['queueThird', 'pointsQueueThird'],
+    ['queueJoin', 'pointsQueueJoin'],
+    ['monthlyGoal', 'pointsMonthlyGoal']
+  ];
+
+  function ffNormalizePointsSettings(data) {
+    const source = data && typeof data === 'object' ? data : {};
+    const normalized = {};
+    Object.keys(FF_POINTS_SETTINGS_DEFAULTS).forEach(function(key) {
+      const value = Number(source[key]);
+      normalized[key] = Number.isFinite(value) ? value : FF_POINTS_SETTINGS_DEFAULTS[key];
+    });
+    return normalized;
+  }
+
+  async function ffGetPointsSettings(accountId, locationId) {
+    if (!accountId) throw new Error('No account');
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    const ref = api.doc(db, `accounts/${accountId}/settings/points`);
+    const snap = await api.getDoc(ref);
+    let accountSettings;
+    if (!snap.exists()) {
+      const defaults = { ...FF_POINTS_SETTINGS_DEFAULTS };
+      await api.setDoc(ref, {
+        ...defaults,
+        createdAt: api.serverTimestamp(),
+        updatedAt: api.serverTimestamp()
+      }, { merge: true });
+      console.log('[PointsSettings] default created');
+      console.log('[PointsSettings] loaded');
+      accountSettings = defaults;
+    } else {
+      const raw = snap.data() || {};
+      const merged = ffNormalizePointsSettings(raw);
+      const missingFields = Object.keys(FF_POINTS_SETTINGS_DEFAULTS).filter(function(key) {
+        return raw[key] == null || !Number.isFinite(Number(raw[key]));
+      });
+      if (missingFields.length) {
+        await api.setDoc(ref, {
+          ...merged,
+          updatedAt: api.serverTimestamp()
+        }, { merge: true });
+      }
+      accountSettings = merged;
+    }
+    const cleanLocationId = String(locationId || '').trim();
+    if (cleanLocationId) {
+      const locRef = api.doc(db, `accounts/${accountId}/locations/${cleanLocationId}/settings/points`);
+      const locSnap = await api.getDoc(locRef);
+      if (locSnap.exists()) {
+        console.log('[PointsSettings] loaded branch override');
+        return ffNormalizePointsSettings({ ...accountSettings, ...(locSnap.data() || {}) });
+      }
+    }
+    console.log('[PointsSettings] loaded');
+    return accountSettings;
+  }
+  window.ffGetPointsSettings = ffGetPointsSettings;
+
+  function ffSetPointsSettingsForm(settings) {
+    const values = ffNormalizePointsSettings(settings);
+    FF_POINTS_SETTINGS_FIELDS.forEach(function(pair) {
+      const input = document.getElementById(pair[1]);
+      if (input) input.value = String(values[pair[0]]);
+    });
+  }
+
+  function ffReadPointsSettingsForm() {
+    const values = {};
+    FF_POINTS_SETTINGS_FIELDS.forEach(function(pair) {
+      const input = document.getElementById(pair[1]);
+      const raw = input ? Number(input.value) : NaN;
+      values[pair[0]] = Number.isFinite(raw) ? raw : FF_POINTS_SETTINGS_DEFAULTS[pair[0]];
+    });
+    return ffNormalizePointsSettings(values);
+  }
+
+  let ffPointsSettingsMode = 'account';
+
+  function ffSetPointsSettingsModalCopy(mode) {
+    const title = document.getElementById('pointsSettingsTitle');
+    const subtitle = document.getElementById('pointsSettingsSubtitle');
+    if (mode === 'branch') {
+      if (title) title.textContent = 'Branch Points Settings';
+      if (subtitle) subtitle.textContent = 'Configure point values for the active branch. If a field is missing, shared account settings are used.';
+    } else {
+      if (title) title.textContent = 'Fair Flow Points';
+      if (subtitle) subtitle.textContent = 'Configure shared account-level point values used as the default for every branch.';
+    }
+  }
+
+  window.ffOpenPointsSettings = async function() {
+    ffPointsSettingsMode = 'account';
+    ffSetPointsSettingsModalCopy('account');
+    const modal = document.getElementById('pointsSettingsModal');
+    const saveBtn = document.getElementById('pointsSettingsSaveBtn');
+    if (modal) modal.style.display = 'flex';
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
+    try {
+      const accountId = ffSharedSetupAccountId();
+      const settings = await ffGetPointsSettings(accountId);
+      ffSetPointsSettingsForm(settings);
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load points settings', 'error');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+    }
+  };
+
+  window.ffOpenBranchPointsSettings = async function() {
+    ffPointsSettingsMode = 'branch';
+    ffSetPointsSettingsModalCopy('branch');
+    const modal = document.getElementById('pointsSettingsModal');
+    const saveBtn = document.getElementById('pointsSettingsSaveBtn');
+    if (modal) modal.style.display = 'flex';
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
+    try {
+      const accountId = ffSharedSetupAccountId();
+      const locationId = ffGetPointsActiveLocationId();
+      if (!locationId) throw new Error('No active branch');
+      const settings = await ffGetPointsSettings(accountId, locationId);
+      ffSetPointsSettingsForm(settings);
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load branch points settings', 'error');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+    }
+  };
+
+  window.ffClosePointsSettings = function() {
+    const modal = document.getElementById('pointsSettingsModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.ffSavePointsSettings = async function() {
+    const saveBtn = document.getElementById('pointsSettingsSaveBtn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
+    try {
+      const accountId = ffSharedSetupAccountId();
+      if (!accountId) throw new Error('No account');
+      const locationId = ffPointsSettingsMode === 'branch' ? ffGetPointsActiveLocationId() : '';
+      await ffGetPointsSettings(accountId, locationId);
+      const values = ffReadPointsSettingsForm();
+      const db = getTrainingDb();
+      const api = await getTrainingFirestoreApi();
+      const refPath = locationId
+        ? `accounts/${accountId}/locations/${locationId}/settings/points`
+        : `accounts/${accountId}/settings/points`;
+      await api.setDoc(api.doc(db, refPath), {
+        ...values,
+        updatedAt: api.serverTimestamp()
+      }, { merge: true });
+      console.log('[PointsSettings] saved');
+      window.ffClosePointsSettings();
+      if (typeof showToast === 'function') showToast('Points settings saved', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to save points settings', 'error');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+    }
+  };
+
+  let ffPointsLeaderboardActivePeriod = 'thisWeek';
+  let ffPointsLeaderboardRows = [];
+  let ffPointsLeaderboardMonthlyGoal = FF_POINTS_SETTINGS_DEFAULTS.monthlyGoal;
+
+  function ffPointsIsoWeekKey(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const day = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - day);
+    const year = d.getUTCFullYear();
+    const yearStart = Date.UTC(year, 0, 1);
+    const week = Math.ceil((((d.getTime() - yearStart) / 86400000) + 1) / 7);
+    return year + '-W' + String(week).padStart(2, '0');
+  }
+
+  function ffPointsMonthKey(date) {
+    return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0');
+  }
+
+  function ffPointsWeekKeyOffset(offsetWeeks) {
+    const d = new Date();
+    d.setDate(d.getDate() + (Number(offsetWeeks) || 0) * 7);
+    return ffPointsIsoWeekKey(d);
+  }
+
+  function ffPointsWeekInputValueOffset(offsetWeeks) {
+    return ffPointsWeekKeyOffset(offsetWeeks);
+  }
+
+  function ffGetLocalStaffForPoints() {
+    const byId = new Map();
+    const activeLocationId = ffGetPointsActiveLocationId();
+    function staffMatchesActiveLocation(staff) {
+      if (!activeLocationId || !staff || typeof staff !== 'object') return true;
+      const raw = [
+        staff.locationId,
+        staff.activeLocationId,
+        staff.primaryLocationId,
+        ...(Array.isArray(staff.allowedLocationIds) ? staff.allowedLocationIds : []),
+        ...(Array.isArray(staff.locationIds) ? staff.locationIds : []),
+        ...(Array.isArray(staff.locations) ? staff.locations : []),
+        ...(Array.isArray(staff.assignedLocationIds) ? staff.assignedLocationIds : [])
+      ].filter(function(v) { return v != null && String(v).trim(); }).map(function(v) { return String(v).trim(); });
+      if (!raw.length) return true;
+      return raw.indexOf(activeLocationId) !== -1;
+    }
+    try {
+      const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+      const staffList = Array.isArray(store.staff) ? store.staff : [];
+      staffList.forEach(function(staff) {
+        if (!staffMatchesActiveLocation(staff)) return;
+        const id = String(staff?.id || staff?.staffId || '').trim();
+        if (!id) return;
+        byId.set(id, {
+          id,
+          name: String(staff.name || staff.displayName || staff.email || id).trim() || id
+        });
+      });
+    } catch (e) {
+      console.warn('[PointsApp] failed reading ff_staff_v1', e);
+    }
+    try {
+      (settings.workers || []).forEach(function(worker) {
+        if (!staffMatchesActiveLocation(worker)) return;
+        const id = String(worker?.id || worker?.staffId || worker?.name || '').trim();
+        if (!id || byId.has(id)) return;
+        byId.set(id, {
+          id,
+          name: String(worker.name || id).trim() || id
+        });
+      });
+    } catch (_) {}
+    return Array.from(byId.values());
+  }
+
+  function ffGetPointsActiveLocationId() {
+    try {
+      if (typeof window.ffGetActiveLocationId === 'function') {
+        const value = window.ffGetActiveLocationId();
+        if (typeof value === 'string' && value.trim()) return value.trim();
+      }
+    } catch (_) {}
+    return typeof window.__ff_active_location_id === 'string' ? window.__ff_active_location_id.trim() : '';
+  }
+
+  function ffGetPointsCustomWeekKey() {
+    const input = document.getElementById('pointsAppCustomWeek');
+    const value = String(input?.value || '').trim();
+    if (!value) return ffPointsWeekKeyOffset(0);
+    const match = value.match(/^(\d{4})-W(\d{2})$/);
+    return match ? (match[1] + '-W' + match[2]) : value;
+  }
+
+  function ffPointsPeriodUsesSummary(period) {
+    return period === 'thisWeek' || period === 'thisMonth' || period === 'allTime';
+  }
+
+  function ffPointsEventWeekKeyForPeriod(period) {
+    if (period === 'lastWeek') return ffPointsWeekKeyOffset(-1);
+    if (period === 'customWeek') return ffGetPointsCustomWeekKey();
+    return ffPointsWeekKeyOffset(0);
+  }
+
+  async function ffLoadPointsFromSummary(accountId, db, api, staffRows) {
+    const now = new Date();
+    const currentWeekKey = ffPointsIsoWeekKey(now);
+    const currentMonthKey = ffPointsMonthKey(now);
+    const rows = await Promise.all(staffRows.map(async function(staff) {
+      try {
+        const ref = api.doc(db, `accounts/${accountId}/staff/${staff.id}/pointsSummary/main`);
+        const snap = await api.getDoc(ref);
+        const summary = snap.exists() ? (snap.data() || {}) : {};
+        const weekMatches = String(summary.currentWeekKey || '') === currentWeekKey;
+        const monthMatches = String(summary.currentMonthKey || '') === currentMonthKey;
+        return {
+          staffId: staff.id,
+          staffName: staff.name,
+          weekPoints: weekMatches ? (Number(summary.currentWeek) || 0) : 0,
+          monthPoints: monthMatches ? (Number(summary.currentMonth) || 0) : 0,
+          allTimePoints: Number(summary.allTime) || 0
+        };
+      } catch (e) {
+        console.warn('[PointsApp] summary load failed for staff', staff.id, e);
+        return {
+          staffId: staff.id,
+          staffName: staff.name,
+          weekPoints: 0,
+          monthPoints: 0,
+          allTimePoints: 0
+        };
+      }
+    }));
+    console.log('[PointsApp] loaded from summary');
+    return rows;
+  }
+
+  function ffPointEventMatchesPeriod(event, period, weekKey) {
+    if (!event) return false;
+    if (period === 'thisWeek' || period === 'lastWeek' || period === 'customWeek') {
+      return String(event.weekKey || '') === weekKey;
+    }
+    if (period === 'thisMonth') {
+      return String(event.monthKey || '') === ffPointsMonthKey(new Date());
+    }
+    return true;
+  }
+
+  async function ffLoadPointEventsForCurrentPeriod(accountId, db, api) {
+    const period = ffPointsLeaderboardActivePeriod;
+    const weekKey = ffPointsEventWeekKeyForPeriod(period);
+    const { collection, query, where, getDocs } = api;
+    let snap;
+    if (period === 'thisWeek' || period === 'lastWeek' || period === 'customWeek') {
+      snap = await getDocs(query(collection(db, `accounts/${accountId}/pointsEvents`), where('weekKey', '==', weekKey)));
+    } else if (period === 'thisMonth') {
+      snap = await getDocs(query(collection(db, `accounts/${accountId}/pointsEvents`), where('monthKey', '==', ffPointsMonthKey(new Date()))));
+    } else {
+      snap = await getDocs(collection(db, `accounts/${accountId}/pointsEvents`));
+    }
+    const activeLocationId = ffGetPointsActiveLocationId();
+    return snap.docs
+      .map(function(docSnap) { return { id: docSnap.id, ...(docSnap.data() || {}) }; })
+      .filter(function(event) {
+        if (!ffPointEventMatchesPeriod(event, period, weekKey)) return false;
+        if (activeLocationId && event.locationId && String(event.locationId) !== activeLocationId) return false;
+        return true;
+      })
+      .sort(function(a, b) {
+        const at = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
+        const bt = b.createdAt && typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : 0;
+        return bt - at;
+      });
+  }
+
+  async function ffLoadPointsFromEvents(accountId, db, api, staffRows, weekKey) {
+    const activeLocationId = ffGetPointsActiveLocationId();
+    const staffById = new Map(staffRows.map(function(staff) { return [String(staff.id), staff]; }));
+    const pointsByStaff = new Map();
+    const { collection, query, where, getDocs } = api;
+    const snap = await getDocs(query(collection(db, `accounts/${accountId}/pointsEvents`), where('weekKey', '==', weekKey)));
+    snap.docs.forEach(function(docSnap) {
+      const event = { id: docSnap.id, ...(docSnap.data() || {}) };
+      if (event.voided === true) return;
+      if (activeLocationId && event.locationId && String(event.locationId) !== activeLocationId) return;
+      const staffId = String(event.staffId || '').trim();
+      if (!staffId) return;
+      const previous = pointsByStaff.get(staffId) || {
+        staffId,
+        staffName: String(event.staffName || staffById.get(staffId)?.name || staffId).trim() || staffId,
+        weekPoints: 0,
+        monthPoints: 0,
+        allTimePoints: 0,
+        events: []
+      };
+      previous.weekPoints += Number(event.points) || 0;
+      previous.events.push(event);
+      pointsByStaff.set(staffId, previous);
+    });
+    staffRows.forEach(function(staff) {
+      if (!pointsByStaff.has(String(staff.id))) {
+        pointsByStaff.set(String(staff.id), {
+          staffId: staff.id,
+          staffName: staff.name,
+          weekPoints: 0,
+          monthPoints: 0,
+          allTimePoints: 0,
+          events: []
+        });
+      }
+    });
+    console.log('[PointsApp] loaded from events');
+    return Array.from(pointsByStaff.values());
+  }
+
+  async function ffLoadPointsLeaderboard() {
+    const accountId = ffSharedSetupAccountId();
+    if (!accountId) throw new Error('No account');
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    const settings = await ffGetPointsSettings(accountId, ffGetPointsActiveLocationId());
+    ffPointsLeaderboardMonthlyGoal = Number(settings.monthlyGoal) || FF_POINTS_SETTINGS_DEFAULTS.monthlyGoal;
+    const staffRows = ffGetLocalStaffForPoints();
+    const period = ffPointsLeaderboardActivePeriod;
+    const rows = ffPointsPeriodUsesSummary(period)
+      ? await ffLoadPointsFromSummary(accountId, db, api, staffRows)
+      : await ffLoadPointsFromEvents(accountId, db, api, staffRows, ffPointsEventWeekKeyForPeriod(period));
+    const events = await ffLoadPointEventsForCurrentPeriod(accountId, db, api);
+    const eventsByStaff = new Map();
+    events.forEach(function(event) {
+      const staffId = String(event.staffId || '').trim();
+      if (!staffId) return;
+      const list = eventsByStaff.get(staffId) || [];
+      list.push(event);
+      eventsByStaff.set(staffId, list);
+    });
+    ffPointsLeaderboardRows = rows.map(function(row) {
+      return { ...row, events: eventsByStaff.get(String(row.staffId)) || row.events || [] };
+    });
+    console.log('[PointsApp] leaderboard loaded');
+    return rows;
+  }
+
+  function ffPointsLeaderboardValue(row, period) {
+    if (period === 'thisMonth') return Number(row.monthPoints) || 0;
+    if (period === 'allTime') return Number(row.allTimePoints) || 0;
+    return Number(row.weekPoints) || 0;
+  }
+
+  function ffUpdatePointsPeriodControls() {
+    const select = document.getElementById('pointsAppPeriodSelect');
+    const customWrap = document.getElementById('pointsAppCustomWeekWrap');
+    if (select) select.value = ffPointsLeaderboardActivePeriod;
+    if (customWrap) customWrap.style.display = ffPointsLeaderboardActivePeriod === 'customWeek' ? 'flex' : 'none';
+    const customInput = document.getElementById('pointsAppCustomWeek');
+    if (customInput && !customInput.value) customInput.value = ffPointsWeekInputValueOffset(0);
+  }
+
+  function ffCanVoidPointsEvents() {
+    const role = String(window.__ff_user_role || window.__ff_actorRole || sessionStorage.getItem('ff_actor_role') || '').toLowerCase();
+    return window.ff_is_admin_cached === true || role === 'owner' || role === 'admin' || role === 'manager';
+  }
+
+  function ffFormatPointEventType(event) {
+    const type = String(event?.type || '').trim();
+    const sourceModule = String(event?.sourceModule || '').trim();
+    if (type === 'media_upload') {
+      const meta = event.sourceMeta || {};
+      if (meta.beforeAfter === true) return 'Media: Before/After';
+      if (meta.mediaType === 'video') return 'Media: Video';
+      return 'Media: Photo';
+    }
+    if (type === 'points_correction') return 'Points: Correction';
+    if (type === 'ticket_upgrade') return 'Ticket Upgrade';
+    if (type === 'queue_join') return 'Queue: Join';
+    if (type === 'task_completed') return 'Tasks: Completed';
+    return (sourceModule ? sourceModule + ': ' : '') + (type || 'Points');
+  }
+
+  function ffFormatPointEventDate(event) {
+    try {
+      const d = event?.createdAt && typeof event.createdAt.toDate === 'function' ? event.createdAt.toDate() : null;
+      if (!d) return '';
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function ffRenderPointEvents(row) {
+    const events = Array.isArray(row.events) ? row.events : [];
+    if (!events.length) {
+      return '<div style="padding:8px 10px;color:#9ca3af;font-size:11px;">No point events found for this period.</div>';
+    }
+    const canVoid = ffCanVoidPointsEvents();
+    const correctedIds = new Set(events
+      .filter(function(event) { return String(event.type || '') === 'points_correction'; })
+      .map(function(event) { return String(event.sourceId || event.sourceMeta?.correctedEventId || '').trim(); })
+      .filter(Boolean));
+    const activeEvents = events.filter(function(event) {
+      const id = String(event.id || '').trim();
+      return event.voided !== true && String(event.type || '') !== 'points_correction' && !correctedIds.has(id);
+    });
+    const historyEvents = events.filter(function(event) {
+      const id = String(event.id || '').trim();
+      return event.voided === true || String(event.type || '') === 'points_correction' || correctedIds.has(id);
+    });
+    const renderEvent = function(event, isHistory) {
+      const points = Number(event.points) || 0;
+      const meta = event.fileHash ? 'Hash: ' + String(event.fileHash).slice(0, 10) : '';
+      const detail = isHistory
+        ? ((event.voidedReason || event.correctionReason ? 'Reason: ' + (event.voidedReason || event.correctionReason) : 'Corrected') + (meta ? ' · ' + meta : ''))
+        : (ffFormatPointEventDate(event) || meta || String(event.sourceId || ''));
+      return '<div style="display:grid;grid-template-columns:1fr 56px 72px' + (canVoid && !isHistory ? ' 70px' : '') + ';gap:8px;align-items:center;padding:7px 10px;border-top:1px solid #f3f4f6;font-size:11px;color:#4b5563;' + (isHistory ? 'background:#fafafa;opacity:.82;' : '') + '">'
+        + '<div style="min-width:0;"><div style="font-weight:700;color:' + (isHistory ? '#6b7280' : '#374151') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtmlDraft(ffFormatPointEventType(event)) + (isHistory ? ' · Corrected' : '') + '</div>'
+        + '<div style="color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtmlDraft(detail) + '</div></div>'
+        + '<div style="text-align:right;font-weight:800;color:' + (isHistory ? '#9ca3af' : '#111827') + ';">' + (isHistory ? '-' : '') + points + '</div>'
+        + '<div style="text-align:right;color:#9ca3af;">' + escapeHtmlDraft(String(event.sourceModule || '')) + '</div>'
+        + (canVoid && !isHistory ? '<button type="button" title="Correct this point event" onclick="window.ffOpenPointVoidModal && window.ffOpenPointVoidModal(\'' + escapeHtmlDraft(String(event.id || '')) + '\')" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #fecaca;border-radius:999px;background:#fff;color:#ef4444;cursor:pointer;padding:0;">'
+        + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 3h6l1 2h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 5h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 8l1 12h8l1-12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>' : '')
+        + '</div>';
+    };
+    const activeHtml = activeEvents.length
+      ? activeEvents.map(function(event) { return renderEvent(event, false); }).join('')
+      : '<div style="padding:8px 10px;color:#9ca3af;font-size:11px;border-top:1px solid #f3f4f6;">No active point events for this period.</div>';
+    const historyHtml = historyEvents.length
+      ? '<div style="padding:8px 10px 4px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;background:#fafafa;">Correction history</div>'
+        + historyEvents.map(function(event) { return renderEvent(event, true); }).join('')
+      : '';
+    return activeHtml + historyHtml;
+  }
+
+  function ffRenderPointsLeaderboard() {
+    const list = document.getElementById('pointsAppLeaderboardList');
+    if (!list) return;
+    ffUpdatePointsPeriodControls();
+    const scope = document.getElementById('pointsAppScopeLabel');
+    if (scope) {
+      const activeLocationId = ffGetPointsActiveLocationId();
+      scope.textContent = activeLocationId ? 'Showing account-wide points' : 'Showing account-wide points';
+      scope.style.display = 'inline-flex';
+    }
+    const rows = ffPointsLeaderboardRows
+      .map(function(row) { return { ...row, points: ffPointsLeaderboardValue(row, ffPointsLeaderboardActivePeriod) }; })
+      .sort(function(a, b) {
+        return (Number(b.points) || 0) - (Number(a.points) || 0)
+          || String(a.staffName || '').localeCompare(String(b.staffName || ''));
+      });
+    const hasActivity = rows.some(function(row) { return (Number(row.points) || 0) > 0 || (Array.isArray(row.events) && row.events.length > 0); });
+    if (!rows.length || !hasActivity) {
+      list.innerHTML = '<div style="padding:22px 14px;text-align:center;border:1px dashed #ddd6fe;border-radius:12px;background:#faf5ff;color:#6b7280;font-size:12px;">No points for this period yet.</div>';
+      return;
+    }
+    const showGoal = ffPointsLeaderboardActivePeriod === 'thisMonth';
+    const body = rows.map(function(row, idx) {
+      const points = Number(row.points) || 0;
+      const percent = ffPointsLeaderboardMonthlyGoal > 0
+        ? Math.min(999, Math.round((points / ffPointsLeaderboardMonthlyGoal) * 100))
+        : 0;
+      return '<details style="border:1px solid #f1f5f9;border-radius:9px;background:#fff;margin-bottom:6px;overflow:hidden;">'
+        + '<summary style="display:grid;grid-template-columns:42px 1fr 84px' + (showGoal ? ' 112px' : '') + ';gap:8px;align-items:center;padding:8px 10px;cursor:pointer;list-style:none;">'
+        + '<div style="font-size:12px;font-weight:800;color:#7c3aed;">#' + (idx + 1) + '</div>'
+        + '<div style="font-size:12px;color:#111827;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtmlDraft(row.staffName || row.staffId || 'Staff') + '</div>'
+        + '<div style="font-size:13px;color:#111827;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;">' + points + '</div>'
+        + (showGoal ? '<div style="font-size:11px;color:#6b7280;text-align:right;">' + percent + '% of goal</div>' : '')
+        + '</summary>'
+        + ffRenderPointEvents(row)
+        + '</details>';
+    }).join('');
+    const header = '<div style="display:grid;grid-template-columns:42px 1fr 84px' + (showGoal ? ' 112px' : '') + ';gap:8px;align-items:center;padding:0 10px 7px;color:#9ca3af;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;">'
+      + '<div>Rank</div><div>Staff</div><div style="text-align:right;">Points</div>' + (showGoal ? '<div style="text-align:right;">Goal</div>' : '') + '</div>';
+    list.innerHTML = header + body;
+  }
+
+  function ffFindPointEventById(eventId) {
+    const cleanEventId = String(eventId || '').trim();
+    if (!cleanEventId) return null;
+    for (const row of ffPointsLeaderboardRows) {
+      const events = Array.isArray(row.events) ? row.events : [];
+      const found = events.find(function(event) { return String(event.id || '') === cleanEventId; });
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function ffEnsurePointVoidModal() {
+    let modal = document.getElementById('pointsVoidConfirmModal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'pointsVoidConfirmModal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:100080;background:rgba(15,23,42,.42);align-items:center;justify-content:center;padding:18px;';
+    modal.innerHTML = ''
+      + '<div style="position:absolute;inset:0;" onclick="window.ffClosePointVoidModal && window.ffClosePointVoidModal()"></div>'
+      + '<div style="position:relative;background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(15,23,42,.22);width:min(440px,94vw);padding:22px;border:1px solid #fee2e2;">'
+      + '<div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:12px;">'
+      + '<div style="width:38px;height:38px;border-radius:12px;background:#fef2f2;color:#b91c1c;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;">!</div>'
+      + '<div style="min-width:0;flex:1;"><h3 style="margin:0 0 4px;font-size:17px;color:#111827;">Correct this point event?</h3>'
+      + '<p id="pointsVoidEventSummary" style="margin:0;color:#6b7280;font-size:12px;line-height:1.45;"></p></div>'
+      + '</div>'
+      + '<div style="padding:12px;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:12px;line-height:1.45;margin-bottom:12px;">'
+      + 'This will not delete the media upload or erase the original record. It marks the point event as corrected, subtracts its points from the staff total, and keeps the correction in history.'
+      + '</div>'
+      + '<label style="display:block;font-size:11px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Reason</label>'
+      + '<textarea id="pointsVoidReasonInput" rows="3" style="width:100%;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:10px;padding:10px;font-size:13px;resize:vertical;font-family:inherit;">Mistaken duplicate media upload</textarea>'
+      + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">'
+      + '<button type="button" onclick="window.ffClosePointVoidModal && window.ffClosePointVoidModal()" style="padding:9px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-size:12px;font-weight:700;cursor:pointer;">Cancel</button>'
+      + '<button id="pointsVoidConfirmBtn" type="button" onclick="window.ffConfirmPointVoidFromModal && window.ffConfirmPointVoidFromModal()" style="padding:9px 14px;border:1px solid #dc2626;border-radius:10px;background:#dc2626;color:#fff;font-size:12px;font-weight:800;cursor:pointer;">Correct points</button>'
+      + '</div>'
+      + '</div>';
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  window.ffOpenPointVoidModal = function(eventId) {
+    const cleanEventId = String(eventId || '').trim();
+    if (!cleanEventId) return;
+    if (!ffCanVoidPointsEvents()) {
+      if (typeof showToast === 'function') showToast('Only managers can correct point events.', 'error');
+      return;
+    }
+    const event = ffFindPointEventById(cleanEventId);
+    const modal = ffEnsurePointVoidModal();
+    modal.dataset.eventId = cleanEventId;
+    const summary = document.getElementById('pointsVoidEventSummary');
+    if (summary) {
+      const label = event ? ffFormatPointEventType(event) : 'Point event';
+      const points = event ? (Number(event.points) || 0) : 0;
+      const staffName = event ? String(event.staffName || 'Staff') : 'Staff';
+      summary.textContent = label + ' · ' + points + ' points · ' + staffName;
+    }
+    const reasonInput = document.getElementById('pointsVoidReasonInput');
+    if (reasonInput) reasonInput.value = 'Mistaken duplicate media upload';
+    modal.style.display = 'flex';
+  };
+
+  window.ffClosePointVoidModal = function() {
+    const modal = document.getElementById('pointsVoidConfirmModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  function ffGetPointsCorrectionActor() {
+    let role = '';
+    let name = '';
+    try { role = typeof getCurrentActorRole === 'function' ? getCurrentActorRole() : ''; } catch (_) {}
+    try { name = typeof getCurrentActorName === 'function' ? getCurrentActorName() : ''; } catch (_) {}
+    if (!role) role = String(window.__ff_actorRole || window.__ff_user_role || sessionStorage.getItem('ff_actor_role') || 'Manager');
+    if (!name) {
+      try { name = String(window.__ff_actorName || sessionStorage.getItem('ff_actor_name') || ''); } catch (_) {}
+    }
+    if (!name) {
+      try {
+        const info = typeof ffGetCurrentUserInfo === 'function' ? ffGetCurrentUserInfo() : {};
+        name = String(info.name || info.email || '').trim();
+      } catch (_) {}
+    }
+    return { role: role || 'Manager', name: name || 'Manager' };
+  }
+
+  function ffAddPointsCorrectionHistory(event, reason, result) {
+    try {
+      const now = new Date();
+      const actor = ffGetPointsCorrectionActor();
+      const staffName = String(event?.staffName || event?.staffId || 'Staff').trim() || 'Staff';
+      const points = Math.abs(Number(event?.points) || Number(result?.points) || 0);
+      const eventLabel = event ? ffFormatPointEventType(event) : 'Point event';
+      const correctionId = String(result?.eventId || '').trim();
+      const correctedEventId = String(event?.id || '').trim();
+      const historyKey = ['points-correction', correctionId || correctedEventId, Date.now()].filter(Boolean).join(':');
+      let activeLocId = '';
+      try {
+        if (typeof window.ffGetActiveLocationId === 'function') {
+          const loc = window.ffGetActiveLocationId();
+          if (typeof loc === 'string' && loc.trim()) activeLocId = loc.trim();
+        }
+      } catch (_) {}
+
+      const action = 'Points corrected: removed ' + points + ' point' + (points === 1 ? '' : 's')
+        + ' from ' + staffName
+        + ' for ' + eventLabel
+        + '. Reason: ' + (String(reason || '').trim() || 'Corrected from points dashboard');
+      const entry = {
+        date: typeof formatHistoryDate === 'function' ? formatHistoryDate(now) : now.toLocaleDateString(),
+        time: typeof formatHistoryTime === 'function' ? formatHistoryTime(now) : now.toLocaleTimeString(),
+        action,
+        role: actor.role,
+        performedBy: actor.name,
+        worker: staffName,
+        source: 'points',
+        locationId: activeLocId,
+        ts: now.getTime(),
+        historyKey,
+        pointsRemoved: points,
+        correctedEventId,
+        correctionEventId: correctionId,
+      };
+      const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+      const alreadyLogged = logArr.some(function(item) {
+        return item && typeof item === 'object'
+          && String(item.correctionEventId || '') === correctionId
+          && correctionId;
+      });
+      if (!alreadyLogged) {
+        logArr.push(entry);
+        localStorage.setItem('ffv24_log', JSON.stringify(logArr));
+        if (typeof log !== 'undefined') log = logArr;
+      }
+      if (typeof window.enforceHistoryRetention === 'function') window.enforceHistoryRetention();
+      if (typeof renderHistory === 'function') renderHistory();
+      console.log('[PointsApp] correction history added', entry);
+      return entry;
+    } catch (historyErr) {
+      console.warn('[PointsApp] correction history write failed', historyErr);
+      return null;
+    }
+  }
+
+  window.ffConfirmPointVoidFromModal = async function() {
+    const modal = document.getElementById('pointsVoidConfirmModal');
+    const eventId = String(modal?.dataset?.eventId || '').trim();
+    const reason = String(document.getElementById('pointsVoidReasonInput')?.value || '').trim() || 'Corrected from points dashboard';
+    if (!eventId) return;
+    const btn = document.getElementById('pointsVoidConfirmBtn');
+    if (btn) { btn.disabled = true; btn.style.opacity = '.7'; btn.textContent = 'Correcting...'; }
+    try {
+      await window.ffVoidPointEventFromApp(eventId, reason);
+      window.ffClosePointVoidModal();
+    } finally {
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'Correct points'; }
+    }
+  };
+
+  window.ffVoidPointEventFromApp = async function(eventId, reasonText) {
+    const cleanEventId = String(eventId || '').trim();
+    if (!cleanEventId) return;
+    if (!ffCanVoidPointsEvents()) {
+      if (typeof showToast === 'function') showToast('Only managers can correct point events.', 'error');
+      return;
+    }
+    const event = ffFindPointEventById(cleanEventId);
+    const reason = String(reasonText || '').trim() || 'Corrected from points dashboard';
+    const actor = ffGetPointsCorrectionActor();
+    const accountId = ffSharedSetupAccountId();
+    if (!accountId || typeof window.ffVoidPointsEvent !== 'function') {
+      if (typeof showToast === 'function') showToast('Points correction is not ready yet.', 'error');
+      return;
+    }
+    try {
+      const result = await window.ffVoidPointsEvent({
+        accountId,
+        eventId: cleanEventId,
+        reason,
+        correctedByName: actor.name,
+        correctedByRole: actor.role,
+      });
+      if (result?.voided) {
+        ffAddPointsCorrectionHistory(event, reason, result);
+        if (typeof showToast === 'function') showToast('Point event corrected and moved to history.', 'success');
+        await ffLoadPointsLeaderboard();
+        ffRenderPointsLeaderboard();
+      } else if (result?.duplicate) {
+        if (typeof showToast === 'function') showToast('This point event was already corrected.', 'info');
+      } else {
+        if (typeof showToast === 'function') showToast(result?.reason || 'Could not void point event.', 'error');
+      }
+    } catch (e) {
+      console.warn('[PointsApp] void failed', e);
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to void point event.', 'error');
+    }
+  };
+
+  window.ffPointsAppPeriodChanged = async function(period) {
+    ffPointsLeaderboardActivePeriod = ['thisWeek', 'lastWeek', 'thisMonth', 'allTime', 'customWeek'].indexOf(period) >= 0 ? period : 'thisWeek';
+    console.log('[PointsApp] period changed');
+    ffUpdatePointsPeriodControls();
+    const list = document.getElementById('pointsAppLeaderboardList');
+    if (list) list.innerHTML = '<div style="padding:18px;text-align:center;color:#6b7280;font-size:12px;">Loading leaderboard...</div>';
+    try {
+      await ffLoadPointsLeaderboard();
+      ffRenderPointsLeaderboard();
+    } catch (e) {
+      if (list) list.innerHTML = '<div style="padding:18px;text-align:center;color:#b91c1c;font-size:12px;">Failed to load points leaderboard.</div>';
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load points leaderboard', 'error');
+    }
+  };
+
+  window.goToPointsApp = async function() {
+    console.log('[PointsApp] opened');
+    if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+      try { window.ffCloseGlobalBlockingOverlays(); } catch (_) {}
+    }
+    ['owner-view','tasksScreen','inboxScreen','chatScreen','mediaScreen','ticketsScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','userProfileScreen','myProfileScreen','manageQueueScreen'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    ['.joinBar','.wrap'].forEach(function(sel) {
+      const el = document.querySelector(sel);
+      if (el) el.style.display = 'none';
+    });
+    const screen = document.getElementById('pointsAppScreen');
+    const list = document.getElementById('pointsAppLeaderboardList');
+    if (screen) screen.style.display = 'flex';
+    ffUpdatePointsPeriodControls();
+    document.querySelectorAll('.btn-pill').forEach(function(b) { b.classList.remove('active'); });
+    if (list) list.innerHTML = '<div style="padding:24px;text-align:center;color:#6b7280;font-size:13px;">Loading leaderboard...</div>';
+    try {
+      await ffLoadPointsLeaderboard();
+      ffRenderPointsLeaderboard();
+    } catch (e) {
+      if (list) list.innerHTML = '<div style="padding:24px;text-align:center;color:#b91c1c;font-size:13px;">Failed to load points leaderboard.</div>';
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load points leaderboard', 'error');
+    }
+  };
+
+  if (typeof document !== 'undefined' && !document.__ffPointsAppLocationListenerBound) {
+    document.__ffPointsAppLocationListenerBound = true;
+    document.addEventListener('ff-active-location-changed', function() {
+      const screen = document.getElementById('pointsAppScreen');
+      if (screen && screen.style.display !== 'none' && typeof window.goToPointsApp === 'function') {
+        window.goToPointsApp();
+      }
+    });
   }
 
   async function ffSharedTaskTemplatesRefs() {
@@ -46141,7 +47290,8 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260420_invite_dedupe"></script>
+  <script type="module" src="/app.js?v=20260426_branch_points_r1"></script>
+  <script type="module" src="/points-engine.js?v=20260426_branch_points_r1"></script>
   <script type="module" src="/schedule-helpers.js?v=20260420_per_loc_no_default"></script>
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
   <script type="module" src="/schedule-generator.js?v=20260420_cross_loc_busy"></script>
@@ -46160,8 +47310,8 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/time-clock-entries.js?v=20260424_tc_single_open_shift_r1"></script>
   <script type="module" src="/queue-cloud.js?v=20260420_per_location_v1"></script>
   <script type="module" src="/tasks-cloud.js?v=20260425_shared_task_templates_r1"></script>
-  <script type="module" src="/tickets.js?v=20260425_shared_service_catalog_connect_r1"></script>
-  <script type="module" src="/media-upload.js?v=20260420_media_works_per_location"></script>
+  <script type="module" src="/tickets.js?v=20260426_branch_points_r1"></script>
+  <script type="module" src="/media-upload.js?v=20260426_branch_points_r1"></script>
   <script type="module" src="/inventory.js?v=20260425_import_shared_inventory_catalog_r1"></script>
   <script type="module" src="/onboarding-wizard.js?v=20260420_onboarding_v1"></script>
   <script type="module" src="/locations-manage.js?v=20260424_locations_compact_rows_r1"></script>
@@ -47298,6 +48448,40 @@ function hookSettingsGuard_DISABLED(){
 </style>
 <!-- Inventory mock screen (sidebar + table; content from /inventory.js) -->
 <div id="inventoryScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f8fafc;z-index:300;flex-direction:column;overflow:hidden;"></div>
+
+<!-- Fair Flow Points dashboard -->
+<div id="pointsAppScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f8fafc;z-index:300;flex-direction:column;overflow:hidden;">
+  <div style="flex:1;overflow-y:auto;padding:16px 18px 24px;box-sizing:border-box;">
+    <div style="max-width:900px;margin:0 auto;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+        <div>
+          <h1 style="margin:0;font-size:21px;font-weight:800;color:#111827;">Fair Flow Points</h1>
+          <p style="margin:4px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Track staff points by location, week, month, and all time.</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <button type="button" onclick="window.ffOpenBranchPointsSettings && window.ffOpenBranchPointsSettings()" style="padding:7px 10px;border:1px solid #ddd6fe;border-radius:999px;background:#fff;color:#6d28d9;font-size:11px;font-weight:800;cursor:pointer;">Points Settings</button>
+          <span id="pointsAppScopeLabel" style="display:none;align-items:center;padding:5px 9px;border:1px solid #ddd6fe;border-radius:999px;background:#faf5ff;color:#6d28d9;font-size:11px;font-weight:700;">Showing account-wide points</span>
+        </div>
+      </div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 6px 18px rgba(15,23,42,0.05);overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:10px;border-bottom:1px solid #e5e7eb;padding:10px 14px;background:#f9fafb;flex-wrap:wrap;">
+          <label for="pointsAppPeriodSelect" style="font-size:11px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">Time period</label>
+          <select id="pointsAppPeriodSelect" onchange="window.ffPointsAppPeriodChanged && window.ffPointsAppPeriodChanged(this.value)" style="min-width:150px;padding:7px 10px;border:1px solid #e5e7eb;border-radius:9px;background:#fff;color:#111827;font-size:12px;font-weight:600;">
+            <option value="thisWeek">This week</option>
+            <option value="lastWeek">Last week</option>
+            <option value="thisMonth">This month</option>
+            <option value="allTime">All time</option>
+            <option value="customWeek">Custom week</option>
+          </select>
+          <div id="pointsAppCustomWeekWrap" style="display:none;align-items:center;gap:8px;">
+            <input id="pointsAppCustomWeek" type="week" onchange="window.ffPointsAppPeriodChanged && window.ffPointsAppPeriodChanged('customWeek')" style="padding:7px 10px;border:1px solid #e5e7eb;border-radius:9px;background:#fff;color:#111827;font-size:12px;">
+          </div>
+        </div>
+        <div id="pointsAppLeaderboardList" style="padding:12px 14px 16px;min-height:160px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- Media Module Screen (like Inbox) -->
 <div id="mediaScreen" class="media-screen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f9fafb;z-index:300;flex-direction:column;overflow:hidden;">
   <!-- Tabs (left) | Filters + Sort + Upload (right, grouped) -->

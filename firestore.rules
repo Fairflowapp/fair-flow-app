@@ -634,7 +634,7 @@ service cloud.firestore {
       allow update: if belongsToSalon(salonId)
         && request.auth.uid in resource.data.participants
         && request.resource.data.participants == resource.data.participants
-        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'lastMessageAt',
           'lastMessageAtMs',
           'lastTitle',
@@ -820,9 +820,49 @@ service cloud.firestore {
       }
     }
 
+    match /accounts/{accountId}/settings/{settingId} {
+      allow read: if settingId == "points" && belongsToSalon(accountId);
+      allow create, update: if settingId == "points" && isManager(accountId);
+      allow delete: if false;
+    }
+
+    match /accounts/{accountId}/pointsEvents/{eventId} {
+      allow read: if belongsToSalon(accountId);
+      allow create: if belongsToSalon(accountId)
+        && (
+          (request.resource.data.type == "task_completed"
+            && request.resource.data.sourceModule == "tasks")
+          || (request.resource.data.type == "queue_join"
+            && request.resource.data.sourceModule == "queue")
+          || (request.resource.data.type == "media_upload"
+            && request.resource.data.sourceModule == "media")
+          || (request.resource.data.type == "ticket_upgrade"
+            && request.resource.data.sourceModule == "tickets")
+          || (request.resource.data.type == "points_correction"
+            && request.resource.data.sourceModule == "points")
+        );
+      allow update: if belongsToSalon(accountId)
+        && resource.data.voided != true
+        && request.resource.data.voided == true
+        && request.resource.data.voidedReason is string;
+      allow delete: if false;
+    }
+
+    match /accounts/{accountId}/staff/{staffId}/pointsSummary/{summaryId} {
+      allow read: if belongsToSalon(accountId);
+      allow create, update: if summaryId == "main" && belongsToSalon(accountId);
+      allow delete: if false;
+    }
+
     match /accounts/{accountId}/locations/{locationId}/serviceOverrides/{serviceId} {
       allow read: if belongsToSalon(accountId);
       allow create, update, delete: if isManager(accountId);
+    }
+
+    match /accounts/{accountId}/locations/{locationId}/settings/{settingId} {
+      allow read: if settingId == "points" && belongsToSalon(accountId);
+      allow create, update: if settingId == "points" && isManager(accountId);
+      allow delete: if false;
     }
 
     match /accounts/{accountId}/locations/{locationId}/inventoryState/{subId} {
