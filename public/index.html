@@ -3130,16 +3130,6 @@ dialog footer button, .code-dialog footer button {
                 </div>
               </div>
             </div>
-            <div class="apps-panel-item" data-app="points" style="cursor:pointer;">
-              <div class="apps-panel-item__content">
-                <div>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.9 6.1 6.6.9-4.8 4.7 1.1 6.6L12 17.2l-5.8 3.1 1.1-6.6L2.5 9l6.6-.9L12 2z"></path></svg>
-                </div>
-                <div>
-                  <div>Fair Flow Points</div>
-                </div>
-              </div>
-            </div>
             <div class="apps-panel-item" data-app="inventory" style="cursor:pointer;">
               <div class="apps-panel-item__content">
                 <div>
@@ -3167,6 +3157,16 @@ dialog footer button, .code-dialog footer button {
                 </div>
                 <div>
                   <div>History</div>
+                </div>
+              </div>
+            </div>
+            <div class="apps-panel-item" data-app="points" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.9 6.1 6.6.9-4.8 4.7 1.1 6.6L12 17.2l-5.8 3.1 1.1-6.6L2.5 9l6.6-.9L12 2z"></path></svg>
+                </div>
+                <div>
+                  <div>Fair Flow Points</div>
                 </div>
               </div>
             </div>
@@ -3427,7 +3427,7 @@ dialog footer button, .code-dialog footer button {
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedTaskTemplates && window.ffOpenSharedTaskTemplates()">Manage Task Templates</button>
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedInventoryCatalog && window.ffOpenSharedInventoryCatalog()">Manage Inventory Catalog</button>
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedChatTemplates && window.ffOpenSharedChatTemplates()">Manage Chat Templates</button>
-            <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenPointsSettings && window.ffOpenPointsSettings()">Manage Points Settings</button>
+            <button id="ffSharedSetupPointsSettingsBtn" class="shared-setup-action-btn" type="button" onclick="window.ffOpenPointsSettings && window.ffOpenPointsSettings()">Manage Points Settings</button>
           </div>
         </div>
 
@@ -7436,6 +7436,51 @@ function ffCurrentUserHasPointsAccess() {
   return ffStaffHasPointsOwnPermission(staff) || ffStaffHasPointsAllPermission(staff) || ffStaffHasPointsManagePermission(staff);
 }
 window.ffCurrentUserHasPointsAccess = ffCurrentUserHasPointsAccess;
+
+/**
+ * Authoritative gate for opening / saving Fair Flow Points settings (account or branch).
+ * Bound to the staff `points_manage` permission so a salon-level manager role alone
+ * is NOT enough — a manager must also be granted Manage/Edit Fair Flow Points.
+ * Owners/admins always pass to avoid lockout (they manage staff permissions).
+ */
+function ffCurrentUserCanManagePointsSettings() {
+  try {
+    if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  } catch (_) {}
+  if (window.ff_is_admin_cached === true) return true;
+  const role = String(window.__ff_user_role || window.__ff_actorRole || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_role') : '') || '').toLowerCase();
+  if (role === 'owner' || role === 'admin') return true;
+  try {
+    const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+    return ffStaffHasPointsManagePermission(staff);
+  } catch (_) {
+    return false;
+  }
+}
+window.ffCurrentUserCanManagePointsSettings = ffCurrentUserCanManagePointsSettings;
+
+/**
+ * Show or hide the two "Points Settings" entry points based on points_manage.
+ * Called from the dashboard load and from the shared setup card render.
+ */
+function ffApplyPointsSettingsButtonsVisibility() {
+  const allowed = ffCurrentUserCanManagePointsSettings();
+  const ids = ['ffSharedSetupPointsSettingsBtn', 'ffPointsAppSettingsBtn'];
+  ids.forEach(function(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (allowed) {
+      el.style.display = '';
+      el.removeAttribute('aria-hidden');
+      el.disabled = false;
+    } else {
+      el.style.display = 'none';
+      el.setAttribute('aria-hidden', 'true');
+      el.disabled = true;
+    }
+  });
+}
+window.ffApplyPointsSettingsButtonsVisibility = ffApplyPointsSettingsButtonsVisibility;
 
 /**
  * Top bar + user menu: show/hide main nav tabs from staff.permissions (ff_staff_v1).
@@ -30876,6 +30921,23 @@ function initializeAppsPanel() {
       const isAdmin = staff.isAdmin === true;
       const isManager = staff.isManager === true;
       
+      const canAdjustPoints = (typeof window.ffCurrentUserIsPointsManager === 'function')
+        ? window.ffCurrentUserIsPointsManager() === true
+        : false;
+      const pointsCardHtml = canAdjustPoints
+        ? `
+        <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-top:8px;width:fit-content;min-width:280px;max-width:400px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <h3 style="margin:0;font-size:13px;font-weight:600;color:#111827;">Fair Flow Points</h3>
+            <button id="ffStaffDetailsAdjustPointsBtn" type="button" style="padding:6px 10px;background:#7c3aed;border:1px solid #7c3aed;border-radius:6px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Adjust Points</button>
+          </div>
+          <div style="font-size:11px;color:#6b7280;line-height:1.4;">
+            Manually add or subtract points for this staff member. The action is logged in the points history with a required reason.
+          </div>
+        </div>
+        `
+        : '';
+
       detailsContent.innerHTML = `
         <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px 12px;width:fit-content;min-width:280px;max-width:400px;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
@@ -30909,6 +30971,7 @@ function initializeAppsPanel() {
             </div>
           </div>
         </div>
+        ${pointsCardHtml}
       `;
       
       // Wire up Edit button
@@ -30919,6 +30982,19 @@ function initializeAppsPanel() {
         };
       }
       
+      // Wire up Adjust Points button (only present when user has permission)
+      const adjustPointsBtn = document.getElementById('ffStaffDetailsAdjustPointsBtn');
+      if (adjustPointsBtn) {
+        adjustPointsBtn.onclick = function() {
+          if (typeof window.ffOpenStaffPointsAdjustModal === 'function') {
+            window.ffOpenStaffPointsAdjustModal({
+              staffId: staff.id,
+              staffName: staff.name || ''
+            });
+          }
+        };
+      }
+
       // Wire up kebab menu (positioned above Details card)
       const kebabBtn = document.getElementById('ffStaffDetailsKebabBtn');
       const kebabMenu = document.getElementById('ffStaffDetailsKebabMenu');
@@ -33991,6 +34067,10 @@ function initializeUserProfileMenu() {
   }
 
   window.ffOpenPointsSettings = async function() {
+    if (typeof ffCurrentUserCanManagePointsSettings === 'function' && !ffCurrentUserCanManagePointsSettings()) {
+      if (typeof showToast === 'function') showToast('You do not have permission to manage Fair Flow Points settings.', 'error');
+      return;
+    }
     ffPointsSettingsMode = 'account';
     ffSetPointsSettingsModalCopy('account');
     const modal = ffGetPointsSettingsModal();
@@ -34009,6 +34089,10 @@ function initializeUserProfileMenu() {
   };
 
   window.ffOpenBranchPointsSettings = async function() {
+    if (typeof ffCurrentUserCanManagePointsSettings === 'function' && !ffCurrentUserCanManagePointsSettings()) {
+      if (typeof showToast === 'function') showToast('You do not have permission to manage Fair Flow Points settings.', 'error');
+      return;
+    }
     const locationId = ffGetPointsActiveLocationId();
     ffPointsSettingsMode = locationId ? 'branch' : 'account';
     ffSetPointsSettingsModalCopy(locationId ? 'branch' : 'account');
@@ -34033,6 +34117,11 @@ function initializeUserProfileMenu() {
   };
 
   window.ffSavePointsSettings = async function() {
+    if (typeof ffCurrentUserCanManagePointsSettings === 'function' && !ffCurrentUserCanManagePointsSettings()) {
+      if (typeof showToast === 'function') showToast('You do not have permission to manage Fair Flow Points settings.', 'error');
+      window.ffClosePointsSettings && window.ffClosePointsSettings();
+      return;
+    }
     const saveBtn = document.getElementById('pointsSettingsSaveBtn');
     if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
     try {
@@ -34065,6 +34154,55 @@ function initializeUserProfileMenu() {
   let ffPointsLeaderboardMonthlyGoal = FF_POINTS_SETTINGS_DEFAULTS.monthlyGoal;
   let ffPointsVisibilityMode = 'full';
   let ffPointsCurrentStaffId = '';
+  // Selected staffId from the picker. Empty string means "All staff".
+  let ffPointsLeaderboardSelectedStaffId = '';
+
+  window.ffPointsAppStaffPickerChanged = function(value) {
+    ffPointsLeaderboardSelectedStaffId = String(value == null ? '' : value).trim();
+    ffRenderPointsLeaderboard();
+  };
+
+  function ffApplyPointsStaffFilterVisibility() {
+    const wrap = document.getElementById('pointsAppStaffFilterWrap');
+    if (!wrap) return;
+    wrap.style.display = ffPointsVisibilityMode === 'private' || ffPointsVisibilityMode === 'none' ? 'none' : 'flex';
+  }
+
+  /**
+   * Populate the staff picker with all staff that have a points row in the
+   * current leaderboard data set (after dedup). Selection is by staffId so
+   * staff with identical display names stay distinguishable.
+   */
+  function ffPopulatePointsStaffPicker(rankedRows) {
+    const select = document.getElementById('pointsAppStaffPicker');
+    if (!select) return;
+    const seenIds = new Set();
+    const options = [];
+    (Array.isArray(rankedRows) ? rankedRows : []).forEach(function(row) {
+      const id = String(row.staffId || '').trim();
+      if (!id || seenIds.has(id)) return;
+      seenIds.add(id);
+      options.push({
+        id,
+        label: String(row.staffName || row.staffId || 'Staff').trim() || 'Staff'
+      });
+    });
+    options.sort(function(a, b) { return a.label.localeCompare(b.label); });
+    if (ffPointsLeaderboardSelectedStaffId && !seenIds.has(ffPointsLeaderboardSelectedStaffId)) {
+      ffPointsLeaderboardSelectedStaffId = '';
+    }
+    let html = '<option value="">All staff</option>';
+    options.forEach(function(opt) {
+      const safeLabel = (typeof escapeHtmlDraft === 'function')
+        ? escapeHtmlDraft(opt.label)
+        : opt.label.replace(/[&<>"']/g, function(c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+          });
+      html += '<option value="' + opt.id + '">' + safeLabel + '</option>';
+    });
+    select.innerHTML = html;
+    select.value = ffPointsLeaderboardSelectedStaffId || '';
+  }
 
   function ffPointsIsoWeekKey(date) {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -34155,6 +34293,9 @@ function initializeUserProfileMenu() {
       return false;
     }
   }
+  // Expose so callers in other scopes (Staff Details details tab, leaderboard
+  // row buttons, etc.) can gate the Manual Points Adjustment UI by permission.
+  window.ffCurrentUserIsPointsManager = ffCurrentUserIsPointsManager;
 
   function ffGetCurrentPointsStaffId() {
     try {
@@ -34392,6 +34533,7 @@ function initializeUserProfileMenu() {
   }
 
   async function ffLoadPointsLeaderboard() {
+    try { ffApplyPointsSettingsButtonsVisibility(); } catch (_) {}
     const accountId = ffSharedSetupAccountId();
     if (!accountId) throw new Error('No account');
     const db = getTrainingDb();
@@ -34485,6 +34627,7 @@ function initializeUserProfileMenu() {
     if (type === 'ticket_upgrade') return 'Ticket Upgrade';
     if (type === 'queue_join') return 'Queue: Join';
     if (type === 'task_completed') return 'Tasks: Completed';
+    if (type === 'manual_adjustment') return 'Manual Adjustment';
     return (sourceModule ? sourceModule + ': ' : '') + (type || 'Points');
   }
 
@@ -34496,6 +34639,130 @@ function initializeUserProfileMenu() {
     } catch (_) {
       return '';
     }
+  }
+
+  // Breakdown categories: each event type maps to a single visual bucket that
+  // makes sense to a staff member viewing their own dashboard. Manual
+  // adjustments live in their own bucket (so positive coach-style boosts and
+  // negative penalties are still attributable rather than blended into other
+  // sources). Colors are kept distinct from the existing brand purple so the
+  // "Tasks" wedge doesn't blur into the surrounding accent.
+  const FF_POINTS_BREAKDOWN_DEFS = [
+    { key: 'tasks',      label: 'Tasks',             color: '#7c3aed' },
+    { key: 'queue',      label: 'Queue',             color: '#f97316' },
+    { key: 'media',      label: 'Media',             color: '#16a34a' },
+    { key: 'tickets',    label: 'Ticket Upgrades',   color: '#0891b2' },
+    { key: 'manual',     label: 'Manual Adjustment', color: '#ec4899' },
+    { key: 'other',      label: 'Other',             color: '#6b7280' }
+  ];
+
+  function ffPointsBreakdownCategoryKey(eventType) {
+    const t = String(eventType || '');
+    if (t === 'task_completed') return 'tasks';
+    if (t === 'queue_join') return 'queue';
+    if (t === 'media_upload') return 'media';
+    if (t === 'ticket_upgrade') return 'tickets';
+    if (t === 'manual_adjustment') return 'manual';
+    return 'other';
+  }
+
+  function ffComputePointsBreakdown(events) {
+    const buckets = {};
+    FF_POINTS_BREAKDOWN_DEFS.forEach(function(def) {
+      buckets[def.key] = { def: def, sum: 0, count: 0 };
+    });
+    if (!Array.isArray(events) || !events.length) return { buckets: buckets, totalPositive: 0, totalNet: 0 };
+    const correctedIds = new Set(events
+      .filter(function(event) { return String(event.type || '') === 'points_correction'; })
+      .map(function(event) { return String(event.sourceId || event.sourceMeta?.correctedEventId || '').trim(); })
+      .filter(Boolean));
+    let totalNet = 0;
+    events.forEach(function(event) {
+      if (!event) return;
+      if (event.voided === true) return;
+      const id = String(event.id || '').trim();
+      if (correctedIds.has(id)) return;
+      const type = String(event.type || '');
+      if (type === 'points_correction') return; // corrections cancel out the
+      // matched original event above, so we don't double-count them here.
+      const bucketKey = ffPointsBreakdownCategoryKey(type);
+      const bucket = buckets[bucketKey];
+      if (!bucket) return;
+      const points = Number(event.points) || 0;
+      bucket.sum += points;
+      bucket.count += 1;
+      totalNet += points;
+    });
+    let totalPositive = 0;
+    Object.keys(buckets).forEach(function(key) {
+      if (buckets[key].sum > 0) totalPositive += buckets[key].sum;
+    });
+    return { buckets: buckets, totalPositive: totalPositive, totalNet: totalNet };
+  }
+
+  function ffRenderPointsBreakdownCard(row) {
+    const events = Array.isArray(row?.events) ? row.events : [];
+    const breakdown = ffComputePointsBreakdown(events);
+    const totalPositive = breakdown.totalPositive;
+    const totalNet = Math.max(0, Math.round(breakdown.totalNet));
+    const visible = FF_POINTS_BREAKDOWN_DEFS
+      .map(function(def) { return breakdown.buckets[def.key]; })
+      .filter(function(b) { return b && b.count > 0; });
+    if (!visible.length) {
+      return '<div style="margin-top:12px;padding:14px;border:1px dashed #ede9fe;border-radius:13px;background:#fff;color:#6b7280;font-size:12px;text-align:center;">No activity yet for this period — your breakdown will appear here.</div>';
+    }
+    // Build SVG donut: a single circle per slice (simpler than path arcs and
+    // works in every browser). r = 15.91549430918954 → circumference = 100 so
+    // dasharray values can be expressed directly as percent values.
+    const r = 15.915494309189533;
+    const cx = 18, cy = 18;
+    const slicesSvg = [];
+    let cumulativePct = 0;
+    if (totalPositive > 0) {
+      visible.forEach(function(b) {
+        if (b.sum <= 0) return;
+        const pct = (b.sum / totalPositive) * 100;
+        const dashArray = pct.toFixed(3) + ' ' + (100 - pct).toFixed(3);
+        const dashOffset = (100 - cumulativePct).toFixed(3);
+        slicesSvg.push(
+          '<circle cx="' + cx + '" cy="' + cy + '" r="' + r.toFixed(6) + '" fill="none"'
+          + ' stroke="' + b.def.color + '" stroke-width="4.5"'
+          + ' stroke-dasharray="' + dashArray + '"'
+          + ' stroke-dashoffset="' + dashOffset + '"'
+          + ' transform="rotate(-90 ' + cx + ' ' + cy + ')" />'
+        );
+        cumulativePct += pct;
+      });
+    }
+    const trackSvg = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r.toFixed(6) + '" fill="none" stroke="#f1f5f9" stroke-width="4.5" />';
+    const centerSvg = '<text x="' + cx + '" y="' + (cy - 0.3) + '" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="7.5" font-weight="800" fill="#111827">' + totalNet + '</text>'
+      + '<text x="' + cx + '" y="' + (cy + 5) + '" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="3.4" font-weight="700" fill="#6b7280" letter-spacing=".05">PTS</text>';
+    const donutSvg = '<svg viewBox="0 0 36 36" width="140" height="140" role="img" aria-label="Points breakdown by source" style="display:block;flex-shrink:0;">'
+      + trackSvg + slicesSvg.join('') + centerSvg
+      + '</svg>';
+    const legendRows = visible.map(function(b) {
+      const pct = totalPositive > 0 && b.sum > 0
+        ? Math.round((b.sum / totalPositive) * 100)
+        : 0;
+      const isNegative = b.sum < 0;
+      const valueText = (isNegative ? '' : '') + b.sum + ' pts';
+      const valueColor = isNegative ? '#dc2626' : '#111827';
+      const pctText = isNegative ? '—' : (pct + '%');
+      const dotOpacity = b.sum > 0 ? '1' : '.45';
+      return '<div style="display:grid;grid-template-columns:14px 1fr auto auto;gap:8px;align-items:center;padding:5px 0;font-size:12px;">'
+        + '<div style="width:10px;height:10px;border-radius:3px;background:' + b.def.color + ';opacity:' + dotOpacity + ';"></div>'
+        + '<div style="color:#374151;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtmlDraft(b.def.label) + '<span style="color:#9ca3af;font-weight:500;font-size:11px;"> · ' + b.count + '</span></div>'
+        + '<div style="color:' + valueColor + ';font-weight:700;font-variant-numeric:tabular-nums;">' + valueText + '</div>'
+        + '<div style="color:#6b7280;font-weight:600;width:42px;text-align:right;">' + pctText + '</div>'
+        + '</div>';
+    }).join('');
+    return '<div style="margin-top:12px;padding:14px;border:1px solid #ede9fe;border-radius:13px;background:#fff;">'
+      + '<div style="font-size:11px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;">Points breakdown</div>'
+      + '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">'
+      + donutSvg
+      + '<div style="flex:1;min-width:200px;">' + legendRows + '</div>'
+      + '</div>'
+      + '</div>';
   }
 
   function ffRenderPointEvents(row) {
@@ -34518,15 +34785,35 @@ function initializeUserProfileMenu() {
     });
     const renderEvent = function(event, isHistory) {
       const points = Number(event.points) || 0;
+      const isManualAdjustment = String(event.type || '') === 'manual_adjustment';
+      const manualReason = isManualAdjustment
+        ? String((event.sourceMeta && event.sourceMeta.reason) || '').trim()
+        : '';
       const meta = event.fileHash ? 'Hash: ' + String(event.fileHash).slice(0, 10) : '';
-      const detail = isHistory
-        ? ((event.voidedReason || event.correctionReason ? 'Reason: ' + (event.voidedReason || event.correctionReason) : 'Corrected') + (meta ? ' · ' + meta : ''))
-        : (ffFormatPointEventDate(event) || meta || String(event.sourceId || ''));
+      let detail;
+      if (isHistory) {
+        detail = (event.voidedReason || event.correctionReason ? 'Reason: ' + (event.voidedReason || event.correctionReason) : 'Corrected') + (meta ? ' · ' + meta : '');
+      } else if (isManualAdjustment && manualReason) {
+        detail = 'Reason: ' + manualReason;
+      } else {
+        detail = ffFormatPointEventDate(event) || meta || String(event.sourceId || '');
+      }
+      const pointsColor = isHistory
+        ? '#9ca3af'
+        : (isManualAdjustment
+            ? (points > 0 ? '#16a34a' : (points < 0 ? '#dc2626' : '#111827'))
+            : '#111827');
+      const pointsText = isHistory
+        ? ('-' + points)
+        : (isManualAdjustment && points > 0 ? '+' + points : String(points));
+      const sourceLabel = isManualAdjustment
+        ? ('by ' + (String((event.sourceMeta && event.sourceMeta.createdByName) || '').trim() || 'Manager'))
+        : String(event.sourceModule || '');
       return '<div style="display:grid;grid-template-columns:1fr 56px 72px' + (canVoid && !isHistory ? ' 70px' : '') + ';gap:8px;align-items:center;padding:7px 10px;border-top:1px solid #f3f4f6;font-size:11px;color:#4b5563;' + (isHistory ? 'background:#fafafa;opacity:.82;' : '') + '">'
         + '<div style="min-width:0;"><div style="font-weight:700;color:' + (isHistory ? '#6b7280' : '#374151') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtmlDraft(ffFormatPointEventType(event)) + (isHistory ? ' · Corrected' : '') + '</div>'
         + '<div style="color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtmlDraft(detail) + '</div></div>'
-        + '<div style="text-align:right;font-weight:800;color:' + (isHistory ? '#9ca3af' : '#111827') + ';">' + (isHistory ? '-' : '') + points + '</div>'
-        + '<div style="text-align:right;color:#9ca3af;">' + escapeHtmlDraft(String(event.sourceModule || '')) + '</div>'
+        + '<div style="text-align:right;font-weight:800;color:' + pointsColor + ';">' + pointsText + '</div>'
+        + '<div style="text-align:right;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtmlDraft(sourceLabel) + '</div>'
         + (canVoid && !isHistory ? '<button type="button" title="Correct this point event" onclick="window.ffOpenPointVoidModal && window.ffOpenPointVoidModal(\'' + escapeHtmlDraft(String(event.id || '')) + '\')" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #fecaca;border-radius:999px;background:#fff;color:#ef4444;cursor:pointer;padding:0;">'
         + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 3h6l1 2h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 5h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 8l1 12h8l1-12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>' : '')
         + '</div>';
@@ -34545,23 +34832,63 @@ function initializeUserProfileMenu() {
     const list = document.getElementById('pointsAppLeaderboardList');
     if (!list) return;
     ffUpdatePointsPeriodControls();
+    ffApplyPointsStaffFilterVisibility();
     const scope = document.getElementById('pointsAppScopeLabel');
     if (scope) scope.style.display = 'none';
     if (ffPointsVisibilityMode === 'none') {
       list.innerHTML = '<div style="padding:14px;border:1px dashed #e5e7eb;border-radius:10px;color:#6b7280;font-size:12px;text-align:center;">Fair Flow Points permission is off for this staff member.</div>';
       return;
     }
-    const rows = ffPointsLeaderboardRows
+    const sortedRows = ffPointsLeaderboardRows
       .map(function(row) { return { ...row, points: ffPointsLeaderboardValue(row, ffPointsLeaderboardActivePeriod) }; })
       .sort(function(a, b) {
         return (Number(b.points) || 0) - (Number(a.points) || 0)
           || String(a.staffName || '').localeCompare(String(b.staffName || ''));
       });
+    // Collapse same-name duplicates: when two rows share the same display name,
+    // keep the row with the highest activity (points first, then event count).
+    // Rows with non-empty staff names are deduped here; rows missing a name
+    // are passed through untouched (they fall back to staffId display).
+    const seenNames = new Map();
+    const dedupedRows = [];
+    sortedRows.forEach(function(row) {
+      const nameKey = String(row.staffName || '').trim().toLowerCase();
+      if (!nameKey) {
+        dedupedRows.push(row);
+        return;
+      }
+      const existingIdx = seenNames.get(nameKey);
+      if (existingIdx == null) {
+        seenNames.set(nameKey, dedupedRows.length);
+        dedupedRows.push(row);
+        return;
+      }
+      const existing = dedupedRows[existingIdx];
+      const existingScore = (Number(existing.points) || 0) * 1000 + (Array.isArray(existing.events) ? existing.events.length : 0);
+      const candidateScore = (Number(row.points) || 0) * 1000 + (Array.isArray(row.events) ? row.events.length : 0);
+      if (candidateScore > existingScore) {
+        dedupedRows[existingIdx] = row;
+      }
+    });
+    const rankedRows = dedupedRows.map(function(row, idx) { return { ...row, rank: idx + 1 }; });
+    if (ffPointsVisibilityMode !== 'private') {
+      ffPopulatePointsStaffPicker(rankedRows);
+    }
+    const selectedStaffId = ffPointsVisibilityMode === 'private' ? '' : String(ffPointsLeaderboardSelectedStaffId || '').trim();
+    const rows = selectedStaffId
+      ? rankedRows.filter(function(row) { return String(row.staffId || '').trim() === selectedStaffId; })
+      : rankedRows;
     const hasActivity = ffPointsVisibilityMode === 'private'
       ? rows.length > 0
       : rows.some(function(row) { return (Number(row.points) || 0) > 0 || (Array.isArray(row.events) && row.events.length > 0); });
     if (!rows.length || !hasActivity) {
-      list.innerHTML = '<div style="padding:22px 14px;text-align:center;border:1px dashed #ddd6fe;border-radius:12px;background:#faf5ff;color:#6b7280;font-size:12px;">No points for this period yet.</div>';
+      let emptyMsg = 'No points for this period yet.';
+      if (selectedStaffId) {
+        const selected = rankedRows.find(function(row) { return String(row.staffId || '').trim() === selectedStaffId; });
+        const selectedName = selected ? String(selected.staffName || selectedStaffId) : selectedStaffId;
+        emptyMsg = 'No points for ' + escapeHtmlDraft(selectedName) + ' in this period.';
+      }
+      list.innerHTML = '<div style="padding:22px 14px;text-align:center;border:1px dashed #ddd6fe;border-radius:12px;background:#faf5ff;color:#6b7280;font-size:12px;">' + emptyMsg + '</div>';
       return;
     }
     const showGoal = ffPointsLeaderboardActivePeriod === 'thisMonth';
@@ -34571,6 +34898,17 @@ function initializeUserProfileMenu() {
       const percent = showGoal && ffPointsLeaderboardMonthlyGoal > 0
         ? Math.min(999, Math.round((points / ffPointsLeaderboardMonthlyGoal) * 100))
         : 0;
+      // Staff in private mode get a visual donut breakdown by source
+      // (Tasks / Queue / Media / Tickets / Manual Adjustment) plus a
+      // collapsible full event log so they understand exactly how their
+      // score was built — including manager Manual Adjustments with reason.
+      const breakdownHtml = ffRenderPointsBreakdownCard(row);
+      const eventsHtml = (Array.isArray(row.events) && row.events.length)
+        ? '<details style="margin-top:12px;border:1px solid #ede9fe;border-radius:11px;background:#fff;overflow:hidden;">'
+          + '<summary style="padding:8px 10px;font-size:10px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:.04em;background:#faf5ff;border-bottom:1px solid #ede9fe;cursor:pointer;list-style:none;">View all events</summary>'
+          + ffRenderPointEvents(row)
+          + '</details>'
+        : '';
       list.innerHTML = '<div style="padding:14px;border:1px solid #ede9fe;border-radius:13px;background:#faf5ff;">'
         + '<div style="font-size:11px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Your points</div>'
         + '<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:14px;">'
@@ -34578,36 +34916,64 @@ function initializeUserProfileMenu() {
         + '<div style="font-size:28px;line-height:1;color:#111827;font-weight:900;font-variant-numeric:tabular-nums;">' + points + '</div>'
         + '</div>'
         + (showGoal ? '<div style="margin-top:8px;font-size:11px;color:#6b7280;text-align:right;">' + percent + '% of monthly goal</div>' : '')
-        + '</div>';
+        + '</div>'
+        + breakdownHtml
+        + eventsHtml;
       return;
     }
-    const body = rows.map(function(row, idx) {
+    const canManageAdjust = (typeof window.ffCurrentUserIsPointsManager === 'function')
+      ? window.ffCurrentUserIsPointsManager() === true
+      : false;
+    const gridCols = '42px 1fr 84px' + (showGoal ? ' 112px' : '') + (canManageAdjust ? ' 72px' : '');
+    const adjustButtonHtml = function(row) {
+      if (!canManageAdjust) return '';
+      const sid = escapeHtmlDraft(String(row.staffId || ''));
+      const sname = escapeHtmlDraft(String(row.staffName || row.staffId || ''));
+      return '<button type="button" class="ff-points-adjust-btn" data-adjust-staff-id="' + sid + '" data-adjust-staff-name="' + sname + '" title="Adjust points" style="justify-self:end;padding:4px 9px;border:1px solid #ddd6fe;border-radius:999px;background:#f5f3ff;color:#6d28d9;font-size:11px;font-weight:800;cursor:pointer;line-height:1;">± Adjust</button>';
+    };
+    const body = rows.map(function(row) {
       const points = Number(row.points) || 0;
+      const rankNum = Number(row.rank) || 0;
       const percent = ffPointsLeaderboardMonthlyGoal > 0
         ? Math.min(999, Math.round((points / ffPointsLeaderboardMonthlyGoal) * 100))
         : 0;
       const isCurrent = ffPointsCurrentStaffId && String(row.staffId || '') === ffPointsCurrentStaffId;
       if (ffPointsVisibilityMode === 'partial') {
-        return '<div style="display:grid;grid-template-columns:42px 1fr 84px' + (showGoal ? ' 112px' : '') + ';gap:8px;align-items:center;padding:8px 10px;border:1px solid ' + (isCurrent ? '#c4b5fd' : '#f1f5f9') + ';border-radius:9px;background:' + (isCurrent ? '#faf5ff' : '#fff') + ';margin-bottom:6px;">'
-          + '<div style="font-size:12px;font-weight:800;color:#7c3aed;">#' + (idx + 1) + '</div>'
+        return '<div style="display:grid;grid-template-columns:' + gridCols + ';gap:8px;align-items:center;padding:8px 10px;border:1px solid ' + (isCurrent ? '#c4b5fd' : '#f1f5f9') + ';border-radius:9px;background:' + (isCurrent ? '#faf5ff' : '#fff') + ';margin-bottom:6px;">'
+          + '<div style="font-size:12px;font-weight:800;color:#7c3aed;">#' + rankNum + '</div>'
           + '<div style="font-size:12px;color:#111827;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtmlDraft(row.staffName || row.staffId || 'Staff') + (isCurrent ? ' <span style="color:#7c3aed;font-size:10px;font-weight:800;">You</span>' : '') + '</div>'
           + '<div style="font-size:13px;color:#111827;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;">' + points + '</div>'
           + (showGoal ? '<div style="font-size:11px;color:#6b7280;text-align:right;">' + percent + '% of goal</div>' : '')
+          + adjustButtonHtml(row)
           + '</div>';
       }
       return '<details style="border:1px solid #f1f5f9;border-radius:9px;background:#fff;margin-bottom:6px;overflow:hidden;">'
-        + '<summary style="display:grid;grid-template-columns:42px 1fr 84px' + (showGoal ? ' 112px' : '') + ';gap:8px;align-items:center;padding:8px 10px;cursor:pointer;list-style:none;">'
-        + '<div style="font-size:12px;font-weight:800;color:#7c3aed;">#' + (idx + 1) + '</div>'
+        + '<summary style="display:grid;grid-template-columns:' + gridCols + ';gap:8px;align-items:center;padding:8px 10px;cursor:pointer;list-style:none;">'
+        + '<div style="font-size:12px;font-weight:800;color:#7c3aed;">#' + rankNum + '</div>'
         + '<div style="font-size:12px;color:#111827;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtmlDraft(row.staffName || row.staffId || 'Staff') + '</div>'
         + '<div style="font-size:13px;color:#111827;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;">' + points + '</div>'
         + (showGoal ? '<div style="font-size:11px;color:#6b7280;text-align:right;">' + percent + '% of goal</div>' : '')
+        + adjustButtonHtml(row)
         + '</summary>'
         + ffRenderPointEvents(row)
         + '</details>';
     }).join('');
-    const header = '<div style="display:grid;grid-template-columns:42px 1fr 84px' + (showGoal ? ' 112px' : '') + ';gap:8px;align-items:center;padding:0 10px 7px;color:#9ca3af;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;">'
-      + '<div>Rank</div><div>Staff</div><div style="text-align:right;">Points</div>' + (showGoal ? '<div style="text-align:right;">Goal</div>' : '') + '</div>';
+    const header = '<div style="display:grid;grid-template-columns:' + gridCols + ';gap:8px;align-items:center;padding:0 10px 7px;color:#9ca3af;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;">'
+      + '<div>Rank</div><div>Staff</div><div style="text-align:right;">Points</div>' + (showGoal ? '<div style="text-align:right;">Goal</div>' : '') + (canManageAdjust ? '<div></div>' : '') + '</div>';
     list.innerHTML = header + body;
+    if (canManageAdjust) {
+      list.querySelectorAll('.ff-points-adjust-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (typeof window.ffOpenStaffPointsAdjustModal !== 'function') return;
+          window.ffOpenStaffPointsAdjustModal({
+            staffId: btn.getAttribute('data-adjust-staff-id') || '',
+            staffName: btn.getAttribute('data-adjust-staff-name') || ''
+          });
+        });
+      });
+    }
   }
 
   function ffFindPointEventById(eventId) {
@@ -34674,6 +35040,258 @@ function initializeUserProfileMenu() {
   window.ffClosePointVoidModal = function() {
     const modal = document.getElementById('pointsVoidConfirmModal');
     if (modal) modal.style.display = 'none';
+  };
+
+  // ---------------------------------------------------------------------------
+  // Manual Points Adjustment modal
+  // Lets owner/admin/manager (or staff with `points_manage` permission) add
+  // or subtract points for any staff member with a mandatory reason. Each
+  // submission writes a fresh `manual_adjustment` event via ffCreatePointsEvent
+  // — the totals are updated by the engine transaction, never directly here.
+  // ---------------------------------------------------------------------------
+  function ffEnsureStaffPointsAdjustModal() {
+    let modal = document.getElementById('ffStaffPointsAdjustModal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'ffStaffPointsAdjustModal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:100085;background:rgba(15,23,42,.42);align-items:center;justify-content:center;padding:18px;';
+    modal.innerHTML = ''
+      + '<div style="position:absolute;inset:0;" onclick="window.ffCloseStaffPointsAdjustModal && window.ffCloseStaffPointsAdjustModal()"></div>'
+      + '<div style="position:relative;background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(15,23,42,.22);width:min(440px,94vw);padding:22px;border:1px solid #ede9fe;">'
+      + '<div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:12px;">'
+      + '<div style="width:38px;height:38px;border-radius:12px;background:#f5f3ff;color:#6d28d9;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;">±</div>'
+      + '<div style="min-width:0;flex:1;"><h3 style="margin:0 0 4px;font-size:17px;color:#111827;">Adjust Points</h3>'
+      + '<p id="ffStaffPointsAdjustStaffSummary" style="margin:0;color:#6b7280;font-size:12px;line-height:1.45;"></p></div>'
+      + '</div>'
+      + '<div style="padding:10px 12px;border-radius:12px;background:#f5f3ff;border:1px solid #ddd6fe;color:#5b21b6;font-size:12px;line-height:1.45;margin-bottom:12px;">'
+      + 'This logs a Manual Adjustment event in the points history. Use a positive number to add points or a negative number to subtract.'
+      + '</div>'
+      + '<label style="display:block;font-size:11px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Points <span style="font-weight:500;color:#9ca3af;text-transform:none;letter-spacing:0;">(-100 to 100, non-zero)</span></label>'
+      + '<input id="ffStaffPointsAdjustPointsInput" type="number" step="1" min="-100" max="100" inputmode="numeric" placeholder="e.g. 5 or -3" style="width:100%;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:10px;padding:10px;font-size:13px;font-family:inherit;outline:none;margin-bottom:10px;">'
+      + '<label style="display:block;font-size:11px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Reason <span style="font-weight:500;color:#9ca3af;text-transform:none;letter-spacing:0;">(required, up to 500 chars)</span></label>'
+      + '<textarea id="ffStaffPointsAdjustReasonInput" rows="3" maxlength="500" placeholder="Why are you adjusting these points?" style="width:100%;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:10px;padding:10px;font-size:13px;resize:vertical;font-family:inherit;outline:none;"></textarea>'
+      + '<div id="ffStaffPointsAdjustError" style="display:none;margin-top:10px;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:12px;"></div>'
+      + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">'
+      + '<button type="button" onclick="window.ffCloseStaffPointsAdjustModal && window.ffCloseStaffPointsAdjustModal()" style="padding:9px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-size:12px;font-weight:700;cursor:pointer;">Cancel</button>'
+      + '<button id="ffStaffPointsAdjustSaveBtn" type="button" onclick="window.ffSubmitStaffPointsAdjustment && window.ffSubmitStaffPointsAdjustment()" style="padding:9px 14px;border:1px solid #7c3aed;border-radius:10px;background:#7c3aed;color:#fff;font-size:12px;font-weight:800;cursor:pointer;">Save</button>'
+      + '</div>'
+      + '</div>';
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  function ffStaffPointsAdjustShowError(message) {
+    const errorEl = document.getElementById('ffStaffPointsAdjustError');
+    if (!errorEl) return;
+    if (message) {
+      errorEl.textContent = message;
+      errorEl.style.display = 'block';
+    } else {
+      errorEl.textContent = '';
+      errorEl.style.display = 'none';
+    }
+  }
+
+  window.ffOpenStaffPointsAdjustModal = function(input) {
+    const data = (input && typeof input === 'object') ? input : {};
+    const staffId = String(data.staffId || '').trim();
+    const staffName = String(data.staffName || '').trim();
+    if (!staffId) {
+      console.warn('[FairFlowPoints ManualAdjustment] open: missing staffId');
+      return;
+    }
+    if (typeof window.ffCurrentUserIsPointsManager === 'function' && !window.ffCurrentUserIsPointsManager()) {
+      console.warn('[FairFlowPoints ManualAdjustment] open: blocked by permission');
+      if (typeof showToast === 'function') showToast('You do not have permission to adjust points.', 'error');
+      return;
+    }
+    const modal = ffEnsureStaffPointsAdjustModal();
+    modal.dataset.staffId = staffId;
+    modal.dataset.staffName = staffName;
+    const summary = document.getElementById('ffStaffPointsAdjustStaffSummary');
+    if (summary) summary.textContent = staffName ? ('Adjusting points for ' + staffName) : 'Manual adjustment';
+    const pointsInput = document.getElementById('ffStaffPointsAdjustPointsInput');
+    if (pointsInput) pointsInput.value = '';
+    const reasonInput = document.getElementById('ffStaffPointsAdjustReasonInput');
+    if (reasonInput) reasonInput.value = '';
+    ffStaffPointsAdjustShowError('');
+    modal.style.display = 'flex';
+    console.log('[FairFlowPoints ManualAdjustment] open', { staffId: staffId, staffName: staffName });
+    setTimeout(function() {
+      const focusEl = document.getElementById('ffStaffPointsAdjustPointsInput');
+      if (focusEl && typeof focusEl.focus === 'function') focusEl.focus();
+    }, 30);
+  };
+
+  window.ffCloseStaffPointsAdjustModal = function() {
+    const modal = document.getElementById('ffStaffPointsAdjustModal');
+    if (modal) modal.style.display = 'none';
+    ffStaffPointsAdjustShowError('');
+  };
+
+  function ffStaffPointsAdjustResolveLocationId(staffId) {
+    try {
+      if (typeof ffGetPointsActiveLocationId === 'function') {
+        const active = ffGetPointsActiveLocationId();
+        if (typeof active === 'string' && active.trim()) return active.trim();
+      }
+    } catch (_) {}
+    try {
+      if (typeof ffGetStaffStore === 'function') {
+        const store = ffGetStaffStore() || {};
+        const staffArr = Array.isArray(store.staff) ? store.staff : [];
+        const row = staffArr.find(function(s) { return s && String(s.id || '') === String(staffId || ''); });
+        if (row) {
+          const primary = String(row.primaryLocationId || '').trim();
+          if (primary) return primary;
+          const allowed = Array.isArray(row.allowedLocationIds) ? row.allowedLocationIds : [];
+          for (let i = 0; i < allowed.length; i++) {
+            const candidate = String(allowed[i] || '').trim();
+            if (candidate) return candidate;
+          }
+        }
+      }
+    } catch (_) {}
+    return 'default';
+  }
+
+  function ffStaffPointsAdjustResolveActor() {
+    let uid = '';
+    try { uid = String(window.auth?.currentUser?.uid || '').trim(); } catch (_) {}
+    let name = '';
+    try { name = typeof getCurrentActorName === 'function' ? String(getCurrentActorName() || '').trim() : ''; } catch (_) {}
+    if (!name) {
+      try {
+        const info = typeof ffGetCurrentUserInfo === 'function' ? ffGetCurrentUserInfo() : {};
+        name = String((info && (info.name || info.email)) || '').trim();
+      } catch (_) {}
+    }
+    if (!name) {
+      try { name = String(window.__ff_actorName || sessionStorage.getItem('ff_actor_name') || '').trim(); } catch (_) {}
+    }
+    return { uid: uid, name: name };
+  }
+
+  window.ffSubmitStaffPointsAdjustment = async function() {
+    const modal = document.getElementById('ffStaffPointsAdjustModal');
+    if (!modal) return;
+    const staffId = String(modal.dataset.staffId || '').trim();
+    const staffName = String(modal.dataset.staffName || '').trim();
+    const pointsInput = document.getElementById('ffStaffPointsAdjustPointsInput');
+    const reasonInput = document.getElementById('ffStaffPointsAdjustReasonInput');
+    const saveBtn = document.getElementById('ffStaffPointsAdjustSaveBtn');
+    const rawPoints = String(pointsInput?.value || '').trim();
+    const pointsNum = Number(rawPoints);
+    const points = Number.isFinite(pointsNum) ? Math.trunc(pointsNum) : NaN;
+    const reason = String(reasonInput?.value || '').trim();
+
+    ffStaffPointsAdjustShowError('');
+
+    if (!staffId) {
+      console.warn('[FairFlowPoints ManualAdjustment] validation failed: missing staffId');
+      ffStaffPointsAdjustShowError('Missing staff. Please reopen the form.');
+      return;
+    }
+    if (!Number.isFinite(points) || !Number.isInteger(points) || points === 0) {
+      console.warn('[FairFlowPoints ManualAdjustment] validation failed: invalid points', { rawPoints: rawPoints });
+      ffStaffPointsAdjustShowError('Enter a non-zero whole number (use a negative value to subtract).');
+      return;
+    }
+    if (Math.abs(points) > 100) {
+      console.warn('[FairFlowPoints ManualAdjustment] validation failed: points out of range', { points: points });
+      ffStaffPointsAdjustShowError('Points must be between -100 and 100.');
+      return;
+    }
+    if (!reason) {
+      console.warn('[FairFlowPoints ManualAdjustment] validation failed: missing reason');
+      ffStaffPointsAdjustShowError('Reason is required.');
+      return;
+    }
+    if (reason.length > 500) {
+      console.warn('[FairFlowPoints ManualAdjustment] validation failed: reason too long', { length: reason.length });
+      ffStaffPointsAdjustShowError('Reason must be 500 characters or fewer.');
+      return;
+    }
+    if (typeof window.ffCurrentUserIsPointsManager === 'function' && !window.ffCurrentUserIsPointsManager()) {
+      console.warn('[FairFlowPoints ManualAdjustment] validation failed: permission lost');
+      ffStaffPointsAdjustShowError('You do not have permission to adjust points.');
+      return;
+    }
+    if (typeof window.ffCreatePointsEvent !== 'function') {
+      console.warn('[FairFlowPoints ManualAdjustment] validation failed: engine missing');
+      ffStaffPointsAdjustShowError('Points engine is not available. Please refresh and try again.');
+      return;
+    }
+    let accountId = '';
+    try {
+      if (typeof ffSharedSetupAccountId === 'function') accountId = String(ffSharedSetupAccountId() || '').trim();
+    } catch (_) {}
+    if (!accountId) {
+      console.warn('[FairFlowPoints ManualAdjustment] validation failed: missing accountId');
+      ffStaffPointsAdjustShowError('No active account. Please refresh and try again.');
+      return;
+    }
+
+    const locationId = ffStaffPointsAdjustResolveLocationId(staffId);
+    const actor = ffStaffPointsAdjustResolveActor();
+    // Per-call unique sourceId so each adjustment is its own event (no
+    // collision with previous adjustments for the same staff/day) without
+    // relying on uniquePerSource — multiple manual entries are expected.
+    const sourceId = 'manual_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '.7'; saveBtn.textContent = 'Saving...'; }
+    console.log('[FairFlowPoints ManualAdjustment] save start', {
+      accountId: accountId,
+      staffId: staffId,
+      locationId: locationId,
+      points: points,
+      sourceId: sourceId
+    });
+
+    try {
+      const result = await window.ffCreatePointsEvent({
+        accountId: accountId,
+        staffId: staffId,
+        staffName: staffName,
+        locationId: locationId,
+        type: 'manual_adjustment',
+        sourceModule: 'points_admin',
+        sourceId: sourceId,
+        points: points,
+        sourceMeta: {
+          reason: reason,
+          createdByUid: actor.uid,
+          createdByName: actor.name
+        }
+      });
+      if (!result || result.created !== true) {
+        console.warn('[FairFlowPoints ManualAdjustment] save not created', result);
+        ffStaffPointsAdjustShowError(result && result.duplicate
+          ? 'Duplicate adjustment detected. Please try again.'
+          : 'Could not save the adjustment. Please try again.');
+        return;
+      }
+      console.log('[FairFlowPoints ManualAdjustment] success', {
+        eventId: result.eventId,
+        staffId: staffId,
+        points: points
+      });
+      if (typeof showToast === 'function') {
+        const direction = points > 0 ? 'added' : 'subtracted';
+        showToast(Math.abs(points) + ' points ' + direction + (staffName ? (' for ' + staffName) : ''), 'success');
+      }
+      window.ffCloseStaffPointsAdjustModal();
+      try {
+        if (typeof window.ffLoadPointsLeaderboard === 'function') window.ffLoadPointsLeaderboard();
+      } catch (refreshErr) {
+        console.warn('[FairFlowPoints ManualAdjustment] leaderboard refresh failed', refreshErr);
+      }
+    } catch (err) {
+      console.error('[FairFlowPoints ManualAdjustment] error', err);
+      ffStaffPointsAdjustShowError((err && err.message) ? err.message : 'Failed to save adjustment.');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; saveBtn.textContent = 'Save'; }
+    }
   };
 
   function ffGetPointsCorrectionActor() {
@@ -38485,6 +39103,10 @@ function initializeUserProfileMenu() {
     const targetCard = document.getElementById(cardId);
     if (targetCard) {
       targetCard.style.display = 'block';
+
+      if (section === 'shared-setup' && typeof ffApplyPointsSettingsButtonsVisibility === 'function') {
+        try { ffApplyPointsSettingsButtonsVisibility(); } catch (_) {}
+      }
       
       // Update billing panel if it's the selected section
       if (section === 'billing' && typeof window.updateBillingPanel === 'function') {
@@ -48748,10 +49370,10 @@ function hookSettingsGuard_DISABLED(){
     <div style="max-width:900px;margin:0 auto;">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
         <div>
-          <h1 style="margin:0;font-size:21px;font-weight:800;color:#111827;">Fair Flow Points</h1>
-          <p style="margin:4px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Track staff points by location, week, month, and all time.</p>
+          <h1 style="margin:0;font-size:15px;font-weight:700;color:#111827;letter-spacing:-0.01em;">Fair Flow Points</h1>
+          <p style="margin:3px 0 0;font-size:11px;color:#6b7280;line-height:1.4;">Track staff points by location, week, month, and all time.</p>
         </div>
-        <button type="button" onclick="window.ffOpenBranchPointsSettings && window.ffOpenBranchPointsSettings()" style="padding:7px 10px;border:1px solid #ddd6fe;border-radius:999px;background:#fff;color:#6d28d9;font-size:11px;font-weight:800;cursor:pointer;">Points Settings</button>
+        <button id="ffPointsAppSettingsBtn" type="button" onclick="window.ffOpenBranchPointsSettings && window.ffOpenBranchPointsSettings()" style="padding:7px 10px;border:1px solid #ddd6fe;border-radius:999px;background:#fff;color:#6d28d9;font-size:11px;font-weight:800;cursor:pointer;">Points Settings</button>
         <span id="pointsAppScopeLabel" style="display:none;"></span>
       </div>
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 6px 18px rgba(15,23,42,0.05);overflow:hidden;">
@@ -48766,6 +49388,12 @@ function hookSettingsGuard_DISABLED(){
           </select>
           <div id="pointsAppCustomWeekWrap" style="display:none;align-items:center;gap:8px;">
             <input id="pointsAppCustomWeek" type="week" onchange="window.ffPointsAppPeriodChanged && window.ffPointsAppPeriodChanged('customWeek')" style="padding:7px 10px;border:1px solid #e5e7eb;border-radius:9px;background:#fff;color:#111827;font-size:12px;">
+          </div>
+          <div id="pointsAppStaffFilterWrap" style="display:flex;align-items:center;gap:6px;margin-left:auto;">
+            <label for="pointsAppStaffPicker" style="font-size:11px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">Staff</label>
+            <select id="pointsAppStaffPicker" onchange="window.ffPointsAppStaffPickerChanged && window.ffPointsAppStaffPickerChanged(this.value)" style="min-width:180px;max-width:240px;padding:7px 10px;border:1px solid #e5e7eb;border-radius:9px;background:#fff;color:#111827;font-size:12px;font-weight:600;">
+              <option value="">All staff</option>
+            </select>
           </div>
         </div>
         <div id="pointsAppLeaderboardList" style="padding:12px 14px 16px;min-height:160px;"></div>
