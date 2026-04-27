@@ -34899,9 +34899,13 @@ function initializeUserProfileMenu() {
     if (ffPointsVisibilityMode === 'private') {
       const row = rows[0] || {};
       const points = Number(row.points) || 0;
-      const percent = showGoal && ffPointsLeaderboardMonthlyGoal > 0
-        ? Math.min(999, Math.round((points / ffPointsLeaderboardMonthlyGoal) * 100))
-        : 0;
+      const goal = Number(ffPointsLeaderboardMonthlyGoal) || 0;
+      const hasGoal = showGoal && goal > 0;
+      // Percent toward goal — capped visually at 100% for the progress bar
+      // but displayed in full (e.g. 142%) in the label so high achievers see
+      // their actual over-performance.
+      const rawPercent = hasGoal ? Math.max(0, Math.round((points / goal) * 100)) : 0;
+      const barPercent = Math.min(100, Math.max(0, rawPercent));
       // Staff in private mode get a visual donut breakdown by source
       // (Tasks / Queue / Media / Tickets / Manual Adjustment) plus a
       // collapsible full event log so they understand exactly how their
@@ -34913,13 +34917,34 @@ function initializeUserProfileMenu() {
           + ffRenderPointEvents(row)
           + '</details>'
         : '';
+      // Big-number block:
+      //  - With goal: "16 / 120 pts" + progress bar + "X% of monthly goal"
+      //  - Without goal (week / all-time): just the total like before.
+      const totalDisplay = hasGoal
+        ? '<div style="display:flex;align-items:baseline;justify-content:flex-end;gap:6px;line-height:1;">'
+          + '<span style="font-size:32px;color:#111827;font-weight:900;font-variant-numeric:tabular-nums;">' + points + '</span>'
+          + '<span style="font-size:18px;color:#6b7280;font-weight:700;font-variant-numeric:tabular-nums;">/ ' + goal + '</span>'
+          + '<span style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">pts</span>'
+          + '</div>'
+        : '<div style="font-size:28px;line-height:1;color:#111827;font-weight:900;font-variant-numeric:tabular-nums;">' + points + '</div>';
+      const goalBlock = hasGoal
+        ? '<div style="margin-top:12px;">'
+          + '<div style="position:relative;height:10px;background:#ede9fe;border-radius:999px;overflow:hidden;">'
+          + '<div style="position:absolute;top:0;left:0;bottom:0;width:' + barPercent + '%;background:linear-gradient(90deg,#7c3aed,#a855f7);border-radius:999px;transition:width .35s ease;"></div>'
+          + '</div>'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:11px;">'
+          + '<span style="color:#6b7280;font-weight:600;">Monthly goal: ' + goal + ' pts</span>'
+          + '<span style="color:#6d28d9;font-weight:800;">' + rawPercent + '% complete</span>'
+          + '</div>'
+          + '</div>'
+        : '';
       list.innerHTML = '<div style="padding:14px;border:1px solid #ede9fe;border-radius:13px;background:#faf5ff;">'
         + '<div style="font-size:11px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Your points</div>'
-        + '<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:14px;">'
+        + '<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;">'
         + '<div style="font-size:13px;color:#374151;font-weight:700;">' + escapeHtmlDraft(row.staffName || row.staffId || 'You') + '</div>'
-        + '<div style="font-size:28px;line-height:1;color:#111827;font-weight:900;font-variant-numeric:tabular-nums;">' + points + '</div>'
+        + totalDisplay
         + '</div>'
-        + (showGoal ? '<div style="margin-top:8px;font-size:11px;color:#6b7280;text-align:right;">' + percent + '% of monthly goal</div>' : '')
+        + goalBlock
         + '</div>'
         + breakdownHtml
         + eventsHtml;
