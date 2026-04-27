@@ -112,6 +112,20 @@ service cloud.firestore {
       );
     }
 
+    function staffDocUidMatches(salonId, staffId) {
+      return isSignedIn()
+        && staffId is string
+        && exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId))
+        && (
+          get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.uid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.firebaseUid == request.auth.uid
+        );
+    }
+
+    function canAccessAccountAsStaffOrMember(accountId) {
+      return belongsToSalon(accountId) || memberExists(accountId) || isStaffInSalon(accountId);
+    }
+
     /** My Profile (self): only these top-level fields may change on own staff doc */
     function staffSelfProfileChangedKeysAllowed() {
       return request.resource.data.diff(resource.data).changedKeys().hasOnly([
@@ -207,6 +221,31 @@ service cloud.firestore {
         || !(mySalonStaffDocData(salonId).permissions is map)
         || !mySalonStaffDocData(salonId).permissions.keys().hasAny(['inbox_send'])
         || mySalonStaffDocData(salonId).permissions.inbox_send == true;
+    }
+
+    function permPointsOwnAllowed(salonId) {
+      return mySalonStaffDocData(salonId) != null && (
+        !(mySalonStaffDocData(salonId).permissions is map)
+        || !mySalonStaffDocData(salonId).permissions.keys().hasAny(['points_view_own'])
+        || mySalonStaffDocData(salonId).permissions.points_view_own == true
+      );
+    }
+
+    function permPointsOwnAllowedForStaff(salonId, staffId) {
+      return salonStaffDocData(salonId, staffId) != null && (
+        !(salonStaffDocData(salonId, staffId).permissions is map)
+        || !salonStaffDocData(salonId, staffId).permissions.keys().hasAny(['points_view_own'])
+        || salonStaffDocData(salonId, staffId).permissions.points_view_own == true
+      );
+    }
+
+    function permPointsAllAllowed(salonId) {
+      return mySalonStaffDocData(salonId) != null
+        && mySalonStaffDocData(salonId).permissions is map
+        && (
+          mySalonStaffDocData(salonId).permissions.points_view_all == true
+          || mySalonStaffDocData(salonId).permissions.points_manage == true
+        );
     }
 
     // Legacy Media (contentWorks): PIN technicians may have staff doc but not users.salonId / members
@@ -821,14 +860,33 @@ service cloud.firestore {
     }
 
     match /accounts/{accountId}/settings/{settingId} {
-      allow read: if settingId == "points" && belongsToSalon(accountId);
+      allow read: if settingId == "points" && isSignedIn();
       allow create, update: if settingId == "points" && isManager(accountId);
       allow delete: if false;
     }
 
     match /accounts/{accountId}/pointsEvents/{eventId} {
-      allow read: if belongsToSalon(accountId);
-      allow create: if belongsToSalon(accountId)
+      allow get: if canAccessAccountAsStaffOrMember(accountId)
+        || (
+          permPointsOwnAllowed(accountId)
+          && resource.data.staffId == userStaffId()
+        )
+        || (
+          permPointsOwnAllowedForStaff(accountId, resource.data.staffId)
+          && staffDocUidMatches(accountId, resource.data.staffId)
+        );
+      allow list: if canAccessAccountAsStaffOrMember(accountId)
+        || permPointsAllAllowed(accountId)
+        || (
+          permPointsOwnAllowed(accountId)
+          && resource.data.staffId == userStaffId()
+        )
+        || (
+          permPointsOwnAllowedForStaff(accountId, resource.data.staffId)
+          && staffDocUidMatches(accountId, resource.data.staffId)
+        );
+      allow create: if (canAccessAccountAsStaffOrMember(accountId)
+        || staffDocUidMatches(accountId, request.resource.data.staffId))
         && (
           (request.resource.data.type == "task_completed"
             && request.resource.data.sourceModule == "tasks")
@@ -849,8 +907,12 @@ service cloud.firestore {
     }
 
     match /accounts/{accountId}/staff/{staffId}/pointsSummary/{summaryId} {
-      allow read: if belongsToSalon(accountId);
-      allow create, update: if summaryId == "main" && belongsToSalon(accountId);
+      allow read: if canAccessAccountAsStaffOrMember(accountId)
+        || permPointsAllAllowed(accountId)
+        || (summaryId == "main" && matchesOwnStaffId(accountId, staffId) && permPointsOwnAllowed(accountId))
+        || (summaryId == "main" && staffDocUidMatches(accountId, staffId) && permPointsOwnAllowedForStaff(accountId, staffId));
+      allow create, update: if summaryId == "main"
+        && (canAccessAccountAsStaffOrMember(accountId) || staffDocUidMatches(accountId, staffId));
       allow delete: if false;
     }
 
@@ -860,7 +922,7 @@ service cloud.firestore {
     }
 
     match /accounts/{accountId}/locations/{locationId}/settings/{settingId} {
-      allow read: if settingId == "points" && belongsToSalon(accountId);
+      allow read: if settingId == "points" && isSignedIn();
       allow create, update: if settingId == "points" && isManager(accountId);
       allow delete: if false;
     }

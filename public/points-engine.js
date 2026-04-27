@@ -19,6 +19,7 @@ const POINTS_SETTINGS_DEFAULTS = {
   queueThird: 5,
   queueJoin: 2,
   monthlyGoal: 120,
+  pointsVisibilityMode: "full",
 };
 
 function getDb() {
@@ -31,6 +32,11 @@ function normalizePointsSettings(data) {
   const source = data && typeof data === "object" ? data : {};
   const out = {};
   Object.keys(POINTS_SETTINGS_DEFAULTS).forEach((key) => {
+    if (key === "pointsVisibilityMode") {
+      const mode = String(source[key] || "").trim();
+      out[key] = ["private", "partial", "full"].includes(mode) ? mode : POINTS_SETTINGS_DEFAULTS[key];
+      return;
+    }
     const value = Number(source[key]);
     out[key] = Number.isFinite(value) ? value : POINTS_SETTINGS_DEFAULTS[key];
   });
@@ -57,7 +63,10 @@ export async function ffGetPointsSettings(accountId, locationId = "") {
   } else {
     const raw = snap.data() || {};
     const merged = normalizePointsSettings(raw);
-  const missing = Object.keys(POINTS_SETTINGS_DEFAULTS).some((key) => raw[key] == null || !Number.isFinite(Number(raw[key])));
+  const missing = Object.keys(POINTS_SETTINGS_DEFAULTS).some((key) => {
+    if (key === "pointsVisibilityMode") return !["private", "partial", "full"].includes(String(raw[key] || "").trim());
+    return raw[key] == null || !Number.isFinite(Number(raw[key]));
+  });
   if (missing) {
     await setDoc(ref, {
       ...merged,

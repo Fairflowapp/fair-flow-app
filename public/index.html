@@ -3453,6 +3453,7 @@ dialog footer button, .code-dialog footer button {
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Third<input id="pointsQueueThird" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Join<input id="pointsQueueJoin" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Monthly Goal<input id="pointsMonthlyGoal" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Staff Visibility<select id="pointsVisibilityMode" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;background:#fff;"><option value="private">Private - own points only</option><option value="partial">Partial - leaderboard only</option><option value="full">Full - leaderboard + details</option></select></label>
               </div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid #f3f4f6;background:#fafafa;">
@@ -6428,6 +6429,7 @@ function ffPointCorrectionHistoryEntryFromEvent(event, correctionId) {
 async function ffSyncPointsCorrectionsToHistory(force = false) {
   const sourceFilter = String(window.__historySourceFilter || 'all').toLowerCase();
   if (sourceFilter !== 'all' && sourceFilter !== 'points') return;
+  if (typeof ffCurrentUserIsPointsManager === 'function' && !ffCurrentUserIsPointsManager()) return;
   if (__ffPointsHistorySyncRunning) return;
   if (!force && Date.now() - __ffPointsHistoryLastSyncAt < 5000) return;
   const accountId = ffPointsHistoryAccountId();
@@ -7409,6 +7411,32 @@ function ffCurrentUserHasQueueManagePermission() {
   return ffStaffHasQueueManagePermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 
+/** Fair Flow Points permissions (Permissions tab). */
+function ffStaffHasPointsOwnPermission(staff) {
+  if (!staff || typeof staff !== 'object') return true;
+  const p = staff.permissions || {};
+  return p.points_view_own !== false;
+}
+
+function ffStaffHasPointsAllPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions || {};
+  return p.points_view_all === true || p.points_manage === true;
+}
+
+function ffStaffHasPointsManagePermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions || {};
+  return p.points_manage === true;
+}
+
+function ffCurrentUserHasPointsAccess() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  const staff = ffResolveCurrentStaffRowFromFfStaffV1();
+  return ffStaffHasPointsOwnPermission(staff) || ffStaffHasPointsAllPermission(staff) || ffStaffHasPointsManagePermission(staff);
+}
+window.ffCurrentUserHasPointsAccess = ffCurrentUserHasPointsAccess;
+
 /**
  * Top bar + user menu: show/hide main nav tabs from staff.permissions (ff_staff_v1).
  * Queue (#queueBtn): queue_view OR join-only on kiosk / bypass station (see ffCurrentUserIsQueueJoinOnlyPartialAccess).
@@ -7545,7 +7573,10 @@ function ffUpdateAppsPanelPermissionVisibility() {
   setAppsTileVisible('.apps-panel-item[data-app="chat"]', tabUnlessExplicitOff('chat_view'));
   setAppsTileVisible('.apps-panel-item[data-app="media"]', tabUnlessExplicitOff('media_view'));
   setAppsTileVisible('.apps-panel-item[data-app="training"]', tabUnlessExplicitOff('training_view'));
-  setAppsTileVisible('.apps-panel-item[data-app="points"]', tabUnlessExplicitOff('points_view'));
+  var pointsOk = typeof window.ffCurrentUserHasPointsAccess === 'function'
+    ? window.ffCurrentUserHasPointsAccess()
+    : tabUnlessExplicitOff('points_view');
+  setAppsTileVisible('.apps-panel-item[data-app="points"]', pointsOk);
   setAppsTileVisible('.apps-panel-item[data-app="inventory"]', tabUnlessExplicitOff('inventory_view'));
 
   let scheduleOk = true;
@@ -29498,6 +29529,12 @@ function initializeAppsPanel() {
         parentKey: 'history_view',
         parentMode: 'strictTrue',
         childKeys: ['history_export', 'history_clear']
+      },
+      {
+        groupTitle: 'Fair Flow Points',
+        parentKey: 'points_view_own',
+        parentMode: 'notFalse',
+        childKeys: ['points_view_all', 'points_manage']
       }
     ];
 
@@ -29687,6 +29724,29 @@ function initializeAppsPanel() {
             getValue: function (st) {
               return (st.permissions || {}).training_view !== false;
             }
+          }
+        ]
+      },
+      {
+        title: 'Fair Flow Points',
+        permissions: [
+          {
+            key: 'points_view_own',
+            label: 'View own points',
+            desc: 'Allow this staff member to open Fair Flow Points and see only their own score and ranking. Default: on for technicians/service providers.',
+            getValue: function (st) {
+              return (st.permissions || {}).points_view_own !== false;
+            }
+          },
+          {
+            key: 'points_view_all',
+            label: 'View all points list',
+            desc: 'Allow this staff member to see the full Fair Flow Points leaderboard. Event breakdown still follows the branch Staff Visibility setting unless Manage/Edit is on.'
+          },
+          {
+            key: 'points_manage',
+            label: 'Manage/Edit Fair Flow Points',
+            desc: 'Allow correcting point events and managing point-related actions. Managers, admins, and owners still have full access.'
           }
         ]
       },
@@ -29889,6 +29949,11 @@ function initializeAppsPanel() {
           permsRef.time_clock_bypass_location = false;
         }
 
+        if (permissionKey === 'points_view_own' && newValue === false) {
+          permsRef.points_view_all = false;
+          permsRef.points_manage = false;
+        }
+
         permsRef[permissionKey] = newValue;
         
         console.log('[renderPermissionsTab] Permission toggled:', permissionKey, newValue);
@@ -29937,6 +30002,12 @@ function initializeAppsPanel() {
         }
 
         if (permissionKey === 'chat_manage' || permissionKey === 'chat_free_text') {
+          renderPermissionsTab(staff);
+          runPermissionVisibilitySideEffects();
+          return;
+        }
+
+        if (permissionKey === 'points_view_own') {
           renderPermissionsTab(staff);
           runPermissionVisibilitySideEffects();
           return;
@@ -31412,6 +31483,11 @@ function initializeAppsPanel() {
     training: {
       view: true
     },
+    points: {
+      viewOwn: true,
+      viewAll: false,
+      manage: false
+    },
     inventory: {
       view: true
     },
@@ -31464,6 +31540,9 @@ function initializeAppsPanel() {
       media_upload: d.media.upload,
       media_handle: d.media.manage,
       training_view: d.training.view,
+      points_view_own: d.points.viewOwn !== false,
+      points_view_all: d.points.viewAll === true,
+      points_manage: d.points.manage === true,
       inventory_view: d.inventory.view,
       inventory_manage: false,
       schedule_edit: d.schedule.manage,
@@ -31526,6 +31605,11 @@ function initializeAppsPanel() {
       manage: true,
       reports: true
     },
+    points: {
+      viewOwn: true,
+      viewAll: true,
+      manage: false
+    },
     inventory: {
       view: true,
       use: true,
@@ -31587,6 +31671,9 @@ function initializeAppsPanel() {
       media_upload: d.media.upload,
       media_handle: d.media.manage,
       training_view: trainingTabOn,
+      points_view_own: d.points.viewOwn !== false,
+      points_view_all: d.points.viewAll === true,
+      points_manage: d.points.manage === true,
       inventory_view: d.inventory.view || d.inventory.use === true,
       inventory_manage: d.inventory.manage === true,
       schedule_edit: d.schedule.manage,
@@ -31664,6 +31751,11 @@ function initializeAppsPanel() {
       reports: true,
       assign: true,
       notifications: true
+    },
+    points: {
+      viewOwn: true,
+      viewAll: true,
+      manage: true
     },
     inventory: {
       view: true,
@@ -31750,6 +31842,9 @@ function initializeAppsPanel() {
       media_upload: m.upload === true,
       media_handle: mediaHandle,
       training_view: trainingTabOn,
+      points_view_own: d.points.viewOwn !== false,
+      points_view_all: d.points.viewAll === true,
+      points_manage: d.points.manage === true,
       inventory_view: d.inventory.view || d.inventory.use === true,
       inventory_manage: d.inventory.manage === true,
       schedule_edit: scheduleEditOn,
@@ -33770,7 +33865,8 @@ function initializeUserProfileMenu() {
     queueSecond: 7,
     queueThird: 5,
     queueJoin: 2,
-    monthlyGoal: 120
+    monthlyGoal: 120,
+    pointsVisibilityMode: 'full'
   };
 
   const FF_POINTS_SETTINGS_FIELDS = [
@@ -33791,6 +33887,11 @@ function initializeUserProfileMenu() {
     const source = data && typeof data === 'object' ? data : {};
     const normalized = {};
     Object.keys(FF_POINTS_SETTINGS_DEFAULTS).forEach(function(key) {
+      if (key === 'pointsVisibilityMode') {
+        const mode = String(source[key] || '').trim();
+        normalized[key] = ['private', 'partial', 'full'].indexOf(mode) >= 0 ? mode : FF_POINTS_SETTINGS_DEFAULTS[key];
+        return;
+      }
       const value = Number(source[key]);
       normalized[key] = Number.isFinite(value) ? value : FF_POINTS_SETTINGS_DEFAULTS[key];
     });
@@ -33818,6 +33919,7 @@ function initializeUserProfileMenu() {
       const raw = snap.data() || {};
       const merged = ffNormalizePointsSettings(raw);
       const missingFields = Object.keys(FF_POINTS_SETTINGS_DEFAULTS).filter(function(key) {
+        if (key === 'pointsVisibilityMode') return ['private', 'partial', 'full'].indexOf(String(raw[key] || '').trim()) < 0;
         return raw[key] == null || !Number.isFinite(Number(raw[key]));
       });
       if (missingFields.length) {
@@ -33848,6 +33950,8 @@ function initializeUserProfileMenu() {
       const input = document.getElementById(pair[1]);
       if (input) input.value = String(values[pair[0]]);
     });
+    const visibility = document.getElementById('pointsVisibilityMode');
+    if (visibility) visibility.value = values.pointsVisibilityMode || 'full';
   }
 
   function ffReadPointsSettingsForm() {
@@ -33857,6 +33961,10 @@ function initializeUserProfileMenu() {
       const raw = input ? Number(input.value) : NaN;
       values[pair[0]] = Number.isFinite(raw) ? raw : FF_POINTS_SETTINGS_DEFAULTS[pair[0]];
     });
+    const visibility = document.getElementById('pointsVisibilityMode');
+    values.pointsVisibilityMode = ['private', 'partial', 'full'].indexOf(String(visibility?.value || '').trim()) >= 0
+      ? String(visibility.value).trim()
+      : FF_POINTS_SETTINGS_DEFAULTS.pointsVisibilityMode;
     return ffNormalizePointsSettings(values);
   }
 
@@ -33874,10 +33982,18 @@ function initializeUserProfileMenu() {
     }
   }
 
+  function ffGetPointsSettingsModal() {
+    const modal = document.getElementById('pointsSettingsModal');
+    if (modal && modal.parentElement !== document.body) {
+      document.body.appendChild(modal);
+    }
+    return modal;
+  }
+
   window.ffOpenPointsSettings = async function() {
     ffPointsSettingsMode = 'account';
     ffSetPointsSettingsModalCopy('account');
-    const modal = document.getElementById('pointsSettingsModal');
+    const modal = ffGetPointsSettingsModal();
     const saveBtn = document.getElementById('pointsSettingsSaveBtn');
     if (modal) modal.style.display = 'flex';
     if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
@@ -33893,20 +34009,19 @@ function initializeUserProfileMenu() {
   };
 
   window.ffOpenBranchPointsSettings = async function() {
-    ffPointsSettingsMode = 'branch';
-    ffSetPointsSettingsModalCopy('branch');
-    const modal = document.getElementById('pointsSettingsModal');
+    const locationId = ffGetPointsActiveLocationId();
+    ffPointsSettingsMode = locationId ? 'branch' : 'account';
+    ffSetPointsSettingsModalCopy(locationId ? 'branch' : 'account');
+    const modal = ffGetPointsSettingsModal();
     const saveBtn = document.getElementById('pointsSettingsSaveBtn');
     if (modal) modal.style.display = 'flex';
     if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
     try {
       const accountId = ffSharedSetupAccountId();
-      const locationId = ffGetPointsActiveLocationId();
-      if (!locationId) throw new Error('No active branch');
       const settings = await ffGetPointsSettings(accountId, locationId);
       ffSetPointsSettingsForm(settings);
     } catch (e) {
-      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load branch points settings', 'error');
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load points settings', 'error');
     } finally {
       if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
     }
@@ -33948,6 +34063,8 @@ function initializeUserProfileMenu() {
   let ffPointsLeaderboardActivePeriod = 'thisWeek';
   let ffPointsLeaderboardRows = [];
   let ffPointsLeaderboardMonthlyGoal = FF_POINTS_SETTINGS_DEFAULTS.monthlyGoal;
+  let ffPointsVisibilityMode = 'full';
+  let ffPointsCurrentStaffId = '';
 
   function ffPointsIsoWeekKey(date) {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -34017,6 +34134,81 @@ function initializeUserProfileMenu() {
       });
     } catch (_) {}
     return Array.from(byId.values());
+  }
+
+  function ffCurrentUserIsPointsManager() {
+    if (window.ff_is_admin_cached === true) return true;
+    try {
+      if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) return true;
+    } catch (_) {}
+    try {
+      const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+      if (typeof ffStaffHasPointsManagePermission === 'function' && ffStaffHasPointsManagePermission(staff)) return true;
+    } catch (_) {}
+    const role = String(window.__ff_user_role || window.__ff_actorRole || sessionStorage.getItem('ff_actor_role') || '').toLowerCase();
+    if (role === 'owner' || role === 'admin' || role === 'manager') return true;
+    try {
+      const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+      const staffRole = String(staff?.role || '').toLowerCase();
+      return staff?.isAdmin === true || staff?.isManager === true || staffRole === 'owner' || staffRole === 'admin' || staffRole === 'manager';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function ffGetCurrentPointsStaffId() {
+    try {
+      const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+      const id = String(staff?.id || staff?.staffId || '').trim();
+      if (id) return id;
+    } catch (_) {}
+    const raw = [
+      window.__ff_authedStaffId,
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : ''),
+      window.auth?.currentUser?.uid
+    ];
+    for (const value of raw) {
+      const clean = String(value || '').trim();
+      if (clean) return clean;
+    }
+    return '';
+  }
+
+  async function ffResolveCurrentPointsStaffIdFromCloud(db, api) {
+    try {
+      const uid = String(window.auth?.currentUser?.uid || '').trim();
+      if (!uid || !api || typeof api.doc !== 'function' || typeof api.getDoc !== 'function') return '';
+      const snap = await api.getDoc(api.doc(db, `users/${uid}`));
+      const data = snap && snap.exists && snap.exists() ? (snap.data() || {}) : {};
+      const staffId = String(data.staffId || '').trim();
+      if (staffId) {
+        try { window.__ff_authedStaffId = staffId; } catch (_) {}
+        try { localStorage.setItem('ff_authedStaffId_v1', staffId); } catch (_) {}
+      }
+      return staffId;
+    } catch (e) {
+      console.warn('[Points Visibility] failed to resolve cloud staffId', e);
+      return '';
+    }
+  }
+
+  function ffFindPointsStaffRowById(staffRows, staffId) {
+    const clean = String(staffId || '').trim();
+    if (!clean) return null;
+    return (Array.isArray(staffRows) ? staffRows : []).find(function(staff) {
+      return staff && String(staff.id || staff.staffId || '').trim() === clean;
+    }) || null;
+  }
+
+  function ffResolvePointsVisibilityMode(settings) {
+    if (ffCurrentUserIsPointsManager()) return 'full';
+    const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+    if (typeof ffStaffHasPointsAllPermission === 'function' && ffStaffHasPointsAllPermission(staff)) {
+      const mode = String(settings?.pointsVisibilityMode || '').trim();
+      return mode === 'full' ? 'full' : 'partial';
+    }
+    if (typeof ffStaffHasPointsOwnPermission === 'function' && !ffStaffHasPointsOwnPermission(staff)) return 'none';
+    return 'private';
   }
 
   function ffGetPointsActiveLocationId() {
@@ -34091,12 +34283,15 @@ function initializeUserProfileMenu() {
     return true;
   }
 
-  async function ffLoadPointEventsForCurrentPeriod(accountId, db, api) {
+  async function ffLoadPointEventsForCurrentPeriod(accountId, db, api, staffIdFilter) {
     const period = ffPointsLeaderboardActivePeriod;
     const weekKey = ffPointsEventWeekKeyForPeriod(period);
     const { collection, query, where, getDocs } = api;
+    const cleanStaffIdFilter = String(staffIdFilter || '').trim();
     let snap;
-    if (period === 'thisWeek' || period === 'lastWeek' || period === 'customWeek') {
+    if (cleanStaffIdFilter) {
+      snap = await getDocs(query(collection(db, `accounts/${accountId}/pointsEvents`), where('staffId', '==', cleanStaffIdFilter)));
+    } else if (period === 'thisWeek' || period === 'lastWeek' || period === 'customWeek') {
       snap = await getDocs(query(collection(db, `accounts/${accountId}/pointsEvents`), where('weekKey', '==', weekKey)));
     } else if (period === 'thisMonth') {
       snap = await getDocs(query(collection(db, `accounts/${accountId}/pointsEvents`), where('monthKey', '==', ffPointsMonthKey(new Date()))));
@@ -34158,6 +34353,44 @@ function initializeUserProfileMenu() {
     return Array.from(pointsByStaff.values());
   }
 
+  function ffBuildPointsRowsFromPeriodEvents(staffRows, events, period) {
+    const staffById = new Map(staffRows.map(function(staff) { return [String(staff.id), staff]; }));
+    const pointsByStaff = new Map();
+    (Array.isArray(events) ? events : []).forEach(function(event) {
+      if (event.voided === true) return;
+      const staffId = String(event.staffId || '').trim();
+      if (!staffId) return;
+      const previous = pointsByStaff.get(staffId) || {
+        staffId,
+        staffName: String(event.staffName || staffById.get(staffId)?.name || staffId).trim() || staffId,
+        weekPoints: 0,
+        monthPoints: 0,
+        allTimePoints: 0,
+        events: []
+      };
+      const value = Number(event.points) || 0;
+      if (period === 'thisMonth') previous.monthPoints += value;
+      else if (period === 'allTime') previous.allTimePoints += value;
+      else previous.weekPoints += value;
+      previous.events.push(event);
+      pointsByStaff.set(staffId, previous);
+    });
+    staffRows.forEach(function(staff) {
+      if (!pointsByStaff.has(String(staff.id))) {
+        pointsByStaff.set(String(staff.id), {
+          staffId: staff.id,
+          staffName: staff.name,
+          weekPoints: 0,
+          monthPoints: 0,
+          allTimePoints: 0,
+          events: []
+        });
+      }
+    });
+    console.log('[PointsApp] loaded branch totals from events');
+    return Array.from(pointsByStaff.values());
+  }
+
   async function ffLoadPointsLeaderboard() {
     const accountId = ffSharedSetupAccountId();
     if (!accountId) throw new Error('No account');
@@ -34165,12 +34398,41 @@ function initializeUserProfileMenu() {
     const api = await getTrainingFirestoreApi();
     const settings = await ffGetPointsSettings(accountId, ffGetPointsActiveLocationId());
     ffPointsLeaderboardMonthlyGoal = Number(settings.monthlyGoal) || FF_POINTS_SETTINGS_DEFAULTS.monthlyGoal;
-    const staffRows = ffGetLocalStaffForPoints();
+    let staffRows = ffGetLocalStaffForPoints();
+    const cloudStaffId = await ffResolveCurrentPointsStaffIdFromCloud(db, api);
+    ffPointsCurrentStaffId = cloudStaffId || ffGetCurrentPointsStaffId();
+    ffPointsVisibilityMode = ffResolvePointsVisibilityMode(settings);
+    if (ffPointsVisibilityMode === 'none') {
+      ffPointsLeaderboardRows = [];
+      console.log('[Points Visibility] resolved:', ffPointsVisibilityMode);
+      console.log('[Points Visibility] staffId:', ffPointsCurrentStaffId);
+      ffRenderPointsLeaderboard();
+      return;
+    }
+    if (ffPointsVisibilityMode === 'private') {
+      staffRows = staffRows.filter(function(staff) { return String(staff.id) === ffPointsCurrentStaffId; });
+      if (!staffRows.length && ffPointsCurrentStaffId) {
+        const resolvedRow = ffFindPointsStaffRowById(ffGetLocalStaffForPoints(), ffPointsCurrentStaffId);
+        staffRows = [{
+          staffId: ffPointsCurrentStaffId,
+          id: ffPointsCurrentStaffId,
+          staffName: resolvedRow?.name || 'You',
+          name: resolvedRow?.name || 'You'
+        }];
+      }
+    }
     const period = ffPointsLeaderboardActivePeriod;
-    const rows = ffPointsPeriodUsesSummary(period)
-      ? await ffLoadPointsFromSummary(accountId, db, api, staffRows)
-      : await ffLoadPointsFromEvents(accountId, db, api, staffRows, ffPointsEventWeekKeyForPeriod(period));
-    const events = await ffLoadPointEventsForCurrentPeriod(accountId, db, api);
+    const activeLocationId = ffGetPointsActiveLocationId();
+    const needsEventsForTotals = !!activeLocationId || !ffPointsPeriodUsesSummary(period);
+    const needsEventsForDetails = ffPointsVisibilityMode === 'full';
+    const shouldLoadEvents = needsEventsForTotals || needsEventsForDetails;
+    const privateStaffIdFilter = ffPointsVisibilityMode === 'private' ? ffPointsCurrentStaffId : '';
+    const events = shouldLoadEvents ? await ffLoadPointEventsForCurrentPeriod(accountId, db, api, privateStaffIdFilter) : [];
+    const rows = activeLocationId || (ffPointsVisibilityMode === 'private' && !ffPointsPeriodUsesSummary(period))
+      ? ffBuildPointsRowsFromPeriodEvents(staffRows, events, period)
+      : (ffPointsPeriodUsesSummary(period)
+        ? await ffLoadPointsFromSummary(accountId, db, api, staffRows)
+        : await ffLoadPointsFromEvents(accountId, db, api, staffRows, ffPointsEventWeekKeyForPeriod(period)));
     const eventsByStaff = new Map();
     events.forEach(function(event) {
       const staffId = String(event.staffId || '').trim();
@@ -34180,7 +34442,7 @@ function initializeUserProfileMenu() {
       eventsByStaff.set(staffId, list);
     });
     ffPointsLeaderboardRows = rows.map(function(row) {
-      return { ...row, events: eventsByStaff.get(String(row.staffId)) || row.events || [] };
+      return { ...row, events: needsEventsForDetails ? (eventsByStaff.get(String(row.staffId)) || row.events || []) : [] };
     });
     console.log('[PointsApp] leaderboard loaded');
     return rows;
@@ -34202,6 +34464,10 @@ function initializeUserProfileMenu() {
   }
 
   function ffCanVoidPointsEvents() {
+    try {
+      const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+      if (typeof ffStaffHasPointsManagePermission === 'function' && ffStaffHasPointsManagePermission(staff)) return true;
+    } catch (_) {}
     const role = String(window.__ff_user_role || window.__ff_actorRole || sessionStorage.getItem('ff_actor_role') || '').toLowerCase();
     return window.ff_is_admin_cached === true || role === 'owner' || role === 'admin' || role === 'manager';
   }
@@ -34280,10 +34546,10 @@ function initializeUserProfileMenu() {
     if (!list) return;
     ffUpdatePointsPeriodControls();
     const scope = document.getElementById('pointsAppScopeLabel');
-    if (scope) {
-      const activeLocationId = ffGetPointsActiveLocationId();
-      scope.textContent = activeLocationId ? 'Showing account-wide points' : 'Showing account-wide points';
-      scope.style.display = 'inline-flex';
+    if (scope) scope.style.display = 'none';
+    if (ffPointsVisibilityMode === 'none') {
+      list.innerHTML = '<div style="padding:14px;border:1px dashed #e5e7eb;border-radius:10px;color:#6b7280;font-size:12px;text-align:center;">Fair Flow Points permission is off for this staff member.</div>';
+      return;
     }
     const rows = ffPointsLeaderboardRows
       .map(function(row) { return { ...row, points: ffPointsLeaderboardValue(row, ffPointsLeaderboardActivePeriod) }; })
@@ -34291,17 +34557,44 @@ function initializeUserProfileMenu() {
         return (Number(b.points) || 0) - (Number(a.points) || 0)
           || String(a.staffName || '').localeCompare(String(b.staffName || ''));
       });
-    const hasActivity = rows.some(function(row) { return (Number(row.points) || 0) > 0 || (Array.isArray(row.events) && row.events.length > 0); });
+    const hasActivity = ffPointsVisibilityMode === 'private'
+      ? rows.length > 0
+      : rows.some(function(row) { return (Number(row.points) || 0) > 0 || (Array.isArray(row.events) && row.events.length > 0); });
     if (!rows.length || !hasActivity) {
       list.innerHTML = '<div style="padding:22px 14px;text-align:center;border:1px dashed #ddd6fe;border-radius:12px;background:#faf5ff;color:#6b7280;font-size:12px;">No points for this period yet.</div>';
       return;
     }
     const showGoal = ffPointsLeaderboardActivePeriod === 'thisMonth';
+    if (ffPointsVisibilityMode === 'private') {
+      const row = rows[0] || {};
+      const points = Number(row.points) || 0;
+      const percent = showGoal && ffPointsLeaderboardMonthlyGoal > 0
+        ? Math.min(999, Math.round((points / ffPointsLeaderboardMonthlyGoal) * 100))
+        : 0;
+      list.innerHTML = '<div style="padding:14px;border:1px solid #ede9fe;border-radius:13px;background:#faf5ff;">'
+        + '<div style="font-size:11px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Your points</div>'
+        + '<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:14px;">'
+        + '<div style="font-size:13px;color:#374151;font-weight:700;">' + escapeHtmlDraft(row.staffName || row.staffId || 'You') + '</div>'
+        + '<div style="font-size:28px;line-height:1;color:#111827;font-weight:900;font-variant-numeric:tabular-nums;">' + points + '</div>'
+        + '</div>'
+        + (showGoal ? '<div style="margin-top:8px;font-size:11px;color:#6b7280;text-align:right;">' + percent + '% of monthly goal</div>' : '')
+        + '</div>';
+      return;
+    }
     const body = rows.map(function(row, idx) {
       const points = Number(row.points) || 0;
       const percent = ffPointsLeaderboardMonthlyGoal > 0
         ? Math.min(999, Math.round((points / ffPointsLeaderboardMonthlyGoal) * 100))
         : 0;
+      const isCurrent = ffPointsCurrentStaffId && String(row.staffId || '') === ffPointsCurrentStaffId;
+      if (ffPointsVisibilityMode === 'partial') {
+        return '<div style="display:grid;grid-template-columns:42px 1fr 84px' + (showGoal ? ' 112px' : '') + ';gap:8px;align-items:center;padding:8px 10px;border:1px solid ' + (isCurrent ? '#c4b5fd' : '#f1f5f9') + ';border-radius:9px;background:' + (isCurrent ? '#faf5ff' : '#fff') + ';margin-bottom:6px;">'
+          + '<div style="font-size:12px;font-weight:800;color:#7c3aed;">#' + (idx + 1) + '</div>'
+          + '<div style="font-size:12px;color:#111827;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtmlDraft(row.staffName || row.staffId || 'Staff') + (isCurrent ? ' <span style="color:#7c3aed;font-size:10px;font-weight:800;">You</span>' : '') + '</div>'
+          + '<div style="font-size:13px;color:#111827;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;">' + points + '</div>'
+          + (showGoal ? '<div style="font-size:11px;color:#6b7280;text-align:right;">' + percent + '% of goal</div>' : '')
+          + '</div>';
+      }
       return '<details style="border:1px solid #f1f5f9;border-radius:9px;background:#fff;margin-bottom:6px;overflow:hidden;">'
         + '<summary style="display:grid;grid-template-columns:42px 1fr 84px' + (showGoal ? ' 112px' : '') + ';gap:8px;align-items:center;padding:8px 10px;cursor:pointer;list-style:none;">'
         + '<div style="font-size:12px;font-weight:800;color:#7c3aed;">#' + (idx + 1) + '</div>'
@@ -48458,10 +48751,8 @@ function hookSettingsGuard_DISABLED(){
           <h1 style="margin:0;font-size:21px;font-weight:800;color:#111827;">Fair Flow Points</h1>
           <p style="margin:4px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Track staff points by location, week, month, and all time.</p>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <button type="button" onclick="window.ffOpenBranchPointsSettings && window.ffOpenBranchPointsSettings()" style="padding:7px 10px;border:1px solid #ddd6fe;border-radius:999px;background:#fff;color:#6d28d9;font-size:11px;font-weight:800;cursor:pointer;">Points Settings</button>
-          <span id="pointsAppScopeLabel" style="display:none;align-items:center;padding:5px 9px;border:1px solid #ddd6fe;border-radius:999px;background:#faf5ff;color:#6d28d9;font-size:11px;font-weight:700;">Showing account-wide points</span>
-        </div>
+        <button type="button" onclick="window.ffOpenBranchPointsSettings && window.ffOpenBranchPointsSettings()" style="padding:7px 10px;border:1px solid #ddd6fe;border-radius:999px;background:#fff;color:#6d28d9;font-size:11px;font-weight:800;cursor:pointer;">Points Settings</button>
+        <span id="pointsAppScopeLabel" style="display:none;"></span>
       </div>
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 6px 18px rgba(15,23,42,0.05);overflow:hidden;">
         <div style="display:flex;align-items:center;gap:10px;border-bottom:1px solid #e5e7eb;padding:10px 14px;background:#f9fafb;flex-wrap:wrap;">
