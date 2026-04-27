@@ -34150,6 +34150,11 @@ function initializeUserProfileMenu() {
   };
 
   let ffPointsLeaderboardActivePeriod = 'thisWeek';
+  // Tracks whether we've picked the initial period for the current session.
+  // Private-mode staff land on "This month" on first load so they see their
+  // monthly goal progress immediately; managers/admins keep the weekly default.
+  // Once true, the user is free to switch periods without us overriding them.
+  let ffPointsLeaderboardPeriodInitialized = false;
   let ffPointsLeaderboardRows = [];
   let ffPointsLeaderboardMonthlyGoal = FF_POINTS_SETTINGS_DEFAULTS.monthlyGoal;
   let ffPointsVisibilityMode = 'full';
@@ -34544,6 +34549,16 @@ function initializeUserProfileMenu() {
     const cloudStaffId = await ffResolveCurrentPointsStaffIdFromCloud(db, api);
     ffPointsCurrentStaffId = cloudStaffId || ffGetCurrentPointsStaffId();
     ffPointsVisibilityMode = ffResolvePointsVisibilityMode(settings);
+    if (!ffPointsLeaderboardPeriodInitialized) {
+      // First load of this session: private staff with a monthly goal benefit
+      // most from seeing the month immediately. Managers / admins / public
+      // viewers keep "This week" as their default snapshot.
+      if (ffPointsVisibilityMode === 'private') {
+        ffPointsLeaderboardActivePeriod = 'thisMonth';
+        console.log('[PointsApp] private default period -> thisMonth');
+      }
+      ffPointsLeaderboardPeriodInitialized = true;
+    }
     if (ffPointsVisibilityMode === 'none') {
       ffPointsLeaderboardRows = [];
       console.log('[Points Visibility] resolved:', ffPointsVisibilityMode);
