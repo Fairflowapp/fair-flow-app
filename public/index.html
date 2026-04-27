@@ -34566,7 +34566,11 @@ function initializeUserProfileMenu() {
     const period = ffPointsLeaderboardActivePeriod;
     const activeLocationId = ffGetPointsActiveLocationId();
     const needsEventsForTotals = !!activeLocationId || !ffPointsPeriodUsesSummary(period);
-    const needsEventsForDetails = ffPointsVisibilityMode === 'full';
+    // Both 'full' (admins viewing everyone) and 'private' (staff viewing own
+    // breakdown + donut chart) need the actual events attached to rows.
+    // Without this, private mode loads totals only and the donut/event log
+    // render empty even though the score is correct.
+    const needsEventsForDetails = ffPointsVisibilityMode === 'full' || ffPointsVisibilityMode === 'private';
     const shouldLoadEvents = needsEventsForTotals || needsEventsForDetails;
     const privateStaffIdFilter = ffPointsVisibilityMode === 'private' ? ffPointsCurrentStaffId : '';
     const events = shouldLoadEvents ? await ffLoadPointEventsForCurrentPeriod(accountId, db, api, privateStaffIdFilter) : [];
