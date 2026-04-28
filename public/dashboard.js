@@ -764,12 +764,24 @@ function renderModuleCards(snap) {
     "time-analytics": "Time Analytics",
     "tasks-analytics": "Tasks Analytics",
   };
+  const ANALYTICS_ROUTES = {
+    "queue-analytics": "goToQueueAnalytics",
+  };
   root.querySelectorAll("[data-dash-action]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       const action = btn.getAttribute("data-dash-action");
       const label = ANALYTICS_LABELS[action] || "Analytics";
       console.log(LOG, "analytics link clicked", action);
+      const routeFn = ANALYTICS_ROUTES[action];
+      if (routeFn && typeof window[routeFn] === "function") {
+        try {
+          window[routeFn]();
+          return;
+        } catch (err) {
+          console.warn(LOG, "route navigation failed", routeFn, err);
+        }
+      }
       try {
         if (window.ffToast && typeof window.ffToast.info === "function") {
           window.ffToast.info(`${label} screen — coming soon`, 3500);
