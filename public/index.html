@@ -8538,6 +8538,21 @@ function ffGetAllQueueTechTypes() {
   } catch(e) { return []; }
 }
 
+function ffQueueTechTypeDisplayLabel(typeId) {
+  const raw = String(typeId || '').trim();
+  if (!raw) return '';
+  try {
+    const cachedTypes = Array.isArray(window.__ff_technician_types_cache) ? window.__ff_technician_types_cache : [];
+    const match = cachedTypes.find(t => t && String(t.id || '').trim() === raw);
+    if (match && match.name) return String(match.name).trim();
+  } catch (_) {}
+  const withoutLocationSuffix = raw.includes('--') ? raw.split('--')[0] : raw;
+  return withoutLocationSuffix
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+    .trim();
+}
+
 function ffHideQueueFilterBar() {
   const bar = document.getElementById('ffQueueFilterBar');
   if (bar) bar.style.display = 'none';
@@ -8547,6 +8562,18 @@ window.ffHideQueueFilterBar = ffHideQueueFilterBar;
 function ffRenderQueueFilterChips() {
   const bar = document.getElementById('ffQueueFilterBar');
   if (!bar) return;
+  if ((!window.__ff_technician_types_cache || window.__ff_technician_types_cache.length === 0) &&
+      typeof window.ffGetTechnicianTypes === 'function' &&
+      !window.__ffQueueTechTypesLabelRefreshPending) {
+    window.__ffQueueTechTypesLabelRefreshPending = true;
+    window.ffGetTechnicianTypes()
+      .then(types => {
+        window.__ff_technician_types_cache = Array.isArray(types) ? types : [];
+        window.__ffQueueTechTypesLabelRefreshPending = false;
+        ffRenderQueueFilterChips();
+      })
+      .catch(() => { window.__ffQueueTechTypesLabelRefreshPending = false; });
+  }
   if (typeof ffCurrentUserIsQueueJoinOnlyPartialAccess === 'function' && ffCurrentUserIsQueueJoinOnlyPartialAccess()) {
     ffHideQueueFilterBar();
     return;
@@ -8566,7 +8593,7 @@ function ffRenderQueueFilterChips() {
   allChips.forEach(type => {
     const chip = document.createElement('button');
     chip.type = 'button';
-    const label = type === 'all' ? 'All' : type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const label = type === 'all' ? 'All' : ffQueueTechTypeDisplayLabel(type);
     chip.textContent = label;
     const isActive = window._ffQueueFilter === type;
     chip.style.cssText = `padding:4px 12px;border-radius:999px;border:1px solid ${isActive ? '#7c3aed' : '#e5e7eb'};background:${isActive ? '#7c3aed' : '#fff'};color:${isActive ? '#fff' : '#374151'};font-size:12px;font-weight:500;cursor:${filterReadOnly ? 'not-allowed' : 'pointer'};transition:all 0.15s;white-space:nowrap;opacity:${filterReadOnly ? '0.9' : '1'};`;
