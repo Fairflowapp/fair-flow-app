@@ -248,6 +248,15 @@ service cloud.firestore {
         );
     }
 
+    // Manage Fair Flow Points settings: staff.permissions.points_manage === true.
+    // Used as the authoritative gate for writes on accounts/{accountId}/settings/points
+    // and accounts/{accountId}/locations/{locationId}/settings/points.
+    function permPointsManageAllowed(salonId) {
+      return mySalonStaffDocData(salonId) != null
+        && mySalonStaffDocData(salonId).permissions is map
+        && mySalonStaffDocData(salonId).permissions.points_manage == true;
+    }
+
     // Legacy Media (contentWorks): PIN technicians may have staff doc but not users.salonId / members
     function isStaffInSalon(salonId) {
       return isSignedIn()
@@ -861,7 +870,8 @@ service cloud.firestore {
 
     match /accounts/{accountId}/settings/{settingId} {
       allow read: if settingId == "points" && isSignedIn();
-      allow create, update: if settingId == "points" && isManager(accountId);
+      allow create, update: if settingId == "points"
+        && (isAdminOrOwner(accountId) || permPointsManageAllowed(accountId));
       allow delete: if false;
     }
 
@@ -898,6 +908,28 @@ service cloud.firestore {
             && request.resource.data.sourceModule == "tickets")
           || (request.resource.data.type == "points_correction"
             && request.resource.data.sourceModule == "points")
+          || (
+            request.resource.data.type == "manual_adjustment"
+            && request.resource.data.sourceModule == "points_admin"
+            && (isManager(accountId) || permPointsManageAllowed(accountId))
+            && request.resource.data.keys().hasAll(['sourceMeta'])
+            && request.resource.data.keys().hasOnly([
+              'staffId', 'staffName', 'locationId',
+              'type', 'sourceModule', 'sourceId',
+              'points', 'createdAt', 'weekKey', 'monthKey',
+              'voided', 'sourceMeta'
+            ])
+            && request.resource.data.points is int
+            && request.resource.data.points != 0
+            && request.resource.data.points >= -100
+            && request.resource.data.points <= 100
+            && request.resource.data.voided == false
+            && request.resource.data.sourceMeta is map
+            && request.resource.data.sourceMeta.keys().hasAll(['reason'])
+            && request.resource.data.sourceMeta.reason is string
+            && request.resource.data.sourceMeta.reason.size() > 0
+            && request.resource.data.sourceMeta.reason.size() <= 500
+          )
         );
       allow update: if belongsToSalon(accountId)
         && resource.data.voided != true
@@ -910,7 +942,16 @@ service cloud.firestore {
       allow read: if canAccessAccountAsStaffOrMember(accountId)
         || permPointsAllAllowed(accountId)
         || (summaryId == "main" && matchesOwnStaffId(accountId, staffId) && permPointsOwnAllowed(accountId))
-        || (summaryId == "main" && staffDocUidMatches(accountId, staffId) && permPointsOwnAllowedForStaff(accountId, staffId));
+        || (summaryId == "main" && staffDocUidMatches(accountId, staffId) && permPointsOwnAllowedForStaff(accountId, staffId))
+        // Rank visibility: when the account/branch has explicitly enabled
+        // showRankToPrivate, any staff with own-points permission may read
+        // every staff member's summary doc (totals only, no events) so the
+        // client can compute their rank without revealing names. The flag
+        // must be set on the account-level points settings doc.
+        || (summaryId == "main"
+          && permPointsOwnAllowed(accountId)
+          && exists(/databases/$(database)/documents/accounts/$(accountId)/settings/points)
+          && get(/databases/$(database)/documents/accounts/$(accountId)/settings/points).data.showRankToPrivate == true);
       allow create, update: if summaryId == "main"
         && (canAccessAccountAsStaffOrMember(accountId) || staffDocUidMatches(accountId, staffId));
       allow delete: if false;
@@ -923,7 +964,8 @@ service cloud.firestore {
 
     match /accounts/{accountId}/locations/{locationId}/settings/{settingId} {
       allow read: if settingId == "points" && isSignedIn();
-      allow create, update: if settingId == "points" && isManager(accountId);
+      allow create, update: if settingId == "points"
+        && (isAdminOrOwner(accountId) || permPointsManageAllowed(accountId));
       allow delete: if false;
     }
 

@@ -3427,7 +3427,7 @@ dialog footer button, .code-dialog footer button {
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedTaskTemplates && window.ffOpenSharedTaskTemplates()">Manage Task Templates</button>
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedInventoryCatalog && window.ffOpenSharedInventoryCatalog()">Manage Inventory Catalog</button>
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedChatTemplates && window.ffOpenSharedChatTemplates()">Manage Chat Templates</button>
-            <button id="ffSharedSetupPointsSettingsBtn" class="shared-setup-action-btn" type="button" onclick="window.ffOpenPointsSettings && window.ffOpenPointsSettings()">Manage Points Settings</button>
+            <button id="ffSharedSetupPointsSettingsBtn" class="shared-setup-action-btn" type="button" onclick="window.ffOpenPointsSettings && window.ffOpenPointsSettings()">Fair Flow Setup</button>
           </div>
         </div>
 
@@ -3435,8 +3435,8 @@ dialog footer button, .code-dialog footer button {
           <div style="width:100%;max-width:560px;max-height:86vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(15,23,42,0.26);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px 14px;border-bottom:1px solid #e5e7eb;">
               <div>
-                <h3 id="pointsSettingsTitle" style="margin:0;font-size:18px;font-weight:800;color:#111827;">Fair Flow Points</h3>
-                <p id="pointsSettingsSubtitle" style="margin:6px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Configure account-level point values.</p>
+                <h3 id="pointsSettingsTitle" style="margin:0;font-size:18px;font-weight:800;color:#111827;">Fair Flow Setup</h3>
+                <p id="pointsSettingsSubtitle" style="margin:6px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Configure account-level point values, visibility and rank options.</p>
               </div>
               <button type="button" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()" style="border:none;background:none;color:#6b7280;font-size:24px;line-height:1;cursor:pointer;">×</button>
             </div>
@@ -3453,7 +3453,8 @@ dialog footer button, .code-dialog footer button {
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Third<input id="pointsQueueThird" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Join<input id="pointsQueueJoin" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Monthly Goal<input id="pointsMonthlyGoal" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Staff Visibility<select id="pointsVisibilityMode" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;background:#fff;"><option value="private">Private - own points only</option><option value="partial">Partial - leaderboard only</option><option value="full">Full - leaderboard + details</option></select></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Staff Visibility<select id="pointsVisibilityMode" onchange="window.ffApplyPointsRankToggleVisibility && window.ffApplyPointsRankToggleVisibility()" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;background:#fff;"><option value="private">Private - own points only</option><option value="partial">Partial - leaderboard only</option><option value="full">Full - leaderboard + details</option></select></label>
+                <label id="pointsShowRankToPrivateWrap" style="display:none;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Rank Visibility<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;"><input id="pointsShowRankToPrivate" type="checkbox" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;flex-shrink:0;"><span style="font-size:12px;color:#6b7280;font-weight:500;line-height:1.4;">Show staff their rank (e.g. <strong style="color:#111827;">#3 of 12</strong>) without revealing other names or scores</span></div></label>
               </div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid #f3f4f6;background:#fafafa;">
@@ -33942,7 +33943,8 @@ function initializeUserProfileMenu() {
     queueThird: 5,
     queueJoin: 2,
     monthlyGoal: 120,
-    pointsVisibilityMode: 'full'
+    pointsVisibilityMode: 'full',
+    showRankToPrivate: false
   };
 
   const FF_POINTS_SETTINGS_FIELDS = [
@@ -33966,6 +33968,10 @@ function initializeUserProfileMenu() {
       if (key === 'pointsVisibilityMode') {
         const mode = String(source[key] || '').trim();
         normalized[key] = ['private', 'partial', 'full'].indexOf(mode) >= 0 ? mode : FF_POINTS_SETTINGS_DEFAULTS[key];
+        return;
+      }
+      if (key === 'showRankToPrivate') {
+        normalized[key] = source[key] === true;
         return;
       }
       const value = Number(source[key]);
@@ -33996,6 +34002,7 @@ function initializeUserProfileMenu() {
       const merged = ffNormalizePointsSettings(raw);
       const missingFields = Object.keys(FF_POINTS_SETTINGS_DEFAULTS).filter(function(key) {
         if (key === 'pointsVisibilityMode') return ['private', 'partial', 'full'].indexOf(String(raw[key] || '').trim()) < 0;
+        if (key === 'showRankToPrivate') return typeof raw[key] !== 'boolean';
         return raw[key] == null || !Number.isFinite(Number(raw[key]));
       });
       if (missingFields.length) {
@@ -34028,7 +34035,22 @@ function initializeUserProfileMenu() {
     });
     const visibility = document.getElementById('pointsVisibilityMode');
     if (visibility) visibility.value = values.pointsVisibilityMode || 'full';
+    const rankToggle = document.getElementById('pointsShowRankToPrivate');
+    if (rankToggle) rankToggle.checked = values.showRankToPrivate === true;
+    ffApplyPointsRankToggleVisibility();
   }
+
+  function ffApplyPointsRankToggleVisibility() {
+    // The "Show rank" checkbox is only meaningful when staff have a private
+    // dashboard. Hide it for partial/full where everyone already sees the
+    // leaderboard so owners aren't faced with an option that has no effect.
+    const wrap = document.getElementById('pointsShowRankToPrivateWrap');
+    if (!wrap) return;
+    const visibility = document.getElementById('pointsVisibilityMode');
+    const mode = String(visibility?.value || '').trim();
+    wrap.style.display = mode === 'private' ? 'flex' : 'none';
+  }
+  window.ffApplyPointsRankToggleVisibility = ffApplyPointsRankToggleVisibility;
 
   function ffReadPointsSettingsForm() {
     const values = {};
@@ -34041,6 +34063,8 @@ function initializeUserProfileMenu() {
     values.pointsVisibilityMode = ['private', 'partial', 'full'].indexOf(String(visibility?.value || '').trim()) >= 0
       ? String(visibility.value).trim()
       : FF_POINTS_SETTINGS_DEFAULTS.pointsVisibilityMode;
+    const rankToggle = document.getElementById('pointsShowRankToPrivate');
+    values.showRankToPrivate = rankToggle ? rankToggle.checked === true : false;
     return ffNormalizePointsSettings(values);
   }
 
@@ -34050,11 +34074,11 @@ function initializeUserProfileMenu() {
     const title = document.getElementById('pointsSettingsTitle');
     const subtitle = document.getElementById('pointsSettingsSubtitle');
     if (mode === 'branch') {
-      if (title) title.textContent = 'Branch Points Settings';
-      if (subtitle) subtitle.textContent = 'Configure point values for the active branch. If a field is missing, shared account settings are used.';
+      if (title) title.textContent = 'Fair Flow Setup · Branch';
+      if (subtitle) subtitle.textContent = 'Configure point values, visibility and rank for the active branch. If a field is missing, shared account settings are used.';
     } else {
-      if (title) title.textContent = 'Fair Flow Points';
-      if (subtitle) subtitle.textContent = 'Configure shared account-level point values used as the default for every branch.';
+      if (title) title.textContent = 'Fair Flow Setup';
+      if (subtitle) subtitle.textContent = 'Configure shared account-level point values, visibility and rank used as defaults for every branch.';
     }
   }
 
@@ -34158,6 +34182,11 @@ function initializeUserProfileMenu() {
   let ffPointsLeaderboardRows = [];
   let ffPointsLeaderboardMonthlyGoal = FF_POINTS_SETTINGS_DEFAULTS.monthlyGoal;
   let ffPointsVisibilityMode = 'full';
+  // When the owner enables Show Rank to Private Staff, we compute a small
+  // anonymous rank object {rank, total, percentile, points} for the current
+  // user during ffLoadPointsLeaderboard and render it in the private dashboard.
+  let ffPointsLeaderboardShowRank = false;
+  let ffPointsLeaderboardPrivateRank = null;
   let ffPointsCurrentStaffId = '';
   // Selected staffId from the picker. Empty string means "All staff".
   let ffPointsLeaderboardSelectedStaffId = '';
@@ -34545,6 +34574,8 @@ function initializeUserProfileMenu() {
     const api = await getTrainingFirestoreApi();
     const settings = await ffGetPointsSettings(accountId, ffGetPointsActiveLocationId());
     ffPointsLeaderboardMonthlyGoal = Number(settings.monthlyGoal) || FF_POINTS_SETTINGS_DEFAULTS.monthlyGoal;
+    ffPointsLeaderboardShowRank = settings.showRankToPrivate === true;
+    ffPointsLeaderboardPrivateRank = null;
     let staffRows = ffGetLocalStaffForPoints();
     const cloudStaffId = await ffResolveCurrentPointsStaffIdFromCloud(db, api);
     ffPointsCurrentStaffId = cloudStaffId || ffGetCurrentPointsStaffId();
@@ -34605,8 +34636,47 @@ function initializeUserProfileMenu() {
     ffPointsLeaderboardRows = rows.map(function(row) {
       return { ...row, events: needsEventsForDetails ? (eventsByStaff.get(String(row.staffId)) || row.events || []) : [] };
     });
+    if (ffPointsVisibilityMode === 'private' && ffPointsLeaderboardShowRank) {
+      try {
+        ffPointsLeaderboardPrivateRank = await ffComputePrivateRank(accountId, db, api, period);
+      } catch (e) {
+        console.warn('[PointsApp] rank load failed', e);
+        ffPointsLeaderboardPrivateRank = null;
+      }
+    }
     console.log('[PointsApp] leaderboard loaded');
     return rows;
+  }
+
+  async function ffComputePrivateRank(accountId, db, api, period) {
+    // Loads pointsSummary/main for every staff in the local list and computes
+    // the current user's rank for the active period without exposing names or
+    // scores back to the caller. The Firestore rule only permits this read
+    // when the owner has explicitly enabled showRankToPrivate, so a failure
+    // here just means we render the dashboard without the rank card.
+    const allStaff = ffGetLocalStaffForPoints();
+    if (!Array.isArray(allStaff) || !allStaff.length) return null;
+    const myId = String(ffPointsCurrentStaffId || '').trim();
+    if (!myId) return null;
+    const summaries = await ffLoadPointsFromSummary(accountId, db, api, allStaff);
+    const sortedTotals = summaries
+      .map(function(row) {
+        const value = ffPointsLeaderboardValue(row, period);
+        return { staffId: String(row.staffId || ''), points: Number(value) || 0 };
+      })
+      // Drop staff with zero score so a brand-new salon doesn't say "#5 of 12"
+      // when 11 people simply have no events yet — except always keep the
+      // current user so they always see a rank for themselves.
+      .filter(function(r) { return r.points > 0 || r.staffId === myId; })
+      .sort(function(a, b) { return (b.points - a.points) || a.staffId.localeCompare(b.staffId); });
+    const total = sortedTotals.length;
+    if (!total) return null;
+    const myIdx = sortedTotals.findIndex(function(r) { return r.staffId === myId; });
+    if (myIdx < 0) return { rank: total, total: total, points: 0, percentile: 100 };
+    const rank = myIdx + 1;
+    const percentile = total > 1 ? Math.round((rank / total) * 100) : 100;
+    console.log('[PointsApp] private rank computed', rank, '/', total);
+    return { rank: rank, total: total, points: sortedTotals[myIdx].points, percentile: percentile };
   }
 
   function ffPointsLeaderboardValue(row, period) {
@@ -34930,6 +35000,34 @@ function initializeUserProfileMenu() {
           + ffRenderPointEvents(row)
           + '</details>'
         : '';
+      // Rank block: anonymous "#3 of 12" card surfaced only when the owner
+      // explicitly enabled Show Rank to Private Staff in Fair Flow Setup.
+      // We never reveal other names or scores, just the current user's
+      // position. Top-3 finishers get a celebratory tag for motivation.
+      const rank = ffPointsLeaderboardPrivateRank;
+      const rankHtml = (ffPointsLeaderboardShowRank && rank && rank.total > 1)
+        ? (function() {
+            const top3 = rank.rank <= 3;
+            const tagText = rank.rank === 1 ? 'Top performer'
+              : (rank.rank === 2 ? '2nd place'
+                : (rank.rank === 3 ? '3rd place'
+                  : 'Top ' + Math.max(rank.percentile, 1) + '%'));
+            const tagBg = top3 ? '#fef3c7' : '#ede9fe';
+            const tagColor = top3 ? '#b45309' : '#6d28d9';
+            const tagBorder = top3 ? '#fde68a' : '#ddd6fe';
+            return '<div style="margin-top:12px;padding:14px;border:1px solid #ede9fe;border-radius:13px;background:#fff;">'
+              + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">'
+              +   '<span style="font-size:11px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:.04em;">Your rank</span>'
+              +   '<span style="font-size:10px;font-weight:700;color:' + tagColor + ';background:' + tagBg + ';border:1px solid ' + tagBorder + ';padding:3px 8px;border-radius:999px;">' + tagText + '</span>'
+              + '</div>'
+              + '<div style="display:flex;align-items:baseline;gap:8px;">'
+              +   '<span style="font-size:30px;line-height:1;font-weight:900;color:#111827;font-variant-numeric:tabular-nums;">#' + rank.rank + '</span>'
+              +   '<span style="font-size:13px;color:#6b7280;font-weight:600;">of ' + rank.total + '</span>'
+              + '</div>'
+              + '<div style="margin-top:6px;font-size:11px;color:#9ca3af;">Based on ' + (ffPointsLeaderboardActivePeriod === 'thisMonth' ? 'this month' : (ffPointsLeaderboardActivePeriod === 'thisWeek' ? 'this week' : (ffPointsLeaderboardActivePeriod === 'lastWeek' ? 'last week' : (ffPointsLeaderboardActivePeriod === 'allTime' ? 'all time' : 'selected week')))) + ' · names hidden</div>'
+              + '</div>';
+          })()
+        : '';
       // Goal block: shows "16 / 120 · 13% of monthly goal" with a progress
       // bar so staff can see at a glance both their absolute score and
       // their progress toward the configured monthlyGoal. Only rendered
@@ -34960,6 +35058,7 @@ function initializeUserProfileMenu() {
         + '</div>'
         + goalHtml
         + '</div>'
+        + rankHtml
         + breakdownHtml
         + eventsHtml;
       return;
@@ -49416,7 +49515,7 @@ function hookSettingsGuard_DISABLED(){
           <h1 style="margin:0;font-size:15px;font-weight:700;color:#111827;letter-spacing:-0.01em;">Fair Flow Points</h1>
           <p style="margin:3px 0 0;font-size:11px;color:#6b7280;line-height:1.4;">Track staff points by location, week, month, and all time.</p>
         </div>
-        <button id="ffPointsAppSettingsBtn" type="button" onclick="window.ffOpenBranchPointsSettings && window.ffOpenBranchPointsSettings()" style="padding:7px 10px;border:1px solid #ddd6fe;border-radius:999px;background:#fff;color:#6d28d9;font-size:11px;font-weight:800;cursor:pointer;">Points Settings</button>
+        <button id="ffPointsAppSettingsBtn" type="button" onclick="window.ffOpenBranchPointsSettings && window.ffOpenBranchPointsSettings()" style="padding:7px 10px;border:1px solid #ddd6fe;border-radius:999px;background:#fff;color:#6d28d9;font-size:11px;font-weight:800;cursor:pointer;">Fair Flow Setup</button>
         <span id="pointsAppScopeLabel" style="display:none;"></span>
       </div>
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 6px 18px rgba(15,23,42,0.05);overflow:hidden;">
