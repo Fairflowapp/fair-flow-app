@@ -18,6 +18,7 @@
 
 const LOG = "[QueueAnalytics]";
 const BH_LOG = "[QueueAnalytics BusinessHours]";
+const V2_LOG = "[QueueAnalytics V2]";
 const SCREEN_ID = "queueAnalyticsScreen";
 
 let _injected = false;
@@ -190,23 +191,46 @@ function injectStyles() {
       margin-top: 4px;
     }
     #${SCREEN_ID} .qa-hour-day {
-      padding: 12px 0;
-      border-bottom: 1px solid #f3f4f6;
+      border: 1px solid #eef0f3;
+      border-radius: 12px;
+      background: #fff;
+      margin-bottom: 10px;
+      overflow: hidden;
     }
-    #${SCREEN_ID} .qa-hour-day:last-child { border-bottom: 0; padding-bottom: 0; }
+    #${SCREEN_ID} .qa-hour-day:last-child { margin-bottom: 0; }
     #${SCREEN_ID} .qa-hour-day-title {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      margin-bottom: 8px;
+      width: 100%;
+      padding: 12px 14px;
+      border: 0;
+      background: #f9fafb;
       font-size: 12px;
       font-weight: 700;
       color: #111827;
+      cursor: pointer;
+      text-align: left;
     }
+    #${SCREEN_ID} .qa-hour-day-title::-webkit-details-marker { display: none; }
     #${SCREEN_ID} .qa-hour-day-hours {
       font-weight: 500;
       color: #6b7280;
+    }
+    #${SCREEN_ID} .qa-hour-day-body {
+      padding: 12px 14px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    #${SCREEN_ID} .qa-metric-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #6b7280;
+      margin-bottom: 8px;
     }
     #${SCREEN_ID} .qa-closed {
       padding: 10px 12px;
@@ -290,7 +314,7 @@ function buildScreen() {
       <div class="qa-section-title">Wait time by day</div>
       <div id="ffQaByDay" class="qa-panel"></div>
 
-      <div class="qa-section-title">Activity by hour</div>
+      <div class="qa-section-title">Queue Load by Hour</div>
       <div id="ffQaByHour" class="qa-panel"></div>
 
       <div class="qa-section-title">Insights</div>
@@ -503,9 +527,11 @@ function computeQueueAnalytics(fromMs) {
     busiestDay: null,
     peakHour: null,
     byDay: [],   // { dayIdx, dayName, count, avgWaitMin, longestWaitMin }
-    byHour: [],  // { hour, count }
-    byDayHour: [], // { dayIdx, dayName, isOpen, hours:[{hour,count}] }
+    byHour: [],  // { hour, count } from service starts inside business hours
+    byDayHour: [], // { dayIdx, dayName, isOpen, hours:[{hour,starts,idleMinutes}] }
     businessHours: null,
+    totalStarts: 0,
+    totalIdleMinutes: 0,
   };
 
   let raw;
@@ -538,11 +564,52 @@ function computeQueueAnalytics(fromMs) {
   const businessByDay = new Map((businessHours.byDay || []).map((d) => [d.dayIdx, d]));
 
   const dayBuckets = new Map(); // day → { count, waits: [] }
-  const hourBuckets = new Map(); // hour → count (business-hours only)
-  const dayHourBuckets = new Map(); // "dayIdx|hour" → count (business-hours only)
+  const hourBuckets = new Map(); // hour → START count (business-hours only)
+  const dayHourStartBuckets = new Map(); // "dayIdx|hour" → START count
+  const dayHourIdleBuckets = new Map(); // "dayIdx|hour" → idle minutes
   const lastJoinAt = new Map();
   const seenEvents = new Set();
   const allWaits = [];
+
+  function addIdleIntervalToBusinessHours(joinedAt, startedAt) {
+    if (!Number.isFinite(joinedAt) || !Number.isFinite(startedAt) || startedAt <= joinedAt) return;
+    const cursor = new Date(joinedAt);
+    cursor.setMinutes(0, 0, 0);
+    while (cursor.getTime() < startedAt) {
+      const hourStart = cursor.getTime();
+      const hourEnd = hourStart + 3600000;
+      const segStart = Math.max(joinedAt, hourStart);
+      const segEnd = Math.min(startedAt, hourEnd);
+      if (segEnd > segStart) {
+        const d = new Date(hourStart);
+        const dayKey = d.getDay();
+        const hourKey = d.getHours();
+        const businessDay = businessByDay.get(dayKey);
+        const minuteOfDay = hourKey * 60;
+        const isBusinessHour = !!(
+          businessDay &&
+          businessDay.isOpen &&
+          minuteOfDay < businessDay.closeMin &&
+          (minuteOfDay + 60) > businessDay.openMin
+        );
+        if (isBusinessHour) {
+          const businessStart = new Date(hourStart);
+          businessStart.setHours(0, 0, 0, 0);
+          const openMs = businessStart.getTime() + businessDay.openMin * 60000;
+          const closeMs = businessStart.getTime() + businessDay.closeMin * 60000;
+          const overlapStart = Math.max(segStart, openMs);
+          const overlapEnd = Math.min(segEnd, closeMs);
+          if (overlapEnd > overlapStart) {
+            const minutes = (overlapEnd - overlapStart) / 60000;
+            const key = `${dayKey}|${hourKey}`;
+            dayHourIdleBuckets.set(key, (dayHourIdleBuckets.get(key) || 0) + minutes);
+            result.totalIdleMinutes += minutes;
+          }
+        }
+      }
+      cursor.setHours(cursor.getHours() + 1);
+    }
+  }
 
   parsed.forEach((ev) => {
     const kind = _qaActionKind(ev.action);
@@ -566,19 +633,21 @@ function computeQueueAnalytics(fromMs) {
       minuteOfDay >= businessDay.openMin &&
       minuteOfDay < businessDay.closeMin
     );
-    if (isInsideBusinessHours) {
-      hourBuckets.set(hourKey, (hourBuckets.get(hourKey) || 0) + 1);
-      const dayHourKey = `${dayKey}|${hourKey}`;
-      dayHourBuckets.set(dayHourKey, (dayHourBuckets.get(dayHourKey) || 0) + 1);
-    }
+    const dayHourKey = `${dayKey}|${hourKey}`;
 
     if (kind === "join" && w) {
       lastJoinAt.set(w, ev.ts);
     } else if (kind === "start" && w) {
+      if (isInsideBusinessHours) {
+        hourBuckets.set(hourKey, (hourBuckets.get(hourKey) || 0) + 1);
+        dayHourStartBuckets.set(dayHourKey, (dayHourStartBuckets.get(dayHourKey) || 0) + 1);
+        result.totalStarts += 1;
+      }
       const joinedAt = lastJoinAt.get(w);
       if (Number.isFinite(joinedAt) && ev.ts > joinedAt) {
         const minutes = (ev.ts - joinedAt) / 60000;
         allWaits.push(minutes);
+        addIdleIntervalToBusinessHours(joinedAt, ev.ts);
         // Bucket by the day the wait STARTED (joinedAt).
         const startDay = new Date(joinedAt).getDay();
         if (!dayBuckets.has(startDay)) dayBuckets.set(startDay, { count: 0, waits: [] });
@@ -629,7 +698,11 @@ function computeQueueAnalytics(fromMs) {
     openTime: day.openTime,
     closeTime: day.closeTime,
     hours: day.isOpen
-      ? day.hours.map((hour) => ({ hour, count: dayHourBuckets.get(`${day.dayIdx}|${hour}`) || 0 }))
+      ? day.hours.map((hour) => ({
+        hour,
+        starts: dayHourStartBuckets.get(`${day.dayIdx}|${hour}`) || 0,
+        idleMinutes: dayHourIdleBuckets.get(`${day.dayIdx}|${hour}`) || 0,
+      }))
       : [],
   }));
 
@@ -655,7 +728,12 @@ function computeQueueAnalytics(fromMs) {
     days: dayRows.length,
     hours: hourRows.length,
     businessHoursSource: businessHours.source,
+    starts: result.totalStarts,
+    idleMinutes: result.totalIdleMinutes,
   });
+  console.log(V2_LOG, "start events detected", { starts: result.totalStarts });
+  console.log(V2_LOG, "idle events calculated", { waitPairs: allWaits.length, idleMinutes: result.totalIdleMinutes });
+  console.log(V2_LOG, "per hour aggregation", result.byDayHour);
   return result;
 }
 
@@ -664,6 +742,14 @@ function computeQueueAnalytics(fromMs) {
 function fmtMinutes(min) {
   if (!Number.isFinite(min) || min <= 0) return "—";
   if (min < 60) return `${Math.round(min)} min`;
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+function fmtCompactMinutes(min) {
+  if (!Number.isFinite(min) || min <= 0) return "0m";
+  if (min < 60) return `${Math.round(min)}m`;
   const h = Math.floor(min / 60);
   const m = Math.round(min % 60);
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
@@ -721,8 +807,8 @@ function renderSummary(metrics) {
     { label: "Average wait time", value: fmtMinutes(metrics.avgWaitMin), foot: "This week" },
     { label: "Longest wait time", value: fmtMinutes(metrics.longestWaitMin), foot: "This week" },
     { label: "Wait events", value: String(metrics.waitCount || 0), foot: "join → start pairs" },
-    { label: "Busiest day", value: metrics.busiestDay || "—", foot: "By total activity" },
-    { label: "Peak hour", value: metrics.peakHour == null ? "—" : fmtHourRange(metrics.peakHour), foot: "By total activity" },
+    { label: "Busiest day", value: metrics.busiestDay || "—", foot: "By queue load" },
+    { label: "Peak hour", value: metrics.peakHour == null ? "—" : fmtHourRange(metrics.peakHour), foot: "By service starts" },
   ];
   root.outerHTML = `
     <div id="ffQaSummary" class="qa-summary">
@@ -753,7 +839,7 @@ function renderByDay(metrics) {
           <th>Day</th>
           <th class="num">Avg wait</th>
           <th class="num">Longest wait</th>
-          <th class="num">Activity</th>
+          <th class="num">Queue Load</th>
         </tr>
       </thead>
       <tbody>
@@ -787,23 +873,41 @@ function renderByHour(metrics) {
   const peak = metrics.peakHour;
   root.innerHTML = `
     <div>
-      ${dayRows.map((day) => `
-        <div class="qa-hour-day">
-          <div class="qa-hour-day-title">
-            <span>${escapeHtml(day.dayName)}</span>
+      ${dayRows.map((day, idx) => `
+        <details class="qa-hour-day" ${idx === new Date().getDay() ? "open" : ""}>
+          <summary class="qa-hour-day-title">
+            <span>${escapeHtml(day.dayName)} ▼</span>
             <span class="qa-hour-day-hours">${day.isOpen ? `${escapeHtml(day.openTime)}–${escapeHtml(day.closeTime)}` : "Closed"}</span>
-          </div>
+          </summary>
           ${day.isOpen ? `
-            <div class="qa-hour-grid">
-              ${day.hours.map((r) => `
-                <div class="qa-hour-tile ${r.hour === peak && r.count > 0 ? "is-peak" : ""}">
-                  <div class="qa-hour-tile-label">${escapeHtml(fmtHourRange(r.hour))}</div>
-                  <div class="qa-hour-tile-value">${escapeHtml(String(r.count))}</div>
+            <div class="qa-hour-day-body">
+              <div>
+                <div class="qa-metric-title">Service Starts</div>
+                <div class="qa-hour-grid">
+                  ${day.hours.map((r) => `
+                    <div class="qa-hour-tile ${r.hour === peak && r.starts > 0 ? "is-peak" : ""}">
+                      <div class="qa-hour-tile-label">${escapeHtml(fmtHourRange(r.hour))}</div>
+                      <div class="qa-hour-tile-value">${escapeHtml(String(r.starts))}</div>
+                    </div>
+                  `).join("")}
                 </div>
-              `).join("")}
+              </div>
+              <div>
+                <div class="qa-metric-title">Idle Time</div>
+                ${metrics.waitCount > 0 ? `
+                  <div class="qa-hour-grid">
+                    ${day.hours.map((r) => `
+                      <div class="qa-hour-tile ${r.idleMinutes >= 30 ? "is-peak" : ""}">
+                        <div class="qa-hour-tile-label">${escapeHtml(fmtHourRange(r.hour))}</div>
+                        <div class="qa-hour-tile-value">${escapeHtml(fmtCompactMinutes(r.idleMinutes))}</div>
+                      </div>
+                    `).join("")}
+                  </div>
+                ` : '<div class="qa-closed">Not enough data yet</div>'}
+              </div>
             </div>
-          ` : '<div class="qa-closed">Closed</div>'}
-        </div>
+          ` : '<div class="qa-hour-day-body"><div class="qa-closed">Closed</div></div>'}
+        </details>
       `).join("")}
     </div>
   `;
@@ -815,6 +919,44 @@ function buildInsights(metrics) {
     out.push({ kind: "info", icon: "ℹ️", text: "Queue activity is currently low. Insights will appear once events are logged." });
     return out;
   }
+  let peakStart = null;
+  (metrics.byDayHour || []).forEach((day) => {
+    (day.hours || []).forEach((hour) => {
+      if (!peakStart || hour.starts > peakStart.starts) {
+        peakStart = { ...hour, dayName: day.dayName };
+      }
+    });
+  });
+  if (peakStart && peakStart.starts > 0) {
+    out.push({
+      kind: "warn",
+      icon: "⚠️",
+      text: `Peak demand at ${fmtHourRange(peakStart.hour)} (${peakStart.starts} service starts).`,
+    });
+  }
+  let highestIdle = null;
+  let morningIdleMinutes = 0;
+  (metrics.byDayHour || []).forEach((day) => {
+    (day.hours || []).forEach((hour) => {
+      if (hour.hour < 12) morningIdleMinutes += hour.idleMinutes || 0;
+      if (!highestIdle || (hour.idleMinutes || 0) > highestIdle.idleMinutes) {
+        highestIdle = { ...hour, dayName: day.dayName };
+      }
+    });
+  });
+  if (morningIdleMinutes >= 30) {
+    out.push({
+      kind: "warn",
+      icon: "⚠️",
+      text: `High idle time detected in morning (${fmtCompactMinutes(morningIdleMinutes)}).`,
+    });
+  } else if (highestIdle && highestIdle.idleMinutes >= 30) {
+    out.push({
+      kind: "warn",
+      icon: "⚠️",
+      text: `High idle time around ${fmtHourRange(highestIdle.hour)} (${fmtCompactMinutes(highestIdle.idleMinutes)}).`,
+    });
+  }
   // Worst day by avg wait (only consider days that actually have wait pairs).
   const dayWithWaits = (metrics.byDay || []).filter((r) => Number.isFinite(r.avgWaitMin) && r.avgWaitMin > 0);
   if (dayWithWaits.length) {
@@ -824,13 +966,6 @@ function buildInsights(metrics) {
       kind: "warn",
       icon: "⚠️",
       text: `${worst.dayName} has the highest average wait time (${fmtMinutes(worst.avgWaitMin)}).`,
-    });
-  }
-  if (metrics.peakHour != null) {
-    out.push({
-      kind: "warn",
-      icon: "⚠️",
-      text: `Peak load occurs around ${fmtHourRange(metrics.peakHour)}.`,
     });
   }
   if (Number.isFinite(metrics.avgWaitMin) && metrics.avgWaitMin >= 20) {
