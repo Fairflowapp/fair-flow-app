@@ -3431,6 +3431,16 @@ dialog footer button, .code-dialog footer button {
           </div>
         </div>
 
+        <style>
+          .ff-toggle-switch{position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;}
+          .ff-toggle-switch input{opacity:0;width:0;height:0;position:absolute;margin:0;}
+          .ff-toggle-switch .ff-toggle-slider{position:absolute;cursor:pointer;inset:0;background:#d1d5db;border-radius:999px;transition:background .2s ease;}
+          .ff-toggle-switch .ff-toggle-slider::before{content:'';position:absolute;height:18px;width:18px;left:2px;top:2px;background:#fff;border-radius:50%;transition:transform .2s ease;box-shadow:0 1px 3px rgba(0,0,0,.2);}
+          .ff-toggle-switch input:checked + .ff-toggle-slider{background:#7c3aed;}
+          .ff-toggle-switch input:checked + .ff-toggle-slider::before{transform:translateX(18px);}
+          .ff-toggle-switch input:focus-visible + .ff-toggle-slider{box-shadow:0 0 0 3px rgba(124,58,237,.3);}
+          .ff-toggle-switch input:disabled + .ff-toggle-slider{opacity:.55;cursor:not-allowed;}
+        </style>
         <div id="pointsSettingsModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:200002;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()">
           <div style="width:100%;max-width:560px;max-height:86vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(15,23,42,0.26);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px 14px;border-bottom:1px solid #e5e7eb;">
@@ -3454,7 +3464,7 @@ dialog footer button, .code-dialog footer button {
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Join<input id="pointsQueueJoin" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Monthly Goal<input id="pointsMonthlyGoal" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Staff Visibility<select id="pointsVisibilityMode" onchange="window.ffApplyPointsRankToggleVisibility && window.ffApplyPointsRankToggleVisibility()" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;background:#fff;"><option value="private">Private - own points only</option><option value="partial">Partial - leaderboard only</option><option value="full">Full - leaderboard + details</option></select></label>
-                <label id="pointsShowRankToPrivateWrap" style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Rank Visibility<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;"><input id="pointsShowRankToPrivate" type="checkbox" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;flex-shrink:0;"><span style="font-size:12px;color:#6b7280;font-weight:500;line-height:1.4;">Show staff their rank (e.g. <strong style="color:#111827;">#3 of 12</strong>) without revealing other names or scores<span id="pointsShowRankToPrivateHint" style="display:block;margin-top:4px;font-size:11px;color:#9ca3af;font-weight:500;"></span></span></div></label>
+                <label id="pointsShowRankToPrivateWrap" style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Rank Visibility<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;"><span class="ff-toggle-switch"><input id="pointsShowRankToPrivate" type="checkbox"><span class="ff-toggle-slider"></span></span><span style="flex:1;font-size:12px;color:#374151;font-weight:600;line-height:1.4;">Show staff their rank<span id="pointsShowRankToPrivateHint" style="display:block;margin-top:2px;font-size:11px;font-weight:500;"></span></span></div></label>
               </div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid #f3f4f6;background:#fafafa;">
@@ -34055,10 +34065,10 @@ function initializeUserProfileMenu() {
     const mode = String(visibility?.value || '').trim();
     if (hint) {
       if (mode === 'private') {
-        hint.textContent = 'Active — staff with private dashboards will see their rank.';
+        hint.textContent = 'Active · names hidden';
         hint.style.color = '#16a34a';
       } else if (mode === 'partial' || mode === 'full') {
-        hint.textContent = 'Inactive — Staff Visibility is "' + (mode === 'full' ? 'Full' : 'Partial') + '". Switch to "Private" for this to apply.';
+        hint.textContent = 'Only applies in Private mode';
         hint.style.color = '#9ca3af';
       } else {
         hint.textContent = '';
