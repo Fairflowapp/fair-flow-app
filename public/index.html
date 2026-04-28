@@ -2932,8 +2932,6 @@ dialog footer button, .code-dialog footer button {
 
       <nav class="toolbar toolbar-nav-main" aria-label="Main navigation">
 
-        <button type="button" id="dashboardBtn" class="btn-pill nav-item core-nav hide-3" onclick="window.goToDashboard && window.goToDashboard()" aria-label="Dashboard"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"></rect><rect x="14" y="3" width="7" height="5" rx="1"></rect><rect x="14" y="12" width="7" height="9" rx="1"></rect><rect x="3" y="16" width="7" height="5" rx="1"></rect></svg></span>Dashboard</button>
-
         <button id="queueBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span>Queue</button>
 
         <button id="ticketsBtn" class="btn-pill nav-item core-nav" onclick="window.goToTickets && window.goToTickets()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></span>Tickets<span id="ticketsNavBadge" class="ff-home-tasks-badge" style="display:none;"></span></button>
@@ -3179,6 +3177,16 @@ dialog footer button, .code-dialog footer button {
         <div class="apps-col">
           <div class="apps-section-title">SETUP & MANAGEMENT</div>
           <div class="apps-section-grid">
+            <div class="apps-panel-item" data-app="dashboard" style="cursor:pointer;" title="Business overview">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"></rect><rect x="14" y="3" width="7" height="5" rx="1"></rect><rect x="14" y="12" width="7" height="9" rx="1"></rect><rect x="3" y="16" width="7" height="5" rx="1"></rect></svg>
+                </div>
+                <div>
+                  <div>Dashboard</div>
+                </div>
+              </div>
+            </div>
             <div class="apps-panel-item" data-app="schedule" style="cursor:pointer;">
               <div class="apps-panel-item__content">
                 <div>
@@ -7648,6 +7656,8 @@ function ffUpdateAppsPanelPermissionVisibility() {
   }
   setAppsTileVisible('.apps-panel-item[data-app="schedule"]', scheduleOk);
 
+  // Dashboard (Overview): passive read-only screen, visible to all authed users.
+  setAppsTileVisible('.apps-panel-item[data-app="dashboard"]', true);
   setAppsTileVisible('.apps-panel-item[data-app="settings"]:not([data-staff])', tabUnlessExplicitOff('settings_view'));
   setAppsTileVisible('.apps-panel-item[data-app="settings"][data-staff="true"]', typeof ffCurrentUserHasStaffViewPermission === 'function' && ffCurrentUserHasStaffViewPermission());
   setAppsTileVisible('.apps-panel-item[data-app="history"]', typeof ffCurrentUserHasHistoryViewPermission === 'function' && ffCurrentUserHasHistoryViewPermission());
@@ -27576,6 +27586,11 @@ function initializeAppsPanel() {
               goToUserProfile('preferences');
             } else if (typeof window.goToUserProfile === 'function') {
               window.goToUserProfile('preferences');
+            }
+            break;
+          case 'dashboard':
+            if (typeof window.goToDashboard === 'function') {
+              window.goToDashboard();
             }
             break;
           default:
