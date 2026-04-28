@@ -3454,7 +3454,7 @@ dialog footer button, .code-dialog footer button {
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Join<input id="pointsQueueJoin" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Monthly Goal<input id="pointsMonthlyGoal" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Staff Visibility<select id="pointsVisibilityMode" onchange="window.ffApplyPointsRankToggleVisibility && window.ffApplyPointsRankToggleVisibility()" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;background:#fff;"><option value="private">Private - own points only</option><option value="partial">Partial - leaderboard only</option><option value="full">Full - leaderboard + details</option></select></label>
-                <label id="pointsShowRankToPrivateWrap" style="display:none;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Rank Visibility<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;"><input id="pointsShowRankToPrivate" type="checkbox" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;flex-shrink:0;"><span style="font-size:12px;color:#6b7280;font-weight:500;line-height:1.4;">Show staff their rank (e.g. <strong style="color:#111827;">#3 of 12</strong>) without revealing other names or scores</span></div></label>
+                <label id="pointsShowRankToPrivateWrap" style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Rank Visibility<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;"><input id="pointsShowRankToPrivate" type="checkbox" style="width:16px;height:16px;cursor:pointer;accent-color:#7c3aed;flex-shrink:0;"><span style="font-size:12px;color:#6b7280;font-weight:500;line-height:1.4;">Show staff their rank (e.g. <strong style="color:#111827;">#3 of 12</strong>) without revealing other names or scores<span id="pointsShowRankToPrivateHint" style="display:block;margin-top:4px;font-size:11px;color:#9ca3af;font-weight:500;"></span></span></div></label>
               </div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid #f3f4f6;background:#fafafa;">
@@ -34041,14 +34041,29 @@ function initializeUserProfileMenu() {
   }
 
   function ffApplyPointsRankToggleVisibility() {
-    // The "Show rank" checkbox is only meaningful when staff have a private
-    // dashboard. Hide it for partial/full where everyone already sees the
-    // leaderboard so owners aren't faced with an option that has no effect.
+    // Always render the Rank Visibility toggle so owners can discover and
+    // configure it without having to first switch the dropdown. The hint
+    // text below the checkbox explains whether it currently applies based
+    // on the chosen Staff Visibility — rank only shows up in the staff
+    // dashboard when visibility is Private (in Full/Partial modes the
+    // leaderboard already reveals positions).
     const wrap = document.getElementById('pointsShowRankToPrivateWrap');
+    const hint = document.getElementById('pointsShowRankToPrivateHint');
     if (!wrap) return;
+    wrap.style.display = 'flex';
     const visibility = document.getElementById('pointsVisibilityMode');
     const mode = String(visibility?.value || '').trim();
-    wrap.style.display = mode === 'private' ? 'flex' : 'none';
+    if (hint) {
+      if (mode === 'private') {
+        hint.textContent = 'Active — staff with private dashboards will see their rank.';
+        hint.style.color = '#16a34a';
+      } else if (mode === 'partial' || mode === 'full') {
+        hint.textContent = 'Inactive — Staff Visibility is "' + (mode === 'full' ? 'Full' : 'Partial') + '". Switch to "Private" for this to apply.';
+        hint.style.color = '#9ca3af';
+      } else {
+        hint.textContent = '';
+      }
+    }
   }
   window.ffApplyPointsRankToggleVisibility = ffApplyPointsRankToggleVisibility;
 
