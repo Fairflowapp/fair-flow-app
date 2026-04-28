@@ -3463,8 +3463,7 @@ dialog footer button, .code-dialog footer button {
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Third<input id="pointsQueueThird" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Join<input id="pointsQueueJoin" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Monthly Goal<input id="pointsMonthlyGoal" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Staff Visibility<select id="pointsVisibilityMode" onchange="window.ffApplyPointsRankToggleVisibility && window.ffApplyPointsRankToggleVisibility()" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;background:#fff;"><option value="private">Private - own points only</option><option value="partial">Partial - leaderboard only</option><option value="full">Full - leaderboard + details</option></select></label>
-                <label id="pointsShowRankToPrivateWrap" style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Rank Visibility<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;"><span class="ff-toggle-switch"><input id="pointsShowRankToPrivate" type="checkbox"><span class="ff-toggle-slider"></span></span><span style="flex:1;font-size:12px;color:#374151;font-weight:600;line-height:1.4;">Show staff their rank<span id="pointsShowRankToPrivateHint" style="display:block;margin-top:2px;font-size:11px;font-weight:500;"></span></span></div></label>
+                <label id="pointsShowRankToPrivateWrap" style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Rank Visibility<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;"><span class="ff-toggle-switch"><input id="pointsShowRankToPrivate" type="checkbox"><span class="ff-toggle-slider"></span></span><span style="flex:1;font-size:12px;color:#374151;font-weight:600;line-height:1.4;">Show staff their rank<span id="pointsShowRankToPrivateHint" style="display:block;margin-top:2px;font-size:11px;font-weight:500;color:#9ca3af;">Applies to staff with "View own Fair Flow Points" permission</span></span></div></label>
               </div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid #f3f4f6;background:#fafafa;">
@@ -34043,37 +34042,18 @@ function initializeUserProfileMenu() {
       const input = document.getElementById(pair[1]);
       if (input) input.value = String(values[pair[0]]);
     });
-    const visibility = document.getElementById('pointsVisibilityMode');
-    if (visibility) visibility.value = values.pointsVisibilityMode || 'full';
     const rankToggle = document.getElementById('pointsShowRankToPrivate');
     if (rankToggle) rankToggle.checked = values.showRankToPrivate === true;
     ffApplyPointsRankToggleVisibility();
   }
 
   function ffApplyPointsRankToggleVisibility() {
-    // Always render the Rank Visibility toggle so owners can discover and
-    // configure it without having to first switch the dropdown. The hint
-    // text below the checkbox explains whether it currently applies based
-    // on the chosen Staff Visibility — rank only shows up in the staff
-    // dashboard when visibility is Private (in Full/Partial modes the
-    // leaderboard already reveals positions).
+    // Visibility scope is fully permission-driven now (no Staff Visibility
+    // dropdown). The Rank toggle stays always visible with a fixed hint
+    // explaining who actually sees the rank — staff with "View own" only.
     const wrap = document.getElementById('pointsShowRankToPrivateWrap');
-    const hint = document.getElementById('pointsShowRankToPrivateHint');
     if (!wrap) return;
     wrap.style.display = 'flex';
-    const visibility = document.getElementById('pointsVisibilityMode');
-    const mode = String(visibility?.value || '').trim();
-    if (hint) {
-      if (mode === 'private') {
-        hint.textContent = 'Active · names hidden';
-        hint.style.color = '#16a34a';
-      } else if (mode === 'partial' || mode === 'full') {
-        hint.textContent = 'Only applies in Private mode';
-        hint.style.color = '#9ca3af';
-      } else {
-        hint.textContent = '';
-      }
-    }
   }
   window.ffApplyPointsRankToggleVisibility = ffApplyPointsRankToggleVisibility;
 
@@ -34084,10 +34064,6 @@ function initializeUserProfileMenu() {
       const raw = input ? Number(input.value) : NaN;
       values[pair[0]] = Number.isFinite(raw) ? raw : FF_POINTS_SETTINGS_DEFAULTS[pair[0]];
     });
-    const visibility = document.getElementById('pointsVisibilityMode');
-    values.pointsVisibilityMode = ['private', 'partial', 'full'].indexOf(String(visibility?.value || '').trim()) >= 0
-      ? String(visibility.value).trim()
-      : FF_POINTS_SETTINGS_DEFAULTS.pointsVisibilityMode;
     const rankToggle = document.getElementById('pointsShowRankToPrivate');
     values.showRankToPrivate = rankToggle ? rankToggle.checked === true : false;
     return ffNormalizePointsSettings(values);
@@ -34400,13 +34376,15 @@ function initializeUserProfileMenu() {
     }) || null;
   }
 
-  function ffResolvePointsVisibilityMode(settings) {
+  function ffResolvePointsVisibilityMode(/* settings */) {
+    // Visibility is now driven entirely by per-staff permissions (Manage /
+    // View All / View Own). The legacy account-level pointsVisibilityMode
+    // setting is ignored here so the surface area matches the permissions
+    // UI, but the field itself is preserved on the settings doc for any
+    // external consumer that might still read it.
     if (ffCurrentUserIsPointsManager()) return 'full';
     const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
-    if (typeof ffStaffHasPointsAllPermission === 'function' && ffStaffHasPointsAllPermission(staff)) {
-      const mode = String(settings?.pointsVisibilityMode || '').trim();
-      return mode === 'full' ? 'full' : 'partial';
-    }
+    if (typeof ffStaffHasPointsAllPermission === 'function' && ffStaffHasPointsAllPermission(staff)) return 'full';
     if (typeof ffStaffHasPointsOwnPermission === 'function' && !ffStaffHasPointsOwnPermission(staff)) return 'none';
     return 'private';
   }
