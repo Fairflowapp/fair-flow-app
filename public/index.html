@@ -3441,34 +3441,34 @@ dialog footer button, .code-dialog footer button {
           .ff-toggle-switch input:focus-visible + .ff-toggle-slider{box-shadow:0 0 0 3px rgba(124,58,237,.3);}
           .ff-toggle-switch input:disabled + .ff-toggle-slider{opacity:.55;cursor:not-allowed;}
         </style>
-        <div id="pointsSettingsModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:200002;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()">
-          <div style="width:100%;max-width:560px;max-height:86vh;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(15,23,42,0.26);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px 14px;border-bottom:1px solid #e5e7eb;">
+        <div id="pointsSettingsModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:200002;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()">
+          <div style="width:100%;max-width:760px;max-height:92vh;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(15,23,42,0.26);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px 10px;border-bottom:1px solid #e5e7eb;">
               <div>
-                <h3 id="pointsSettingsTitle" style="margin:0;font-size:18px;font-weight:800;color:#111827;">Fair Flow Setup</h3>
-                <p id="pointsSettingsSubtitle" style="margin:6px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Configure account-level point values, visibility and rank options.</p>
+                <h3 id="pointsSettingsTitle" style="margin:0;font-size:16px;font-weight:800;color:#111827;">Fair Flow Setup</h3>
+                <p id="pointsSettingsSubtitle" style="margin:3px 0 0;font-size:11px;color:#6b7280;line-height:1.35;">Configure account-level point values and rank.</p>
               </div>
-              <button type="button" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()" style="border:none;background:none;color:#6b7280;font-size:24px;line-height:1;cursor:pointer;">×</button>
+              <button type="button" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()" style="border:none;background:none;color:#6b7280;font-size:22px;line-height:1;cursor:pointer;">×</button>
             </div>
-            <div style="padding:16px 20px;overflow-y:auto;">
-              <div id="pointsSettingsFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Task Completed<input id="pointsTaskCompleted" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Photo Upload<input id="pointsPhotoUpload" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Video Upload<input id="pointsVideoUpload" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Before/After Upload<input id="pointsBeforeAfterUpload" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Upgrade Service<input id="pointsUpgradeService" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Ticket Upgrade<input id="pointsTicketUpgrade" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue First<input id="pointsQueueFirst" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Second<input id="pointsQueueSecond" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Third<input id="pointsQueueThird" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Queue Join<input id="pointsQueueJoin" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Monthly Goal<input id="pointsMonthlyGoal" type="number" min="0" step="1" style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:400;"></label>
-                <label id="pointsShowRankToPrivateWrap" style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;font-weight:700;">Rank Visibility<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;"><span class="ff-toggle-switch"><input id="pointsShowRankToPrivate" type="checkbox"><span class="ff-toggle-slider"></span></span><span style="flex:1;font-size:12px;color:#374151;font-weight:600;line-height:1.4;">Show staff their rank<span id="pointsShowRankToPrivateHint" style="display:block;margin-top:2px;font-size:11px;font-weight:500;color:#9ca3af;">Applies to staff with "View own Fair Flow Points" permission</span></span></div></label>
+            <div style="padding:12px 18px;overflow-y:auto;">
+              <div id="pointsSettingsFields" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px;">
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Task Completed<input id="pointsTaskCompleted" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Photo Upload<input id="pointsPhotoUpload" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Video Upload<input id="pointsVideoUpload" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Before/After Upload<input id="pointsBeforeAfterUpload" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Upgrade Service<input id="pointsUpgradeService" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Ticket Upgrade<input id="pointsTicketUpgrade" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Queue First<input id="pointsQueueFirst" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Queue Second<input id="pointsQueueSecond" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Queue Third<input id="pointsQueueThird" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Queue Join<input id="pointsQueueJoin" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Monthly Goal<input id="pointsMonthlyGoal" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
+                <label id="pointsShowRankToPrivateWrap" style="grid-column:1/-1;display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;margin-top:2px;">Rank Visibility<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;"><span class="ff-toggle-switch"><input id="pointsShowRankToPrivate" type="checkbox"><span class="ff-toggle-slider"></span></span><span style="flex:1;font-size:11px;color:#374151;font-weight:600;line-height:1.35;">Show staff their rank <span id="pointsShowRankToPrivateHint" style="font-size:10px;font-weight:500;color:#9ca3af;">· Applies to staff with "View own Fair Flow Points" permission</span></span></div></label>
               </div>
             </div>
-            <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid #f3f4f6;background:#fafafa;">
-              <button type="button" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()" style="padding:8px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
-              <button type="button" id="pointsSettingsSaveBtn" onclick="window.ffSavePointsSettings && window.ffSavePointsSettings()" style="padding:8px 16px;border:none;border-radius:10px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Save</button>
+            <div style="display:flex;justify-content:flex-end;gap:8px;padding:10px 18px;border-top:1px solid #f3f4f6;background:#fafafa;">
+              <button type="button" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()" style="padding:7px 14px;border:1px solid #e5e7eb;border-radius:9px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;">Cancel</button>
+              <button type="button" id="pointsSettingsSaveBtn" onclick="window.ffSavePointsSettings && window.ffSavePointsSettings()" style="padding:7px 16px;border:none;border-radius:9px;background:#7c3aed;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">Save</button>
             </div>
           </div>
         </div>
@@ -34076,10 +34076,10 @@ function initializeUserProfileMenu() {
     const subtitle = document.getElementById('pointsSettingsSubtitle');
     if (mode === 'branch') {
       if (title) title.textContent = 'Fair Flow Setup · Branch';
-      if (subtitle) subtitle.textContent = 'Configure point values, visibility and rank for the active branch. If a field is missing, shared account settings are used.';
+      if (subtitle) subtitle.textContent = 'Branch overrides. Empty fields fall back to account defaults.';
     } else {
       if (title) title.textContent = 'Fair Flow Setup';
-      if (subtitle) subtitle.textContent = 'Configure shared account-level point values, visibility and rank used as defaults for every branch.';
+      if (subtitle) subtitle.textContent = 'Account-level defaults used by every branch.';
     }
   }
 
