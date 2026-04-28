@@ -312,6 +312,7 @@ function _qaExtractWorker(action) {
   let mm = action.match(/IN SERVICE:\s*(.+)$/i); if (mm) return mm[1].trim();
   mm = action.match(/Back to end:\s*(.+)$/i);    if (mm) return mm[1].trim();
   mm = action.match(/^join:\s*(.+)$/i);          if (mm) return mm[1].trim();
+  mm = action.match(/^(JOIN|START|FINISH)\s+(?![•·>-])(.+)$/i); if (mm) return mm[2].trim();
   mm = action.match(/^HOLD:\s*(.+)$/i);          if (mm) return mm[1].trim();
   mm = action.match(/^RELEASE:\s*(.+)$/i);       if (mm) return mm[1].trim();
   mm = action.match(/^MOVE (?:UP|DOWN):\s*(.+)$/i); if (mm) return mm[1].trim();
@@ -321,8 +322,8 @@ function _qaExtractWorker(action) {
 
 function _qaActionKind(action) {
   if (!action) return null;
-  if (/^join:/i.test(action)) return "join";
-  if (/IN SERVICE:/i.test(action)) return "start";
+  if (/^JOIN\b|^join:/i.test(action)) return "join";
+  if (/^START\b|IN SERVICE:/i.test(action)) return "start";
   if (/^FINISH\b|Back to end:/i.test(action)) return "finish";
   if (/^HOLD:/i.test(action)) return "hold";
   if (/^RELEASE:/i.test(action)) return "release";
@@ -393,11 +394,16 @@ function computeQueueAnalytics(fromMs) {
   const dayBuckets = new Map(); // day → { count, waits: [] }
   const hourBuckets = new Map(); // hour → count
   const lastJoinAt = new Map();
+  const seenEvents = new Set();
   const allWaits = [];
 
   parsed.forEach((ev) => {
     const kind = _qaActionKind(ev.action);
     if (!kind) return;
+    const w = (ev.worker || "").toLowerCase();
+    const dedupeKey = `${kind}|${w || ev.action.toLowerCase()}|${Math.round(ev.ts / 5000)}`;
+    if (seenEvents.has(dedupeKey)) return;
+    seenEvents.add(dedupeKey);
     result.activityCount += 1;
     const d = new Date(ev.ts);
     const dayKey = d.getDay();
@@ -407,7 +413,6 @@ function computeQueueAnalytics(fromMs) {
     dayBuckets.get(dayKey).count += 1;
     hourBuckets.set(hourKey, (hourBuckets.get(hourKey) || 0) + 1);
 
-    const w = (ev.worker || "").toLowerCase();
     if (kind === "join" && w) {
       lastJoinAt.set(w, ev.ts);
     } else if (kind === "start" && w) {

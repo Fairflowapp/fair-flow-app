@@ -5821,6 +5821,33 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
   }
 }
 
+function ffQueueLogEvent(type, workerName) {
+  try {
+    const normalizedType = String(type || '').trim().toUpperCase();
+    const worker = String(workerName || '').trim();
+    if (!/^(JOIN|START|FINISH)$/.test(normalizedType) || !worker) return;
+    const entry = `${new Date().toLocaleString()} ${normalizedType} ${worker}`;
+    const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+    logArr.push(entry);
+    localStorage.setItem('ffv24_log', JSON.stringify(logArr));
+    log = logArr;
+    window.log = logArr;
+    console.log('[QueueLogEvents]', normalizedType, { worker, entry });
+    if (typeof window.queueCloudWrite === 'function') {
+      setTimeout(() => {
+        try {
+          window.queueCloudWrite();
+        } catch (err) {
+          console.warn('[QueueLogEvents] queueCloudWrite failed', err);
+        }
+      }, 0);
+    }
+  } catch (err) {
+    console.warn('[QueueLogEvents] failed to add queue event', err);
+  }
+}
+window.ffQueueLogEvent = ffQueueLogEvent;
+
 function addQueueCheckoutHistoryRecord({ staffId, workerName, source, role, performedBy }) {
   try {
     const now = new Date();
@@ -9529,6 +9556,7 @@ async function handleJoin(){
   // Join is done directly by worker (Tech action)
   const techActor = getActorForAction({ workerName: selectedTechnicianName });
   addHistoryEntry('Join', techActor.role, techActor.name, selectedTechnicianName, 'queue');
+  if (typeof window.ffQueueLogEvent === 'function') window.ffQueueLogEvent('JOIN', selectedTechnicianName);
   } catch (e) {
     console.error('[handleJoin] Error in handleJoin:', e);
     const joinErrorEl = document.getElementById('joinError');
@@ -9585,6 +9613,7 @@ function startSpecific(idx){
     actor = getActorForAction({ workerName: it.name });
   }
   addHistoryEntry('Start (Available → In service)', actor.role, actor.name, it.name, 'queue');
+  if (typeof window.ffQueueLogEvent === 'function') window.ffQueueLogEvent('START', it.name);
 
 }
 
@@ -9637,6 +9666,7 @@ function finish(i){
     actor = { role: 'Tech', name: it.name };
   }
   addHistoryEntry('Finish (In service → Available)', actor.role, actor.name, it.name, 'queue');
+  if (typeof window.ffQueueLogEvent === 'function') window.ffQueueLogEvent('FINISH', it.name);
 
 }
 
@@ -48392,8 +48422,8 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/inventory.js?v=20260425_import_shared_inventory_catalog_r1"></script>
   <script type="module" src="/onboarding-wizard.js?v=20260420_onboarding_v1"></script>
   <script type="module" src="/locations-manage.js?v=20260424_locations_compact_rows_r1"></script>
-  <script type="module" src="/dashboard.js?v=20260428_qa_route_v1"></script>
-  <script type="module" src="/queue-analytics.js?v=20260428_qa_v1"></script>
+  <script type="module" src="/dashboard.js?v=20260428_queue_log_events_v1"></script>
+  <script type="module" src="/queue-analytics.js?v=20260428_queue_log_events_v1"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">

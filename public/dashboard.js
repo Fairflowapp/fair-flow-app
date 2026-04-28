@@ -430,6 +430,7 @@ function _qmExtractWorker(action) {
   let mm = action.match(/IN SERVICE:\s*(.+)$/i); if (mm) return mm[1].trim();
   mm = action.match(/Back to end:\s*(.+)$/i);    if (mm) return mm[1].trim();
   mm = action.match(/^join:\s*(.+)$/i);          if (mm) return mm[1].trim();
+  mm = action.match(/^(JOIN|START|FINISH)\s+(?![•·>-])(.+)$/i); if (mm) return mm[2].trim();
   mm = action.match(/^HOLD:\s*(.+)$/i);          if (mm) return mm[1].trim();
   mm = action.match(/^RELEASE:\s*(.+)$/i);       if (mm) return mm[1].trim();
   mm = action.match(/^MOVE (?:UP|DOWN):\s*(.+)$/i); if (mm) return mm[1].trim();
@@ -439,8 +440,8 @@ function _qmExtractWorker(action) {
 
 function _qmActionKind(action) {
   if (!action) return null;
-  if (/^join:/i.test(action)) return "join";
-  if (/IN SERVICE:/i.test(action)) return "start";
+  if (/^JOIN\b|^join:/i.test(action)) return "join";
+  if (/^START\b|IN SERVICE:/i.test(action)) return "start";
   if (/^FINISH\b|Back to end:/i.test(action)) return "finish";
   if (/^HOLD:/i.test(action)) return "hold";
   if (/^RELEASE:/i.test(action)) return "release";
@@ -488,18 +489,22 @@ function computeQueueMetrics(fromMs) {
   const dayCounts = new Map();
   const hourCounts = new Map();
   const lastJoinAt = new Map();
+  const seenEvents = new Set();
   const waits = [];
 
   parsed.forEach((ev) => {
     const kind = _qmActionKind(ev.action);
     if (!kind) return;
+    const w = (ev.worker || "").toLowerCase();
+    const dedupeKey = `${kind}|${w || ev.action.toLowerCase()}|${Math.round(ev.ts / 5000)}`;
+    if (seenEvents.has(dedupeKey)) return;
+    seenEvents.add(dedupeKey);
     result.activityCount += 1;
     const d = new Date(ev.ts);
     const dayKey = d.getDay();
     const hourKey = d.getHours();
     dayCounts.set(dayKey, (dayCounts.get(dayKey) || 0) + 1);
     hourCounts.set(hourKey, (hourCounts.get(hourKey) || 0) + 1);
-    const w = (ev.worker || "").toLowerCase();
     if (kind === "join" && w) {
       lastJoinAt.set(w, ev.ts);
     } else if (kind === "start" && w) {
