@@ -17,11 +17,13 @@
  */
 
 const LOG = "[QueueAnalytics]";
+const BH_LOG = "[QueueAnalytics BusinessHours]";
 const SCREEN_ID = "queueAnalyticsScreen";
 
 let _injected = false;
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
 // Capture-phase auto-hide on these other main-nav buttons + Apps panel
 // re-opens. Same pattern dashboard.js uses so we never touch goToQueue / etc.
@@ -187,6 +189,33 @@ function injectStyles() {
       gap: 8px;
       margin-top: 4px;
     }
+    #${SCREEN_ID} .qa-hour-day {
+      padding: 12px 0;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    #${SCREEN_ID} .qa-hour-day:last-child { border-bottom: 0; padding-bottom: 0; }
+    #${SCREEN_ID} .qa-hour-day-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #111827;
+    }
+    #${SCREEN_ID} .qa-hour-day-hours {
+      font-weight: 500;
+      color: #6b7280;
+    }
+    #${SCREEN_ID} .qa-closed {
+      padding: 10px 12px;
+      border: 1px dashed #e5e7eb;
+      border-radius: 10px;
+      background: #f9fafb;
+      color: #6b7280;
+      font-size: 13px;
+    }
     #${SCREEN_ID} .qa-hour-tile {
       background: #f9fafb;
       border: 1px solid #eef0f3;
@@ -293,6 +322,117 @@ function _qaWeekStartMs() {
   return d.getTime();
 }
 
+function _qaActiveLocationId() {
+  try {
+    if (typeof window.ffGetActiveLocationId === "function") {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  } catch (_) {}
+  try {
+    const raw = typeof window.__ff_active_location_id === "string" ? window.__ff_active_location_id.trim() : "";
+    return raw || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function _qaTimeToMinutes(value) {
+  const s = String(value || "").trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min) || h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+function _qaMinutesToHourFloor(minutes) {
+  if (!Number.isFinite(minutes)) return null;
+  return Math.max(0, Math.min(23, Math.floor(minutes / 60)));
+}
+
+function _qaReadSettingsBusinessHours() {
+  try {
+    const fromWindow = window.settings && typeof window.settings.businessHours === "object"
+      ? window.settings.businessHours
+      : null;
+    if (fromWindow) return { source: "window.settings.businessHours", value: fromWindow };
+  } catch (_) {}
+  try {
+    const stored = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+    if (stored && typeof stored.businessHours === "object") {
+      return { source: "localStorage.ffv24_settings.businessHours", value: stored.businessHours };
+    }
+  } catch (_) {}
+  return null;
+}
+
+function resolveBusinessHoursForWeek() {
+  const activeLocationId = _qaActiveLocationId();
+  console.log(BH_LOG, "active location used", activeLocationId || "(default/current settings)");
+
+  let source = null;
+  let rawHours = null;
+  const found = _qaReadSettingsBusinessHours();
+  if (found && found.value) {
+    source = found.source;
+    rawHours = found.value;
+    console.log(BH_LOG, "source found", source);
+  }
+
+  if (rawHours && typeof window.ffScheduleHelpers?.normalizeBusinessHours === "function") {
+    try {
+      rawHours = window.ffScheduleHelpers.normalizeBusinessHours(rawHours);
+    } catch (e) {
+      console.warn(BH_LOG, "normalizeBusinessHours failed", e);
+    }
+  }
+
+  if (!rawHours || typeof rawHours !== "object") {
+    console.log(BH_LOG, "fallback used", "9 AM–9 PM (no business hours source found)");
+    source = "fallback";
+    rawHours = {};
+    DAY_KEYS.forEach((day) => {
+      rawHours[day] = { isOpen: true, openTime: "09:00", closeTime: "21:00" };
+    });
+  }
+
+  const byDay = DAY_KEYS.map((dayKey, dayIdx) => {
+    const entry = rawHours[dayKey] && typeof rawHours[dayKey] === "object" ? rawHours[dayKey] : null;
+    const isOpen = !!(entry && entry.isOpen === true);
+    const openMin = isOpen ? _qaTimeToMinutes(entry.openTime) : null;
+    const closeMin = isOpen ? _qaTimeToMinutes(entry.closeTime) : null;
+    const usable = isOpen && Number.isFinite(openMin) && Number.isFinite(closeMin) && closeMin > openMin;
+    const row = {
+      dayIdx,
+      dayKey,
+      dayName: DAY_NAMES[dayIdx],
+      isOpen: usable,
+      openTime: usable ? entry.openTime : null,
+      closeTime: usable ? entry.closeTime : null,
+      openMin: usable ? openMin : null,
+      closeMin: usable ? closeMin : null,
+      hours: [],
+    };
+    if (usable) {
+      const startHour = _qaMinutesToHourFloor(openMin);
+      const endHourExclusive = Math.ceil(closeMin / 60);
+      for (let h = startHour; h < endHourExclusive && h <= 23; h += 1) {
+        row.hours.push(h);
+      }
+    }
+    return row;
+  });
+
+  console.log(BH_LOG, "hours per day", byDay.map((d) => ({
+    day: d.dayName,
+    status: d.isOpen ? `${d.openTime}-${d.closeTime}` : "Closed",
+  })));
+
+  return { source, activeLocationId, byDay };
+}
+
 function _qaReadRawLog() {
   try {
     if (Array.isArray(window.log) && window.log.length) return window.log;
@@ -364,6 +504,8 @@ function computeQueueAnalytics(fromMs) {
     peakHour: null,
     byDay: [],   // { dayIdx, dayName, count, avgWaitMin, longestWaitMin }
     byHour: [],  // { hour, count }
+    byDayHour: [], // { dayIdx, dayName, isOpen, hours:[{hour,count}] }
+    businessHours: null,
   };
 
   let raw;
@@ -391,8 +533,13 @@ function computeQueueAnalytics(fromMs) {
     return result;
   }
 
+  const businessHours = resolveBusinessHoursForWeek();
+  result.businessHours = businessHours;
+  const businessByDay = new Map((businessHours.byDay || []).map((d) => [d.dayIdx, d]));
+
   const dayBuckets = new Map(); // day → { count, waits: [] }
-  const hourBuckets = new Map(); // hour → count
+  const hourBuckets = new Map(); // hour → count (business-hours only)
+  const dayHourBuckets = new Map(); // "dayIdx|hour" → count (business-hours only)
   const lastJoinAt = new Map();
   const seenEvents = new Set();
   const allWaits = [];
@@ -411,7 +558,19 @@ function computeQueueAnalytics(fromMs) {
 
     if (!dayBuckets.has(dayKey)) dayBuckets.set(dayKey, { count: 0, waits: [] });
     dayBuckets.get(dayKey).count += 1;
-    hourBuckets.set(hourKey, (hourBuckets.get(hourKey) || 0) + 1);
+    const businessDay = businessByDay.get(dayKey);
+    const minuteOfDay = d.getHours() * 60 + d.getMinutes();
+    const isInsideBusinessHours = !!(
+      businessDay &&
+      businessDay.isOpen &&
+      minuteOfDay >= businessDay.openMin &&
+      minuteOfDay < businessDay.closeMin
+    );
+    if (isInsideBusinessHours) {
+      hourBuckets.set(hourKey, (hourBuckets.get(hourKey) || 0) + 1);
+      const dayHourKey = `${dayKey}|${hourKey}`;
+      dayHourBuckets.set(dayHourKey, (dayHourBuckets.get(dayHourKey) || 0) + 1);
+    }
 
     if (kind === "join" && w) {
       lastJoinAt.set(w, ev.ts);
@@ -463,6 +622,17 @@ function computeQueueAnalytics(fromMs) {
   hourRows.sort((a, b) => a.hour - b.hour);
   result.byHour = hourRows;
 
+  result.byDayHour = (businessHours.byDay || []).map((day) => ({
+    dayIdx: day.dayIdx,
+    dayName: day.dayName,
+    isOpen: day.isOpen,
+    openTime: day.openTime,
+    closeTime: day.closeTime,
+    hours: day.isOpen
+      ? day.hours.map((hour) => ({ hour, count: dayHourBuckets.get(`${day.dayIdx}|${hour}`) || 0 }))
+      : [],
+  }));
+
   // Busiest day / peak hour from rows.
   if (dayRows.length) {
     let best = null;
@@ -484,6 +654,7 @@ function computeQueueAnalytics(fromMs) {
     peakHour: result.peakHour,
     days: dayRows.length,
     hours: hourRows.length,
+    businessHoursSource: businessHours.source,
   });
   return result;
 }
@@ -608,18 +779,30 @@ function renderByDay(metrics) {
 function renderByHour(metrics) {
   const root = document.getElementById("ffQaByHour");
   if (!root) return;
-  const rows = metrics.byHour || [];
-  if (!rows.length) {
+  const dayRows = metrics.byDayHour || [];
+  if (!dayRows.length) {
     root.innerHTML = '<div style="color:#6b7280;font-size:13px;">No hourly activity yet.</div>';
     return;
   }
   const peak = metrics.peakHour;
   root.innerHTML = `
-    <div class="qa-hour-grid">
-      ${rows.map((r) => `
-        <div class="qa-hour-tile ${r.hour === peak ? "is-peak" : ""}">
-          <div class="qa-hour-tile-label">${escapeHtml(fmtHourRange(r.hour))}</div>
-          <div class="qa-hour-tile-value">${escapeHtml(String(r.count))}</div>
+    <div>
+      ${dayRows.map((day) => `
+        <div class="qa-hour-day">
+          <div class="qa-hour-day-title">
+            <span>${escapeHtml(day.dayName)}</span>
+            <span class="qa-hour-day-hours">${day.isOpen ? `${escapeHtml(day.openTime)}–${escapeHtml(day.closeTime)}` : "Closed"}</span>
+          </div>
+          ${day.isOpen ? `
+            <div class="qa-hour-grid">
+              ${day.hours.map((r) => `
+                <div class="qa-hour-tile ${r.hour === peak && r.count > 0 ? "is-peak" : ""}">
+                  <div class="qa-hour-tile-label">${escapeHtml(fmtHourRange(r.hour))}</div>
+                  <div class="qa-hour-tile-value">${escapeHtml(String(r.count))}</div>
+                </div>
+              `).join("")}
+            </div>
+          ` : '<div class="qa-closed">Closed</div>'}
         </div>
       `).join("")}
     </div>
