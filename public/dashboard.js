@@ -306,11 +306,24 @@ function fmtNumber(n) {
 
 function fmtMinutes(min) {
   if (!Number.isFinite(min) || min <= 0) return "—";
-  if (min < 60) return `${Math.round(min)}m`;
+  if (min < 60) return `${Math.round(min)} min`;
   const h = Math.floor(min / 60);
   const m = Math.round(min % 60);
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
+
+function fmtHourRange(hour24) {
+  if (!Number.isFinite(hour24) || hour24 < 0 || hour24 > 23) return "—";
+  const next = (hour24 + 1) % 24;
+  const label = (h) => {
+    if (h === 0) return "12 AM";
+    if (h === 12) return "12 PM";
+    return h < 12 ? `${h} AM` : `${h - 12} PM`;
+  };
+  return `${label(hour24).replace(/ AM| PM/, "")}–${label(next)}`;
+}
+
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 function fmtCurrency(v) {
   if (!Number.isFinite(v)) return "—";
@@ -358,16 +371,203 @@ function readTicketsSnapshot() {
   return out;
 }
 
+// ---------- Queue metrics (from window.log / ffv24_log) ----------
+//
+// Source: queue-cloud.js syncs salons/{salonId}/queueState/{locationId}.log into
+// `window.log` (and localStorage `ffv24_log`). Entries are an array of strings
+// in chronological-DESC order, each in the form
+//   "MM/DD/YYYY, h:mm:ss AM <ACTION>"
+// where <ACTION> is one of (case sensitive on the verb keywords):
+//   join: <name>
+//   START -> IN SERVICE: <name>
+//   FINISH -> Back to end: <name>
+//   HOLD: <name> | RELEASE: <name>
+//   MOVE UP: <name> | MOVE DOWN: <name>
+// Newer object-shaped entries (points corrections, etc.) carry their own ts /
+// action / source fields and are skipped unless source === 'queue'.
+const QM_LOG_PREFIX = "[Dashboard QueueMetrics]";
+
+function _qmReadRawLog() {
+  try {
+    if (Array.isArray(window.log) && window.log.length) return window.log;
+  } catch (_) {}
+  try {
+    const raw = localStorage.getItem("ffv24_log");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (_) {}
+  return null;
+}
+
+// Parse a single log entry (string or object) into { ts, action, worker } or null.
+function _qmParseEntry(entry) {
+  if (entry == null) return null;
+  if (typeof entry === "object") {
+    const source = String(entry.source || "queue").toLowerCase();
+    if (source !== "queue") return null;
+    const ts = Number(entry.ts || entry.timestamp);
+    if (!Number.isFinite(ts)) return null;
+    const action = String(entry.action || entry.actionText || "").trim();
+    const worker = String(entry.worker || entry.assignedTo || "").trim();
+    return { ts, action, worker };
+  }
+  if (typeof entry !== "string") return null;
+  // Match "MM/DD/YYYY, h:mm:ss AM/PM <rest>"
+  const m = entry.match(/^(\d{1,2}\/\d{1,2}\/\d{4}),\s*([\d:]+\s*[AP]M)\s*(.*)$/);
+  if (!m) return null;
+  const [, dateStr, timeStr, rest] = m;
+  const ts = Date.parse(`${dateStr} ${timeStr}`);
+  if (!Number.isFinite(ts)) return null;
+  const action = (rest || "").trim();
+  const worker = _qmExtractWorker(action);
+  return { ts, action, worker };
+}
+
+function _qmExtractWorker(action) {
+  if (!action) return "";
+  let mm = action.match(/IN SERVICE:\s*(.+)$/i); if (mm) return mm[1].trim();
+  mm = action.match(/Back to end:\s*(.+)$/i);    if (mm) return mm[1].trim();
+  mm = action.match(/^join:\s*(.+)$/i);          if (mm) return mm[1].trim();
+  mm = action.match(/^HOLD:\s*(.+)$/i);          if (mm) return mm[1].trim();
+  mm = action.match(/^RELEASE:\s*(.+)$/i);       if (mm) return mm[1].trim();
+  mm = action.match(/^MOVE (?:UP|DOWN):\s*(.+)$/i); if (mm) return mm[1].trim();
+  const idx = action.lastIndexOf(":");
+  return idx > -1 ? action.slice(idx + 1).trim() : "";
+}
+
+function _qmActionKind(action) {
+  if (!action) return null;
+  if (/^join:/i.test(action)) return "join";
+  if (/IN SERVICE:/i.test(action)) return "start";
+  if (/^FINISH\b|Back to end:/i.test(action)) return "finish";
+  if (/^HOLD:/i.test(action)) return "hold";
+  if (/^RELEASE:/i.test(action)) return "release";
+  if (/^MOVE (?:UP|DOWN):/i.test(action)) return "move";
+  return null;
+}
+
+// Compute queue metrics for [fromMs, nowMs]. Returns nulls when no data.
+function computeQueueMetrics(fromMs) {
+  const result = {
+    avgWaitMin: null,
+    longestWaitMin: null,
+    busiestDay: null,
+    peakHour: null,
+    waitCount: 0,
+    activityCount: 0,
+    sourceFound: false,
+  };
+  let raw;
+  try {
+    raw = _qmReadRawLog();
+  } catch (e) {
+    console.warn(QM_LOG_PREFIX, "error reading log", e);
+    return result;
+  }
+  if (!Array.isArray(raw) || !raw.length) {
+    console.log(QM_LOG_PREFIX, "no historical queue data source found");
+    return result;
+  }
+  result.sourceFound = true;
+  console.log(QM_LOG_PREFIX, "source detected", { entries: raw.length });
+
+  // Parse + chronological order (raw is newest-first; we walk oldest-first
+  // so join → START pairs resolve correctly).
+  const parsed = [];
+  for (let i = raw.length - 1; i >= 0; i -= 1) {
+    const p = _qmParseEntry(raw[i]);
+    if (p && p.ts >= fromMs) parsed.push(p);
+  }
+  if (!parsed.length) {
+    console.log(QM_LOG_PREFIX, "no events in range");
+    return result;
+  }
+
+  const dayCounts = new Map();
+  const hourCounts = new Map();
+  const lastJoinAt = new Map();
+  const waits = [];
+
+  parsed.forEach((ev) => {
+    const kind = _qmActionKind(ev.action);
+    if (!kind) return;
+    result.activityCount += 1;
+    const d = new Date(ev.ts);
+    const dayKey = d.getDay();
+    const hourKey = d.getHours();
+    dayCounts.set(dayKey, (dayCounts.get(dayKey) || 0) + 1);
+    hourCounts.set(hourKey, (hourCounts.get(hourKey) || 0) + 1);
+    const w = (ev.worker || "").toLowerCase();
+    if (kind === "join" && w) {
+      lastJoinAt.set(w, ev.ts);
+    } else if (kind === "start" && w) {
+      const joinedAt = lastJoinAt.get(w);
+      if (Number.isFinite(joinedAt) && ev.ts > joinedAt) {
+        waits.push((ev.ts - joinedAt) / 60000);
+        lastJoinAt.delete(w);
+      }
+    } else if (kind === "finish" && w) {
+      lastJoinAt.delete(w);
+    }
+  });
+
+  if (waits.length) {
+    const total = waits.reduce((a, b) => a + b, 0);
+    result.avgWaitMin = total / waits.length;
+    result.longestWaitMin = waits.reduce((a, b) => (b > a ? b : a), 0);
+    result.waitCount = waits.length;
+  }
+
+  if (dayCounts.size) {
+    let bestDay = null, bestDayCount = -1;
+    dayCounts.forEach((count, day) => {
+      if (count > bestDayCount) { bestDayCount = count; bestDay = day; }
+    });
+    if (bestDay != null) result.busiestDay = DAY_NAMES[bestDay];
+  }
+  if (hourCounts.size) {
+    let bestHour = null, bestHourCount = -1;
+    hourCounts.forEach((count, hour) => {
+      if (count > bestHourCount) { bestHourCount = count; bestHour = hour; }
+    });
+    if (bestHour != null) result.peakHour = bestHour;
+  }
+
+  console.log(QM_LOG_PREFIX, "metrics calculated", {
+    waits: waits.length,
+    avgWaitMin: result.avgWaitMin,
+    longestWaitMin: result.longestWaitMin,
+    busiestDay: result.busiestDay,
+    peakHour: result.peakHour,
+    activity: result.activityCount,
+  });
+  return result;
+}
+
 function readQueueSnapshot() {
   const q = safeArr(window.queue);
   const service = safeArr(window.service);
-  return {
+  const out = {
     inQueue: q.length,
     inService: service.length,
     held: q.filter((x) => x && x.held).length,
-    avgWaitMin: null, // Wait timing isn't tracked on queue items today.
+    avgWaitMin: null,
     longestWaitMin: null,
+    busiestDay: null,
+    peakHour: null,
   };
+  try {
+    const metrics = computeQueueMetrics(weekStartMs());
+    out.avgWaitMin = metrics.avgWaitMin;
+    out.longestWaitMin = metrics.longestWaitMin;
+    out.busiestDay = metrics.busiestDay;
+    out.peakHour = metrics.peakHour;
+  } catch (e) {
+    console.warn(QM_LOG_PREFIX, "error calculating metrics", e);
+  }
+  return out;
 }
 
 function readTasksSnapshot() {
@@ -491,8 +691,8 @@ function renderModuleCards(snap) {
         <div class="dash-stat"><div class="dash-stat-label">Longest wait time</div><div class="dash-stat-value">${escapeHtml(fmtMinutes(snap.queue.longestWaitMin))}</div></div>
       </div>
       <div class="dash-meta">
-        <div>Busiest day: <b>—</b></div>
-        <div>Peak hour: <b>—</b></div>
+        <div>Busiest day: <b>${escapeHtml(snap.queue.busiestDay || "—")}</b></div>
+        <div>Peak hour: <b>${escapeHtml(snap.queue.peakHour == null ? "—" : fmtHourRange(snap.queue.peakHour))}</b></div>
       </div>
       <button type="button" class="dash-link" data-dash-action="queue-analytics">View Queue Analytics →</button>
     </div>
