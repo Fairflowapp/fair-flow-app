@@ -758,10 +758,27 @@ function renderModuleCards(snap) {
 
   root.innerHTML = queueCard + ticketsCard + timeCard + tasksCard;
 
+  const ANALYTICS_LABELS = {
+    "queue-analytics": "Queue Analytics",
+    "tickets-analytics": "Tickets Analytics",
+    "time-analytics": "Time Analytics",
+    "tasks-analytics": "Tasks Analytics",
+  };
   root.querySelectorAll("[data-dash-action]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
       const action = btn.getAttribute("data-dash-action");
-      console.log(LOG, "analytics link clicked (UI only)", action);
+      const label = ANALYTICS_LABELS[action] || "Analytics";
+      console.log(LOG, "analytics link clicked", action);
+      try {
+        if (window.ffToast && typeof window.ffToast.info === "function") {
+          window.ffToast.info(`${label} screen — coming soon`, 3500);
+        } else if (typeof window.showToast === "function") {
+          window.showToast(`${label} screen — coming soon`, 3500);
+        }
+      } catch (err) {
+        console.warn(LOG, "toast failed", err);
+      }
     });
   });
 }
