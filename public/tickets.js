@@ -4182,6 +4182,7 @@ export function goToTickets() {
     ticketsBtn.classList.add('active');
   }
   if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+  updateNewTicketButtonVisibility();
 
   if (_ticketsDataReady && currentUserProfile) {
     enrichTicketsProfileFromMemberDoc()
@@ -4214,6 +4215,19 @@ export function goToTickets() {
 
 function doServiceSelect(svc) {
   if (svc) addServiceToTicket(svc);
+}
+
+function updateNewTicketButtonVisibility() {
+  const newTicketBtn = document.getElementById('ticketsNewBtn');
+  if (!newTicketBtn) return;
+  if (!currentUserProfile) {
+    newTicketBtn.style.display = 'none';
+    return;
+  }
+  // The logged-in Firebase profile controls who can create service-provider tickets.
+  const profileRole = (currentUserProfile?.role || '').toLowerCase();
+  const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
+  newTicketBtn.style.display = isFirebaseAdmin ? 'none' : 'inline-flex';
 }
 
 async function setupTicketsUI() {
@@ -4262,14 +4276,7 @@ async function setupTicketsUI() {
     }
   }
   updateTicketsTabsVisibility();
-  const newTicketBtn = document.getElementById('ticketsNewBtn');
-  if (newTicketBtn) {
-    // Hide for admin/manager/owner based on FIRESTORE profile role
-    // (not PIN actor — the logged-in Firebase user determines this)
-    const profileRole = (currentUserProfile?.role || '').toLowerCase();
-    const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
-    newTicketBtn.style.display = isFirebaseAdmin ? 'none' : 'inline-block';
-  }
+  updateNewTicketButtonVisibility();
 }
 
 // =====================

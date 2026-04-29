@@ -7,8 +7,10 @@
  */
 
 const LOG = "[TicketsAnalytics]";
+const LOC_LOG = "[TicketsAnalytics LocationScope]";
 const SCREEN_ID = "ticketsAnalyticsScreen";
 const STYLE_ID = "ffTicketsAnalyticsStyles";
+const RANGE_STORAGE_KEY = "ff_tickets_analytics_range_v1";
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const OTHER_NAV_IDS = [
@@ -26,6 +28,9 @@ const OTHER_NAV_IDS = [
 ];
 
 let _injected = false;
+let _taRangeState = { mode: "thisWeek", customStart: "", customEnd: "" };
+let _lastMetrics = null;
+let _lastRange = null;
 
 // ---------- Formatting ----------
 
@@ -67,6 +72,141 @@ function fmtHourRange(hour24) {
   const start = label(hour24);
   const end = label(hour24 + 1);
   return `${start.replace(/ AM| PM/, "")}–${end}`;
+}
+
+function weekStartMs() {
+  const d = new Date();
+  const day = d.getDay();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - day);
+  return d.getTime();
+}
+
+function dayStart(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function endOfDay(date) {
+  const d = new Date(date);
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function dateInputValue(date) {
+  const d = new Date(date);
+  if (!Number.isFinite(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function parseDateInput(value) {
+  const m = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function formatDate(date) {
+  const d = new Date(date);
+  if (!Number.isFinite(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function loadRangeState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RANGE_STORAGE_KEY) || "{}");
+    if (saved && typeof saved.mode === "string") {
+      _taRangeState = {
+        mode: saved.mode || "thisWeek",
+        customStart: saved.customStart || "",
+        customEnd: saved.customEnd || "",
+      };
+    }
+  } catch (_) {}
+}
+
+function saveRangeState() {
+  try {
+    localStorage.setItem(RANGE_STORAGE_KEY, JSON.stringify(_taRangeState));
+  } catch (_) {}
+}
+
+function getSelectedRange() {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const weekStart = new Date(weekStartMs());
+  const mode = _taRangeState.mode || "thisWeek";
+  let start = weekStart;
+  let end = now;
+  let label = "This week";
+
+  if (mode === "lastWeek") {
+    start = addDays(weekStart, -7);
+    end = endOfDay(addDays(weekStart, -1));
+    label = "Last week";
+  } else if (mode === "last2Weeks") {
+    start = addDays(weekStart, -14);
+    end = endOfDay(addDays(weekStart, -1));
+    label = "Last 2 weeks";
+  } else if (mode === "last30Days") {
+    start = addDays(dayStart(now), -29);
+    end = now;
+    label = "Last 30 days";
+  } else if (mode === "thisMonth") {
+    start = new Date(currentYear, now.getMonth(), 1);
+    end = now;
+    label = "This month";
+  } else if (/^month-\d{1,2}$/.test(mode)) {
+    const month = Number(mode.split("-")[1]);
+    start = new Date(currentYear, month, 1);
+    end = endOfDay(new Date(currentYear, month + 1, 0));
+    label = start.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  } else if (mode === "custom") {
+    const customStart = parseDateInput(_taRangeState.customStart);
+    const customEnd = parseDateInput(_taRangeState.customEnd);
+    if (customStart && customEnd) {
+      start = dayStart(customStart);
+      end = endOfDay(customEnd);
+      if (start.getTime() > end.getTime()) {
+        const tmp = start;
+        start = dayStart(end);
+        end = endOfDay(tmp);
+      }
+      label = `${formatDate(start)} – ${formatDate(end)}`;
+    } else {
+      label = "Custom range";
+    }
+  }
+
+  return {
+    mode,
+    fromMs: start.getTime(),
+    toMs: end.getTime(),
+    label,
+    startLabel: formatDate(start),
+    endLabel: formatDate(end),
+  };
+}
+
+function syncRangeControls() {
+  const screen = document.getElementById(SCREEN_ID);
+  const mode = document.getElementById("ffTaRangeMode");
+  const start = document.getElementById("ffTaCustomStart");
+  const end = document.getElementById("ffTaCustomEnd");
+  if (mode) mode.value = _taRangeState.mode || "thisWeek";
+  if (start) start.value = _taRangeState.customStart || dateInputValue(new Date());
+  if (end) end.value = _taRangeState.customEnd || dateInputValue(new Date());
+  if (screen) screen.classList.toggle("ta-custom-range", (_taRangeState.mode || "thisWeek") === "custom");
 }
 
 // ---------- DOM ----------
@@ -119,6 +259,19 @@ function injectStyles() {
       font-size: 13px;
       color: #6b7280;
     }
+    #${SCREEN_ID} .ta-location {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: -10px 0 16px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      color: #6b7280;
+      font-size: 12px;
+      font-weight: 600;
+    }
     #${SCREEN_ID} .ta-section-title {
       font-size: 12px;
       font-weight: 700;
@@ -126,6 +279,79 @@ function injectStyles() {
       letter-spacing: 0.06em;
       color: #6b7280;
       margin: 22px 2px 10px;
+    }
+    #${SCREEN_ID} .ta-toolbar {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 14px 16px;
+      margin: 18px 0 20px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    #${SCREEN_ID} .ta-filter-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    #${SCREEN_ID} .ta-field {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    #${SCREEN_ID} .ta-field label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #6b7280;
+    }
+    #${SCREEN_ID} .ta-field select,
+    #${SCREEN_ID} .ta-field input {
+      height: 36px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      background: #fff;
+      color: #111827;
+      padding: 0 10px;
+      font-size: 13px;
+      min-width: 150px;
+    }
+    #${SCREEN_ID} .ta-field.is-custom { display: none; }
+    #${SCREEN_ID}.ta-custom-range .ta-field.is-custom { display: flex; }
+    #${SCREEN_ID} .ta-toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    #${SCREEN_ID} .ta-range-label {
+      font-size: 12px;
+      color: #6b7280;
+      margin-right: 4px;
+    }
+    #${SCREEN_ID} .ta-action-btn {
+      height: 36px;
+      border: 0;
+      border-radius: 999px;
+      padding: 0 14px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      background: linear-gradient(135deg, #9d68b9, #ff9580);
+      color: #fff;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.10);
+    }
+    #${SCREEN_ID} .ta-action-btn.secondary {
+      background: #f3f4f6;
+      color: #374151;
+      box-shadow: none;
+      border: 1px solid #e5e7eb;
     }
     #${SCREEN_ID} .ta-summary {
       display: grid;
@@ -146,20 +372,20 @@ function injectStyles() {
       gap: 4px;
     }
     #${SCREEN_ID} .ta-card-label {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.05em;
       color: #6b7280;
     }
     #${SCREEN_ID} .ta-card-value {
-      font-size: 24px;
+      font-size: 21px;
       font-weight: 800;
       color: #111827;
       line-height: 1.1;
     }
     #${SCREEN_ID} .ta-card-foot {
-      font-size: 12px;
+      font-size: 11px;
       color: #6b7280;
     }
     #${SCREEN_ID} .ta-panel {
@@ -287,7 +513,10 @@ function injectStyles() {
     }
     @media (max-width: 900px) {
       #${SCREEN_ID} .ta-wrap { padding: 16px 14px 32px; }
-      #${SCREEN_ID} .ta-card-value { font-size: 21px; }
+      #${SCREEN_ID} .ta-toolbar { align-items: stretch; }
+      #${SCREEN_ID} .ta-toolbar-actions { width: 100%; }
+      #${SCREEN_ID} .ta-action-btn { flex: 1; }
+      #${SCREEN_ID} .ta-card-value { font-size: 19px; }
     }
   `;
   document.head.appendChild(style);
@@ -302,6 +531,48 @@ function buildScreen() {
       <button type="button" class="ta-back" id="ffTaBack" aria-label="Back to dashboard">← Back to dashboard</button>
       <h1 class="ta-h1">Tickets Analytics</h1>
       <p class="ta-sub">Understand ticket volume, revenue, and employee performance</p>
+      <div class="ta-location" id="ffTaLocationLabel">Location: —</div>
+
+      <div class="ta-toolbar" id="ffTaToolbar">
+        <div class="ta-filter-row">
+          <div class="ta-field">
+            <label for="ffTaRangeMode">Date range</label>
+            <select id="ffTaRangeMode">
+              <option value="thisWeek">This week</option>
+              <option value="lastWeek">Last week</option>
+              <option value="last2Weeks">Last 2 weeks</option>
+              <option value="last30Days">Last 30 days</option>
+              <option value="thisMonth">This month</option>
+              <option value="month-0">January</option>
+              <option value="month-1">February</option>
+              <option value="month-2">March</option>
+              <option value="month-3">April</option>
+              <option value="month-4">May</option>
+              <option value="month-5">June</option>
+              <option value="month-6">July</option>
+              <option value="month-7">August</option>
+              <option value="month-8">September</option>
+              <option value="month-9">October</option>
+              <option value="month-10">November</option>
+              <option value="month-11">December</option>
+              <option value="custom">Custom range</option>
+            </select>
+          </div>
+          <div class="ta-field is-custom">
+            <label for="ffTaCustomStart">Start</label>
+            <input type="date" id="ffTaCustomStart">
+          </div>
+          <div class="ta-field is-custom">
+            <label for="ffTaCustomEnd">End</label>
+            <input type="date" id="ffTaCustomEnd">
+          </div>
+          <button type="button" class="ta-action-btn secondary" id="ffTaApplyRange">Apply</button>
+        </div>
+        <div class="ta-toolbar-actions">
+          <span class="ta-range-label" id="ffTaRangeLabel">This week</span>
+          <button type="button" class="ta-action-btn" id="ffTaExportCsv">Export Excel</button>
+        </div>
+      </div>
 
       <div class="ta-section-title">Summary</div>
       <div id="ffTaSummary" class="ta-summary"></div>
@@ -331,6 +602,44 @@ function buildScreen() {
       }
     });
   }
+  const rangeMode = root.querySelector("#ffTaRangeMode");
+  const customStart = root.querySelector("#ffTaCustomStart");
+  const customEnd = root.querySelector("#ffTaCustomEnd");
+  const applyRange = root.querySelector("#ffTaApplyRange");
+  const exportCsv = root.querySelector("#ffTaExportCsv");
+  if (rangeMode) {
+    rangeMode.addEventListener("change", () => {
+      _taRangeState.mode = rangeMode.value || "thisWeek";
+      saveRangeState();
+      syncRangeControls();
+      if (_taRangeState.mode !== "custom") refresh();
+    });
+  }
+  [customStart, customEnd].forEach((input) => {
+    if (!input) return;
+    input.addEventListener("change", () => {
+      _taRangeState.customStart = customStart ? customStart.value : "";
+      _taRangeState.customEnd = customEnd ? customEnd.value : "";
+      saveRangeState();
+    });
+  });
+  if (applyRange) {
+    applyRange.addEventListener("click", () => {
+      _taRangeState.mode = rangeMode ? rangeMode.value : _taRangeState.mode;
+      _taRangeState.customStart = customStart ? customStart.value : _taRangeState.customStart;
+      _taRangeState.customEnd = customEnd ? customEnd.value : _taRangeState.customEnd;
+      saveRangeState();
+      syncRangeControls();
+      refresh();
+    });
+  }
+  if (exportCsv) {
+    exportCsv.addEventListener("click", () => {
+      exportCurrentCsv();
+    });
+  }
+  loadRangeState();
+  syncRangeControls();
   return root;
 }
 
@@ -399,6 +708,45 @@ function getActiveLocationId() {
     if (id) return id;
   } catch (_) {}
   return "";
+}
+
+function getLocationScope() {
+  const id = getActiveLocationId();
+  let name = "";
+  try {
+    const lists = [
+      typeof window.ffGetActiveLocations === "function" ? window.ffGetActiveLocations() : null,
+      typeof window.ffGetLocations === "function" ? window.ffGetLocations() : null,
+      window.ffLocationsState?.locations,
+    ];
+    for (const list of lists) {
+      const match = (Array.isArray(list) ? list : []).find((loc) => String(loc?.id || loc?.locationId || "").trim() === id);
+      if (match) {
+        name = cleanString(match.name || match.label || match.title || id);
+        break;
+      }
+    }
+  } catch (_) {}
+  return {
+    id,
+    name: name || id || "",
+    hasLocation: !!id,
+    label: id ? `Location: ${name || id}` : "Please select a location",
+  };
+}
+
+function renderLocationScope(scope = getLocationScope()) {
+  const el = document.getElementById("ffTaLocationLabel");
+  if (el) el.textContent = scope.label;
+}
+
+function logLocationScope(source, scope, before, after, skippedNoLocation) {
+  console.log(LOC_LOG, source, {
+    activeLocationId: scope?.id || "",
+    recordsBeforeFilter: before,
+    recordsAfterFilter: after,
+    skippedRecordsWithoutLocationId: skippedNoLocation,
+  });
 }
 
 function readStaffNames() {
@@ -645,23 +993,31 @@ function avgAmount(bucket) {
   return bucket && bucket.tickets ? bucket.totalAmount / bucket.tickets : null;
 }
 
-async function computeTicketsAnalytics() {
+async function computeTicketsAnalytics(range = getSelectedRange()) {
   const source = await readCandidateArrays();
-  const activeLocationId = getActiveLocationId();
+  const scope = getLocationScope();
+  const activeLocationId = scope.id;
   const staffNames = readStaffNames();
   const missingFields = { timestamp: 0, amount: 0, employee: 0, location: 0, items: 0 };
   const parsed = [];
+  let skippedNoLocation = 0;
 
   source.list.forEach((raw) => {
     try {
       const ticket = parseTicket(raw, staffNames, missingFields);
       if (!ticket) return;
-      if (activeLocationId && ticket.locationId && ticket.locationId !== activeLocationId) return;
+      if (!ticket.locationId) {
+        skippedNoLocation += 1;
+        return;
+      }
+      if (!scope.hasLocation || ticket.locationId !== activeLocationId) return;
+      if (!Number.isFinite(ticket.timestamp) || ticket.timestamp < range.fromMs || ticket.timestamp > range.toMs) return;
       parsed.push(ticket);
     } catch (err) {
       console.warn(LOG, "ticket parse error", err, raw);
     }
   });
+  logLocationScope("tickets", scope, source.list.length, parsed.length, skippedNoLocation);
 
   const businessHours = resolveBusinessHoursForWeek();
   const byDayBuckets = DAY_NAMES.map((dayName, dayIdx) => ({ dayIdx, dayName, ...makeBucket() }));
@@ -672,6 +1028,7 @@ async function computeTicketsAnalytics() {
   const result = {
     sourceName: source.name,
     activeLocationId,
+    locationLabel: scope.label,
     rawCount: source.list.length,
     parsedCount: parsed.length,
     totalTickets: 0,
@@ -686,6 +1043,7 @@ async function computeTicketsAnalytics() {
     items: [],
     bestSellingItem: null,
     businessHours,
+    rangeLabel: range.label,
     missingFields,
     hasData: parsed.length > 0,
   };
@@ -744,14 +1102,22 @@ async function computeTicketsAnalytics() {
     row.averageTicket = avgAmount(row);
   });
   result.byDayHour = businessHours.byDay.map((day) => {
-    const hours = day.isOpen
-      ? day.hours.map((hour) => {
+    const activityHours = Array.from(dayHourMap.values())
+      .filter((bucket) => bucket.dayIdx === day.dayIdx && bucket.tickets > 0)
+      .map((bucket) => bucket.hour);
+    const displayHours = Array.from(new Set([...(day.hours || []), ...activityHours])).sort((a, b) => a - b);
+    const hours = displayHours
+      .map((hour) => {
           const bucket = dayHourMap.get(`${day.dayIdx}|${hour}`) || { dayIdx: day.dayIdx, hour, ...makeBucket() };
           return { ...bucket, averageTicket: avgAmount(bucket) };
-        })
-      : [];
+        });
     const peak = hours.reduce((best, row) => (row.tickets > (best?.tickets || 0) ? row : best), null);
-    return { ...day, peakHour: peak && peak.tickets ? peak.hour : null, hours };
+    return {
+      ...day,
+      hasActivityOutsideHours: activityHours.some((hour) => !(day.hours || []).includes(hour)),
+      peakHour: peak && peak.tickets ? peak.hour : null,
+      hours,
+    };
   });
   result.employees = Array.from(employeeMap.values())
     .map((row) => ({ ...row, averageTicket: row.tickets ? row.totalAmount / row.tickets : null }))
@@ -767,6 +1133,7 @@ async function computeTicketsAnalytics() {
     tickets: result.totalTickets,
     totalAmount: result.totalAmount,
     itemRows: result.items.length,
+    range: range.label,
     activeLocationId: activeLocationId || "(all/general)",
   });
 
@@ -801,8 +1168,8 @@ function renderSummary(metrics) {
   const root = document.getElementById("ffTaSummary");
   if (!root) return;
   const cards = [
-    { label: "Total Tickets", value: fmtNumber(metrics.totalTickets), foot: metrics.activeLocationId ? "Active location" : "All visible tickets" },
-    { label: "Total Amount", value: fmtCurrency(metrics.totalAmount), foot: "All parsed tickets" },
+    { label: "Total Tickets", value: fmtNumber(metrics.totalTickets), foot: metrics.activeLocationId ? `Active location · ${metrics.rangeLabel}` : metrics.rangeLabel },
+    { label: "Total Amount", value: fmtCurrency(metrics.totalAmount), foot: metrics.rangeLabel },
     { label: "Average Ticket", value: fmtCurrency(metrics.averageTicket), foot: "Revenue per ticket" },
     { label: "Busiest Day", value: metrics.busiestDay?.tickets ? metrics.busiestDay.dayName : "—", foot: metrics.busiestDay?.tickets ? `${fmtNumber(metrics.busiestDay.tickets)} tickets` : "Not enough data yet" },
     { label: "Peak Hour", value: metrics.peakHour ? fmtHourRange(metrics.peakHour.hour) : "—", foot: metrics.peakHour ? `${fmtNumber(metrics.peakHour.tickets)} tickets` : "Not enough data yet" },
@@ -854,7 +1221,7 @@ function renderByHour(metrics) {
   root.innerHTML = metrics.byDayHour.map((day) => {
     const dayTickets = day.hours.reduce((sum, hour) => sum + hour.tickets, 0);
     const dayAmount = day.hours.reduce((sum, hour) => sum + hour.totalAmount, 0);
-    if (!day.isOpen) {
+    if (!day.hours.length) {
       return `
         <details class="ta-day">
           <summary class="ta-day-title">
@@ -869,7 +1236,7 @@ function renderByHour(metrics) {
       <details class="ta-day">
         <summary class="ta-day-title">
           <span>${escapeHtml(day.dayName)}</span>
-          <span class="ta-day-meta">${escapeHtml(fmtNumber(dayTickets))} tickets · ${escapeHtml(fmtCurrency(dayAmount))}</span>
+          <span class="ta-day-meta">${day.isOpen ? "" : "Closed · "}${day.hasActivityOutsideHours ? "After hours · " : ""}${escapeHtml(fmtNumber(dayTickets))} tickets · ${escapeHtml(fmtCurrency(dayAmount))}</span>
         </summary>
         <div class="ta-day-body">
           <div class="ta-hour-grid">
@@ -959,13 +1326,118 @@ function renderInsights(metrics) {
   `;
 }
 
+function csvCell(value) {
+  const s = String(value == null ? "" : value);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function csvRow(values) {
+  return values.map(csvCell).join(",");
+}
+
+async function exportCurrentCsv() {
+  const range = _lastRange || getSelectedRange();
+  const metrics = _lastMetrics || await computeTicketsAnalytics(range);
+  const insights = buildInsights(metrics);
+  const rows = [];
+
+  rows.push(["Tickets Analytics Export"]);
+  rows.push(["Range", range.label]);
+  rows.push(["From", range.startLabel]);
+  rows.push(["To", range.endLabel]);
+  rows.push([]);
+
+  rows.push(["Summary"]);
+  rows.push(["Metric", "Value"]);
+  rows.push(["Total tickets", metrics.totalTickets || 0]);
+  rows.push(["Total amount", fmtCurrency(metrics.totalAmount)]);
+  rows.push(["Average ticket", fmtCurrency(metrics.averageTicket)]);
+  rows.push(["Busiest day", metrics.busiestDay?.tickets ? metrics.busiestDay.dayName : ""]);
+  rows.push(["Peak hour", metrics.peakHour ? fmtHourRange(metrics.peakHour.hour) : ""]);
+  rows.push(["Best selling item", metrics.bestSellingItem?.name || ""]);
+  rows.push([]);
+
+  rows.push(["Tickets by Day"]);
+  rows.push(["Day", "Tickets", "Total Amount", "Average Ticket", "Highest Ticket"]);
+  (metrics.byDay || []).forEach((row) => {
+    rows.push([
+      row.dayName,
+      row.tickets || 0,
+      fmtCurrency(row.totalAmount || 0),
+      row.tickets ? fmtCurrency(row.averageTicket) : "",
+      row.tickets ? fmtCurrency(row.highestTicket) : "",
+    ]);
+  });
+  rows.push([]);
+
+  rows.push(["Tickets by Hour"]);
+  rows.push(["Day", "Hour", "Tickets", "Total Amount", "Average Ticket"]);
+  (metrics.byDayHour || []).forEach((day) => {
+    if (!day.hours || !day.hours.length) {
+      rows.push([day.dayName, "Closed", "", "", ""]);
+      return;
+    }
+    day.hours.forEach((hour) => {
+      rows.push([
+        day.dayName,
+        fmtHourRange(hour.hour),
+        hour.tickets || 0,
+        fmtCurrency(hour.totalAmount || 0),
+        hour.tickets ? fmtCurrency(hour.averageTicket) : "",
+      ]);
+    });
+  });
+  rows.push([]);
+
+  rows.push(["Top Selling Items"]);
+  rows.push(["Item", "Sold", "Total Amount", "Average Price"]);
+  (metrics.items || []).slice(0, 10).forEach((item) => {
+    rows.push([
+      item.name,
+      item.sold || 0,
+      fmtCurrency(item.totalAmount || 0),
+      fmtCurrency(item.averagePrice),
+    ]);
+  });
+  rows.push([]);
+
+  rows.push(["Insights"]);
+  insights.forEach((text) => rows.push([text]));
+
+  const csv = `\uFEFF${rows.map(csvRow).join("\r\n")}`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const safeRange = String(range.label || "range").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `tickets-analytics-${safeRange || "range"}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try {
+    if (window.ffToast && typeof window.ffToast.success === "function") {
+      window.ffToast.success("Tickets Analytics export created");
+    }
+  } catch (_) {}
+}
+
 async function refresh() {
   const screen = document.getElementById(SCREEN_ID);
   if (!screen || screen.style.display === "none") return;
+  syncRangeControls();
+  const scope = getLocationScope();
+  renderLocationScope(scope);
+  console.log(LOC_LOG, "active location", { activeLocationId: scope.id || "", label: scope.label });
+  const range = getSelectedRange();
+  const label = document.getElementById("ffTaRangeLabel");
+  if (label) label.textContent = range.label;
   try {
-    const metrics = await computeTicketsAnalytics();
+    const metrics = await computeTicketsAnalytics(range);
+    _lastMetrics = metrics;
+    _lastRange = range;
     if (!metrics.hasData) {
-      renderEmpty("No ticket data available yet");
+      renderEmpty(scope.hasLocation ? "No ticket data available for this location yet" : "Please select a location");
       return;
     }
     renderSummary(metrics);
@@ -975,7 +1447,7 @@ async function refresh() {
     renderInsights(metrics);
   } catch (err) {
     console.error(LOG, "refresh failed", err);
-    renderEmpty("No ticket data available yet");
+    renderEmpty(scope.hasLocation ? "No ticket data available for this location yet" : "Please select a location");
   }
 }
 

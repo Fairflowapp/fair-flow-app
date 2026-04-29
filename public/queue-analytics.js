@@ -18,6 +18,7 @@
 
 const LOG = "[QueueAnalytics]";
 const BH_LOG = "[QueueAnalytics BusinessHours]";
+const LOC_LOG = "[QueueAnalytics LocationScope]";
 const V2_LOG = "[QueueAnalytics V2]";
 const TYPES_LOG = "[QueueAnalytics Types]";
 const SCREEN_ID = "queueAnalyticsScreen";
@@ -95,6 +96,19 @@ function injectStyles() {
       margin: 0 0 22px 0;
       font-size: 13px;
       color: #6b7280;
+    }
+    #${SCREEN_ID} .qa-location {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: -10px 0 16px 0;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      color: #6b7280;
+      font-size: 12px;
+      font-weight: 600;
     }
     #${SCREEN_ID} .qa-section-title {
       font-size: 12px;
@@ -540,6 +554,7 @@ function buildScreen() {
       <button type="button" class="qa-back" id="ffQaBack" aria-label="Back to dashboard">← Back to dashboard</button>
       <h1 class="qa-h1">Queue Analytics</h1>
       <p class="qa-sub">Understand average wait time, staff flow, and hourly capacity</p>
+      <div class="qa-location" id="ffQaLocationLabel">Location: —</div>
 
       <div class="qa-toolbar" id="ffQaToolbar">
         <div class="qa-filter-row">
@@ -800,6 +815,45 @@ function _qaActiveLocationId() {
   }
 }
 
+function _qaLocationScope() {
+  const id = _qaActiveLocationId();
+  let name = "";
+  try {
+    const lists = [
+      typeof window.ffGetActiveLocations === "function" ? window.ffGetActiveLocations() : null,
+      typeof window.ffGetLocations === "function" ? window.ffGetLocations() : null,
+      window.ffLocationsState?.locations,
+    ];
+    for (const list of lists) {
+      const match = (Array.isArray(list) ? list : []).find((loc) => String(loc?.id || loc?.locationId || "").trim() === id);
+      if (match) {
+        name = String(match.name || match.label || match.title || id).trim();
+        break;
+      }
+    }
+  } catch (_) {}
+  return {
+    id,
+    name: name || id || "",
+    hasLocation: !!id,
+    label: id ? `Location: ${name || id}` : "Please select a location",
+  };
+}
+
+function _qaRenderLocation(scope = _qaLocationScope()) {
+  const el = document.getElementById("ffQaLocationLabel");
+  if (el) el.textContent = scope.label;
+}
+
+function _qaLogScope(source, scope, before, after, skippedNoLocation) {
+  console.log(LOC_LOG, source, {
+    activeLocationId: scope?.id || "",
+    recordsBeforeFilter: before,
+    recordsAfterFilter: after,
+    skippedRecordsWithoutLocationId: skippedNoLocation,
+  });
+}
+
 function _qaTimeToMinutes(value) {
   const s = String(value || "").trim();
   const m = s.match(/^(\d{1,2}):(\d{2})$/);
@@ -1008,7 +1062,8 @@ function _qaParseEntry(entry) {
     const worker = String(entry.worker || entry.assignedTo || "").trim() || _qaExtractWorker(action);
     const staffId = String(entry.staffId || entry.staffMemberId || entry.employeeId || "").trim();
     const typedAction = entry.type === "queue_check_out" ? `${action} queue_check_out` : action;
-    return { ts, action: typedAction, worker, staffId };
+    const locationId = String(entry.locationId || entry.locId || "").trim();
+    return { ts, action: typedAction, worker, staffId, locationId };
   }
   if (typeof entry !== "string") return null;
   const m = entry.match(/^(\d{1,2}\/\d{1,2}\/\d{4}),\s*([\d:]+\s*[AP]M)\s*(.*)$/);
@@ -1017,11 +1072,12 @@ function _qaParseEntry(entry) {
   const ts = Date.parse(`${dateStr} ${timeStr}`);
   if (!Number.isFinite(ts)) return null;
   const action = (rest || "").trim();
-  return { ts, action, worker: _qaExtractWorker(action), staffId: "" };
+  return { ts, action, worker: _qaExtractWorker(action), staffId: "", locationId: "" };
 }
 
 // Compute the full breakdown needed for sections A-D.
 function computeQueueAnalytics(fromMs, toMs = Date.now()) {
+  const scope = _qaLocationScope();
   const result = {
     sourceFound: false,
     activityCount: 0,
@@ -1039,6 +1095,8 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
     totalIdleMinutes: 0,
     avgStaffPerDay: null,
     staffActivityDays: 0,
+    activeLocationId: scope.id,
+    locationLabel: scope.label,
   };
 
   let raw;
@@ -1060,10 +1118,17 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
   // (oldest-first). Sort by timestamp so JOIN → START pairs resolve
   // correctly regardless of write path.
   const parsed = [];
+  let skippedNoLocation = 0;
   for (let i = 0; i < raw.length; i += 1) {
     const p = _qaParseEntry(raw[i]);
-    if (p && p.ts <= toMs) parsed.push(p);
+    if (!p || p.ts > toMs) continue;
+    if (!p.locationId) {
+      skippedNoLocation += 1;
+      continue;
+    }
+    if (scope.hasLocation && p.locationId === scope.id) parsed.push(p);
   }
+  _qaLogScope("queue-events", scope, raw.length, parsed.length, skippedNoLocation);
   parsed.sort((a, b) => a.ts - b.ts);
   if (!parsed.length) {
     console.log(LOG, "no events in range");
@@ -1096,8 +1161,9 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
     return `${y}-${m}-${day}`;
   }
 
-  function addMinutesIntervalToBusinessHours(startedAt, endedAt, onOverlap) {
+  function addMinutesIntervalToBusinessHours(startedAt, endedAt, onOverlap, options = {}) {
     if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt) || endedAt <= startedAt) return;
+    const includeOutsideHours = options && options.includeOutsideHours === true;
     const clippedStart = Math.max(startedAt, fromMs);
     const clippedEnd = Math.min(endedAt, toMs);
     if (clippedEnd <= clippedStart) return;
@@ -1120,7 +1186,11 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
           minuteOfDay < businessDay.closeMin &&
           (minuteOfDay + 60) > businessDay.openMin
         );
-        if (isBusinessHour) {
+        if (includeOutsideHours) {
+          const minutes = (segEnd - segStart) / 60000;
+          const key = `${dayKey}|${hourKey}`;
+          onOverlap({ key, dayKey, hourKey, dateKey: dateKeyFromMs(hourStart), minutes });
+        } else if (isBusinessHour) {
           const businessStart = new Date(hourStart);
           businessStart.setHours(0, 0, 0, 0);
           const openMs = businessStart.getTime() + businessDay.openMin * 60000;
@@ -1148,7 +1218,7 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
       dayHourIdleBuckets.set(key, (dayHourIdleBuckets.get(key) || 0) + minutes);
       addTypeCount(dayHourIdleTypeBuckets, key, state?.type || "Other", minutes);
       result.totalIdleMinutes += minutes;
-    });
+    }, { includeOutsideHours: true });
   }
 
   function addTypeCount(bucket, key, type, amount = 1) {
@@ -1182,7 +1252,7 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
       .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
   }
 
-  function addActiveInterval(state, startedAt, endedAt) {
+  function addActiveInterval(state, startedAt, endedAt, includeOutsideHours = true) {
     if (!state) return;
     const worker = String(state.worker || "").trim();
     const staff = String(worker || "").trim();
@@ -1194,7 +1264,7 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
       ensureDayBucket(dayKey).staff.add(staff);
       if (!dailyActiveStaff.has(dateKey)) dailyActiveStaff.set(dateKey, new Set());
       dailyActiveStaff.get(dateKey).add(staff);
-    });
+    }, { includeOutsideHours });
   }
 
   function closeIdle(state, ts) {
@@ -1208,12 +1278,12 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
     state.idleStart = null;
   }
 
-  function closeActive(state, ts) {
+  function closeActive(state, ts, includeOutsideHours = true) {
     if (!state || !Number.isFinite(state.activeStart) || ts <= state.activeStart) {
       if (state) state.activeStart = null;
       return;
     }
-    addActiveInterval(state, state.activeStart, ts);
+    addActiveInterval(state, state.activeStart, ts, includeOutsideHours);
     state.activeStart = null;
   }
 
@@ -1298,7 +1368,7 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
       }
       if (!state.staffId && staffId) state.staffId = staffId;
       if (!state.type || state.type === "Other") state.type = staffType;
-      if (eventInRange && isInsideBusinessHours) {
+      if (eventInRange) {
         hourBuckets.set(hourKey, (hourBuckets.get(hourKey) || 0) + 1);
         dayHourStartBuckets.set(dayHourKey, (dayHourStartBuckets.get(dayHourKey) || 0) + 1);
         addTypeCount(dayHourStartTypeBuckets, dayHourKey, state.type || staffType || "Other");
@@ -1350,7 +1420,7 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
     // Open staff records still count for Active Staff through the selected
     // range, but incomplete Available waits are not counted as Idle Time
     // until a START confirms the wait duration.
-    closeActive(state, toMs);
+    closeActive(state, toMs, false);
   });
 
   // Aggregate global metrics.
@@ -1389,8 +1459,16 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
 
   result.byDayHour = (businessHours.byDay || []).map((day) => {
     let peak = null;
-    const hours = day.isOpen
-      ? day.hours.map((hour) => {
+    const activityHours = new Set();
+    [dayHourStartBuckets, dayHourIdleBuckets, dayHourActiveStaff].forEach((bucket) => {
+      bucket.forEach((_, key) => {
+        const [dayPart, hourPart] = String(key).split("|");
+        if (Number(dayPart) === day.dayIdx) activityHours.add(Number(hourPart));
+      });
+    });
+    const displayHours = Array.from(new Set([...(day.hours || []), ...Array.from(activityHours)])).sort((a, b) => a - b);
+    const hours = displayHours
+      .map((hour) => {
         const key = `${day.dayIdx}|${hour}`;
         const activeStaffSet = dayHourActiveStaff.get(key);
         const row = {
@@ -1411,8 +1489,7 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
           peak = row;
         }
         return row;
-      })
-      : [];
+      });
     const totalStaff = dayBuckets.get(day.dayIdx)?.staff?.size || 0;
     return {
       dayIdx: day.dayIdx,
@@ -1420,6 +1497,7 @@ function computeQueueAnalytics(fromMs, toMs = Date.now()) {
       isOpen: day.isOpen,
       openTime: day.openTime,
       closeTime: day.closeTime,
+      hasActivityOutsideHours: Array.from(activityHours).some((hour) => !(day.hours || []).includes(hour)),
       totalStaff,
       peakHour: peak && (peak.starts > 0 || peak.activeStaff > 0 || peak.idleMinutes > 0) ? peak.hour : null,
       hours,
@@ -1540,19 +1618,19 @@ function escapeHtml(s) {
 
 // ---------- Render ----------
 
-function renderEmpty() {
+function renderEmpty(message = "No queue data available yet") {
   ["ffQaSummary", "ffQaByDay", "ffQaByHour", "ffQaInsights"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.innerHTML = "";
   });
   const summary = document.getElementById("ffQaSummary");
   if (summary) {
-    summary.outerHTML = '<div id="ffQaSummary" class="qa-empty">No queue data available yet</div>';
+    summary.outerHTML = `<div id="ffQaSummary" class="qa-empty">${escapeHtml(message)}</div>`;
   }
   const byDay = document.getElementById("ffQaByDay");
-  if (byDay) byDay.innerHTML = '<div style="color:#6b7280;font-size:13px;">No queue data available yet</div>';
+  if (byDay) byDay.innerHTML = `<div style="color:#6b7280;font-size:13px;">${escapeHtml(message)}</div>`;
   const byHour = document.getElementById("ffQaByHour");
-  if (byHour) byHour.innerHTML = '<div style="color:#6b7280;font-size:13px;">No queue data available yet</div>';
+  if (byHour) byHour.innerHTML = `<div style="color:#6b7280;font-size:13px;">${escapeHtml(message)}</div>`;
   const insights = document.getElementById("ffQaInsights");
   if (insights) {
     insights.innerHTML = `
@@ -1755,9 +1833,9 @@ function renderByHour(metrics) {
         <details class="qa-hour-day">
           <summary class="qa-hour-day-title">
             <span>${escapeHtml(day.dayName)} ▼</span>
-            <span class="qa-hour-day-hours">${day.isOpen ? `${escapeHtml(day.openTime)}–${escapeHtml(day.closeTime)}` : "Closed"}</span>
+            <span class="qa-hour-day-hours">${day.isOpen ? `${escapeHtml(day.openTime)}–${escapeHtml(day.closeTime)}${day.hasActivityOutsideHours ? " · After hours activity" : ""}` : (day.hours && day.hours.length ? "Closed · activity logged" : "Closed")}</span>
           </summary>
-          ${day.isOpen ? `
+          ${(day.isOpen || (day.hours && day.hours.length)) ? `
             <div class="qa-hour-day-body">
               <div class="qa-day-stats">
                 <span class="qa-day-stat">Total Staff: ${escapeHtml(String(day.totalStaff || 0))}</span>
@@ -1993,6 +2071,9 @@ function refresh() {
   const screen = document.getElementById(SCREEN_ID);
   if (!screen || screen.style.display === "none") return;
   syncRangeControls();
+  const scope = _qaLocationScope();
+  _qaRenderLocation(scope);
+  console.log(LOC_LOG, "active location", { activeLocationId: scope.id || "", label: scope.label });
   const range = getSelectedRange();
   const label = document.getElementById("ffQaRangeLabel");
   if (label) label.textContent = range.label;
@@ -2005,7 +2086,7 @@ function refresh() {
     _lastRange = range;
   } catch (e) {
     console.warn(LOG, "error calculating metrics", e);
-    renderEmpty();
+    renderEmpty(scope.hasLocation ? "No queue data available for this location yet" : "Please select a location");
     return;
   }
   if (!metrics.sourceFound || (
@@ -2015,7 +2096,7 @@ function refresh() {
     metrics.totalActiveStaff === 0 &&
     metrics.totalIdleMinutes === 0
   )) {
-    renderEmpty();
+    renderEmpty(scope.hasLocation ? "No queue data available for this location yet" : "Please select a location");
     return;
   }
   renderSummary(metrics);

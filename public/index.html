@@ -3177,16 +3177,6 @@ dialog footer button, .code-dialog footer button {
         <div class="apps-col">
           <div class="apps-section-title">SETUP & MANAGEMENT</div>
           <div class="apps-section-grid">
-            <div class="apps-panel-item" data-app="dashboard" style="cursor:pointer;" title="Business overview">
-              <div class="apps-panel-item__content">
-                <div>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"></rect><rect x="14" y="3" width="7" height="5" rx="1"></rect><rect x="14" y="12" width="7" height="9" rx="1"></rect><rect x="3" y="16" width="7" height="5" rx="1"></rect></svg>
-                </div>
-                <div>
-                  <div>Dashboard</div>
-                </div>
-              </div>
-            </div>
             <div class="apps-panel-item" data-app="schedule" style="cursor:pointer;">
               <div class="apps-panel-item__content">
                 <div>
@@ -3214,6 +3204,16 @@ dialog footer button, .code-dialog footer button {
                 </div>
                 <div>
                   <div>Staff Members</div>
+                </div>
+              </div>
+            </div>
+            <div class="apps-panel-item" data-app="dashboard" style="cursor:pointer;" title="Business overview">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"></rect><rect x="14" y="3" width="7" height="5" rx="1"></rect><rect x="14" y="12" width="7" height="9" rx="1"></rect><rect x="3" y="16" width="7" height="5" rx="1"></rect></svg>
+                </div>
+                <div>
+                  <div>Dashboard</div>
                 </div>
               </div>
             </div>
@@ -38980,7 +38980,7 @@ function initializeUserProfileMenu() {
           <div style="display:flex;flex-direction:column;">
             <div style="${labelStyle};height:14px;line-height:14px;white-space:nowrap;overflow:hidden;margin-bottom:3px;">Clock-in</div>
             <div style="display:flex;align-items:center;gap:2px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:7px;background:#f9fafb;height:28px;box-sizing:border-box;">
-              <input id="tcAddInH" type="number" min="1" max="12" value="${inH12}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
+              <input id="tcAddInH" type="number" min="0" max="23" value="${inH12}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
               <span style="color:#9ca3af;font-weight:500;font-size:12px;">:</span>
               <input id="tcAddInM" type="number" min="0" max="59" value="${inMins}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
               <select id="tcAddInAM" style="border:none;font-size:10px;color:#6b7280;background:transparent;outline:none;font-weight:500;margin-left:auto;padding:0;">
@@ -38992,7 +38992,7 @@ function initializeUserProfileMenu() {
           <div style="display:flex;flex-direction:column;">
             <div style="${labelStyle};height:14px;line-height:14px;white-space:nowrap;overflow:hidden;margin-bottom:3px;">Clock-out</div>
             <div style="display:flex;align-items:center;gap:2px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:7px;background:#f9fafb;height:28px;box-sizing:border-box;">
-              <input id="tcAddOutH" type="number" min="1" max="12" placeholder="--" value="${outH12}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
+              <input id="tcAddOutH" type="number" min="0" max="23" placeholder="--" value="${outH12}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
               <span style="color:#9ca3af;font-weight:500;font-size:12px;">:</span>
               <input id="tcAddOutM" type="number" min="0" max="59" placeholder="--" value="${outMins}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
               <select id="tcAddOutAM" style="border:none;font-size:10px;color:#6b7280;background:transparent;outline:none;font-weight:500;margin-left:auto;padding:0;">
@@ -39046,9 +39046,13 @@ function initializeUserProfileMenu() {
     let h = parseInt(h12, 10);
     const mi = parseInt(mm, 10);
     if (!isFinite(h) || !isFinite(mi)) return null;
-    if (h < 1 || h > 12 || mi < 0 || mi > 59) return null;
-    if (ampm === 'PM' && h !== 12) h += 12;
-    if (ampm === 'AM' && h === 12) h = 0;
+    if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+    // Accept both 12-hour input (6 PM) and direct 24-hour input (18 PM/18).
+    // When the hour is 13-23, it is already unambiguous and AM/PM is ignored.
+    if (h >= 1 && h <= 12) {
+      if (ampm === 'PM' && h !== 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+    }
     const dt = new Date(y, m - 1, d, h, mi, 0, 0);
     return isFinite(dt.getTime()) ? dt : null;
   }
@@ -48444,14 +48448,15 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/time-clock-entries.js?v=20260424_tc_single_open_shift_r1"></script>
   <script type="module" src="/queue-cloud.js?v=20260420_per_location_v1"></script>
   <script type="module" src="/tasks-cloud.js?v=20260425_shared_task_templates_r1"></script>
-  <script type="module" src="/tickets.js?v=20260428_tickets_shared_local_merge_v1"></script>
+  <script type="module" src="/tickets.js?v=20260429_tickets_new_btn_no_flicker_v1"></script>
   <script type="module" src="/media-upload.js?v=20260426_branch_points_r1"></script>
   <script type="module" src="/inventory.js?v=20260425_import_shared_inventory_catalog_r1"></script>
   <script type="module" src="/onboarding-wizard.js?v=20260420_onboarding_v1"></script>
   <script type="module" src="/locations-manage.js?v=20260424_locations_compact_rows_r1"></script>
-  <script type="module" src="/dashboard.js?v=20260428_tickets_analytics_route_v1"></script>
-  <script type="module" src="/queue-analytics.js?v=20260428_queue_analytics_avg_staff_day_v1"></script>
-  <script type="module" src="/tickets-analytics.js?v=20260428_tickets_no_employee_breakdown_v1"></script>
+  <script type="module" src="/dashboard.js?v=20260429_location_scope_v1"></script>
+  <script type="module" src="/queue-analytics.js?v=20260429_location_scope_v1"></script>
+  <script type="module" src="/tickets-analytics.js?v=20260429_location_scope_v1"></script>
+  <script type="module" src="/time-analytics.js?v=20260429_location_scope_v1"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -49022,7 +49027,7 @@ function hookSettingsGuard_DISABLED(){
       </div>
     </div>
 
-    <button id="ticketsNewBtn" onclick="window.openTicketModal && window.openTicketModal()" style="padding:8px 18px;background:#7c3aed;color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(124,58,237,0.25);white-space:nowrap;min-height:36px;box-sizing:border-box;display:inline-flex;align-items:center;">+ New Ticket</button>
+    <button id="ticketsNewBtn" onclick="window.openTicketModal && window.openTicketModal()" style="padding:8px 18px;background:#7c3aed;color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(124,58,237,0.25);white-space:nowrap;min-height:36px;box-sizing:border-box;display:none;align-items:center;">+ New Ticket</button>
     </div>
   </div>
 

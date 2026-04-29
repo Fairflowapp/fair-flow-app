@@ -19,6 +19,7 @@
  */
 
 const LOG = "[Dashboard]";
+const LOC_LOG = "[Dashboard LocationScope]";
 const SCREEN_ID = "dashboardScreen";
 const NAV_BTN_ID = "dashboardBtn";
 
@@ -74,6 +75,19 @@ function injectStyles() {
       margin: 0 0 22px 0;
       font-size: 13px;
       color: #6b7280;
+    }
+    #${SCREEN_ID} .dash-location {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: -10px 0 18px 0;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      color: #6b7280;
+      font-size: 12px;
+      font-weight: 600;
     }
     #${SCREEN_ID} .dash-section-title {
       font-size: 12px;
@@ -254,6 +268,7 @@ function buildScreen() {
     <div class="dash-wrap" id="ffDashWrap">
       <h1 class="dash-h1">Dashboard</h1>
       <p class="dash-sub" id="ffDashSubtitle">Overview of your business activity</p>
+      <div class="dash-location" id="ffDashLocationLabel">Location: —</div>
 
       <div class="dash-section-title">Today at a glance</div>
       <div class="dash-kpis" id="ffDashKpis"></div>
@@ -281,6 +296,52 @@ function buildScreen() {
 
 function safeArr(v) {
   return Array.isArray(v) ? v : [];
+}
+
+function getDashboardLocationScope() {
+  let id = "";
+  try {
+    if (typeof window.ffGetActiveLocationId === "function") id = String(window.ffGetActiveLocationId() || "").trim();
+  } catch (_) {}
+  if (!id) {
+    try { id = String(window.__ff_active_location_id || window.activeLocationId || window.currentLocationId || "").trim(); } catch (_) {}
+  }
+  let name = "";
+  try {
+    const lists = [
+      typeof window.ffGetActiveLocations === "function" ? window.ffGetActiveLocations() : null,
+      typeof window.ffGetLocations === "function" ? window.ffGetLocations() : null,
+      window.ffLocationsState?.locations,
+    ];
+    for (const list of lists) {
+      const match = (Array.isArray(list) ? list : []).find((loc) => String(loc?.id || loc?.locationId || "").trim() === id);
+      if (match) {
+        name = String(match.name || match.label || match.title || id).trim();
+        break;
+      }
+    }
+  } catch (_) {}
+  return {
+    id,
+    name: name || id || "",
+    label: id ? `Location: ${name || id}` : "Please select a location",
+    hasLocation: !!id,
+  };
+}
+
+function recordMatchesDashboardLocation(record, scope) {
+  if (!scope?.hasLocation) return false;
+  const loc = String(record?.locationId || record?.locId || record?.branchId || "").trim();
+  return !!loc && loc === scope.id;
+}
+
+function logDashboardScope(source, scope, before, after, skippedNoLocation) {
+  console.log(LOC_LOG, source, {
+    activeLocationId: scope?.id || "",
+    recordsBeforeFilter: before,
+    recordsAfterFilter: after,
+    skippedRecordsWithoutLocationId: skippedNoLocation,
+  });
 }
 
 function todayStartMs() {
@@ -337,13 +398,42 @@ function fmtCurrency(v) {
 // Best-effort tickets snapshot. Tickets module keeps its data internal,
 // so we look for any of the common globals it (or future code) might
 // expose. Falls back gracefully.
-function readTicketsSnapshot() {
+async function readTicketsSnapshot() {
   const out = { todayCount: 0, weekCount: 0, totalCount: 0, totalAmount: 0, hasData: false };
+  const scope = getDashboardLocationScope();
   let list = [];
   if (Array.isArray(window.currentTickets)) list = window.currentTickets;
   else if (Array.isArray(window.allTickets)) list = window.allTickets;
   else if (Array.isArray(window.ticketsCache)) list = window.ticketsCache;
+  if (!list.length && typeof window.ffGetCurrentTickets === "function") {
+    try {
+      const visibleTickets = window.ffGetCurrentTickets();
+      if (Array.isArray(visibleTickets)) list = visibleTickets;
+    } catch (err) {
+      console.warn(LOG, "ffGetCurrentTickets failed", err);
+    }
+  }
+  if (!list.length && typeof window.ffLoadTicketsForAnalytics === "function") {
+    try {
+      const loadedTickets = await window.ffLoadTicketsForAnalytics();
+      if (Array.isArray(loadedTickets)) list = loadedTickets;
+    } catch (err) {
+      console.warn(LOG, "ffLoadTicketsForAnalytics failed", err);
+    }
+  }
   if (!list.length) return out;
+  const before = list.length;
+  let skippedNoLocation = 0;
+  list = list.filter((ticket) => {
+    const loc = String(ticket?.locationId || "").trim();
+    if (!loc) {
+      skippedNoLocation += 1;
+      return false;
+    }
+    return scope.hasLocation && loc === scope.id;
+  });
+  logDashboardScope("tickets", scope, before, list.length, skippedNoLocation);
+  if (!scope.hasLocation || !list.length) return out;
 
   out.hasData = true;
   out.totalCount = list.length;
@@ -412,7 +502,8 @@ function _qmParseEntry(entry) {
     const action = String(entry.action || entry.actionText || "").trim();
     const worker = String(entry.worker || entry.assignedTo || "").trim();
     const typedAction = entry.type === "queue_check_out" ? `${action} queue_check_out` : action;
-    return { ts, action: typedAction, worker };
+    const locationId = String(entry.locationId || entry.locId || "").trim();
+    return { ts, action: typedAction, worker, locationId };
   }
   if (typeof entry !== "string") return null;
   // Match "MM/DD/YYYY, h:mm:ss AM/PM <rest>"
@@ -423,7 +514,7 @@ function _qmParseEntry(entry) {
   if (!Number.isFinite(ts)) return null;
   const action = (rest || "").trim();
   const worker = _qmExtractWorker(action);
-  return { ts, action, worker };
+  return { ts, action, worker, locationId: "" };
 }
 
 function _qmExtractWorker(action) {
@@ -453,6 +544,7 @@ function _qmActionKind(action) {
 
 // Compute queue metrics for [fromMs, nowMs]. Returns nulls when no data.
 function computeQueueMetrics(fromMs) {
+  const scope = getDashboardLocationScope();
   const result = {
     avgWaitMin: null,
     longestWaitMin: null,
@@ -481,10 +573,17 @@ function computeQueueMetrics(fromMs) {
   // (oldest-first). Sort by timestamp so join → START pairs resolve
   // correctly regardless of write path.
   const parsed = [];
+  let skippedNoLocation = 0;
   for (let i = 0; i < raw.length; i += 1) {
     const p = _qmParseEntry(raw[i]);
-    if (p && p.ts >= fromMs) parsed.push(p);
+    if (!p || p.ts < fromMs) continue;
+    if (!p.locationId) {
+      skippedNoLocation += 1;
+      continue;
+    }
+    if (scope.hasLocation && p.locationId === scope.id) parsed.push(p);
   }
+  logDashboardScope("queue-events", scope, raw.length, parsed.length, skippedNoLocation);
   parsed.sort((a, b) => a.ts - b.ts);
   if (!parsed.length) {
     console.log(QM_LOG_PREFIX, "no events in range");
@@ -622,8 +721,21 @@ function computeQueueMetrics(fromMs) {
 }
 
 function readQueueSnapshot() {
-  const q = safeArr(window.queue);
-  const service = safeArr(window.service);
+  const scope = getDashboardLocationScope();
+  const rawQ = safeArr(window.queue);
+  const rawService = safeArr(window.service);
+  let skippedNoLocation = 0;
+  const filterQueueRows = (rows) => rows.filter((row) => {
+    const loc = String(row?.locationId || row?.locId || "").trim();
+    if (!loc) {
+      skippedNoLocation += 1;
+      return false;
+    }
+    return scope.hasLocation && loc === scope.id;
+  });
+  const q = filterQueueRows(rawQ);
+  const service = filterQueueRows(rawService);
+  logDashboardScope("queue-live", scope, rawQ.length + rawService.length, q.length + service.length, skippedNoLocation);
   const out = {
     inQueue: q.length,
     inService: service.length,
@@ -646,9 +758,12 @@ function readQueueSnapshot() {
 }
 
 function readTasksSnapshot() {
+  const scope = getDashboardLocationScope();
   const cache = window.tasksCache;
   const out = { opened: 0, completed: 0, openCount: 0, completionRate: null, hasData: false };
   if (!cache || typeof cache !== "object") return out;
+  let before = 0;
+  let skippedNoLocation = 0;
   let totalActive = 0;
   let totalDone = 0;
   let totalOpen = 0;
@@ -657,6 +772,13 @@ function readTasksSnapshot() {
     const arr = Array.isArray(v) ? v : (v && Array.isArray(v.items) ? v.items : []);
     arr.forEach((task) => {
       if (!task) return;
+      before += 1;
+      const loc = String(task.locationId || task.locId || "").trim();
+      if (!loc) {
+        skippedNoLocation += 1;
+        return;
+      }
+      if (!scope.hasLocation || loc !== scope.id) return;
       totalActive += 1;
       const status = String(task.status || task.state || "").toLowerCase();
       if (status === "done" || status === "completed" || task.completed === true || task.doneAt) {
@@ -666,6 +788,7 @@ function readTasksSnapshot() {
       }
     });
   });
+  logDashboardScope("tasks", scope, before, totalActive, skippedNoLocation);
   if (!totalActive) return out;
   out.hasData = true;
   out.opened = totalActive;
@@ -677,18 +800,28 @@ function readTasksSnapshot() {
 
 async function readTimeClockSnapshot() {
   const out = { totalHoursWeek: 0, overtimeHours: 0, topStaffName: null, hasData: false };
+  const scope = getDashboardLocationScope();
+  if (!scope.hasLocation) {
+    logDashboardScope("time-clock", scope, 0, 0, 0);
+    return out;
+  }
   if (typeof window.ffListTimeEntriesForSalon !== "function") return out;
   try {
     const fromDate = new Date(weekStartMs());
     const entries = await window.ffListTimeEntriesForSalon({
       from: fromDate,
+      locationId: scope.id,
       statuses: ["open", "closed"],
       maxResults: 500,
     });
     if (!Array.isArray(entries) || !entries.length) return out;
+    const skippedNoLocation = entries.filter((entry) => !String(entry?.locationId || "").trim()).length;
+    const scopedEntries = entries.filter((entry) => recordMatchesDashboardLocation(entry, scope));
+    logDashboardScope("time-clock", scope, entries.length, scopedEntries.length, skippedNoLocation);
+    if (!scopedEntries.length) return out;
     out.hasData = true;
     const byStaff = new Map();
-    entries.forEach((e) => {
+    scopedEntries.forEach((e) => {
       const inAt = e && (e.clockInAt || e.clockIn || e.startAt);
       const outAt = e && (e.clockOutAt || e.clockOut || e.endAt);
       const inMs = toMillis(inAt);
@@ -697,7 +830,7 @@ async function readTimeClockSnapshot() {
       const hours = (outMs - inMs) / 3600000;
       out.totalHoursWeek += hours;
       const sid = String(e.staffId || e.staffMemberId || e.uid || "unknown");
-      const sname = String(e.staffName || e.name || sid);
+      const sname = resolveDashboardStaffName(sid, e.staffName || e.name || "");
       byStaff.set(sid, { name: sname, hours: (byStaff.get(sid)?.hours || 0) + hours });
     });
     // Naive overtime: hours over 40/week per staff.
@@ -711,6 +844,36 @@ async function readTimeClockSnapshot() {
     console.warn(LOG, "time-clock snapshot failed", e);
   }
   return out;
+}
+
+function resolveDashboardStaffName(staffId, fallback = "") {
+  const sid = String(staffId || "").trim();
+  const direct = String(fallback || "").trim();
+  if (direct && direct !== sid) return direct;
+  const readName = (row) => {
+    const id = String(row?.id || row?.staffId || row?.uid || row?.firebaseUid || "").trim();
+    if (!sid || id !== sid) return "";
+    return String(row?.name || row?.staffName || row?.displayName || row?.email || "").trim();
+  };
+  try {
+    const store = typeof window.ffGetStaffStore === "function" ? window.ffGetStaffStore() : null;
+    const list = Array.isArray(store?.staff) ? store.staff : [];
+    for (const row of list) {
+      const name = readName(row);
+      if (name) return name;
+    }
+  } catch (err) {
+    console.warn(LOG, "staff name helper failed", err);
+  }
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const list = Array.isArray(store?.staff) ? store.staff : [];
+    for (const row of list) {
+      const name = readName(row);
+      if (name) return name;
+    }
+  } catch (_) {}
+  return sid && sid !== "unknown" ? "Unknown staff" : "—";
 }
 
 function toMillis(v) {
@@ -728,6 +891,11 @@ function toMillis(v) {
 }
 
 // ---------- Render ----------
+
+function renderDashboardLocation(scope = getDashboardLocationScope()) {
+  const el = document.getElementById("ffDashLocationLabel");
+  if (el) el.textContent = scope.label;
+}
 
 function renderKpis(snap) {
   const root = document.getElementById("ffDashKpis");
@@ -842,6 +1010,7 @@ function renderModuleCards(snap) {
   const ANALYTICS_ROUTES = {
     "queue-analytics": "goToQueueAnalytics",
     "tickets-analytics": "goToTicketsAnalytics",
+    "time-analytics": "goToTimeAnalytics",
   };
   root.querySelectorAll("[data-dash-action]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
@@ -928,8 +1097,11 @@ async function refresh() {
   const screen = document.getElementById(SCREEN_ID);
   if (!screen || screen.style.display === "none") return;
   console.log(LOG, "refresh");
+  const scope = getDashboardLocationScope();
+  console.log(LOC_LOG, "active location", { activeLocationId: scope.id || "", label: scope.label });
+  renderDashboardLocation(scope);
   const snap = {
-    tickets: readTicketsSnapshot(),
+    tickets: await readTicketsSnapshot(),
     queue: readQueueSnapshot(),
     tasks: readTasksSnapshot(),
     time: { totalHoursWeek: 0, overtimeHours: 0, topStaffName: null, hasData: false },
@@ -1060,6 +1232,10 @@ function init() {
     window.__ffDashLocationListenerBound = true;
     document.addEventListener("ff-active-location-changed", () => {
       console.log(LOG, "active location changed → refresh");
+      refresh();
+    });
+    document.addEventListener("ff-tickets-data-changed", () => {
+      console.log(LOG, "tickets data changed → refresh");
       refresh();
     });
   }
