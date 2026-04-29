@@ -10,7 +10,7 @@
  * Sections rendered:
  *   A — Summary cards (Avg / Longest / Wait events / Busiest day / Peak hour)
  *   B — Wait Time by Day (table: avg, longest, count)
- *   C — Activity by Hour (grid: hour range, activity count)
+ *   C — Queue Load by Hour (service starts, avg wait, avg people waiting)
  *   D — Auto Insights (text bullets)
  *
  * Logging prefix: [QueueAnalytics]
@@ -19,9 +19,14 @@
 const LOG = "[QueueAnalytics]";
 const BH_LOG = "[QueueAnalytics BusinessHours]";
 const V2_LOG = "[QueueAnalytics V2]";
+const TYPES_LOG = "[QueueAnalytics Types]";
 const SCREEN_ID = "queueAnalyticsScreen";
+const RANGE_STORAGE_KEY = "ff_queue_analytics_range_v1";
 
 let _injected = false;
+let _qaRangeState = { mode: "thisWeek", customStart: "", customEnd: "" };
+let _lastMetrics = null;
+let _lastRange = null;
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -98,6 +103,79 @@ function injectStyles() {
       letter-spacing: 0.06em;
       color: #6b7280;
       margin: 22px 2px 10px 2px;
+    }
+    #${SCREEN_ID} .qa-toolbar {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 14px 16px;
+      margin: 18px 0 20px 0;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    #${SCREEN_ID} .qa-filter-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    #${SCREEN_ID} .qa-field {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    #${SCREEN_ID} .qa-field label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #6b7280;
+    }
+    #${SCREEN_ID} .qa-field select,
+    #${SCREEN_ID} .qa-field input {
+      height: 36px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      background: #fff;
+      color: #111827;
+      padding: 0 10px;
+      font-size: 13px;
+      min-width: 150px;
+    }
+    #${SCREEN_ID} .qa-field.is-custom { display: none; }
+    #${SCREEN_ID}.qa-custom-range .qa-field.is-custom { display: flex; }
+    #${SCREEN_ID} .qa-toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    #${SCREEN_ID} .qa-range-label {
+      font-size: 12px;
+      color: #6b7280;
+      margin-right: 4px;
+    }
+    #${SCREEN_ID} .qa-action-btn {
+      height: 36px;
+      border: 0;
+      border-radius: 999px;
+      padding: 0 14px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      background: linear-gradient(135deg, #9d68b9, #ff9580);
+      color: #fff;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.10);
+    }
+    #${SCREEN_ID} .qa-action-btn.secondary {
+      background: #f3f4f6;
+      color: #374151;
+      box-shadow: none;
+      border: 1px solid #e5e7eb;
     }
     #${SCREEN_ID} .qa-empty {
       background: #fff;
@@ -232,6 +310,145 @@ function injectStyles() {
       color: #6b7280;
       margin-bottom: 8px;
     }
+    #${SCREEN_ID} .qa-day-stats {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    #${SCREEN_ID} .qa-day-stat {
+      border: 1px solid #eef0f3;
+      background: #f9fafb;
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-size: 12px;
+      color: #374151;
+      font-weight: 700;
+    }
+    #${SCREEN_ID} .qa-hour-card-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #111827;
+      margin-bottom: 8px;
+    }
+    #${SCREEN_ID} .qa-hour-card-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #4b5563;
+    }
+    #${SCREEN_ID} .qa-hour-card-row strong {
+      color: #111827;
+      font-variant-numeric: tabular-nums;
+    }
+    #${SCREEN_ID} .qa-type-title {
+      font-size: 10px;
+      font-weight: 800;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 2px;
+    }
+    #${SCREEN_ID} .qa-type-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: #4b5563;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    #${SCREEN_ID} .qa-type-row strong {
+      color: #111827;
+      font-variant-numeric: tabular-nums;
+    }
+    #${SCREEN_ID} .qa-hour-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 9995;
+      background: rgba(17, 24, 39, 0.42);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+    #${SCREEN_ID} .qa-hour-modal {
+      width: min(520px, 100%);
+      max-height: min(720px, calc(100vh - 36px));
+      overflow: auto;
+      background: #fff;
+      border-radius: 18px;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+    }
+    #${SCREEN_ID} .qa-hour-modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 18px 20px 12px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    #${SCREEN_ID} .qa-hour-modal-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 800;
+      color: #111827;
+    }
+    #${SCREEN_ID} .qa-hour-modal-sub {
+      margin: 4px 0 0;
+      font-size: 12px;
+      color: #6b7280;
+    }
+    #${SCREEN_ID} .qa-hour-modal-close {
+      border: 0;
+      background: #f3f4f6;
+      color: #374151;
+      border-radius: 999px;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+    }
+    #${SCREEN_ID} .qa-hour-modal-body {
+      padding: 16px 20px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    #${SCREEN_ID} .qa-hour-modal-summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    #${SCREEN_ID} .qa-hour-modal-stat {
+      border: 1px solid #eef0f3;
+      background: #f9fafb;
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+    #${SCREEN_ID} .qa-hour-modal-stat span {
+      display: block;
+      font-size: 10px;
+      font-weight: 800;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    #${SCREEN_ID} .qa-hour-modal-stat strong {
+      font-size: 18px;
+      color: #111827;
+      font-variant-numeric: tabular-nums;
+    }
+    #${SCREEN_ID} .qa-hour-modal-section {
+      border: 1px solid #eef0f3;
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: #fff;
+    }
     #${SCREEN_ID} .qa-closed {
       padding: 10px 12px;
       border: 1px dashed #e5e7eb;
@@ -245,6 +462,18 @@ function injectStyles() {
       border: 1px solid #eef0f3;
       border-radius: 10px;
       padding: 10px 12px;
+      appearance: none;
+      cursor: pointer;
+      text-align: left;
+      width: 100%;
+    }
+    #${SCREEN_ID} .qa-hour-tile:hover {
+      border-color: #d8b6e8;
+      box-shadow: 0 2px 8px rgba(157, 104, 185, 0.10);
+    }
+    #${SCREEN_ID} .qa-hour-tile:focus-visible {
+      outline: 2px solid #9d68b9;
+      outline-offset: 2px;
     }
     #${SCREEN_ID} .qa-hour-tile.is-peak {
       background: linear-gradient(135deg, rgba(157, 104, 185, 0.10), rgba(255, 149, 128, 0.10));
@@ -293,6 +522,10 @@ function injectStyles() {
     }
     @media (max-width: 900px) {
       #${SCREEN_ID} .qa-wrap { padding: 16px 14px 32px 14px; }
+      #${SCREEN_ID} .qa-toolbar { align-items: stretch; }
+      #${SCREEN_ID} .qa-toolbar-actions { width: 100%; }
+      #${SCREEN_ID} .qa-action-btn { flex: 1; }
+      #${SCREEN_ID} .qa-hour-modal-summary { grid-template-columns: 1fr; }
     }
   `;
   document.head.appendChild(style);
@@ -306,12 +539,53 @@ function buildScreen() {
     <div class="qa-wrap">
       <button type="button" class="qa-back" id="ffQaBack" aria-label="Back to dashboard">← Back to dashboard</button>
       <h1 class="qa-h1">Queue Analytics</h1>
-      <p class="qa-sub">Understand wait times, flow, and peak hours</p>
+      <p class="qa-sub">Understand average wait time, staff flow, and hourly capacity</p>
+
+      <div class="qa-toolbar" id="ffQaToolbar">
+        <div class="qa-filter-row">
+          <div class="qa-field">
+            <label for="ffQaRangeMode">Date range</label>
+            <select id="ffQaRangeMode">
+              <option value="thisWeek">This week</option>
+              <option value="lastWeek">Last week</option>
+              <option value="last2Weeks">Last 2 weeks</option>
+              <option value="last30Days">Last 30 days</option>
+              <option value="thisMonth">This month</option>
+              <option value="month-0">January</option>
+              <option value="month-1">February</option>
+              <option value="month-2">March</option>
+              <option value="month-3">April</option>
+              <option value="month-4">May</option>
+              <option value="month-5">June</option>
+              <option value="month-6">July</option>
+              <option value="month-7">August</option>
+              <option value="month-8">September</option>
+              <option value="month-9">October</option>
+              <option value="month-10">November</option>
+              <option value="month-11">December</option>
+              <option value="custom">Custom range</option>
+            </select>
+          </div>
+          <div class="qa-field is-custom">
+            <label for="ffQaCustomStart">Start</label>
+            <input type="date" id="ffQaCustomStart">
+          </div>
+          <div class="qa-field is-custom">
+            <label for="ffQaCustomEnd">End</label>
+            <input type="date" id="ffQaCustomEnd">
+          </div>
+          <button type="button" class="qa-action-btn secondary" id="ffQaApplyRange">Apply</button>
+        </div>
+        <div class="qa-toolbar-actions">
+          <span class="qa-range-label" id="ffQaRangeLabel">This week</span>
+          <button type="button" class="qa-action-btn" id="ffQaExportCsv">Export Excel</button>
+        </div>
+      </div>
 
       <div class="qa-section-title">Summary</div>
       <div id="ffQaSummary" class="qa-summary"></div>
 
-      <div class="qa-section-title">Wait time by day</div>
+      <div class="qa-section-title">Available wait by day</div>
       <div id="ffQaByDay" class="qa-panel"></div>
 
       <div class="qa-section-title">Queue Load by Hour</div>
@@ -333,6 +607,44 @@ function buildScreen() {
       } catch (e) { console.warn(LOG, "back nav failed", e); }
     });
   }
+  const rangeMode = root.querySelector("#ffQaRangeMode");
+  const customStart = root.querySelector("#ffQaCustomStart");
+  const customEnd = root.querySelector("#ffQaCustomEnd");
+  const applyRange = root.querySelector("#ffQaApplyRange");
+  const exportCsv = root.querySelector("#ffQaExportCsv");
+  if (rangeMode) {
+    rangeMode.addEventListener("change", () => {
+      _qaRangeState.mode = rangeMode.value || "thisWeek";
+      _qaSaveRangeState();
+      syncRangeControls();
+      if (_qaRangeState.mode !== "custom") refresh();
+    });
+  }
+  [customStart, customEnd].forEach((input) => {
+    if (!input) return;
+    input.addEventListener("change", () => {
+      _qaRangeState.customStart = customStart ? customStart.value : "";
+      _qaRangeState.customEnd = customEnd ? customEnd.value : "";
+      _qaSaveRangeState();
+    });
+  });
+  if (applyRange) {
+    applyRange.addEventListener("click", () => {
+      _qaRangeState.mode = rangeMode ? rangeMode.value : _qaRangeState.mode;
+      _qaRangeState.customStart = customStart ? customStart.value : _qaRangeState.customStart;
+      _qaRangeState.customEnd = customEnd ? customEnd.value : _qaRangeState.customEnd;
+      _qaSaveRangeState();
+      syncRangeControls();
+      refresh();
+    });
+  }
+  if (exportCsv) {
+    exportCsv.addEventListener("click", () => {
+      exportCurrentCsv();
+    });
+  }
+  _qaLoadRangeState();
+  syncRangeControls();
   return root;
 }
 
@@ -344,6 +656,133 @@ function _qaWeekStartMs() {
   d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() - day);
   return d.getTime();
+}
+
+function _qaDayStart(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function _qaEndOfDay(date) {
+  const d = new Date(date);
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+function _qaAddDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function _qaDateInputValue(date) {
+  const d = new Date(date);
+  if (!Number.isFinite(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function _qaParseDateInput(value) {
+  const m = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function _qaFormatDate(date) {
+  const d = new Date(date);
+  if (!Number.isFinite(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function _qaLoadRangeState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RANGE_STORAGE_KEY) || "{}");
+    if (saved && typeof saved.mode === "string") {
+      _qaRangeState = {
+        mode: saved.mode || "thisWeek",
+        customStart: saved.customStart || "",
+        customEnd: saved.customEnd || "",
+      };
+    }
+  } catch (_) {}
+}
+
+function _qaSaveRangeState() {
+  try {
+    localStorage.setItem(RANGE_STORAGE_KEY, JSON.stringify(_qaRangeState));
+  } catch (_) {}
+}
+
+function getSelectedRange() {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const weekStart = new Date(_qaWeekStartMs());
+  const mode = _qaRangeState.mode || "thisWeek";
+  let start = weekStart;
+  let end = now;
+  let label = "This week";
+
+  if (mode === "lastWeek") {
+    start = _qaAddDays(weekStart, -7);
+    end = _qaEndOfDay(_qaAddDays(weekStart, -1));
+    label = "Last week";
+  } else if (mode === "last2Weeks") {
+    start = _qaAddDays(weekStart, -14);
+    end = _qaEndOfDay(_qaAddDays(weekStart, -1));
+    label = "Last 2 weeks";
+  } else if (mode === "last30Days") {
+    start = _qaAddDays(_qaDayStart(now), -29);
+    end = now;
+    label = "Last 30 days";
+  } else if (mode === "thisMonth") {
+    start = new Date(currentYear, now.getMonth(), 1);
+    end = now;
+    label = "This month";
+  } else if (/^month-\d{1,2}$/.test(mode)) {
+    const month = Number(mode.split("-")[1]);
+    start = new Date(currentYear, month, 1);
+    end = _qaEndOfDay(new Date(currentYear, month + 1, 0));
+    label = start.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  } else if (mode === "custom") {
+    const customStart = _qaParseDateInput(_qaRangeState.customStart);
+    const customEnd = _qaParseDateInput(_qaRangeState.customEnd);
+    if (customStart && customEnd) {
+      start = _qaDayStart(customStart);
+      end = _qaEndOfDay(customEnd);
+      if (start.getTime() > end.getTime()) {
+        const tmp = start;
+        start = _qaDayStart(end);
+        end = _qaEndOfDay(tmp);
+      }
+      label = `${_qaFormatDate(start)} – ${_qaFormatDate(end)}`;
+    } else {
+      label = "Custom range";
+    }
+  }
+
+  return {
+    mode,
+    fromMs: start.getTime(),
+    toMs: end.getTime(),
+    label,
+    startLabel: _qaFormatDate(start),
+    endLabel: _qaFormatDate(end),
+  };
+}
+
+function syncRangeControls() {
+  const screen = document.getElementById(SCREEN_ID);
+  const mode = document.getElementById("ffQaRangeMode");
+  const start = document.getElementById("ffQaCustomStart");
+  const end = document.getElementById("ffQaCustomEnd");
+  if (mode) mode.value = _qaRangeState.mode || "thisWeek";
+  if (start) start.value = _qaRangeState.customStart || _qaDateInputValue(new Date());
+  if (end) end.value = _qaRangeState.customEnd || _qaDateInputValue(new Date());
+  if (screen) screen.classList.toggle("qa-custom-range", (_qaRangeState.mode || "thisWeek") === "custom");
 }
 
 function _qaActiveLocationId() {
@@ -471,6 +910,68 @@ function _qaReadRawLog() {
   return null;
 }
 
+function _qaReadStaffList() {
+  try {
+    if (typeof window.ffGetStaffStore === "function") {
+      const store = window.ffGetStaffStore();
+      if (Array.isArray(store?.staff)) return store.staff.filter(Boolean);
+    }
+  } catch (_) {}
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    if (Array.isArray(store?.staff)) return store.staff.filter(Boolean);
+  } catch (_) {}
+  return [];
+}
+
+function _qaTypeDisplayLabel(typeId) {
+  const raw = String(typeId || "").trim();
+  if (!raw) return "Other";
+  try {
+    const cachedTypes = Array.isArray(window.__ff_technician_types_cache) ? window.__ff_technician_types_cache : [];
+    const match = cachedTypes.find((t) => t && String(t.id || "").trim() === raw);
+    if (match && match.name) return String(match.name).trim();
+  } catch (_) {}
+  const withoutLocationSuffix = raw.includes("--") ? raw.split("--")[0] : raw;
+  return withoutLocationSuffix
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim() || "Other";
+}
+
+function buildStaffTypeResolver() {
+  const staffList = _qaReadStaffList();
+  const byId = new Map();
+  const byName = new Map();
+  const mappingLog = [];
+
+  staffList.forEach((staff) => {
+    const id = String(staff?.id || staff?.staffId || "").trim();
+    const name = String(staff?.name || staff?.staffName || staff?.displayName || "").trim();
+    const rawType = String(
+      staff?.serviceProviderType ||
+      staff?.technicianType ||
+      staff?.providerType ||
+      (Array.isArray(staff?.technicianTypes) ? staff.technicianTypes[0] : "") ||
+      "",
+    ).trim();
+    const type = rawType ? _qaTypeDisplayLabel(rawType) : "Other";
+    const record = { id, name, type };
+    if (id) byId.set(id, record);
+    if (name) byName.set(name.toLowerCase(), record);
+    if (id || name) mappingLog.push({ staffId: id || "(missing)", name: name || "(missing)", type });
+  });
+
+  console.log(TYPES_LOG, "staffId → type mapping", mappingLog);
+
+  return function resolveType({ staffId, worker }) {
+    const id = String(staffId || "").trim();
+    const name = String(worker || "").trim();
+    const match = (id && byId.get(id)) || (name && byName.get(name.toLowerCase())) || null;
+    return match?.type || "Other";
+  };
+}
+
 function _qaExtractWorker(action) {
   if (!action) return "";
   let mm = action.match(/IN SERVICE:\s*(.+)$/i); if (mm) return mm[1].trim();
@@ -489,6 +990,7 @@ function _qaActionKind(action) {
   if (/^JOIN\b|^join:/i.test(action)) return "join";
   if (/^START\b|IN SERVICE:/i.test(action)) return "start";
   if (/^FINISH\b|Back to end:/i.test(action)) return "finish";
+  if (/Remove from queue|Leave queue|queue_check_out/i.test(action)) return "checkout";
   if (/^HOLD:/i.test(action)) return "hold";
   if (/^RELEASE:/i.test(action)) return "release";
   if (/^MOVE (?:UP|DOWN):/i.test(action)) return "move";
@@ -504,7 +1006,9 @@ function _qaParseEntry(entry) {
     if (!Number.isFinite(ts)) return null;
     const action = String(entry.action || entry.actionText || "").trim();
     const worker = String(entry.worker || entry.assignedTo || "").trim() || _qaExtractWorker(action);
-    return { ts, action, worker };
+    const staffId = String(entry.staffId || entry.staffMemberId || entry.employeeId || "").trim();
+    const typedAction = entry.type === "queue_check_out" ? `${action} queue_check_out` : action;
+    return { ts, action: typedAction, worker, staffId };
   }
   if (typeof entry !== "string") return null;
   const m = entry.match(/^(\d{1,2}\/\d{1,2}\/\d{4}),\s*([\d:]+\s*[AP]M)\s*(.*)$/);
@@ -513,11 +1017,11 @@ function _qaParseEntry(entry) {
   const ts = Date.parse(`${dateStr} ${timeStr}`);
   if (!Number.isFinite(ts)) return null;
   const action = (rest || "").trim();
-  return { ts, action, worker: _qaExtractWorker(action) };
+  return { ts, action, worker: _qaExtractWorker(action), staffId: "" };
 }
 
 // Compute the full breakdown needed for sections A-D.
-function computeQueueAnalytics(fromMs) {
+function computeQueueAnalytics(fromMs, toMs = Date.now()) {
   const result = {
     sourceFound: false,
     activityCount: 0,
@@ -526,12 +1030,15 @@ function computeQueueAnalytics(fromMs) {
     longestWaitMin: null,
     busiestDay: null,
     peakHour: null,
-    byDay: [],   // { dayIdx, dayName, count, avgWaitMin, longestWaitMin }
+    byDay: [],   // { dayIdx, dayName, count, avgWaitMin, longestWaitMin, totalStaff, peakHour }
     byHour: [],  // { hour, count } from service starts inside business hours
-    byDayHour: [], // { dayIdx, dayName, isOpen, hours:[{hour,starts,idleMinutes}] }
+    byDayHour: [], // { dayIdx, dayName, isOpen, totalStaff, peakHour, hours:[{hour,starts,activeStaff,idleMinutes,startsByType,staffByType,idleByType}] }
     businessHours: null,
     totalStarts: 0,
+    totalActiveStaff: 0,
     totalIdleMinutes: 0,
+    avgStaffPerDay: null,
+    staffActivityDays: 0,
   };
 
   let raw;
@@ -548,12 +1055,16 @@ function computeQueueAnalytics(fromMs) {
   result.sourceFound = true;
   console.log(LOG, "data source detected", { entries: raw.length });
 
-  // Parse + chronological order.
+  // Parse + chronological order. Legacy forced-log entries used unshift()
+  // (newest-first), while newer queue/history entries use push()
+  // (oldest-first). Sort by timestamp so JOIN → START pairs resolve
+  // correctly regardless of write path.
   const parsed = [];
-  for (let i = raw.length - 1; i >= 0; i -= 1) {
+  for (let i = 0; i < raw.length; i += 1) {
     const p = _qaParseEntry(raw[i]);
-    if (p && p.ts >= fromMs) parsed.push(p);
+    if (p && p.ts <= toMs) parsed.push(p);
   }
+  parsed.sort((a, b) => a.ts - b.ts);
   if (!parsed.length) {
     console.log(LOG, "no events in range");
     return result;
@@ -562,24 +1073,41 @@ function computeQueueAnalytics(fromMs) {
   const businessHours = resolveBusinessHoursForWeek();
   result.businessHours = businessHours;
   const businessByDay = new Map((businessHours.byDay || []).map((d) => [d.dayIdx, d]));
+  const resolveStaffType = buildStaffTypeResolver();
 
-  const dayBuckets = new Map(); // day → { count, waits: [] }
+  const dayBuckets = new Map(); // day → { count, waits: [], staff: Set }
   const hourBuckets = new Map(); // hour → START count (business-hours only)
   const dayHourStartBuckets = new Map(); // "dayIdx|hour" → START count
-  const dayHourIdleBuckets = new Map(); // "dayIdx|hour" → idle minutes
-  const lastJoinAt = new Map();
+  const dayHourStartTypeBuckets = new Map(); // "dayIdx|hour" → Map(type → START count)
+  const dayHourIdleBuckets = new Map(); // "dayIdx|hour" → Available time before START, HOLD excluded
+  const dayHourIdleTypeBuckets = new Map(); // "dayIdx|hour" → Map(type → idle minutes)
+  const dayHourActiveStaff = new Map(); // "dayIdx|hour" → Set(worker)
+  const dayHourActiveStaffTypes = new Map(); // "dayIdx|hour" → Map(type → Set(worker))
+  const dailyActiveStaff = new Map(); // "YYYY-MM-DD" → Set(worker)
+  const staffStates = new Map();
   const seenEvents = new Set();
   const allWaits = [];
 
-  function addIdleIntervalToBusinessHours(joinedAt, startedAt) {
-    if (!Number.isFinite(joinedAt) || !Number.isFinite(startedAt) || startedAt <= joinedAt) return;
-    const cursor = new Date(joinedAt);
+  function dateKeyFromMs(ms) {
+    const d = new Date(ms);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function addMinutesIntervalToBusinessHours(startedAt, endedAt, onOverlap) {
+    if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt) || endedAt <= startedAt) return;
+    const clippedStart = Math.max(startedAt, fromMs);
+    const clippedEnd = Math.min(endedAt, toMs);
+    if (clippedEnd <= clippedStart) return;
+    const cursor = new Date(clippedStart);
     cursor.setMinutes(0, 0, 0);
-    while (cursor.getTime() < startedAt) {
+    while (cursor.getTime() < clippedEnd) {
       const hourStart = cursor.getTime();
       const hourEnd = hourStart + 3600000;
-      const segStart = Math.max(joinedAt, hourStart);
-      const segEnd = Math.min(startedAt, hourEnd);
+      const segStart = Math.max(clippedStart, hourStart);
+      const segEnd = Math.min(clippedEnd, hourEnd);
       if (segEnd > segStart) {
         const d = new Date(hourStart);
         const dayKey = d.getDay();
@@ -602,8 +1130,7 @@ function computeQueueAnalytics(fromMs) {
           if (overlapEnd > overlapStart) {
             const minutes = (overlapEnd - overlapStart) / 60000;
             const key = `${dayKey}|${hourKey}`;
-            dayHourIdleBuckets.set(key, (dayHourIdleBuckets.get(key) || 0) + minutes);
-            result.totalIdleMinutes += minutes;
+            onOverlap({ key, dayKey, hourKey, dateKey: dateKeyFromMs(hourStart), minutes });
           }
         }
       }
@@ -611,20 +1138,131 @@ function computeQueueAnalytics(fromMs) {
     }
   }
 
+  function ensureDayBucket(dayIdx) {
+    if (!dayBuckets.has(dayIdx)) dayBuckets.set(dayIdx, { count: 0, waits: [], staff: new Set() });
+    return dayBuckets.get(dayIdx);
+  }
+
+  function addIdleInterval(state, startedAt, endedAt) {
+    addMinutesIntervalToBusinessHours(startedAt, endedAt, ({ key, minutes }) => {
+      dayHourIdleBuckets.set(key, (dayHourIdleBuckets.get(key) || 0) + minutes);
+      addTypeCount(dayHourIdleTypeBuckets, key, state?.type || "Other", minutes);
+      result.totalIdleMinutes += minutes;
+    });
+  }
+
+  function addTypeCount(bucket, key, type, amount = 1) {
+    const cleanType = String(type || "").trim() || "Other";
+    if (!bucket.has(key)) bucket.set(key, new Map());
+    const typeMap = bucket.get(key);
+    typeMap.set(cleanType, (typeMap.get(cleanType) || 0) + amount);
+  }
+
+  function addTypeStaff(bucket, key, type, staffKey) {
+    const cleanType = String(type || "").trim() || "Other";
+    const cleanStaff = String(staffKey || "").trim();
+    if (!cleanStaff) return;
+    if (!bucket.has(key)) bucket.set(key, new Map());
+    const typeMap = bucket.get(key);
+    if (!typeMap.has(cleanType)) typeMap.set(cleanType, new Set());
+    typeMap.get(cleanType).add(cleanStaff);
+  }
+
+  function typeCountRows(typeMap) {
+    if (!(typeMap instanceof Map)) return [];
+    return Array.from(typeMap.entries())
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+  }
+
+  function typeStaffRows(typeMap) {
+    if (!(typeMap instanceof Map)) return [];
+    return Array.from(typeMap.entries())
+      .map(([type, set]) => ({ type, count: set instanceof Set ? set.size : 0 }))
+      .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+  }
+
+  function addActiveInterval(state, startedAt, endedAt) {
+    if (!state) return;
+    const worker = String(state.worker || "").trim();
+    const staff = String(worker || "").trim();
+    if (!staff) return;
+    addMinutesIntervalToBusinessHours(startedAt, endedAt, ({ key, dayKey, dateKey }) => {
+      if (!dayHourActiveStaff.has(key)) dayHourActiveStaff.set(key, new Set());
+      dayHourActiveStaff.get(key).add(staff);
+      addTypeStaff(dayHourActiveStaffTypes, key, state.type || "Other", state.staffId || state.worker);
+      ensureDayBucket(dayKey).staff.add(staff);
+      if (!dailyActiveStaff.has(dateKey)) dailyActiveStaff.set(dateKey, new Set());
+      dailyActiveStaff.get(dateKey).add(staff);
+    });
+  }
+
+  function closeIdle(state, ts) {
+    if (!state || !Number.isFinite(state.idleStart) || ts <= state.idleStart) {
+      if (state) state.idleStart = null;
+      return;
+    }
+    const minutes = (ts - state.idleStart) / 60000;
+    state.waitMinutes += minutes;
+    addIdleInterval(state, state.idleStart, ts);
+    state.idleStart = null;
+  }
+
+  function closeActive(state, ts) {
+    if (!state || !Number.isFinite(state.activeStart) || ts <= state.activeStart) {
+      if (state) state.activeStart = null;
+      return;
+    }
+    addActiveInterval(state, state.activeStart, ts);
+    state.activeStart = null;
+  }
+
+  function createAvailableState({ worker, staffId, type, ts }) {
+    return {
+      worker,
+      staffId,
+      type,
+      joinedAt: ts,
+      activeStart: ts,
+      idleStart: ts,
+      waitMinutes: 0,
+      inService: false,
+      onHold: false,
+    };
+  }
+
+  function recordCompletedWait(state, ts) {
+    if (!state || !Number.isFinite(state.waitMinutes) || state.waitMinutes <= 0) return;
+    const minutes = state.waitMinutes;
+    allWaits.push(minutes);
+    const startDay = new Date(Number.isFinite(state.joinedAt) ? state.joinedAt : ts).getDay();
+    ensureDayBucket(startDay).waits.push(minutes);
+    state.waitMinutes = 0;
+    state.joinedAt = null;
+  }
+
   parsed.forEach((ev) => {
     const kind = _qaActionKind(ev.action);
     if (!kind) return;
-    const w = (ev.worker || "").toLowerCase();
+    const workerName = String(ev.worker || "").trim();
+    const staffId = String(ev.staffId || "").trim();
+    const staffType = resolveStaffType({ staffId, worker: workerName });
+    const staffKey = workerName || staffId;
+    const w = staffKey.toLowerCase();
     const dedupeKey = `${kind}|${w || ev.action.toLowerCase()}|${Math.round(ev.ts / 5000)}`;
     if (seenEvents.has(dedupeKey)) return;
     seenEvents.add(dedupeKey);
-    result.activityCount += 1;
     const d = new Date(ev.ts);
     const dayKey = d.getDay();
     const hourKey = d.getHours();
+    const eventInRange = ev.ts >= fromMs && ev.ts <= toMs;
 
-    if (!dayBuckets.has(dayKey)) dayBuckets.set(dayKey, { count: 0, waits: [] });
-    dayBuckets.get(dayKey).count += 1;
+    if (eventInRange) {
+      result.activityCount += 1;
+      const dayBucket = ensureDayBucket(dayKey);
+      dayBucket.count += 1;
+      if (staffKey) dayBucket.staff.add(staffKey);
+    }
     const businessDay = businessByDay.get(dayKey);
     const minuteOfDay = d.getHours() * 60 + d.getMinutes();
     const isInsideBusinessHours = !!(
@@ -636,27 +1274,83 @@ function computeQueueAnalytics(fromMs) {
     const dayHourKey = `${dayKey}|${hourKey}`;
 
     if (kind === "join" && w) {
-      lastJoinAt.set(w, ev.ts);
+      const existing = staffStates.get(w);
+      if (existing) {
+        closeIdle(existing, ev.ts);
+        closeActive(existing, ev.ts);
+      }
+      staffStates.set(w, createAvailableState({ worker: staffKey, staffId, type: staffType, ts: ev.ts }));
     } else if (kind === "start" && w) {
-      if (isInsideBusinessHours) {
+      let state = staffStates.get(w);
+      if (!state) {
+        state = {
+          worker: staffKey,
+          staffId,
+          type: staffType,
+          joinedAt: null,
+          activeStart: ev.ts,
+          idleStart: null,
+          waitMinutes: 0,
+          inService: false,
+          onHold: false,
+        };
+        staffStates.set(w, state);
+      }
+      if (!state.staffId && staffId) state.staffId = staffId;
+      if (!state.type || state.type === "Other") state.type = staffType;
+      if (eventInRange && isInsideBusinessHours) {
         hourBuckets.set(hourKey, (hourBuckets.get(hourKey) || 0) + 1);
         dayHourStartBuckets.set(dayHourKey, (dayHourStartBuckets.get(dayHourKey) || 0) + 1);
+        addTypeCount(dayHourStartTypeBuckets, dayHourKey, state.type || staffType || "Other");
         result.totalStarts += 1;
       }
-      const joinedAt = lastJoinAt.get(w);
-      if (Number.isFinite(joinedAt) && ev.ts > joinedAt) {
-        const minutes = (ev.ts - joinedAt) / 60000;
-        allWaits.push(minutes);
-        addIdleIntervalToBusinessHours(joinedAt, ev.ts);
-        // Bucket by the day the wait STARTED (joinedAt).
-        const startDay = new Date(joinedAt).getDay();
-        if (!dayBuckets.has(startDay)) dayBuckets.set(startDay, { count: 0, waits: [] });
-        dayBuckets.get(startDay).waits.push(minutes);
-        lastJoinAt.delete(w);
+      closeIdle(state, ev.ts);
+      if (eventInRange) recordCompletedWait(state, ev.ts);
+      state.inService = true;
+      state.onHold = false;
+      if (!Number.isFinite(state.activeStart)) state.activeStart = ev.ts;
+    } else if (kind === "hold" && w) {
+      const state = staffStates.get(w);
+      if (state && !state.onHold) {
+        closeIdle(state, ev.ts);
+        closeActive(state, ev.ts);
+        state.onHold = true;
+      }
+    } else if (kind === "release" && w) {
+      const state = staffStates.get(w);
+      if (state) {
+        state.onHold = false;
+        state.activeStart = ev.ts;
+        if (!state.inService) state.idleStart = ev.ts;
       }
     } else if (kind === "finish" && w) {
-      lastJoinAt.delete(w);
+      let state = staffStates.get(w);
+      if (state) {
+        state.inService = false;
+        state.onHold = false;
+        state.joinedAt = ev.ts;
+        state.idleStart = ev.ts;
+        if (!Number.isFinite(state.activeStart)) state.activeStart = ev.ts;
+      } else {
+        state = createAvailableState({ worker: staffKey, staffId, type: staffType, ts: ev.ts });
+        staffStates.set(w, state);
+      }
+    } else if (kind === "checkout" && w) {
+      const state = staffStates.get(w);
+      if (state) {
+        closeIdle(state, ev.ts);
+        if (eventInRange) recordCompletedWait(state, ev.ts);
+        closeActive(state, ev.ts);
+        staffStates.delete(w);
+      }
     }
+  });
+
+  staffStates.forEach((state) => {
+    // Open staff records still count for Active Staff through the selected
+    // range, but incomplete Available waits are not counted as Idle Time
+    // until a START confirms the wait duration.
+    closeActive(state, toMs);
   });
 
   // Aggregate global metrics.
@@ -680,6 +1374,8 @@ function computeQueueAnalytics(fromMs) {
       avgWaitMin: avg,
       longestWaitMin: longest,
       waitsInDay: waits.length,
+      totalStaff: bucket.staff ? bucket.staff.size : 0,
+      peakHour: null,
     });
   });
   dayRows.sort((a, b) => a.dayIdx - b.dayIdx);
@@ -691,20 +1387,62 @@ function computeQueueAnalytics(fromMs) {
   hourRows.sort((a, b) => a.hour - b.hour);
   result.byHour = hourRows;
 
-  result.byDayHour = (businessHours.byDay || []).map((day) => ({
-    dayIdx: day.dayIdx,
-    dayName: day.dayName,
-    isOpen: day.isOpen,
-    openTime: day.openTime,
-    closeTime: day.closeTime,
-    hours: day.isOpen
-      ? day.hours.map((hour) => ({
-        hour,
-        starts: dayHourStartBuckets.get(`${day.dayIdx}|${hour}`) || 0,
-        idleMinutes: dayHourIdleBuckets.get(`${day.dayIdx}|${hour}`) || 0,
-      }))
-      : [],
-  }));
+  result.byDayHour = (businessHours.byDay || []).map((day) => {
+    let peak = null;
+    const hours = day.isOpen
+      ? day.hours.map((hour) => {
+        const key = `${day.dayIdx}|${hour}`;
+        const activeStaffSet = dayHourActiveStaff.get(key);
+        const row = {
+          hour,
+          starts: dayHourStartBuckets.get(key) || 0,
+          activeStaff: activeStaffSet ? activeStaffSet.size : 0,
+          idleMinutes: dayHourIdleBuckets.get(key) || 0,
+          startsByType: typeCountRows(dayHourStartTypeBuckets.get(key)),
+          staffByType: typeStaffRows(dayHourActiveStaffTypes.get(key)),
+          idleByType: typeCountRows(dayHourIdleTypeBuckets.get(key)),
+        };
+        if (
+          !peak ||
+          row.starts > peak.starts ||
+          (row.starts === peak.starts && row.activeStaff > peak.activeStaff) ||
+          (row.starts === peak.starts && row.activeStaff === peak.activeStaff && row.idleMinutes > peak.idleMinutes)
+        ) {
+          peak = row;
+        }
+        return row;
+      })
+      : [];
+    const totalStaff = dayBuckets.get(day.dayIdx)?.staff?.size || 0;
+    return {
+      dayIdx: day.dayIdx,
+      dayName: day.dayName,
+      isOpen: day.isOpen,
+      openTime: day.openTime,
+      closeTime: day.closeTime,
+      totalStaff,
+      peakHour: peak && (peak.starts > 0 || peak.activeStaff > 0 || peak.idleMinutes > 0) ? peak.hour : null,
+      hours,
+    };
+  });
+
+  result.byDay.forEach((day) => {
+    const hourly = result.byDayHour.find((row) => row.dayIdx === day.dayIdx);
+    if (hourly) {
+      day.totalStaff = hourly.totalStaff;
+      day.peakHour = hourly.peakHour;
+    }
+  });
+  const allActiveStaff = new Set();
+  dayBuckets.forEach((bucket) => {
+    if (bucket.staff) bucket.staff.forEach((staff) => allActiveStaff.add(staff));
+  });
+  result.totalActiveStaff = allActiveStaff.size;
+  const dailyStaffCounts = Array.from(dailyActiveStaff.values()).map((staffSet) => staffSet.size);
+  if (dailyStaffCounts.length) {
+    result.staffActivityDays = dailyStaffCounts.length;
+    result.avgStaffPerDay = dailyStaffCounts.reduce((sum, count) => sum + count, 0) / dailyStaffCounts.length;
+  }
 
   // Busiest day / peak hour from rows.
   if (dayRows.length) {
@@ -729,10 +1467,30 @@ function computeQueueAnalytics(fromMs) {
     hours: hourRows.length,
     businessHoursSource: businessHours.source,
     starts: result.totalStarts,
+    activeStaff: result.totalActiveStaff,
     idleMinutes: result.totalIdleMinutes,
+    avgStaffPerDay: result.avgStaffPerDay,
+    staffActivityDays: result.staffActivityDays,
   });
   console.log(V2_LOG, "start events detected", { starts: result.totalStarts });
-  console.log(V2_LOG, "idle events calculated", { waitPairs: allWaits.length, idleMinutes: result.totalIdleMinutes });
+  console.log(V2_LOG, "idle time calculated", {
+    waitPairs: allWaits.length,
+    idleMinutes: result.totalIdleMinutes,
+  });
+  console.log(TYPES_LOG, "per hour type counts", result.byDayHour.map((day) => ({
+    day: day.dayName,
+    hours: (day.hours || []).map((hour) => ({
+      hour: fmtHourRange(hour.hour),
+      startsByType: hour.startsByType,
+      staffByType: hour.staffByType,
+      idleByType: hour.idleByType,
+      totalWait: fmtIdleMinutes(hour.idleMinutes),
+      waitTimeByType: buildWaitTimeTypeRows(hour).map((row) => ({
+        type: row.type,
+        wait: fmtIdleMinutes(row.count),
+      })),
+    })),
+  })));
   console.log(V2_LOG, "per hour aggregation", result.byDayHour);
   return result;
 }
@@ -747,12 +1505,17 @@ function fmtMinutes(min) {
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
-function fmtCompactMinutes(min) {
+function fmtIdleMinutes(min) {
   if (!Number.isFinite(min) || min <= 0) return "0m";
   if (min < 60) return `${Math.round(min)}m`;
   const h = Math.floor(min / 60);
   const m = Math.round(min % 60);
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+function fmtStaffAverage(value) {
+  if (!Number.isFinite(value) || value <= 0) return "—";
+  return value >= 10 ? String(Math.round(value)) : value.toFixed(1).replace(/\.0$/, "");
 }
 
 function fmtHourRange(hour24) {
@@ -794,7 +1557,7 @@ function renderEmpty() {
   if (insights) {
     insights.innerHTML = `
       <ul class="qa-insights-list">
-        <li class="qa-insight is-info"><span aria-hidden="true">ℹ️</span><span>Queue activity is currently low. Insights will appear once events are logged.</span></li>
+        <li class="qa-insight is-info"><span aria-hidden="true">ℹ️</span><span>Queue data is currently low. Insights will appear once staff flow events are logged.</span></li>
       </ul>
     `;
   }
@@ -803,12 +1566,13 @@ function renderEmpty() {
 function renderSummary(metrics) {
   const root = document.getElementById("ffQaSummary");
   if (!root) return;
+  const rangeLabel = metrics.rangeLabel || "Selected range";
   const cards = [
-    { label: "Average wait time", value: fmtMinutes(metrics.avgWaitMin), foot: "This week" },
-    { label: "Longest wait time", value: fmtMinutes(metrics.longestWaitMin), foot: "This week" },
-    { label: "Wait events", value: String(metrics.waitCount || 0), foot: "join → start pairs" },
-    { label: "Busiest day", value: metrics.busiestDay || "—", foot: "By queue load" },
-    { label: "Peak hour", value: metrics.peakHour == null ? "—" : fmtHourRange(metrics.peakHour), foot: "By service starts" },
+    { label: "Service starts", value: String(metrics.totalStarts || 0), foot: "Work entered" },
+    { label: "Active staff", value: String(metrics.totalActiveStaff || 0), foot: rangeLabel },
+    { label: "Avg staff / day", value: fmtStaffAverage(metrics.avgStaffPerDay), foot: `${metrics.staffActivityDays || 0} active day${(metrics.staffActivityDays || 0) === 1 ? "" : "s"}` },
+    { label: "Average wait time", value: fmtMinutes(metrics.avgWaitMin), foot: rangeLabel },
+    { label: "Longest wait time", value: fmtMinutes(metrics.longestWaitMin), foot: rangeLabel },
   ];
   root.outerHTML = `
     <div id="ffQaSummary" class="qa-summary">
@@ -828,7 +1592,7 @@ function renderByDay(metrics) {
   if (!root) return;
   const rows = metrics.byDay || [];
   if (!rows.length) {
-    root.innerHTML = '<div style="color:#6b7280;font-size:13px;">No day-level activity yet.</div>';
+    root.innerHTML = '<div style="color:#6b7280;font-size:13px;">No day-level staff flow yet.</div>';
     return;
   }
   const maxCount = rows.reduce((a, r) => (r.count > a ? r.count : a), 0) || 1;
@@ -839,7 +1603,7 @@ function renderByDay(metrics) {
           <th>Day</th>
           <th class="num">Avg wait</th>
           <th class="num">Longest wait</th>
-          <th class="num">Queue Load</th>
+          <th class="num">Staff Flow</th>
         </tr>
       </thead>
       <tbody>
@@ -862,48 +1626,152 @@ function renderByDay(metrics) {
   `;
 }
 
+function renderTypeBreakdown(title, rows, formatter = (value) => String(value || 0)) {
+  const cleanRows = Array.isArray(rows) && rows.length ? rows : [{ type: "Other", count: 0 }];
+  return `
+    <div>
+      <div class="qa-type-title">${escapeHtml(title)}</div>
+      ${cleanRows.map((row) => `
+        <div class="qa-type-row">
+          <span>${escapeHtml(row.type || "Other")}</span>
+          <strong>${escapeHtml(formatter(row.count || 0))}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function mergeTypeRows(primaryRows, ...fallbackRows) {
+  const out = new Map();
+  (Array.isArray(primaryRows) ? primaryRows : []).forEach((row) => {
+    const type = String(row?.type || "Other").trim() || "Other";
+    out.set(type, Number(row?.count) || 0);
+  });
+  fallbackRows.forEach((rows) => {
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const type = String(row?.type || "Other").trim() || "Other";
+      if (!out.has(type)) out.set(type, 0);
+    });
+  });
+  return Array.from(out.entries())
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+}
+
+function buildWaitTimeTypeRows(hour) {
+  const totalWait = Number(hour?.idleMinutes) || 0;
+  const primaryRows = Array.isArray(hour?.idleByType) ? hour.idleByType : [];
+  const primaryTotal = primaryRows.reduce((sum, row) => sum + (Number(row?.count) || 0), 0);
+
+  if (totalWait > 0 && primaryTotal <= 0) {
+    return [{ type: "Unassigned", count: totalWait }];
+  }
+
+  const rows = primaryRows
+    .filter((row) => (Number(row?.count) || 0) > 0)
+    .map((row) => ({
+      type: String(row?.type || "Unassigned").trim() || "Unassigned",
+      count: Number(row?.count) || 0,
+    }));
+
+  if (totalWait > 0 && primaryTotal > 0 && Math.abs(totalWait - primaryTotal) >= 0.5) {
+    const missing = totalWait - primaryTotal;
+    const first = rows[0];
+    if (first) first.count = (Number(first.count) || 0) + missing;
+  }
+
+  return rows.sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+}
+
+function formatTypeBreakdown(rows, formatter = (value) => String(value || 0)) {
+  const cleanRows = Array.isArray(rows) && rows.length ? rows : [{ type: "Other", count: 0 }];
+  return cleanRows.map((row) => `${row.type || "Other"}: ${formatter(row.count || 0)}`).join("; ");
+}
+
+function closeHourDetailsModal() {
+  const modal = document.getElementById("ffQaHourDetailsModal");
+  if (modal) modal.remove();
+}
+
+function showHourDetailsModal(day, hour) {
+  closeHourDetailsModal();
+  const root = document.getElementById(SCREEN_ID);
+  if (!root || !day || !hour) return;
+  const modal = document.createElement("div");
+  modal.id = "ffQaHourDetailsModal";
+  modal.className = "qa-hour-modal-backdrop";
+  modal.innerHTML = `
+    <div class="qa-hour-modal" role="dialog" aria-modal="true" aria-labelledby="ffQaHourModalTitle">
+      <div class="qa-hour-modal-head">
+        <div>
+          <h2 class="qa-hour-modal-title" id="ffQaHourModalTitle">${escapeHtml(day.dayName)} ${escapeHtml(fmtHourRange(hour.hour))}</h2>
+          <p class="qa-hour-modal-sub">Staff and Available wait breakdown for this hour</p>
+        </div>
+        <button type="button" class="qa-hour-modal-close" data-qa-hour-modal-close aria-label="Close details">×</button>
+      </div>
+      <div class="qa-hour-modal-body">
+        <div class="qa-hour-modal-summary">
+          <div class="qa-hour-modal-stat"><span>Starts</span><strong>${escapeHtml(String(hour.starts || 0))}</strong></div>
+          <div class="qa-hour-modal-stat"><span>Staff</span><strong>${escapeHtml(String(hour.activeStaff || 0))}</strong></div>
+          <div class="qa-hour-modal-stat"><span>Average Wait</span><strong>${escapeHtml(fmtIdleMinutes(hour.idleMinutes))}</strong></div>
+        </div>
+        <div class="qa-hour-modal-section">
+          ${renderTypeBreakdown("Average wait by type", buildWaitTimeTypeRows(hour), fmtIdleMinutes)}
+        </div>
+        <div class="qa-hour-modal-section">
+          ${renderTypeBreakdown("Staff by type", hour.staffByType)}
+        </div>
+      </div>
+    </div>
+  `;
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal || event.target.closest("[data-qa-hour-modal-close]")) {
+      closeHourDetailsModal();
+    }
+  });
+  const onKeyDown = (event) => {
+    if (event.key === "Escape") {
+      closeHourDetailsModal();
+      document.removeEventListener("keydown", onKeyDown);
+    }
+  };
+  document.addEventListener("keydown", onKeyDown);
+  root.appendChild(modal);
+  const closeBtn = modal.querySelector("[data-qa-hour-modal-close]");
+  if (closeBtn) closeBtn.focus();
+}
+
 function renderByHour(metrics) {
   const root = document.getElementById("ffQaByHour");
   if (!root) return;
   const dayRows = metrics.byDayHour || [];
   if (!dayRows.length) {
-    root.innerHTML = '<div style="color:#6b7280;font-size:13px;">No hourly activity yet.</div>';
+    root.innerHTML = '<div style="color:#6b7280;font-size:13px;">No hourly staff flow yet.</div>';
     return;
   }
-  const peak = metrics.peakHour;
   root.innerHTML = `
     <div>
       ${dayRows.map((day, idx) => `
-        <details class="qa-hour-day" ${idx === new Date().getDay() ? "open" : ""}>
+        <details class="qa-hour-day">
           <summary class="qa-hour-day-title">
             <span>${escapeHtml(day.dayName)} ▼</span>
             <span class="qa-hour-day-hours">${day.isOpen ? `${escapeHtml(day.openTime)}–${escapeHtml(day.closeTime)}` : "Closed"}</span>
           </summary>
           ${day.isOpen ? `
             <div class="qa-hour-day-body">
-              <div>
-                <div class="qa-metric-title">Service Starts</div>
-                <div class="qa-hour-grid">
-                  ${day.hours.map((r) => `
-                    <div class="qa-hour-tile ${r.hour === peak && r.starts > 0 ? "is-peak" : ""}">
-                      <div class="qa-hour-tile-label">${escapeHtml(fmtHourRange(r.hour))}</div>
-                      <div class="qa-hour-tile-value">${escapeHtml(String(r.starts))}</div>
-                    </div>
-                  `).join("")}
-                </div>
+              <div class="qa-day-stats">
+                <span class="qa-day-stat">Total Staff: ${escapeHtml(String(day.totalStaff || 0))}</span>
+                <span class="qa-day-stat">Peak Hour: ${escapeHtml(day.peakHour == null ? "—" : fmtHourRange(day.peakHour))}</span>
               </div>
-              <div>
-                <div class="qa-metric-title">Idle Time</div>
-                ${metrics.waitCount > 0 ? `
-                  <div class="qa-hour-grid">
-                    ${day.hours.map((r) => `
-                      <div class="qa-hour-tile ${r.idleMinutes >= 30 ? "is-peak" : ""}">
-                        <div class="qa-hour-tile-label">${escapeHtml(fmtHourRange(r.hour))}</div>
-                        <div class="qa-hour-tile-value">${escapeHtml(fmtCompactMinutes(r.idleMinutes))}</div>
-                      </div>
-                    `).join("")}
-                  </div>
-                ` : '<div class="qa-closed">Not enough data yet</div>'}
+              <div class="qa-hour-grid">
+                ${day.hours.map((r) => `
+                  <button type="button" class="qa-hour-tile ${r.hour === day.peakHour ? "is-peak" : ""}" data-qa-hour-card data-day-idx="${escapeHtml(String(day.dayIdx))}" data-hour="${escapeHtml(String(r.hour))}" aria-label="Open ${escapeHtml(day.dayName)} ${escapeHtml(fmtHourRange(r.hour))} details">
+                    <div class="qa-hour-card-title">${escapeHtml(fmtHourRange(r.hour))}</div>
+                    <div class="qa-hour-card-row"><span>Starts</span><strong>${escapeHtml(String(r.starts || 0))}</strong></div>
+                    <div class="qa-hour-card-row"><span>Staff</span><strong>${escapeHtml(String(r.activeStaff || 0))}</strong></div>
+                    <div class="qa-hour-card-row"><span>Average Wait</span><strong>${escapeHtml(fmtIdleMinutes(r.idleMinutes))}</strong></div>
+                  </button>
+                `).join("")}
               </div>
             </div>
           ` : '<div class="qa-hour-day-body"><div class="qa-closed">Closed</div></div>'}
@@ -911,12 +1779,27 @@ function renderByHour(metrics) {
       `).join("")}
     </div>
   `;
+  root.querySelectorAll("[data-qa-hour-card]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const dayIdx = Number(card.getAttribute("data-day-idx"));
+      const hourValue = Number(card.getAttribute("data-hour"));
+      const day = dayRows.find((row) => row.dayIdx === dayIdx);
+      const hour = day?.hours?.find((row) => row.hour === hourValue);
+      showHourDetailsModal(day, hour);
+    });
+  });
 }
 
 function buildInsights(metrics) {
   const out = [];
-  if (!metrics.sourceFound || (metrics.activityCount === 0 && metrics.waitCount === 0)) {
-    out.push({ kind: "info", icon: "ℹ️", text: "Queue activity is currently low. Insights will appear once events are logged." });
+  if (!metrics.sourceFound || (
+    metrics.activityCount === 0 &&
+    metrics.waitCount === 0 &&
+    metrics.totalStarts === 0 &&
+    metrics.totalActiveStaff === 0 &&
+    metrics.totalIdleMinutes === 0
+  )) {
+    out.push({ kind: "info", icon: "ℹ️", text: "Queue data is currently low. Insights will appear once staff flow events are logged." });
     return out;
   }
   let peakStart = null;
@@ -934,27 +1817,30 @@ function buildInsights(metrics) {
       text: `Peak demand at ${fmtHourRange(peakStart.hour)} (${peakStart.starts} service starts).`,
     });
   }
-  let highestIdle = null;
-  let morningIdleMinutes = 0;
+  let busiestStaffHour = null;
+  let highestIdleHour = null;
   (metrics.byDayHour || []).forEach((day) => {
     (day.hours || []).forEach((hour) => {
-      if (hour.hour < 12) morningIdleMinutes += hour.idleMinutes || 0;
-      if (!highestIdle || (hour.idleMinutes || 0) > highestIdle.idleMinutes) {
-        highestIdle = { ...hour, dayName: day.dayName };
+      if (!busiestStaffHour || (hour.activeStaff || 0) > busiestStaffHour.activeStaff) {
+        busiestStaffHour = { ...hour, dayName: day.dayName };
+      }
+      if (!highestIdleHour || (hour.idleMinutes || 0) > highestIdleHour.idleMinutes) {
+        highestIdleHour = { ...hour, dayName: day.dayName };
       }
     });
   });
-  if (morningIdleMinutes >= 30) {
+  if (busiestStaffHour && busiestStaffHour.activeStaff >= 1) {
     out.push({
       kind: "warn",
       icon: "⚠️",
-      text: `High idle time detected in morning (${fmtCompactMinutes(morningIdleMinutes)}).`,
+      text: `Most active staff were on ${busiestStaffHour.dayName} around ${fmtHourRange(busiestStaffHour.hour)} (${busiestStaffHour.activeStaff} staff).`,
     });
-  } else if (highestIdle && highestIdle.idleMinutes >= 30) {
+  }
+  if (highestIdleHour && highestIdleHour.idleMinutes >= 20) {
     out.push({
       kind: "warn",
       icon: "⚠️",
-      text: `High idle time around ${fmtHourRange(highestIdle.hour)} (${fmtCompactMinutes(highestIdle.idleMinutes)}).`,
+      text: `Highest wait time was ${highestIdleHour.dayName} ${fmtHourRange(highestIdleHour.hour)} (${fmtIdleMinutes(highestIdleHour.idleMinutes)}).`,
     });
   }
   // Worst day by avg wait (only consider days that actually have wait pairs).
@@ -979,14 +1865,14 @@ function buildInsights(metrics) {
     out.push({
       kind: "warn",
       icon: "⚠️",
-      text: `Longest wait this week reached ${fmtMinutes(metrics.longestWaitMin)}.`,
+      text: `Longest wait time in this range reached ${fmtMinutes(metrics.longestWaitMin)}.`,
     });
   }
   if (!out.length) {
     if (metrics.waitCount === 0 && metrics.activityCount > 0) {
-      out.push({ kind: "info", icon: "ℹ️", text: "Activity recorded, but no completed join → start pairs yet." });
+      out.push({ kind: "info", icon: "ℹ️", text: "Staff flow was recorded, but no completed join → start pairs yet." });
     } else {
-      out.push({ kind: "good", icon: "✅", text: "Queue is flowing smoothly. No bottlenecks detected this week." });
+      out.push({ kind: "good", icon: "✅", text: "Queue is flowing smoothly. No bottlenecks detected in this range." });
     }
   }
   return out.slice(0, 4);
@@ -1011,18 +1897,124 @@ function renderInsights(metrics) {
   `;
 }
 
+function csvCell(value) {
+  const s = String(value == null ? "" : value);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function csvRow(values) {
+  return values.map(csvCell).join(",");
+}
+
+function exportCurrentCsv() {
+  const range = _lastRange || getSelectedRange();
+  const metrics = _lastMetrics || computeQueueAnalytics(range.fromMs, range.toMs);
+  metrics.rangeLabel = metrics.rangeLabel || range.label;
+  const insights = buildInsights(metrics);
+  const rows = [];
+
+  rows.push(["Queue Analytics Export"]);
+  rows.push(["Range", range.label]);
+  rows.push(["From", range.startLabel]);
+  rows.push(["To", range.endLabel]);
+  rows.push([]);
+
+  rows.push(["Summary"]);
+  rows.push(["Metric", "Value"]);
+  rows.push(["Service starts", metrics.totalStarts || 0]);
+  rows.push(["Active staff", metrics.totalActiveStaff || 0]);
+  rows.push(["Average staff per day", fmtStaffAverage(metrics.avgStaffPerDay)]);
+  rows.push(["Staff activity days", metrics.staffActivityDays || 0]);
+  rows.push(["Average wait time", fmtMinutes(metrics.avgWaitMin)]);
+  rows.push(["Longest wait time", fmtMinutes(metrics.longestWaitMin)]);
+  rows.push(["Wait events", metrics.waitCount || 0]);
+  rows.push(["Busiest day", metrics.busiestDay || ""]);
+  rows.push(["Peak hour", metrics.peakHour == null ? "" : fmtHourRange(metrics.peakHour)]);
+  rows.push([]);
+
+  rows.push(["Wait Time by Day"]);
+  rows.push(["Day", "Average Wait", "Longest Wait", "Queue Load", "Wait Events", "Total Staff", "Peak Hour"]);
+  (metrics.byDay || []).forEach((r) => {
+    rows.push([
+      r.dayName,
+      fmtMinutes(r.avgWaitMin),
+      fmtMinutes(r.longestWaitMin),
+      r.count || 0,
+      r.waitsInDay || 0,
+      r.totalStaff || 0,
+      r.peakHour == null ? "" : fmtHourRange(r.peakHour),
+    ]);
+  });
+  rows.push([]);
+
+  rows.push(["Queue Load by Hour"]);
+  rows.push(["Day", "Hour", "Service Starts", "Active Staff", "Staff by Type", "Average Wait by Type", "Average Wait"]);
+  (metrics.byDayHour || []).forEach((day) => {
+    if (!day.isOpen) {
+      rows.push([day.dayName, "Closed", "", "", "", "", "", ""]);
+      return;
+    }
+    (day.hours || []).forEach((hour) => {
+      rows.push([
+        day.dayName,
+        fmtHourRange(hour.hour),
+        hour.starts || 0,
+        hour.activeStaff || 0,
+        formatTypeBreakdown(hour.staffByType),
+        formatTypeBreakdown(buildWaitTimeTypeRows(hour), fmtIdleMinutes),
+        fmtIdleMinutes(hour.idleMinutes),
+      ]);
+    });
+  });
+  rows.push([]);
+
+  rows.push(["Insights"]);
+  insights.forEach((item) => rows.push([item.text]));
+
+  const csv = `\uFEFF${rows.map(csvRow).join("\r\n")}`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const safeRange = String(range.label || "range").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `fair-flow-queue-analytics-${safeRange || "export"}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try {
+    if (window.ffToast && typeof window.ffToast.success === "function") {
+      window.ffToast.success("Queue Analytics export created");
+    }
+  } catch (_) {}
+}
+
 function refresh() {
   const screen = document.getElementById(SCREEN_ID);
   if (!screen || screen.style.display === "none") return;
+  syncRangeControls();
+  const range = getSelectedRange();
+  const label = document.getElementById("ffQaRangeLabel");
+  if (label) label.textContent = range.label;
   let metrics;
   try {
-    metrics = computeQueueAnalytics(_qaWeekStartMs());
+    metrics = computeQueueAnalytics(range.fromMs, range.toMs);
+    metrics.rangeLabel = range.label;
+    metrics.range = range;
+    _lastMetrics = metrics;
+    _lastRange = range;
   } catch (e) {
     console.warn(LOG, "error calculating metrics", e);
     renderEmpty();
     return;
   }
-  if (!metrics.sourceFound || (metrics.activityCount === 0 && metrics.waitCount === 0)) {
+  if (!metrics.sourceFound || (
+    metrics.activityCount === 0 &&
+    metrics.waitCount === 0 &&
+    metrics.totalStarts === 0 &&
+    metrics.totalActiveStaff === 0 &&
+    metrics.totalIdleMinutes === 0
+  )) {
     renderEmpty();
     return;
   }

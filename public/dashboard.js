@@ -411,7 +411,8 @@ function _qmParseEntry(entry) {
     if (!Number.isFinite(ts)) return null;
     const action = String(entry.action || entry.actionText || "").trim();
     const worker = String(entry.worker || entry.assignedTo || "").trim();
-    return { ts, action, worker };
+    const typedAction = entry.type === "queue_check_out" ? `${action} queue_check_out` : action;
+    return { ts, action: typedAction, worker };
   }
   if (typeof entry !== "string") return null;
   // Match "MM/DD/YYYY, h:mm:ss AM/PM <rest>"
@@ -443,6 +444,7 @@ function _qmActionKind(action) {
   if (/^JOIN\b|^join:/i.test(action)) return "join";
   if (/^START\b|IN SERVICE:/i.test(action)) return "start";
   if (/^FINISH\b|Back to end:/i.test(action)) return "finish";
+  if (/Remove from queue|Leave queue|queue_check_out/i.test(action)) return "checkout";
   if (/^HOLD:/i.test(action)) return "hold";
   if (/^RELEASE:/i.test(action)) return "release";
   if (/^MOVE (?:UP|DOWN):/i.test(action)) return "move";
@@ -474,13 +476,16 @@ function computeQueueMetrics(fromMs) {
   result.sourceFound = true;
   console.log(QM_LOG_PREFIX, "source detected", { entries: raw.length });
 
-  // Parse + chronological order (raw is newest-first; we walk oldest-first
-  // so join → START pairs resolve correctly).
+  // Parse + chronological order. Legacy forced-log entries used unshift()
+  // (newest-first), while newer queue/history entries use push()
+  // (oldest-first). Sort by timestamp so join → START pairs resolve
+  // correctly regardless of write path.
   const parsed = [];
-  for (let i = raw.length - 1; i >= 0; i -= 1) {
+  for (let i = 0; i < raw.length; i += 1) {
     const p = _qmParseEntry(raw[i]);
     if (p && p.ts >= fromMs) parsed.push(p);
   }
+  parsed.sort((a, b) => a.ts - b.ts);
   if (!parsed.length) {
     console.log(QM_LOG_PREFIX, "no events in range");
     return result;
@@ -488,9 +493,35 @@ function computeQueueMetrics(fromMs) {
 
   const dayCounts = new Map();
   const hourCounts = new Map();
-  const lastJoinAt = new Map();
+  const staffStates = new Map();
   const seenEvents = new Set();
   const waits = [];
+
+  function closeIdle(state, ts) {
+    if (!state || !Number.isFinite(state.idleStart) || ts <= state.idleStart) {
+      if (state) state.idleStart = null;
+      return;
+    }
+    state.waitMinutes += (ts - state.idleStart) / 60000;
+    state.idleStart = null;
+  }
+
+  function recordCompletedWait(state) {
+    if (!state || !Number.isFinite(state.waitMinutes) || state.waitMinutes <= 0) return;
+    waits.push(state.waitMinutes);
+    state.waitMinutes = 0;
+    state.joinedAt = null;
+  }
+
+  function createAvailableState(ts) {
+    return {
+      joinedAt: ts,
+      idleStart: ts,
+      waitMinutes: 0,
+      inService: false,
+      onHold: false,
+    };
+  }
 
   parsed.forEach((ev) => {
     const kind = _qmActionKind(ev.action);
@@ -506,15 +537,54 @@ function computeQueueMetrics(fromMs) {
     dayCounts.set(dayKey, (dayCounts.get(dayKey) || 0) + 1);
     hourCounts.set(hourKey, (hourCounts.get(hourKey) || 0) + 1);
     if (kind === "join" && w) {
-      lastJoinAt.set(w, ev.ts);
+      const existing = staffStates.get(w);
+      if (existing) closeIdle(existing, ev.ts);
+      staffStates.set(w, createAvailableState(ev.ts));
     } else if (kind === "start" && w) {
-      const joinedAt = lastJoinAt.get(w);
-      if (Number.isFinite(joinedAt) && ev.ts > joinedAt) {
-        waits.push((ev.ts - joinedAt) / 60000);
-        lastJoinAt.delete(w);
+      let state = staffStates.get(w);
+      if (!state) {
+        state = {
+          joinedAt: null,
+          idleStart: null,
+          waitMinutes: 0,
+          inService: false,
+          onHold: false,
+        };
+        staffStates.set(w, state);
       }
+      closeIdle(state, ev.ts);
+      recordCompletedWait(state);
+      state.inService = true;
+      state.onHold = false;
     } else if (kind === "finish" && w) {
-      lastJoinAt.delete(w);
+      let state = staffStates.get(w);
+      if (state) {
+        state.inService = false;
+        state.onHold = false;
+        state.joinedAt = ev.ts;
+        state.idleStart = ev.ts;
+      } else {
+        staffStates.set(w, createAvailableState(ev.ts));
+      }
+    } else if (kind === "hold" && w) {
+      const state = staffStates.get(w);
+      if (state && !state.onHold) {
+        closeIdle(state, ev.ts);
+        state.onHold = true;
+      }
+    } else if (kind === "release" && w) {
+      const state = staffStates.get(w);
+      if (state) {
+        state.onHold = false;
+        if (!state.inService) state.idleStart = ev.ts;
+      }
+    } else if (kind === "checkout" && w) {
+      const state = staffStates.get(w);
+      if (state) {
+        closeIdle(state, ev.ts);
+        recordCompletedWait(state);
+        staffStates.delete(w);
+      }
     }
   });
 
