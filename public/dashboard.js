@@ -841,6 +841,7 @@ function renderModuleCards(snap) {
   };
   const ANALYTICS_ROUTES = {
     "queue-analytics": "goToQueueAnalytics",
+    "tickets-analytics": "goToTicketsAnalytics",
   };
   root.querySelectorAll("[data-dash-action]").forEach((btn) => {
     btn.addEventListener("click", (e) => {

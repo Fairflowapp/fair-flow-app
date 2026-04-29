@@ -40,6 +40,42 @@ let _ticketsMembersAvatarCache = null;
 /** Secondary lookup by normalized display name (when older tickets lack technicianStaffId). */
 let _ticketsMembersAvatarByName = null;
 
+window.ffGetCurrentTickets = function() {
+  return Array.isArray(currentTickets) ? currentTickets.slice() : [];
+};
+
+window.ffLoadTicketsForAnalytics = async function() {
+  const salonId = currentUserProfile?.salonId
+    || (typeof window !== 'undefined' && window.currentSalonId)
+    || null;
+  if (!currentUserProfile) {
+    try { await loadCurrentUserProfile(); } catch (_) {}
+  }
+  const resolvedSalonId = currentUserProfile?.salonId
+    || salonId
+    || (typeof window !== 'undefined' && window.currentSalonId)
+    || null;
+  if (!resolvedSalonId) return [];
+  const qAnalytics = query(
+    collection(db, `salons/${resolvedSalonId}/tickets`),
+    orderBy('createdAt', 'desc'),
+    limit(500)
+  );
+  const snap = await getDocs(qAnalytics);
+  const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return rows.filter((ticket) => {
+    try { return canSeeTicket(ticket); } catch (_) { return true; }
+  });
+};
+
+function notifyTicketsAnalyticsDataChanged() {
+  try {
+    document.dispatchEvent(new CustomEvent('ff-tickets-data-changed', {
+      detail: { count: Array.isArray(currentTickets) ? currentTickets.length : 0 }
+    }));
+  } catch (_) {}
+}
+
 function normalizeTicketTechName(name) {
   if (!name || typeof name !== 'string') return '';
   return name.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -265,7 +301,7 @@ function applySharedServiceCatalog() {
       });
     }
   });
-  salonServices = _rawSharedServices
+  const sharedServices = _rawSharedServices
     .filter((s) => s && s.active !== false)
     .map((s, idx) => {
       const categoryName = normalizeSharedCategoryName(s.category);
@@ -293,7 +329,26 @@ function applySharedServiceCatalog() {
     })
     .filter((s) => s.name)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+
+  const localCategories = _rawCategories
+    .filter(_ffServiceMatchesActiveLocation)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  localCategories.forEach((c) => {
+    if (c?.id && !categoryMap.has(c.id)) categoryMap.set(c.id, c);
+  });
+
+  const localServices = _rawServices
+    .filter(_ffServiceMatchesActiveLocation)
+    .map((s) => ({ ...s, isSharedService: false }))
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+
+  salonServices = [...sharedServices, ...localServices];
   serviceCategories = Array.from(categoryMap.values()).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  console.log('[SharedServices] merged catalog for picker', {
+    sharedServices: sharedServices.length,
+    localServices: localServices.length,
+    categories: serviceCategories.length
+  });
 }
 
 function getSharedServicesForCatalogManager() {
@@ -552,7 +607,6 @@ function _onCatalogSnapshot() {
 /** Live subscribe to services + serviceCategories for the current salon.
  *  Idempotent; switching salon auto-rebinds. */
 function subscribeServiceCatalog() {
-  if (_catalogSource === 'shared') return;
   const salonId = currentUserProfile?.salonId;
   if (!salonId) return;
   if (_catalogSubSalonId === salonId && (_servicesUnsub || _serviceCatsUnsub)) return;
@@ -585,7 +639,24 @@ async function loadServices() {
   if (!currentUserProfile?.salonId) return [];
   if (_catalogSource !== 'location') {
     const sharedLoaded = await tryLoadSharedServiceCatalog();
-    if (sharedLoaded) return salonServices;
+    if (sharedLoaded) {
+      subscribeServiceCatalog();
+      try {
+        if (_rawServices.length === 0 || _rawCategories.length === 0) {
+          await _ffWipeLegacyCatalogOnce();
+          const [svcSnap, catSnap] = await Promise.all([
+            getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`)),
+            getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`))
+          ]);
+          _rawServices = svcSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          _rawCategories = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          _applyCatalogFilter();
+        }
+      } catch (err) {
+        console.warn('[Tickets] location catalog merge load failed', err);
+      }
+      return salonServices;
+    }
     _catalogSource = 'location';
   }
   // Make sure live subscriptions are running; they will refresh the UI the
@@ -999,6 +1070,7 @@ function _rebuildCurrentTicketsMerged() {
     const mb = db ? db.getTime() : 0;
     return mb - ma;
   });
+  notifyTicketsAnalyticsDataChanged();
 }
 
 function updateTicketsLoadMoreUi() {
