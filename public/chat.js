@@ -45,6 +45,12 @@ let _chatMembersLoaded = false;
 const CHAT_NAME_LOADING = 'Loading...';
 let chatConvsUnsub     = null;
 let _chatInitialized   = false;  // cache flag — skip re-fetching on repeat visits
+let _chatUsersLoadKey = '';
+let _chatTemplatesLoadKey = '';
+let _chatFlowsLoadKey = '';
+let _chatUsersLoadPromise = null;
+let _chatTemplatesLoadPromise = null;
+let _chatFlowsLoadPromise = null;
 let chatMsgsUnsub      = null;
 let chatBadgeUnsub     = null;
 let chatToastUnsub     = null;
@@ -59,6 +65,7 @@ let chatEditingFlowId  = null;
 let chatFlowDraft      = null;   // { title, allowedSenders, steps } for builder
 let chatReplyContext   = null;   // { uid, name, conversationId }
 let allConversations   = [];     // kept in sync by onSnapshot
+let lastNonEmptyConversations = [];
 let currentMessages    = [];     // kept in sync by onSnapshot for open conversation
 let currentConvId      = null;   // currently open thread
 let chatSendMode       = 'template'; // 'template' | 'flow' (free text uses textarea, not this flag)
@@ -158,14 +165,16 @@ function _convLocKeyFromId(id) {
 /**
  * Resolve the location a conversation doc belongs to.
  *
- * Prefers the ID prefix (immutable, authoritative). Falls back to the
- * `locationId` field only if we do not have the document ID on hand (e.g.
- * when only a snapshot of the data was passed in).
+ * Prefers the ID prefix for newer location-scoped conversations. Legacy
+ * conversation IDs have no prefix, so if Firestore has a locationId field,
+ * use that instead of treating them as permanently "default".
  */
 function _convLocKey(conv) {
   if (!conv || typeof conv !== 'object') return CHAT_DEFAULT_LOC_KEY;
-  if (conv.id) return _convLocKeyFromId(conv.id);
   const v = typeof conv.locationId === 'string' ? conv.locationId.trim() : '';
+  if (conv.id && String(conv.id).startsWith('loc_')) return _convLocKeyFromId(conv.id);
+  if (v) return v;
+  if (conv.id) return _convLocKeyFromId(conv.id);
   return v ? v : CHAT_DEFAULT_LOC_KEY;
 }
 /** True when a conversation doc belongs to the given location key. */
@@ -502,11 +511,11 @@ async function goToChat() {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
-  ['.joinBar', '.wrap'].forEach((sel) => {
+  ['#joinBar', '.joinbar', '.wrap', '#queueControls'].forEach((sel) => {
     const el = document.querySelector(sel);
     if (el) el.style.display = 'none';
   });
-  ['queueControls', 'userProfileScreen', 'manageQueueScreen'].forEach((id) => {
+  ['userProfileScreen', 'manageQueueScreen'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -540,13 +549,17 @@ async function initChatScreen() {
     renderChatHeaderForRole(null);
     return;
   }
-  subscribeToConversationList();
-  await Promise.all([loadChatSalonUsers(), loadChatTemplates(), loadChatFlows()]);
   renderChatHeaderForRole(chatUserProfile.role);
-  if (allConversations.length) renderThreadList();
+  subscribeToConversationList();
   _bindChatConvFreeTextComposer();
   _syncChatConvFreeTextComposer();
   _chatInitialized = true;
+  Promise.all([loadChatSalonUsers(), loadChatTemplates(), loadChatFlows()])
+    .then(() => {
+      if (allConversations.length) renderThreadList();
+      _syncChatConvFreeTextComposer();
+    })
+    .catch((err) => console.warn('[Chat] background preload failed', err));
 }
 
 // ─── Profile / Users / Templates ──────────────────────────────────────────────
@@ -571,77 +584,103 @@ async function loadChatUserProfile() {
   }
 }
 
-async function loadChatSalonUsers() {
+async function loadChatSalonUsers(options = {}) {
   if (!chatUserProfile?.salonId) {
     chatSalonUsers = [];
     _chatMembersLoaded = true;
     return;
   }
+  const key = `${chatUserProfile.salonId}::${chatUserProfile.uid || ''}`;
+  if (!options.force && _chatMembersLoaded && _chatUsersLoadKey === key) return;
+  if (!options.force && _chatUsersLoadPromise && _chatUsersLoadKey === key) return _chatUsersLoadPromise;
+  _chatUsersLoadKey = key;
   _chatMembersLoaded = false;
-  try {
-    const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/members`));
-    chatSalonUsers = snap.docs
-      .map(d => ({ ...d.data(), uid: d.id }))
-      .filter(u => u.uid !== chatUserProfile.uid);
-  } catch (e) {
-    chatSalonUsers = [];
-  } finally {
-    _chatMembersLoaded = true;
-  }
+  _chatUsersLoadPromise = (async () => {
+    try {
+      const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/members`));
+      chatSalonUsers = snap.docs
+        .map(d => ({ ...d.data(), uid: d.id }))
+        .filter(u => u.uid !== chatUserProfile.uid);
+    } catch (e) {
+      chatSalonUsers = [];
+    } finally {
+      _chatMembersLoaded = true;
+      _chatUsersLoadPromise = null;
+    }
+  })();
+  return _chatUsersLoadPromise;
 }
 
-async function loadChatTemplates() {
+async function loadChatTemplates(options = {}) {
   if (!chatUserProfile?.salonId) return;
   const locKey = _activeLocKey();
-  const sharedTemplates = await loadSharedChatTemplates();
-  try {
-    const snap = await getDocs(query(
-      collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
-      orderBy('order','asc')
-    ));
-    const localTemplates = snap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(t => _itemMatchesLocation(t, locKey));
-    chatTemplates = [...sharedTemplates, ...localTemplates];
-  } catch (e) {
-    console.warn('[Chat] loadChatTemplates orderBy failed, retrying without order', e?.code, e?.message);
+  const key = `${chatUserProfile.salonId}::${locKey}`;
+  if (!options.force && _chatTemplatesLoadKey === key && chatTemplates.length) return;
+  if (!options.force && _chatTemplatesLoadPromise && _chatTemplatesLoadKey === key) return _chatTemplatesLoadPromise;
+  _chatTemplatesLoadKey = key;
+  _chatTemplatesLoadPromise = (async () => {
+    const sharedTemplates = await loadSharedChatTemplates();
     try {
-      const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`));
+      const snap = await getDocs(query(
+        collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
+        orderBy('order','asc')
+      ));
       const localTemplates = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter(t => _itemMatchesLocation(t, locKey))
-        .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+        .filter(t => _itemMatchesLocation(t, locKey));
       chatTemplates = [...sharedTemplates, ...localTemplates];
-    } catch (e2) {
-      console.error('[Chat] loadChatTemplates error', e2);
-      chatTemplates = sharedTemplates;
+    } catch (e) {
+      console.warn('[Chat] loadChatTemplates orderBy failed, retrying without order', e?.code, e?.message);
+      try {
+        const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`));
+        const localTemplates = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(t => _itemMatchesLocation(t, locKey))
+          .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+        chatTemplates = [...sharedTemplates, ...localTemplates];
+      } catch (e2) {
+        console.error('[Chat] loadChatTemplates error', e2);
+        chatTemplates = sharedTemplates;
+      }
+    } finally {
+      _chatTemplatesLoadPromise = null;
     }
-  }
+  })();
+  return _chatTemplatesLoadPromise;
 }
 
-async function loadChatFlows() {
+async function loadChatFlows(options = {}) {
   if (!chatUserProfile?.salonId) return;
   const locKey = _activeLocKey();
-  const sharedFlows = await loadSharedChatFlows();
-  try {
-    const flowsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows`));
-    const flows = [];
-    for (const fd of flowsSnap.docs) {
-      const flowData = { id: fd.id, ...fd.data() };
-      if (!_itemMatchesLocation(flowData, locKey)) continue;
-      const stepsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps`));
-      flowData.steps = [];
-      for (const sd of stepsSnap.docs) {
-        const stepData = { id: sd.id, ...sd.data() };
-        const optsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps/${sd.id}/options`));
-        stepData.options = optsSnap.docs.map(od => ({ id: od.id, ...od.data() }));
-        flowData.steps.push(stepData);
-      }
-      flowData.steps.sort((a,b) => (a.order||0) - (b.order||0));
-      if ((flowData.status || 'active') !== 'archived') flows.push(flowData);
+  const key = `${chatUserProfile.salonId}::${locKey}`;
+  if (!options.force && _chatFlowsLoadKey === key && chatFlows.length) return;
+  if (!options.force && _chatFlowsLoadPromise && _chatFlowsLoadKey === key) return _chatFlowsLoadPromise;
+  _chatFlowsLoadKey = key;
+  _chatFlowsLoadPromise = (async () => {
+    const sharedFlows = await loadSharedChatFlows();
+    try {
+      const flowsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows`));
+      const flows = (await Promise.all(flowsSnap.docs.map(async (fd) => {
+        const flowData = { id: fd.id, ...fd.data() };
+        if (!_itemMatchesLocation(flowData, locKey)) return null;
+        const stepsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps`));
+        flowData.steps = await Promise.all(stepsSnap.docs.map(async (sd) => {
+          const stepData = { id: sd.id, ...sd.data() };
+          const optsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps/${sd.id}/options`));
+          stepData.options = optsSnap.docs.map(od => ({ id: od.id, ...od.data() }));
+          return stepData;
+        }));
+        flowData.steps.sort((a,b) => (a.order||0) - (b.order||0));
+        return (flowData.status || 'active') !== 'archived' ? flowData : null;
+      }))).filter(Boolean);
+      chatFlows = [...sharedFlows, ...flows];
+    } catch(e) {
+      chatFlows = sharedFlows;
+    } finally {
+      _chatFlowsLoadPromise = null;
     }
-    chatFlows = [...sharedFlows, ...flows];
-  } catch(e) { chatFlows = sharedFlows; }
+  })();
+  return _chatFlowsLoadPromise;
 }
 
 // ─── Conversation List Subscription (PRIVATE) ──────────────────────────────────
@@ -667,11 +706,20 @@ function subscribeToConversationList() {
         console.log('[ChatBadgePerf] first-snapshot', performance.now(), Date.now());
       }
       const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      allConversations = allDocs.filter(c => _convMatchesLocation(c, locKey));
+      const nextConversations = allDocs.filter(c => _convMatchesLocation(c, locKey));
+      if (nextConversations.length > 0) {
+        allConversations = nextConversations;
+        lastNonEmptyConversations = nextConversations;
+      } else if (lastNonEmptyConversations.length > 0) {
+        allConversations = lastNonEmptyConversations;
+      } else {
+        allConversations = nextConversations;
+      }
       console.log(
         '[Chat] threads snapshot: locKey=', locKey,
         'totalDocs=', allDocs.length,
-        'matchLocation=', allConversations.length,
+        'matchLocation=', nextConversations.length,
+        'rendered=', allConversations.length,
         'sample=', allDocs.slice(0, 8).map(d => ({
           id: d.id,
           locationId: d.locationId || '(none)',
@@ -717,15 +765,20 @@ function renderThreadList() {
   if (loading) loading.style.display = 'none';
 
   const uid = chatUserProfile?.uid || '';
+  const conversationsToRender = (Array.isArray(allConversations) && allConversations.length > 0)
+    ? allConversations
+    : (Array.isArray(lastNonEmptyConversations) && lastNonEmptyConversations.length > 0)
+      ? lastNonEmptyConversations
+      : [];
 
-  if (!Array.isArray(allConversations) || allConversations.length === 0) {
+  if (conversationsToRender.length === 0) {
     if (empty) empty.style.display = 'block';
     list.innerHTML = '';
     return;
   }
   if (empty) empty.style.display = 'none';
 
-  list.innerHTML = allConversations.map(conv => {
+  list.innerHTML = conversationsToRender.map(conv => {
     const convId = conv.id;
     const otherUid = _otherUidFromParticipants(conv.participants, uid);
     const otherName = _nameForUid(otherUid) || 'Unknown';
@@ -765,17 +818,44 @@ function renderThreadList() {
   }).join('');
 }
 
+function _rememberConversationForList(conv) {
+  if (!conv || !conv.id) return;
+  const mergeInto = (list) => {
+    if (!Array.isArray(list)) return [conv];
+    const idx = list.findIndex(c => c && c.id === conv.id);
+    if (idx >= 0) {
+      const next = list.slice();
+      next[idx] = { ...next[idx], ...conv };
+      return next;
+    }
+    return [conv, ...list];
+  };
+  allConversations = mergeInto(allConversations);
+  lastNonEmptyConversations = mergeInto(lastNonEmptyConversations);
+}
+
 // ─── Open / Close Thread ───────────────────────────────────────────────────────
 window._openThread = async function(convId) {
+  if (Array.isArray(allConversations) && allConversations.length > 0) {
+    lastNonEmptyConversations = allConversations.slice();
+  }
   currentConvId = convId;
-  // Mobile: open conversation view (hide list)
-  document.getElementById('chatScreen')?.classList.add('chat-mobile-open');
+  // On narrow mobile screens, show the conversation view with a back button.
+  // Desktop/tablet keeps the left conversation list visible.
+  const shouldUseMobileChatView = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 860px)').matches;
+  document.getElementById('chatScreen')?.classList.toggle('chat-mobile-open', shouldUseMobileChatView);
   // Update header title
   _setConversationHeader(convId);
+  renderThreadList();
   _subscribeToMessages(convId);
   renderConversation(convId);
-  await markThreadRead(convId);
-  renderThreadList();
+  markThreadRead(convId)
+    .catch(() => {})
+    .finally(() => {
+      if (currentConvId === convId) renderThreadList();
+    });
 };
 
 window.closeConversation = function() {
@@ -963,6 +1043,7 @@ async function _sendFreeTextDirect(recipientUid, recipientName, conversationIdOv
     { merge: true }
   );
   await batch.commit();
+  return convId;
 }
 
 window.sendChatConvFreeText = async function() {
@@ -1016,8 +1097,7 @@ window.openThreadReply = async function() {
   const convId = btn?.getAttribute('data-conv-id') || currentConvId;
   if (!otherUid || !chatUserProfile) return;
 
-  await loadChatTemplates();
-  await loadChatFlows();
+  await Promise.all([loadChatTemplates(), loadChatFlows()]);
   const sendableTemplates = chatTemplates.filter(t =>
     _chatUserMatchesAllowedSenders(chatUserProfile.role, t.allowedSenders)
   );
@@ -1096,9 +1176,7 @@ window.openSendMessageModal = async function() {
 // ─── Shared Modal Renderer ─────────────────────────────────────────────────────
 async function _openChatModal({ title, showSendTo }) {
   if (!chatUserProfile) return;
-  await loadChatTemplates();
-  await loadChatFlows();
-  await loadChatSalonUsers();
+  await Promise.all([loadChatTemplates(), loadChatFlows(), loadChatSalonUsers()]);
 
   chatSendMode = 'template';
   chatSelectedFlow = null;
@@ -1475,7 +1553,7 @@ function _updateChatSendBtn() {
   const btn = document.getElementById('chatSendConfirmBtn');
   if (btn) {
     btn.disabled = !ready;
-    btn.title = ready && !rcpt ? 'Select at least one recipient' : '';
+    btn.title = '';
   }
   _updateRecipientSummary();
 }
@@ -1580,11 +1658,20 @@ window.confirmSendChatMessage = async function() {
         recipientNames.push(cb.getAttribute('data-name') || _nameForUidForSend(cb.value));
       });
     }
-    if (!recipientUids.length) { alert('Please select at least one recipient.'); return; }
+    if (!recipientUids.length) {
+      const msg = 'Please select at least one recipient.';
+      if (typeof window.ffStyledAlert === 'function') {
+        await window.ffStyledAlert(msg, 'Choose recipient');
+      } else {
+        alert(msg);
+      }
+      return;
+    }
   }
 
   const btn = document.getElementById('chatSendConfirmBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  let firstSentConvId = null;
 
   try {
     if (freeRaw) {
@@ -1592,7 +1679,8 @@ window.confirmSendChatMessage = async function() {
       for (let i = 0; i < recipientUids.length; i++) {
         const rUid = recipientUids[i];
         const rName = recipientNames[i] || _nameForUidForSend(rUid);
-        await _sendFreeTextDirect(rUid, rName, convOverride, freeRaw);
+        const sentConvId = await _sendFreeTextDirect(rUid, rName, convOverride, freeRaw);
+        if (!firstSentConvId) firstSentConvId = sentConvId;
       }
     } else {
       const salonId = chatUserProfile.salonId;
@@ -1609,6 +1697,7 @@ window.confirmSendChatMessage = async function() {
         const rUid = recipientUids[i];
         const rName = recipientNames[i] || _nameForUidForSend(rUid);
         const convId = chatReplyContext?.conversationId || buildConvId(senderUid, rUid, locKey);
+        if (!firstSentConvId) firstSentConvId = convId;
         console.log('[Chat] send → locKey=', locKey, ' convId=', convId);
 
         const convRef = doc(db, `salons/${salonId}/conversations`, convId);
@@ -1665,9 +1754,29 @@ window.confirmSendChatMessage = async function() {
       }
     }
 
+    const replyConvId = chatReplyContext?.conversationId || null;
     window.closeSendMessageModal();
-    if (chatReplyContext?.conversationId && currentConvId === chatReplyContext.conversationId) {
-      renderConversation(chatReplyContext.conversationId);
+    if (replyConvId && currentConvId === replyConvId) {
+      renderConversation(replyConvId);
+    } else if (firstSentConvId && recipientUids.length === 1) {
+      _rememberConversationForList({
+        id: firstSentConvId,
+        participants: [chatUserProfile.uid, recipientUids[0]].sort(),
+        locationId: _activeLocKey(),
+        lastTitle: title,
+        lastMessage: message || renderedText || freeRaw || '',
+        lastSenderUid: chatUserProfile.uid,
+        lastSenderName:
+          _trimStr(chatUserProfile.displayName) ||
+          _trimStr(chatUserProfile.name) ||
+          (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
+          '',
+        lastSenderRole: chatUserProfile.role || '',
+        lastMessageAtMs: Date.now(),
+        updatedAtMs: Date.now()
+      });
+      renderThreadList();
+      window._openThread(firstSentConvId);
     }
   } catch(e) {
     console.error('[Chat] send error', e);
@@ -1824,8 +1933,7 @@ function _subscribeToMessages(convId) {
 window.openChatTemplatesSettings = async function() {
   if (!_chatManageAllowed()) return;
   if (!chatUserProfile) await loadChatUserProfile();
-  await loadChatTemplates();
-  await loadChatFlows();
+  await Promise.all([loadChatTemplates(), loadChatFlows()]);
   // Reset the compact form to its default "new" state each time we open
   chatEditingTmplId = null;
   const titleEl = document.getElementById('chatTmplTitle');
@@ -2177,7 +2285,7 @@ window.saveChatFlow = async function() {
       if (i === 0) await updateDoc(doc(db, `salons/${salonId}/chatFlows`, flowId), { startStepId: firestoreStepId });
     }
     window.cancelEditChatFlow();
-    await loadChatFlows();
+    await loadChatFlows({ force: true });
     _renderFlowsAdminList();
     if (typeof window.showToast === 'function') window.showToast('Flow saved', 'success');
   } catch(e) {
@@ -2271,7 +2379,7 @@ window.deleteChatFlow = async function(id) {
     }
     if (chatEditingFlowId === id) window.cancelEditChatFlow();
     await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatFlows`, id));
-    await loadChatFlows();
+    await loadChatFlows({ force: true });
     _renderFlowsAdminList();
   } catch(e) {
     console.error('[Chat] delete flow error', e);
@@ -2525,7 +2633,7 @@ window.saveChatTemplate = async function() {
         { title, message, allowedSenders, locationId: locKey, order: chatTemplates.length, createdAt: serverTimestamp(), createdBy: chatUserProfile.uid });
     }
     window.cancelEditChatTemplate();
-    await loadChatTemplates();
+    await loadChatTemplates({ force: true });
     _renderTmplList();
   } catch(e) {
     console.error('[Chat] save template error', e?.code, e?.message, e);
@@ -2551,7 +2659,7 @@ window.deleteChatTemplate = async function(id) {
   try {
     await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, id));
     if (chatEditingTmplId === id) window.cancelEditChatTemplate();
-    await loadChatTemplates();
+    await loadChatTemplates({ force: true });
     _renderTmplList();
   } catch(e) {
     console.error('[Chat] delete template error', e?.code, e?.message, e);
@@ -2562,8 +2670,7 @@ window.deleteChatTemplate = async function(id) {
 };
 
 window.ffReloadChatTemplates = async function() {
-  await loadChatTemplates();
-  await loadChatFlows();
+  await Promise.all([loadChatTemplates({ force: true }), loadChatFlows({ force: true })]);
   _renderTmplList();
   _renderFlowsAdminList();
   renderSendOptions();
@@ -2638,6 +2745,7 @@ if (typeof document !== 'undefined' && !window.__ff_chatLocationListener) {
       _lastChatToastLastMsgMsByConv.clear();
 
       allConversations = [];
+      lastNonEmptyConversations = [];
       currentMessages  = [];
       currentConvId    = null;
 

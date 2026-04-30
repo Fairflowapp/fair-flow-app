@@ -244,7 +244,7 @@ function getSelectedRange() {
   const weekStart = getWeekStart(now);
   const mode = _timeRangeState.mode || "thisWeek";
   let start = weekStart;
-  let end = now;
+  let end = endOfDay(addDays(weekStart, 6));
   let label = "This week";
 
   if (mode === "lastWeek") {
@@ -858,17 +858,30 @@ async function readScheduleDays(weekStartDate) {
     sources.push({ name, ...details });
     console.log(SCHEDULE_DEBUG_LOG, "source checked", { name, ...details });
   };
+  const stampDaysLocation = (days, locationId) => {
+    const loc = String(locationId || "").trim();
+    if (!loc || !Array.isArray(days)) return days;
+    return days.map((day) => ({
+      ...day,
+      locationId: String(day?.locationId || day?.locId || loc).trim(),
+      assignments: (Array.isArray(day?.assignments) ? day.assignments : []).map((assignment) => ({
+        ...assignment,
+        locationId: String(assignment?.locationId || assignment?.locId || day?.locationId || day?.locId || loc).trim(),
+      })),
+    }));
+  };
   const pickDays = (name, days, details = {}) => {
-    const shifts = extractScheduledShifts(days);
+    const normalizedDays = stampDaysLocation(days, details.locationId || "");
+    const shifts = extractScheduledShifts(normalizedDays);
     addSourceResult(name, {
       ...details,
-      days: Array.isArray(days) ? days.length : 0,
+      days: Array.isArray(normalizedDays) ? normalizedDays.length : 0,
       shifts: shifts.length,
       firstShift: shifts[0] || null,
       accepted: shifts.length > 0,
       rejectedReason: shifts.length ? "" : (details.rejectedReason || "No shifts found"),
     });
-    return shifts.length ? days : null;
+    return shifts.length ? normalizedDays : null;
   };
 
   const docIds = [
@@ -896,6 +909,7 @@ async function readScheduleDays(weekStartDate) {
         const picked = pickDays(sourceName, days, {
           exists: true,
           docId,
+          locationId: docId === schedulePublishDocId() ? activeLocationId : (data.locationId || ""),
           published: data.published?.[weekKey] === true,
           hasWeekBlock: !!block,
         });
@@ -1175,8 +1189,9 @@ async function computeTimeAnalytics(range = getSelectedRange()) {
   const allScheduledShifts = extractScheduledShifts(scheduleDays);
   const skippedScheduleNoLocation = allScheduledShifts.filter((shift) => !shift.locationId).length;
   const scheduledShifts = allScheduledShifts.filter((shift) => {
-    return scope.hasLocation &&
-      shift.locationId === scope.id &&
+    const shiftLocationId = String(shift.locationId || "").trim();
+    const matchesLocation = scope.hasLocation && (shiftLocationId === scope.id || !shiftLocationId);
+    return matchesLocation &&
       shift.scheduledStartMs >= range.fromMs &&
       shift.scheduledStartMs <= range.toMs;
   });

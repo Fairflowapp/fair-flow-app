@@ -2032,7 +2032,9 @@ onAuthStateChanged(auth, async (user) => {
 // =====================
 // Wire UI after DOM is ready
 // =====================
-window.addEventListener("DOMContentLoaded", () => {
+function ffWireUiAfterDomReady() {
+  if (window.__ffUiAfterDomReadyBound) return;
+  window.__ffUiAfterDomReadyBound = true;
   console.log("[UI] DOMContentLoaded – wiring buttons");
 
   let inviteToken = new URLSearchParams(window.location.search).get("invite");
@@ -2649,7 +2651,13 @@ window.addEventListener("DOMContentLoaded", () => {
   } catch (e) {
     console.error('[AUTO_RESET][QUEUE] Error initializing:', e);
   }
-});
+}
+
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", ffWireUiAfterDomReady, { once: true });
+} else {
+  ffWireUiAfterDomReady();
+}
 
 // Initialize Tasks screen buttons function (can be called when Tasks screen opens)
 function initializeTasksScreenButtons() {

@@ -4884,6 +4884,11 @@ export async function goToSchedule() {
     "userProfileScreen",
     "manageQueueScreen",
     "timeClockScreen",
+    "dashboardScreen",
+    "queueAnalyticsScreen",
+    "ticketsAnalyticsScreen",
+    "timeAnalyticsScreen",
+    "tasksAnalyticsScreen",
   ];
   screenIdsToHide.forEach((id) => {
     const el = document.getElementById(id);
