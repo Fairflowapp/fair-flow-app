@@ -397,6 +397,10 @@ body.ff-avatar-dropdown-open .header-inner {
 body.ff-avatar-dropdown-open #userAvatarDropdown {
   pointer-events: auto !important;
 }
+body.ff-avatar-dropdown-open .user-avatar-wrapper,
+body.ff-avatar-dropdown-open #userAvatarBtn {
+  pointer-events: auto !important;
+}
 
 /* Disable pointer-events on header when editing staff details (allows clicking inputs) */
 body.ff-staff-editing .header-inner {
@@ -1293,9 +1297,28 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
 
 .joinbar{max-width:1140px;margin:6px auto 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:0 24px 10px;z-index:1}
 
-/* make sure top bar can't appear above modals */
-#joinBar, .joinbar, .top-bar, #mainTopBar, .header {
+/* make sure queue chrome can't appear above modals */
+#joinBar, .joinbar, .top-bar, #mainTopBar {
   z-index: 1;
+}
+
+/* Main app screens such as Inbox/Training use z-index:100200.
+   Keep the global header and account menu above those screens, but below Apps/modals. */
+.header {
+  z-index: 100250 !important;
+  pointer-events: auto !important;
+}
+.header .toolbar,
+.header .toolbar button,
+.user-avatar-wrapper,
+#userAvatarBtn {
+  pointer-events: auto !important;
+}
+.user-avatar-wrapper {
+  z-index: 100260 !important;
+}
+#userAvatarDropdown {
+  z-index: 100261 !important;
 }
 
 .grow{flex:1 1 260px}
@@ -6113,12 +6136,31 @@ async function verifyQueueGeoFenceForAction({ action, staffId, staffName }) {
     let distanceMeters = null;
     let blockedReason = null;
     try {
-      const position = await requestCurrentBrowserLocation({
-        enableHighAccuracy: true,
-        timeout: 6000,
-        maximumAge: 30000
-      });
+      let position = null;
+      try {
+        position = await requestCurrentBrowserLocation({
+          enableHighAccuracy: false,
+          timeout: 2500,
+          maximumAge: 120000
+        });
+      } catch (_) {
+        position = await requestCurrentBrowserLocation({
+          enableHighAccuracy: true,
+          timeout: 4500,
+          maximumAge: 30000
+        });
+      }
       accuracy = Math.round(Number(position.accuracy || 0));
+      if (accuracy > accuracyLimit) {
+        try {
+          position = await requestCurrentBrowserLocation({
+            enableHighAccuracy: true,
+            timeout: 4500,
+            maximumAge: 30000
+          });
+          accuracy = Math.round(Number(position.accuracy || 0));
+        } catch (_) {}
+      }
       if (accuracy > accuracyLimit) {
         blockedReason = 'low_accuracy';
       } else {
@@ -7836,7 +7878,7 @@ function ffMaybeQueueUiReadyAfterAuth() {
     var t = setTimeout(function () {
       if (gen !== window.__ffQueueGateGen) return;
       ffMarkUiReady();
-    }, 4000);
+    }, 1800);
     document.addEventListener(
       'ff-staff-cloud-updated',
       function ffQueueGateOnStaffOnce() {
@@ -13180,6 +13222,7 @@ function _ffEnsureTrainingModalPortal() {
   modal.style.setProperty('overflow-x', 'hidden', 'important');
   modal.style.setProperty('margin', '0', 'important');
   modal.style.setProperty('transform', 'none', 'important');
+  modal.style.setProperty('pointer-events', 'auto', 'important');
   // Also bulletproof the inner card so it gets a proper width and is never
   // collapsed to a tiny strip by some inherited CSS.
   const card = modal.firstElementChild;
@@ -13254,8 +13297,33 @@ function openEditTrainingModal(itemId) {
 
 function closeCreateTrainingModal() {
   const modal = document.getElementById('createTrainingModal');
-  if (modal) modal.style.display = 'none';
+  if (modal) modal.style.setProperty('display', 'none', 'important');
 }
+
+function ffCloseTrainingOverlaysForNavigation() {
+  try {
+    if (typeof closeCreateTrainingModal === 'function') closeCreateTrainingModal();
+  } catch (_) {}
+  try {
+    ['createTrainingModal', 'addTechnicianTypeModal'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.style.setProperty('display', 'none', 'important');
+        el.style.pointerEvents = 'none';
+      }
+    });
+  } catch (_) {}
+  try {
+    ['trainingAdminConfirmModal', 'trainingAdminNoticeModal'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    });
+  } catch (_) {}
+  try {
+    document.body.style.overflow = '';
+  } catch (_) {}
+}
+window.ffCloseTrainingOverlaysForNavigation = ffCloseTrainingOverlaysForNavigation;
 
 function collectTrainingFormData() {
   const titleInput = document.getElementById('trainingTitleInput');
@@ -14911,6 +14979,11 @@ function goToUserProfile(section) {
     window.goToTimeClock();
     return;
   }
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try { window.ffCloseGlobalBlockingOverlays(); } catch (e) {}
+  } else if (typeof ffCloseTrainingOverlaysForNavigation === 'function') {
+    try { ffCloseTrainingOverlaysForNavigation(); } catch (e) {}
+  }
   if (typeof ffUserShouldRouteToMyProfileOnly === 'function' && ffUserShouldRouteToMyProfileOnly()) {
     if (typeof goToMyProfile === 'function') {
       goToMyProfile();
@@ -15187,6 +15260,11 @@ function goToMyProfile() {
   if (!myProfileScreen) {
     console.error('goToMyProfile: missing #myProfileScreen');
     return;
+  }
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try { window.ffCloseGlobalBlockingOverlays(); } catch (e) {}
+  } else if (typeof ffCloseTrainingOverlaysForNavigation === 'function') {
+    try { ffCloseTrainingOverlaysForNavigation(); } catch (e) {}
   }
 
   const userProfileScreen = document.getElementById('userProfileScreen');
@@ -18260,6 +18338,7 @@ function showAddTechnicianTypeDialog() {
   
   // Show modal
   modal.style.display = 'flex';
+  modal.style.pointerEvents = 'auto';
   
   // Close handlers
   const closeModal = () => {
@@ -24389,9 +24468,16 @@ window.ffCloseGlobalBlockingOverlays = function () {
     });
   } catch (e) {}
   try {
-    ['uploadWorkModal', 'workDetailsModal', 'markPostedModal', 'createTrainingModal', 'addTechnicianTypeModal'].forEach(function (id) {
+    ['uploadWorkModal', 'workDetailsModal', 'markPostedModal'].forEach(function (id) {
       var el = document.getElementById(id);
       if (el) el.style.display = 'none';
+    });
+  } catch (e) {}
+  try {
+    if (typeof ffCloseTrainingOverlaysForNavigation === 'function') ffCloseTrainingOverlaysForNavigation();
+    else ['createTrainingModal', 'addTechnicianTypeModal'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.setProperty('display', 'none', 'important');
     });
   } catch (e) {}
   try {
@@ -27742,6 +27828,17 @@ function initializeAppsPanel() {
           case 'dashboard':
             if (typeof window.goToDashboard === 'function') {
               window.goToDashboard();
+            } else {
+              import('/dashboard.js?v=20260430_dashboard_range_filter_v3')
+                .then((m) => {
+                  if (m && typeof m.goToDashboard === 'function') {
+                    window.goToDashboard = m.goToDashboard;
+                    m.goToDashboard();
+                  } else if (typeof window.goToDashboard === 'function') {
+                    window.goToDashboard();
+                  }
+                })
+                .catch((err) => console.error('[Apps Panel] Failed to load Dashboard', err));
             }
             break;
           default:
@@ -29562,12 +29659,37 @@ function initializeAppsPanel() {
       var r = String(window.__ff_user_role || '').toLowerCase();
       return r === 'owner' || r === 'admin';
     }
-    const staffId = String(window.__ff_authedStaffId || (function () { try { return localStorage.getItem('ff_authedStaffId_v1'); } catch (e) { return ''; } })() || '').trim();
     let staff = null;
+    try {
+      if (typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function') {
+        staff = ffResolveCurrentStaffRowFromFfStaffV1();
+      }
+    } catch (e) { /* ignore */ }
     if (typeof ffGetStaffStore === 'function') {
       try {
         const st = ffGetStaffStore();
-        staff = (st.staff || []).find(function (s) { return s && String(s.id) === staffId; }) || null;
+        const staffList = Array.isArray(st.staff) ? st.staff : [];
+        const user = window.auth && window.auth.currentUser;
+        const uid = user && user.uid ? String(user.uid).trim() : '';
+        const email = user && user.email ? String(user.email).toLowerCase().trim() : '';
+        if (!staff && uid) {
+          staff = staffList.find(function (s) {
+            return s && (
+              String(s.uid || '').trim() === uid ||
+              String(s.firebaseUid || '').trim() === uid ||
+              String(s.userUid || '').trim() === uid
+            );
+          }) || null;
+        }
+        if (!staff && email) {
+          staff = staffList.find(function (s) {
+            return s && String(s.email || '').toLowerCase().trim() === email;
+          }) || null;
+        }
+        if (!staff) {
+          const staffId = String(window.__ff_authedStaffId || (function () { try { return localStorage.getItem('ff_authedStaffId_v1'); } catch (e) { return ''; } })() || '').trim();
+          staff = staffList.find(function (s) { return s && String(s.id) === staffId; }) || null;
+        }
       } catch (e) { /* ignore */ }
     }
     var p = (staff && staff.permissions) ? staff.permissions : {};
@@ -48580,35 +48702,35 @@ function hookSettingsGuard_DISABLED(){
   <script>
     (function () {
       var scripts = [
-        { src: "/points-engine.js?v=20260426_branch_points_r1", type: "module", delay: 1200 },
-        { src: "/schedule-helpers.js?v=20260420_per_loc_no_default", type: "module", delay: 1600 },
-        { src: "/schedule-availability.js?v=20260409_coverage_plain_cards", type: "module", delay: 1700 },
-        { src: "/schedule-generator.js?v=20260420_cross_loc_busy", type: "module", delay: 1800 },
-        { src: "/schedule-validator.js?v=20260409_stagger_by_coverage_min", type: "module", delay: 1900 },
-        { src: "/schedule-ui.js?v=20260429_dashboard_nav_fix_v1", type: "module", delay: 2200 },
-        { src: "/inbox.js?v=20260420_inv_draftpicker_v123", type: "module", delay: 2400 },
-        { src: "/chat.js?v=20260430_chat_recipient_open_fix_v3", type: "module", delay: 2600 },
-        { src: "/staff-cloud.js?v=20260415_ff_toast", type: "module", delay: 2800 },
-        { src: "/locations-cloud.js?v=20260420_locations_v1", type: "module", delay: 3000 },
-        { src: "/location-helpers.js?v=20260420_owner_bypass_v1", delay: 3200 },
-        { src: "/location-switcher.js?v=20260420_switcher_mangomint_v1", delay: 3400 },
-        { src: "/staff-documents.js?v=20260412_doc_meta_edit", type: "module", delay: 3600 },
-        { src: "/staff-call-cloud.js?v=20260412_staffcall_accept_ui", type: "module", delay: 3800 },
-        { src: "/settings-cloud.js?v=20260420_time_clock_v1", type: "module", delay: 4000 },
-        { src: "/time-clock-engine.js?v=20260420_tc_engine_v2_shifts", delay: 4200 },
-        { src: "/time-clock-entries.js?v=20260424_tc_single_open_shift_r1", type: "module", delay: 4400 },
-        { src: "/queue-cloud.js?v=20260420_per_location_v1", type: "module", delay: 4600 },
-        { src: "/tasks-cloud.js?v=20260429_tasks_force_auto_reset_v1", type: "module", delay: 4800 },
-        { src: "/tickets.js?v=20260429_tickets_new_btn_no_flicker_v1", type: "module", delay: 5000 },
-        { src: "/media-upload.js?v=20260426_branch_points_r1", type: "module", delay: 5200 },
-        { src: "/inventory.js?v=20260425_import_shared_inventory_catalog_r1", type: "module", delay: 5400 },
-        { src: "/onboarding-wizard.js?v=20260420_onboarding_v1", type: "module", delay: 5600 },
-        { src: "/locations-manage.js?v=20260424_locations_compact_rows_r1", type: "module", delay: 5800 },
-        { src: "/dashboard.js?v=20260429_tight_analytics_v1", type: "module", delay: 6000 },
-        { src: "/queue-analytics.js?v=20260429_tight_analytics_v1", type: "module", delay: 6200 },
-        { src: "/tickets-analytics.js?v=20260429_tight_analytics_v1", type: "module", delay: 6400 },
-        { src: "/time-analytics.js?v=20260429_time_full_week_v1", type: "module", delay: 6600 },
-        { src: "/tasks-analytics.js?v=20260429_tight_analytics_v1", type: "module", delay: 6800 }
+        { src: "/staff-cloud.js?v=20260415_ff_toast", type: "module", delay: 700 },
+        { src: "/locations-cloud.js?v=20260420_locations_v1", type: "module", delay: 900 },
+        { src: "/location-helpers.js?v=20260420_owner_bypass_v1", delay: 1050 },
+        { src: "/location-switcher.js?v=20260420_switcher_mangomint_v1", delay: 1200 },
+        { src: "/queue-cloud.js?v=20260420_per_location_v1", type: "module", delay: 1350 },
+        { src: "/tasks-cloud.js?v=20260429_tasks_force_auto_reset_v1", type: "module", delay: 1500 },
+        { src: "/points-engine.js?v=20260426_branch_points_r1", type: "module", delay: 1650 },
+        { src: "/schedule-helpers.js?v=20260420_per_loc_no_default", type: "module", delay: 1800 },
+        { src: "/schedule-availability.js?v=20260409_coverage_plain_cards", type: "module", delay: 1900 },
+        { src: "/schedule-generator.js?v=20260420_cross_loc_busy", type: "module", delay: 2000 },
+        { src: "/schedule-validator.js?v=20260409_stagger_by_coverage_min", type: "module", delay: 2100 },
+        { src: "/schedule-ui.js?v=20260429_dashboard_nav_fix_v1", type: "module", delay: 2300 },
+        { src: "/dashboard.js?v=20260430_dashboard_range_filter_v3", type: "module", delay: 2500 },
+        { src: "/inbox.js?v=20260420_inv_draftpicker_v123", type: "module", delay: 2700 },
+        { src: "/chat.js?v=20260430_chat_recipient_open_fix_v3", type: "module", delay: 2900 },
+        { src: "/staff-documents.js?v=20260412_doc_meta_edit", type: "module", delay: 3200 },
+        { src: "/staff-call-cloud.js?v=20260412_staffcall_accept_ui", type: "module", delay: 3400 },
+        { src: "/settings-cloud.js?v=20260420_time_clock_v1", type: "module", delay: 3600 },
+        { src: "/time-clock-engine.js?v=20260420_tc_engine_v2_shifts", delay: 3800 },
+        { src: "/time-clock-entries.js?v=20260424_tc_single_open_shift_r1", type: "module", delay: 4000 },
+        { src: "/tickets.js?v=20260429_tickets_new_btn_no_flicker_v1", type: "module", delay: 4300 },
+        { src: "/media-upload.js?v=20260426_branch_points_r1", type: "module", delay: 4600 },
+        { src: "/inventory.js?v=20260425_import_shared_inventory_catalog_r1", type: "module", delay: 4900 },
+        { src: "/onboarding-wizard.js?v=20260420_onboarding_v1", type: "module", delay: 5200 },
+        { src: "/locations-manage.js?v=20260424_locations_compact_rows_r1", type: "module", delay: 5400 },
+        { src: "/queue-analytics.js?v=20260429_tight_analytics_v1", type: "module", delay: 5700 },
+        { src: "/tickets-analytics.js?v=20260429_tight_analytics_v1", type: "module", delay: 6000 },
+        { src: "/time-analytics.js?v=20260429_time_full_week_v1", type: "module", delay: 6300 },
+        { src: "/tasks-analytics.js?v=20260429_tight_analytics_v1", type: "module", delay: 6600 }
       ];
       function wait(ms) {
         return new Promise(function (resolve) { setTimeout(resolve, ms); });

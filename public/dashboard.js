@@ -39,6 +39,15 @@ const OTHER_NAV_IDS = [
 
 let _injected = false;
 let _refreshTimer = null;
+let _dashboardRangeMode = (() => {
+  try { return localStorage.getItem("ff_dashboard_range_mode_v1") || "thisWeek"; } catch (_) { return "thisWeek"; }
+})();
+let _dashboardCustomStart = (() => {
+  try { return localStorage.getItem("ff_dashboard_custom_start_v1") || ""; } catch (_) { return ""; }
+})();
+let _dashboardCustomEnd = (() => {
+  try { return localStorage.getItem("ff_dashboard_custom_end_v1") || ""; } catch (_) { return ""; }
+})();
 
 // ---------- DOM injection ----------
 
@@ -61,7 +70,7 @@ function injectStyles() {
     #${SCREEN_ID} .dash-wrap {
       max-width: 1280px;
       margin: 0 auto;
-      padding: 6px 28px 48px 28px;
+      padding: 2px 28px 48px 28px;
       width: 100%;
     }
     #${SCREEN_ID} .dash-h1 {
@@ -89,6 +98,55 @@ function injectStyles() {
       color: #6b7280;
       font-size: 10px;
       font-weight: 600;
+    }
+    #${SCREEN_ID} .dash-head-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 2px;
+    }
+    #${SCREEN_ID} .dash-title-group {
+      min-width: 0;
+    }
+    #${SCREEN_ID} .dash-range-controls {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      flex-wrap: nowrap;
+      margin-left: auto;
+      margin-top: 6px;
+    }
+    #${SCREEN_ID} .dash-range-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+    #${SCREEN_ID} .dash-range-select,
+    #${SCREEN_ID} .dash-range-date {
+      height: 32px;
+      border: 1px solid #e5e7eb;
+      border-radius: 999px;
+      background: #fff;
+      color: #374151;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 0 10px;
+      outline: none;
+    }
+    #${SCREEN_ID} .dash-range-date {
+      border-radius: 10px;
+      width: 132px;
+    }
+    #${SCREEN_ID} .dash-range-custom {
+      display: none;
+      align-items: center;
+      gap: 6px;
     }
     #${SCREEN_ID} .dash-section-title {
       font-size: 12px;
@@ -256,6 +314,7 @@ function injectStyles() {
       #${SCREEN_ID} .dash-wrap { padding: 16px 14px 32px 14px; }
       #${SCREEN_ID} .dash-h1,
       #${SCREEN_ID} .dash-location { margin-left: 0; }
+      #${SCREEN_ID} .dash-range-controls { justify-content: flex-start; width: 100%; }
       #${SCREEN_ID} .dash-grid { grid-template-columns: 1fr; }
       #${SCREEN_ID} .dash-stats { grid-template-columns: 1fr 1fr; }
     }
@@ -269,11 +328,30 @@ function buildScreen() {
   root.id = SCREEN_ID;
   root.innerHTML = `
     <div class="dash-wrap" id="ffDashWrap">
-      <h1 class="dash-h1">Dashboard</h1>
-      <p class="dash-sub" id="ffDashSubtitle">Overview of your business activity</p>
-      <div class="dash-location" id="ffDashLocationLabel">—</div>
+      <div class="dash-head-row">
+        <div class="dash-title-group">
+          <h1 class="dash-h1">Dashboard</h1>
+          <p class="dash-sub" id="ffDashSubtitle">Overview of your business activity</p>
+          <div class="dash-location" id="ffDashLocationLabel">—</div>
+        </div>
+        <div class="dash-range-controls" aria-label="Dashboard date range">
+          <span class="dash-range-label">Date range</span>
+          <select id="ffDashRangeSelect" class="dash-range-select">
+            <option value="today">Today</option>
+            <option value="thisWeek">This week</option>
+            <option value="thisMonth">This month</option>
+            <option value="last7">Last 7 days</option>
+            <option value="custom">Custom date</option>
+          </select>
+          <span id="ffDashCustomRange" class="dash-range-custom">
+            <input id="ffDashCustomStart" class="dash-range-date" type="date" aria-label="Custom start date">
+            <span style="font-size:12px;color:#9ca3af;">to</span>
+            <input id="ffDashCustomEnd" class="dash-range-date" type="date" aria-label="Custom end date">
+          </span>
+        </div>
+      </div>
 
-      <div class="dash-section-title">Today at a glance</div>
+      <div class="dash-section-title" id="ffDashGlanceTitle">At a glance</div>
       <div class="dash-kpis" id="ffDashKpis"></div>
 
       <div class="dash-section-title">Modules</div>
@@ -353,12 +431,80 @@ function todayStartMs() {
   return d.getTime();
 }
 
+function endOfTodayMs() {
+  const d = new Date();
+  d.setHours(23, 59, 59, 999);
+  return d.getTime();
+}
+
 function weekStartMs() {
   const d = new Date();
   const day = d.getDay(); // 0 = Sunday
   d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() - day);
   return d.getTime();
+}
+
+function monthStartMs() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(1);
+  return d.getTime();
+}
+
+function parseLocalDateStartMs(value) {
+  const s = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00`);
+  const ms = d.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function parseLocalDateEndMs(value) {
+  const s = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T23:59:59.999`);
+  const ms = d.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function getDashboardDateRange() {
+  const now = Date.now();
+  const today = todayStartMs();
+  const mode = ["today", "thisWeek", "thisMonth", "last7", "custom"].includes(_dashboardRangeMode)
+    ? _dashboardRangeMode
+    : "thisWeek";
+  if (mode === "today") {
+    return { mode, startMs: today, endMs: endOfTodayMs(), label: "Today", shortLabel: "Today" };
+  }
+  if (mode === "thisMonth") {
+    return { mode, startMs: monthStartMs(), endMs: now, label: "This month", shortLabel: "This month" };
+  }
+  if (mode === "last7") {
+    return { mode, startMs: now - (7 * 24 * 60 * 60 * 1000), endMs: now, label: "Last 7 days", shortLabel: "Last 7 days" };
+  }
+  if (mode === "custom") {
+    const start = parseLocalDateStartMs(_dashboardCustomStart);
+    const end = parseLocalDateEndMs(_dashboardCustomEnd);
+    if (start != null && end != null && end >= start) {
+      return {
+        mode,
+        startMs: start,
+        endMs: end,
+        label: `${_dashboardCustomStart} to ${_dashboardCustomEnd}`,
+        shortLabel: "Custom date",
+      };
+    }
+  }
+  return { mode: "thisWeek", startMs: weekStartMs(), endMs: now, label: "This week", shortLabel: "This week" };
+}
+
+function inDashboardRange(ms, range) {
+  return Number.isFinite(ms) && ms >= range.startMs && ms <= range.endMs;
+}
+
+function eventMillis(v) {
+  return toMillis(v);
 }
 
 function fmtNumber(n) {
@@ -401,8 +547,8 @@ function fmtCurrency(v) {
 // Best-effort tickets snapshot. Tickets module keeps its data internal,
 // so we look for any of the common globals it (or future code) might
 // expose. Falls back gracefully.
-async function readTicketsSnapshot() {
-  const out = { todayCount: 0, weekCount: 0, totalCount: 0, totalAmount: 0, hasData: false };
+async function readTicketsSnapshot(range) {
+  const out = { rangeCount: 0, todayCount: 0, weekCount: 0, totalCount: 0, totalAmount: 0, hasData: false };
   const scope = getDashboardLocationScope();
   let list = [];
   if (Array.isArray(window.currentTickets)) list = window.currentTickets;
@@ -457,10 +603,14 @@ async function readTicketsSnapshot() {
     if (ms != null) {
       if (ms >= todayMs) out.todayCount += 1;
       if (ms >= weekMs) out.weekCount += 1;
+      if (!range || inDashboardRange(ms, range)) {
+        out.rangeCount += 1;
+        const amt = Number(t && (t.totalAmount ?? t.total ?? t.amount));
+        if (Number.isFinite(amt)) out.totalAmount += amt;
+      }
     }
-    const amt = Number(t && (t.totalAmount ?? t.total ?? t.amount));
-    if (Number.isFinite(amt)) out.totalAmount += amt;
   });
+  out.totalCount = out.rangeCount;
   return out;
 }
 
@@ -546,7 +696,7 @@ function _qmActionKind(action) {
 }
 
 // Compute queue metrics for [fromMs, nowMs]. Returns nulls when no data.
-function computeQueueMetrics(fromMs) {
+function computeQueueMetrics(fromMs, endMs = Date.now()) {
   const scope = getDashboardLocationScope();
   const result = {
     avgWaitMin: null,
@@ -579,7 +729,7 @@ function computeQueueMetrics(fromMs) {
   let skippedNoLocation = 0;
   for (let i = 0; i < raw.length; i += 1) {
     const p = _qmParseEntry(raw[i]);
-    if (!p || p.ts < fromMs) continue;
+    if (!p || p.ts < fromMs || p.ts > endMs) continue;
     if (!p.locationId) {
       skippedNoLocation += 1;
       continue;
@@ -723,7 +873,7 @@ function computeQueueMetrics(fromMs) {
   return result;
 }
 
-function readQueueSnapshot() {
+function readQueueSnapshot(range) {
   const scope = getDashboardLocationScope();
   const rawQ = safeArr(window.queue);
   const rawService = safeArr(window.service);
@@ -749,7 +899,7 @@ function readQueueSnapshot() {
     peakHour: null,
   };
   try {
-    const metrics = computeQueueMetrics(weekStartMs());
+    const metrics = computeQueueMetrics(range?.startMs || weekStartMs(), range?.endMs || Date.now());
     out.avgWaitMin = metrics.avgWaitMin;
     out.longestWaitMin = metrics.longestWaitMin;
     out.busiestDay = metrics.busiestDay;
@@ -760,7 +910,7 @@ function readQueueSnapshot() {
   return out;
 }
 
-function readTasksSnapshot() {
+function readTasksSnapshot(range) {
   const scope = getDashboardLocationScope();
   const out = { opened: 0, completed: 0, openCount: 0, completionRate: null, hasData: false };
   const tabs = ["opening", "closing", "weekly", "monthly", "yearly"];
@@ -818,6 +968,10 @@ function readTasksSnapshot() {
     const id = String(task.taskId || task.id || `${task.__tab}:${task.__kind}:${task.title || index}`).trim();
     const key = `${task.__tab || "task"}:${id}`;
     const status = String(task.status || task.state || "").toLowerCase();
+    const taskMs = eventMillis(
+      task.completedAt || task.doneAt || task.updatedAt || task.createdAt || task.createdAtMs || task.ts || task.timestamp
+    );
+    if (taskMs && range && !inDashboardRange(taskMs, range)) return;
     const isDone = task.__kind === "done" || status === "done" || status === "completed" || task.completed === true || !!task.completedAt || !!task.doneAt;
     const isPending = task.__kind === "pending" || status === "pending" || !!task.assignedTo;
     const current = seen.get(key) || { done: false, pending: false };
@@ -840,8 +994,8 @@ function readTasksSnapshot() {
   return out;
 }
 
-async function readTimeClockSnapshot() {
-  const out = { totalHoursWeek: 0, overtimeHours: 0, topStaffName: null, hasData: false };
+async function readTimeClockSnapshot(range) {
+  const out = { totalHours: 0, overtimeHours: 0, topStaffName: null, hasData: false };
   const scope = getDashboardLocationScope();
   if (!scope.hasLocation) {
     logDashboardScope("time-clock", scope, 0, 0, 0);
@@ -849,7 +1003,7 @@ async function readTimeClockSnapshot() {
   }
   if (typeof window.ffListTimeEntriesForSalon !== "function") return out;
   try {
-    const fromDate = new Date(weekStartMs());
+    const fromDate = new Date(range?.startMs || weekStartMs());
     const entries = await window.ffListTimeEntriesForSalon({
       from: fromDate,
       locationId: scope.id,
@@ -869,8 +1023,11 @@ async function readTimeClockSnapshot() {
       const inMs = toMillis(inAt);
       const outMs = toMillis(outAt) || (e && e.status === "open" ? Date.now() : null);
       if (!inMs || !outMs || outMs <= inMs) return;
-      const hours = (outMs - inMs) / 3600000;
-      out.totalHoursWeek += hours;
+      const startMs = Math.max(inMs, range?.startMs || inMs);
+      const endMs = Math.min(outMs, range?.endMs || outMs);
+      if (endMs <= startMs) return;
+      const hours = (endMs - startMs) / 3600000;
+      out.totalHours += hours;
       const sid = String(e.staffId || e.staffMemberId || e.uid || "unknown");
       const sname = resolveDashboardStaffName(sid, e.staffName || e.name || "");
       byStaff.set(sid, { name: sname, hours: (byStaff.get(sid)?.hours || 0) + hours });
@@ -939,16 +1096,59 @@ function renderDashboardLocation(scope = getDashboardLocationScope()) {
   if (el) el.textContent = scope.label;
 }
 
-function renderKpis(snap) {
+function renderDashboardRangeControls(range) {
+  const select = document.getElementById("ffDashRangeSelect");
+  const custom = document.getElementById("ffDashCustomRange");
+  const start = document.getElementById("ffDashCustomStart");
+  const end = document.getElementById("ffDashCustomEnd");
+  const title = document.getElementById("ffDashGlanceTitle");
+  if (select) select.value = range.mode || _dashboardRangeMode || "thisWeek";
+  if (custom) custom.style.display = (select?.value || range.mode) === "custom" ? "inline-flex" : "none";
+  if (start) start.value = _dashboardCustomStart || "";
+  if (end) end.value = _dashboardCustomEnd || "";
+  if (title) title.textContent = `${range.shortLabel || "Selected range"} at a glance`;
+}
+
+function bindDashboardRangeControls() {
+  const select = document.getElementById("ffDashRangeSelect");
+  const start = document.getElementById("ffDashCustomStart");
+  const end = document.getElementById("ffDashCustomEnd");
+  if (select && !select.__ffDashBound) {
+    select.__ffDashBound = true;
+    select.addEventListener("change", () => {
+      _dashboardRangeMode = select.value || "thisWeek";
+      try { localStorage.setItem("ff_dashboard_range_mode_v1", _dashboardRangeMode); } catch (_) {}
+      refresh();
+    });
+  }
+  if (start && !start.__ffDashBound) {
+    start.__ffDashBound = true;
+    start.addEventListener("change", () => {
+      _dashboardCustomStart = start.value || "";
+      try { localStorage.setItem("ff_dashboard_custom_start_v1", _dashboardCustomStart); } catch (_) {}
+      refresh();
+    });
+  }
+  if (end && !end.__ffDashBound) {
+    end.__ffDashBound = true;
+    end.addEventListener("change", () => {
+      _dashboardCustomEnd = end.value || "";
+      try { localStorage.setItem("ff_dashboard_custom_end_v1", _dashboardCustomEnd); } catch (_) {}
+      refresh();
+    });
+  }
+}
+
+function renderKpis(snap, range) {
   const root = document.getElementById("ffDashKpis");
   if (!root) return;
   const cards = [
-    { label: "Tickets today", value: snap.tickets.hasData ? fmtNumber(snap.tickets.todayCount) : "0", foot: "Today" },
-    { label: "Tickets this week", value: snap.tickets.hasData ? fmtNumber(snap.tickets.weekCount) : "0", foot: "Last 7 days" },
-    { label: "Revenue", value: snap.tickets.hasData && snap.tickets.totalAmount ? fmtCurrency(snap.tickets.totalAmount) : "—", foot: "All visible tickets" },
-    { label: "Avg wait time", value: fmtMinutes(snap.queue.avgWaitMin), foot: snap.queue.inQueue ? `${snap.queue.inQueue} in queue now` : "—" },
-    { label: "Hours worked", value: snap.time.hasData ? `${snap.time.totalHoursWeek.toFixed(1)}h` : "0h", foot: "This week" },
-    { label: "Overtime", value: snap.time.hasData ? `${snap.time.overtimeHours.toFixed(1)}h` : "0h", foot: "Over 40h/week" },
+    { label: "Tickets", value: snap.tickets.hasData ? fmtNumber(snap.tickets.rangeCount) : "0", foot: range.label },
+    { label: "Revenue", value: snap.tickets.hasData && snap.tickets.totalAmount ? fmtCurrency(snap.tickets.totalAmount) : "—", foot: range.label },
+    { label: "Avg wait time", value: fmtMinutes(snap.queue.avgWaitMin), foot: range.label },
+    { label: "Hours worked", value: snap.time.hasData ? `${snap.time.totalHours.toFixed(1)}h` : "0h", foot: range.label },
+    { label: "Overtime", value: snap.time.hasData ? `${snap.time.overtimeHours.toFixed(1)}h` : "0h", foot: range.label },
+    { label: "Tasks completed", value: fmtNumber(snap.tasks.completed), foot: range.label },
   ];
   root.innerHTML = cards.map((c) => `
     <div class="dash-kpi">
@@ -959,7 +1159,7 @@ function renderKpis(snap) {
   `).join("");
 }
 
-function renderModuleCards(snap) {
+function renderModuleCards(snap, range) {
   const root = document.getElementById("ffDashGrid");
   if (!root) return;
 
@@ -971,13 +1171,14 @@ function renderModuleCards(snap) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         </span>
       </div>
+      <div class="dash-meta">Showing: <b>${escapeHtml(range.label)}</b></div>
       <div class="dash-stats">
         <div class="dash-stat"><div class="dash-stat-label">Average wait time</div><div class="dash-stat-value">${escapeHtml(fmtMinutes(snap.queue.avgWaitMin))}</div></div>
         <div class="dash-stat"><div class="dash-stat-label">Longest wait time</div><div class="dash-stat-value">${escapeHtml(fmtMinutes(snap.queue.longestWaitMin))}</div></div>
       </div>
       <div class="dash-meta">
-        <div>Busiest day: <b>${escapeHtml(snap.queue.busiestDay || "—")}</b></div>
-        <div>Peak hour: <b>${escapeHtml(snap.queue.peakHour == null ? "—" : fmtHourRange(snap.queue.peakHour))}</b></div>
+        <div>Busiest day in range: <b>${escapeHtml(snap.queue.busiestDay || "—")}</b></div>
+        <div>Peak hour in range: <b>${escapeHtml(snap.queue.peakHour == null ? "—" : fmtHourRange(snap.queue.peakHour))}</b></div>
       </div>
       <button type="button" class="dash-link" data-dash-action="queue-analytics">View Queue Analytics →</button>
     </div>
@@ -991,6 +1192,7 @@ function renderModuleCards(snap) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
         </span>
       </div>
+      <div class="dash-meta">Showing: <b>${escapeHtml(range.label)}</b></div>
       <div class="dash-stats">
         <div class="dash-stat"><div class="dash-stat-label">Total tickets</div><div class="dash-stat-value">${escapeHtml(fmtNumber(snap.tickets.totalCount))}</div></div>
         <div class="dash-stat"><div class="dash-stat-label">Total amount</div><div class="dash-stat-value">${escapeHtml(snap.tickets.totalAmount ? fmtCurrency(snap.tickets.totalAmount) : "—")}</div></div>
@@ -1010,8 +1212,9 @@ function renderModuleCards(snap) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         </span>
       </div>
+      <div class="dash-meta">Showing: <b>${escapeHtml(range.label)}</b></div>
       <div class="dash-stats">
-        <div class="dash-stat"><div class="dash-stat-label">Total hours</div><div class="dash-stat-value">${snap.time.hasData ? `${snap.time.totalHoursWeek.toFixed(1)}h` : "0h"}</div></div>
+        <div class="dash-stat"><div class="dash-stat-label">Total hours</div><div class="dash-stat-value">${snap.time.hasData ? `${snap.time.totalHours.toFixed(1)}h` : "0h"}</div></div>
         <div class="dash-stat"><div class="dash-stat-label">Overtime</div><div class="dash-stat-value">${snap.time.hasData ? `${snap.time.overtimeHours.toFixed(1)}h` : "0h"}</div></div>
       </div>
       <div class="dash-meta">
@@ -1029,6 +1232,7 @@ function renderModuleCards(snap) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         </span>
       </div>
+      <div class="dash-meta">Showing: <b>${escapeHtml(range.label)}</b></div>
       <div class="dash-stats">
         <div class="dash-stat"><div class="dash-stat-label">Tasks opened</div><div class="dash-stat-value">${escapeHtml(fmtNumber(snap.tasks.opened))}</div></div>
         <div class="dash-stat"><div class="dash-stat-label">Completed</div><div class="dash-stat-value">${escapeHtml(fmtNumber(snap.tasks.completed))}</div></div>
@@ -1141,21 +1345,23 @@ async function refresh() {
   if (!screen || screen.style.display === "none") return;
   console.log(LOG, "refresh");
   const scope = getDashboardLocationScope();
+  const range = getDashboardDateRange();
   console.log(LOC_LOG, "active location", { activeLocationId: scope.id || "", label: scope.label });
   renderDashboardLocation(scope);
+  renderDashboardRangeControls(range);
   const snap = {
-    tickets: await readTicketsSnapshot(),
-    queue: readQueueSnapshot(),
-    tasks: readTasksSnapshot(),
-    time: { totalHoursWeek: 0, overtimeHours: 0, topStaffName: null, hasData: false },
+    tickets: await readTicketsSnapshot(range),
+    queue: readQueueSnapshot(range),
+    tasks: readTasksSnapshot(range),
+    time: { totalHours: 0, overtimeHours: 0, topStaffName: null, hasData: false },
   };
   try {
-    snap.time = await readTimeClockSnapshot();
+    snap.time = await readTimeClockSnapshot(range);
   } catch (e) {
     console.warn(LOG, "async time refresh failed", e);
   }
-  renderKpis(snap);
-  renderModuleCards(snap);
+  renderKpis(snap, range);
+  renderModuleCards(snap, range);
   renderInsights(snap);
 }
 
@@ -1243,6 +1449,7 @@ function ensureInjected() {
   if (_injected) return;
   injectStyles();
   buildScreen();
+  bindDashboardRangeControls();
   bindAutoHideOnOtherNav();
   _injected = true;
   console.log(LOG, "screen injected");
