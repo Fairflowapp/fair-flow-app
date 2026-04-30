@@ -21187,6 +21187,9 @@ function openTasks() {
       if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
       return;
     }
+    if (typeof window.hideTasksAnalytics === 'function') {
+      try { window.hideTasksAnalytics(); } catch (_) {}
+    }
     if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
       window.ffCloseGlobalBlockingOverlays();
     }
@@ -21362,8 +21365,12 @@ function openTasks() {
       window.tasksCloudRefresh();
     }
 
-    // Set default tab to Opening (this will render tasks)
-    setTasksTab('opening');
+    // Keep the user's current Tasks tab instead of jumping back to Opening.
+    const validTaskTabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
+    const desiredTasksTab = validTaskTabs.includes(String(window.currentTasksTab || '').toLowerCase())
+      ? String(window.currentTasksTab).toLowerCase()
+      : 'opening';
+    setTasksTab(desiredTasksTab);
     
     // Update tab badges after opening Tasks screen
     if (typeof window.ffUpdateTasksTabBadges === 'function') {
@@ -21431,19 +21438,22 @@ function openTasks() {
               // Check all tasks done
               const _active  = JSON.parse(localStorage.getItem('ff_tasks_' + _tab + '_active_v1')  || '[]');
               const _pending = JSON.parse(localStorage.getItem('ff_tasks_' + _tab + '_pending_v1') || '[]');
-              if (_active.length === 0) return;
+              if (_active.length === 0 && _pending.length === 0) return;
 
               const _isDone = t => {
                 const s = String(t && t.status || '').toLowerCase();
                 return s === 'done' || t.completed === true || t.isCompleted === true || Boolean(t.completedAt);
               };
-              if (!_active.every(_isDone)) return;
-              if (_pending.length > 0 && !_pending.every(_isDone)) return;
+              const _forceReset = _cfg.autoResetForce === true;
+              if (!_forceReset) {
+                if (!_active.every(_isDone)) return;
+                if (_pending.length > 0 && !_pending.every(_isDone)) return;
+              }
 
               // For weekly/monthly/yearly: only reset if there are tasks scheduled for today
               // (ffGetUncompletedCountForTab returns 0 even when no tasks scheduled, so guard here too)
               if (_tab === 'weekly' || _tab === 'monthly' || _tab === 'yearly') {
-                if (typeof window.ffHasTodayTasksForTab === 'function' && !window.ffHasTodayTasksForTab(_tab, _now)) return;
+                if (!_forceReset && typeof window.ffHasTodayTasksForTab === 'function' && !window.ffHasTodayTasksForTab(_tab, _now)) return;
               }
 
               // All conditions met — fire reset
@@ -21876,12 +21886,14 @@ function setSettingsModalTab(tabName, options) {
     const tasksMonthlyAutoResetEnabled = document.getElementById('tasksMonthlyAutoResetEnabled');
     const tasksMonthlyAutoResetTimeRow = document.getElementById('tasksMonthlyAutoResetTimeRow');
     const tasksMonthlyAutoResetTime = document.getElementById('tasksMonthlyAutoResetTime');
+    const tasksMonthlyAutoResetForce = document.getElementById('tasksMonthlyAutoResetForce');
     
     // Cache Yearly Auto-Reset elements
     const tasksYearlyAutoResetSection = document.getElementById('tasksYearlyAutoResetSection');
     const tasksYearlyAutoResetEnabled = document.getElementById('tasksYearlyAutoResetEnabled');
     const tasksYearlyAutoResetTimeRow = document.getElementById('tasksYearlyAutoResetTimeRow');
     const tasksYearlyAutoResetTime = document.getElementById('tasksYearlyAutoResetTime');
+    const tasksYearlyAutoResetForce = document.getElementById('tasksYearlyAutoResetForce');
     
     // Cache Opening/Closing/Weekly Auto-Reset sections
     const tasksOpeningAutoResetSection = document.getElementById('tasksOpeningAutoResetSection');
@@ -21895,6 +21907,43 @@ function setSettingsModalTab(tabName, options) {
       if (row) {
         section.appendChild(row);
       }
+    };
+
+    const syncAutoResetForce = (tab, checkbox, enabled, persist) => {
+      if (!tab || !checkbox) return;
+      const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+      if (!alertWindows[tab]) alertWindows[tab] = {};
+      checkbox.disabled = enabled !== true;
+      if (enabled !== true) {
+        checkbox.checked = false;
+        alertWindows[tab].autoResetForce = false;
+      } else {
+        checkbox.checked = alertWindows[tab].autoResetForce === true;
+      }
+      const label = checkbox.closest('label');
+      if (label) {
+        label.style.opacity = enabled === true ? '1' : '0.45';
+        label.style.cursor = enabled === true ? 'pointer' : 'not-allowed';
+      }
+      if (persist === true) {
+        localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+      }
+    };
+
+    const bindAutoResetForce = (tab, checkbox, enabled) => {
+      if (!tab || !checkbox) return;
+      syncAutoResetForce(tab, checkbox, enabled, true);
+      checkbox.dataset.tasksAutoResetForceTab = tab;
+      if (checkbox.__ffForceBound) return;
+      checkbox.__ffForceBound = true;
+      checkbox.addEventListener('change', function() {
+        const forceTab = checkbox.dataset.tasksAutoResetForceTab || tab;
+        if (checkbox.disabled) return;
+        const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+        if (!alertWindows[forceTab]) alertWindows[forceTab] = {};
+        alertWindows[forceTab].autoResetForce = checkbox.checked === true;
+        localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+      });
     };
 
     const setRowVisible = (el, visible, display) => {
@@ -21984,6 +22033,7 @@ function setSettingsModalTab(tabName, options) {
           const autoResetEnabledCheckbox = document.getElementById('tasksOpeningAutoResetEnabled');
           const autoResetTimeInput = document.getElementById('tasksOpeningAutoResetTime');
           const autoResetTimeRow = document.getElementById('tasksOpeningAutoResetTimeRow');
+          const autoResetForceCheckbox = document.getElementById('tasksOpeningAutoResetForce');
           
           if (autoResetSection && autoResetEnabledCheckbox && autoResetTimeInput && autoResetTimeRow) {
             clearAutoResetSection(autoResetSection);
@@ -22000,6 +22050,7 @@ function setSettingsModalTab(tabName, options) {
             autoResetEnabledCheckbox.checked = enabled;
             autoResetTimeInput.value = time;
             autoResetTimeRow.style.display = enabled ? 'block' : 'none';
+            bindAutoResetForce('opening', autoResetForceCheckbox, enabled);
             
             // Checkbox change handler
             if (!autoResetEnabledCheckbox.__ffChangeBound) {
@@ -22011,6 +22062,7 @@ function setSettingsModalTab(tabName, options) {
                 }
                 const isChecked = autoResetEnabledCheckbox.checked;
                 alertWindows.opening.autoResetEnabled = isChecked;
+                if (!isChecked) alertWindows.opening.autoResetForce = false;
                 
                 // If checked and time is empty, set default
                 if (isChecked && !autoResetTimeInput.value) {
@@ -22022,6 +22074,7 @@ function setSettingsModalTab(tabName, options) {
                 
                 // Toggle time row visibility
                 autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
+                syncAutoResetForce('opening', autoResetForceCheckbox, isChecked, false);
               });
             }
             
@@ -22091,6 +22144,7 @@ function setSettingsModalTab(tabName, options) {
           const autoResetEnabledCheckbox = document.getElementById('tasksClosingAutoResetEnabled');
           const autoResetTimeInput = document.getElementById('tasksClosingAutoResetTime');
           const autoResetTimeRow = document.getElementById('tasksClosingAutoResetTimeRow');
+          const autoResetForceCheckbox = document.getElementById('tasksClosingAutoResetForce');
           
           if (autoResetSection && autoResetEnabledCheckbox && autoResetTimeInput && autoResetTimeRow) {
             clearAutoResetSection(autoResetSection);
@@ -22107,6 +22161,7 @@ function setSettingsModalTab(tabName, options) {
             autoResetEnabledCheckbox.checked = enabled;
             autoResetTimeInput.value = time;
             autoResetTimeRow.style.display = enabled ? 'block' : 'none';
+            bindAutoResetForce('closing', autoResetForceCheckbox, enabled);
             
             // Checkbox change handler
             if (!autoResetEnabledCheckbox.__ffChangeBound) {
@@ -22118,6 +22173,7 @@ function setSettingsModalTab(tabName, options) {
                 }
                 const isChecked = autoResetEnabledCheckbox.checked;
                 alertWindows.closing.autoResetEnabled = isChecked;
+                if (!isChecked) alertWindows.closing.autoResetForce = false;
                 
                 // If checked and time is empty, set default
                 if (isChecked && !autoResetTimeInput.value) {
@@ -22129,6 +22185,7 @@ function setSettingsModalTab(tabName, options) {
                 
                 // Toggle time row visibility
                 autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
+                syncAutoResetForce('closing', autoResetForceCheckbox, isChecked, false);
               });
             }
             
@@ -22272,6 +22329,7 @@ function setSettingsModalTab(tabName, options) {
         const autoResetEnabledCheckbox = document.getElementById('tasksWeeklyAutoResetEnabled');
         const autoResetTimeInput = document.getElementById('tasksWeeklyAutoResetTime');
         const autoResetTimeRow = document.getElementById('tasksWeeklyAutoResetTimeRow');
+        const autoResetForceCheckbox = document.getElementById('tasksWeeklyAutoResetForce');
         
         if (autoResetSection && autoResetEnabledCheckbox && autoResetTimeInput && autoResetTimeRow) {
           clearAutoResetSection(autoResetSection);
@@ -22288,6 +22346,7 @@ function setSettingsModalTab(tabName, options) {
           autoResetEnabledCheckbox.checked = enabled;
           autoResetTimeInput.value = time;
           autoResetTimeRow.style.display = enabled ? 'block' : 'none';
+          bindAutoResetForce('weekly', autoResetForceCheckbox, enabled);
           
           // Checkbox change handler
           if (!autoResetEnabledCheckbox.__ffChangeBound) {
@@ -22299,6 +22358,7 @@ function setSettingsModalTab(tabName, options) {
               }
               const isChecked = autoResetEnabledCheckbox.checked;
               alertWindows.weekly.autoResetEnabled = isChecked;
+              if (!isChecked) alertWindows.weekly.autoResetForce = false;
               
               // If checked and time is empty, set default
               if (isChecked && !autoResetTimeInput.value) {
@@ -22310,6 +22370,7 @@ function setSettingsModalTab(tabName, options) {
               
               // Toggle time row visibility
               autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
+              syncAutoResetForce('weekly', autoResetForceCheckbox, isChecked, false);
             });
           }
           
@@ -22431,6 +22492,7 @@ function setSettingsModalTab(tabName, options) {
           tasksMonthlyAutoResetEnabled.checked = !!cfg.autoResetEnabled;
           tasksMonthlyAutoResetTime.value = cfg.autoResetTime || '21:00';
           tasksMonthlyAutoResetTimeRow.style.display = cfg.autoResetEnabled ? 'block' : 'none';
+          bindAutoResetForce('monthly', tasksMonthlyAutoResetForce, !!cfg.autoResetEnabled);
           
           // Event handlers
           if (!tasksMonthlyAutoResetEnabled.__ffChangeBound) {
@@ -22441,6 +22503,7 @@ function setSettingsModalTab(tabName, options) {
                 alertWindows.monthly = {};
               }
               alertWindows.monthly.autoResetEnabled = tasksMonthlyAutoResetEnabled.checked;
+              if (!tasksMonthlyAutoResetEnabled.checked) alertWindows.monthly.autoResetForce = false;
               
               if (!alertWindows.monthly.autoResetTime) {
                 alertWindows.monthly.autoResetTime = '21:00';
@@ -22448,6 +22511,7 @@ function setSettingsModalTab(tabName, options) {
               }
               
               tasksMonthlyAutoResetTimeRow.style.display = tasksMonthlyAutoResetEnabled.checked ? 'block' : 'none';
+              syncAutoResetForce('monthly', tasksMonthlyAutoResetForce, tasksMonthlyAutoResetEnabled.checked, false);
               
               localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
             });
@@ -22511,6 +22575,7 @@ function setSettingsModalTab(tabName, options) {
         tasksYearlyAutoResetEnabled.checked = !!cfg.autoResetEnabled;
         tasksYearlyAutoResetTime.value = cfg.autoResetTime || '21:00';
         tasksYearlyAutoResetTimeRow.style.display = cfg.autoResetEnabled ? 'block' : 'none';
+        bindAutoResetForce('yearly', tasksYearlyAutoResetForce, !!cfg.autoResetEnabled);
         
         // Event handlers
         if (!tasksYearlyAutoResetEnabled.__ffChangeBound) {
@@ -22521,6 +22586,7 @@ function setSettingsModalTab(tabName, options) {
               alertWindows.yearly = {};
             }
             alertWindows.yearly.autoResetEnabled = tasksYearlyAutoResetEnabled.checked;
+            if (!tasksYearlyAutoResetEnabled.checked) alertWindows.yearly.autoResetForce = false;
             
             if (!alertWindows.yearly.autoResetTime) {
               alertWindows.yearly.autoResetTime = '21:00';
@@ -22528,6 +22594,7 @@ function setSettingsModalTab(tabName, options) {
             }
             
             tasksYearlyAutoResetTimeRow.style.display = tasksYearlyAutoResetEnabled.checked ? 'block' : 'none';
+            syncAutoResetForce('yearly', tasksYearlyAutoResetForce, tasksYearlyAutoResetEnabled.checked, false);
             
             localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
           });
@@ -23451,16 +23518,17 @@ function renderTasksList(tab, opts) {
                dateA.getDate() === dateB.getDate();
       }
       
-      // For yearly tab, compute done-today items early (before empty-state check)
-      let yearlyDoneToday = [];
-      if (mainTab === 'yearly') {
+      // Compute done-today items early (before empty-state check).
+      // MARK DONE stores completed copies here so the task stays visible as completed.
+      let doneToday = [];
+      if (['opening', 'closing', 'weekly', 'monthly', 'yearly'].includes(mainTab)) {
         const doneKey = (typeof getTabStorageKey === 'function')
-          ? getTabStorageKey('yearly', 'done')
-          : 'ff_tasks_yearly_done_v1';
-        const yearlyDoneList = getTabTasks('yearly', 'done');
+          ? getTabStorageKey(mainTab, 'done')
+          : `ff_tasks_${mainTab}_done_v1`;
+        const tabDoneList = getTabTasks(mainTab, 'done');
         const today = new Date();
         
-        yearlyDoneToday = yearlyDoneList.filter(doneTask => {
+        doneToday = tabDoneList.filter(doneTask => {
           if (!doneTask || typeof doneTask !== 'object') return false;
           // Only show if completedAt exists and is today
           if (!doneTask.completedAt) return false;
@@ -23469,9 +23537,9 @@ function renderTasksList(tab, opts) {
         
         // Debug log (behind DEBUG_MODE check)
         if (window.DEBUG_MODE || localStorage.getItem('DEBUG_MODE') === 'true') {
-          console.log('[DEBUG] Yearly done key:', doneKey);
-          console.log('[DEBUG] Yearly done list total:', yearlyDoneList.length);
-          console.log('[DEBUG] Yearly done today:', yearlyDoneToday.length);
+          console.log('[DEBUG] Tasks done key:', doneKey);
+          console.log('[DEBUG] Tasks done list total:', tabDoneList.length);
+          console.log('[DEBUG] Tasks done today:', doneToday.length);
         }
       }
       
@@ -23695,8 +23763,8 @@ function renderTasksList(tab, opts) {
       const displayTasks = filteredForAdmin;
       
       // Show "No tasks yet" or "Enter PIN" prompt
-      const hasYearlyDoneToday = (mainTab === 'yearly' && yearlyDoneToday.length > 0);
-      const needsIdentify = displayTasks.length === 0 && !hasYearlyDoneToday;
+      const hasDoneToday = doneToday.length > 0;
+      const needsIdentify = displayTasks.length === 0 && !hasDoneToday;
       if (needsIdentify) {
         const hasStaffId = !!(window.__ff_authedStaffId || (typeof localStorage !== 'undefined' && localStorage.getItem('ff_authedStaffId_v1')));
         const isAdmin = window.ff_is_admin_cached === true;
@@ -23719,10 +23787,9 @@ function renderTasksList(tab, opts) {
           }
         });
         
-        // For yearly tab, add done tasks completed today (from done list, not active)
-        if (mainTab === 'yearly' && yearlyDoneToday.length > 0) {
-          // Add yearly done tasks to completed array (only those completed today)
-          yearlyDoneToday.forEach(doneTask => {
+        // Add done tasks completed today (from done list, not active)
+        if (doneToday.length > 0) {
+          doneToday.forEach(doneTask => {
             // Check if already in completed array (from activeTasks)
             const keyId = doneTask.taskId || doneTask.id;
             const alreadyInCompleted = completed.some(t => {
@@ -44234,10 +44301,25 @@ window.__ffTasksCloudInit = function() {
       var autoResetState = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
       var state = { catalog: catalog, tombstone: tombstone, alertWindows: alertWindows, enforceSelectSettings: enforceSelectSettings, autoResetState: autoResetState };
       TABS.forEach(function(tab) {
+        var active = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_active_v1')  || '[]');
+        var done = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_done_v1')    || '[]');
+        var doneById = {};
+        done.forEach(function(task) {
+          var id = String((task && (task.taskId || task.id)) || '').trim();
+          if (id) doneById[id] = true;
+        });
+        active.forEach(function(task) {
+          var id = String((task && (task.taskId || task.id)) || '').trim();
+          if (!id || doneById[id]) return;
+          if (task && (task.status === 'done' || task.completedAt)) {
+            done.push(Object.assign({}, task, { id: id, taskId: id, status: 'done' }));
+            doneById[id] = true;
+          }
+        });
         state[tab] = {
-          active:  JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_active_v1')  || '[]'),
+          active:  active,
           pending: JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_pending_v1') || '[]'),
-          done:    JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_done_v1')    || '[]')
+          done:    done
         };
       });
       return state;
@@ -44278,12 +44360,47 @@ window.__ffTasksCloudInit = function() {
             }
           } catch(e) { console.warn('[TasksCloud] autoResetState merge error', e); }
         }
+        function taskTime(task) {
+          var value = task && (task.completedAt || task.updatedAt || task.createdAt);
+          if (!value) return 0;
+          if (typeof value === 'number') return value;
+          if (value && typeof value.toMillis === 'function') return value.toMillis();
+          if (value && typeof value.seconds === 'number') return value.seconds * 1000;
+          var parsed = Date.parse(value);
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+        function mergeDoneRows(localRows, remoteRows) {
+          var byId = {};
+          (Array.isArray(remoteRows) ? remoteRows : []).forEach(function(task) {
+            var id = String((task && (task.taskId || task.id)) || '').trim();
+            if (!id) return;
+            byId[id] = Object.assign({}, task, { id: id, taskId: id, status: 'done' });
+          });
+          (Array.isArray(localRows) ? localRows : []).forEach(function(task) {
+            var id = String((task && (task.taskId || task.id)) || '').trim();
+            if (!id) return;
+            var normalized = Object.assign({}, task, { id: id, taskId: id, status: 'done' });
+            var existing = byId[id];
+            if (!existing || taskTime(normalized) >= taskTime(existing)) {
+              byId[id] = normalized;
+            }
+          });
+          return Object.values(byId);
+        }
         TABS.forEach(function(tab) {
           var tabData = data[tab];
           if (!tabData) return;
           ['active','pending','done'].forEach(function(kind) {
             if (Array.isArray(tabData[kind])) {
-              localStorage.setItem('ff_tasks_' + tab + '_' + kind + '_v1', JSON.stringify(tabData[kind]));
+              var rows = tabData[kind];
+              if (kind === 'done') {
+                var localDone = [];
+                try {
+                  localDone = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_done_v1') || '[]') || [];
+                } catch (e) {}
+                rows = mergeDoneRows(localDone, rows);
+              }
+              localStorage.setItem('ff_tasks_' + tab + '_' + kind + '_v1', JSON.stringify(rows));
             }
           });
         });
@@ -47931,6 +48048,13 @@ function hookSettingsGuard_DISABLED(){
                   <input type="time" id="tasksOpeningAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                 </label>
                 </div>
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                  <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                    <input type="checkbox" id="tasksOpeningAutoResetForce">
+                    <span class="staff-permission-toggle-slider"></span>
+                  </span>
+                  <span>Reset even if tasks are open</span>
+                </label>
                 <div id="tasksEnforceSelectSection" style="display:none;flex-shrink:0;">
                   <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
                     <span class="staff-permission-toggle" style="flex:0 0 auto;">
@@ -47958,6 +48082,13 @@ function hookSettingsGuard_DISABLED(){
                     <input type="time" id="tasksClosingAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                   </label>
                 </div>
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                  <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                    <input type="checkbox" id="tasksClosingAutoResetForce">
+                    <span class="staff-permission-toggle-slider"></span>
+                  </span>
+                  <span>Reset even if tasks are open</span>
+                </label>
                 <div id="tasksEnforceSelectSectionClosing" style="display:none;flex-shrink:0;">
                   <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
                     <span class="staff-permission-toggle" style="flex:0 0 auto;">
@@ -48004,6 +48135,13 @@ function hookSettingsGuard_DISABLED(){
                     <input type="time" id="tasksWeeklyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                   </label>
                 </div>
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                  <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                    <input type="checkbox" id="tasksWeeklyAutoResetForce">
+                    <span class="staff-permission-toggle-slider"></span>
+                  </span>
+                  <span>Reset even if tasks are open</span>
+                </label>
               </div>
             </div>
           </div>
@@ -48043,6 +48181,13 @@ function hookSettingsGuard_DISABLED(){
                   <input type="time" id="tasksMonthlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                 </label>
               </div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                  <input type="checkbox" id="tasksMonthlyAutoResetForce">
+                  <span class="staff-permission-toggle-slider"></span>
+                </span>
+                <span>Reset even if tasks are open</span>
+              </label>
             </div>
           </div>
           
@@ -48081,6 +48226,13 @@ function hookSettingsGuard_DISABLED(){
                   <input type="time" id="tasksYearlyAutoResetTime" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
                 </label>
               </div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
+                <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                  <input type="checkbox" id="tasksYearlyAutoResetForce">
+                  <span class="staff-permission-toggle-slider"></span>
+                </span>
+                <span>Reset even if tasks are open</span>
+              </label>
             </div>
           </div>
           
@@ -48428,7 +48580,7 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260426_branch_points_r1"></script>
+  <script type="module" src="/app.js?v=20260429_tasks_force_auto_reset_v1"></script>
   <script type="module" src="/points-engine.js?v=20260426_branch_points_r1"></script>
   <script type="module" src="/schedule-helpers.js?v=20260420_per_loc_no_default"></script>
   <script type="module" src="/schedule-availability.js?v=20260409_coverage_plain_cards"></script>
@@ -48447,16 +48599,17 @@ function hookSettingsGuard_DISABLED(){
   <script src="/time-clock-engine.js?v=20260420_tc_engine_v2_shifts"></script>
   <script type="module" src="/time-clock-entries.js?v=20260424_tc_single_open_shift_r1"></script>
   <script type="module" src="/queue-cloud.js?v=20260420_per_location_v1"></script>
-  <script type="module" src="/tasks-cloud.js?v=20260425_shared_task_templates_r1"></script>
+  <script type="module" src="/tasks-cloud.js?v=20260429_tasks_force_auto_reset_v1"></script>
   <script type="module" src="/tickets.js?v=20260429_tickets_new_btn_no_flicker_v1"></script>
   <script type="module" src="/media-upload.js?v=20260426_branch_points_r1"></script>
   <script type="module" src="/inventory.js?v=20260425_import_shared_inventory_catalog_r1"></script>
   <script type="module" src="/onboarding-wizard.js?v=20260420_onboarding_v1"></script>
   <script type="module" src="/locations-manage.js?v=20260424_locations_compact_rows_r1"></script>
-  <script type="module" src="/dashboard.js?v=20260429_location_scope_v1"></script>
-  <script type="module" src="/queue-analytics.js?v=20260429_location_scope_v1"></script>
-  <script type="module" src="/tickets-analytics.js?v=20260429_location_scope_v1"></script>
-  <script type="module" src="/time-analytics.js?v=20260429_location_scope_v1"></script>
+  <script type="module" src="/dashboard.js?v=20260429_tight_analytics_v1"></script>
+  <script type="module" src="/queue-analytics.js?v=20260429_tight_analytics_v1"></script>
+  <script type="module" src="/tickets-analytics.js?v=20260429_tight_analytics_v1"></script>
+  <script type="module" src="/time-analytics.js?v=20260429_tight_analytics_v1"></script>
+  <script type="module" src="/tasks-analytics.js?v=20260429_tight_analytics_v1"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">

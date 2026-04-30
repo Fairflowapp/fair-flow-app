@@ -61,32 +61,33 @@ function injectStyles() {
     #${SCREEN_ID} .dash-wrap {
       max-width: 1280px;
       margin: 0 auto;
-      padding: 24px 28px 48px 28px;
+      padding: 6px 28px 48px 28px;
       width: 100%;
     }
     #${SCREEN_ID} .dash-h1 {
-      margin: 0 0 4px 0;
-      font-size: 22px;
+      display: inline-block;
+      vertical-align: middle;
+      margin: 0 8px 6px 0;
+      font-size: 16px;
       font-weight: 700;
       color: #111827;
       letter-spacing: -0.01em;
     }
     #${SCREEN_ID} .dash-sub {
-      margin: 0 0 22px 0;
-      font-size: 13px;
-      color: #6b7280;
+      display: none;
     }
     #${SCREEN_ID} .dash-location {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      margin: -10px 0 18px 0;
-      padding: 7px 10px;
+      vertical-align: middle;
+      margin: 0 0 6px 0;
+      padding: 5px 8px;
       border-radius: 999px;
       background: #fff;
       border: 1px solid #e5e7eb;
       color: #6b7280;
-      font-size: 12px;
+      font-size: 10px;
       font-weight: 600;
     }
     #${SCREEN_ID} .dash-section-title {
@@ -95,18 +96,18 @@ function injectStyles() {
       text-transform: uppercase;
       letter-spacing: 0.06em;
       color: #6b7280;
-      margin: 22px 2px 10px 2px;
+      margin: 12px 2px 7px 2px;
     }
     #${SCREEN_ID} .dash-kpis {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
+      gap: 10px;
     }
     #${SCREEN_ID} .dash-kpi {
       background: #fff;
       border: 1px solid #e5e7eb;
       border-radius: 14px;
-      padding: 14px 16px;
+      padding: 11px 14px;
       display: flex;
       flex-direction: column;
       gap: 4px;
@@ -132,16 +133,16 @@ function injectStyles() {
     #${SCREEN_ID} .dash-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 16px;
+      gap: 12px;
     }
     #${SCREEN_ID} .dash-card {
       background: #fff;
       border: 1px solid #e5e7eb;
       border-radius: 16px;
-      padding: 18px 20px;
+      padding: 14px 16px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 9px;
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
     }
     #${SCREEN_ID} .dash-card-header {
@@ -253,6 +254,8 @@ function injectStyles() {
 
     @media (max-width: 900px) {
       #${SCREEN_ID} .dash-wrap { padding: 16px 14px 32px 14px; }
+      #${SCREEN_ID} .dash-h1,
+      #${SCREEN_ID} .dash-location { margin-left: 0; }
       #${SCREEN_ID} .dash-grid { grid-template-columns: 1fr; }
       #${SCREEN_ID} .dash-stats { grid-template-columns: 1fr 1fr; }
     }
@@ -268,7 +271,7 @@ function buildScreen() {
     <div class="dash-wrap" id="ffDashWrap">
       <h1 class="dash-h1">Dashboard</h1>
       <p class="dash-sub" id="ffDashSubtitle">Overview of your business activity</p>
-      <div class="dash-location" id="ffDashLocationLabel">Location: —</div>
+      <div class="dash-location" id="ffDashLocationLabel">—</div>
 
       <div class="dash-section-title">Today at a glance</div>
       <div class="dash-kpis" id="ffDashKpis"></div>
@@ -324,7 +327,7 @@ function getDashboardLocationScope() {
   return {
     id,
     name: name || id || "",
-    label: id ? `Location: ${name || id}` : "Please select a location",
+    label: id ? `${name || id}` : "Select location",
     hasLocation: !!id,
   };
 }
@@ -759,42 +762,81 @@ function readQueueSnapshot() {
 
 function readTasksSnapshot() {
   const scope = getDashboardLocationScope();
-  const cache = window.tasksCache;
   const out = { opened: 0, completed: 0, openCount: 0, completionRate: null, hasData: false };
-  if (!cache || typeof cache !== "object") return out;
+  const tabs = ["opening", "closing", "weekly", "monthly", "yearly"];
+  const rows = [];
+  const pushRows = (tab, kind, list, scopedByStorage = false) => {
+    if (!Array.isArray(list)) return;
+    list.forEach((task) => {
+      if (!task || typeof task !== "object") return;
+      rows.push({ ...task, __tab: tab, __kind: kind, __scopedByStorage: scopedByStorage });
+    });
+  };
+  const cache = window.tasksCache;
+  if (cache && typeof cache === "object") {
+    tabs.forEach((tab) => {
+      const v = cache[tab];
+      if (Array.isArray(v)) {
+        pushRows(tab, "active", v, false);
+      } else if (v && typeof v === "object") {
+        pushRows(tab, "active", Array.isArray(v.active) ? v.active : v.items, false);
+        pushRows(tab, "pending", v.pending, false);
+        pushRows(tab, "done", v.done, false);
+      }
+    });
+  }
+  // Current Tasks storage is already location-scoped by tasks-cloud.js, so rows
+  // generally do not carry locationId. Use it as the primary fallback/source.
+  try {
+    tabs.forEach((tab) => {
+      ["active", "pending", "done"].forEach((kind) => {
+        const raw = localStorage.getItem(`ff_tasks_${tab}_${kind}_v1`);
+        const list = raw ? JSON.parse(raw) : [];
+        pushRows(tab, kind, Array.isArray(list) ? list : [], true);
+      });
+    });
+  } catch (e) {
+    console.warn(LOG, "tasks localStorage read failed", e);
+  }
+  if (!rows.length) return out;
   let before = 0;
   let skippedNoLocation = 0;
-  let totalActive = 0;
+  let scopedCount = 0;
   let totalDone = 0;
   let totalOpen = 0;
-  Object.keys(cache).forEach((tab) => {
-    const v = cache[tab];
-    const arr = Array.isArray(v) ? v : (v && Array.isArray(v.items) ? v.items : []);
-    arr.forEach((task) => {
-      if (!task) return;
-      before += 1;
-      const loc = String(task.locationId || task.locId || "").trim();
+  const seen = new Map();
+  rows.forEach((task, index) => {
+    before += 1;
+    const loc = String(task.locationId || task.locId || "").trim();
+    if (!task.__scopedByStorage) {
       if (!loc) {
         skippedNoLocation += 1;
         return;
       }
       if (!scope.hasLocation || loc !== scope.id) return;
-      totalActive += 1;
-      const status = String(task.status || task.state || "").toLowerCase();
-      if (status === "done" || status === "completed" || task.completed === true || task.doneAt) {
-        totalDone += 1;
-      } else {
-        totalOpen += 1;
-      }
-    });
+    }
+    const id = String(task.taskId || task.id || `${task.__tab}:${task.__kind}:${task.title || index}`).trim();
+    const key = `${task.__tab || "task"}:${id}`;
+    const status = String(task.status || task.state || "").toLowerCase();
+    const isDone = task.__kind === "done" || status === "done" || status === "completed" || task.completed === true || !!task.completedAt || !!task.doneAt;
+    const isPending = task.__kind === "pending" || status === "pending" || !!task.assignedTo;
+    const current = seen.get(key) || { done: false, pending: false };
+    current.done = current.done || isDone;
+    current.pending = current.pending || isPending;
+    seen.set(key, current);
   });
-  logDashboardScope("tasks", scope, before, totalActive, skippedNoLocation);
-  if (!totalActive) return out;
+  seen.forEach((task) => {
+    scopedCount += 1;
+    if (task.done) totalDone += 1;
+    else totalOpen += 1;
+  });
+  logDashboardScope("tasks", scope, before, scopedCount, skippedNoLocation);
+  if (!scopedCount) return out;
   out.hasData = true;
-  out.opened = totalActive;
+  out.opened = scopedCount;
   out.completed = totalDone;
   out.openCount = totalOpen;
-  out.completionRate = totalActive > 0 ? Math.round((totalDone / totalActive) * 100) : 0;
+  out.completionRate = scopedCount > 0 ? Math.round((totalDone / scopedCount) * 100) : 0;
   return out;
 }
 
@@ -1011,6 +1053,7 @@ function renderModuleCards(snap) {
     "queue-analytics": "goToQueueAnalytics",
     "tickets-analytics": "goToTicketsAnalytics",
     "time-analytics": "goToTimeAnalytics",
+    "tasks-analytics": "goToTasksAnalytics",
   };
   root.querySelectorAll("[data-dash-action]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
@@ -1106,18 +1149,14 @@ async function refresh() {
     tasks: readTasksSnapshot(),
     time: { totalHoursWeek: 0, overtimeHours: 0, topStaffName: null, hasData: false },
   };
-  // Render now with sync data, then patch in time-clock async.
-  renderKpis(snap);
-  renderModuleCards(snap);
-  renderInsights(snap);
   try {
     snap.time = await readTimeClockSnapshot();
-    renderKpis(snap);
-    renderModuleCards(snap);
-    renderInsights(snap);
   } catch (e) {
     console.warn(LOG, "async time refresh failed", e);
   }
+  renderKpis(snap);
+  renderModuleCards(snap);
+  renderInsights(snap);
 }
 
 // ---------- Navigation ----------

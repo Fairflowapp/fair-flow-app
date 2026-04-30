@@ -68,7 +68,7 @@ function injectStyles() {
     #${SCREEN_ID} .qa-wrap {
       max-width: 1280px;
       margin: 0 auto;
-      padding: 24px 28px 48px 28px;
+      padding: 6px 28px 48px 28px;
       width: 100%;
     }
     #${SCREEN_ID} .qa-back {
@@ -82,32 +82,33 @@ function injectStyles() {
       font-weight: 600;
       cursor: pointer;
       padding: 4px 0;
-      margin-bottom: 14px;
+      margin: 0 12px 6px 0;
     }
     #${SCREEN_ID} .qa-back:hover { color: #9d68b9; }
     #${SCREEN_ID} .qa-h1 {
-      margin: 0 0 4px 0;
-      font-size: 22px;
+      display: inline-block;
+      vertical-align: middle;
+      margin: 0 8px 6px 0;
+      font-size: 16px;
       font-weight: 700;
       color: #111827;
       letter-spacing: -0.01em;
     }
     #${SCREEN_ID} .qa-sub {
-      margin: 0 0 22px 0;
-      font-size: 13px;
-      color: #6b7280;
+      display: none;
     }
     #${SCREEN_ID} .qa-location {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      margin: -10px 0 16px 0;
-      padding: 7px 10px;
+      vertical-align: middle;
+      margin: 0 0 6px 0;
+      padding: 5px 8px;
       border-radius: 999px;
       background: #fff;
       border: 1px solid #e5e7eb;
       color: #6b7280;
-      font-size: 12px;
+      font-size: 10px;
       font-weight: 600;
     }
     #${SCREEN_ID} .qa-section-title {
@@ -116,18 +117,18 @@ function injectStyles() {
       text-transform: uppercase;
       letter-spacing: 0.06em;
       color: #6b7280;
-      margin: 22px 2px 10px 2px;
+      margin: 12px 2px 7px 2px;
     }
     #${SCREEN_ID} .qa-toolbar {
       background: #fff;
       border: 1px solid #e5e7eb;
       border-radius: 16px;
-      padding: 14px 16px;
-      margin: 18px 0 20px 0;
+      padding: 11px 14px;
+      margin: 6px 0 12px 0;
       display: flex;
       align-items: flex-end;
       justify-content: space-between;
-      gap: 14px;
+      gap: 10px;
       flex-wrap: wrap;
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
     }
@@ -203,13 +204,13 @@ function injectStyles() {
     #${SCREEN_ID} .qa-summary {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      gap: 12px;
+      gap: 10px;
     }
     #${SCREEN_ID} .qa-card {
       background: #fff;
       border: 1px solid #e5e7eb;
       border-radius: 14px;
-      padding: 14px 16px;
+      padding: 11px 14px;
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
       display: flex;
       flex-direction: column;
@@ -536,6 +537,8 @@ function injectStyles() {
     }
     @media (max-width: 900px) {
       #${SCREEN_ID} .qa-wrap { padding: 16px 14px 32px 14px; }
+      #${SCREEN_ID} .qa-h1,
+      #${SCREEN_ID} .qa-location { margin-left: 0; }
       #${SCREEN_ID} .qa-toolbar { align-items: stretch; }
       #${SCREEN_ID} .qa-toolbar-actions { width: 100%; }
       #${SCREEN_ID} .qa-action-btn { flex: 1; }
@@ -551,10 +554,10 @@ function buildScreen() {
   root.id = SCREEN_ID;
   root.innerHTML = `
     <div class="qa-wrap">
-      <button type="button" class="qa-back" id="ffQaBack" aria-label="Back to dashboard">← Back to dashboard</button>
+      <button type="button" class="qa-back" id="ffQaBack" aria-label="Back">← Back</button>
       <h1 class="qa-h1">Queue Analytics</h1>
       <p class="qa-sub">Understand average wait time, staff flow, and hourly capacity</p>
-      <div class="qa-location" id="ffQaLocationLabel">Location: —</div>
+      <div class="qa-location" id="ffQaLocationLabel">—</div>
 
       <div class="qa-toolbar" id="ffQaToolbar">
         <div class="qa-filter-row">
@@ -836,7 +839,7 @@ function _qaLocationScope() {
     id,
     name: name || id || "",
     hasLocation: !!id,
-    label: id ? `Location: ${name || id}` : "Please select a location",
+    label: id ? `${name || id}` : "Select location",
   };
 }
 

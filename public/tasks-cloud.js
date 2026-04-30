@@ -18,7 +18,7 @@
 
 import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc, deleteDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260411_chat_reminder_attrfix";
+import { db, auth } from "./app.js?v=20260429_tasks_force_auto_reset_v1";
 
 const TASKS_STATE_DEFAULT = "default";
 const TABS = ["opening", "closing", "weekly", "monthly", "yearly"];

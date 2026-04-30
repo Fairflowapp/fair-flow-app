@@ -3434,68 +3434,6 @@ function markTaskDone(taskId, workerName) {
         assignedEmployee
     });
     
-    // For yearly tasks, store in done list with completedYear and scheduleYear
-    if (tab === 'yearly') {
-        // Use getTabStorageKey for standard storage key
-        const doneKey = (typeof getTabStorageKey === 'function') 
-            ? getTabStorageKey(tab, 'done')
-            : `ff_tasks_${tab}_done_v1`;
-        const doneList = ffSafeParseJSON(localStorage.getItem(doneKey), []);
-        const currentYear = new Date().getFullYear();
-        
-        // Get task data to extract scheduleYear
-        const sourceTask = idx >= 0 ? activeTasks[idx] : pendingTask;
-        
-        // Get scheduleYear from task, or try catalog lookup
-        let scheduleYear = sourceTask?.scheduleYear;
-        if (scheduleYear === undefined && typeof ffGetYearlyCatalogMap === 'function') {
-            const catalogMap = ffGetYearlyCatalogMap();
-            const catalogTask = catalogMap.get(String(keyId).trim());
-            if (catalogTask) {
-                scheduleYear = catalogTask.scheduleYear;
-            }
-        }
-        
-        // Remove existing entry for this task if present
-        const existingDoneIndex = doneList.findIndex(t => {
-            const tId = t.taskId || t.id;
-            return tId && String(tId) === String(keyId);
-        });
-        
-        const doneTask = {
-            id: keyId,
-            taskId: keyId,
-            title: sourceTask?.title || '',
-            instructions: sourceTask?.instructions || sourceTask?.info || sourceTask?.details || '',
-            status: 'done',
-            completedAt: completionTime,
-            completedBy: assignedEmployee,
-            completedByStaffId: pointsStaff.staffId || null,
-            completedYear: currentYear,
-            scheduleYear: scheduleYear
-        };
-        
-        if (existingDoneIndex >= 0) {
-            doneList[existingDoneIndex] = doneTask;
-        } else {
-            doneList.push(doneTask);
-        }
-        
-        // Save done list
-        if (typeof writeTasksList === 'function') {
-            writeTasksList(tab, 'done', doneList);
-        } else {
-            localStorage.setItem(doneKey, JSON.stringify(doneList));
-        }
-        console.log(`[MARK DONE] Saved to yearly done list: ${doneKey}, count=${doneList.length}`);
-        
-        // Debug log (behind DEBUG_MODE check)
-        if (window.DEBUG_MODE || localStorage.getItem('DEBUG_MODE') === 'true') {
-            console.log('[DEBUG] Yearly done key:', doneKey);
-            console.log('[DEBUG] Last done entry after MARK DONE:', doneTask);
-        }
-    }
-    
     if (idx >= 0) {
         // Update existing active task
         const taskBefore = { ...activeTasks[idx] };
@@ -3544,6 +3482,47 @@ function markTaskDone(taskId, workerName) {
             removedFromActive: false // Task was not in active, so nothing to remove
         });
     }
+
+    // Keep a tab-specific DONE list for rendering completed tasks reliably.
+    // Active can be filtered/reset by tab rules; done preserves the completion row.
+    const doneKey = (typeof getTabStorageKey === 'function')
+        ? getTabStorageKey(tab, 'done')
+        : `ff_tasks_${tab}_done_v1`;
+    const doneList = ffSafeParseJSON(localStorage.getItem(doneKey), []);
+    const currentYear = new Date().getFullYear();
+    const sourceTask = (idx >= 0 ? activeTasks[idx] : pendingTask) || {};
+    let scheduleYear = sourceTask?.scheduleYear;
+    if (tab === 'yearly' && scheduleYear === undefined && typeof ffGetYearlyCatalogMap === 'function') {
+        const catalogMap = ffGetYearlyCatalogMap();
+        const catalogTask = catalogMap.get(String(keyId).trim());
+        if (catalogTask) scheduleYear = catalogTask.scheduleYear;
+    }
+    const doneTask = {
+        id: keyId,
+        taskId: keyId,
+        title: sourceTask?.title || pendingTask?.title || '',
+        instructions: sourceTask?.instructions || sourceTask?.info || sourceTask?.details || pendingTask?.instructions || '',
+        status: 'done',
+        completedAt: completionTime,
+        completedBy: assignedEmployee,
+        completedByStaffId: pointsStaff.staffId || null,
+        ...(tab === 'yearly' ? { completedYear: currentYear, scheduleYear } : {})
+    };
+    const existingDoneIndex = doneList.findIndex(t => {
+        const tId = t?.taskId || t?.id;
+        return tId && String(tId) === String(keyId);
+    });
+    if (existingDoneIndex >= 0) {
+        doneList[existingDoneIndex] = doneTask;
+    } else {
+        doneList.push(doneTask);
+    }
+    if (typeof writeTasksList === 'function') {
+        writeTasksList(tab, 'done', doneList);
+    } else {
+        localStorage.setItem(doneKey, JSON.stringify(doneList));
+    }
+    console.log(`[MARK DONE] Saved DONE list: ${doneKey}, count=${doneList.length}`);
     
     // Save updated ACTIVE list
     if (typeof writeTasksList === 'function') {
@@ -5766,13 +5745,15 @@ function ffGetAutoResetConfig(tab) {
     
     return {
       autoResetEnabled: tabConfig.autoResetEnabled === true,
-      autoResetTime: tabConfig.autoResetTime || '21:00'
+      autoResetTime: tabConfig.autoResetTime || '21:00',
+      autoResetForce: tabConfig.autoResetForce === true
     };
   } catch (e) {
     console.warn('[Auto-Reset] Error loading config:', e);
     return {
       autoResetEnabled: false,
-      autoResetTime: '21:00'
+      autoResetTime: '21:00',
+      autoResetForce: false
     };
   }
 }
@@ -5844,12 +5825,12 @@ window.ffMaybeAutoResetOpening = function(nowDate) {
     }
     
     const uncompleted = ffGetUncompletedCountForTab(tab);
-    if (uncompleted !== 0) {
+    if (uncompleted !== 0 && config.autoResetForce !== true) {
       return; // Not all tasks completed
     }
     
     // All conditions met - perform reset
-    console.log('[Auto-Reset] All Opening tasks completed, performing auto-reset at', config.autoResetTime);
+    console.log('[Auto-Reset] Opening tasks reset at', config.autoResetTime, 'force=', config.autoResetForce === true);
     
     // Call reset function for opening tab (uses existing reset logic via getTabStorageKey)
     if (typeof window.resetTasksForTab === 'function') {
@@ -5906,12 +5887,12 @@ window.ffMaybeAutoResetClosing = function(nowDate) {
     }
     
     const uncompleted = ffGetUncompletedCountForTab(tab);
-    if (uncompleted !== 0) {
+    if (uncompleted !== 0 && config.autoResetForce !== true) {
       return; // Not all tasks completed
     }
     
     // All conditions met - perform reset
-    console.log('[Auto-Reset] All Closing tasks completed, performing auto-reset at', config.autoResetTime);
+    console.log('[Auto-Reset] Closing tasks reset at', config.autoResetTime, 'force=', config.autoResetForce === true);
     
     // Call reset function for closing tab (uses existing reset logic via getTabStorageKey)
     if (typeof window.resetTasksForTab === 'function') {
@@ -6028,19 +6009,19 @@ function _ffMaybeAutoResetTab(tab, nowDate) {
     }
 
     const hasTasks = window.ffHasTodayTasksForTab(tab, now);
-    if (!hasTasks) {
+    if (!hasTasks && config.autoResetForce !== true) {
       console.warn(tag, 'SKIP: no tasks scheduled/active for today');
       return;
     }
 
     const uncompleted = typeof ffGetUncompletedCountForTab === 'function'
       ? ffGetUncompletedCountForTab(tab) : -1;
-    if (uncompleted !== 0) {
+    if (uncompleted !== 0 && config.autoResetForce !== true) {
       console.warn(tag, 'SKIP: uncompleted tasks remaining =', uncompleted);
       return;
     }
 
-    console.warn(tag, 'FIRING reset — all conditions met. time=' + nowStr);
+    console.warn(tag, 'FIRING reset. time=' + nowStr + ' force=' + (config.autoResetForce === true));
     if (typeof window.resetTasksForTab === 'function') {
       window.resetTasksForTab(tab);
       ffSetAutoResetLastRun(tab, todayISO);
