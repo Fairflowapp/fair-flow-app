@@ -18,7 +18,7 @@
 
 import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc, deleteDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260429_tasks_force_auto_reset_v1";
+import { db, auth } from "./app.js?v=20260430_unified";
 
 const TASKS_STATE_DEFAULT = "default";
 const TABS = ["opening", "closing", "weekly", "monthly", "yearly"];
@@ -367,6 +367,12 @@ export function initTasksCloud(opts) {
   _onRefresh = opts.onRefresh || null;
   installStorageHook();
   function tryConnect() {
+    if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice === true) {
+      if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
+      _salonId = null;
+      _locationId = null;
+      return;
+    }
     getSalonId().then((sid) => {
       const loc = readActiveLocationId();
       if (sid && (sid !== _salonId || loc !== _locationId)) {
@@ -411,6 +417,7 @@ export function tasksCloudWrite() {
 }
 
 export function tasksCloudReconnect() {
+  if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice === true) return Promise.resolve();
   getSalonId().then((sid) => {
     const loc = readActiveLocationId();
     if (sid === _salonId && loc === _locationId) return;
@@ -422,6 +429,7 @@ export function tasksCloudReconnect() {
 
 /** Force fetch current state from server (bypass cache) and apply so other computer sees updates. */
 export function tasksCloudRefresh() {
+  if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice === true) return Promise.resolve();
   if (!_salonId || !_applyState) return Promise.resolve();
   if (typeof window !== "undefined" && window.__ffTasksLastLocalWrite != null && (Date.now() - window.__ffTasksLastLocalWrite) < 12000) return Promise.resolve();
   const ref = tasksStateRef(_salonId, _locationId);

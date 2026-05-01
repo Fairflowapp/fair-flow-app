@@ -18,9 +18,22 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    function belongsToSalon(salonId) {
+    function hasActiveMembership(salonId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.status == 'active';
+    }
+
+    function canAccessSalon(salonId) {
       return userExists()
-        && userDocData().salonId == salonId;
+        && (
+          userDocData().salonId == salonId
+          || hasActiveMembership(salonId)
+        );
+    }
+
+    function belongsToSalon(salonId) {
+      return canAccessSalon(salonId);
     }
 
     /**
@@ -174,6 +187,17 @@ service cloud.firestore {
         : '';
     }
 
+    function membershipStaffId(salonId) {
+      return hasActiveMembership(salonId)
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId is string
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId
+        : '';
+    }
+
+    function activeStaffIdForSalon(salonId) {
+      return membershipStaffId(salonId) != '' ? membershipStaffId(salonId) : userStaffId();
+    }
+
     // Staff doc on salon (for per-staff permissions.media_* on Media module)
     function salonStaffDocData(salonId, staffId) {
       return staffId != ''
@@ -289,6 +313,28 @@ service cloud.firestore {
     // User profile doc: each signed-in user can read/write ONLY their own doc
     match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      // Phase 1 memberships: additive, backward-compatible mirror of users/{uid}.salonId/staffId.
+      // The app does not read this for routing yet. Client writes are limited
+      // to a first-create mirror of the existing users/{uid} legacy fields.
+      // Server Functions/Admin SDK bypass these rules for invite finalize and
+      // future backfills.
+      match /memberships/{salonId} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow create: if request.auth != null
+          && request.auth.uid == uid
+          && exists(/databases/$(database)/documents/users/$(uid))
+          && get(/databases/$(database)/documents/users/$(uid)).data.salonId == salonId
+          && request.resource.data.salonId == salonId
+          && request.resource.data.staffId is string
+          && get(/databases/$(database)/documents/users/$(uid)).data.staffId is string
+          && request.resource.data.staffId == get(/databases/$(database)/documents/users/$(uid)).data.staffId
+          && request.resource.data.role is string
+          && get(/databases/$(database)/documents/users/$(uid)).data.role is string
+          && request.resource.data.role == get(/databases/$(database)/documents/users/$(uid)).data.role
+          && request.resource.data.status in ['active', 'archived', 'pending'];
+        allow update, delete: if false;
+      }
     }
 
     // Salon members directory: minimal public profile (name, role, staffId) for "Send to" lookup
@@ -1106,8 +1152,8 @@ service cloud.firestore {
         && (
           isManager(salonId)
           || (
-            userStaffId() != ''
-            && resource.data.forStaffId == userStaffId()
+            activeStaffIdForSalon(salonId) != ''
+            && resource.data.forStaffId == activeStaffIdForSalon(salonId)
           )
         );
       allow create: if belongsToSalon(salonId) && isManager(salonId)
@@ -1118,8 +1164,8 @@ service cloud.firestore {
         && (
           isManager(salonId)
           || (
-            userStaffId() != ''
-            && resource.data.forStaffId == userStaffId()
+            activeStaffIdForSalon(salonId) != ''
+            && resource.data.forStaffId == activeStaffIdForSalon(salonId)
             && request.resource.data.forStaffId == resource.data.forStaffId
           )
         );
@@ -1237,31 +1283,31 @@ service cloud.firestore {
     // ===== TRAINING (root collections; each doc has salonId) =====
     match /trainingItems/{itemId} {
       allow read: if userExists()
-        && resource.data.salonId == userDocData().salonId;
+        && canAccessSalon(resource.data.salonId);
       allow create: if userExists()
-        && request.resource.data.salonId == userDocData().salonId
+        && canAccessSalon(request.resource.data.salonId)
         && request.resource.data.salonId is string
         && request.resource.data.title is string
         && request.resource.data.category is string
         && isManager(request.resource.data.salonId);
       allow update: if userExists()
-        && resource.data.salonId == userDocData().salonId
+        && canAccessSalon(resource.data.salonId)
         && request.resource.data.salonId == resource.data.salonId
         && isManager(resource.data.salonId);
       allow delete: if userExists()
-        && resource.data.salonId == userDocData().salonId
+        && canAccessSalon(resource.data.salonId)
         && isManager(resource.data.salonId);
     }
 
     match /trainingProgress/{progressId} {
       allow read: if userExists()
-        && resource.data.salonId == userDocData().salonId
+        && canAccessSalon(resource.data.salonId)
         && (
           isManager(resource.data.salonId)
           || (userStaffId() != '' && resource.data.staffId == userStaffId())
         );
       allow create: if userExists()
-        && request.resource.data.salonId == userDocData().salonId
+        && canAccessSalon(request.resource.data.salonId)
         && request.resource.data.salonId is string
         && request.resource.data.staffId is string
         && request.resource.data.trainingId is string
@@ -1271,7 +1317,7 @@ service cloud.firestore {
           || (userStaffId() != '' && request.resource.data.staffId == userStaffId())
         );
       allow update: if userExists()
-        && resource.data.salonId == userDocData().salonId
+        && canAccessSalon(resource.data.salonId)
         && trainingProgressIdentityUnchanged()
         && (
           isManager(resource.data.salonId)

@@ -95,6 +95,36 @@ function escapeHtml(s) {
 // CRITICAL: Set the final public domain for the main application
 const APP_BASE_URL = 'https://app.fairflowapp.com';
 
+function membershipDocRef(uid, salonId) {
+  return admin.firestore().doc(`users/${uid}/memberships/${salonId}`);
+}
+
+function buildMembershipPayload({
+  salonId,
+  staffId,
+  role,
+  email,
+  name,
+  status = "active",
+  invitedAt = null,
+  joinedAt = null,
+  source = "system",
+}) {
+  const payload = {
+    salonId: String(salonId || "").trim(),
+    staffId: String(staffId || "").trim(),
+    role: String(role || "technician").trim(),
+    status,
+    email: String(email || "").trim().toLowerCase(),
+    name: String(name || "").trim(),
+    source,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+  if (invitedAt) payload.invitedAt = invitedAt;
+  if (joinedAt) payload.joinedAt = joinedAt;
+  return payload;
+}
+
 /**
  * Firestore-triggered: no HTTP/Invoker needed. Client writes to staffInviteRequests,
  * this function runs when doc is created. Bypasses IAM allUsers restriction.
@@ -238,16 +268,20 @@ async function handleFinalizeInviteRequest(snap) {
       const staffRef = staffId
         ? admin.firestore().collection("salons").doc(salonId).collection("staff").doc(staffId)
         : null;
+      const membershipRef = membershipDocRef(uid, salonId);
 
       const userSnap = await tx.get(userRef);
+      const membershipSnap = await tx.get(membershipRef);
       const memberSnap = await tx.get(memberRef);
       const staffSnap = staffRef ? await tx.get(staffRef) : null;
 
-      // Guard: if user already belongs to a different salon, block.
-      if (userSnap.exists) {
-        const ud = userSnap.data() || {};
-        if (ud.salonId && String(ud.salonId) !== salonId) {
-          throw new Error("Account already belongs to another salon.");
+      // Phase 2: users/{uid}.salonId remains a legacy default and no longer
+      // blocks accepting an invite to another salon. Do not overwrite it when
+      // the user doc already exists.
+      if (membershipSnap.exists) {
+        const md = membershipSnap.data() || {};
+        if (String(md.status || "").trim().toLowerCase() === "archived") {
+          throw new Error("Membership is archived. Ask the owner to reactivate this account.");
         }
       }
 
@@ -315,15 +349,18 @@ async function handleFinalizeInviteRequest(snap) {
       }
 
       // Write user profile (server-authoritative)
+      const existingUser = userSnap.exists ? (userSnap.data() || {}) : {};
       const userPayload = {
-        salonId,
-        role,
-        email: tokEmailLower || email || null,
-        staffId: staffId || null,
+        email: existingUser.email || tokEmailLower || email || null,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
-      if (!userSnap.exists) userPayload.createdAt = admin.firestore.FieldValue.serverTimestamp();
-      if (staffName) userPayload.name = staffName;
+      if (!userSnap.exists) {
+        userPayload.salonId = salonId;
+        userPayload.role = role;
+        userPayload.staffId = staffId || null;
+        userPayload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+      }
+      if (staffName && !String(existingUser.name || "").trim()) userPayload.name = staffName;
       tx.set(userRef, userPayload, { merge: true });
 
       // Write salon member directory
@@ -336,6 +373,24 @@ async function handleFinalizeInviteRequest(snap) {
       };
       if (!memberSnap.exists) memberPayload.createdAt = admin.firestore.FieldValue.serverTimestamp();
       tx.set(memberRef, memberPayload, { merge: true });
+
+      // Phase 1: additive membership mirror. Login still uses users/{uid}.salonId/staffId.
+      tx.set(
+        membershipRef,
+        buildMembershipPayload({
+          salonId,
+          staffId: staffId || "",
+          role,
+          email: tokEmailLower || email || "",
+          name: staffName || "",
+          status: "active",
+          invitedAt: tok.createdAt || null,
+          joinedAt: admin.firestore.FieldValue.serverTimestamp(),
+          source: "invite_finalize",
+        }),
+        { merge: true }
+      );
+      const membershipPath = membershipRef.path;
 
       // Mark token used
       tx.set(
@@ -356,6 +411,7 @@ async function handleFinalizeInviteRequest(snap) {
           doneAt: admin.firestore.FieldValue.serverTimestamp(),
           salonId,
           staffId: staffId || null,
+          membershipPath,
         },
         { merge: true }
       );
@@ -379,6 +435,89 @@ exports.onFinalizeInviteCreatedV1 = functions
   .region("us-central1")
   .firestore.document("finalizeInviteRequests/{requestId}")
   .onCreate((snap) => handleFinalizeInviteRequest(snap));
+
+exports.backfillUserMemberships = functions.region("us-central1").https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Sign in first.");
+  }
+  const allowed = String(process.env.MEMBERSHIP_BACKFILL_ADMIN_UIDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!allowed.includes(context.auth.uid)) {
+    throw new functions.https.HttpsError("permission-denied", "Membership backfill is disabled for this user.");
+  }
+
+  const dryRun = data && data.dryRun === true;
+  const limit = Math.max(1, Math.min(Number(data && data.limit) || 500, 1000));
+  const startAfterUid = String((data && data.startAfterUid) || "").trim();
+  let usersQuery = admin.firestore()
+    .collection("users")
+    .orderBy(admin.firestore.FieldPath.documentId())
+    .limit(limit);
+  if (startAfterUid) usersQuery = usersQuery.startAfter(startAfterUid);
+  const usersSnap = await usersQuery.get();
+  let scanned = 0;
+  let eligible = 0;
+  let written = 0;
+  let skipped = 0;
+  const examples = [];
+  let lastUid = null;
+
+  let batch = admin.firestore().batch();
+  let batchCount = 0;
+  async function commitBatchIfNeeded(force = false) {
+    if (batchCount > 0 && (force || batchCount >= 400)) {
+      await batch.commit();
+      batch = admin.firestore().batch();
+      batchCount = 0;
+    }
+  }
+
+  for (const userDoc of usersSnap.docs) {
+    scanned += 1;
+    const uid = userDoc.id;
+    lastUid = uid;
+    const u = userDoc.data() || {};
+    const salonId = String(u.salonId || "").trim();
+    const staffId = String(u.staffId || "").trim();
+    if (!salonId || !staffId) {
+      skipped += 1;
+      continue;
+    }
+    eligible += 1;
+    let status = "active";
+    let staffName = String(u.name || "").trim();
+    try {
+      const staffSnap = await admin.firestore().doc(`salons/${salonId}/staff/${staffId}`).get();
+      if (staffSnap.exists) {
+        const s = staffSnap.data() || {};
+        if (s.isArchived === true || s.archived === true) status = "archived";
+        staffName = String(s.name || staffName || "").trim();
+      }
+    } catch (err) {
+      console.warn("[backfillUserMemberships] staff read failed", { uid, salonId, staffId, error: err?.message || String(err) });
+    }
+    const payload = buildMembershipPayload({
+      salonId,
+      staffId,
+      role: u.role || "technician",
+      email: u.email || "",
+      name: staffName || u.name || "",
+      status,
+      source: "legacy_backfill",
+    });
+    if (examples.length < 10) examples.push({ uid, salonId, staffId, status });
+    if (!dryRun) {
+      batch.set(membershipDocRef(uid, salonId), payload, { merge: true });
+      batchCount += 1;
+      written += 1;
+      await commitBatchIfNeeded(false);
+    }
+  }
+  if (!dryRun) await commitBatchIfNeeded(true);
+  return { ok: true, dryRun, scanned, eligible, written, skipped, lastUid, hasMore: usersSnap.size === limit, examples };
+});
 
 /**
  * Processes pending staffInviteRequests every 1 min (instant for SaaS).

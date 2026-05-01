@@ -13,7 +13,7 @@ import {
   serverTimestamp, Timestamp
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260411_chat_reminder_attrfix";
+import { db, auth } from "./app.js?v=20260430_unified";
 
 // =====================
 // State
@@ -40,21 +40,34 @@ let _ticketsMembersAvatarCache = null;
 /** Secondary lookup by normalized display name (when older tickets lack technicianStaffId). */
 let _ticketsMembersAvatarByName = null;
 
+function getActiveTicketsSalonId() {
+  return (typeof window !== 'undefined' && window.currentSalonId)
+    || currentUserProfile?.salonId
+    || null;
+}
+
+function resetTicketsRuntimeCache() {
+  currentTickets = [];
+  _ticketsFirstPageTickets = [];
+  _ticketsExtraTickets = [];
+  _ticketsNextPageCursor = null;
+  _ticketsHasMoreOlder = false;
+  _ticketsLoadingMore = false;
+  _ticketsListSnapshotReady = false;
+  _ticketsDataReady = false;
+  _frontDeskCache = null;
+}
+
 window.ffGetCurrentTickets = function() {
   return Array.isArray(currentTickets) ? currentTickets.slice() : [];
 };
 
 window.ffLoadTicketsForAnalytics = async function() {
-  const salonId = currentUserProfile?.salonId
-    || (typeof window !== 'undefined' && window.currentSalonId)
-    || null;
+  const salonId = getActiveTicketsSalonId();
   if (!currentUserProfile) {
     try { await loadCurrentUserProfile(); } catch (_) {}
   }
-  const resolvedSalonId = currentUserProfile?.salonId
-    || salonId
-    || (typeof window !== 'undefined' && window.currentSalonId)
-    || null;
+  const resolvedSalonId = getActiveTicketsSalonId() || salonId;
   if (!resolvedSalonId) return [];
   const qAnalytics = query(
     collection(db, `salons/${resolvedSalonId}/tickets`),
@@ -112,7 +125,7 @@ async function loadCurrentUserProfile() {
 /** If users/{uid} lacks staffId, copy from salons/{salonId}/members/{uid} so staff-store permission match works. */
 async function enrichTicketsProfileFromMemberDoc() {
   if (!currentUserProfile?.uid) return;
-  const salonId = currentUserProfile.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = (typeof window !== 'undefined' && window.currentSalonId) || currentUserProfile.salonId;
   if (!salonId) return;
   if (currentUserProfile.staffId != null && String(currentUserProfile.staffId).trim() !== '') return;
   try {
@@ -127,7 +140,7 @@ async function enrichTicketsProfileFromMemberDoc() {
 
 /** Load members with avatarUrl for ticket list avatars. */
 async function loadTicketsMembersForAvatars() {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = (typeof window !== 'undefined' && window.currentSalonId) || currentUserProfile?.salonId;
   if (!salonId) return;
   try {
     const snap = await getDocs(collection(db, `salons/${salonId}/members`));
@@ -222,13 +235,13 @@ let _catalogSubSalonId = null;
 
 function getTicketsAccountId() {
   const candidates = [
+    (typeof window !== 'undefined' ? window.currentSalonId : null),
     currentUserProfile?.accountId,
     currentUserProfile?.accountID,
     currentUserProfile?.account_id,
     currentUserProfile?.salonId,
     (typeof window !== 'undefined' ? window.currentAccountId : null),
-    (typeof window !== 'undefined' ? window.accountId : null),
-    (typeof window !== 'undefined' ? window.currentSalonId : null)
+    (typeof window !== 'undefined' ? window.accountId : null)
   ];
   for (const v of candidates) {
     if (typeof v === 'string' && v.trim()) return v.trim();
@@ -1121,9 +1134,7 @@ async function loadMoreTicketsOlder() {
 
 function subscribeTickets(options) {
   const resetLoading = !!(options && options.resetLoading);
-  const salonId = currentUserProfile?.salonId
-    || (typeof window !== 'undefined' && window.currentSalonId)
-    || null;
+  const salonId = getActiveTicketsSalonId();
   if (!salonId) {
     console.warn('[Tickets] No salonId. Retrying in 1s...');
     setTimeout(() => subscribeTickets(options), 1000);
@@ -1210,7 +1221,7 @@ function getTicketCustomerPriceApprovedFromForm() {
 }
 
 async function createTicket(payload) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = getActiveTicketsSalonId();
   if (!salonId) throw new Error('No salon - ensure your account has salonId');
   const status = payload.status === 'READY_FOR_CHECKOUT' ? 'READY_FOR_CHECKOUT' : 'OPEN';
   const activeLocForNewTicket = getActiveLocationIdForTickets();
@@ -1241,7 +1252,7 @@ async function createTicket(payload) {
 }
 
 async function updateTicket(ticketId, updates) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = getActiveTicketsSalonId();
   if (!salonId || !ticketId) return;
   const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
   let snap;
@@ -1394,7 +1405,7 @@ async function appendTicketSummaryOnClose(salonId, ticketId) {
 }
 
 async function closeTicket(ticketId) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = getActiveTicketsSalonId();
   const closedByName = currentUserProfile?.name || currentUserProfile?.email || 'Manager';
   console.log('[Tickets Summary DEBUG] closeTicket: before update + append', {
     salonId: salonId || '(missing)',
@@ -1524,7 +1535,7 @@ async function markTicketSummariesSourceDeleted(salonId, ticketId) {
 }
 
 async function deleteTicketPermanently(ticketId) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = getActiveTicketsSalonId();
   if (!salonId || !ticketId) return;
   await markTicketSummariesSourceDeleted(salonId, ticketId);
   const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
@@ -1536,7 +1547,7 @@ async function deleteTicketPermanently(ticketId) {
 
 /** Mark ticket as seen/acknowledged by Front Desk (removes "Edited" indicator). Call when FD opens the ticket. */
 async function markTicketSeenByFrontDesk(ticketId) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = getActiveTicketsSalonId();
   if (!salonId || !ticketId) return;
   const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
   const snap = await getDoc(ticketRef);
@@ -4320,6 +4331,9 @@ export function initTickets() {
   if (typeof document !== 'undefined' && !window.__ffTicketsLocationListenerBound) {
     window.__ffTicketsLocationListenerBound = true;
     document.addEventListener('ff-active-location-changed', function () {
+      if (ticketsUnsubscribe) { try { ticketsUnsubscribe(); } catch (_) {} ticketsUnsubscribe = null; }
+      resetTicketsRuntimeCache();
+      if (typeof subscribeTickets === 'function') subscribeTickets({ resetLoading: true });
       try { renderTicketsList(); } catch (_) {}
       try { updateTicketsNavBadge(); } catch (_) {}
       try {

@@ -1,4 +1,4 @@
-﻿// Static imports must be first in ES modules (avoids SyntaxError / "Unexpected end of input" in some browsers).
+// Static imports must be first in ES modules (avoids SyntaxError / "Unexpected end of input" in some browsers).
 import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
 import {
   getAuth,
@@ -202,21 +202,55 @@ let __ffChatBadgeEarlyGen = 0;
 onAuthStateChanged(auth, async user => {
   if (!user) {
     window.currentSalonId = null;
+    window.__ff_waiting_for_salon_choice = false;
     __ffChatBadgeEarlyGen++;
     return;
   }
+  // Pre-emptively flip the wait flag synchronously. The flag will be cleared by
+  // ffApplyActiveMembership once a single membership is auto-selected or the
+  // user picks one via Choose Salon. This stops module auth listeners from
+  // racing the awaits below and firing premature subscriptions that crash the
+  // page with "Missing or insufficient permissions" floods.
+  if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice !== false) {
+    window.__ff_waiting_for_salon_choice = true;
+  }
   try {
     const { getDoc, doc } = await import("https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js");
-    const snap = await getDoc(doc(db, 'users', user.uid));
+    // Parallelize these two reads — previously sequential which doubled the
+    // login round-trip latency.
+    const [snap, memberships] = await Promise.all([
+      getDoc(doc(db, 'users', user.uid)),
+      ffLoadActiveMembershipsForUser(user),
+    ]);
     if (snap.exists()) {
-      window.currentSalonId = snap.data().salonId || null;
+      const data = snap.data() || {};
+      const storedSalonId = (() => {
+        try { return sessionStorage.getItem("ff_active_salon_id") || localStorage.getItem("ff_active_salon_id") || ""; } catch (_) { return ""; }
+      })();
+      const storedMembership = storedSalonId
+        ? memberships.find((m) => String(m.salonId || "") === String(storedSalonId))
+        : null;
+      if (memberships.length > 1 && !storedMembership) {
+        window.__ff_waiting_for_salon_choice = true;
+        window.currentSalonId = null;
+        console.log('[app.js] currentSalonId deferred: multiple memberships require Choose Salon');
+        __ffChatBadgeEarlyGen++;
+        // Surface Choose Salon immediately so modules don't paint placeholder UI
+        // behind it while loadUserRoleAndShowView (later in the flow) reaches the
+        // same code path. Safe because ffShowChooseSalonScreen is idempotent.
+        try { if (typeof ffShowChooseSalonScreen === 'function') ffShowChooseSalonScreen(user, data, memberships); } catch (e) { console.warn('[app.js] early Choose Salon render failed', e); }
+        return;
+      }
+      // Single (or zero) membership -> not waiting for choice anymore.
+      window.__ff_waiting_for_salon_choice = false;
+      window.currentSalonId = (storedMembership && storedMembership.salonId) || (memberships.length === 1 ? memberships[0].salonId : data.salonId) || null;
       console.log('[app.js] currentSalonId set:', window.currentSalonId);
       const uid = user.uid;
       const sid = window.currentSalonId;
       __ffChatBadgeEarlyGen++;
       const gen = __ffChatBadgeEarlyGen;
       if (sid && uid) {
-        import("/chat.js?v=20260420_chat_settings_loc")
+        import("/chat.js?v=20260430_unified")
           .then((m) => {
             if (gen !== __ffChatBadgeEarlyGen) return;
             if (m.subscribeToChatBadge) m.subscribeToChatBadge(uid, sid);
@@ -1281,6 +1315,22 @@ function _ffOwnerDefaultPermissions() {
   };
 }
 
+async function ffCreateOrUpdateUserMembership({ user, salonId, staffId, role, name, email, status = "active" }) {
+  if (!user || !user.uid || !salonId || !staffId) return null;
+  const membershipRef = doc(db, "users", user.uid, "memberships", salonId);
+  const payload = {
+    salonId,
+    staffId,
+    role: role || "technician",
+    status,
+    email: email || user.email || "",
+    name: name || user.displayName || user.email || "",
+    updatedAt: serverTimestamp()
+  };
+  await setDoc(membershipRef, payload, { merge: true });
+  return membershipRef.path;
+}
+
 async function ensureOwnerStaffAndMemberDocs({ user, salonId, ownerName }) {
   if (!user || !salonId) return null;
   const safeName = String(ownerName || user.displayName || user.email || "Owner").trim() || "Owner";
@@ -1331,6 +1381,19 @@ async function ensureOwnerStaffAndMemberDocs({ user, salonId, ownerName }) {
     await setDoc(userRef, { staffId }, { merge: true });
   } catch (e) {
     console.warn("[OwnerStaffBootstrap] user.staffId write failed", e?.code, e?.message);
+  }
+  try {
+    await ffCreateOrUpdateUserMembership({
+      user,
+      salonId,
+      staffId,
+      role: "owner",
+      name: safeName,
+      email: safeEmail,
+      status: "active"
+    });
+  } catch (e) {
+    console.warn("[OwnerStaffBootstrap] membership write failed", e?.code, e?.message);
   }
 
   if (typeof window !== "undefined") {
@@ -1450,7 +1513,10 @@ async function handleEmailLogin() {
     // Clear any previous error
     showLoginError("");
 
-    await loadUserRoleAndShowView(user);
+    // The onAuthStateChanged listener will call loadUserRoleAndShowView once.
+    // Calling it again here used to run the same Firestore queries twice in
+    // parallel (memberships + user doc), which contributed to the freeze that
+    // triggered Chrome's "page not responding" dialog on multi-membership login.
   } catch (err) {
     console.error("[Login] Error", err);
     
@@ -1493,7 +1559,9 @@ async function handleGoogleLogin() {
     // Clear any previous error
     showLoginError("");
 
-    await loadUserRoleAndShowView(user);
+    // The onAuthStateChanged listener will call loadUserRoleAndShowView. See
+    // the matching comment in handleEmailLogin for why we removed the direct
+    // call here.
   } catch (err) {
     console.error("[Login] Google error", err);
     
@@ -1692,10 +1760,274 @@ async function ffPingStaffLastActiveAt(user, userDocDataOptional) {
   }
 }
 
+async function ffLoadActiveMembershipsForUser(user) {
+  if (!user || !user.uid) return [];
+  try {
+    const snap = await getDocs(collection(db, "users", user.uid, "memberships"));
+    const rows = await Promise.all(snap.docs.map(async (d) => {
+      const data = d.data() || {};
+      const salonId = String(data.salonId || d.id || "").trim();
+      let salonName = String(data.salonName || "").trim();
+      if (salonId && !salonName) {
+        try {
+          const salonSnap = await getDoc(doc(db, "salons", salonId));
+          if (salonSnap.exists()) salonName = String(salonSnap.data()?.name || "").trim();
+        } catch (_) {}
+      }
+      return { id: d.id, ...data, salonId, salonName: salonName || salonId };
+    }));
+    return rows.filter((m) => {
+      const status = String(m.status || "active").trim().toLowerCase();
+      return m.salonId && status !== "archived";
+    });
+  } catch (err) {
+    console.warn("[Membership] Failed loading memberships; falling back to legacy users.salonId", err);
+    return [];
+  }
+}
+
+function ffApplyActiveMembership(membership, legacyUserData) {
+  const m = membership || {};
+  const salonId = String(m.salonId || legacyUserData?.salonId || "").trim();
+  const staffId = String(m.staffId || legacyUserData?.staffId || "").trim();
+  const role = String(m.role || legacyUserData?.role || "owner").trim();
+  currentSalonId = salonId || null;
+  if (typeof window !== "undefined") {
+    window.__ff_waiting_for_salon_choice = false;
+    window.currentSalonId = currentSalonId;
+    window.__ff_user_role = role.toLowerCase();
+    window.ff_is_admin_cached = ["owner", "admin"].includes(role.toLowerCase());
+    if (staffId) {
+      window.__ff_authedStaffId = staffId;
+      try { localStorage.setItem("ff_authedStaffId_v1", staffId); } catch (_) {}
+    }
+    if (salonId) {
+      try {
+        sessionStorage.setItem("ff_active_salon_id", salonId);
+        localStorage.setItem("ff_active_salon_id", salonId);
+      } catch (_) {}
+    }
+  }
+  // Restore the header that ffShowChooseSalonScreen hid. Module screens stay
+  // hidden because the regular login flow (showMainAppContent + Queue gate) will
+  // show whichever screen is appropriate next.
+  try {
+    const chooseRoot = document.getElementById("choose-salon-section");
+    if (chooseRoot) chooseRoot.style.display = "none";
+    const headers = document.querySelectorAll(".header, header.header, #appHeader");
+    headers.forEach((h) => { try { h.style.display = ""; } catch (_) {} });
+  } catch (_) {}
+  // Auth state did not change after Choose Salon, so module auth listeners did
+  // not re-fire. Manually nudge the cloud modules whose initial tryConnect was
+  // skipped by the __ff_waiting_for_salon_choice guard.
+  try {
+    if (typeof window !== "undefined") {
+      if (typeof window.queueCloudReconnect === "function") window.queueCloudReconnect();
+      if (typeof window.tasksCloudReconnect === "function") window.tasksCloudReconnect();
+      if (typeof window.settingsCloudReconnect === "function") window.settingsCloudReconnect();
+      // Chat badge / toast notifications are subscribed via the chat module's
+      // own onAuthStateChanged. When the wait guard caused that to bail early
+      // we kick it off explicitly here using the chosen salonId.
+      if (salonId && typeof user !== "undefined") {
+        try {
+          import("/chat.js?v=20260430_unified")
+            .then((m) => {
+              try {
+                if (m && typeof m.subscribeToChatBadge === "function") m.subscribeToChatBadge(window.ffAuth?.currentUser?.uid, salonId);
+                if (m && typeof m.subscribeToChatToastNotifications === "function") m.subscribeToChatToastNotifications(window.ffAuth?.currentUser?.uid, salonId);
+              } catch (_) {}
+            })
+            .catch(() => {});
+        } catch (_) {}
+      }
+    }
+  } catch (e) { console.warn("[Auth] Module reconnect after Choose Salon failed", e); }
+  return { salonId, staffId, role };
+}
+
+function ffEnsureChooseSalonScreen() {
+  let root = document.getElementById("choose-salon-section");
+  if (root) return root;
+  // Inject Fair Flow brand styles for the screen the first time we render it.
+  if (!document.getElementById("ffChooseSalonStyles")) {
+    const style = document.createElement("style");
+    style.id = "ffChooseSalonStyles";
+    style.textContent = `
+      #choose-salon-section {
+        position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+        background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+        padding: 24px; z-index: 100200; overflow-y: auto;
+      }
+      #choose-salon-section .ffcs-card {
+        width: 100%; max-width: 460px; background: #fff; border-radius: 24px;
+        padding: 36px 28px 28px; box-shadow: 0 20px 60px rgba(124,58,237,0.18), 0 4px 12px rgba(0,0,0,0.04);
+        border: 1px solid rgba(124,58,237,0.08); animation: ffcsFadeIn .35s ease-out;
+      }
+      @keyframes ffcsFadeIn {
+        from { opacity: 0; transform: translateY(8px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      #choose-salon-section .ffcs-logo {
+        display: flex; align-items: center; justify-content: center;
+        width: 56px; height: 56px; margin: 0 auto 18px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #9d68b9 0%, #7c3aed 100%);
+        box-shadow: 0 8px 20px rgba(124,58,237,0.35);
+      }
+      #choose-salon-section .ffcs-logo svg { width: 28px; height: 28px; color: #fff; }
+      #choose-salon-section .ffcs-title {
+        margin: 0 0 6px; font-size: 24px; font-weight: 700; text-align: center;
+        background: linear-gradient(90deg, #9d68b9, #7c3aed);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+        letter-spacing: -0.01em;
+      }
+      #choose-salon-section .ffcs-subtitle {
+        margin: 0 0 24px; text-align: center; color: #6b7280; font-size: 14px;
+      }
+      #choose-salon-section .ffcs-list { display: flex; flex-direction: column; gap: 12px; }
+      #choose-salon-section .ffcs-card-btn {
+        width: 100%; padding: 16px 18px; border: 2px solid #f1ecf6; border-radius: 14px;
+        background: #fff; cursor: pointer; text-align: left; font: inherit; color: inherit;
+        display: flex; align-items: center; gap: 14px;
+        transition: border-color .15s ease, transform .12s ease, box-shadow .15s ease, background .15s ease;
+      }
+      #choose-salon-section .ffcs-card-btn:hover {
+        border-color: #9d68b9;
+        background: #faf5ff;
+        box-shadow: 0 6px 18px rgba(124,58,237,0.18);
+        transform: translateY(-1px);
+      }
+      #choose-salon-section .ffcs-card-btn:active { transform: translateY(0); }
+      #choose-salon-section .ffcs-avatar {
+        flex-shrink: 0; width: 44px; height: 44px; border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        background: linear-gradient(135deg, #9d68b9 0%, #7c3aed 100%);
+        color: #fff; font-weight: 700; font-size: 17px; letter-spacing: .02em;
+      }
+      #choose-salon-section .ffcs-meta { flex: 1; min-width: 0; }
+      #choose-salon-section .ffcs-name {
+        display: block; font-size: 15px; font-weight: 700; color: #111827;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      #choose-salon-section .ffcs-role {
+        display: block; margin-top: 3px; font-size: 12px; color: #6b7280;
+        text-transform: capitalize;
+      }
+      #choose-salon-section .ffcs-open {
+        flex-shrink: 0; padding: 8px 16px; border-radius: 999px;
+        background: linear-gradient(90deg, #9d68b9, #7c3aed); color: #fff;
+        font-size: 12px; font-weight: 700; letter-spacing: .02em;
+        box-shadow: 0 4px 12px rgba(124,58,237,0.25);
+      }
+      #choose-salon-section .ffcs-divider {
+        margin: 20px 0 14px; height: 1px;
+        background: linear-gradient(90deg, transparent, #e5e7eb, transparent);
+      }
+      #choose-salon-section .ffcs-signout {
+        display: block; margin: 0 auto; border: 0; background: transparent;
+        color: #9ca3af; font-size: 13px; cursor: pointer; padding: 6px 12px;
+        border-radius: 8px; transition: color .15s ease, background .15s ease;
+      }
+      #choose-salon-section .ffcs-signout:hover { color: #7c3aed; background: #faf5ff; }
+    `;
+    document.head.appendChild(style);
+  }
+  root = document.createElement("section");
+  root.id = "choose-salon-section";
+  document.body.appendChild(root);
+  return root;
+}
+
+function ffShowChooseSalonScreen(user, userData, memberships) {
+  const root = ffEnsureChooseSalonScreen();
+  const loginSection = document.getElementById("login-section");
+  const signupSection = document.getElementById("signup-section");
+  const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
+  const mainApp = document.getElementById("main-app-content");
+  if (loginSection) loginSection.style.display = "none";
+  if (signupSection) signupSection.style.display = "none";
+  if (resetSection) resetSection.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "none";
+  if (mainApp) mainApp.style.display = "none";
+  // Hide all module screens + queue chrome so the Choose Salon screen owns the viewport
+  // and module subscription errors that fired pre-selection don't paint placeholder UI behind it.
+  const idsToHide = [
+    "owner-view","joinBar","queueViewBlocked","tasksScreen","inboxScreen","chatScreen",
+    "mediaScreen","ticketsScreen","trainingScreen","scheduleScreen","timeClockScreen",
+    "inventoryScreen","userProfileScreen","myProfileScreen","manageQueueScreen",
+    "pointsAppScreen","dashboardScreen","queueAnalyticsScreen","ticketsAnalyticsScreen",
+    "timeAnalyticsScreen","tasksAnalyticsScreen","appsPanel","userAvatarDropdown"
+  ];
+  idsToHide.forEach((id) => { try { const el = document.getElementById(id); if (el) el.style.display = "none"; } catch (_) {} });
+  try {
+    const headers = document.querySelectorAll(".header, header.header, #appHeader");
+    headers.forEach((h) => { try { h.style.display = "none"; } catch (_) {} });
+  } catch (_) {}
+  root.style.display = "flex";
+  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+  const initialOf = (name) => {
+    const t = String(name || "").trim();
+    if (!t) return "S";
+    const ch = t.charAt(0).toUpperCase();
+    return /[A-Z0-9]/.test(ch) ? ch : "S";
+  };
+  root.innerHTML = `
+    <div class="ffcs-card">
+      <div class="ffcs-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 21V5a2 2 0 0 1 2-2h9l5 5v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          <path d="M14 3v5h5"/>
+          <path d="M8 13h8M8 17h5"/>
+        </svg>
+      </div>
+      <h2 class="ffcs-title">Choose Salon</h2>
+      <p class="ffcs-subtitle">Select which business you want to open.</p>
+      <div id="chooseSalonList" class="ffcs-list"></div>
+      <div class="ffcs-divider"></div>
+      <button id="chooseSalonSignOutBtn" type="button" class="ffcs-signout">Sign out</button>
+    </div>
+  `;
+  const list = root.querySelector("#chooseSalonList");
+  memberships.forEach((m) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "ffcs-card-btn";
+    const role = String(m.role || "staff").trim();
+    const name = String(m.salonName || m.salonId || "Salon");
+    card.innerHTML = `
+      <span class="ffcs-avatar">${escapeHtml(initialOf(name))}</span>
+      <span class="ffcs-meta">
+        <span class="ffcs-name">${escapeHtml(name)}</span>
+        <span class="ffcs-role">${escapeHtml(role)}</span>
+      </span>
+      <span class="ffcs-open">Open</span>
+    `;
+    card.addEventListener("click", async () => {
+      root.style.display = "none";
+      await loadUserRoleAndShowView(user, { selectedMembership: m, legacyUserData: userData });
+    });
+    list.appendChild(card);
+  });
+  const signOutBtn = root.querySelector("#chooseSalonSignOutBtn");
+  if (signOutBtn) {
+    signOutBtn.addEventListener("click", async () => {
+      try { await signOut(auth); } catch (_) {}
+      // Hard-refresh — see comment in handleLogout. Without this, the next
+      // login would re-fire 29 module auth listeners simultaneously and freeze.
+      try { window.location.replace("/"); } catch (_) {
+        try { window.location.href = "/"; } catch (__) {}
+      }
+    });
+  }
+}
+
 // =====================
 // Load user role and show view
 // =====================
-async function loadUserRoleAndShowView(user) {
+async function loadUserRoleAndShowView(user, options = {}) {
   try {
     const userDocRef = doc(db, "users", user.uid);
     const snap = await getDoc(userDocRef);
@@ -1710,7 +2042,19 @@ async function loadUserRoleAndShowView(user) {
     }
 
     const data = snap.data();
-    const role = data.role || "owner";
+    let selectedMembership = options.selectedMembership || null;
+    if (!selectedMembership) {
+      const memberships = await ffLoadActiveMembershipsForUser(user);
+      if (memberships.length > 1) {
+        if (typeof window !== "undefined") window.__ff_waiting_for_salon_choice = true;
+        ffShowChooseSalonScreen(user, data, memberships);
+        return;
+      } else if (memberships.length === 1) {
+        selectedMembership = memberships[0];
+      }
+    }
+    const activeSession = ffApplyActiveMembership(selectedMembership, data);
+    const role = activeSession.role || data.role || "owner";
     console.log("[Auth] Loaded user role:", role, "for uid:", user.uid);
 
     // Set admin cache immediately so Chat gear & Tasks Settings work without delay
@@ -1738,12 +2082,10 @@ async function loadUserRoleAndShowView(user) {
 
     ffStartAvatarListener(user.uid);
 
-    // Store salonId for later use
-    currentSalonId = data.salonId || null;
-    // Update global reference
-    if (typeof window !== 'undefined') {
-      window.currentSalonId = currentSalonId;
-    }
+    // Store salonId for later use. Phase 3 uses active membership when present,
+    // otherwise falls back to legacy users/{uid}.salonId.
+    currentSalonId = activeSession.salonId || data.salonId || null;
+    if (typeof window !== 'undefined') window.currentSalonId = currentSalonId;
 
     // One-time: persist salon owner uid on settings/main (immutable thereafter via rules).
     if (currentSalonId && user && role === 'owner') {
@@ -1788,7 +2130,8 @@ async function loadUserRoleAndShowView(user) {
 
     // Set ff_authedStaffId from user doc so avatar upload works for managers/technicians (not just PIN flow)
     const staffIdFromUser =
-      data.staffId != null && String(data.staffId).trim() !== "" ? String(data.staffId).trim() : null;
+      activeSession.staffId ||
+      (data.staffId != null && String(data.staffId).trim() !== "" ? String(data.staffId).trim() : null);
     if (staffIdFromUser && typeof window !== "undefined") {
       window.__ff_authedStaffId = staffIdFromUser;
       try {
@@ -2026,6 +2369,14 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   console.log("[Auth] User is signed in, loading role");
+  // If the early auth listener already detected multi-memberships and surfaced
+  // the Choose Salon screen, skip duplicating the same Firestore round-trips here.
+  // loadUserRoleAndShowView will run again (with selectedMembership) when the
+  // user clicks one of the salon cards.
+  if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice === true) {
+    console.log("[Auth] Skipping loadUserRoleAndShowView while Choose Salon is open");
+    return;
+  }
   await loadUserRoleAndShowView(user);
 });
 
@@ -2340,6 +2691,7 @@ function ffWireUiAfterDomReady() {
             "ff_users_v1",
             "ff_queues_v1",
             "ff_queue_settings_v1",
+            "ff_active_salon_id",
             "ff_tasks_catalog_v1",
             "ff_tasks_active_deleted_v1",
             "ff_tasks_alert_windows_v1",
@@ -2358,6 +2710,7 @@ function ffWireUiAfterDomReady() {
           tenantKeys.forEach((k) => {
             try { localStorage.removeItem(k); } catch (_) {}
           });
+          try { sessionStorage.removeItem("ff_active_salon_id"); } catch (_) {}
           window.__ff_authedStaffId = null;
           window.__ff_active_location_id = null;
           // Reset in-memory avatar state so the stale photo doesn't survive
@@ -2370,7 +2723,16 @@ function ffWireUiAfterDomReady() {
         }
 
         await signOut(auth);
-        showLoginScreen();
+        // Hard-refresh after signOut so all 29 cloud modules unload cleanly.
+        // Keeping them attached caused subsequent logins to freeze the page —
+        // every module's onAuthStateChanged listener would fire simultaneously
+        // on the next sign-in and saturate Chrome's main thread, the same
+        // pattern that triggered "This page isn't responding" before the safe
+        // loader gating fix. A reload guarantees a clean process per session.
+        try { window.location.replace("/"); } catch (_) {
+          try { window.location.href = "/"; } catch (__) {}
+        }
+        return;
       } catch (err) {
         console.error("[Auth] Logout failed:", err);
         alert("Logout failed, please try again.");

@@ -102,7 +102,7 @@
  */
 
 import { doc, getDoc, addDoc, updateDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db, auth } from "./app.js?v=20260412_salon_owner_uid";
+import { db, auth } from "./app.js?v=20260430_unified";
 
 // ───────────────────────── salon id resolution ─────────────────────────
 // Mirrors settings-cloud.js so both modules agree on how to find the salon

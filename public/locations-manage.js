@@ -20,7 +20,7 @@ import {
   updateDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db, auth } from "./app.js?v=20260411_chat_reminder_attrfix";
+import { db, auth } from "./app.js?v=20260430_unified";
 
 const CARD_ID = "userProfileCardLocations";
 

@@ -2,7 +2,7 @@
  * Inventory — categories/subcategories from Firestore (salon inventoryCategories).
  * Table rows/groups persist on the selected subcategory Firestore document.
  */
-import { db, auth, storage } from "./app.js?v=20260411_chat_reminder_attrfix";
+import { db, auth, storage } from "./app.js?v=20260430_unified";
 import {
   doc,
   getDoc,

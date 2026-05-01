@@ -19,7 +19,7 @@ import {
   onSnapshot, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260408_inbox_upload_deeplink";
+import { db, auth } from "./app.js?v=20260430_unified";
 
 // Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
 // window level in capture phase to beat any other handler that might
@@ -2707,6 +2707,13 @@ if (typeof document !== 'undefined' && !window.__ff_chatStaffPermListener) {
 // ─── Auth Listener ─────────────────────────────────────────────────────────────
 onAuthStateChanged(auth, async user => {
   if (user) {
+    // Defer chat badge subscriptions until salon is resolved. When the user has
+    // multiple memberships, currentSalonId is null until they pick one in the
+    // Choose Salon screen — subscribing here with the legacy users/{uid}.salonId
+    // would race with the salon selection and could attach to the wrong salon.
+    if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice === true) {
+      return;
+    }
     try {
       const snap = await getDoc(doc(db, 'users', user.uid));
       if (snap.exists()) {

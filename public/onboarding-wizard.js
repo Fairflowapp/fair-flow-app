@@ -27,7 +27,7 @@ import {
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260411_chat_reminder_attrfix";
+import { db, auth } from "./app.js?v=20260430_unified";
 
 const LS_COMPLETED_KEY = "ff_onboarding_completed_v1";
 const WIZARD_ID = "ff-onboarding-wizard";

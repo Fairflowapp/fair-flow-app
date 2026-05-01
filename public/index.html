@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <!-- FF_BUILD_STAMP: 20260415-goToQueue-ffMarkUiReady-fallback - View Source on production. -->
 
 <html lang="en">
@@ -84,7 +84,7 @@
       return window.goToInventory();
     }
     try {
-      await import('/inventory.js?v=20260425_import_shared_inventory_catalog_r1');
+      await import('/inventory.js?v=20260430_unified');
     } catch (e) {
       console.error('[Inventory mock] load failed', e);
       return;
@@ -4866,14 +4866,14 @@ async function initFirebaseAuth() {
           if (authBanner) authBanner.style.display = 'none';
           if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
 
-          if (typeof ensureTrainingItemsSubscription === 'function') {
+          if (window.__ff_waiting_for_salon_choice !== true && typeof ensureTrainingItemsSubscription === 'function') {
             setTimeout(() => {
               ensureTrainingItemsSubscription().catch((err) => {
                 console.warn('[Training] Failed to start items subscription after auth', err);
               });
             }, 0);
           }
-          if (typeof ensureTrainingNotificationsSubscription === 'function') {
+          if (window.__ff_waiting_for_salon_choice !== true && typeof ensureTrainingNotificationsSubscription === 'function') {
             setTimeout(() => {
               ensureTrainingNotificationsSubscription().catch((err) => {
                 console.warn('[Training] Failed to start notifications subscription after auth', err);
@@ -6875,12 +6875,12 @@ if (typeof document !== 'undefined') {
     if (typeof ffRenderQueueFilterChips === 'function') ffRenderQueueFilterChips();
     if (typeof renderQueue === 'function') renderQueue();
     if (typeof renderService === 'function') renderService();
-    if (typeof ensureTrainingItemsSubscription === 'function') {
+    if (window.__ff_waiting_for_salon_choice !== true && typeof ensureTrainingItemsSubscription === 'function') {
       ensureTrainingItemsSubscription().catch((err) => {
         console.warn('[Training] Failed to refresh items subscription after staff update', err);
       });
     }
-    if (typeof ensureTrainingNotificationsSubscription === 'function') {
+    if (window.__ff_waiting_for_salon_choice !== true && typeof ensureTrainingNotificationsSubscription === 'function') {
       ensureTrainingNotificationsSubscription().catch((err) => {
         console.warn('[Training] Failed to refresh notifications subscription after staff update', err);
       });
@@ -10935,6 +10935,7 @@ function resolveCurrentTrainingStaffRecord() {
     let currentStaff = null;
     if (directStaffId) {
       currentStaff = staffList.find((staff) => String(staff?.id || staff?.staffId || '').trim() === directStaffId) || null;
+      return currentStaff || { id: directStaffId, name: directName || '', email: authEmail || '' };
     }
     if (!currentStaff && authEmail) {
       currentStaff = staffList.find((staff) => String(staff?.email || '').trim().toLowerCase() === authEmail) || null;
@@ -27322,7 +27323,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260430_chat_recipient_open_fix_v3');
+            const m = await import('/chat.js?v=20260430_unified');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -27829,7 +27830,7 @@ function initializeAppsPanel() {
             if (typeof window.goToDashboard === 'function') {
               window.goToDashboard();
             } else {
-              import('/dashboard.js?v=20260430_dashboard_range_filter_v3')
+              import('/dashboard.js?v=20260430_unified')
                 .then((m) => {
                   if (m && typeof m.goToDashboard === 'function') {
                     window.goToDashboard = m.goToDashboard;
@@ -48698,39 +48699,39 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260429_tasks_force_auto_reset_v1"></script>
+  <script type="module" src="/app.js?v=20260430_unified"></script>
   <script>
     (function () {
       var scripts = [
-        { src: "/staff-cloud.js?v=20260415_ff_toast", type: "module", delay: 700 },
-        { src: "/locations-cloud.js?v=20260420_locations_v1", type: "module", delay: 900 },
-        { src: "/location-helpers.js?v=20260420_owner_bypass_v1", delay: 1050 },
-        { src: "/location-switcher.js?v=20260420_switcher_mangomint_v1", delay: 1200 },
-        { src: "/queue-cloud.js?v=20260420_per_location_v1", type: "module", delay: 1350 },
-        { src: "/tasks-cloud.js?v=20260429_tasks_force_auto_reset_v1", type: "module", delay: 1500 },
-        { src: "/points-engine.js?v=20260426_branch_points_r1", type: "module", delay: 1650 },
-        { src: "/schedule-helpers.js?v=20260420_per_loc_no_default", type: "module", delay: 1800 },
-        { src: "/schedule-availability.js?v=20260409_coverage_plain_cards", type: "module", delay: 1900 },
-        { src: "/schedule-generator.js?v=20260420_cross_loc_busy", type: "module", delay: 2000 },
-        { src: "/schedule-validator.js?v=20260409_stagger_by_coverage_min", type: "module", delay: 2100 },
-        { src: "/schedule-ui.js?v=20260429_dashboard_nav_fix_v1", type: "module", delay: 2300 },
-        { src: "/dashboard.js?v=20260430_dashboard_range_filter_v3", type: "module", delay: 2500 },
-        { src: "/inbox.js?v=20260420_inv_draftpicker_v123", type: "module", delay: 2700 },
-        { src: "/chat.js?v=20260430_chat_recipient_open_fix_v3", type: "module", delay: 2900 },
-        { src: "/staff-documents.js?v=20260412_doc_meta_edit", type: "module", delay: 3200 },
-        { src: "/staff-call-cloud.js?v=20260412_staffcall_accept_ui", type: "module", delay: 3400 },
-        { src: "/settings-cloud.js?v=20260420_time_clock_v1", type: "module", delay: 3600 },
-        { src: "/time-clock-engine.js?v=20260420_tc_engine_v2_shifts", delay: 3800 },
-        { src: "/time-clock-entries.js?v=20260424_tc_single_open_shift_r1", type: "module", delay: 4000 },
-        { src: "/tickets.js?v=20260429_tickets_new_btn_no_flicker_v1", type: "module", delay: 4300 },
-        { src: "/media-upload.js?v=20260426_branch_points_r1", type: "module", delay: 4600 },
-        { src: "/inventory.js?v=20260425_import_shared_inventory_catalog_r1", type: "module", delay: 4900 },
-        { src: "/onboarding-wizard.js?v=20260420_onboarding_v1", type: "module", delay: 5200 },
-        { src: "/locations-manage.js?v=20260424_locations_compact_rows_r1", type: "module", delay: 5400 },
-        { src: "/queue-analytics.js?v=20260429_tight_analytics_v1", type: "module", delay: 5700 },
-        { src: "/tickets-analytics.js?v=20260429_tight_analytics_v1", type: "module", delay: 6000 },
-        { src: "/time-analytics.js?v=20260429_time_full_week_v1", type: "module", delay: 6300 },
-        { src: "/tasks-analytics.js?v=20260429_tight_analytics_v1", type: "module", delay: 6600 }
+        { src: "/staff-cloud.js?v=20260430_unified", type: "module", delay: 700 },
+        { src: "/locations-cloud.js?v=20260430_unified", type: "module", delay: 900 },
+        { src: "/location-helpers.js?v=20260430_unified", delay: 1050 },
+        { src: "/location-switcher.js?v=20260430_unified", type: "module", delay: 1200 },
+        { src: "/queue-cloud.js?v=20260430_unified", type: "module", delay: 1350 },
+        { src: "/tasks-cloud.js?v=20260430_unified", type: "module", delay: 1500 },
+        { src: "/points-engine.js?v=20260430_unified", type: "module", delay: 1650 },
+        { src: "/schedule-helpers.js?v=20260430_unified", type: "module", delay: 1800 },
+        { src: "/schedule-availability.js?v=20260430_unified", type: "module", delay: 1900 },
+        { src: "/schedule-generator.js?v=20260430_unified", type: "module", delay: 2000 },
+        { src: "/schedule-validator.js?v=20260430_unified", type: "module", delay: 2100 },
+        { src: "/schedule-ui.js?v=20260430_unified", type: "module", delay: 2300 },
+        { src: "/dashboard.js?v=20260430_unified", type: "module", delay: 2500 },
+        { src: "/inbox.js?v=20260430_unified", type: "module", delay: 2700 },
+        { src: "/chat.js?v=20260430_unified", type: "module", delay: 2900 },
+        { src: "/staff-documents.js?v=20260430_unified", type: "module", delay: 3200 },
+        { src: "/staff-call-cloud.js?v=20260430_unified", type: "module", delay: 3400 },
+        { src: "/settings-cloud.js?v=20260430_unified", type: "module", delay: 3600 },
+        { src: "/time-clock-engine.js?v=20260430_unified", delay: 3800 },
+        { src: "/time-clock-entries.js?v=20260430_unified", type: "module", delay: 4000 },
+        { src: "/tickets.js?v=20260430_unified", type: "module", delay: 4300 },
+        { src: "/media-upload.js?v=20260430_unified", type: "module", delay: 4600 },
+        { src: "/inventory.js?v=20260430_unified", type: "module", delay: 4900 },
+        { src: "/onboarding-wizard.js?v=20260430_unified", type: "module", delay: 5200 },
+        { src: "/locations-manage.js?v=20260430_unified", type: "module", delay: 5400 },
+        { src: "/queue-analytics.js?v=20260430_unified", type: "module", delay: 5700 },
+        { src: "/tickets-analytics.js?v=20260430_unified", type: "module", delay: 6000 },
+        { src: "/time-analytics.js?v=20260430_unified", type: "module", delay: 6300 },
+        { src: "/tasks-analytics.js?v=20260430_unified", type: "module", delay: 6600 }
       ];
       function wait(ms) {
         return new Promise(function (resolve) { setTimeout(resolve, ms); });
@@ -48748,7 +48749,40 @@ function hookSettingsGuard_DISABLED(){
           document.body.appendChild(s);
         });
       }
+      // Wait until the user is authenticated AND a salon is selected before
+      // loading the heavy module scripts. Loading 29 modules during the login
+      // flow attached 29 onAuthStateChanged listeners that all fired in parallel
+      // when the user signed in, blocking Chrome's main thread long enough to
+      // trigger the "This page isn't responding" dialog. By gating the loader
+      // on currentSalonId we guarantee subscriptions only run for the chosen
+      // salon and never race the auth resolution.
+      function waitForSalonReady() {
+        return new Promise(function (resolve) {
+          function ready() {
+            try {
+              if (typeof window === "undefined") return false;
+              if (window.__ff_waiting_for_salon_choice === true) return false;
+              if (!window.ffAuth || !window.ffAuth.currentUser) return false;
+              if (!window.currentSalonId) return false;
+              return true;
+            } catch (_) { return false; }
+          }
+          if (ready()) { resolve(); return; }
+          var poll = setInterval(function () {
+            if (ready()) {
+              clearInterval(poll);
+              resolve();
+            }
+          }, 200);
+          // Hard cap at 10 minutes so a stalled session can't leak the interval.
+          setTimeout(function () { clearInterval(poll); resolve(); }, 600000);
+        });
+      }
       (async function loadSafely() {
+        try { await waitForSalonReady(); } catch (_) {}
+        // Once salon is ready, load all modules with the original sequential
+        // delays preserved so we don't overload the browser with 29 simultaneous
+        // module evaluations.
         var lastDelay = 0;
         for (var i = 0; i < scripts.length; i += 1) {
           var item = scripts[i];

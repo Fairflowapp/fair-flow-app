@@ -12,7 +12,7 @@
 
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, getDocs, addDoc, updateDoc, deleteDoc, deleteField } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260412_salon_owner_uid";
+import { db, auth } from "./app.js?v=20260430_unified";
 import {
   cloneDefaultBusinessHours,
   cloneDefaultDayShiftSegments,
