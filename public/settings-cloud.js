@@ -12,7 +12,7 @@
 
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, getDocs, addDoc, updateDoc, deleteDoc, deleteField } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260430_unified";
+import { db, auth } from "./app.js?v=20260501_points";
 import {
   cloneDefaultBusinessHours,
   cloneDefaultDayShiftSegments,
@@ -53,18 +53,25 @@ function _ffActiveLocationIdForSettings() {
 }
 
 async function getSalonId() {
+  // Multi-salon: when the user has chosen a salon (single membership auto-
+  // selected, or one explicitly picked from Choose Salon), that selection is
+  // the source of truth. Reading users/{uid}.salonId first would leak data
+  // from the legacy primary salon into whichever salon the user picked.
+  if (typeof window !== "undefined" && window.currentSalonId) {
+    return String(window.currentSalonId).trim() || null;
+  }
   const user = auth.currentUser;
   if (!user) return null;
   try {
     const userDoc = await getDoc(doc(db, "users", user.uid));
     if (userDoc.exists()) {
       const data = userDoc.data();
-      return data.salonId || (typeof window !== "undefined" ? window.currentSalonId : null) || null;
+      return data.salonId || null;
     }
   } catch (e) {
     console.warn("[SettingsCloud] getSalonId failed", e);
   }
-  return typeof window !== "undefined" ? window.currentSalonId : null;
+  return null;
 }
 
 // ─── UI Settings (historyRange) ───────────────────────────────────────────────

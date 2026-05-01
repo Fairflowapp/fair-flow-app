@@ -13,7 +13,7 @@ import {
   serverTimestamp, Timestamp
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260430_unified";
+import { db, auth } from "./app.js?v=20260501_points";
 
 // =====================
 // State
@@ -108,11 +108,45 @@ async function loadCurrentUserProfile() {
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (userDoc.exists()) {
-      const data = userDoc.data();
-      currentUserProfile = { uid: user.uid, ...data };
-      if (!currentUserProfile.salonId && typeof window !== 'undefined' && window.currentSalonId) {
-        currentUserProfile.salonId = window.currentSalonId;
-        console.log('[Tickets] Using window.currentSalonId fallback:', window.currentSalonId);
+      const data = userDoc.data() || {};
+      // Multi-salon: prefer the salon picked from Choose Salon (or the single
+      // auto-selected membership) over users/{uid}.salonId. Previously this
+      // only fell back when salonId was missing, which still leaked legacy
+      // primary-salon tickets into the picked salon.
+      // staffId + role also need to follow the chosen membership so ticket
+      // permission checks (canViewTickets etc.) evaluate against the right
+      // salon's role rather than the legacy primary-salon role.
+      const w = (typeof window !== 'undefined') ? window : {};
+      const activeSalonId = w.currentSalonId ? String(w.currentSalonId).trim() : '';
+      const activeStaffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : '';
+      const activeRole = w.__ff_user_role ? String(w.__ff_user_role).trim() : '';
+      const resolvedSalonId = activeSalonId || data.salonId || null;
+      const resolvedStaffId = activeStaffId || data.staffId || null;
+      currentUserProfile = {
+        uid: user.uid,
+        ...data,
+        salonId: resolvedSalonId,
+        staffId: resolvedStaffId,
+        role: activeRole || data.role || '',
+      };
+      // Multi-salon: pull the technician name from the staff doc in the chosen
+      // salon. Otherwise tickets created from test_salon_001 are stored with
+      // technicianName = legacy primary-salon name instead of the salon-scoped
+      // staff name, and the wrong technician is credited / the ticket is hidden
+      // from the actual servicer's "my tickets" view (which filters by name).
+      if (resolvedSalonId && resolvedStaffId) {
+        try {
+          const staffSnap = await getDoc(doc(db, `salons/${resolvedSalonId}/staff`, resolvedStaffId));
+          if (staffSnap.exists()) {
+            const st = staffSnap.data() || {};
+            const staffName = String(st.name || '').trim();
+            if (staffName) currentUserProfile.name = staffName;
+            currentUserProfile.permissions = { ...(currentUserProfile.permissions || {}), ...(st.permissions || {}) };
+            if (st.managerType) currentUserProfile.managerType = st.managerType;
+          }
+        } catch (mergeErr) {
+          console.warn('[Tickets] Failed to merge staff doc into profile', mergeErr);
+        }
       }
       return currentUserProfile;
     }
@@ -1438,7 +1472,12 @@ async function setTicketServiceUpgrade(ticketId, enabled) {
 }
 
 function getTicketUpgradePointsAccountId() {
-  return String(currentUserProfile?.salonId || (typeof window !== 'undefined' && (window.currentAccountId || window.accountId || window.currentSalonId)) || '').trim();
+  return String(
+    (typeof window !== 'undefined' && window.currentSalonId)
+    || currentUserProfile?.salonId
+    || (typeof window !== 'undefined' && (window.currentAccountId || window.accountId))
+    || ''
+  ).trim();
 }
 
 function getTicketUpgradePointsLocationId(ticket) {

@@ -19,7 +19,7 @@ import {
   onSnapshot, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260430_unified";
+import { db, auth } from "./app.js?v=20260501_points";
 
 // Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
 // window level in capture phase to beat any other handler that might
@@ -573,7 +573,49 @@ async function loadChatUserProfile() {
   try {
     const snap = await getDoc(doc(db, 'users', user.uid));
     if (snap.exists()) {
-      chatUserProfile = { uid: user.uid, ...snap.data() };
+      const data = snap.data() || {};
+      // Multi-salon: prefer the salon the user picked from Choose Salon (or the
+      // single auto-selected membership) over the legacy users/{uid}.salonId.
+      // Without this override, a user who picked test_salon_001 from Choose
+      // Salon would still see conversations / templates / flows from their
+      // legacy primary salon (data.salonId), since every chat query below
+      // composes paths from chatUserProfile.salonId.
+      // staffId and role also need to be overridden — chat header rendering
+      // and "allowed senders" gating use chatUserProfile.role, which differs
+      // between salons (e.g. owner here, technician there).
+      const w = (typeof window !== 'undefined') ? window : {};
+      const activeSalonId = w.currentSalonId ? String(w.currentSalonId).trim() : '';
+      const activeStaffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : '';
+      const activeRole = w.__ff_user_role ? String(w.__ff_user_role).trim() : '';
+      const resolvedSalonId = activeSalonId || data.salonId || null;
+      const resolvedStaffId = activeStaffId || data.staffId || null;
+      chatUserProfile = {
+        uid: user.uid,
+        ...data,
+        salonId: resolvedSalonId,
+        staffId: resolvedStaffId,
+        role: activeRole || data.role || '',
+      };
+      // Multi-salon: pull the display name from the staff doc in the chosen
+      // salon. Otherwise messages sent from test_salon_001 are stored with
+      // chatUserProfile.name = the legacy primary-salon user name (e.g.
+      // "Test Multi") instead of the salon-scoped staff name (e.g. "TEST TECH"),
+      // and recipients see the wrong sender label.
+      if (resolvedSalonId && resolvedStaffId) {
+        try {
+          const staffSnap = await getDoc(doc(db, `salons/${resolvedSalonId}/staff`, resolvedStaffId));
+          if (staffSnap.exists()) {
+            const st = staffSnap.data() || {};
+            const staffName = String(st.name || '').trim();
+            if (staffName) chatUserProfile.name = staffName;
+            // Also merge permissions so per-salon access controls work in chat.
+            chatUserProfile.permissions = { ...(chatUserProfile.permissions || {}), ...(st.permissions || {}) };
+            if (st.managerType) chatUserProfile.managerType = st.managerType;
+          }
+        } catch (mergeErr) {
+          console.warn('[Chat] Failed to merge staff doc into profile', mergeErr);
+        }
+      }
     } else {
       console.error('[Chat] loadChatUserProfile failed — Firestore doc users/' + user.uid + ' not found. Gear hidden.');
       chatUserProfile = null;
@@ -2718,9 +2760,16 @@ onAuthStateChanged(auth, async user => {
       const snap = await getDoc(doc(db, 'users', user.uid));
       if (snap.exists()) {
         const p = { uid: user.uid, ...snap.data() };
-        if (p.salonId) {
-          subscribeToChatBadge(user.uid, p.salonId);
-          subscribeToChatToastNotifications(user.uid, p.salonId);
+        // Multi-salon: same reason as loadChatUserProfile — prefer the salon
+        // the user actively picked, otherwise badge/toast subscriptions point
+        // at the legacy primary salon and cross-salon notifications leak in.
+        const activeSalonId = (typeof window !== 'undefined' && window.currentSalonId)
+          ? String(window.currentSalonId).trim()
+          : '';
+        const targetSalonId = activeSalonId || p.salonId || '';
+        if (targetSalonId) {
+          subscribeToChatBadge(user.uid, targetSalonId);
+          subscribeToChatToastNotifications(user.uid, targetSalonId);
         }
       }
     } catch(e) {}

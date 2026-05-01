@@ -102,12 +102,17 @@
  */
 
 import { doc, getDoc, addDoc, updateDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db, auth } from "./app.js?v=20260430_unified";
+import { db, auth } from "./app.js?v=20260501_points";
 
 // ───────────────────────── salon id resolution ─────────────────────────
-// Mirrors settings-cloud.js so both modules agree on how to find the salon
-// when called from anywhere in the app.
+// Mirrors the multi-salon modules: the selected membership/session salon is
+// the source of truth. users/{uid}.salonId is a legacy fallback only.
 async function _ffGetSalonIdForTimeEntries() {
+  try {
+    if (typeof window !== "undefined" && window.currentSalonId) {
+      return String(window.currentSalonId).trim() || null;
+    }
+  } catch (_) {}
   try {
     const user = auth && auth.currentUser;
     if (user) {
@@ -120,11 +125,6 @@ async function _ffGetSalonIdForTimeEntries() {
   } catch (e) {
     console.warn("[TimeClockEntries] _ffGetSalonIdForTimeEntries (user lookup) failed", e);
   }
-  try {
-    if (typeof window !== "undefined" && window.currentSalonId) {
-      return String(window.currentSalonId);
-    }
-  } catch (_) {}
   return null;
 }
 

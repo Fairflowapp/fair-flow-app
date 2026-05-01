@@ -30,7 +30,7 @@ import {
   deleteObject,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
-import { db, auth, storage } from "./app.js?v=20260430_unified";
+import { db, auth, storage } from "./app.js?v=20260501_points";
 
 // --- Phase 2: Inbox → staff /documents sync (approve / reject) ---
 

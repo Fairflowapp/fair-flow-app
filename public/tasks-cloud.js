@@ -18,7 +18,7 @@
 
 import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc, deleteDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260430_unified";
+import { db, auth } from "./app.js?v=20260501_points";
 
 const TASKS_STATE_DEFAULT = "default";
 const TABS = ["opening", "closing", "weekly", "monthly", "yearly"];
@@ -49,7 +49,15 @@ async function getSalonId() {
   const user = auth.currentUser;
   let salonId = null;
 
-  // 1) From Firebase auth user doc (primary for logged-in users)
+  // Multi-salon: when the user has chosen a salon (single membership auto-
+  // selected, or one explicitly picked from Choose Salon), that selection is
+  // the source of truth. Reading users/{uid}.salonId first would leak data
+  // from the legacy primary salon into whichever salon the user picked.
+  if (typeof window !== "undefined" && window.currentSalonId) {
+    return String(window.currentSalonId).trim() || null;
+  }
+
+  // 1) From Firebase auth user doc (legacy fallback for users with no membership yet)
   if (user) {
     try {
       const userDoc = await getDoc(doc(db, "users", user.uid));

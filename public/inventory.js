@@ -2,7 +2,7 @@
  * Inventory — categories/subcategories from Firestore (salon inventoryCategories).
  * Table rows/groups persist on the selected subcategory Firestore document.
  */
-import { db, auth, storage } from "./app.js?v=20260430_unified";
+import { db, auth, storage } from "./app.js?v=20260501_points";
 import {
   doc,
   getDoc,
@@ -324,6 +324,13 @@ function newSubcategoryId() {
 }
 
 async function getSalonId() {
+  // Multi-salon: when the user has chosen a salon (single membership auto-
+  // selected, or one explicitly picked from Choose Salon), that selection is
+  // the source of truth. Reading users/{uid}.salonId first would leak data
+  // from the legacy primary salon into whichever salon the user picked.
+  if (typeof window !== "undefined" && window.currentSalonId) {
+    return String(window.currentSalonId).trim();
+  }
   const user = auth.currentUser;
   let salonId = null;
   if (user) {
@@ -336,9 +343,6 @@ async function getSalonId() {
     } catch (e) {
       console.warn("[Inventory] getSalonId from user doc failed", e);
     }
-  }
-  if (!salonId && typeof window !== "undefined" && window.currentSalonId) {
-    salonId = window.currentSalonId;
   }
   if (!salonId && typeof localStorage !== "undefined") {
     try {

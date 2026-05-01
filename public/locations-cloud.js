@@ -21,7 +21,7 @@ import {
   onSnapshot,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260430_unified";
+import { db, auth } from "./app.js?v=20260501_points";
 
 const LOCATIONS_STORAGE_KEY = "ff_locations_v1";
 const LOCATIONS_DEBUG = false;

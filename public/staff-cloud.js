@@ -16,7 +16,7 @@ import {
   onSnapshot, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260430_unified";
+import { db, auth } from "./app.js?v=20260501_points";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let _salonId  = null;
@@ -247,10 +247,20 @@ window.ffStaffSyncNameToFirestore = async function(email, newName) {
     const snap = await getDocs(collection(db, `salons/${_salonId}/members`));
     const md   = snap.docs.find(d => d.data().email === email);
     if (!md) { console.log('[StaffCloud] No member found for', email); return; }
-    await Promise.all([
+    const results = await Promise.allSettled([
       updateDoc(doc(db, `salons/${_salonId}/members`, md.id), { name: newName }),
-      updateDoc(doc(db, 'users', md.id), { name: newName })
+      updateDoc(doc(db, 'users', md.id), { name: newName }),
+      setDoc(doc(db, `users/${md.id}/memberships`, _salonId), {
+        salonId: _salonId,
+        name: newName,
+        status: 'active',
+        updatedAt: serverTimestamp()
+      }, { merge: true })
     ]);
+    const failed = results.filter(r => r.status === 'rejected');
+    if (failed.length) {
+      console.warn('[StaffCloud] name sync partial failure', failed.map(f => f.reason?.code || f.reason?.message));
+    }
     _toast('✅ Name updated: ' + newName, 'success');
   } catch(e) {
     console.warn('[StaffCloud] Name sync error', e.code, e.message);
@@ -375,9 +385,17 @@ window.ffStaffSyncRoleToFirestore = async function(staff) {
 
     const memberRef = doc(db, `salons/${_salonId}/members`, memberUid);
     const userRef = doc(db, 'users', memberUid);
+    const membershipRef = doc(db, `users/${memberUid}/memberships`, _salonId);
     const results = await Promise.allSettled([
       updateDoc(memberRef, { role }),
       updateDoc(userRef, { role }),
+      setDoc(membershipRef, {
+        salonId: _salonId,
+        role,
+        staffId: String(staff.id || staff.staffId || '').trim(),
+        status: 'active',
+        updatedAt: serverTimestamp()
+      }, { merge: true }),
     ]);
     const failed = results.filter(r => r.status === 'rejected');
     if (failed.length) {

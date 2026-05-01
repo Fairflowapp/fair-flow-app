@@ -28,7 +28,7 @@ import {
 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth, storage } from "./app.js?v=20260430_unified";
+import { db, auth, storage } from "./app.js?v=20260501_points";
 import {
   ffSyncStaffDocumentOnInboxApprove,
   ffSyncStaffDocumentOnInboxReject,
@@ -225,11 +225,40 @@ async function mergeSalonStaffIntoUserProfile(profile) {
       const st = snap.data() || {};
       profile.permissions = { ...(profile.permissions || {}), ...(st.permissions || {}) };
       if (st.managerType) profile.managerType = st.managerType;
+      // Multi-salon: prefer the staff doc's display name over users/{uid}.name.
+      // Without this, requests created by a user who picked test_salon_001 from
+      // Choose Salon are saved with "createdByName" = legacy primary-salon name
+      // (e.g. "Test Multi") instead of the staff name in the chosen salon
+      // (e.g. "TEST TECH"), which surfaces as the wrong "Requested by" label.
+      const staffName = String(st.name || "").trim();
+      if (staffName) profile.name = staffName;
     }
   } catch (e) {
     console.warn("[Inbox] merge salon staff", e.message);
   }
   return profile;
+}
+
+async function resolveCurrentInboxActorName() {
+  const fallback =
+    currentUserProfile?.name ||
+    currentUserProfile?.displayName ||
+    currentUserProfile?.email ||
+    "";
+  try {
+    const w = (typeof window !== "undefined") ? window : {};
+    const salonId = w.currentSalonId ? String(w.currentSalonId).trim() : String(currentUserProfile?.salonId || "").trim();
+    const staffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : String(currentUserProfile?.staffId || "").trim();
+    if (!salonId || !staffId) return fallback;
+    const snap = await getDoc(doc(db, `salons/${salonId}/staff`, staffId));
+    if (!snap.exists()) return fallback;
+    const st = snap.data() || {};
+    const staffName = String(st.name || st.firstName || "").trim();
+    return staffName || fallback;
+  } catch (e) {
+    console.warn("[Inbox] resolve actor name failed", e.message);
+    return fallback;
+  }
 }
 
 function inboxCanViewInboxEval(profile) {
@@ -568,7 +597,29 @@ async function loadCurrentUserProfile() {
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (userDoc.exists()) {
-      currentUserProfile = { uid: user.uid, ...userDoc.data() };
+      const data = userDoc.data() || {};
+      // Multi-salon: prefer the salon picked from Choose Salon (or the single
+      // auto-selected membership) over the legacy users/{uid}.salonId. Without
+      // this override, inbox queries below build paths from currentUserProfile
+      // .salonId and read items from the legacy primary salon instead of the
+      // one the user chose.
+      // We also override staffId + role with the membership-scoped values
+      // (set by ffApplyActiveMembership in app.js). Otherwise
+      // mergeSalonStaffIntoUserProfile would query
+      // salons/{newSalonId}/staff/{legacyStaffId} which doesn't exist, so no
+      // permissions get merged and the user gets "You do not have permission
+      // to open Inbox" even if they have full inbox access in the picked salon.
+      const w = (typeof window !== 'undefined') ? window : {};
+      const activeSalonId = w.currentSalonId ? String(w.currentSalonId).trim() : '';
+      const activeStaffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : '';
+      const activeRole = w.__ff_user_role ? String(w.__ff_user_role).trim() : '';
+      currentUserProfile = {
+        uid: user.uid,
+        ...data,
+        salonId: activeSalonId || data.salonId || null,
+        staffId: activeStaffId || data.staffId || null,
+        role: activeRole || data.role || '',
+      };
       await mergeSalonStaffIntoUserProfile(currentUserProfile);
       console.log('[Inbox] User profile loaded', { role: currentUserProfile.role, permissions: currentUserProfile.permissions });
       // Register in members directory so others can find this user in "Send to"
@@ -3555,7 +3606,8 @@ window.addSuppliesItem = function() {
 
 async function submitRequest(type) {
   console.log('[Inbox] Submitting request:', type);
-  
+
+  await loadCurrentUserProfile();
   if (!currentUserProfile) {
     showToast('User profile not loaded', 'error');
     return;
@@ -3898,6 +3950,7 @@ async function submitRequest(type) {
     }
     
     const salonId = currentUserProfile.salonId;
+    const creatorName = await resolveCurrentInboxActorName();
 
     const docUploadOwnerExtra =
       type === 'document_upload' && data && data.documentOwnerStaffId
@@ -3958,7 +4011,7 @@ async function submitRequest(type) {
         ...baseDoc,
         createdByUid: currentUserProfile.uid,
         createdByStaffId: currentUserProfile.staffId || '',
-        createdByName: currentUserProfile.name || '',
+        createdByName: creatorName || currentUserProfile.name || '',
         createdByRole: currentUserProfile.role || '',
         forUid,
         forStaffId,
@@ -3975,11 +4028,11 @@ async function submitRequest(type) {
         ...baseDoc,
         createdByUid: currentUserProfile.uid,
         createdByStaffId: currentUserProfile.staffId || '',
-        createdByName: currentUserProfile.name || '',
+        createdByName: creatorName || currentUserProfile.name || '',
         createdByRole: currentUserProfile.role || '',
         forUid: currentUserProfile.uid,
         forStaffId: currentUserProfile.staffId || '',
-        forStaffName: currentUserProfile.name || '',
+        forStaffName: creatorName || currentUserProfile.name || '',
         createdAt: serverTimestamp(),
         lastActivityAt: serverTimestamp(),
         updatedAt: null
@@ -4166,7 +4219,7 @@ function showRequestDetails(requestId) {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
         <div>
           <div style="color:#6b7280;margin-bottom:4px;">Requested by</div>
-          <div style="font-weight:500;">${request.forStaffName}</div>
+          <div style="font-weight:500;">${escapeHtml(request.createdByName || request.createdByUid || '')}</div>
         </div>
         <div>
           <div style="color:#6b7280;margin-bottom:4px;">Created</div>

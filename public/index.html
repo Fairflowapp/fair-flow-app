@@ -84,7 +84,7 @@
       return window.goToInventory();
     }
     try {
-      await import('/inventory.js?v=20260430_unified');
+      await import('/inventory.js?v=20260501_points');
     } catch (e) {
       console.error('[Inventory mock] load failed', e);
       return;
@@ -5845,7 +5845,25 @@ function ffQueueLogEvent(type, workerName) {
     const normalizedType = String(type || '').trim().toUpperCase();
     const worker = String(workerName || '').trim();
     if (!/^(JOIN|START|FINISH)$/.test(normalizedType) || !worker) return;
-    const entry = `${new Date().toLocaleString()} ${normalizedType} ${worker}`;
+    let activeLocId = '';
+    try {
+      if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
+        const v = window.ffGetActiveLocationId();
+        if (typeof v === 'string' && v.trim()) activeLocId = v.trim();
+      }
+    } catch (_) {}
+    const now = new Date();
+    const entry = {
+      date: formatHistoryDate(now),
+      time: formatHistoryTime(now),
+      action: normalizedType + ' ' + worker,
+      role: 'Tech',
+      performedBy: worker,
+      worker,
+      source: 'queue',
+      locationId: activeLocId,
+      ts: now.getTime()
+    };
     const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
     logArr.push(entry);
     localStorage.setItem('ffv24_log', JSON.stringify(logArr));
@@ -6970,6 +6988,18 @@ function ffResolveCurrentStaffRowFromFfStaffV1() {
   try {
     const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
     const staffList = Array.isArray(store.staff) ? store.staff : [];
+    const activeStaffId = String(
+      window.__ff_authedStaffId ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : '') ||
+      ''
+    ).trim();
+    if (activeStaffId) {
+      const byActiveStaffId = staffList.find((s) => {
+        const id = String((s && (s.id || s.staffId)) || '').trim();
+        return id && id === activeStaffId;
+      });
+      if (byActiveStaffId) return byActiveStaffId;
+    }
     const u = window.auth && window.auth.currentUser;
     if (u) {
       const uid = String(u.uid || '').trim();
@@ -6989,14 +7019,6 @@ function ffResolveCurrentStaffRowFromFfStaffV1() {
         );
         if (byEmail) return byEmail;
       }
-    }
-    let sid = '';
-    try {
-      sid = String(localStorage.getItem('ff_authedStaffId_v1') || '').trim();
-    } catch (e2) {}
-    if (sid) {
-      const byStaffId = staffList.find((s) => s && String(s.id || '').trim() === sid);
-      if (byStaffId) return byStaffId;
     }
     return null;
   } catch (e) {
@@ -9633,7 +9655,6 @@ async function handleJoin(){
   // Join is done directly by worker (Tech action)
   const techActor = getActorForAction({ workerName: selectedTechnicianName });
   addHistoryEntry('Join', techActor.role, techActor.name, selectedTechnicianName, 'queue');
-  if (typeof window.ffQueueLogEvent === 'function') window.ffQueueLogEvent('JOIN', selectedTechnicianName);
   } catch (e) {
     console.error('[handleJoin] Error in handleJoin:', e);
     const joinErrorEl = document.getElementById('joinError');
@@ -9690,7 +9711,6 @@ function startSpecific(idx){
     actor = getActorForAction({ workerName: it.name });
   }
   addHistoryEntry('Start (Available - In service)', actor.role, actor.name, it.name, 'queue');
-  if (typeof window.ffQueueLogEvent === 'function') window.ffQueueLogEvent('START', it.name);
 
 }
 
@@ -9743,7 +9763,6 @@ function finish(i){
     actor = { role: 'Tech', name: it.name };
   }
   addHistoryEntry('Finish (In service - Available)', actor.role, actor.name, it.name, 'queue');
-  if (typeof window.ffQueueLogEvent === 'function') window.ffQueueLogEvent('FINISH', it.name);
 
 }
 
@@ -27323,7 +27342,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260430_unified');
+            const m = await import('/chat.js?v=20260501_points');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -27830,7 +27849,7 @@ function initializeAppsPanel() {
             if (typeof window.goToDashboard === 'function') {
               window.goToDashboard();
             } else {
-              import('/dashboard.js?v=20260430_unified')
+              import('/dashboard.js?v=20260501_final3')
                 .then((m) => {
                   if (m && typeof m.goToDashboard === 'function') {
                     window.goToDashboard = m.goToDashboard;
@@ -34120,14 +34139,31 @@ function initializeUserProfileMenu() {
     }
   }
 
-  // Helper: true only if the current user is the Salon Owner. Admin/Manager
-  // staff DO NOT get owner-only sections (Billing, Locations, Schedule,
-  // Preferences) because those affect the entire salon / subscription.
+  // Helper: true only if the current user is the Salon Owner. Keep billing and
+  // location ownership separate from operational settings that admins can manage.
   function ffIsCurrentUserOwnerForSettings() {
     try {
       return typeof window.ffIsOwner === 'function' && window.ffIsOwner() === true;
     } catch (_) { return false; }
   }
+
+  function ffCurrentUserCanManageGeneralSettings() {
+    try {
+      if (ffIsCurrentUserOwnerForSettings()) return true;
+      const role = String(
+        (typeof window !== 'undefined' && window.__ff_user_role) || ''
+      ).toLowerCase();
+      if (role === 'admin' || role === 'owner') return true;
+      const staff = (typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function')
+        ? ffResolveCurrentStaffRowFromFfStaffV1()
+        : null;
+      const permissions = staff && typeof staff.permissions === 'object' ? staff.permissions : {};
+      return permissions.settings_manage === true;
+    } catch (_) {
+      return false;
+    }
+  }
+  window.ffCurrentUserCanManageGeneralSettings = ffCurrentUserCanManageGeneralSettings;
 
   function ffSyncUserProfileBillingMenuVisibility() {
     try {
@@ -34156,13 +34192,13 @@ function initializeUserProfileMenu() {
   window.ffSyncUserProfileLocationsMenuVisibility = ffSyncUserProfileLocationsMenuVisibility;
   ffSyncUserProfileLocationsMenuVisibility();
 
-  // Shared Setup section - OWNER ONLY. Shared data affects every location
-  // unless a per-location override exists.
+  // Shared Setup section - owner or Settings admin. Shared data affects every
+  // location, but "Manage general settings" explicitly grants this access.
   function ffSyncUserProfileSharedSetupMenuVisibility() {
     try {
       const btn = document.querySelector('.user-profile-menu-item[data-section="shared-setup"]');
       if (!btn) return;
-      btn.style.display = ffIsCurrentUserOwnerForSettings() ? '' : 'none';
+      btn.style.display = ffCurrentUserCanManageGeneralSettings() ? '' : 'none';
     } catch (e) {
       console.warn('[User Profile] ffSyncUserProfileSharedSetupMenuVisibility', e);
     }
@@ -34190,9 +34226,9 @@ function initializeUserProfileMenu() {
 
   function ffSharedSetupAccountId() {
     const candidates = [
+      (typeof window !== 'undefined' ? window.currentSalonId : null),
       (typeof window !== 'undefined' ? window.currentAccountId : null),
-      (typeof window !== 'undefined' ? window.accountId : null),
-      (typeof window !== 'undefined' ? window.currentSalonId : null)
+      (typeof window !== 'undefined' ? window.accountId : null)
     ];
     for (const v of candidates) {
       if (typeof v === 'string' && v.trim()) return v.trim();
@@ -34258,12 +34294,16 @@ function initializeUserProfileMenu() {
     let accountSettings;
     if (!snap.exists()) {
       const defaults = { ...FF_POINTS_SETTINGS_DEFAULTS };
-      await api.setDoc(ref, {
-        ...defaults,
-        createdAt: api.serverTimestamp(),
-        updatedAt: api.serverTimestamp()
-      }, { merge: true });
-      console.log('[PointsSettings] default created');
+      try {
+        await api.setDoc(ref, {
+          ...defaults,
+          createdAt: api.serverTimestamp(),
+          updatedAt: api.serverTimestamp()
+        }, { merge: true });
+        console.log('[PointsSettings] default created');
+      } catch (err) {
+        console.warn('[PointsSettings] default create skipped', err);
+      }
       console.log('[PointsSettings] loaded');
       accountSettings = defaults;
     } else {
@@ -34275,10 +34315,14 @@ function initializeUserProfileMenu() {
         return raw[key] == null || !Number.isFinite(Number(raw[key]));
       });
       if (missingFields.length) {
-        await api.setDoc(ref, {
-          ...merged,
-          updatedAt: api.serverTimestamp()
-        }, { merge: true });
+        try {
+          await api.setDoc(ref, {
+            ...merged,
+            updatedAt: api.serverTimestamp()
+          }, { merge: true });
+        } catch (err) {
+          console.warn('[PointsSettings] default patch skipped', err);
+        }
       }
       accountSettings = merged;
     }
@@ -34614,9 +34658,28 @@ function initializeUserProfileMenu() {
     try {
       const uid = String(window.auth?.currentUser?.uid || '').trim();
       if (!uid || !api || typeof api.doc !== 'function' || typeof api.getDoc !== 'function') return '';
-      const snap = await api.getDoc(api.doc(db, `users/${uid}`));
-      const data = snap && snap.exists && snap.exists() ? (snap.data() || {}) : {};
-      const staffId = String(data.staffId || '').trim();
+      const salonId = String(window.currentSalonId || '').trim();
+      let staffId = '';
+      if (salonId) {
+        try {
+          const membershipSnap = await api.getDoc(api.doc(db, `users/${uid}/memberships/${salonId}`));
+          const membershipData = membershipSnap && membershipSnap.exists && membershipSnap.exists() ? (membershipSnap.data() || {}) : {};
+          staffId = String(membershipData.staffId || '').trim();
+        } catch (_) {}
+        if (!staffId) {
+          try {
+            const memberSnap = await api.getDoc(api.doc(db, `salons/${salonId}/members/${uid}`));
+            const memberData = memberSnap && memberSnap.exists && memberSnap.exists() ? (memberSnap.data() || {}) : {};
+            staffId = String(memberData.staffId || '').trim();
+          } catch (_) {}
+        }
+      }
+      if (!staffId) staffId = String(window.__ff_authedStaffId || '').trim();
+      if (!staffId) {
+        const snap = await api.getDoc(api.doc(db, `users/${uid}`));
+        const data = snap && snap.exists && snap.exists() ? (snap.data() || {}) : {};
+        staffId = String(data.staffId || '').trim();
+      }
       if (staffId) {
         try { window.__ff_authedStaffId = staffId; } catch (_) {}
         try { localStorage.setItem('ff_authedStaffId_v1', staffId); } catch (_) {}
@@ -37139,13 +37202,13 @@ function initializeUserProfileMenu() {
     if (typeof showToast === 'function') showToast(`${label} will be added later.`, 'info');
   };
 
-  // Schedule section - OWNER ONLY. Defines salon-wide hours / working days
-  // that shape the rest of the app (Schedule module, Queue auto-reset).
+  // Schedule section - owner or Settings admin. Defines salon-wide hours /
+  // working days that shape the rest of the app.
   function ffSyncUserProfileScheduleMenuVisibility() {
     try {
       const btn = document.querySelector('.user-profile-menu-item[data-section="schedule"]');
       if (!btn) return;
-      btn.style.display = ffIsCurrentUserOwnerForSettings() ? '' : 'none';
+      btn.style.display = ffCurrentUserCanManageGeneralSettings() ? '' : 'none';
     } catch (e) {
       console.warn('[User Profile] ffSyncUserProfileScheduleMenuVisibility', e);
     }
@@ -37153,15 +37216,13 @@ function initializeUserProfileMenu() {
   window.ffSyncUserProfileScheduleMenuVisibility = ffSyncUserProfileScheduleMenuVisibility;
   ffSyncUserProfileScheduleMenuVisibility();
 
-  // Preferences section - OWNER ONLY. Governs salon-wide defaults (timezone,
-  // currency, week start, staff-call templates, etc.). Per-user UI prefs
-  // (like time format / default screen) live in profile prefs localStorage
-  // and are handled elsewhere if/when we expose a per-user view.
+  // Preferences section - owner or Settings admin. Governs app-wide defaults
+  // such as timezone, currency, week start, and staff-call templates.
   function ffSyncUserProfilePreferencesMenuVisibility() {
     try {
       const btn = document.querySelector('.user-profile-menu-item[data-section="preferences"]');
       if (!btn) return;
-      btn.style.display = ffIsCurrentUserOwnerForSettings() ? '' : 'none';
+      btn.style.display = ffCurrentUserCanManageGeneralSettings() ? '' : 'none';
     } catch (e) {
       console.warn('[User Profile] ffSyncUserProfilePreferencesMenuVisibility', e);
     }
@@ -37169,12 +37230,11 @@ function initializeUserProfileMenu() {
   window.ffSyncUserProfilePreferencesMenuVisibility = ffSyncUserProfilePreferencesMenuVisibility;
   ffSyncUserProfilePreferencesMenuVisibility();
 
-  // Time Clock Settings - OWNER OR ADMIN. Broader than the other Settings
-  // sections (which are owner-only) because Time Clock is an operational
-  // module multiple admins typically manage. Managers and staff are hidden.
+  // Time Clock Settings - owner or Settings admin. This is an operational
+  // settings section, so explicit settings_manage grants access too.
   function ffIsCurrentUserOwnerOrAdminForSettings() {
     try {
-      if (ffIsCurrentUserOwnerForSettings()) return true;
+      if (ffCurrentUserCanManageGeneralSettings()) return true;
       const role = String(
         (typeof window !== 'undefined' && window.__ff_user_role) || ''
       ).toLowerCase();
@@ -37197,6 +37257,7 @@ function initializeUserProfileMenu() {
       return false;
     } catch (_) { return false; }
   }
+  window.ffIsCurrentUserOwnerOrAdminForSettings = ffIsCurrentUserOwnerOrAdminForSettings;
   function ffSyncUserProfileTimeClockSettingsMenuVisibility() {
     try {
       const btn = document.querySelector('.user-profile-menu-item[data-section="time-clock-settings"]');
@@ -39468,12 +39529,16 @@ function initializeUserProfileMenu() {
       section = 'preferences';
       __prefSubtab = 'media-categories';
     }
-    // Double-gate owner-only sections (defense in depth). If someone forces
-    // a section via window.__ff_handleMenuClick or a stale deep-link, we
-    // bounce them to a safe tab. Visibility sync above already hides the
-    // menu buttons for non-owners.
-    const ownerOnlySections = ['billing', 'locations', 'shared-setup', 'schedule', 'preferences'];
+    // Double-gate owner-only sections (defense in depth). Billing and
+    // locations remain owner-only; operational settings are controlled by
+    // settings_manage / admin role.
+    const ownerOnlySections = ['billing', 'locations'];
     if (ownerOnlySections.indexOf(section) !== -1 && !ffIsCurrentUserOwnerForSettings()) {
+      section = 'password';
+      __prefSubtab = null;
+    }
+    const settingsManageSections = ['shared-setup', 'schedule', 'preferences'];
+    if (settingsManageSections.indexOf(section) !== -1 && !ffCurrentUserCanManageGeneralSettings()) {
       section = 'password';
       __prefSubtab = null;
     }
@@ -44566,9 +44631,10 @@ document.addEventListener('visibilitychange', function() {
 window.__ffQueueCloudInit = function() {
   if (typeof window.initQueueCloud !== 'function') return;
   window.initQueueCloud({
-    applyState: function(q, s, l, qd) {
+    applyState: function(q, s, l, qd, meta) {
       // After a local save, ignore Firestore updates for 5s to avoid race condition
-      if (Date.now() - window.__ff_lastSaveTime < 5000) return;
+      const forceApply = meta && meta.force === true;
+      if (!forceApply && Date.now() - window.__ff_lastSaveTime < 5000) return;
       queue = q;
       service = s;
       log = l;
@@ -48699,39 +48765,39 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260430_unified"></script>
+  <script type="module" src="/app.js?v=20260501_points"></script>
   <script>
     (function () {
       var scripts = [
-        { src: "/staff-cloud.js?v=20260430_unified", type: "module", delay: 700 },
-        { src: "/locations-cloud.js?v=20260430_unified", type: "module", delay: 900 },
-        { src: "/location-helpers.js?v=20260430_unified", delay: 1050 },
-        { src: "/location-switcher.js?v=20260430_unified", type: "module", delay: 1200 },
-        { src: "/queue-cloud.js?v=20260430_unified", type: "module", delay: 1350 },
-        { src: "/tasks-cloud.js?v=20260430_unified", type: "module", delay: 1500 },
-        { src: "/points-engine.js?v=20260430_unified", type: "module", delay: 1650 },
-        { src: "/schedule-helpers.js?v=20260430_unified", type: "module", delay: 1800 },
-        { src: "/schedule-availability.js?v=20260430_unified", type: "module", delay: 1900 },
-        { src: "/schedule-generator.js?v=20260430_unified", type: "module", delay: 2000 },
-        { src: "/schedule-validator.js?v=20260430_unified", type: "module", delay: 2100 },
-        { src: "/schedule-ui.js?v=20260430_unified", type: "module", delay: 2300 },
-        { src: "/dashboard.js?v=20260430_unified", type: "module", delay: 2500 },
-        { src: "/inbox.js?v=20260430_unified", type: "module", delay: 2700 },
-        { src: "/chat.js?v=20260430_unified", type: "module", delay: 2900 },
-        { src: "/staff-documents.js?v=20260430_unified", type: "module", delay: 3200 },
-        { src: "/staff-call-cloud.js?v=20260430_unified", type: "module", delay: 3400 },
-        { src: "/settings-cloud.js?v=20260430_unified", type: "module", delay: 3600 },
-        { src: "/time-clock-engine.js?v=20260430_unified", delay: 3800 },
-        { src: "/time-clock-entries.js?v=20260430_unified", type: "module", delay: 4000 },
-        { src: "/tickets.js?v=20260430_unified", type: "module", delay: 4300 },
-        { src: "/media-upload.js?v=20260430_unified", type: "module", delay: 4600 },
-        { src: "/inventory.js?v=20260430_unified", type: "module", delay: 4900 },
-        { src: "/onboarding-wizard.js?v=20260430_unified", type: "module", delay: 5200 },
-        { src: "/locations-manage.js?v=20260430_unified", type: "module", delay: 5400 },
-        { src: "/queue-analytics.js?v=20260430_unified", type: "module", delay: 5700 },
-        { src: "/tickets-analytics.js?v=20260430_unified", type: "module", delay: 6000 },
-        { src: "/time-analytics.js?v=20260430_unified", type: "module", delay: 6300 },
-        { src: "/tasks-analytics.js?v=20260430_unified", type: "module", delay: 6600 }
+        { src: "/staff-cloud.js?v=20260501_final3", type: "module", delay: 700 },
+        { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
+        { src: "/location-helpers.js?v=20260501_points", delay: 1050 },
+        { src: "/location-switcher.js?v=20260501_points", type: "module", delay: 1200 },
+        { src: "/queue-cloud.js?v=20260501_points", type: "module", delay: 1350 },
+        { src: "/tasks-cloud.js?v=20260501_points", type: "module", delay: 1500 },
+        { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
+        { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
+        { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 1900 },
+        { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 2000 },
+        { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
+        { src: "/schedule-ui.js?v=20260501_points", type: "module", delay: 2300 },
+        { src: "/dashboard.js?v=20260501_final3", type: "module", delay: 2500 },
+        { src: "/inbox.js?v=20260501_points", type: "module", delay: 2700 },
+        { src: "/chat.js?v=20260501_points", type: "module", delay: 2900 },
+        { src: "/staff-documents.js?v=20260501_points", type: "module", delay: 3200 },
+        { src: "/staff-call-cloud.js?v=20260501_points", type: "module", delay: 3400 },
+        { src: "/settings-cloud.js?v=20260501_points", type: "module", delay: 3600 },
+        { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
+        { src: "/time-clock-entries.js?v=20260501_points", type: "module", delay: 4000 },
+        { src: "/tickets.js?v=20260501_points", type: "module", delay: 4300 },
+        { src: "/media-upload.js?v=20260501_media_restore", type: "module", delay: 4600 },
+        { src: "/inventory.js?v=20260501_points", type: "module", delay: 4900 },
+        { src: "/onboarding-wizard.js?v=20260501_points", type: "module", delay: 5200 },
+        { src: "/locations-manage.js?v=20260501_points", type: "module", delay: 5400 },
+        { src: "/queue-analytics.js?v=20260501_points", type: "module", delay: 5700 },
+        { src: "/tickets-analytics.js?v=20260501_points", type: "module", delay: 6000 },
+        { src: "/time-analytics.js?v=20260501_points", type: "module", delay: 6300 },
+        { src: "/tasks-analytics.js?v=20260501_points", type: "module", delay: 6600 }
       ];
       function wait(ms) {
         return new Promise(function (resolve) { setTimeout(resolve, ms); });

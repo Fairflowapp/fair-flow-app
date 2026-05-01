@@ -12,7 +12,7 @@ import {
   deleteField,
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { auth, db } from "./app.js?v=20260430_unified";
+import { auth, db } from "./app.js?v=20260501_points";
 import { generateWeeklySchedule } from "./schedule-generator.js?v=20260420_cross_loc_busy";
 import { validateScheduleDraft } from "./schedule-validator.js?v=20260409_coverage_total_staff_skip";
 import {
@@ -1783,6 +1783,17 @@ function isTechnicianScheduleStaff(staff) {
 
 function getFilteredScheduleStaff(staffList) {
   const ctx = getScheduleAccessContext();
+  if (ctx.viewOwnOnly) {
+    const sid = String(
+      typeof window !== "undefined" && window.__ff_authedStaffId
+        ? window.__ff_authedStaffId
+        : (typeof localStorage !== "undefined" ? localStorage.getItem("ff_authedStaffId_v1") : "") || "",
+    ).trim();
+    if (!sid) return [];
+    const me = (Array.isArray(staffList) ? staffList : []).find((staff) => getScheduleStaffKey(staff) === sid);
+    return me ? [me] : [];
+  }
+
   if (scheduleUserCanManualEdit() && schedulePreviewMode === "my_shifts") {
     const sid = getAuthedStaffIdForSchedule();
     if (!sid) return [];
@@ -1795,17 +1806,6 @@ function getFilteredScheduleStaff(staffList) {
       ? isTechnicianScheduleStaff(staff)
       : isManagementScheduleStaff(staff);
   });
-
-  if (ctx.viewOwnOnly) {
-    const sid = String(
-      typeof window !== "undefined" && window.__ff_authedStaffId
-        ? window.__ff_authedStaffId
-        : (typeof localStorage !== "undefined" ? localStorage.getItem("ff_authedStaffId_v1") : "") || "",
-    ).trim();
-    if (sid) {
-      filtered = filtered.filter((staff) => getScheduleStaffKey(staff) === sid);
-    }
-  }
 
   return filtered.sort((left, right) => {
     const leftRole = getScheduleStaffRole(left);
@@ -4913,14 +4913,18 @@ export async function goToSchedule() {
 
   await refreshSchedulePreview();
 
-  if (schedCtx.viewOwnOnly && Array.isArray(schedulePreviewState.staffList) && schedulePreviewState.staffList.length) {
+  if (Array.isArray(schedulePreviewState.staffList) && schedulePreviewState.staffList.length) {
     const sid = String(
       typeof window !== "undefined" && window.__ff_authedStaffId
         ? window.__ff_authedStaffId
         : (typeof localStorage !== "undefined" ? localStorage.getItem("ff_authedStaffId_v1") : "") || "",
     ).trim();
     const me = schedulePreviewState.staffList.find((s) => getScheduleStaffKey(s) === sid);
-    if (me && canViewScheduleBoardForCurrentWeek()) {
+    const shouldFocusOwnSchedule =
+      schedCtx.viewOwnOnly ||
+      (me && isTechnicianScheduleStaff(me) && !scheduleInboxUserIsFirestoreManager());
+    if (me && shouldFocusOwnSchedule && canViewScheduleBoardForCurrentWeek()) {
+      if (schedCtx.viewOwnOnly) schedulePreviewMode = "my_shifts";
       schedulePreviewView = isTechnicianScheduleStaff(me) ? "technicians" : "management";
       renderScheduleViewTabs();
       renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);

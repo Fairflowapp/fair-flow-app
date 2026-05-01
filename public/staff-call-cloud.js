@@ -10,7 +10,7 @@ import {
   writeBatch
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260430_unified";
+import { db, auth } from "./app.js?v=20260501_points";
 
 const HEARTBEAT_INTERVAL_MS = 15000;
 const OFFLINE_THRESHOLD_MS = 45000;
@@ -103,16 +103,26 @@ async function resolveOwnStaffFromCloud(salonId, userData = {}, memberData = {},
   const staffSnap = await getDocs(collection(db, `salons/${salonId}/staff`));
   const staffList = staffSnap.docs.map((snap) => ({ id: snap.id, ...(snap.data() || {}) }));
 
-  const userStaffId = String(userData.staffId || "").trim();
-  if (userStaffId) {
-    const byUserStaffId = staffList.find((staff) => String(staff.id || "").trim() === userStaffId);
-    if (byUserStaffId) return { staff: byUserStaffId, source: "users.staffId" };
+  // Multi-salon: session/member staffId belongs to the chosen salon. The
+  // legacy users/{uid}.staffId may belong to the user's primary salon.
+  const sessionStaffId = String(
+    (typeof window !== "undefined" && window.__ff_authedStaffId) || ""
+  ).trim();
+  if (sessionStaffId) {
+    const bySessionStaffId = staffList.find((staff) => String(staff.id || "").trim() === sessionStaffId);
+    if (bySessionStaffId) return { staff: bySessionStaffId, source: "session.staffId" };
   }
 
   const memberStaffId = String(memberData.staffId || "").trim();
   if (memberStaffId) {
     const byMemberStaffId = staffList.find((staff) => String(staff.id || "").trim() === memberStaffId);
     if (byMemberStaffId) return { staff: byMemberStaffId, source: "members.staffId" };
+  }
+
+  const userStaffId = String(userData.staffId || "").trim();
+  if (userStaffId) {
+    const byUserStaffId = staffList.find((staff) => String(staff.id || "").trim() === userStaffId);
+    if (byUserStaffId) return { staff: byUserStaffId, source: "users.staffId" };
   }
 
   const byUid = staffList.find((staff) => String(staff.uid || "").trim() === String(user?.uid || "").trim());
@@ -743,8 +753,12 @@ async function loadContextForUser(user) {
   try {
     const userSnap = await getDoc(doc(db, "users", user.uid));
     const userData = userSnap.exists() ? (userSnap.data() || {}) : {};
-    _salonId = userData.salonId || window.currentSalonId || null;
-    _userRole = String(userData.role || window.__ff_user_role || "").toLowerCase();
+    // Multi-salon: the active session salon/role from app.js is the source of
+    // truth. users/{uid}.salonId and users/{uid}.role are legacy primary-salon
+    // fields and can point staff-call presence at the wrong salon, so calls
+    // written by Queue never reach the staff member who picked another salon.
+    _salonId = window.currentSalonId || userData.salonId || null;
+    _userRole = String(window.__ff_user_role || userData.role || "").toLowerCase();
     let memberData = {};
     if (_salonId) {
       try {

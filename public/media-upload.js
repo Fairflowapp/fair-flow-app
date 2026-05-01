@@ -5,7 +5,7 @@
 
 import { getDoc, getDocs, doc, collection, query, where, setDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260430_unified";
+import { db, auth } from "./app.js?v=20260501_points";
 import {
   createWorkWithMedia,
   addMediaToExistingWork,
@@ -82,9 +82,17 @@ async function waitForSalonId(maxMs = 3500) {
 
 async function resolveSalonStaffDoc(salonId, user, userData) {
   if (!salonId) {
-    return { data: null, docId: userData?.staffId || user.uid };
+    return { data: null, docId: (typeof window !== "undefined" && window.__ff_authedStaffId) || userData?.staffId || user.uid };
   }
   const tryIds = [];
+  if (typeof window !== "undefined" && window.__ff_authedStaffId) tryIds.push(window.__ff_authedStaffId);
+  try {
+    const membershipSnap = await getDoc(doc(db, `users/${user.uid}/memberships/${salonId}`));
+    if (membershipSnap.exists()) {
+      const membershipStaffId = membershipSnap.data()?.staffId;
+      if (membershipStaffId && typeof membershipStaffId === "string") tryIds.push(membershipStaffId);
+    }
+  } catch (_) {}
   try {
     const memSnap = await getDoc(doc(db, `salons/${salonId}/members`, user.uid));
     if (memSnap.exists()) {
@@ -92,12 +100,11 @@ async function resolveSalonStaffDoc(salonId, user, userData) {
       if (mid && typeof mid === "string") tryIds.push(mid);
     }
   } catch (_) {}
-  if (userData?.staffId) tryIds.push(userData.staffId);
-  if (typeof window !== "undefined" && window.__ff_authedStaffId) tryIds.push(window.__ff_authedStaffId);
   try {
     const ls = typeof localStorage !== "undefined" ? localStorage.getItem("ff_authedStaffId_v1") : "";
     if (ls) tryIds.push(ls);
   } catch (_) {}
+  if (userData?.staffId) tryIds.push(userData.staffId);
   tryIds.push(user.uid);
   const seen = new Set();
   for (const id of tryIds) {
@@ -126,7 +133,7 @@ async function resolveSalonStaffDoc(salonId, user, userData) {
       }
     }
   } catch (_) {}
-  return { data: null, docId: userData?.staffId || user.uid };
+  return { data: null, docId: (typeof window !== "undefined" && window.__ff_authedStaffId) || userData?.staffId || user.uid };
 }
 
 /** When direct paths miss, one full scan — must attach full doc for permissions.media_handle */
@@ -170,7 +177,7 @@ async function loadUserProfile() {
       };
     }
 
-    let salonId = d.salonId || (typeof window !== "undefined" ? window.currentSalonId : null);
+    let salonId = (typeof window !== "undefined" && window.currentSalonId) ? window.currentSalonId : d.salonId;
     if (!salonId) {
       salonId = await waitForSalonId();
     }
@@ -203,11 +210,20 @@ async function loadUserProfile() {
     }
 
     const mediaHandleAllowed = computeMediaHandleAllowed(staffDocData, role);
+    const staffName = String(
+      staffDocData?.name ||
+      staffDocData?.displayName ||
+      d.name ||
+      d.displayName ||
+      user.displayName ||
+      user.email ||
+      "User"
+    ).trim() || "User";
 
     currentUserProfile = {
       uid: user.uid,
       staffId,
-      staffName: d.name || d.displayName || user.email || "User",
+      staffName,
       createdByRole: role,
       salonId,
       mediaHandleAllowed,
@@ -216,6 +232,7 @@ async function loadUserProfile() {
       setDoc(doc(db, `salons/${salonId}/members`, user.uid), {
         name: currentUserProfile.staffName,
         role: currentUserProfile.createdByRole,
+        staffId: currentUserProfile.staffId,
       }, { merge: true }).catch(() => {});
     }
     return currentUserProfile;
@@ -748,10 +765,10 @@ function hideUploadMessage() {
 
 function getMediaPointsAccountId() {
   const candidates = [
+    typeof window !== "undefined" ? window.currentSalonId : "",
+    currentUserProfile?.salonId,
     typeof window !== "undefined" ? window.currentAccountId : "",
     typeof window !== "undefined" ? window.accountId : "",
-    currentUserProfile?.salonId,
-    typeof window !== "undefined" ? window.currentSalonId : "",
   ];
   for (const value of candidates) {
     const clean = String(value || "").trim();
@@ -1917,11 +1934,18 @@ function setupMediaWorkListSubscriptions() {
     unsubAllWorks = null;
   }
 
-  if (currentUserProfile?.staffId) {
-    unsubMyWorks = subscribeContentWorks({ staffId: currentUserProfile.staffId }, async (works) => {
-      const toEnrich = works.slice(0, 20);
+  if (currentUserProfile?.staffId || currentUserProfile?.uid) {
+    unsubMyWorks = subscribeContentWorks({}, async (works) => {
+      const uid = String(currentUserProfile?.uid || "").trim();
+      const staffId = String(currentUserProfile?.staffId || "").trim();
+      const ownWorks = (Array.isArray(works) ? works : []).filter((work) => {
+        const workStaffId = String(work?.staffId || "").trim();
+        const workCreatedByUid = String(work?.createdByUid || "").trim();
+        return (staffId && workStaffId === staffId) || (uid && workCreatedByUid === uid);
+      });
+      const toEnrich = ownWorks.slice(0, 20);
       const enriched = await Promise.all(toEnrich.map((w) => enrichWorkWithPreview({ ...w })));
-      userWorks = [...enriched, ...works.slice(20)];
+      userWorks = [...enriched, ...ownWorks.slice(20)];
       populateWorksDropdown();
       renderMediaList();
     });

@@ -58,14 +58,12 @@ service cloud.firestore {
     function userCanWriteAtLocation(salonId, locationId) {
       return locationId == 'default'
         || isManager(salonId)
-        || !userDocData().keys().hasAny(['staffId'])
-        || !(userDocData().staffId is string)
-        || userDocData().staffId == ''
-        || !exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId))
-        || !(get(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId)).data.keys().hasAny(['allowedLocationIds']))
-        || !(get(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId)).data.allowedLocationIds is list)
-        || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId)).data.allowedLocationIds.size() == 0
-        || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId)).data.allowedLocationIds.hasAny([locationId]);
+        || activeStaffIdForSalon(salonId) == ''
+        || !exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(activeStaffIdForSalon(salonId)))
+        || !(get(/databases/$(database)/documents/salons/$(salonId)/staff/$(activeStaffIdForSalon(salonId))).data.keys().hasAny(['allowedLocationIds']))
+        || !(get(/databases/$(database)/documents/salons/$(salonId)/staff/$(activeStaffIdForSalon(salonId))).data.allowedLocationIds is list)
+        || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(activeStaffIdForSalon(salonId))).data.allowedLocationIds.size() == 0
+        || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(activeStaffIdForSalon(salonId))).data.allowedLocationIds.hasAny([locationId]);
     }
 
     /** salons/{salonId}/settings/main ownerUid: cannot change once set (except first claim to own uid). */
@@ -83,25 +81,36 @@ service cloud.firestore {
       return (userDocData().role is string) ? userDocData().role.lower() : '';
     }
 
+    function membershipRole(salonId) {
+      return hasActiveMembership(salonId)
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.role is string
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.role.lower()
+        : '';
+    }
+
+    function activeUserRoleForSalon(salonId) {
+      return membershipRole(salonId) != '' ? membershipRole(salonId) : userRole();
+    }
+
     function isManager(salonId) {
       return belongsToSalon(salonId)
-        && userRole() in ['manager', 'admin', 'owner'];
+        && activeUserRoleForSalon(salonId) in ['manager', 'admin', 'owner'];
     }
 
     function isTechnician(salonId) {
       return belongsToSalon(salonId)
-        && userRole() == 'technician';
+        && activeUserRoleForSalon(salonId) == 'technician';
     }
 
     function isAdminOrOwner(salonId) {
       return belongsToSalon(salonId)
-        && userRole() in ['admin', 'owner'];
+        && activeUserRoleForSalon(salonId) in ['admin', 'owner'];
     }
 
     /** Ticket summary rows on close: same users doc roles the Tickets UI treats as staff/tech (not only manager/admin/owner). */
     function canCreateTicketSummary(salonId) {
       return belongsToSalon(salonId)
-        && userRole() in ['manager', 'admin', 'owner', 'technician', 'tech', 'staff'];
+        && activeUserRoleForSalon(salonId) in ['manager', 'admin', 'owner', 'technician', 'tech', 'staff'];
     }
 
     function memberExists(salonId) {
@@ -118,6 +127,9 @@ service cloud.firestore {
         userExists()
         && userDocData().staffId is string
         && userDocData().staffId == staffId
+      ) || (
+        activeStaffIdForSalon(salonId) != ''
+        && activeStaffIdForSalon(salonId) == staffId
       ) || (
         memberExists(salonId)
         && memberDocData(salonId).staffId is string
@@ -207,7 +219,7 @@ service cloud.firestore {
     }
 
     function mySalonStaffDocData(salonId) {
-      return salonStaffDocData(salonId, userStaffId());
+      return salonStaffDocData(salonId, activeStaffIdForSalon(salonId));
     }
 
     function legacyStaffMediaHandleFromDoc(d) {
@@ -281,6 +293,12 @@ service cloud.firestore {
         && mySalonStaffDocData(salonId).permissions.points_manage == true;
     }
 
+    function permTimeClockManageAllowed(salonId) {
+      return mySalonStaffDocData(salonId) != null
+        && mySalonStaffDocData(salonId).permissions is map
+        && mySalonStaffDocData(salonId).permissions.time_clock_manage == true;
+    }
+
     // Legacy Media (contentWorks): PIN technicians may have staff doc but not users.salonId / members
     function isStaffInSalon(salonId) {
       return isSignedIn()
@@ -320,20 +338,56 @@ service cloud.firestore {
       // Server Functions/Admin SDK bypass these rules for invite finalize and
       // future backfills.
       match /memberships/{salonId} {
+        function managerMembershipCreateAllowed() {
+          return isManager(salonId)
+            && request.resource.data.salonId == salonId
+            && request.resource.data.staffId is string
+            && request.resource.data.role is string
+            && request.resource.data.status in ['active', 'archived', 'pending']
+            && request.resource.data.keys().hasOnly([
+              'salonId',
+              'staffId',
+              'role',
+              'status',
+              'name',
+              'email',
+              'updatedAt'
+            ]);
+        }
+
+        function managerMembershipUpdateAllowed() {
+          return isManager(salonId)
+            && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+              'staffId',
+              'role',
+              'status',
+              'name',
+              'email',
+              'updatedAt'
+            ])
+            && (!request.resource.data.diff(resource.data).changedKeys().hasAny(['staffId']) || request.resource.data.staffId is string)
+            && (!request.resource.data.diff(resource.data).changedKeys().hasAny(['role']) || request.resource.data.role is string)
+            && (!request.resource.data.diff(resource.data).changedKeys().hasAny(['status']) || request.resource.data.status in ['active', 'archived', 'pending']);
+        }
+
         allow read: if request.auth != null && request.auth.uid == uid;
-        allow create: if request.auth != null
-          && request.auth.uid == uid
-          && exists(/databases/$(database)/documents/users/$(uid))
-          && get(/databases/$(database)/documents/users/$(uid)).data.salonId == salonId
-          && request.resource.data.salonId == salonId
-          && request.resource.data.staffId is string
-          && get(/databases/$(database)/documents/users/$(uid)).data.staffId is string
-          && request.resource.data.staffId == get(/databases/$(database)/documents/users/$(uid)).data.staffId
-          && request.resource.data.role is string
-          && get(/databases/$(database)/documents/users/$(uid)).data.role is string
-          && request.resource.data.role == get(/databases/$(database)/documents/users/$(uid)).data.role
-          && request.resource.data.status in ['active', 'archived', 'pending'];
-        allow update, delete: if false;
+        allow create: if managerMembershipCreateAllowed()
+          || (
+            request.auth != null
+            && request.auth.uid == uid
+            && exists(/databases/$(database)/documents/users/$(uid))
+            && get(/databases/$(database)/documents/users/$(uid)).data.salonId == salonId
+            && request.resource.data.salonId == salonId
+            && request.resource.data.staffId is string
+            && get(/databases/$(database)/documents/users/$(uid)).data.staffId is string
+            && request.resource.data.staffId == get(/databases/$(database)/documents/users/$(uid)).data.staffId
+            && request.resource.data.role is string
+            && get(/databases/$(database)/documents/users/$(uid)).data.role is string
+            && request.resource.data.role == get(/databases/$(database)/documents/users/$(uid)).data.role
+            && request.resource.data.status in ['active', 'archived', 'pending']
+          );
+        allow update: if managerMembershipUpdateAllowed();
+        allow delete: if false;
       }
     }
 
@@ -925,7 +979,7 @@ service cloud.firestore {
       allow get: if canAccessAccountAsStaffOrMember(accountId)
         || (
           permPointsOwnAllowed(accountId)
-          && resource.data.staffId == userStaffId()
+          && resource.data.staffId == activeStaffIdForSalon(accountId)
         )
         || (
           permPointsOwnAllowedForStaff(accountId, resource.data.staffId)
@@ -935,7 +989,7 @@ service cloud.firestore {
         || permPointsAllAllowed(accountId)
         || (
           permPointsOwnAllowed(accountId)
-          && resource.data.staffId == userStaffId()
+          && resource.data.staffId == activeStaffIdForSalon(accountId)
         )
         || (
           permPointsOwnAllowedForStaff(accountId, resource.data.staffId)
@@ -1304,7 +1358,8 @@ service cloud.firestore {
         && canAccessSalon(resource.data.salonId)
         && (
           isManager(resource.data.salonId)
-          || (userStaffId() != '' && resource.data.staffId == userStaffId())
+          || (activeStaffIdForSalon(resource.data.salonId) != ''
+            && resource.data.staffId == activeStaffIdForSalon(resource.data.salonId))
         );
       allow create: if userExists()
         && canAccessSalon(request.resource.data.salonId)
@@ -1314,14 +1369,16 @@ service cloud.firestore {
         && request.resource.data.status is string
         && (
           isManager(request.resource.data.salonId)
-          || (userStaffId() != '' && request.resource.data.staffId == userStaffId())
+          || (activeStaffIdForSalon(request.resource.data.salonId) != ''
+            && request.resource.data.staffId == activeStaffIdForSalon(request.resource.data.salonId))
         );
       allow update: if userExists()
         && canAccessSalon(resource.data.salonId)
         && trainingProgressIdentityUnchanged()
         && (
           isManager(resource.data.salonId)
-          || (userStaffId() != '' && resource.data.staffId == userStaffId())
+          || (activeStaffIdForSalon(resource.data.salonId) != ''
+            && resource.data.staffId == activeStaffIdForSalon(resource.data.salonId))
         );
       allow delete: if false;
     }
@@ -1350,6 +1407,7 @@ service cloud.firestore {
       allow read: if belongsToSalon(salonId)
         && (
           isManager(salonId)
+          || permTimeClockManageAllowed(salonId)
           || matchesOwnStaffId(salonId, resource.data.staffId)
         );
 
@@ -1363,11 +1421,35 @@ service cloud.firestore {
         && request.resource.data.clockOutAt == null
         && (
           isManager(salonId)
+          || permTimeClockManageAllowed(salonId)
           || matchesOwnStaffId(salonId, request.resource.data.staffId)
         );
 
       allow update: if belongsToSalon(salonId)
-        && isManager(salonId);
+        && (
+          isManager(salonId)
+          || permTimeClockManageAllowed(salonId)
+          || (
+            matchesOwnStaffId(salonId, resource.data.staffId)
+            && resource.data.status == 'open'
+            && request.resource.data.status == 'closed'
+            && request.resource.data.salonId == resource.data.salonId
+            && request.resource.data.locationId == resource.data.locationId
+            && request.resource.data.staffId == resource.data.staffId
+            && request.resource.data.clockInAt == resource.data.clockInAt
+            && request.resource.data.clockOutAt != null
+            && request.resource.data.durationMinutes is int
+            && request.resource.data.updatedBy == request.auth.uid
+            && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+              'status',
+              'clockOutAt',
+              'durationMinutes',
+              'updatedAt',
+              'updatedBy',
+              'notes'
+            ])
+          )
+        );
 
       allow delete: if false;
     }

@@ -250,13 +250,30 @@ onAuthStateChanged(auth, async user => {
       __ffChatBadgeEarlyGen++;
       const gen = __ffChatBadgeEarlyGen;
       if (sid && uid) {
-        import("/chat.js?v=20260430_unified")
+        import("/chat.js?v=20260501_points")
           .then((m) => {
             if (gen !== __ffChatBadgeEarlyGen) return;
             if (m.subscribeToChatBadge) m.subscribeToChatBadge(uid, sid);
             if (m.subscribeToChatToastNotifications) m.subscribeToChatToastNotifications(uid, sid);
           })
           .catch(() => {});
+      }
+      // Race fix: the main onAuthStateChanged listener bails out early because
+      // we synchronously set __ff_waiting_for_salon_choice = true above (so
+      // module listeners don't race) — by the time we've cleared it here, the
+      // main listener has already returned and won't re-fire. Without this
+      // explicit call, loadUserRoleAndShowView (which sets __ff_user_role and
+      // triggers ffApplyActiveMembership for the chosen membership) NEVER runs
+      // for users with a single auto-selected membership. The result we kept
+      // hitting: __ff_user_role = undefined, so currentUserProfile.role and
+      // .name in inbox/chat/tickets fell back to the legacy users/{uid}.* and
+      // requests showed the wrong "Requested by" name.
+      const selectedMembership =
+        storedMembership ||
+        (memberships.length === 1 ? memberships[0] : null);
+      if (typeof loadUserRoleAndShowView === 'function') {
+        loadUserRoleAndShowView(user, { selectedMembership, legacyUserData: data })
+          .catch((err) => console.warn('[Auth] early loadUserRoleAndShowView failed', err));
       }
     }
   } catch(e) { console.warn('[app.js] Failed to set currentSalonId', e); }
@@ -1830,7 +1847,7 @@ function ffApplyActiveMembership(membership, legacyUserData) {
       // we kick it off explicitly here using the chosen salonId.
       if (salonId && typeof user !== "undefined") {
         try {
-          import("/chat.js?v=20260430_unified")
+          import("/chat.js?v=20260501_points")
             .then((m) => {
               try {
                 if (m && typeof m.subscribeToChatBadge === "function") m.subscribeToChatBadge(window.ffAuth?.currentUser?.uid, salonId);
@@ -3573,10 +3590,10 @@ window.moveTaskToPending = moveTaskToPending;
 
 function getPointsAccountIdForTasks() {
     const candidates = [
-        window.currentAccountId,
-        window.accountId,
         window.currentSalonId,
         typeof currentSalonId !== "undefined" ? currentSalonId : null,
+        window.currentAccountId,
+        window.accountId,
     ];
     for (const value of candidates) {
         if (typeof value === "string" && value.trim()) return value.trim();

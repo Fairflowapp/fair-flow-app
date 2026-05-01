@@ -881,8 +881,9 @@ function readQueueSnapshot(range) {
   const filterQueueRows = (rows) => rows.filter((row) => {
     const loc = String(row?.locationId || row?.locId || "").trim();
     if (!loc) {
-      skippedNoLocation += 1;
-      return false;
+      // queue-cloud already subscribes to salons/{salonId}/queueState/{activeLocationId};
+      // legacy rows from that scoped document may not carry locationId.
+      return scope.hasLocation;
     }
     return scope.hasLocation && loc === scope.id;
   });

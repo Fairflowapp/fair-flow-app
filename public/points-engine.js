@@ -52,12 +52,16 @@ export async function ffGetPointsSettings(accountId, locationId = "") {
   let accountSettings;
   if (!snap.exists()) {
     const defaults = { ...POINTS_SETTINGS_DEFAULTS };
-    await setDoc(ref, {
-      ...defaults,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-    console.log("[PointsSettings] default created");
+    try {
+      await setDoc(ref, {
+        ...defaults,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      console.log("[PointsSettings] default created");
+    } catch (err) {
+      console.warn("[PointsSettings] default create skipped", err);
+    }
     console.log("[PointsSettings] loaded");
     accountSettings = defaults;
   } else {
