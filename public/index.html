@@ -7428,6 +7428,19 @@ function ffCurrentUserHasHistoryViewPermission() {
 }
 window.ffCurrentUserHasHistoryViewPermission = ffCurrentUserHasHistoryViewPermission;
 
+/** Dashboard: staff.permissions.dashboard_view === true (Apps launcher tile + Dashboard screen). */
+function ffStaffHasDashboardViewPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && p.dashboard_view === true);
+}
+
+function ffCurrentUserHasDashboardViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasDashboardViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasDashboardViewPermission = ffCurrentUserHasDashboardViewPermission;
+
 /** History modal: Export - staff.permissions.history_export === true; admin session bypass. */
 function ffStaffHasHistoryExportPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
@@ -7555,15 +7568,13 @@ window.ffCurrentUserHasPointsAccess = ffCurrentUserHasPointsAccess;
  * Authoritative gate for opening / saving Fair Flow Points settings (account or branch).
  * Bound to the staff `points_manage` permission so a salon-level manager role alone
  * is NOT enough - a manager must also be granted Manage/Edit Fair Flow Points.
- * Owners/admins always pass to avoid lockout (they manage staff permissions).
+ * Only the salon owner bypasses this to avoid lockout. Admin/manager users
+ * still need the explicit `points_manage` permission.
  */
 function ffCurrentUserCanManagePointsSettings() {
   try {
     if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) return true;
   } catch (_) {}
-  if (window.ff_is_admin_cached === true) return true;
-  const role = String(window.__ff_user_role || window.__ff_actorRole || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_role') : '') || '').toLowerCase();
-  if (role === 'owner' || role === 'admin') return true;
   try {
     const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
     return ffStaffHasPointsManagePermission(staff);
@@ -7750,8 +7761,7 @@ function ffUpdateAppsPanelPermissionVisibility() {
   }
   setAppsTileVisible('.apps-panel-item[data-app="schedule"]', scheduleOk);
 
-  // Dashboard (Overview): passive read-only screen, visible to all authed users.
-  setAppsTileVisible('.apps-panel-item[data-app="dashboard"]', true);
+  setAppsTileVisible('.apps-panel-item[data-app="dashboard"]', typeof ffCurrentUserHasDashboardViewPermission === 'function' && ffCurrentUserHasDashboardViewPermission());
   setAppsTileVisible('.apps-panel-item[data-app="settings"]:not([data-staff])', tabUnlessExplicitOff('settings_view'));
   setAppsTileVisible('.apps-panel-item[data-app="settings"][data-staff="true"]', typeof ffCurrentUserHasStaffViewPermission === 'function' && ffCurrentUserHasStaffViewPermission());
   setAppsTileVisible('.apps-panel-item[data-app="history"]', typeof ffCurrentUserHasHistoryViewPermission === 'function' && ffCurrentUserHasHistoryViewPermission());
@@ -27846,10 +27856,14 @@ function initializeAppsPanel() {
             }
             break;
           case 'dashboard':
+            if (typeof window.ffCurrentUserHasDashboardViewPermission === 'function' && !window.ffCurrentUserHasDashboardViewPermission()) {
+              if (typeof showToast === 'function') showToast('Dashboard access is not enabled for this staff member.', 'error');
+              break;
+            }
             if (typeof window.goToDashboard === 'function') {
               window.goToDashboard();
             } else {
-              import('/dashboard.js?v=20260501_final3')
+              import('/dashboard.js?v=20260501_dashboard_perm')
                 .then((m) => {
                   if (m && typeof m.goToDashboard === 'function') {
                     window.goToDashboard = m.goToDashboard;
@@ -29878,6 +29892,12 @@ function initializeAppsPanel() {
         childKeys: ['inventory_manage']
       },
       {
+        groupTitle: 'Dashboard',
+        parentKey: 'dashboard_view',
+        parentMode: 'strictTrue',
+        childKeys: []
+      },
+      {
         groupTitle: 'Settings',
         parentKey: 'settings_view',
         parentMode: 'notFalse',
@@ -29915,6 +29935,72 @@ function initializeAppsPanel() {
       }
       return null;
     }
+
+    function ffNormalizePointsPermissionFlags(perms, changedKey, changedValue) {
+      if (!perms || typeof perms !== 'object') return;
+      // Base access off means the whole Points module is off for this staff row.
+      if (changedKey === 'points_view_own' && changedValue === false) {
+        perms.points_view_own = false;
+        perms.points_view_all = false;
+        perms.points_manage = false;
+        return;
+      }
+      // Manage/Edit is the highest tier: it implies the list and own access.
+      if (changedKey === 'points_manage' && changedValue === true) {
+        perms.points_view_own = true;
+        perms.points_view_all = true;
+        perms.points_manage = true;
+        return;
+      }
+      // The full list implies own access, but not editing.
+      if (changedKey === 'points_view_all' && changedValue === true) {
+        perms.points_view_own = true;
+        perms.points_view_all = true;
+        return;
+      }
+      // Turning off the full list must also remove editing, otherwise Manage
+      // would still grant full-list behavior through ffStaffHasPointsAllPermission.
+      if (changedKey === 'points_view_all' && changedValue === false) {
+        perms.points_view_all = false;
+        perms.points_manage = false;
+        return;
+      }
+      if (changedKey === 'points_view_own' && changedValue === true) {
+        perms.points_view_own = true;
+      }
+      if (perms.points_manage === true) {
+        perms.points_view_own = true;
+        perms.points_view_all = true;
+      } else if (perms.points_view_all === true) {
+        perms.points_view_own = true;
+      } else if (perms.points_view_own === false) {
+        perms.points_view_all = false;
+        perms.points_manage = false;
+      }
+    }
+
+    try {
+      const beforePointsPerms = JSON.stringify({
+        points_view_own: permissions.points_view_own,
+        points_view_all: permissions.points_view_all,
+        points_manage: permissions.points_manage
+      });
+      ffNormalizePointsPermissionFlags(permissions);
+      const afterPointsPerms = JSON.stringify({
+        points_view_own: permissions.points_view_own,
+        points_view_all: permissions.points_view_all,
+        points_manage: permissions.points_manage
+      });
+      if (beforePointsPerms !== afterPointsPerms) {
+        const staffStore = ffGetStaffStore();
+        const staffIndex = staffStore.staff.findIndex(s => s.id === staff.id);
+        if (staffIndex !== -1) {
+          staffStore.staff[staffIndex].permissions = permissions;
+          ffSaveStaffStore(staffStore);
+          staff.permissions = permissions;
+        }
+      }
+    } catch (_) {}
     
     // Define all permissions grouped by category
     const permissionGroups = [
@@ -30093,12 +30179,22 @@ function initializeAppsPanel() {
         ]
       },
       {
+        title: 'Dashboard',
+        permissions: [
+          {
+            key: 'dashboard_view',
+            label: 'View Dashboard',
+            desc: 'Show the Dashboard tile in Apps and allow opening the business overview for the active salon/location. Default: off for new staff.'
+          }
+        ]
+      },
+      {
         title: 'Fair Flow Points',
         permissions: [
           {
             key: 'points_view_own',
             label: 'View own points',
-            desc: 'Allow this staff member to open Fair Flow Points and see only their own score and ranking. Default: on for technicians/service providers.',
+            desc: 'Base access to Fair Flow Points. With only this on, staff see their own score. Add View all for the full list, or Manage/Edit for full setup and corrections.',
             getValue: function (st) {
               return (st.permissions || {}).points_view_own !== false;
             }
@@ -30106,12 +30202,12 @@ function initializeAppsPanel() {
           {
             key: 'points_view_all',
             label: 'View all points list',
-            desc: 'Allow this staff member to see the full Fair Flow Points leaderboard. Event breakdown still follows the branch Staff Visibility setting unless Manage/Edit is on.'
+            desc: 'Allow this staff member to see the full Fair Flow Points leaderboard. Turn this off for own-only access. Turning it off also disables Manage/Edit.'
           },
           {
             key: 'points_manage',
             label: 'Manage/Edit Fair Flow Points',
-            desc: 'Allow correcting point events and managing point-related actions. Managers, admins, and owners still have full access.'
+            desc: 'Allow correcting point events, opening Fair Flow Setup, and managing point-related actions. Admins/managers need this explicitly; owner keeps full access.'
           }
         ]
       },
@@ -30314,12 +30410,10 @@ function initializeAppsPanel() {
           permsRef.time_clock_bypass_location = false;
         }
 
-        if (permissionKey === 'points_view_own' && newValue === false) {
-          permsRef.points_view_all = false;
-          permsRef.points_manage = false;
-        }
-
         permsRef[permissionKey] = newValue;
+        if (permissionKey === 'points_view_own' || permissionKey === 'points_view_all' || permissionKey === 'points_manage') {
+          ffNormalizePointsPermissionFlags(permsRef, permissionKey, newValue);
+        }
         
         console.log('[renderPermissionsTab] Permission toggled:', permissionKey, newValue);
         console.log('[renderPermissionsTab] Updated permissions:', permsRef);
@@ -30372,7 +30466,7 @@ function initializeAppsPanel() {
           return;
         }
 
-        if (permissionKey === 'points_view_own') {
+        if (permissionKey === 'points_view_own' || permissionKey === 'points_view_all' || permissionKey === 'points_manage') {
           renderPermissionsTab(staff);
           runPermissionVisibilitySideEffects();
           return;
@@ -31870,6 +31964,9 @@ function initializeAppsPanel() {
     },
     history: {
       view: false
+    },
+    dashboard: {
+      view: false
     }
   };
 
@@ -31920,7 +32017,8 @@ function initializeAppsPanel() {
       staff_permissions_manage: false,
       history_view: d.history.view,
       history_export: false,
-      history_clear: false
+      history_clear: false,
+      dashboard_view: d.dashboard && d.dashboard.view === true
     };
   }
 
@@ -31994,6 +32092,9 @@ function initializeAppsPanel() {
     },
     history: {
       view: false
+    },
+    dashboard: {
+      view: false
     }
   };
 
@@ -32051,7 +32152,8 @@ function initializeAppsPanel() {
       staff_permissions_manage: false,
       history_view: d.history.view,
       history_export: false,
-      history_clear: false
+      history_clear: false,
+      dashboard_view: d.dashboard && d.dashboard.view === true
     };
   }
 
@@ -32148,6 +32250,9 @@ function initializeAppsPanel() {
     history: {
       view: true,
       manage: true
+    },
+    dashboard: {
+      view: false
     }
   };
 
@@ -32222,7 +32327,8 @@ function initializeAppsPanel() {
       staff_permissions_manage: st.permissions === true,
       history_view: d.history.view,
       history_export: d.history.manage === true,
-      history_clear: d.history.manage === true
+      history_clear: d.history.manage === true,
+      dashboard_view: d.dashboard && d.dashboard.view === true
     };
   }
 
@@ -34495,6 +34601,7 @@ function initializeUserProfileMenu() {
   let ffPointsCurrentStaffId = '';
   // Selected staffId from the picker. Empty string means "All staff".
   let ffPointsLeaderboardSelectedStaffId = '';
+  let ffPointsLastPermissionDeniedAt = 0;
 
   window.ffPointsAppStaffPickerChanged = function(value) {
     ffPointsLeaderboardSelectedStaffId = String(value == null ? '' : value).trim();
@@ -34505,6 +34612,19 @@ function initializeUserProfileMenu() {
     const wrap = document.getElementById('pointsAppStaffFilterWrap');
     if (!wrap) return;
     wrap.style.display = ffPointsVisibilityMode === 'private' || ffPointsVisibilityMode === 'none' ? 'none' : 'flex';
+  }
+
+  function ffPointsErrorIsPermissionDenied(err) {
+    const msg = String(err?.code || err?.message || err || '').toLowerCase();
+    return msg.indexOf('permission-denied') !== -1 || msg.indexOf('missing or insufficient permissions') !== -1;
+  }
+
+  function ffPointsResetToOwnOnlyMode() {
+    ffPointsVisibilityMode = 'private';
+    ffPointsLeaderboardSelectedStaffId = '';
+    ffPointsLastPermissionDeniedAt = Date.now();
+    try { ffApplyPointsSettingsButtonsVisibility(); } catch (_) {}
+    ffApplyPointsStaffFilterVisibility();
   }
 
   /**
@@ -34614,7 +34734,6 @@ function initializeUserProfileMenu() {
   }
 
   function ffCurrentUserIsPointsManager() {
-    if (window.ff_is_admin_cached === true) return true;
     try {
       if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) return true;
     } catch (_) {}
@@ -34622,15 +34741,7 @@ function initializeUserProfileMenu() {
       const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
       if (typeof ffStaffHasPointsManagePermission === 'function' && ffStaffHasPointsManagePermission(staff)) return true;
     } catch (_) {}
-    const role = String(window.__ff_user_role || window.__ff_actorRole || sessionStorage.getItem('ff_actor_role') || '').toLowerCase();
-    if (role === 'owner' || role === 'admin' || role === 'manager') return true;
-    try {
-      const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
-      const staffRole = String(staff?.role || '').toLowerCase();
-      return staff?.isAdmin === true || staff?.isManager === true || staffRole === 'owner' || staffRole === 'admin' || staffRole === 'manager';
-    } catch (_) {
-      return false;
-    }
+    return false;
   }
   // Expose so callers in other scopes (Staff Details details tab, leaderboard
   // row buttons, etc.) can gate the Manual Points Adjustment UI by permission.
@@ -34644,8 +34755,7 @@ function initializeUserProfileMenu() {
     } catch (_) {}
     const raw = [
       window.__ff_authedStaffId,
-      (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : ''),
-      window.auth?.currentUser?.uid
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : '')
     ];
     for (const value of raw) {
       const clean = String(value || '').trim();
@@ -34659,7 +34769,22 @@ function initializeUserProfileMenu() {
       const uid = String(window.auth?.currentUser?.uid || '').trim();
       if (!uid || !api || typeof api.doc !== 'function' || typeof api.getDoc !== 'function') return '';
       const salonId = String(window.currentSalonId || '').trim();
+      const email = String(window.auth?.currentUser?.email || '').trim().toLowerCase();
       let staffId = '';
+      async function findStaffByField(field, value) {
+        const cleanValue = String(value || '').trim();
+        if (!salonId || !cleanValue || !api.collection || !api.query || !api.where || !api.getDocs) return '';
+        try {
+          const snap = await api.getDocs(api.query(
+            api.collection(db, `salons/${salonId}/staff`),
+            api.where(field, '==', cleanValue)
+          ));
+          const docSnap = snap && snap.docs && snap.docs[0];
+          return docSnap ? String(docSnap.id || '').trim() : '';
+        } catch (_) {
+          return '';
+        }
+      }
       if (salonId) {
         try {
           const membershipSnap = await api.getDoc(api.doc(db, `users/${uid}/memberships/${salonId}`));
@@ -34679,6 +34804,13 @@ function initializeUserProfileMenu() {
         const snap = await api.getDoc(api.doc(db, `users/${uid}`));
         const data = snap && snap.exists && snap.exists() ? (snap.data() || {}) : {};
         staffId = String(data.staffId || '').trim();
+      }
+      if (!staffId && salonId) {
+        staffId = await findStaffByField('uid', uid)
+          || await findStaffByField('firebaseUid', uid)
+          || await findStaffByField('firebaseAuthUid', uid)
+          || await findStaffByField('authUid', uid)
+          || await findStaffByField('email', email);
       }
       if (staffId) {
         try { window.__ff_authedStaffId = staffId; } catch (_) {}
@@ -34898,7 +35030,17 @@ function initializeUserProfileMenu() {
     if (!accountId) throw new Error('No account');
     const db = getTrainingDb();
     const api = await getTrainingFirestoreApi();
-    const settings = await ffGetPointsSettings(accountId, ffGetPointsActiveLocationId());
+    let settings;
+    try {
+      settings = await ffGetPointsSettings(accountId, ffGetPointsActiveLocationId());
+    } catch (settingsErr) {
+      if (ffPointsErrorIsPermissionDenied(settingsErr)) {
+        ffPointsResetToOwnOnlyMode();
+        settings = { ...FF_POINTS_SETTINGS_DEFAULTS, leaderboardVisibility: 'private' };
+      } else {
+        throw settingsErr;
+      }
+    }
     ffPointsLeaderboardMonthlyGoal = Number(settings.monthlyGoal) || FF_POINTS_SETTINGS_DEFAULTS.monthlyGoal;
     ffPointsLeaderboardShowRank = settings.showRankToPrivate === true;
     ffPointsLeaderboardPrivateRank = null;
@@ -34906,6 +35048,12 @@ function initializeUserProfileMenu() {
     const cloudStaffId = await ffResolveCurrentPointsStaffIdFromCloud(db, api);
     ffPointsCurrentStaffId = cloudStaffId || ffGetCurrentPointsStaffId();
     ffPointsVisibilityMode = ffResolvePointsVisibilityMode(settings);
+    if (ffPointsVisibilityMode === 'private' && !ffPointsCurrentStaffId) {
+      ffPointsLeaderboardRows = [];
+      ffPointsResetToOwnOnlyMode();
+      ffRenderPointsLeaderboard();
+      return;
+    }
     if (!ffPointsLeaderboardPeriodInitialized) {
       // First load of this session: private staff with a monthly goal benefit
       // most from seeing the month immediately. Managers / admins / public
@@ -34938,19 +35086,60 @@ function initializeUserProfileMenu() {
     const period = ffPointsLeaderboardActivePeriod;
     const activeLocationId = ffGetPointsActiveLocationId();
     const needsEventsForTotals = !!activeLocationId || !ffPointsPeriodUsesSummary(period);
-    // Both 'full' (admins viewing everyone) and 'private' (staff viewing own
-    // breakdown + donut chart) need the actual events attached to rows.
-    // Without this, private mode loads totals only and the donut/event log
-    // render empty even though the score is correct.
+    // Managers need events for drill-down and corrections. Private staff also
+    // need their own events so week/month/all-time and breakdown cards are exact.
     const needsEventsForDetails = ffPointsVisibilityMode === 'full' || ffPointsVisibilityMode === 'private';
     const shouldLoadEvents = needsEventsForTotals || needsEventsForDetails;
     const privateStaffIdFilter = ffPointsVisibilityMode === 'private' ? ffPointsCurrentStaffId : '';
-    const events = shouldLoadEvents ? await ffLoadPointEventsForCurrentPeriod(accountId, db, api, privateStaffIdFilter) : [];
-    const rows = activeLocationId || (ffPointsVisibilityMode === 'private' && !ffPointsPeriodUsesSummary(period))
-      ? ffBuildPointsRowsFromPeriodEvents(staffRows, events, period)
-      : (ffPointsPeriodUsesSummary(period)
-        ? await ffLoadPointsFromSummary(accountId, db, api, staffRows)
-        : await ffLoadPointsFromEvents(accountId, db, api, staffRows, ffPointsEventWeekKeyForPeriod(period)));
+    let events = [];
+    let rows = [];
+    try {
+      events = shouldLoadEvents ? await ffLoadPointEventsForCurrentPeriod(accountId, db, api, privateStaffIdFilter) : [];
+      rows = activeLocationId || ffPointsVisibilityMode === 'private'
+        ? ffBuildPointsRowsFromPeriodEvents(staffRows, events, period)
+        : (ffPointsPeriodUsesSummary(period)
+          ? await ffLoadPointsFromSummary(accountId, db, api, staffRows)
+          : await ffLoadPointsFromEvents(accountId, db, api, staffRows, ffPointsEventWeekKeyForPeriod(period)));
+    } catch (loadErr) {
+      if (ffPointsErrorIsPermissionDenied(loadErr) && ffPointsVisibilityMode === 'private') {
+        console.warn('[PointsApp] private events load denied; rendering summary-only view', loadErr);
+        events = [];
+        rows = ffPointsPeriodUsesSummary(ffPointsLeaderboardActivePeriod)
+          ? await ffLoadPointsFromSummary(accountId, db, api, staffRows)
+          : staffRows.map(function(staff) {
+              return {
+                staffId: staff.id,
+                staffName: staff.name,
+                weekPoints: 0,
+                monthPoints: 0,
+                allTimePoints: 0,
+                events: []
+              };
+            });
+      } else if (!ffPointsErrorIsPermissionDenied(loadErr)) {
+        throw loadErr;
+      } else if (typeof window.ffCurrentUserIsPointsManager === 'function' && window.ffCurrentUserIsPointsManager()) {
+        throw loadErr;
+      } else {
+        console.warn('[PointsApp] all-staff load denied; falling back to own-only view', loadErr);
+        ffPointsResetToOwnOnlyMode();
+        if (ffPointsLeaderboardActivePeriod === 'thisWeek') {
+          ffPointsLeaderboardActivePeriod = 'thisMonth';
+        }
+        staffRows = ffGetLocalStaffForPoints().filter(function(staff) { return String(staff.id) === ffPointsCurrentStaffId; });
+        if (!staffRows.length && ffPointsCurrentStaffId) {
+          const resolvedRow = ffFindPointsStaffRowById(ffGetLocalStaffForPoints(), ffPointsCurrentStaffId);
+          staffRows = [{
+            staffId: ffPointsCurrentStaffId,
+            id: ffPointsCurrentStaffId,
+            staffName: resolvedRow?.name || 'You',
+            name: resolvedRow?.name || 'You'
+          }];
+        }
+        events = [];
+        rows = await ffLoadPointsFromSummary(accountId, db, api, staffRows);
+      }
+    }
     const eventsByStaff = new Map();
     events.forEach(function(event) {
       const staffId = String(event.staffId || '').trim();
@@ -35025,8 +35214,11 @@ function initializeUserProfileMenu() {
       const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
       if (typeof ffStaffHasPointsManagePermission === 'function' && ffStaffHasPointsManagePermission(staff)) return true;
     } catch (_) {}
-    const role = String(window.__ff_user_role || window.__ff_actorRole || sessionStorage.getItem('ff_actor_role') || '').toLowerCase();
-    return window.ff_is_admin_cached === true || role === 'owner' || role === 'admin' || role === 'manager';
+    try {
+      return typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass();
+    } catch (_) {
+      return false;
+    }
   }
 
   function ffFormatPointEventType(event) {
@@ -35512,7 +35704,7 @@ function initializeUserProfileMenu() {
 
   // ---------------------------------------------------------------------------
   // Manual Points Adjustment modal
-  // Lets owner/admin/manager (or staff with `points_manage` permission) add
+  // Lets the salon owner or staff with `points_manage` permission add
   // or subtract points for any staff member with a mandatory reason. Each
   // submission writes a fresh `manual_adjustment` event via ffCreatePointsEvent
   // - the totals are updated by the engine transaction, never directly here.
@@ -35902,8 +36094,18 @@ function initializeUserProfileMenu() {
       await ffLoadPointsLeaderboard();
       ffRenderPointsLeaderboard();
     } catch (e) {
-      if (list) list.innerHTML = '<div style="padding:18px;text-align:center;color:#b91c1c;font-size:12px;">Failed to load points leaderboard.</div>';
-      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load points leaderboard', 'error');
+      if (ffPointsErrorIsPermissionDenied(e) && !(typeof window.ffCurrentUserIsPointsManager === 'function' && window.ffCurrentUserIsPointsManager())) {
+        ffPointsResetToOwnOnlyMode();
+        try {
+          await ffLoadPointsLeaderboard();
+          ffRenderPointsLeaderboard();
+          return;
+        } catch (retryErr) {
+          e = retryErr;
+        }
+      }
+      if (list) list.innerHTML = '<div style="padding:18px;text-align:center;color:#b91c1c;font-size:12px;">Failed to load your points.</div>';
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load your points', 'error');
     }
   };
 
@@ -35930,8 +36132,18 @@ function initializeUserProfileMenu() {
       await ffLoadPointsLeaderboard();
       ffRenderPointsLeaderboard();
     } catch (e) {
-      if (list) list.innerHTML = '<div style="padding:24px;text-align:center;color:#b91c1c;font-size:13px;">Failed to load points leaderboard.</div>';
-      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load points leaderboard', 'error');
+      if (ffPointsErrorIsPermissionDenied(e) && !(typeof window.ffCurrentUserIsPointsManager === 'function' && window.ffCurrentUserIsPointsManager())) {
+        ffPointsResetToOwnOnlyMode();
+        try {
+          await ffLoadPointsLeaderboard();
+          ffRenderPointsLeaderboard();
+          return;
+        } catch (retryErr) {
+          e = retryErr;
+        }
+      }
+      if (list) list.innerHTML = '<div style="padding:24px;text-align:center;color:#b91c1c;font-size:13px;">Failed to load your points.</div>';
+      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load your points', 'error');
     }
   };
 
@@ -48781,7 +48993,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 2000 },
         { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
         { src: "/schedule-ui.js?v=20260501_points", type: "module", delay: 2300 },
-        { src: "/dashboard.js?v=20260501_final3", type: "module", delay: 2500 },
+        { src: "/dashboard.js?v=20260501_dashboard_perm", type: "module", delay: 2500 },
         { src: "/inbox.js?v=20260501_points", type: "module", delay: 2700 },
         { src: "/chat.js?v=20260501_points", type: "module", delay: 2900 },
         { src: "/staff-documents.js?v=20260501_points", type: "module", delay: 3200 },

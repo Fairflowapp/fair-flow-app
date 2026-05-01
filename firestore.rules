@@ -107,6 +107,11 @@ service cloud.firestore {
         && activeUserRoleForSalon(salonId) in ['admin', 'owner'];
     }
 
+    function isOwner(salonId) {
+      return belongsToSalon(salonId)
+        && activeUserRoleForSalon(salonId) == 'owner';
+    }
+
     /** Ticket summary rows on close: same users doc roles the Tickets UI treats as staff/tech (not only manager/admin/owner). */
     function canCreateTicketSummary(salonId) {
       return belongsToSalon(salonId)
@@ -144,6 +149,18 @@ service cloud.firestore {
         && (
           get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.uid == request.auth.uid
           || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.firebaseUid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.firebaseAuthUid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.authUid == request.auth.uid
+          || (
+            request.auth.token.email is string
+            && get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.email is string
+            && get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.email.lower() == request.auth.token.email.lower()
+          )
+          || (
+            memberExists(salonId)
+            && memberDocData(salonId).staffId is string
+            && memberDocData(salonId).staffId == staffId
+          )
         );
     }
 
@@ -206,8 +223,17 @@ service cloud.firestore {
         : '';
     }
 
+    function memberStaffId(salonId) {
+      return memberExists(salonId)
+        && memberDocData(salonId).staffId is string
+        ? memberDocData(salonId).staffId
+        : '';
+    }
+
     function activeStaffIdForSalon(salonId) {
-      return membershipStaffId(salonId) != '' ? membershipStaffId(salonId) : userStaffId();
+      return membershipStaffId(salonId) != ''
+        ? membershipStaffId(salonId)
+        : (memberStaffId(salonId) != '' ? memberStaffId(salonId) : userStaffId());
     }
 
     // Staff doc on salon (for per-staff permissions.media_* on Media module)
@@ -276,11 +302,14 @@ service cloud.firestore {
     }
 
     function permPointsAllAllowed(salonId) {
-      return mySalonStaffDocData(salonId) != null
-        && mySalonStaffDocData(salonId).permissions is map
-        && (
-          mySalonStaffDocData(salonId).permissions.points_view_all == true
-          || mySalonStaffDocData(salonId).permissions.points_manage == true
+      return isManager(salonId)
+        || (
+          mySalonStaffDocData(salonId) != null
+          && mySalonStaffDocData(salonId).permissions is map
+          && (
+            mySalonStaffDocData(salonId).permissions.points_view_all == true
+            || mySalonStaffDocData(salonId).permissions.points_manage == true
+          )
         );
     }
 
@@ -288,9 +317,12 @@ service cloud.firestore {
     // Used as the authoritative gate for writes on accounts/{accountId}/settings/points
     // and accounts/{accountId}/locations/{locationId}/settings/points.
     function permPointsManageAllowed(salonId) {
-      return mySalonStaffDocData(salonId) != null
-        && mySalonStaffDocData(salonId).permissions is map
-        && mySalonStaffDocData(salonId).permissions.points_manage == true;
+      return isAdminOrOwner(salonId)
+        || (
+          mySalonStaffDocData(salonId) != null
+          && mySalonStaffDocData(salonId).permissions is map
+          && mySalonStaffDocData(salonId).permissions.points_manage == true
+        );
     }
 
     function permTimeClockManageAllowed(salonId) {
@@ -971,12 +1003,13 @@ service cloud.firestore {
     match /accounts/{accountId}/settings/{settingId} {
       allow read: if settingId == "points" && isSignedIn();
       allow create, update: if settingId == "points"
-        && (isAdminOrOwner(accountId) || permPointsManageAllowed(accountId));
+        && permPointsManageAllowed(accountId);
       allow delete: if false;
     }
 
     match /accounts/{accountId}/pointsEvents/{eventId} {
-      allow get: if canAccessAccountAsStaffOrMember(accountId)
+      allow get: if permPointsAllAllowed(accountId)
+        || isOwner(accountId)
         || (
           permPointsOwnAllowed(accountId)
           && resource.data.staffId == activeStaffIdForSalon(accountId)
@@ -985,8 +1018,8 @@ service cloud.firestore {
           permPointsOwnAllowedForStaff(accountId, resource.data.staffId)
           && staffDocUidMatches(accountId, resource.data.staffId)
         );
-      allow list: if canAccessAccountAsStaffOrMember(accountId)
-        || permPointsAllAllowed(accountId)
+      allow list: if permPointsAllAllowed(accountId)
+        || isOwner(accountId)
         || (
           permPointsOwnAllowed(accountId)
           && resource.data.staffId == activeStaffIdForSalon(accountId)
@@ -1011,7 +1044,7 @@ service cloud.firestore {
           || (
             request.resource.data.type == "manual_adjustment"
             && request.resource.data.sourceModule == "points_admin"
-            && (isManager(accountId) || permPointsManageAllowed(accountId))
+            && (isOwner(accountId) || permPointsManageAllowed(accountId))
             && request.resource.data.keys().hasAll(['sourceMeta'])
             && request.resource.data.keys().hasOnly([
               'staffId', 'staffName', 'locationId',
@@ -1031,7 +1064,7 @@ service cloud.firestore {
             && request.resource.data.sourceMeta.reason.size() <= 500
           )
         );
-      allow update: if belongsToSalon(accountId)
+      allow update: if (isOwner(accountId) || permPointsManageAllowed(accountId))
         && resource.data.voided != true
         && request.resource.data.voided == true
         && request.resource.data.voidedReason is string;
@@ -1039,8 +1072,8 @@ service cloud.firestore {
     }
 
     match /accounts/{accountId}/staff/{staffId}/pointsSummary/{summaryId} {
-      allow read: if canAccessAccountAsStaffOrMember(accountId)
-        || permPointsAllAllowed(accountId)
+      allow read: if permPointsAllAllowed(accountId)
+        || isOwner(accountId)
         || (summaryId == "main" && matchesOwnStaffId(accountId, staffId) && permPointsOwnAllowed(accountId))
         || (summaryId == "main" && staffDocUidMatches(accountId, staffId) && permPointsOwnAllowedForStaff(accountId, staffId))
         // Rank visibility: when the account/branch has explicitly enabled
@@ -1065,7 +1098,7 @@ service cloud.firestore {
     match /accounts/{accountId}/locations/{locationId}/settings/{settingId} {
       allow read: if settingId == "points" && isSignedIn();
       allow create, update: if settingId == "points"
-        && (isAdminOrOwner(accountId) || permPointsManageAllowed(accountId));
+        && permPointsManageAllowed(accountId);
       allow delete: if false;
     }
 

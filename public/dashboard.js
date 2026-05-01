@@ -1416,6 +1416,12 @@ function bindAutoHideOnOtherNav() {
 
 export function goToDashboard() {
   console.log(LOG, "goToDashboard");
+  if (typeof window.ffCurrentUserHasDashboardViewPermission === "function" && !window.ffCurrentUserHasDashboardViewPermission()) {
+    if (typeof window.showToast === "function") {
+      try { window.showToast("Dashboard access is not enabled for this staff member.", "error"); } catch (_) {}
+    }
+    return;
+  }
   if (typeof window.ffCloseGlobalBlockingOverlays === "function") {
     try { window.ffCloseGlobalBlockingOverlays(); } catch (_) {}
   }
