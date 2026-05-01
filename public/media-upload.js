@@ -1744,6 +1744,15 @@ export async function goToMedia() {
   const tasksScreen = document.getElementById("tasksScreen");
   const inboxScreen = document.getElementById("inboxScreen");
   const chatScreen = document.getElementById("chatScreen");
+  const ticketsScreen = document.getElementById("ticketsScreen");
+  const trainingScreen = document.getElementById("trainingScreen");
+  const scheduleScreen = document.getElementById("scheduleScreen");
+  const timeClockScreen = document.getElementById("timeClockScreen");
+  const inventoryScreen = document.getElementById("inventoryScreen");
+  const pointsAppScreen = document.getElementById("pointsAppScreen");
+  const userProfileScreen = document.getElementById("userProfileScreen");
+  const myProfileScreen = document.getElementById("myProfileScreen");
+  const manageQueueScreen = document.getElementById("manageQueueScreen");
   const ownerView = document.getElementById("owner-view");
   const joinBar = document.getElementById("joinBar");
   const queueControls = document.getElementById("queueControls");
@@ -1751,20 +1760,18 @@ export async function goToMedia() {
   if (tasksScreen) tasksScreen.style.display = "none";
   if (inboxScreen) inboxScreen.style.display = "none";
   if (chatScreen) chatScreen.style.display = "none";
+  if (ticketsScreen) ticketsScreen.style.display = "none";
+  if (trainingScreen) trainingScreen.style.display = "none";
+  if (scheduleScreen) scheduleScreen.style.display = "none";
+  if (timeClockScreen) timeClockScreen.style.display = "none";
+  if (inventoryScreen) inventoryScreen.style.display = "none";
+  if (pointsAppScreen) pointsAppScreen.style.display = "none";
+  if (userProfileScreen) userProfileScreen.style.display = "none";
+  if (myProfileScreen) myProfileScreen.style.display = "none";
+  if (manageQueueScreen) manageQueueScreen.style.display = "none";
   if (ownerView) ownerView.style.display = "none";
   if (joinBar) joinBar.style.display = "none";
   if (queueControls) queueControls.style.display = "none";
-
-  if (auth.currentUser) {
-    try {
-      await loadUserProfile();
-      setupMediaWorkListSubscriptions();
-    } catch (e) {
-      console.warn("[Media] goToMedia profile/subscriptions", e);
-    }
-  } else {
-    applyToHandleVisibility();
-  }
 
   const screen = document.getElementById("mediaScreen");
   if (screen) {
@@ -1776,6 +1783,22 @@ export async function goToMedia() {
   updateMediaUploadWorkButtonVisibility();
   renderMediaFilters();
   renderMediaList();
+
+  if (auth.currentUser) {
+    void (async () => {
+      try {
+        await loadUserProfile();
+        setupMediaWorkListSubscriptions();
+        updateMediaUploadWorkButtonVisibility();
+        renderMediaFilters();
+        renderMediaList();
+      } catch (e) {
+        console.warn("[Media] goToMedia profile/subscriptions", e);
+      }
+    })();
+  } else {
+    applyToHandleVisibility();
+  }
 }
 
 function hideMediaScreen() {

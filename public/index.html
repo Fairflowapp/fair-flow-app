@@ -84,7 +84,7 @@
       return window.goToInventory();
     }
     try {
-      await import('/inventory.js?v=20260501_points');
+      await import('/inventory.js?v=20260501_navfix');
     } catch (e) {
       console.error('[Inventory mock] load failed', e);
       return;
@@ -21448,40 +21448,9 @@ function openTasks() {
     // Initialize storage for all tabs
     ['opening', 'closing', 'weekly', 'monthly', 'yearly'].forEach(ensureTaskStorageInitialized);
     
-    // Cleanup orphan tasks (one-time cleanup on load)
-    cleanupOrphanTasks();
-    
-    // Cleanup blocked tasks (remove tasks in tombstone from existing lists)
-    cleanupBlockedTasks();
-    
-    // FINAL ROOT FIX: Cleanup blocked tasks from active list (direct execution, no cache)
-    // MUST run for ALL TABS, not only currentTasksTab
-    const tombstone = JSON.parse(localStorage.getItem("ff_tasks_active_deleted_v1") || "{}");
-    const tabs = ["opening", "closing", "weekly", "monthly", "yearly"];
-    
-    tabs.forEach(tab => {
-      const blocked = new Set((tombstone[tab] || []).map(x => String(x).trim()));
-      if (!blocked.size) return;
-      
-      const key = `ff_tasks_${tab}_active_v1`;
-      const arr = JSON.parse(localStorage.getItem(key) || "[]");
-      
-      const filtered = arr.filter(t => {
-        const ids = [t?.taskId, t?.id].filter(Boolean).map(v => String(v).trim());
-        return !ids.some(id => blocked.has(id));
-      });
-      
-      if (filtered.length !== arr.length) {
-        const m = String(key).match(
-          /^ff_tasks_(opening|closing|weekly|monthly|yearly)_(active|pending|done)_v1$/
-        );
-        if (m) {
-          writeTasksList(m[1], m[2], filtered);
-        } else {
-          localStorage.setItem(key, JSON.stringify(filtered));
-        }
-      }
-    });
+    // Do not run destructive cleanup while opening Tasks. The cloud/catalog state
+    // can be a beat behind local runtime lists, which made valid tasks disappear.
+    // Explicit delete/reset flows still update the tombstone and task lists.
     
     // Load tasks from storage (single source of truth)
     loadTasks();
@@ -49002,8 +48971,8 @@ function hookSettingsGuard_DISABLED(){
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260501_points", type: "module", delay: 4000 },
         { src: "/tickets.js?v=20260501_points", type: "module", delay: 4300 },
-        { src: "/media-upload.js?v=20260501_media_restore", type: "module", delay: 4600 },
-        { src: "/inventory.js?v=20260501_points", type: "module", delay: 4900 },
+        { src: "/media-upload.js?v=20260501_navfix", type: "module", delay: 4600 },
+        { src: "/inventory.js?v=20260501_navfix", type: "module", delay: 4900 },
         { src: "/onboarding-wizard.js?v=20260501_points", type: "module", delay: 5200 },
         { src: "/locations-manage.js?v=20260501_points", type: "module", delay: 5400 },
         { src: "/queue-analytics.js?v=20260501_points", type: "module", delay: 5700 },

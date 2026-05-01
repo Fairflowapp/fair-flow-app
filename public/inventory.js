@@ -12898,6 +12898,7 @@ function hideFullscreenPeersForInventory() {
     "trainingScreen",
     "scheduleScreen",
     "timeClockScreen",
+    "pointsAppScreen",
     "userProfileScreen",
     "myProfileScreen",
     "manageQueueScreen",
@@ -12935,22 +12936,6 @@ export async function goToInventory() {
   _invOrderDraftLoaded = false;
 
   _invCategoriesLoading = true;
-  try {
-    await loadInventoryCategoriesFromFirestore();
-  } catch (e) {
-    console.error("[Inventory] category load failed", e);
-    _invCatLoadError = (e && e.message) || "Failed to load categories";
-    _categoryTree = [];
-    _persistedCategoryTree = [];
-  } finally {
-    _invCategoriesLoading = false;
-  }
-
-  // If the user lands directly on the Create Order tab, load its draft before first paint.
-  if (_invMainTab === "orderBuilder") {
-    void loadInventoryOrderDraft();
-  }
-
   mountOrRefreshMockUi();
 
   screen.style.display = "flex";
@@ -12963,6 +12948,25 @@ export async function goToInventory() {
   // Smart Inventory Suggestions — run once per session, fire-and-forget.
   // Silently creates Inbox alerts for items forecast to run out within 3 days.
   void scanInventorySuggestionsOnce();
+
+  void (async () => {
+    try {
+      await loadInventoryCategoriesFromFirestore();
+    } catch (e) {
+      console.error("[Inventory] category load failed", e);
+      _invCatLoadError = (e && e.message) || "Failed to load categories";
+      _categoryTree = [];
+      _persistedCategoryTree = [];
+    } finally {
+      _invCategoriesLoading = false;
+      mountOrRefreshMockUi();
+    }
+
+    // If the user lands directly on the Create Order tab, load its draft after first paint.
+    if (_invMainTab === "orderBuilder") {
+      void loadInventoryOrderDraft();
+    }
+  })();
 
   try {
     const bd = document.getElementById("appsOverlayBackdrop");
