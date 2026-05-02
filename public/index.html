@@ -7498,6 +7498,10 @@ function ffCurrentUserHasStaffViewPermission() {
 /** Reorder control: staff.permissions.queue_reorder === true (Permissions tab: Show Reorder). */
 function ffStaffHasQueueReorderPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
+  const roleLc = String(staff.role || '').toLowerCase().trim();
+  if (roleLc === 'owner' || roleLc === 'admin' || roleLc === 'manager' || staff.isAdmin === true || staff.isManager === true) {
+    return true;
+  }
   const p = staff.permissions;
   return !!(p && typeof p === 'object' && p.queue_reorder === true);
 }
@@ -7516,7 +7520,7 @@ function ffStaffHasQueueResetPermission(staff) {
     return true;
   }
   const roleLc = String(staff.role || '').toLowerCase().trim();
-  if (roleLc === 'owner') return true;
+  if (roleLc === 'owner' || roleLc === 'admin' || roleLc === 'manager' || staff.isAdmin === true || staff.isManager === true) return true;
   const p = staff.permissions;
   return !!(p && typeof p === 'object' && p.queue_reset === true);
 }
@@ -8573,6 +8577,39 @@ function showQueueSelfCheckoutModal(validator) {
   });
 }
 
+function ffQueuePinMatchesStaffRow(pin, row) {
+  const cleanPin = String(pin || '').trim();
+  if (!cleanPin || !row) return false;
+
+  const refs = [];
+  const rowStaffId = String(row.staffId || '').trim();
+  const rowName = String(row.name || '').trim();
+  if (rowStaffId) refs.push(rowStaffId);
+  if (rowName) refs.push(rowName);
+
+  for (const ref of refs) {
+    const storedPin = getCurrentStaffPin(ref);
+    if (storedPin && String(storedPin).trim() === cleanPin) return true;
+  }
+
+  try {
+    if (typeof window.ffAuthByPin === 'function') {
+      const authResult = window.ffAuthByPin(cleanPin);
+      const staff = authResult && authResult.ok ? authResult.staff : null;
+      if (staff) {
+        const authStaffId = String(staff.id || '').trim();
+        const authName = String(staff.name || '').trim();
+        if ((rowStaffId && authStaffId === rowStaffId) || (rowName && authName === rowName)) return true;
+        if (staff.isAdmin === true || staff.isManager === true) return true;
+      }
+    }
+  } catch (e) {
+    console.warn('[Queue] self-checkout PIN auth fallback failed', e);
+  }
+
+  return false;
+}
+
 let ffQueuePresenceRenderTimer = null;
 document.addEventListener('ff-staff-presence-updated', () => {
   if (ffQueuePresenceRenderTimer) clearTimeout(ffQueuePresenceRenderTimer);
@@ -8819,7 +8856,7 @@ function renderQueue(){
       }
     };
     console.log('[StaffCallDiag] queue row presence', diagEligibility);
-    if (canCall && canManageCalls && !queueLocked) {
+    if (canCall && canManageCalls && !queueLocked && !reorderMode) {
       const callWrap = document.createElement("div");
       callWrap.style.cssText = "display:flex;align-items:center;gap:4px;white-space:nowrap;";
 
@@ -8895,6 +8932,7 @@ function renderQueue(){
 
     if (
       !queueLocked &&
+      !reorderMode &&
       (canTechnicianSelfCheckoutQueueRow(q) ||
         (typeof ffCurrentUserIsQueueSharedStationJoin === 'function' && ffCurrentUserIsQueueSharedStationJoin()))
     ) {
@@ -8958,11 +8996,31 @@ function renderQueue(){
       ctrls.append(quickRemove);
     }
 
-    if (canViewQueueRowActionControls(q)) {
+    if (!reorderMode && canViewQueueRowActionControls(q)) {
       ctrls.append(hold,start);
     }
 
-    if(reorderMode && !queueLocked){ const up=btn("-","start-btn"), down=btn("-","start-btn"); up.onclick=() =>move(qi,-1); down.onclick=() =>move(qi,1); const del=btn("-","finish-btn"); del.title="Remove from queue"; del.onclick=()=>guardHold(()=>removeFromQueue(qi)); ctrls.prepend(up); ctrls.append(down); ctrls.append(del); }
+    if (reorderMode && !queueLocked) {
+      const up = btn("↑", "start-btn");
+      const down = btn("↓", "start-btn");
+      const del = btn("✖", "finish-btn");
+      [up, down, del].forEach((b) => {
+        b.style.width = "34px";
+        b.style.minWidth = "34px";
+        b.style.height = "34px";
+        b.style.padding = "0";
+        b.style.borderRadius = "999px";
+        b.style.fontSize = "15px";
+        b.style.whiteSpace = "nowrap";
+      });
+      del.style.background = "#fee2e2";
+      del.style.color = "#991b1b";
+      del.title = "Remove from queue";
+      up.onclick = () => move(qi, -1);
+      down.onclick = () => move(qi, 1);
+      del.onclick = () => guardHold(() => removeFromQueue(qi));
+      ctrls.append(up, down, del);
+    }
 
     li.append(badge,nm,ctrls); queueList.appendChild(li);
 
@@ -9026,12 +9084,8 @@ async function selfRemoveFromQueue(i) {
     typeof ffCurrentUserIsQueueSharedStationJoin === 'function' && ffCurrentUserIsQueueSharedStationJoin();
   if (!canTechnicianSelfCheckoutQueueRow(target) && !sharedStation) return;
   const currentStaffId = String(window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || target.staffId || '').trim();
-  const pinRef = sharedStation
-    ? (String(target.staffId || '').trim() || String(target.name || '').trim())
-    : (currentStaffId || target.name);
   const modalResult = await showQueueSelfCheckoutModal((pin) => {
-    const storedPin = getCurrentStaffPin(pinRef);
-    return !!storedPin && String(storedPin) === String(pin);
+    return ffQueuePinMatchesStaffRow(pin, target);
   });
   if (modalResult == null) return;
   let geoFenceCheck = { allowed: true };
@@ -9816,20 +9870,10 @@ async function resetDay(){
     await ffStyledAlert("You don't have permission to reset the queue.", 'Reset Queue');
     return;
   }
-  // Check if user is owner/admin - block if not
-  if (typeof window.isCurrentUserOwner === 'function') {
-    try {
-      const isOwner = await window.isCurrentUserOwner();
-      if (!isOwner) {
-        await ffStyledAlert('Not authorized - only admin/owner can reset the day.', 'Reset Queue');
-        return;
-      }
-    } catch (e) {
-      console.warn('[Reset] Could not verify user role, proceeding with admin code check:', e);
-      // Continue to admin code check if role verification fails
-    }
-  }
-  
+  // Queue reset is controlled by queue_reset/Admin/Manager permission above and
+  // by the staff PIN check below. Do not re-block permitted Admin/Manager users
+  // with an owner-only account check.
+
   // Step 1: Show confirmation modal
   const confirmed = await showResetConfirmation();
   if (!confirmed) {
