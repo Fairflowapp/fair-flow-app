@@ -28,7 +28,7 @@ import {
 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth, storage } from "./app.js?v=20260501_points";
+import { db, auth, storage } from "/app.js?v=20260509_staffid_notify";
 import {
   ffSyncStaffDocumentOnInboxApprove,
   ffSyncStaffDocumentOnInboxReject,

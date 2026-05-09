@@ -19,7 +19,7 @@ import {
   onSnapshot, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260501_points";
+import { db, auth } from "/app.js?v=20260509_staffid_notify";
 
 // Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
 // window level in capture phase to beat any other handler that might
@@ -144,6 +144,25 @@ function _activeLocKey() {
   const raw = _readActiveLocationId();
   return raw ? raw : CHAT_DEFAULT_LOC_KEY;
 }
+
+/**
+ * Branch key for filtering conversations, badge, and toasts.
+ * When Queue shows "not linked to a staff profile" (staff_unresolved), the
+ * location switcher may still hold a stale `ff_active_location_id` — then
+ * scoping chat to that id hides all legacy/default-branch DMs.
+ */
+function _chatEffectiveLocKey() {
+  try {
+    const w = typeof window !== 'undefined' ? window : {};
+    if (typeof w.ffCurrentUserSalonOwnerPermissionBypass === 'function' && w.ffCurrentUserSalonOwnerPermissionBypass()) {
+      return _activeLocKey();
+    }
+    if (typeof w.ffStaffPermissionLoadState === 'function' && w.ffStaffPermissionLoadState() === 'staff_unresolved') {
+      return CHAT_DEFAULT_LOC_KEY;
+    }
+  } catch (_) {}
+  return _activeLocKey();
+}
 /**
  * Derive the location from a conversation document ID.
  *
@@ -180,7 +199,34 @@ function _convLocKey(conv) {
 /** True when a conversation doc belongs to the given location key. */
 function _convMatchesLocation(conv, locKey) {
   const k = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
-  return _convLocKey(conv) === k;
+  const convKey = _convLocKey(conv);
+  if (convKey === k) return true;
+  // Legacy / salon-default DMs (branch "default") stay visible at any location the
+  // user is allowed to work in — not only primary. Otherwise after staff + location
+  // hydrate (~1s after load) the nav badge recomputes with a concrete location id
+  // and incorrectly drops to 0 while the thread list still shows unread.
+  if (convKey === CHAT_DEFAULT_LOC_KEY && k !== CHAT_DEFAULT_LOC_KEY) {
+    try {
+      const w = typeof window !== 'undefined' ? window : {};
+      if (typeof w.ffGetUserAllowedLocations === 'function') {
+        const locs = w.ffGetUserAllowedLocations();
+        if (Array.isArray(locs) && locs.some((loc) => loc && String(loc.id || '').trim() === k)) {
+          return true;
+        }
+      }
+      if (typeof w.ffResolveCurrentStaffRowFromFfStaffV1 === 'function') {
+        const row = w.ffResolveCurrentStaffRowFromFfStaffV1();
+        if (row && typeof w.ffEnsureStaffLocationFields === 'function') {
+          const f = w.ffEnsureStaffLocationFields(row);
+          const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
+          if (primary && primary === k) return true;
+          const allowed = Array.isArray(f.allowedLocationIds) ? f.allowedLocationIds : [];
+          if (allowed.some((id) => String(id || '').trim() === k)) return true;
+        }
+      }
+    } catch (_) {}
+  }
+  return false;
 }
 
 /**
@@ -428,6 +474,32 @@ function fmtTime(ts) {
   return d.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
 }
 
+/** Local calendar day key for grouping (YYYY-MM-DD). */
+function _chatDayKey(ts) {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** WhatsApp-style separator: TODAY / YESTERDAY / weekday or date. */
+function _chatDaySeparatorLabel(ts) {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const startD = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startToday - startD) / 86400000);
+  if (diffDays === 0) return 'TODAY';
+  if (diffDays === 1) return 'YESTERDAY';
+  const yNow = today.getFullYear();
+  if (d.getFullYear() !== yNow) {
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+}
+
 // ─── Header (gear): ffCurrentUserHasChatManagePermission (staff chat_manage + admin session) ───
 function renderChatHeaderForRole(role) {
   const gear = document.getElementById('chatSettingsGearBtn');
@@ -655,7 +727,7 @@ async function loadChatSalonUsers(options = {}) {
 
 async function loadChatTemplates(options = {}) {
   if (!chatUserProfile?.salonId) return;
-  const locKey = _activeLocKey();
+  const locKey = _chatEffectiveLocKey();
   const key = `${chatUserProfile.salonId}::${locKey}`;
   if (!options.force && _chatTemplatesLoadKey === key && chatTemplates.length) return;
   if (!options.force && _chatTemplatesLoadPromise && _chatTemplatesLoadKey === key) return _chatTemplatesLoadPromise;
@@ -693,7 +765,7 @@ async function loadChatTemplates(options = {}) {
 
 async function loadChatFlows(options = {}) {
   if (!chatUserProfile?.salonId) return;
-  const locKey = _activeLocKey();
+  const locKey = _chatEffectiveLocKey();
   const key = `${chatUserProfile.salonId}::${locKey}`;
   if (!options.force && _chatFlowsLoadKey === key && chatFlows.length) return;
   if (!options.force && _chatFlowsLoadPromise && _chatFlowsLoadKey === key) return _chatFlowsLoadPromise;
@@ -732,9 +804,8 @@ function subscribeToConversationList() {
   if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
 
   const uid  = chatUserProfile.uid;
-  const locKey = _activeLocKey();
 
-  console.log('[ChatBadgePerf] subscribe-start', performance.now(), Date.now(), 'loc=', locKey);
+  console.log('[ChatBadgePerf] subscribe-start', performance.now(), Date.now(), 'loc=', _chatEffectiveLocKey());
   _chatConvFirstSnapLogged = false;
 
   chatConvsUnsub = onSnapshot(
@@ -747,13 +818,15 @@ function subscribeToConversationList() {
         _chatConvFirstSnapLogged = true;
         console.log('[ChatBadgePerf] first-snapshot', performance.now(), Date.now());
       }
+      const locKey = _chatEffectiveLocKey();
       const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const nextConversations = allDocs.filter(c => _convMatchesLocation(c, locKey));
       if (nextConversations.length > 0) {
         allConversations = nextConversations;
         lastNonEmptyConversations = nextConversations;
       } else if (lastNonEmptyConversations.length > 0) {
-        allConversations = lastNonEmptyConversations;
+        const staleForLoc = lastNonEmptyConversations.filter(c => _convMatchesLocation(c, locKey));
+        allConversations = staleForLoc.length > 0 ? staleForLoc : [];
       } else {
         allConversations = nextConversations;
       }
@@ -787,6 +860,7 @@ function subscribeToConversationList() {
       });
 
       renderThreadList();
+      _applyChatNavBadgeFromConversationSnap(snap, uid);
       if (!_chatBadgePerfRenderLogged && _chatBadgePerfOpenMs) {
         _chatBadgePerfRenderLogged = true;
         console.log('[ChatBadgePerf] render-done', performance.now(), Date.now());
@@ -807,10 +881,11 @@ function renderThreadList() {
   if (loading) loading.style.display = 'none';
 
   const uid = chatUserProfile?.uid || '';
+  const locKey = _chatEffectiveLocKey();
   const conversationsToRender = (Array.isArray(allConversations) && allConversations.length > 0)
     ? allConversations
     : (Array.isArray(lastNonEmptyConversations) && lastNonEmptyConversations.length > 0)
-      ? lastNonEmptyConversations
+      ? lastNonEmptyConversations.filter(c => _convMatchesLocation(c, locKey))
       : [];
 
   if (conversationsToRender.length === 0) {
@@ -941,7 +1016,25 @@ function renderConversation(convId) {
 
   const otherAvatarUrl = _avatarUrlForUid(otherUid);
 
-  container.innerHTML = msgs.map(ev => {
+  let lastDayKey = '';
+  const segments = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const ev = msgs[i];
+    const dk = _chatDayKey(ev.sentAt);
+    if (dk && dk !== lastDayKey) {
+      lastDayKey = dk;
+      segments.push({ kind: 'day', ts: ev.sentAt });
+    }
+    segments.push({ kind: 'msg', ev });
+  }
+
+  container.innerHTML = segments.map(seg => {
+    if (seg.kind === 'day') {
+      const lab = _chatDaySeparatorLabel(seg.ts);
+      if (!lab) return '';
+      return `<div class="cb-day-sep" role="separator" aria-label="${escHtml(lab)}"><span>${escHtml(lab)}</span></div>`;
+    }
+    const ev = seg.ev;
     const mine = ev.senderUid === uid;
     const senderInitial = (ev.senderName || '?').charAt(0).toUpperCase();
     const otherAvatarHtml = !mine && otherAvatarUrl
@@ -1044,7 +1137,7 @@ async function _sendFreeTextDirect(recipientUid, recipientName, conversationIdOv
   const senderRole = chatUserProfile.role || '';
   const rUid = recipientUid;
   const rName = recipientName || _nameForUidForSend(rUid);
-  const locKey = _activeLocKey();
+  const locKey = _chatEffectiveLocKey();
   const convId = conversationIdOverride || buildConvId(senderUid, rUid, locKey);
 
   const convRef = doc(db, `salons/${salonId}/conversations`, convId);
@@ -1150,6 +1243,16 @@ window.openThreadReply = async function() {
 
   if (_chatFreeTextAllowed() && templateFlowCount === 0) {
     document.getElementById('chatConvFreeTextInput')?.focus();
+    return;
+  }
+
+  if (!_chatFreeTextAllowed() && templateFlowCount === 0) {
+    const msg = 'No message templates are available for your role. Ask an admin to add templates or enable free-text chat for you.';
+    if (typeof window.ffStyledAlert === 'function') {
+      window.ffStyledAlert(msg, 'Chat');
+    } else {
+      alert(msg);
+    }
     return;
   }
 
@@ -1733,7 +1836,7 @@ window.confirmSendChatMessage = async function() {
         (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
         '';
       const senderRole = chatUserProfile.role || '';
-      const locKey = _activeLocKey();
+      const locKey = _chatEffectiveLocKey();
 
       for (let i = 0; i < recipientUids.length; i++) {
         const rUid = recipientUids[i];
@@ -1804,7 +1907,7 @@ window.confirmSendChatMessage = async function() {
       _rememberConversationForList({
         id: firstSentConvId,
         participants: [chatUserProfile.uid, recipientUids[0]].sort(),
-        locationId: _activeLocKey(),
+        locationId: _chatEffectiveLocKey(),
         lastTitle: title,
         lastMessage: message || renderedText || freeRaw || '',
         lastSenderUid: chatUserProfile.uid,
@@ -1828,6 +1931,51 @@ window.confirmSendChatMessage = async function() {
   }
 };
 
+// ─── Nav unread badge (top nav “Chat”) ───────────────────────────────────────
+function _unreadCountForUid(data, uid) {
+  const ur = data && data.unreadFor;
+  if (!ur || typeof ur !== 'object') return 0;
+  let raw = ur[uid];
+  if (raw == null && typeof uid === 'string') raw = ur[String(uid)];
+  const n = Number(raw);
+  return isNaN(n) ? 0 : n;
+}
+
+/**
+ * Total unread for the bottom/top nav badge.
+ * Intentionally does NOT filter by active location: that filter is for the in-chat
+ * thread list only. Including location here caused the badge to flash then drop to
+ * 0 after staff + location hydration (~1s) even though unreadFor was unchanged.
+ * Scope is already limited by Firestore: this salon’s conversations + participant uid.
+ */
+function _computeChatNavUnreadFromSnapDocs(snapDocs, uid) {
+  if (!uid || !snapDocs || !snapDocs.length) return 0;
+  return snapDocs.reduce((sum, d) => {
+    const data = d.data() || {};
+    return sum + _unreadCountForUid(data, uid);
+  }, 0);
+}
+
+function _paintChatNavBadge(unread) {
+  const badge = document.getElementById('chatNavBadge');
+  if (!badge) return;
+  if (unread > 0) {
+    badge.textContent = unread > 99 ? '99+' : String(unread);
+    badge.style.setProperty('display', 'inline-flex', 'important');
+    badge.style.setProperty('visibility', 'visible', 'important');
+  } else {
+    badge.textContent = '';
+    badge.style.removeProperty('display');
+    badge.style.removeProperty('visibility');
+  }
+}
+
+function _applyChatNavBadgeFromConversationSnap(snap, uid) {
+  if (!snap || !uid) return;
+  const unread = _computeChatNavUnreadFromSnapDocs(snap.docs, uid);
+  _paintChatNavBadge(unread);
+}
+
 // ─── Badge ─────────────────────────────────────────────────────────────────────
 // Remember last auth context so the location-change listener can re-subscribe.
 let _chatAuthUid = null;
@@ -1835,13 +1983,17 @@ let _chatAuthSalonId = null;
 
 export function subscribeToChatBadge(uid, salonId) {
   if (!uid || !salonId) return;
+  // Avoid churn: auth + chat module both call this with the same context on load.
+  // Unsub/resub leaves the badge blank until the next snapshot arrives.
+  if (chatBadgeUnsub && _chatAuthUid === uid && _chatAuthSalonId === salonId) {
+    return;
+  }
   _chatAuthUid = uid;
   _chatAuthSalonId = salonId;
   if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
   _chatNavBadgeFirstSnapLogged = false;
   _chatNavBadgeRenderDoneLogged = false;
-  const locKey = _activeLocKey();
-  console.log('[ChatBadgePerf] subscribe-start nav-badge', performance.now(), Date.now(), 'loc=', locKey);
+  console.log('[ChatBadgePerf] subscribe-start nav-badge', performance.now(), Date.now(), 'loc=', _chatEffectiveLocKey());
   chatBadgeUnsub = onSnapshot(
     query(
       collection(db, `salons/${salonId}/conversations`),
@@ -1852,22 +2004,13 @@ export function subscribeToChatBadge(uid, salonId) {
         _chatNavBadgeFirstSnapLogged = true;
         console.log('[ChatBadgePerf] first-snapshot nav-badge', performance.now(), Date.now());
       }
-      const unread = snap.docs.reduce((sum, d) => {
-        const data = d.data() || {};
-        data.id = d.id;
-        if (!_convMatchesLocation(data, locKey)) return sum;
-        const n = (data.unreadFor && data.unreadFor[uid]) ? Number(data.unreadFor[uid]) : 0;
-        return sum + (isNaN(n) ? 0 : n);
-      }, 0);
-      const badge = document.getElementById('chatNavBadge');
-      if (!badge) return;
-      badge.textContent = unread > 99 ? '99+' : String(unread);
-      badge.style.display = unread > 0 ? 'inline-flex' : 'none';
+      _applyChatNavBadgeFromConversationSnap(snap, uid);
       if (!_chatNavBadgeRenderDoneLogged) {
         _chatNavBadgeRenderDoneLogged = true;
         console.log('[ChatBadgePerf] render-done nav-badge', performance.now(), Date.now());
       }
-    }
+    },
+    err => console.error('[Chat] nav badge snapshot error', err)
   );
 }
 
@@ -1921,13 +2064,13 @@ export function subscribeToChatToastNotifications(myUid, salonId) {
   _chatAuthUid = myUid;
   _chatAuthSalonId = salonId;
   if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
-  const locKey = _activeLocKey();
   chatToastUnsub = onSnapshot(
     query(
       collection(db, `salons/${salonId}/conversations`),
       where('participants', 'array-contains', myUid)
     ),
     snap => {
+      const locKey = _chatEffectiveLocKey();
       snap.docChanges().forEach(change => {
         if (change.type !== 'modified') return;
         const data = change.doc.data() || {};
@@ -2286,7 +2429,7 @@ window.saveChatFlow = async function() {
   const wasEditing = !!chatEditingFlowId;
   if (btn) { btn.disabled = true; }
   _setChatFlowSaveBtn('saving');
-  const locKey = _activeLocKey();
+  const locKey = _chatEffectiveLocKey();
   try {
     const salonId = chatUserProfile.salonId;
     const flowsRef = collection(db, `salons/${salonId}/chatFlows`);
@@ -2486,8 +2629,21 @@ function _renderFlowBuilder() {
   const list = document.getElementById('chatFlowStepsList');
   if (!list) return;
   const steps = chatFlowDraft?.steps || [];
+  const mobileFlow =
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function' &&
+    window.matchMedia('(max-width: 768px)').matches;
 
   function stepOptionsHtml(currentStepId, selectedId) {
+    if (mobileFlow) {
+      let html = '<option value="" title="End flow here (no next question)">END</option>';
+      steps.forEach((candidate, idx) => {
+        if (candidate.id === currentStepId) return;
+        const longLabel = `Question ${idx + 1}${candidate.prompt ? ': ' + candidate.prompt : ''}`;
+        const shortLabel = `Q${idx + 1}`;
+        html += `<option value="${escHtml(candidate.id)}" title="${escHtml(longLabel)}"${candidate.id === selectedId ? ' selected' : ''}>${escHtml(shortLabel)}</option>`;
+      });
+      return html;
+    }
     let html = '<option value="">End flow</option>';
     steps.forEach((candidate, idx) => {
       if (candidate.id === currentStepId) return;
@@ -2500,29 +2656,45 @@ function _renderFlowBuilder() {
   function renderStepNode(s, idx) {
     if (!s) return '';
     const opts = s.options || [];
-    return `
-    <div class="chat-flow-node" data-step-id="${escHtml(s.id)}" data-depth="0" style="margin-bottom:10px;padding:10px;border:1px solid #ede9fe;border-radius:12px;background:#faf5ff;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;">
-        <span style="font-size:12px;font-weight:800;color:#7c3aed;">Question ${idx + 1}</span>
-        <button type="button" onclick="window._chatFlowRemoveStepById('${escHtml(s.id)}')" title="Remove question" style="padding:3px 7px;font-size:12px;color:#b91c1c;background:#fef2f2;border:none;border-radius:6px;cursor:pointer;">Remove</button>
-      </div>
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
-        <input type="text" class="chat-flow-step-prompt" data-step-id="${escHtml(s.id)}" placeholder="Question..." value="${escHtml(s.prompt||'')}"
-          style="flex:1;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;min-width:0;background:#fff;">
-      </div>
-      <div class="chat-flow-options" data-step-id="${escHtml(s.id)}" style="display:flex;flex-direction:column;gap:6px;">
-        ${opts.map((o, oidx) => {
-          return `
+    const answersHtml = opts.map((o, oidx) => {
+      if (mobileFlow) {
+        return `
+          <div class="chat-flow-answer-block chat-flow-answer-block--mobile" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}">
+            <input type="text" class="chat-flow-opt-label" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" placeholder="Answer" value="${escHtml(o.label||'')}" style="min-width:0;width:100%;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;box-sizing:border-box;">
+            <div class="chat-flow-answer-actions">
+              <select class="chat-flow-next-select" title="Next step after this answer (END = finish here)">
+                ${stepOptionsHtml(s.id, o.nextStepId || '')}
+              </select>
+              <button type="button" class="chat-flow-next-q-btn" onclick="window._chatFlowAddStepAndLinkById('${escHtml(s.id)}',${oidx})" title="Add next question and link this answer">+ Next</button>
+              <button type="button" class="chat-flow-remove-opt-btn" onclick="window._chatFlowRemoveOptionByIdx('${escHtml(s.id)}',${oidx})" title="Remove answer" aria-label="Remove answer">×</button>
+            </div>
+          </div>
+        `;
+      }
+      return `
           <div class="chat-flow-answer-block" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(140px,190px) auto auto;gap:6px;align-items:center;">
             <input type="text" class="chat-flow-opt-label" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" placeholder="Answer" value="${escHtml(o.label||'')}" style="min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;">
             <select class="chat-flow-next-select" style="min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;">
               ${stepOptionsHtml(s.id, o.nextStepId || '')}
             </select>
-            <button type="button" onclick="window._chatFlowAddStepAndLinkById('${escHtml(s.id)}',${oidx})" style="padding:6px 8px;font-size:11px;font-weight:800;color:#7c3aed;background:#ede9fe;border:none;border-radius:7px;cursor:pointer;white-space:nowrap;">+ Next question</button>
-            <button type="button" onclick="window._chatFlowRemoveOptionByIdx('${escHtml(s.id)}',${oidx})" title="Remove answer" style="padding:6px 8px;color:#9ca3af;cursor:pointer;font-size:12px;background:#fff;border:none;border-radius:7px;">×</button>
+            <button type="button" class="chat-flow-next-q-btn" onclick="window._chatFlowAddStepAndLinkById('${escHtml(s.id)}',${oidx})" style="padding:6px 8px;font-size:11px;font-weight:800;color:#7c3aed;background:#ede9fe;border:none;border-radius:7px;cursor:pointer;white-space:nowrap;">+ Next question</button>
+            <button type="button" class="chat-flow-remove-opt-btn" onclick="window._chatFlowRemoveOptionByIdx('${escHtml(s.id)}',${oidx})" title="Remove answer" style="padding:6px 8px;color:#9ca3af;cursor:pointer;font-size:12px;background:#fff;border:none;border-radius:7px;">×</button>
           </div>
-          `;
-        }).join('')}
+        `;
+    }).join('');
+
+    return `
+    <div class="chat-flow-node" data-step-id="${escHtml(s.id)}" data-depth="0" style="margin-bottom:10px;padding:10px;border:1px solid #ede9fe;border-radius:12px;background:#faf5ff;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;${mobileFlow ? 'min-width:0;' : ''}">
+        <span style="font-size:12px;font-weight:800;color:#7c3aed;">Question ${idx + 1}</span>
+        <button type="button" class="chat-flow-remove-step-btn" onclick="window._chatFlowRemoveStepById('${escHtml(s.id)}')" title="Remove question" style="padding:3px 7px;font-size:12px;color:#b91c1c;background:#fef2f2;border:none;border-radius:6px;cursor:pointer;${mobileFlow ? 'flex-shrink:0;' : ''}">Remove</button>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;${mobileFlow ? 'min-width:0;' : ''}">
+        <input type="text" class="chat-flow-step-prompt" data-step-id="${escHtml(s.id)}" placeholder="Question..." value="${escHtml(s.prompt||'')}"
+          style="flex:1;min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;${mobileFlow ? 'box-sizing:border-box;' : ''}">
+      </div>
+      <div class="chat-flow-options" data-step-id="${escHtml(s.id)}" style="display:flex;flex-direction:column;gap:6px;${mobileFlow ? 'min-width:0;' : ''}">
+        ${answersHtml}
         <button type="button" class="chat-flow-add-opt" data-step-id="${escHtml(s.id)}" onclick="window._chatFlowAddOptionById('${escHtml(s.id)}')" style="align-self:flex-start;padding:5px 8px;font-size:11px;font-weight:800;color:#7c3aed;background:#ede9fe;border:none;border-radius:7px;cursor:pointer;">+ Add answer</button>
       </div>
     </div>
@@ -2665,7 +2837,7 @@ window.saveChatTemplate = async function() {
   const wasEditing = !!chatEditingTmplId;
   if (btn) { btn.disabled = true; }
   _setChatTmplSaveBtn('saving');
-  const locKey = _activeLocKey();
+  const locKey = _chatEffectiveLocKey();
   try {
     if (chatEditingTmplId) {
       await updateDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, chatEditingTmplId),
@@ -2780,15 +2952,18 @@ onAuthStateChanged(auth, async user => {
     if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
     _lastChatToastLastMsgMsByConv.clear();
     const badge = document.getElementById('chatNavBadge');
-    if (badge) badge.style.display = 'none';
+    if (badge) {
+      badge.textContent = '';
+      badge.style.removeProperty('display');
+    }
   }
 });
 
 // ─── Location-change Listener (per-location chat isolation) ────────────────────
-// When the active location changes, tear down every chat listener and
-// re-subscribe so the thread list / badge / toasts only surface data that
-// belongs to the new location. Legacy conversations (no `locationId`) are
-// treated as belonging to the "default" branch so they remain visible there.
+// When the active location changes, reset thread UI and re-attach listeners that
+// depend on location filtering. The nav chat badge subscription is intentionally
+// NOT restarted: it already sums unread for the whole salon participant set, and
+// tearing it down + clearing the DOM produced a flash-then-empty badge after load.
 if (typeof document !== 'undefined' && !window.__ff_chatLocationListener) {
   window.__ff_chatLocationListener = true;
   document.addEventListener('ff-active-location-changed', () => {
@@ -2796,7 +2971,6 @@ if (typeof document !== 'undefined' && !window.__ff_chatLocationListener) {
       console.log('[Chat] location changed → resetting chat state, new loc=', _activeLocKey());
       if (chatConvsUnsub) { chatConvsUnsub(); chatConvsUnsub = null; }
       if (chatMsgsUnsub)  { chatMsgsUnsub();  chatMsgsUnsub  = null; }
-      if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
       if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
       _lastChatToastLastMsgMsByConv.clear();
 
@@ -2808,14 +2982,7 @@ if (typeof document !== 'undefined' && !window.__ff_chatLocationListener) {
       try { renderThreadList(); } catch (_) {}
       try { _renderEmptyConversation(); } catch (_) {}
 
-      const navBadge = document.getElementById('chatNavBadge');
-      if (navBadge) { navBadge.textContent = ''; navBadge.style.display = 'none'; }
-
-      // Re-subscribe with the cached auth context (captured by the
-      // subscribe* functions on first run). Each internally reads the new
-      // active location via _activeLocKey() during the resubscribe.
       if (_chatAuthUid && _chatAuthSalonId) {
-        subscribeToChatBadge(_chatAuthUid, _chatAuthSalonId);
         subscribeToChatToastNotifications(_chatAuthUid, _chatAuthSalonId);
       }
       if (chatUserProfile?.salonId) {

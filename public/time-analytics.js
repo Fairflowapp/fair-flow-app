@@ -9,7 +9,7 @@
  */
 
 import { collection, doc, getDoc, getDocs, limit, query } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db } from "./app.js?v=20260501_points";
+import { db } from "/app.js?v=20260509_staffid_notify";
 
 const LOG = "[TimeAnalytics Simple]";
 const MATCH_LOG = "[TimeAnalytics Match]";

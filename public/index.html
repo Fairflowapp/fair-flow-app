@@ -661,6 +661,7 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   position: absolute;
   top: -5px;
   right: -8px;
+  z-index: 3;
   margin-left: 0 !important;
   min-width: 14px;
   height: 14px;
@@ -982,6 +983,22 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   gap: 8px;
   align-items: center;
 }
+.chat-tmpl-field-row {
+  width: 100%;
+}
+.chat-tmpl-field-row .chat-tmpl-input {
+  width: 100%;
+  flex: none;
+  display: block;
+}
+.chat-tmpl-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
 .chat-tmpl-input {
   flex: 1;
   min-width: 0;
@@ -1242,9 +1259,122 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   gap: 6px 10px;
 }
 
-/* Nav badge (same class as tasks/inbox badges) */
-#chatNavBadge {
-  display: none;
+/* Mobile-only (~768px): flow answer row stacked; desktop keeps JS inline 4-col grid */
+@media (max-width: 768px) {
+  .chat-flow-answer-block--mobile {
+    display: flex !important;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+  .chat-flow-answer-block--mobile .chat-flow-answer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+  }
+  .chat-flow-answer-block--mobile .chat-flow-next-select {
+    flex: 1 1 64px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 6px 4px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 11px;
+    background: #fff;
+    box-sizing: border-box;
+  }
+  .chat-flow-answer-block--mobile .chat-flow-next-q-btn {
+    flex: 0 0 auto;
+    padding: 6px 8px;
+    font-size: 10px;
+    font-weight: 800;
+    color: #7c3aed;
+    background: #ede9fe;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+    white-space: nowrap;
+    line-height: 1.2;
+  }
+  .chat-flow-answer-block--mobile .chat-flow-remove-opt-btn {
+    flex: 0 0 auto;
+    min-width: 32px;
+    padding: 5px 8px;
+    color: #64748b;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 7px;
+  }
+
+  .ff-shared-flow-answer-block--mobile {
+    display: flex !important;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+  .ff-shared-flow-answer-block--mobile .ff-shared-flow-answer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+  }
+  .ff-shared-flow-answer-block--mobile .ff-shared-flow-next-select {
+    flex: 1 1 64px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 6px 4px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 11px;
+    background: #fff;
+    box-sizing: border-box;
+  }
+  .ff-shared-flow-answer-block--mobile .ff-shared-flow-next-q-btn {
+    flex: 0 0 auto;
+    padding: 6px 8px;
+    font-size: 10px;
+    font-weight: 800;
+    color: #7c3aed;
+    background: #ede9fe;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+    white-space: nowrap;
+    line-height: 1.2;
+  }
+  .ff-shared-flow-answer-block--mobile .ff-shared-flow-remove-opt-btn {
+    flex: 0 0 auto;
+    min-width: 32px;
+    padding: 5px 8px;
+    color: #64748b;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 7px;
+  }
+}
+@media (max-width: 480px) {
+  .chat-flow-remove-step-btn {
+    font-size: 10px !important;
+    padding: 2px 6px !important;
+  }
+}
+#chatTemplatesModal .chat-modal-box {
+  overflow-x: hidden;
+  max-width: min(680px, 100vw - 16px);
+}
+#chatNavBadge:empty {
+  display: none !important;
 }
 
 /* ===== CHAT THREAD LIST CARDS ===== */
@@ -1391,6 +1521,26 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
 .cb-bubble-mine  .cb-body { color: rgba(255,255,255,0.85); }
 .cb-time { font-size: 10px; color: #d1d5db; }
 .cb-row-mine .cb-time { text-align: right; }
+
+.cb-day-sep {
+  align-self: center;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin: 14px 0 10px;
+  pointer-events: none;
+}
+.cb-day-sep span {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 
 .btn-danger{border-color:#fca5a5;color:#b91c1c}
 
@@ -2585,6 +2735,12 @@ dialog footer button, .code-dialog footer button {
     max-width: 100%;
     overflow-x: hidden;
     position: relative;
+  }
+
+  /* Chat lives in-document under the fixed bottom nav — pad so thread composer stays visible */
+  #chatScreen {
+    padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
   }
 
   /* Full-screen modules outside #main-app-content use bottom:0; leave space for fixed bottom nav */
@@ -4081,6 +4237,10 @@ dialog footer button, .code-dialog footer button {
       for(var j = 0; j < mobileHeaderTitleMap.length; j++){
         var fallback = mobileHeaderTitleMap[j];
         var screen = document.getElementById(fallback.screen);
+        if(fallback.screen === 'owner-view'){
+          var tsVis = document.getElementById('tasksScreen');
+          if(tsVis && isVisible(tsVis)) continue;
+        }
         if(isVisible(screen)){
           titleEl.textContent = fallback.title;
           return;
@@ -21766,11 +21926,103 @@ function loadTasks() {
   }
 }
 
+/** Local calendar date YYYY-MM-DD (Opening/Closing one-time tasks). */
+function ffTasksLocalDateString(d) {
+  var x = d instanceof Date ? d : new Date(d);
+  if (isNaN(x.getTime())) return '';
+  var y = x.getFullYear();
+  var m = String(x.getMonth() + 1).padStart(2, '0');
+  var day = String(x.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+window.ffTasksLocalDateString = ffTasksLocalDateString;
+
+function ffIsOneTimeCatalogTaskForToday(catalogTask, tab) {
+  if (tab !== 'opening' && tab !== 'closing') return true;
+  if (!catalogTask || catalogTask.isOneTime !== true) return true;
+  var today = ffTasksLocalDateString(new Date());
+  var od = catalogTask.oneTimeDate;
+  if (!od || String(od).trim() === '') return false;
+  return String(od).slice(0, 10) === today;
+}
+
+function ffIsOneTimeTaskVisibleToday(task, tab) {
+  var taskId = String(task.taskId || task.id || '').trim();
+  var catalog = window.ff_tasks_catalog_v1 || {};
+  var list = catalog[tab] || [];
+  var catalogTask = taskId ? list.find(function(t) {
+    return String(t.taskId || t.id || '').trim() === taskId;
+  }) : null;
+  return ffIsOneTimeCatalogTaskForToday(catalogTask || task, tab);
+}
+window.ffIsOneTimeTaskVisibleToday = ffIsOneTimeTaskVisibleToday;
+
+function ffCatalogTaskIsExpiredOneTime(task, tab) {
+  if (tab !== 'opening' && tab !== 'closing') return false;
+  if (!task || task.isOneTime !== true) return false;
+  var today = ffTasksLocalDateString(new Date());
+  var od = task.oneTimeDate;
+  if (!od || String(od).trim() === '') return true;
+  return String(od).slice(0, 10) < today;
+}
+
+function ffPruneExpiredOneTimeTasksForTab(tab) {
+  if (tab !== 'opening' && tab !== 'closing') return;
+  if (typeof localStorage === 'undefined') return;
+  var catalogObj = {};
+  try {
+    var raw = localStorage.getItem('ff_tasks_catalog_v1');
+    if (raw) catalogObj = JSON.parse(raw);
+  } catch (e) {
+    return;
+  }
+  var list = catalogObj[tab] || [];
+  var staleIds = new Set();
+  var kept = list.filter(function(t) {
+    if (ffCatalogTaskIsExpiredOneTime(t, tab)) {
+      var id = String(t.taskId || t.id || '').trim();
+      if (id) staleIds.add(id);
+      return false;
+    }
+    return true;
+  });
+  if (kept.length === list.length) return;
+  catalogObj[tab] = kept;
+  try {
+    localStorage.setItem('ff_tasks_catalog_v1', JSON.stringify(catalogObj));
+  } catch (e) {}
+  if (typeof window.ff_tasks_catalog_v1 === 'undefined' || !window.ff_tasks_catalog_v1) {
+    window.ff_tasks_catalog_v1 = {};
+  }
+  window.ff_tasks_catalog_v1[tab] = kept;
+  ['active', 'pending', 'done'].forEach(function(kind) {
+    var arr = typeof getTabTasks === 'function' ? getTabTasks(tab, kind) : [];
+    var filtered = (arr || []).filter(function(x) {
+      var id = String(x.taskId || x.id || '').trim();
+      return !staleIds.has(id);
+    });
+    if (filtered.length !== (arr || []).length && typeof saveTabTasks === 'function') {
+      saveTabTasks(tab, kind, filtered);
+    }
+  });
+  if (typeof tasksModalDraft !== 'undefined' && tasksModalDraft[tab]) {
+    tasksModalDraft[tab] = (tasksModalDraft[tab] || []).filter(function(x) {
+      var id = String(x.taskId || x.id || '').trim();
+      return !staleIds.has(id);
+    });
+  }
+}
+window.ffPruneExpiredOneTimeTasksForTab = ffPruneExpiredOneTimeTasksForTab;
+
 function loadTasksForSettingsTab(tab) {
   try {
     // One-time migration for this tab before reading v1 storage
     if (typeof migrateLegacyActiveToV1 === 'function') {
       migrateLegacyActiveToV1(tab);
+    }
+    if (typeof ffPruneExpiredOneTimeTasksForTab === 'function') {
+      ffPruneExpiredOneTimeTasksForTab('opening');
+      ffPruneExpiredOneTimeTasksForTab('closing');
     }
     // Load catalog tasks (template tasks) for Settings modal editing
     let catalogObj = {};
@@ -21843,6 +22095,12 @@ function loadTasksForSettingsTab(tab) {
           } else {
             normalizedTask.scheduleYear = currentYear;
           }
+        }
+      }
+      if (tab === 'opening' || tab === 'closing') {
+        normalizedTask.isOneTime = task.isOneTime === true;
+        if (task.oneTimeDate) {
+          normalizedTask.oneTimeDate = String(task.oneTimeDate).slice(0, 10);
         }
       }
       return normalizedTask;
@@ -22023,11 +22281,24 @@ function renderSettingsTaskList(tabKey) {
           }
         }
         
+        let oneTimeEditHtml = '';
+        if (tab === 'opening' || tab === 'closing') {
+          oneTimeEditHtml = `
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;margin-top:8px;cursor:pointer;user-select:none;">
+                  <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                    <input type="checkbox" class="tasks-edit-onetime" data-task-id="${resolvedTaskId}" ${task.isOneTime === true ? 'checked' : ''}>
+                    <span class="staff-permission-toggle-slider"></span>
+                  </span>
+                  <span>One-Time Task (today only)</span>
+                </label>`;
+        }
+        
         return `
             <div class="tasks-modal-draft-item" style="display:flex;flex-direction:column;padding:10px;margin-bottom:6px;background:#f9fafb;border:1px solid #7b3fe4;border-radius:6px;">
               <div style="flex:1;margin-bottom:6px;">
                 <input type="text" class="tasks-edit-title" data-task-id="${resolvedTaskId}" value="${escapeHtmlDraft(task.title || '')}" placeholder="Task title" style="width:100%;padding:6px;margin-bottom:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-weight:600;font-family:inherit;color:#111827;" />
                 <textarea class="tasks-edit-instructions" data-task-id="${resolvedTaskId}" placeholder="Instructions..." rows="3" style="width:100%;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;resize:vertical;font-family:inherit;color:#111827;">${escapeHtmlDraft(task.instructions || '')}</textarea>
+                ${oneTimeEditHtml}
                 <div style="margin-top:6px;padding:6px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;">
                   <div style="font-size:10px;color:#6b7280;margin-bottom:4px;">Assign To:</div>
                   <div style="font-size:10px;color:#111827;font-weight:500;">${escapeHtmlDraft(assignToDisplay)}</div>
@@ -22199,10 +22470,16 @@ function renderSettingsTaskList(tabKey) {
             `;
           }
           
+          let oneTimeBadgeHtml = '';
+          if ((tab === 'opening' || tab === 'closing') && task.isOneTime === true) {
+            oneTimeBadgeHtml = '<span style="font-size:9px;font-weight:600;color:#7c3aed;background:#ede9fe;padding:2px 6px;border-radius:4px;white-space:nowrap;">One-time</span>';
+          }
+          
           return `
             <div class="tasks-modal-draft-item" draggable="true" data-task-key="${String(resolvedTaskId || '').trim()}" data-is-orphan="${isOrphan ? 'true' : 'false'}" style="display:flex;align-items:flex-start;justify-content:space-between;padding:8px 10px;margin-bottom:6px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;cursor:move;">
             <div style="flex:1;">
-                <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap;">
+                  ${oneTimeBadgeHtml}
                   <div style="font-weight:600;font-size:10px;color:#111827;">${escapeHtmlDraft(task.title || '')}</div>
             </div>
                 ${task.instructions ? `<div style="font-size:10px;color:#374151;margin-top:2px;white-space:pre-wrap;">${escapeHtmlDraft(task.instructions)}</div>` : ''}
@@ -23361,7 +23638,9 @@ function openTasks() {
     console.log("INIT TAB -", window.currentTasksTab);
     
     const tasksScreen = document.getElementById('tasksScreen');
-    const mainContent = document.querySelector('#owner-view .wrap');
+    // Queue grid lives in .wrap, a sibling of #owner-view (not inside it).
+    const mainContent = document.querySelector('.wrap');
+    const ownerView = document.getElementById('owner-view');
     const joinBar = document.getElementById('joinBar');
     const queueControls = document.getElementById('queueControls');
     
@@ -23387,6 +23666,7 @@ function openTasks() {
     
     // Hide main content and Queue-specific controls (joinBar and queueControls)
     // Header remains visible (it's now outside owner-view and always sticky)
+    if (ownerView) ownerView.style.display = 'none';
     if (mainContent) mainContent.style.display = 'none';
     if (joinBar) joinBar.style.display = 'none';
     // Hide Queue-only controls (Reorder, RESET) when on TASKS screen
@@ -23538,9 +23818,9 @@ function openTasks() {
     // Update active state for navigation tabs
     const tasksBtn = document.getElementById('tasksBtn');
     document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
-    if (tasksBtn && typeof window.ffCurrentUserHasTasksViewPermission === 'function' && window.ffCurrentUserHasTasksViewPermission()) {
-      tasksBtn.classList.add('active');
-    }
+    if (tasksBtn) tasksBtn.classList.add('active');
+    if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
+    if (typeof window.ffSyncShellHeaderInset === 'function') window.ffSyncShellHeaderInset();
     if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
 
     console.log('[Tasks] Tasks screen opened');
@@ -23573,8 +23853,13 @@ function closeTasks() {
       console.log('[Tasks] Tasks screen closed (User Profile is active, Queue UI hidden)');
       return;
     }
+
+    const ownerViewAfter = document.getElementById('owner-view');
+    if (ownerViewAfter) ownerViewAfter.style.display = '';
     
     if (typeof ffApplyQueueViewGate === 'function') ffApplyQueueViewGate();
+    if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
+    if (typeof window.ffSyncShellHeaderInset === 'function') window.ffSyncShellHeaderInset();
 
     console.log('[Tasks] Tasks screen closed');
   } catch (e) {
@@ -24771,6 +25056,10 @@ function saveTasksToStorage() {
     }
     // Get current tab (Settings modal tab)
     const tab = getCurrentTasksTab();
+    if (typeof ffPruneExpiredOneTimeTasksForTab === 'function') {
+      ffPruneExpiredOneTimeTasksForTab('opening');
+      ffPruneExpiredOneTimeTasksForTab('closing');
+    }
     const currentTabTasks = tasksModalDraft[tab] || [];
     
     // 1) Update catalog (ff_tasks_catalog_v1) with template-only entries
@@ -24859,6 +25148,20 @@ function saveTasksToStorage() {
         catalogTask.technicianTypes = task.technicianTypes;
       } else if (existingTask && existingTask.technicianTypes !== undefined) {
         catalogTask.technicianTypes = existingTask.technicianTypes;
+      }
+      
+      if (tab === 'opening' || tab === 'closing') {
+        const isOt = task.isOneTime === true;
+        if (isOt) {
+          catalogTask.isOneTime = true;
+          const d = task.oneTimeDate || existingTask?.oneTimeDate;
+          catalogTask.oneTimeDate = d
+            ? String(d).slice(0, 10)
+            : (typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '');
+        } else {
+          catalogTask.isOneTime = false;
+          delete catalogTask.oneTimeDate;
+        }
       }
       
       // For yearly tasks: use updateCatalogItem to preserve catalog shape (array vs object)
@@ -25025,6 +25328,12 @@ function saveTasksToStorage() {
         return;
       }
       
+      if ((tab === 'opening' || tab === 'closing') && typeof ffIsOneTimeCatalogTaskForToday === 'function') {
+        if (!ffIsOneTimeCatalogTaskForToday(task, tab)) {
+          return;
+        }
+      }
+      
       if (keyId && !activeIds.has(keyId)) {
         const newActiveTask = {
           id: keyId,
@@ -25039,6 +25348,12 @@ function saveTasksToStorage() {
           assignTo: task.assignTo !== undefined ? task.assignTo : 'all',
           technicianTypes: task.technicianTypes !== undefined ? task.technicianTypes : undefined
         };
+        if ((tab === 'opening' || tab === 'closing') && task.isOneTime === true) {
+          newActiveTask.isOneTime = true;
+          newActiveTask.oneTimeDate = task.oneTimeDate
+            ? String(task.oneTimeDate).slice(0, 10)
+            : (typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '');
+        }
         activeTasks.push(newActiveTask);
         activeIds.add(keyId); // Prevent duplicates
         tasksAdded.push(keyId);
@@ -25067,6 +25382,17 @@ function saveTasksToStorage() {
       // Sync technicianTypes if missing (catalog has it)
       if (activeTask.technicianTypes === undefined && catalogTask.technicianTypes !== undefined) {
         activeTask.technicianTypes = catalogTask.technicianTypes;
+      }
+      if (tab === 'opening' || tab === 'closing') {
+        if (catalogTask.isOneTime === true) {
+          activeTask.isOneTime = true;
+          activeTask.oneTimeDate = catalogTask.oneTimeDate
+            ? String(catalogTask.oneTimeDate).slice(0, 10)
+            : (typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '');
+        } else {
+          delete activeTask.isOneTime;
+          delete activeTask.oneTimeDate;
+        }
       }
     });
     
@@ -25490,6 +25816,10 @@ function renderTasksList(tab, opts) {
     if (typeof migrateLegacyActiveToV1 === 'function') {
       migrateLegacyActiveToV1(currentTab);
     }
+    if (typeof ffPruneExpiredOneTimeTasksForTab === 'function') {
+      ffPruneExpiredOneTimeTasksForTab('opening');
+      ffPruneExpiredOneTimeTasksForTab('closing');
+    }
     
     // Render modal list (Settings modal) - use the full renderer with date/day selectors
     if (isTasksSettingsOpen) {
@@ -25560,8 +25890,11 @@ function renderTasksList(tab, opts) {
       catalogTabTasks.forEach(ct => {
         const keyId = String(ct.taskId || ct.id || '').trim();
         if (!keyId || activeIds.has(keyId) || pendingIds.has(keyId) || doneIds.has(keyId) || tombstone.has(keyId)) return;
+        if ((mainTab === 'opening' || mainTab === 'closing') && typeof ffIsOneTimeCatalogTaskForToday === 'function') {
+          if (!ffIsOneTimeCatalogTaskForToday(ct, mainTab)) return;
+        }
         activeTasks = activeTasks || [];
-        activeTasks.push({
+        const row = {
           taskId: keyId,
           id: keyId,
           title: ct.title || '',
@@ -25573,7 +25906,12 @@ function renderTasksList(tab, opts) {
           completedAt: null,
           assignTo: ct.assignTo ?? 'all',
           technicianTypes: Array.isArray(ct.technicianTypes) ? ct.technicianTypes : []
-        });
+        };
+        if ((mainTab === 'opening' || mainTab === 'closing') && ct.isOneTime === true) {
+          row.isOneTime = true;
+          row.oneTimeDate = ct.oneTimeDate ? String(ct.oneTimeDate).slice(0, 10) : (typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '');
+        }
+        activeTasks.push(row);
         activeIds.add(keyId);
       });
       
@@ -25740,10 +26078,10 @@ function renderTasksList(tab, opts) {
               }
             });
             if (userTypeSet.size === 0) {
-              if (localStorage.getItem('DEBUG_TASKS') === 'true') {
-                console.warn('[Tasks/assignTo] Technician task hidden: staff has no technicianTypes. staffId:', window.__ff_authedStaffId, 'task:', task.title, 'taskTypes:', taskTechnicianTypes);
-              }
-              return false;
+              // Staff row has no technicianTypes (common for new invites / incomplete profiles).
+              // Previously every assignTo=technicians task with specific types was hidden → empty MY LIST.
+              // Treat as "unscoped" technician: show these tasks until types are configured.
+              return true;
             }
             const matched = taskTechnicianTypes.some(taskType => {
               const raw = typeof taskType === 'object' && taskType !== null ? (taskType.id || taskType.name) : taskType;
@@ -25801,6 +26139,12 @@ function renderTasksList(tab, opts) {
           if (mainTab === 'yearly' && typeof window.ffIsYearlyTaskActive === 'function') {
             if (!window.ffIsYearlyTaskActive(task, new Date())) {
               return false; // Skip this task - not active
+            }
+          }
+          
+          if ((mainTab === 'opening' || mainTab === 'closing') && typeof ffIsOneTimeTaskVisibleToday === 'function') {
+            if (!ffIsOneTimeTaskVisibleToday(task, mainTab)) {
+              return false;
             }
           }
           
@@ -26553,6 +26897,14 @@ function addTaskToDraft() {
     // Build task object
     const taskObj = { id, taskId: id, title: name, instructions: info };
     
+    if (tab === 'opening' || tab === 'closing') {
+      const otCb = document.getElementById('taskOneTimeCheckbox');
+      if (otCb && otCb.checked) {
+        taskObj.isOneTime = true;
+        taskObj.oneTimeDate = typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '';
+      }
+    }
+    
     // Capture assignTo field
     const assignToRadio = modal.querySelector('input[name="taskAssignTo"]:checked');
     const assignToValue = assignToRadio ? assignToRadio.value : 'all';
@@ -27204,11 +27556,30 @@ function saveEditTask(taskId) {
     task.title = newTitle;
     task.instructions = newInstructions;
     
+    if (tab === 'opening' || tab === 'closing') {
+      const otEdit = document.querySelector('.tasks-edit-onetime[data-task-id="' + String(taskId) + '"]');
+      if (otEdit) {
+        if (otEdit.checked) {
+          task.isOneTime = true;
+          task.oneTimeDate = task.oneTimeDate
+            ? String(task.oneTimeDate).slice(0, 10)
+            : (typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '');
+        } else {
+          task.isOneTime = false;
+          delete task.oneTimeDate;
+        }
+      }
+    }
+    
     // Clear editing state
     editingTaskId = null;
     
     // Re-render to show updated task
     renderSettingsTaskList(tab);
+    
+    if (typeof saveTasksToStorage === 'function') {
+      saveTasksToStorage();
+    }
     
     console.log('[Tasks] Task saved in draft:', taskId);
   } catch (e) {
@@ -27239,6 +27610,8 @@ function updateAddFormScheduleFields() {
   if (weeklyDiv) weeklyDiv.style.display = (tab === 'weekly') ? 'block' : 'none';
   if (monthlyDiv) monthlyDiv.style.display = (tab === 'monthly') ? 'block' : 'none';
   if (yearlyDiv) yearlyDiv.style.display = (tab === 'yearly') ? 'block' : 'none';
+  const oneTimeRow = document.getElementById('taskOneTimeRow');
+  if (oneTimeRow) oneTimeRow.style.display = (tab === 'opening' || tab === 'closing') ? 'block' : 'none';
 }
 
 function resetAddFormScheduleFields() {
@@ -27253,6 +27626,9 @@ function resetAddFormScheduleFields() {
   if (yearlyMonth) yearlyMonth.value = '';
   const yearlyDay = document.getElementById('taskAddYearlyDay');
   if (yearlyDay) yearlyDay.value = '';
+  
+  const otCb = document.getElementById('taskOneTimeCheckbox');
+  if (otCb) otCb.checked = false;
   
   // Reset assignTo to default
   const assignToAll = document.getElementById('taskAssignToAll');
@@ -27582,12 +27958,6 @@ function openTasksSettings(options) {
     const closeBtn = document.getElementById('tasksSettingsClose');
     if (closeBtn) {
       closeBtn.onclick = closeTasksSettings;
-    }
-    
-    // Set up Cancel button handler (same as close button)
-    const cancelBtn = document.getElementById('tasksModalCancelBtn');
-    if (cancelBtn) {
-      cancelBtn.onclick = closeTasksSettings;
     }
     
     // Set up Save button handler
@@ -29353,7 +29723,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260501_points');
+            const m = await import('/chat.js?v=20260505_chat_flow_desktop_mobile');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -38918,39 +39288,63 @@ function initializeUserProfileMenu() {
     const editorBox = document.querySelector('#sharedChatFlowEditorModal > div');
     const previousScrollTop = editorBox ? editorBox.scrollTop : 0;
     const steps = ffSharedChatFlowDraft.steps || [];
+    const mobileFlow = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 768px)').matches;
     const stepOptionsHtml = function(currentStepId, selectedId) {
+      if (mobileFlow) {
+        let html = '<option value="" title="End flow here (no next question)">END</option>';
+        steps.forEach(function(candidate, idx) {
+          if (candidate.id === currentStepId) return;
+          const longLabel = 'Question ' + (idx + 1) + (candidate.prompt ? ': ' + candidate.prompt : '');
+          const shortLabel = 'Q' + (idx + 1);
+          html += '<option value="' + escapeHtml(candidate.id) + '" title="' + escapeHtml(longLabel) + '"' + (candidate.id === selectedId ? ' selected' : '') + '>' + escapeHtml(shortLabel) + '</option>';
+        });
+        return html;
+      }
       let html = '<option value="">End flow</option>';
       steps.forEach(function(candidate, idx) {
         if (candidate.id === currentStepId) return;
-        const label = `Question ${idx + 1}${candidate.prompt ? ': ' + candidate.prompt : ''}`;
-        html += `<option value="${escapeHtml(candidate.id)}"${candidate.id === selectedId ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+        const label = 'Question ' + (idx + 1) + (candidate.prompt ? ': ' + candidate.prompt : '');
+        html += '<option value="' + escapeHtml(candidate.id) + '"' + (candidate.id === selectedId ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
       });
       return html;
     };
     const renderStep = function(step, idx) {
       const opts = step.options || [];
-      return `
-        <div class="ff-shared-flow-node" data-shared-step-id="${escapeHtml(step.id)}" style="margin-bottom:10px;padding:10px;border:1px solid #ede9fe;border-radius:12px;background:#faf5ff;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;">
-            <span style="font-size:12px;font-weight:800;color:#7c3aed;">Question ${idx + 1}</span>
-            <button type="button" onclick="window.ffSharedChatFlowRemoveStep('${escapeHtml(step.id)}')" style="padding:3px 7px;border:none;border-radius:6px;background:#fef2f2;color:#b91c1c;font-size:12px;cursor:pointer;">Remove</button>
-          </div>
-          <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
-            <input type="text" class="ff-shared-flow-step-prompt" placeholder="Question..." value="${escapeHtml(step.prompt || '')}" style="flex:1;min-width:0;padding:5px 7px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;">
-          </div>
-          <div class="ff-shared-flow-options" style="display:flex;flex-direction:column;gap:6px;">
-            ${opts.map(function(opt, idx) {
-              return `
-                <div class="ff-shared-flow-answer-block" data-shared-opt-idx="${idx}" style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(140px,190px) auto auto;gap:6px;align-items:center;">
+      const answersHtml = opts.map(function(opt, oidx) {
+        if (mobileFlow) {
+          return `
+                <div class="ff-shared-flow-answer-block ff-shared-flow-answer-block--mobile" data-shared-opt-idx="${oidx}">
+                  <input type="text" class="ff-shared-flow-opt-label" placeholder="Answer" value="${escapeHtml(opt.label || '')}" style="min-width:0;width:100%;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;box-sizing:border-box;">
+                  <div class="ff-shared-flow-answer-actions">
+                    <select class="ff-shared-flow-next-select" title="Next step (END = finish here)">
+                      ${stepOptionsHtml(step.id, opt.nextStepId || '')}
+                    </select>
+                    <button type="button" class="ff-shared-flow-next-q-btn" onclick="window.ffSharedChatFlowAddStepAndLink('${escapeHtml(step.id)}',${oidx})" title="Add next question and link this answer">+ Next</button>
+                    <button type="button" class="ff-shared-flow-remove-opt-btn" onclick="window.ffSharedChatFlowRemoveOption('${escapeHtml(step.id)}',${oidx})" title="Remove answer" aria-label="Remove answer">×</button>
+                  </div>
+                </div>`;
+        }
+        return `
+                <div class="ff-shared-flow-answer-block" data-shared-opt-idx="${oidx}" style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(140px,190px) auto auto;gap:6px;align-items:center;">
                   <input type="text" class="ff-shared-flow-opt-label" placeholder="Answer" value="${escapeHtml(opt.label || '')}" style="min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;">
                   <select class="ff-shared-flow-next-select" style="min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;">
                     ${stepOptionsHtml(step.id, opt.nextStepId || '')}
                   </select>
-                  <button type="button" onclick="window.ffSharedChatFlowAddStepAndLink('${escapeHtml(step.id)}',${idx})" style="padding:6px 8px;border:none;border-radius:7px;background:#ede9fe;color:#7c3aed;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;">+ Next question</button>
-                  <button type="button" onclick="window.ffSharedChatFlowRemoveOption('${escapeHtml(step.id)}',${idx})" style="padding:6px 8px;border:none;border-radius:7px;background:#fff;color:#9ca3af;font-size:12px;cursor:pointer;">x</button>
-                </div>
-              `;
-            }).join('')}
+                  <button type="button" class="ff-shared-flow-next-q-btn" onclick="window.ffSharedChatFlowAddStepAndLink('${escapeHtml(step.id)}',${oidx})" style="padding:6px 8px;font-size:11px;font-weight:800;color:#7c3aed;background:#ede9fe;border:none;border-radius:7px;cursor:pointer;white-space:nowrap;">+ Next question</button>
+                  <button type="button" class="ff-shared-flow-remove-opt-btn" onclick="window.ffSharedChatFlowRemoveOption('${escapeHtml(step.id)}',${oidx})" title="Remove answer" style="padding:6px 8px;color:#9ca3af;cursor:pointer;font-size:12px;background:#fff;border:none;border-radius:7px;">×</button>
+                </div>`;
+      }).join('');
+      return `
+        <div class="ff-shared-flow-node" data-shared-step-id="${escapeHtml(step.id)}" style="margin-bottom:10px;padding:10px;border:1px solid #ede9fe;border-radius:12px;background:#faf5ff;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;${mobileFlow ? 'min-width:0;' : ''}">
+            <span style="font-size:12px;font-weight:800;color:#7c3aed;">Question ${idx + 1}</span>
+            <button type="button" onclick="window.ffSharedChatFlowRemoveStep('${escapeHtml(step.id)}')" style="padding:3px 7px;border:none;border-radius:6px;background:#fef2f2;color:#b91c1c;font-size:12px;cursor:pointer;${mobileFlow ? 'flex-shrink:0;' : ''}">Remove</button>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;${mobileFlow ? 'min-width:0;' : ''}">
+            <input type="text" class="ff-shared-flow-step-prompt" placeholder="Question..." value="${escapeHtml(step.prompt || '')}" style="flex:1;min-width:0;padding:5px 7px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;${mobileFlow ? 'box-sizing:border-box;' : ''}">
+          </div>
+          <div class="ff-shared-flow-options" style="display:flex;flex-direction:column;gap:6px;${mobileFlow ? 'min-width:0;' : ''}">
+            ${answersHtml}
             <button type="button" onclick="window.ffSharedChatFlowAddOption('${escapeHtml(step.id)}')" style="align-self:flex-start;padding:5px 8px;border:none;background:#ede9fe;color:#7c3aed;border-radius:7px;font-size:11px;font-weight:800;cursor:pointer;">+ Add answer</button>
           </div>
         </div>
@@ -43222,7 +43616,8 @@ window.updateTaskNoteDisplay = updateTaskNoteDisplay;
       
       // Get DOM elements
       elements.tasksScreen = document.getElementById('tasksScreen');
-      elements.mainContent = document.querySelector('#owner-view .wrap');
+      elements.mainContent = document.querySelector('.wrap');
+      elements.ownerView = document.getElementById('owner-view');
       elements.joinBar = document.getElementById('joinBar');
       elements.header = document.querySelector('.header');
       elements.backBtn = document.getElementById('tasksBackBtn');
@@ -43248,9 +43643,13 @@ window.updateTaskNoteDisplay = updateTaskNoteDisplay;
       elements.tasksScreen.style.display = 'flex';
       elements.tasksScreen.style.visibility = 'visible';
       elements.tasksScreen.style.opacity = '1';
-      elements.tasksScreen.style.zIndex = '300';
+      elements.tasksScreen.style.zIndex = '9850';
+      elements.tasksScreen.style.overflow = 'hidden';
       
       // Hide main content
+      if (elements.ownerView) {
+        elements.ownerView.style.display = 'none';
+      }
       elements.mainContent.style.display = 'none';
       if (elements.joinBar) {
         elements.joinBar.style.display = 'none';
@@ -43319,6 +43718,8 @@ window.updateTaskNoteDisplay = updateTaskNoteDisplay;
       if (elements.mainContent) {
         elements.mainContent.style.display = 'block';
       }
+      var ovRestore = document.getElementById('owner-view');
+      if (ovRestore) ovRestore.style.display = '';
       if (elements.joinBar) {
         elements.joinBar.style.display = 'flex';
       }
@@ -43641,24 +44042,7 @@ function updateAllTabBadges() {
 window.updateAllTabBadges = updateAllTabBadges;
 window.ffUpdateTasksTabBadges = updateAllTabBadges;
 
-// Update the TASKS badge on the home screen nav button
-window.ffUpdateHomeTasksBadge = function() {
-  try {
-    var TABS = ['opening','closing','weekly','monthly','yearly'];
-    var totalIncomplete = 0;
-    var alertWindows = {};
-    try { alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}'); } catch(e) {}
-    TABS.forEach(function(tab) {
-      var cfg = alertWindows[tab];
-      var showOnHome = !cfg || cfg.showOnHome !== false;
-      if (showOnHome) {
-        totalIncomplete += countIncompleteTasks(tab);
-      }
-    });
-    var badge = document.querySelector('#tasksBtn .ff-home-tasks-badge');
-    if (badge) badge.textContent = totalIncomplete > 0 ? totalIncomplete.toString() : '';
-  } catch(e) {}
-};
+// TASKS nav badge: canonical implementation in app.js (loads after this script).
 
 // Get current category
 function getCurrentTasksCategory() {
@@ -50329,6 +50713,11 @@ function hookSettingsGuard_DISABLED(){
     /* Unified Typography for Tasks */
     #tasksScreen {
       font-family: 'Avenir Next', 'Open Sans', Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      overscroll-behavior-y: none;
+    }
+    #tasksScreen #tasksContent {
+      overscroll-behavior-y: contain;
+      -webkit-overflow-scrolling: touch;
     }
     
     #tasksScreen h1 {
@@ -50412,9 +50801,29 @@ function hookSettingsGuard_DISABLED(){
       line-height: 1;
     }
     
-    /* Hide X close button in Tasks Settings modal only */
+    /* Tasks Settings: compact header row — only X, minimal height/padding */
+    #tasksScreen #tasksSettingsModal .tasks-modal-header {
+      justify-content: flex-end;
+      align-items: center;
+      padding: 2px 8px 4px 12px;
+      min-height: 0;
+      flex: 0 0 auto;
+    }
     #tasksScreen #tasksSettingsModal .tasks-modal-close {
-      display: none;
+      display: flex;
+      font-size: 20px;
+      font-weight: 400;
+      line-height: 1;
+      color: #374151;
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      min-height: 28px;
+      padding: 0;
+      margin: 0;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
     }
     
     #tasksScreen .tasks-modal-close:hover {
@@ -50432,6 +50841,10 @@ function hookSettingsGuard_DISABLED(){
     }
     
     /* Tasks Settings: tab row + mobile dropdown (same idea as main Tasks screen) */
+    #tasksScreen #tasksSettingsModal .tasks-modal-content {
+      border-radius: 0 0 12px 12px;
+    }
+    
     #tasksScreen #tasksSettingsModal .tasks-settings-tabs-row {
       margin: -16px -20px 12px -20px;
       border-bottom: 1px solid rgba(0, 0, 0, 0.08);
@@ -50716,7 +51129,7 @@ function hookSettingsGuard_DISABLED(){
       font-weight: 400 !important;
     }
   </style>
-  <div id="tasksScreen" style="display:none;position:fixed;left:0;right:0;bottom:0;background:#fff;z-index:300;flex-direction:column;pointer-events:auto;">
+  <div id="tasksScreen" style="display:none;position:fixed;left:0;right:0;bottom:0;background:#fff;z-index:9850;flex-direction:column;overflow:hidden;pointer-events:auto;">
     <!-- Top bar hidden - main nav header is used instead -->
     <div style="display:none;">
       <button id="btnTasksBack" class="btn-pill" style="pointer-events:auto;z-index:301;">BACK</button>
@@ -50796,7 +51209,7 @@ function hookSettingsGuard_DISABLED(){
       <div class="tasks-modal-container" onclick="event.stopPropagation()">
         <div class="tasks-modal-header">
           <h3 class="tasks-modal-title">Settings</h3>
-          <button id="tasksSettingsClose" class="tasks-modal-close" aria-label="Close">x</button>
+          <button type="button" id="tasksSettingsClose" class="tasks-modal-close" aria-label="Close settings">&times;</button>
         </div>
         <div class="tasks-modal-content">
           <!-- Tab bar inside Settings modal (desktop); mobile uses dropdown in .tasks-settings-tab-mobile-wrap -->
@@ -51058,6 +51471,15 @@ function hookSettingsGuard_DISABLED(){
                   
                   <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Info / Instructions</label>
                   <input type="text" id="taskInfoInput" class="taskInfoInput" placeholder="Write the instructions..." style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;color:#111827;box-sizing:border-box;">
+                  <div id="taskOneTimeRow" style="display:none;margin-bottom:8px;">
+                    <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;user-select:none;">
+                      <span class="staff-permission-toggle" style="flex:0 0 auto;">
+                        <input type="checkbox" id="taskOneTimeCheckbox">
+                        <span class="staff-permission-toggle-slider"></span>
+                      </span>
+                      <span>One-Time Task (today only)</span>
+                    </label>
+                  </div>
                 </div>
                 
                 <!-- Assign To: on mobile, tap row opens option list below -->
@@ -51149,11 +51571,6 @@ function hookSettingsGuard_DISABLED(){
           </div>
           </div>
           <!-- End scrollable body content wrapper -->
-        </div>
-        
-        <!-- Sticky close button. Task settings are saved as changes are made. -->
-        <div class="tasks-modal-footer" style="padding:10px 20px;border-top:1px solid #e5e7eb;background:#fff;border-radius:0 0 12px 12px;display:flex;justify-content:flex-end;gap:8px;">
-          <button id="tasksModalCancelBtn" class="btn-pill" style="padding:8px 16px;font-size:10px;font-weight:500;border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:8px;cursor:pointer;">Cancel</button>
         </div>
       </div>
     </div>
@@ -51401,7 +51818,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/location-switcher.js?v=20260501_points", type: "module", delay: 1200 },
         { src: "/queue-cloud.js?v=20260501_points", type: "module", delay: 1350 },
         { src: "/tickets.js?v=20260505_summary_today_dom", type: "module", delay: 1400 },
-        { src: "/tasks-cloud.js?v=20260501_points", type: "module", delay: 1500 },
+        { src: "/tasks-cloud.js?v=20260505_unified_app", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
         { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
         { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 1900 },
@@ -51411,7 +51828,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/dashboard.js?v=20260501_dashboard_perm", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260504_index_fallback", type: "module", delay: 2700 },
-        { src: "/chat.js?v=20260501_points", type: "module", delay: 2900 },
+        { src: "/chat.js?v=20260505_chat_flow_desktop_mobile", type: "module", delay: 2900 },
         { src: "/staff-documents.js?v=20260501_points", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/settings-cloud.js?v=20260501_points", type: "module", delay: 3600 },
@@ -52416,6 +52833,8 @@ function hookSettingsGuard_DISABLED(){
       #chatScreen.chat-mobile-open #chatThreadListWrap { display:none; }
       #chatScreen.chat-mobile-open #chatConvView { display:flex; }
       #chatConvBackBtn { display:inline-flex; }
+      /* In an open thread, use bottom Reply / composer — hide top New Message to avoid wrong flow */
+      #chatScreen.chat-mobile-open #chatTopBar #chatSendBtn { display: none !important; }
     }
   </style>
 
@@ -52572,8 +52991,10 @@ function hookSettingsGuard_DISABLED(){
       <!-- Compact add / edit form - title + expandable details -->
       <div id="chatTmplForm" class="chat-tmpl-form-compact">
         <div class="chat-tmpl-form-label" id="chatTmplFormLabel">New Template</div>
-        <div class="chat-tmpl-row">
+        <div class="chat-tmpl-field-row">
           <input id="chatTmplTitle" type="text" placeholder="Template title (e.g. Need 15 more minutes)" maxlength="80" class="chat-tmpl-input">
+        </div>
+        <div class="chat-tmpl-row chat-tmpl-row-actions">
           <button type="button" id="chatTmplDetailsToggle" class="chat-tmpl-details-toggle" aria-expanded="false">
             <span>Options</span>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transition:transform 0.2s;"><polyline points="6 9 12 15 18 9"></polyline></svg>
@@ -52629,8 +53050,10 @@ function hookSettingsGuard_DISABLED(){
         <!-- Compact create / edit form -->
         <div id="chatFlowForm" class="chat-tmpl-form-compact">
           <div class="chat-tmpl-form-label" id="chatFlowFormLabel">New Flow</div>
-          <div class="chat-tmpl-row">
+          <div class="chat-tmpl-field-row">
             <input id="chatFlowTitle" type="text" placeholder="Flow title (e.g. Coffee Order)" maxlength="80" class="chat-tmpl-input">
+          </div>
+          <div class="chat-tmpl-row chat-tmpl-row-actions">
             <button type="button" id="chatFlowDetailsToggle" class="chat-tmpl-details-toggle" aria-expanded="false">
               <span>Options</span>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transition:transform 0.2s;"><polyline points="6 9 12 15 18 9"></polyline></svg>

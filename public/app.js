@@ -275,7 +275,7 @@ onAuthStateChanged(auth, async user => {
       __ffChatBadgeEarlyGen++;
       const gen = __ffChatBadgeEarlyGen;
       if (sid && uid) {
-        import("/chat.js?v=20260501_points")
+        import("/chat.js?v=20260505_chat_flow_desktop_mobile")
           .then((m) => {
             if (gen !== __ffChatBadgeEarlyGen) return;
             if (m.subscribeToChatBadge) m.subscribeToChatBadge(uid, sid);
@@ -2120,7 +2120,7 @@ function ffApplyActiveMembership(membership, legacyUserData) {
       // we kick it off explicitly here using the chosen salonId.
       if (salonId && typeof user !== "undefined") {
         try {
-          import("/chat.js?v=20260501_points")
+          import("/chat.js?v=20260505_chat_flow_desktop_mobile")
             .then((m) => {
               try {
                 if (m && typeof m.subscribeToChatBadge === "function") m.subscribeToChatBadge(window.ffAuth?.currentUser?.uid, salonId);
@@ -5702,6 +5702,12 @@ function getFilteredMyListTasksForTab(tab) {
         }
       }
       
+      if ((tab === 'opening' || tab === 'closing') && typeof window.ffIsOneTimeTaskVisibleToday === 'function') {
+        if (!window.ffIsOneTimeTaskVisibleToday(task, tab)) {
+          return false;
+        }
+      }
+      
       // Filter by assignTo/technicianTypes - only count tasks relevant to current user
       if (typeof window.ffIsTaskRelevantToUser === 'function' && !window.ffIsTaskRelevantToUser(task, tab)) {
         return false;
@@ -5902,35 +5908,22 @@ function ffUpdateHomeTasksBadge() {
     // Target TASKS nav badge specifically — NOT #ticketsNavBadge (first in DOM)
     const badge = document.querySelector('#tasksBtn .ff-home-tasks-badge');
     if (!badge) return;
-    
-    // Load alert window settings
+
     const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
     const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
-    const now = new Date();
-    
     let total = 0;
-    
-    tabs.forEach(tab => {
+
+    tabs.forEach((tab) => {
       const tabConfig = alertWindows[tab];
-      
-      // Only count if showOnHome is true AND alerts are active
-      if (tabConfig && tabConfig.showOnHome === true) {
-        const alertsActive = ffIsAlertsActiveForTab(tab, now);
-        if (alertsActive) {
-          const count = ffGetUncompletedCountForTab(tab);
-          total += count;
-        }
-      }
+      const showOnHome = !tabConfig || tabConfig.showOnHome !== false;
+      if (!showOnHome) return;
+      total += ffGetUncompletedCountForTab(tab);
     });
-    
-    // Update badge
-    if (total > 0) {
-      badge.textContent = String(total);
-      badge.style.display = 'inline-block';
-    } else {
-      badge.textContent = '';
-      badge.style.display = 'none';
-    }
+
+    // Match index.html + CSS (.ff-home-tasks-badge:not(:empty)) — avoid inline display
+    // toggles that fight the stylesheet and cause brief hide/show flicker.
+    badge.style.display = '';
+    badge.textContent = total > 0 ? String(total) : '';
   } catch (e) {
     console.error('[Badge] Error updating home tasks badge:', e);
   }

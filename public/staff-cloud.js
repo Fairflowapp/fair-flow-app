@@ -17,7 +17,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { getApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
-import { db, auth } from "./app.js?v=20260501_points";
+import { db, auth } from "/app.js?v=20260509_staffid_notify";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let _salonId  = null;

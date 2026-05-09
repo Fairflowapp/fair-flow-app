@@ -10,7 +10,7 @@ import {
   writeBatch
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260501_points";
+import { db, auth } from "/app.js?v=20260509_staffid_notify";
 
 const HEARTBEAT_INTERVAL_MS = 15000;
 const OFFLINE_THRESHOLD_MS = 45000;

@@ -20,7 +20,7 @@ import {
   updateDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db, auth } from "./app.js?v=20260501_points";
+import { db, auth } from "/app.js?v=20260509_staffid_notify";
 
 const CARD_ID = "userProfileCardLocations";
 
