@@ -266,7 +266,7 @@ export function queueCloudReconnect() {
 export function queueCloudRefresh() {
   if (!_salonId || !_applyState) return Promise.resolve();
   // Respect cooldown from local writes
-  if (typeof window !== "undefined" && (Date.now() - (window.__ff_lastSaveTime || 0)) < 5000) return Promise.resolve();
+  if (typeof window !== "undefined" && (Date.now() - (window.__ff_lastSaveTime || 0)) < 6000) return Promise.resolve();
   const ref = queueStateRef(_salonId, _locationId);
   return getDocFromServer(ref).then((snap) => {
     if (snap.exists()) {

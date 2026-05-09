@@ -47,6 +47,13 @@ if (!window.__ff_authedStaffId) {
   window.__ff_authedStaffId = localStorage.getItem("ff_authedStaffId_v1") || null;
 }
 
+/** Let staff-cloud retry single-doc sync when membership / users.staffId becomes available after first paint. */
+function ffNotifyAuthedStaffIdChanged() {
+  try {
+    document.dispatchEvent(new CustomEvent("ff-authed-staff-id-changed", { bubbles: true }));
+  } catch (_) {}
+}
+
 /** Parse JSON from localStorage or other untrusted strings without throwing (avoids SyntaxError on corrupt/empty data). */
 function ffSafeParseJSON(str, fallback) {
   try {
@@ -138,7 +145,7 @@ function ffSafeParseJSON(str, fallback) {
 // =====================
 // Firebase config
 // =====================
-const firebaseConfig = {
+const existingFallbackConfig = {
   apiKey: "AIzaSyCoj6A2Eoa0uDrelIJxycZCL6cTw570FCI",
   authDomain: "fairflowapp-db841.firebaseapp.com",
   projectId: "fairflowapp-db841",
@@ -147,6 +154,8 @@ const firebaseConfig = {
   appId: "1:823186963319:web:2bc2d386311b2898643f72",
   measurementId: "G-S7T9WN343B"
 };
+const firebaseConfig = window.firebaseConfig || existingFallbackConfig;
+console.log("[AppFirebaseConfig]", firebaseConfig.projectId, firebaseConfig.apiKey);
 
 // =====================
 // Init
@@ -245,6 +254,22 @@ onAuthStateChanged(auth, async user => {
       window.__ff_waiting_for_salon_choice = false;
       window.currentSalonId = (storedMembership && storedMembership.salonId) || (memberships.length === 1 ? memberships[0].salonId : data.salonId) || null;
       console.log('[app.js] currentSalonId set:', window.currentSalonId);
+      currentSalonId = window.currentSalonId;
+      (async () => {
+        try {
+          const fixed = await ffEnsureSalonDocumentExists(window.currentSalonId, user, memberships);
+          if (fixed && fixed !== window.currentSalonId) {
+            window.currentSalonId = fixed;
+            currentSalonId = fixed;
+            console.log("[app.js] currentSalonId repaired to existing Firestore salon:", fixed);
+            try {
+              if (typeof window.ffStaffForceLoad === "function") await window.ffStaffForceLoad();
+            } catch (_) {}
+          }
+        } catch (e) {
+          console.warn("[app.js] currentSalonId validation failed", e);
+        }
+      })();
       const uid = user.uid;
       const sid = window.currentSalonId;
       __ffChatBadgeEarlyGen++;
@@ -1044,6 +1069,7 @@ function showLoginScreen() {
   } catch (e) {
     /* ignore */
   }
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
 }
 
 function showResetPasswordScreen() {
@@ -1066,6 +1092,7 @@ function showResetPasswordScreen() {
   const resetSuccess = document.getElementById("reset-success");
   if (resetError) resetError.textContent = "";
   if (resetSuccess) resetSuccess.textContent = "";
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
 }
 
 function showMainAppForRole(role) {
@@ -1081,6 +1108,7 @@ function showMainAppForRole(role) {
   }
 
   document.body.classList.remove("ff-logged-out");
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
 
   // hide auth
   hideAuthScreens();
@@ -1182,6 +1210,7 @@ function showCompleteSetupScreen(user) {
 
   // Store the user we're completing setup for
   window.__ff_completeSetupUser = user || null;
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
 }
 
 async function handleCompleteSetup() {
@@ -1348,44 +1377,172 @@ async function ffCreateOrUpdateUserMembership({ user, salonId, staffId, role, na
   return membershipRef.path;
 }
 
-async function ensureOwnerStaffAndMemberDocs({ user, salonId, ownerName }) {
-  if (!user || !salonId) return null;
+function ffNormalizeOwnerEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+async function ffFindExistingOwnerStaff({ user, salonId, normalizedEmail }) {
+  const emailKey = ffNormalizeOwnerEmail(normalizedEmail);
+  const uid = user && user.uid ? String(user.uid).trim() : "";
+  console.log("[OwnerMerge] checking owner profile", { salonId, email: emailKey, uid });
+  if (!salonId || (!emailKey && !uid)) return null;
+  const candidates = [];
+  const addCandidate = (staffId, staffRef, data, source) => {
+    if (!staffId || candidates.some(c => c.staffId === staffId)) return;
+    candidates.push({ staffId, staffRef, data: data || {}, source });
+  };
+
+  try {
+    if (typeof window !== "undefined" && typeof window.findExistingStaffByEmail === "function" && emailKey) {
+      const localMatch = window.findExistingStaffByEmail(emailKey, salonId);
+      const localId = localMatch && (localMatch.id || localMatch.staffId) ? String(localMatch.id || localMatch.staffId).trim() : "";
+      if (localId) {
+        const localRef = doc(db, `salons/${salonId}/staff`, localId);
+        const localSnap = await getDoc(localRef);
+        if (localSnap.exists()) {
+          addCandidate(localId, localRef, localSnap.data() || {}, "StaffMerge");
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[OwnerMerge] StaffMerge helper lookup failed", e?.code, e?.message);
+  }
+
+  try {
+    const snap = await getDocs(collection(db, `salons/${salonId}/staff`));
+    for (const d of snap.docs) {
+      const row = d.data() || {};
+      const rowEmail = ffNormalizeOwnerEmail(row.email);
+      const rowEmailLower = ffNormalizeOwnerEmail(row.emailLower);
+      const linkedIds = [
+        row.userId,
+        row.uid,
+        row.authUid,
+        row.memberId,
+        row.firebaseUid,
+        row.firebaseAuthUid
+      ].map(value => value == null ? "" : String(value).trim()).filter(Boolean);
+
+      let source = "";
+      if (emailKey && ((rowEmail && rowEmail === emailKey) || (rowEmailLower && rowEmailLower === emailKey))) {
+        source = "email";
+      }
+      if (!source && uid && linkedIds.indexOf(uid) !== -1) {
+        source = "uid";
+      }
+      if (!source && emailKey && linkedIds.some(value => ffNormalizeOwnerEmail(value) === emailKey)) {
+        source = "linkedEmail";
+      }
+      if (source) {
+        addCandidate(d.id, doc(db, `salons/${salonId}/staff`, d.id), row, source);
+      }
+    }
+  } catch (e) {
+    console.warn("[OwnerMerge] staff scan failed", e?.code, e?.message);
+  }
+
+  if (!candidates.length) return null;
+
+  const scoreCandidate = (candidate) => {
+    const row = candidate.data || {};
+    const hasUid = [row.uid, row.authUid, row.userId, row.memberId, row.firebaseUid, row.firebaseAuthUid]
+      .some(value => uid && String(value || "").trim() === uid);
+    const hasEmail = !!(ffNormalizeOwnerEmail(row.email) || ffNormalizeOwnerEmail(row.emailLower));
+    let score = 0;
+    if (hasUid) score += 100;
+    if (hasEmail) score += 10;
+    if (candidate.source === "StaffMerge") score += 1;
+    return score;
+  };
+  candidates.sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
+  const winner = candidates[0];
+  winner.duplicates = candidates.slice(1);
+  console.log("[OwnerMerge] found existing staff", {
+    staffId: winner.staffId,
+    source: winner.source,
+    duplicateCount: winner.duplicates.length
+  });
+  return winner;
+}
+
+function ffBuildOwnerStaffPayload({ user, salonId, staffId, ownerName, existingStaff }) {
   const safeName = String(ownerName || user.displayName || user.email || "Owner").trim() || "Owner";
-  const safeEmail = String(user.email || "").trim();
-
-  const staffId = `staff_${user.uid}`;
-  const staffRef = doc(db, `salons/${salonId}/staff`, staffId);
-  const memberRef = doc(db, `salons/${salonId}/members`, user.uid);
-  const userRef = doc(db, "users", user.uid);
-
-  const staffPayload = {
+  const safeEmail = ffNormalizeOwnerEmail(user.email);
+  const emailLower = ffNormalizeOwnerEmail(safeEmail);
+  const existing = existingStaff && typeof existingStaff === "object" ? existingStaff : {};
+  return {
     id: staffId,
     uid: user.uid,
+    userId: existing.userId || user.uid,
+    authUid: existing.authUid || user.uid,
+    memberId: existing.memberId || user.uid,
+    salonId,
+    accountId: existing.accountId || salonId,
     name: safeName,
     email: safeEmail,
+    emailLower,
     role: "owner",
     isAdmin: true,
     isManager: false,
     isArchived: false,
     invited: true,
     inviteStatus: "accepted",
-    permissions: _ffOwnerDefaultPermissions(),
-    technicianTypes: [],
-    allowedLocationIds: [],
-    primaryLocationId: null,
-    createdAt: Date.now(),
+    permissions: { ...(existing.permissions || {}), ..._ffOwnerDefaultPermissions() },
+    technicianTypes: Array.isArray(existing.technicianTypes) ? existing.technicianTypes : [],
+    allowedLocationIds: Array.isArray(existing.allowedLocationIds) ? existing.allowedLocationIds : [],
+    primaryLocationId: existing.primaryLocationId || null,
+    createdAt: existing.createdAt || Date.now(),
+    updatedAt: serverTimestamp(),
+    updatedAtMs: Date.now(),
     _syncedAt: serverTimestamp()
   };
+}
+
+async function ensureOwnerStaffAndMemberDocs({ user, salonId, ownerName }) {
+  if (!user || !salonId) return null;
+  const safeName = String(ownerName || user.displayName || user.email || "Owner").trim() || "Owner";
+  const safeEmail = ffNormalizeOwnerEmail(user.email);
+  const emailLower = ffNormalizeOwnerEmail(safeEmail);
+
+  const existingOwnerStaff = await ffFindExistingOwnerStaff({ user, salonId, normalizedEmail: emailLower });
+  const staffId = existingOwnerStaff?.staffId || `staff_${user.uid}`;
+  const staffRef = doc(db, `salons/${salonId}/staff`, staffId);
+  const memberRef = doc(db, `salons/${salonId}/members`, user.uid);
+  const userRef = doc(db, "users", user.uid);
+
+  const staffPayload = ffBuildOwnerStaffPayload({
+    user,
+    salonId,
+    staffId,
+    ownerName: safeName,
+    existingStaff: existingOwnerStaff?.data || null
+  });
 
   const memberPayload = {
     name: safeName,
     email: safeEmail,
+    emailLower,
     role: "owner",
     staffId
   };
 
   try {
     await setDoc(staffRef, staffPayload, { merge: true });
+    if (existingOwnerStaff) {
+      console.log("[OwnerMerge] merged owner into existing staff", { staffId });
+      const duplicates = Array.isArray(existingOwnerStaff.duplicates) ? existingOwnerStaff.duplicates : [];
+      for (const duplicate of duplicates) {
+        if (!duplicate || duplicate.staffId === staffId || !duplicate.staffRef) continue;
+        try {
+          await deleteDoc(duplicate.staffRef);
+          console.log("[OwnerMerge] removed duplicate staff", { staffId: duplicate.staffId, keptStaffId: staffId });
+        } catch (deleteErr) {
+          console.warn("[OwnerMerge] duplicate staff delete failed", duplicate.staffId, deleteErr?.code, deleteErr?.message);
+        }
+      }
+    } else {
+      console.log("[OwnerMerge] creating new owner staff", { staffId });
+    }
   } catch (e) {
     console.warn("[OwnerStaffBootstrap] staff write failed", e?.code, e?.message);
   }
@@ -1416,6 +1573,7 @@ async function ensureOwnerStaffAndMemberDocs({ user, salonId, ownerName }) {
   if (typeof window !== "undefined") {
     window.__ff_authedStaffId = staffId;
     try { localStorage.setItem("ff_authedStaffId_v1", staffId); } catch (_) {}
+    ffNotifyAuthedStaffIdChanged();
   }
 
   return staffId;
@@ -1435,7 +1593,7 @@ async function handleOwnerSignup() {
 
   const businessName = businessNameEl?.value.trim();
   const ownerName = ownerNameEl?.value.trim();
-  const email = emailEl?.value.trim();
+  const email = ffNormalizeOwnerEmail(emailEl?.value);
   const password = passEl?.value;
   const passwordConfirm = pass2El?.value;
 
@@ -1454,8 +1612,10 @@ async function handleOwnerSignup() {
 
   try {
     console.log("[SignUp] Creating auth user for:", email);
+    if (typeof window !== "undefined") window.__ff_owner_signup_in_progress = true;
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     const user = cred.user;
+    if (typeof window !== "undefined") window.__ff_owner_signup_in_progress = { uid: user.uid };
 
     console.log("[SignUp] Auth user created:", user.uid);
 
@@ -1502,6 +1662,8 @@ async function handleOwnerSignup() {
   } catch (err) {
     console.error("[SignUp] Failed to create owner", err);
     showSignupError(err.message || "Sign up failed.");
+  } finally {
+    if (typeof window !== "undefined") window.__ff_owner_signup_in_progress = false;
   }
 }
 
@@ -1752,6 +1914,7 @@ async function ffPingStaffLastActiveAt(user, userDocDataOptional) {
         try {
           localStorage.setItem("ff_authedStaffId_v1", resolved.staffId);
         } catch (e) {}
+        ffNotifyAuthedStaffIdChanged();
         console.log(`[Auth] ${tag}: __ff_authedStaffId set (users.staffId was empty)`, {
           resolvedStaffId: resolved.staffId,
           resolution: resolved.resolution,
@@ -1803,6 +1966,115 @@ async function ffLoadActiveMembershipsForUser(user) {
   }
 }
 
+/**
+ * Firestore salon doc ids are exact strings. Staging data often has transposed
+ * casing or dropped characters vs the real salons/{id} (e.g. Gc vs GC, IV5 vs IVi5).
+ */
+function ffGenerateSalonIdTypoRepairs(seed) {
+  const s = String(seed || "").trim();
+  const out = [];
+  const add = (x) => {
+    const t = String(x || "").trim();
+    if (t && !out.includes(t)) out.push(t);
+  };
+  add(s);
+  if (!s) return out;
+  if (s.includes("Gcbigo")) add(s.split("Gcbigo").join("GCbigo"));
+  if (s.includes("gcbigo")) add(s.split("gcbigo").join("GCbigo"));
+  if (s.includes("IV5vb")) add(s.split("IV5vb").join("IVi5vb"));
+  let both = s;
+  if (both.includes("Gcbigo")) both = both.split("Gcbigo").join("GCbigo");
+  if (both.includes("gcbigo")) both = both.split("gcbigo").join("GCbigo");
+  if (both.includes("IV5vb")) both = both.split("IV5vb").join("IVi5vb");
+  add(both);
+  return out;
+}
+
+/**
+ * If users.salonId or ff_active_salon_id is a typo / stale id, there is no salons/{id}
+ * document → staff store stays empty, queue permissions break, staffNotifications
+ * queries hit permission-denied. Prefer membership salonIds, with typo hygiene.
+ */
+async function ffEnsureSalonDocumentExists(candidateSalonId, user, membershipsCache = null) {
+  if (!user || !user.uid) return String(candidateSalonId || "").trim() || null;
+
+  const persistSalon = (id) => {
+    const t = String(id || "").trim();
+    if (!t) return;
+    try {
+      sessionStorage.setItem("ff_active_salon_id", t);
+      localStorage.setItem("ff_active_salon_id", t);
+    } catch (_) {}
+  };
+
+  async function firstExistingFromSeed(raw) {
+    const seeds = ffGenerateSalonIdTypoRepairs(raw);
+    let sawNetworkError = false;
+    for (let s = 0; s < seeds.length; s++) {
+      const cand = seeds[s];
+      try {
+        const salonSnap = await getDoc(doc(db, "salons", cand));
+        if (salonSnap.exists()) return { found: cand };
+      } catch (e) {
+        sawNetworkError = true;
+        console.warn("[Auth] ffEnsureSalonDocumentExists: salon read failed", { cand, code: e?.code });
+      }
+    }
+    if (sawNetworkError) return { bail: String(raw || "").trim() || null };
+    return { miss: true };
+  }
+
+  const initial = String(candidateSalonId || "").trim();
+
+  if (initial) {
+    const r0 = await firstExistingFromSeed(initial);
+    if (r0.found) {
+      if (r0.found !== initial) {
+        console.warn("[Auth] Repaired salonId to existing salons/ doc", {
+          before: initial,
+          after: r0.found,
+          authUid: user.uid,
+        });
+      }
+      persistSalon(r0.found);
+      return r0.found;
+    }
+    if (r0.bail) return r0.bail;
+  }
+
+  const memberships = Array.isArray(membershipsCache)
+    ? membershipsCache
+    : await ffLoadActiveMembershipsForUser(user);
+
+  for (let i = 0; i < memberships.length; i++) {
+    const raw = String(memberships[i].salonId || "").trim();
+    if (!raw) continue;
+    const r1 = await firstExistingFromSeed(raw);
+    if (r1.found) {
+      if (!initial || r1.found !== initial) {
+        console.warn("[Auth] Repaired salonId via membership + existence / typo check", {
+          sessionCandidate: initial || null,
+          membershipSeed: raw,
+          after: r1.found,
+          authUid: user.uid,
+        });
+      }
+      persistSalon(r1.found);
+      return r1.found;
+    }
+    if (r1.bail) return r1.bail;
+  }
+
+  if (initial) {
+    console.warn("[Auth] ffEnsureSalonDocumentExists: no valid salon — check users.salonId and memberships", {
+      candidate: initial,
+      authUid: user.uid,
+      membershipCount: memberships.length,
+    });
+  }
+  return null;
+}
+
 function ffApplyActiveMembership(membership, legacyUserData) {
   const m = membership || {};
   const salonId = String(m.salonId || legacyUserData?.salonId || "").trim();
@@ -1817,6 +2089,7 @@ function ffApplyActiveMembership(membership, legacyUserData) {
     if (staffId) {
       window.__ff_authedStaffId = staffId;
       try { localStorage.setItem("ff_authedStaffId_v1", staffId); } catch (_) {}
+      ffNotifyAuthedStaffIdChanged();
     }
     if (salonId) {
       try {
@@ -2047,7 +2320,19 @@ function ffShowChooseSalonScreen(user, userData, memberships) {
 async function loadUserRoleAndShowView(user, options = {}) {
   try {
     const userDocRef = doc(db, "users", user.uid);
-    const snap = await getDoc(userDocRef);
+    let snap = await getDoc(userDocRef);
+
+    if (!snap.exists()) {
+      const signupState = typeof window !== "undefined" ? window.__ff_owner_signup_in_progress : null;
+      const signupUid = signupState && typeof signupState === "object" ? String(signupState.uid || "") : "";
+      const signupIsCurrentUser = signupState === true || !signupUid || signupUid === user.uid;
+      if (signupState && signupIsCurrentUser) {
+        for (let i = 0; i < 12 && !snap.exists(); i++) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          snap = await getDoc(userDocRef);
+        }
+      }
+    }
 
     if (!snap.exists()) {
       console.warn("[Auth] No user profile found for", user.uid, "- showing Complete Setup screen");
@@ -2060,14 +2345,15 @@ async function loadUserRoleAndShowView(user, options = {}) {
 
     const data = snap.data();
     let selectedMembership = options.selectedMembership || null;
+    let membershipsLoaded = null;
     if (!selectedMembership) {
-      const memberships = await ffLoadActiveMembershipsForUser(user);
-      if (memberships.length > 1) {
+      membershipsLoaded = await ffLoadActiveMembershipsForUser(user);
+      if (membershipsLoaded.length > 1) {
         if (typeof window !== "undefined") window.__ff_waiting_for_salon_choice = true;
-        ffShowChooseSalonScreen(user, data, memberships);
+        ffShowChooseSalonScreen(user, data, membershipsLoaded);
         return;
-      } else if (memberships.length === 1) {
-        selectedMembership = memberships[0];
+      } else if (membershipsLoaded.length === 1) {
+        selectedMembership = membershipsLoaded[0];
       }
     }
     const activeSession = ffApplyActiveMembership(selectedMembership, data);
@@ -2104,6 +2390,31 @@ async function loadUserRoleAndShowView(user, options = {}) {
     currentSalonId = activeSession.salonId || data.salonId || null;
     if (typeof window !== 'undefined') window.currentSalonId = currentSalonId;
 
+    if (user && currentSalonId) {
+      const membershipsForRepair =
+        membershipsLoaded || (await ffLoadActiveMembershipsForUser(user));
+      const repaired = await ffEnsureSalonDocumentExists(currentSalonId, user, membershipsForRepair);
+      if (repaired) {
+        if (repaired !== currentSalonId) {
+          console.warn("[Auth] Session salonId repaired after membership check", {
+            before: currentSalonId,
+            after: repaired,
+            authUid: user.uid,
+          });
+          currentSalonId = repaired;
+          if (typeof window !== "undefined") window.currentSalonId = repaired;
+        }
+        try {
+          if (typeof window.ffStaffForceLoad === "function") await window.ffStaffForceLoad();
+        } catch (_) {}
+      } else {
+        console.error("[Auth] No Firestore salons/{id} for this account — fix users.salonId or memberships", {
+          authUid: user.uid,
+          attemptedSalonId: currentSalonId,
+        });
+      }
+    }
+
     // One-time: persist salon owner uid on settings/main (immutable thereafter via rules).
     if (currentSalonId && user && role === 'owner') {
       try {
@@ -2124,22 +2435,15 @@ async function loadUserRoleAndShowView(user, options = {}) {
       }
     }
 
-    // Retroactive bootstrap: ensure the owner has matching staff + members docs
-    // even if they signed up before the auto-create logic was added. No-op on
-    // subsequent logins (setDoc merge simply rewrites the same payload).
+    // Retroactive bootstrap + cleanup: ensure the owner has matching staff + members docs
+    // and merge/remove duplicate owner/admin staff rows on each owner login.
     if (currentSalonId && user && role === 'owner') {
       try {
-        const ownerStaffId = `staff_${user.uid}`;
-        const ownerStaffRef = doc(db, `salons/${currentSalonId}/staff`, ownerStaffId);
-        const ownerStaffSnap = await getDoc(ownerStaffRef);
-        if (!ownerStaffSnap.exists()) {
-          console.log('[Auth] Owner has no staff doc — bootstrapping now');
-          await ensureOwnerStaffAndMemberDocs({
-            user,
-            salonId: currentSalonId,
-            ownerName: data.name || user.displayName || ''
-          });
-        }
+        await ensureOwnerStaffAndMemberDocs({
+          user,
+          salonId: currentSalonId,
+          ownerName: data.name || user.displayName || ''
+        });
       } catch (bootErr) {
         console.warn('[Auth] Owner staff retroactive bootstrap failed', bootErr);
       }
@@ -2154,6 +2458,7 @@ async function loadUserRoleAndShowView(user, options = {}) {
       try {
         localStorage.setItem("ff_authedStaffId_v1", staffIdFromUser);
       } catch (e) {}
+      ffNotifyAuthedStaffIdChanged();
     }
 
     // Staff status (UI): lastActiveAt on correct staff doc (retry after ~2.5s heals post-invite / slow users doc)
@@ -4094,6 +4399,7 @@ async function validatePinAndMove() {
     
     window.__ff_authedStaffId = authedStaffId;
     localStorage.setItem("ff_authedStaffId_v1", authedStaffId || "");
+    if (authedStaffId) ffNotifyAuthedStaffIdChanged();
     
     console.log("[PIN] authed staff set", {
       authedStaffId,
@@ -4171,6 +4477,7 @@ function validatePinAndMarkDone() {
     
     window.__ff_authedStaffId = authedStaffId;
     localStorage.setItem("ff_authedStaffId_v1", authedStaffId || "");
+    if (authedStaffId) ffNotifyAuthedStaffIdChanged();
     
     console.log("[PIN] authed staff set", {
       authedStaffId,

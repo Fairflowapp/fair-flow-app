@@ -192,6 +192,60 @@ function inboxItemActivityMs(r) {
   return 0;
 }
 
+function inboxErrorNeedsIndex(error) {
+  const msg = String(error?.message || "").toLowerCase();
+  return error?.code === "failed-precondition" &&
+    (msg.includes("requires an index") || msg.includes("index is currently building"));
+}
+
+function applyInboxSnapshotRows(snapshot, loadingEl) {
+  if (loadingEl) loadingEl.style.display = 'none';
+  currentRequests = snapshot.docs
+    .map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }))
+    .sort((a, b) => inboxItemActivityMs(b) - inboxItemActivityMs(a));
+
+  console.log('[Inbox] Loaded', currentRequests.length, 'requests');
+  updateInboxStaffFilterOptions();
+  updateInboxBadges();
+  renderInboxList();
+}
+
+function showInboxLoadError(error, loadingEl, listEl, emptyEl) {
+  if (loadingEl) loadingEl.style.display = 'none';
+  currentRequests = [];
+  if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach(el => el.remove());
+  if (emptyEl) {
+    emptyEl.style.display = 'block';
+    emptyEl.innerHTML = `
+          <div style="color:#ef4444;">
+            <div style="font-size:16px;font-weight:500;margin-bottom:8px;">Error loading requests</div>
+            <div style="font-size:14px;">${error.message || 'Please try again'}</div>
+          </div>
+        `;
+  }
+}
+
+function subscribeInboxIndexFallback({ salonId, uid, mode, loadingEl, listEl, emptyEl }) {
+  const field = mode === "mine" ? "createdByUid" : "forUid";
+  console.warn('[Inbox] Composite index not ready; using fallback query', { mode, field });
+  const fallbackQuery = query(
+    collection(db, `salons/${salonId}/inboxItems`),
+    where(field, '==', uid),
+    limit(100)
+  );
+  return onSnapshot(
+    fallbackQuery,
+    (snapshot) => applyInboxSnapshotRows(snapshot, loadingEl),
+    (fallbackError) => {
+      console.error('[Inbox] Fallback query error', fallbackError);
+      showInboxLoadError(fallbackError, loadingEl, listEl, emptyEl);
+    }
+  );
+}
+
 function applyTechInboxMerge(loadingEl) {
   const map = new Map();
   _techInboxOutgoing.forEach((row) => map.set(row.id, row));
@@ -999,32 +1053,24 @@ async function loadInboxItems() {
     
     // Listen for changes
     inboxUnsubscribe = onSnapshot(q, (snapshot) => {
-      if (loadingEl) loadingEl.style.display = 'none';
-
-      currentRequests = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-
-      console.log('[Inbox] Loaded', currentRequests.length, 'requests');
-      updateInboxStaffFilterOptions();
-      updateInboxBadges();
-      // Always call renderInboxList — it cleans up old DOM elements even when empty
-      renderInboxList();
+      applyInboxSnapshotRows(snapshot, loadingEl);
     }, (error) => {
       console.error('[Inbox] Query error', error);
-      if (loadingEl) loadingEl.style.display = 'none';
-      currentRequests = [];
-      if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach(el => el.remove());
-      if (emptyEl) {
-        emptyEl.style.display = 'block';
-        emptyEl.innerHTML = `
-          <div style="color:#ef4444;">
-            <div style="font-size:16px;font-weight:500;margin-bottom:8px;">Error loading requests</div>
-            <div style="font-size:14px;">${error.message || 'Please try again'}</div>
-          </div>
-        `;
+      if (inboxErrorNeedsIndex(error)) {
+        try {
+          if (typeof inboxUnsubscribe === 'function') inboxUnsubscribe();
+        } catch (_) {}
+        inboxUnsubscribe = subscribeInboxIndexFallback({
+          salonId,
+          uid,
+          mode: inboxViewMode === "mine" || !inboxCanManageInbox() ? "mine" : "to_handle",
+          loadingEl,
+          listEl,
+          emptyEl
+        });
+        return;
       }
+      showInboxLoadError(error, loadingEl, listEl, emptyEl);
     });
     
   } catch (error) {

@@ -25,11 +25,13 @@ service cloud.firestore {
     }
 
     function canAccessSalon(salonId) {
-      return userExists()
+      return (userExists()
         && (
           userDocData().salonId == salonId
           || hasActiveMembership(salonId)
-        );
+        ))
+        || memberExists(salonId)
+        || isStaffInSalon(salonId);
     }
 
     function belongsToSalon(salonId) {
@@ -139,7 +141,9 @@ service cloud.firestore {
         memberExists(salonId)
         && memberDocData(salonId).staffId is string
         && memberDocData(salonId).staffId == staffId
-      );
+      )
+        // Invite / multi-tenant: staff row links to Auth via uid fields even when users.staffId lags
+        || staffDocUidMatches(salonId, staffId);
     }
 
     function staffDocUidMatches(salonId, staffId) {
@@ -150,7 +154,8 @@ service cloud.firestore {
           get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.uid == request.auth.uid
           || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.firebaseUid == request.auth.uid
           || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.firebaseAuthUid == request.auth.uid
-          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.authUid == request.auth.uid
+          ||           get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.authUid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.userUid == request.auth.uid
           || (
             request.auth.token.email is string
             && get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.email is string
@@ -337,6 +342,11 @@ service cloud.firestore {
         && userExists()
         && userDocData().staffId is string
         && exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(userDocData().staffId));
+    }
+
+    /** Salon access when users/{uid}.salonId / memberships are missing but members/{uid} or staff link exists. */
+    function effectiveSalonMembership(salonId) {
+      return belongsToSalon(salonId) || memberExists(salonId) || isStaffInSalon(salonId);
     }
 
     function canAccessMedia(salonId) {
@@ -685,7 +695,12 @@ service cloud.firestore {
     // ===== STAFF MEMBERS (cloud sync) =====
     // Manager/Admin/Owner: full CRUD. Salon members + PIN/staff linked via users.staffId: read (queue, schedule, etc.)
     match /salons/{salonId}/staff/{staffId} {
-      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId)
+        || (
+          memberExists(salonId)
+          && memberStaffId(salonId) == staffId
+        )
+        || staffDocUidMatches(salonId, staffId);
       allow create, delete: if belongsToSalon(salonId)
         && isManager(salonId);
       allow update: if (belongsToSalon(salonId) && isManager(salonId))
@@ -708,71 +723,83 @@ service cloud.firestore {
 
     // Staff presence (heartbeat + reception call popup via currentCall) — public/staff-call-cloud.js
     match /salons/{salonId}/staffPresence/{staffId} {
-      allow read: if belongsToSalon(salonId)
+      allow read: if (
+        belongsToSalon(salonId)
         && (
           isManager(salonId)
           || matchesOwnStaffId(salonId, staffId)
-        );
-      allow create: if belongsToSalon(salonId)
+        )
+      ) || (
+        matchesOwnStaffId(salonId, staffId)
         && (
-          isManager(salonId)
-          || (
-            matchesOwnStaffId(salonId, staffId)
-            && request.resource.data.staffId == staffId
-            && (
-              request.resource.data.uid == null
-              || request.resource.data.uid == request.auth.uid
-            )
-            && (
-              request.resource.data.currentCall == null
-              || request.resource.data.currentCall.status == 'accepted'
-            )
-          )
-        );
-      allow update: if belongsToSalon(salonId)
+          effectiveSalonMembership(salonId)
+          || staffDocUidMatches(salonId, staffId)
+        )
+      );
+      allow create: if (
+        belongsToSalon(salonId) && isManager(salonId)
+      ) || (
+        matchesOwnStaffId(salonId, staffId)
         && (
-          isManager(salonId)
+          effectiveSalonMembership(salonId)
+          || staffDocUidMatches(salonId, staffId)
+        )
+        && request.resource.data.staffId == staffId
+        && (
+          request.resource.data.uid == null
+          || request.resource.data.uid == request.auth.uid
+        )
+        && (
+          request.resource.data.currentCall == null
+          || request.resource.data.currentCall.status == 'accepted'
+        )
+      );
+      allow update: if (
+        belongsToSalon(salonId) && isManager(salonId)
+      ) || (
+        matchesOwnStaffId(salonId, staffId)
+        && (
+          effectiveSalonMembership(salonId)
+          || staffDocUidMatches(salonId, staffId)
+        )
+        && request.resource.data.staffId == staffId
+        && (
+          request.resource.data.uid == null
+          || request.resource.data.uid == request.auth.uid
+          || request.resource.data.uid == resource.data.uid
+        )
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'staffId',
+          'uid',
+          'role',
+          'name',
+          'onlineStatus',
+          'lastHeartbeatAt',
+          'lastHeartbeatMs',
+          'lastSeenAt',
+          'lastActivityMs',
+          'updatedAt',
+          'inShift',
+          'queueStatus',
+          'currentCall'
+        ])
+        && (
+          !request.resource.data.diff(resource.data).changedKeys().hasAny(['currentCall'])
           || (
-            matchesOwnStaffId(salonId, staffId)
-            && request.resource.data.staffId == staffId
-            && (
-              request.resource.data.uid == null
-              || request.resource.data.uid == request.auth.uid
-              || request.resource.data.uid == resource.data.uid
-            )
-            && request.resource.data.diff(resource.data).changedKeys().hasOnly([
-              'staffId',
-              'uid',
-              'role',
-              'name',
-              'onlineStatus',
-              'lastHeartbeatAt',
-              'lastHeartbeatMs',
-              'lastSeenAt',
-              'lastActivityMs',
-              'updatedAt',
-              'inShift',
-              'queueStatus',
-              'currentCall'
-            ])
-            && (
-              !request.resource.data.diff(resource.data).changedKeys().hasAny(['currentCall'])
-              || (
-                resource.data.currentCall is map
-                && request.resource.data.currentCall is map
-                && request.resource.data.currentCall.callId == resource.data.currentCall.callId
-                && request.resource.data.currentCall.message == resource.data.currentCall.message
-                && request.resource.data.currentCall.sentBy == resource.data.currentCall.sentBy
-                && request.resource.data.currentCall.sentAt == resource.data.currentCall.sentAt
-                && request.resource.data.currentCall.sentAtMs == resource.data.currentCall.sentAtMs
-                && request.resource.data.currentCall.expiresAt == resource.data.currentCall.expiresAt
-                && request.resource.data.currentCall.expiresAtMs == resource.data.currentCall.expiresAtMs
-                && resource.data.currentCall.status == 'sent'
-                && request.resource.data.currentCall.status == 'accepted'
-              )
-            )
+            resource.data.currentCall is map
+            && request.resource.data.currentCall is map
+            && request.resource.data.currentCall.callId == resource.data.currentCall.callId
+            && request.resource.data.currentCall.message == resource.data.currentCall.message
+            && request.resource.data.currentCall.sentBy == resource.data.currentCall.sentBy
+            && request.resource.data.currentCall.sentAt == resource.data.currentCall.sentAt
+            && request.resource.data.currentCall.sentAtMs == resource.data.currentCall.sentAtMs
+            && request.resource.data.currentCall.expiresAt == resource.data.currentCall.expiresAt
+            && request.resource.data.currentCall.expiresAtMs == resource.data.currentCall.expiresAtMs
+            && resource.data.currentCall.status == 'sent'
+            && request.resource.data.currentCall.status == 'accepted'
           )
-        );
+        )
+      );
       allow delete: if belongsToSalon(salonId)
         && isManager(salonId);
     }
@@ -1235,19 +1262,41 @@ service cloud.firestore {
 
     // Per-staff training assignment toasts / inbox (APPS → Training); queried by forStaffId
     match /salons/{salonId}/staffNotifications/{notifId} {
-      allow read: if belongsToSalon(salonId)
+      allow read: if (
+        belongsToSalon(salonId)
         && (
           isManager(salonId)
           || (
             activeStaffIdForSalon(salonId) != ''
             && resource.data.forStaffId == activeStaffIdForSalon(salonId)
           )
-        );
+          || (
+            resource.data.forStaffId is string
+            && staffDocUidMatches(salonId, resource.data.forStaffId)
+          )
+        )
+      ) || (
+        effectiveSalonMembership(salonId)
+        && (
+          (
+            activeStaffIdForSalon(salonId) != ''
+            && resource.data.forStaffId == activeStaffIdForSalon(salonId)
+          )
+          || (
+            resource.data.forStaffId is string
+            && staffDocUidMatches(salonId, resource.data.forStaffId)
+          )
+        )
+      ) || (
+        resource.data.forStaffId is string
+        && staffDocUidMatches(salonId, resource.data.forStaffId)
+      );
       allow create: if belongsToSalon(salonId) && isManager(salonId)
         && request.resource.data.forStaffId is string
         && request.resource.data.trainingId is string
         && request.resource.data.type == 'training_assigned';
-      allow update: if belongsToSalon(salonId)
+      allow update: if (
+        belongsToSalon(salonId)
         && (
           isManager(salonId)
           || (
@@ -1255,7 +1304,31 @@ service cloud.firestore {
             && resource.data.forStaffId == activeStaffIdForSalon(salonId)
             && request.resource.data.forStaffId == resource.data.forStaffId
           )
-        );
+          || (
+            resource.data.forStaffId is string
+            && request.resource.data.forStaffId == resource.data.forStaffId
+            && staffDocUidMatches(salonId, resource.data.forStaffId)
+          )
+        )
+      ) || (
+        effectiveSalonMembership(salonId)
+        && (
+          (
+            activeStaffIdForSalon(salonId) != ''
+            && resource.data.forStaffId == activeStaffIdForSalon(salonId)
+            && request.resource.data.forStaffId == resource.data.forStaffId
+          )
+          || (
+            resource.data.forStaffId is string
+            && request.resource.data.forStaffId == resource.data.forStaffId
+            && staffDocUidMatches(salonId, resource.data.forStaffId)
+          )
+        )
+      ) || (
+        resource.data.forStaffId is string
+        && request.resource.data.forStaffId == resource.data.forStaffId
+        && staffDocUidMatches(salonId, resource.data.forStaffId)
+      );
       allow delete: if belongsToSalon(salonId) && isManager(salonId);
     }
 
@@ -1369,7 +1442,8 @@ service cloud.firestore {
 
     // ===== TRAINING (root collections; each doc has salonId) =====
     match /trainingItems/{itemId} {
-      allow read: if userExists()
+      allow read: if isSignedIn()
+        && resource.data.salonId is string
         && canAccessSalon(resource.data.salonId);
       allow create: if userExists()
         && canAccessSalon(request.resource.data.salonId)
@@ -1387,7 +1461,8 @@ service cloud.firestore {
     }
 
     match /trainingProgress/{progressId} {
-      allow read: if userExists()
+      allow read: if isSignedIn()
+        && resource.data.salonId is string
         && canAccessSalon(resource.data.salonId)
         && (
           isManager(resource.data.salonId)

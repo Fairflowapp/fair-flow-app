@@ -98,6 +98,23 @@ function normalizeText(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function readSessionStaffIdHint() {
+  try {
+    if (typeof window !== "undefined" && window.__ff_authedStaffId) {
+      return String(window.__ff_authedStaffId).trim();
+    }
+  } catch (e) {}
+  try {
+    if (typeof localStorage !== "undefined") {
+      const ls = localStorage.getItem("ff_authedStaffId_v1");
+      if (ls) return String(ls).trim();
+    }
+  } catch (e) {}
+  return "";
+}
+
+let _staffCloudContextReloadTimer = null;
+
 async function resolveOwnStaffFromCloud(salonId, userData = {}, memberData = {}, user = null) {
   if (!salonId) return { staff: null, source: "none" };
   const staffSnap = await getDocs(collection(db, `salons/${salonId}/staff`));
@@ -105,9 +122,7 @@ async function resolveOwnStaffFromCloud(salonId, userData = {}, memberData = {},
 
   // Multi-salon: session/member staffId belongs to the chosen salon. The
   // legacy users/{uid}.staffId may belong to the user's primary salon.
-  const sessionStaffId = String(
-    (typeof window !== "undefined" && window.__ff_authedStaffId) || ""
-  ).trim();
+  const sessionStaffId = readSessionStaffIdHint();
   if (sessionStaffId) {
     const bySessionStaffId = staffList.find((staff) => String(staff.id || "").trim() === sessionStaffId);
     if (bySessionStaffId) return { staff: bySessionStaffId, source: "session.staffId" };
@@ -544,6 +559,14 @@ function subscribePresenceCollection() {
   if (!_salonId) return;
   const isPrivileged = ["owner", "admin", "manager"].includes((_userRole || "").toLowerCase());
 
+  if (!isPrivileged && !_staffId) {
+    diagWarn("presence subscribe skipped until staff id resolves", {
+      salonId: _salonId,
+      role: _userRole || null
+    });
+    return;
+  }
+
   if (!isPrivileged && _staffId) {
     const ownRef = presenceRef(_salonId, _staffId);
     _presenceUnsub = onSnapshot(ownRef, (snap) => {
@@ -849,9 +872,14 @@ onAuthStateChanged(auth, (user) => {
 });
 
 document.addEventListener("ff-staff-cloud-updated", () => {
-  if (auth.currentUser && !_staffId) {
+  if (!auth.currentUser) return;
+  const hint = readSessionStaffIdHint();
+  if (_staffId && (!hint || hint === _staffId)) return;
+  if (_staffCloudContextReloadTimer) clearTimeout(_staffCloudContextReloadTimer);
+  _staffCloudContextReloadTimer = setTimeout(() => {
+    _staffCloudContextReloadTimer = null;
     loadContextForUser(auth.currentUser);
-  }
+  }, 400);
 });
 
 window.ffGetStaffPresenceFor = function(staffIdOrName) {

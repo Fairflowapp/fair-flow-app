@@ -1,0 +1,9 @@
+{
+  "appId": "com.fairflow.app",
+  "appName": "Fair Flow",
+  "webDir": "public",
+  "server": {
+    "url": "https://fair-flow-staging.web.app",
+    "cleartext": true
+  }
+}

@@ -8,7 +8,7 @@
  */
 
 import {
-  collection, query, where, orderBy, limit, startAfter, documentId,
+  collection, query, where, orderBy, limit, startAfter,
   addDoc, updateDoc, setDoc, doc, getDoc, getDocFromServer, getDocs, deleteDoc, onSnapshot,
   serverTimestamp, Timestamp
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
@@ -24,6 +24,8 @@ let serviceCategories = [];
 let currentTickets = [];
 /** Real-time first page (newest). Older pages appended via Load more (not live-updated). */
 const TICKETS_PAGE_SIZE = 200;
+/** Page size for Summary: paginated fetch of CLOSED tickets. */
+const _ticketSummaryPageSize = 500;
 let _ticketsFirstPageTickets = [];
 let _ticketsExtraTickets = [];
 let _ticketsNextPageCursor = null;
@@ -977,8 +979,21 @@ function updateTicketsTabsVisibility() {
   const summaryTab = document.getElementById('ticketsSummaryTab');
   const showArchived = canViewTicketsArchivedTab();
   const showSummary = canViewTicketsSummaryTab();
-  if (archivedTab) archivedTab.style.display = showArchived ? 'inline-block' : 'none';
-  if (summaryTab) summaryTab.style.display = showSummary ? 'inline-block' : 'none';
+  /* Let stylesheet control tab layout (flex on .tickets-tab). inline-block overrides mobile flex and can clip labels. */
+  if (archivedTab) archivedTab.style.display = showArchived ? '' : 'none';
+  if (summaryTab) {
+    // Always set label in JS so cached HTML (old "SUM" shortcut) still shows full "Summary".
+    summaryTab.textContent = 'Summary';
+    summaryTab.style.display = showSummary ? '' : 'none';
+  }
+}
+
+/** Show or hide the full-width filters strip below tabs (Summary / Closed date filters). */
+function ffTicketsSetTimePeriodFiltersVisible(want) {
+  const row = document.getElementById('ticketsFiltersRow');
+  const wrap = document.getElementById('ticketsTimePeriodWrap');
+  if (row) row.style.display = want ? 'flex' : 'none';
+  if (wrap) wrap.style.display = want ? 'flex' : 'none';
 }
 
 /** Staff row flags manager/admin even when Firestore profile role is still technician-like. */
@@ -994,7 +1009,32 @@ function isStaffRecordManagerOrAdmin() {
 /** Firestore salon profile: technician-like roles see only their own tickets in this module. */
 function isTicketsTechnicianRestrictedRole() {
   const r = (currentUserProfile?.role || '').toLowerCase().trim();
-  return r === 'technician' || r === 'tech' || r === 'staff';
+  return (
+    r === 'technician' ||
+    r === 'tech' ||
+    r === 'staff' ||
+    r === 'service_provider' ||
+    r === 'service provider'
+  );
+}
+
+/** Narrow screens: hide front-desk date/employee row for restricted roles (Closed/Archived). */
+function ffTicketsIsMobileViewport() {
+  try {
+    if (typeof window.matchMedia === 'function') {
+      return window.matchMedia('(max-width: 639px)').matches;
+    }
+  } catch (_) {}
+  return typeof window !== 'undefined' && Number(window.innerWidth || 0) <= 639;
+}
+
+function ffTicketsHideFrontDeskFiltersOnThisView() {
+  return (
+    ffTicketsIsMobileViewport() &&
+    isTicketsTechnicianRestrictedRole() &&
+    !isStaffRecordManagerOrAdmin() &&
+    (currentTicketsTab === 'closed' || currentTicketsTab === 'archived')
+  );
 }
 
 /** Matches ticket.technicianStaffId to staff doc id, falling back to auth uid (same as new tickets). */
@@ -1438,7 +1478,7 @@ async function appendTicketSummaryOnClose(salonId, ticketId) {
   }
 }
 
-async function closeTicket(ticketId) {
+async function closeTicket(ticketId, preCloseFields = null) {
   const salonId = getActiveTicketsSalonId();
   const closedByName = currentUserProfile?.name || currentUserProfile?.email || 'Manager';
   console.log('[Tickets Summary DEBUG] closeTicket: before update + append', {
@@ -1447,7 +1487,14 @@ async function closeTicket(ticketId) {
     profileRole: currentUserProfile?.role ?? '(no profile)',
     uid: currentUserProfile?.uid ?? '(no uid)'
   });
+  const extra =
+    preCloseFields && typeof preCloseFields === 'object'
+      ? Object.fromEntries(
+          Object.entries(preCloseFields).filter(([, v]) => v !== undefined)
+        )
+      : {};
   await updateTicket(ticketId, {
+    ...extra,
     status: 'CLOSED',
     closedByUid: currentUserProfile.uid,
     closedByName,
@@ -1633,6 +1680,114 @@ function passesTicketsDateFilter(t, fromStr, toStr) {
   return true;
 }
 
+/** Firestore bounds for Summary queries (local calendar day, same as passesTicketsDateFilter). */
+function _summaryRangeToTimestampBounds(fromStr, toStr) {
+  if (!fromStr && !toStr) return { minTs: null, maxTs: null };
+  let minTs = null;
+  let maxTs = null;
+  if (fromStr) {
+    const p = fromStr.split('-').map(Number);
+    if (p.length === 3) {
+      const d = new Date(p[0], p[1] - 1, p[2], 0, 0, 0, 0);
+      minTs = Timestamp.fromDate(d);
+    }
+  }
+  if (toStr) {
+    const p = toStr.split('-').map(Number);
+    if (p.length === 3) {
+      const d = new Date(p[0], p[1] - 1, p[2], 23, 59, 59, 999);
+      maxTs = Timestamp.fromDate(d);
+    }
+  }
+  return { minTs, maxTs };
+}
+
+/**
+ * Indexed path: status + createdAt (needs composite index on collection group "tickets").
+ */
+async function _fetchClosedTicketsForSummaryIndexed(salonId, fromStr, toStr) {
+  const colRef = collection(db, `salons/${salonId}/tickets`);
+  const { minTs, maxTs } = _summaryRangeToTimestampBounds(fromStr, toStr);
+  const out = [];
+  const PAGE = _ticketSummaryPageSize;
+  const constraints = [where('status', '==', 'CLOSED')];
+  if (minTs && maxTs) {
+    constraints.push(where('createdAt', '>=', minTs));
+    constraints.push(where('createdAt', '<=', maxTs));
+  } else if (minTs) {
+    constraints.push(where('createdAt', '>=', minTs));
+  } else if (maxTs) {
+    constraints.push(where('createdAt', '<=', maxTs));
+  }
+  constraints.push(orderBy('createdAt', 'desc'));
+  let lastDoc = null;
+  for (;;) {
+    const q = lastDoc
+      ? query(colRef, ...constraints, startAfter(lastDoc), limit(PAGE))
+      : query(colRef, ...constraints, limit(PAGE));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    snap.docs.forEach((d) => out.push({ id: d.id, ...d.data() }));
+    if (snap.size < PAGE) break;
+    lastDoc = snap.docs[snap.docs.length - 1];
+  }
+  return out;
+}
+
+/** Scan by createdAt only (no status in query) — works without the CLOSED+createdAt composite index; stops once past fromStr. */
+async function _fetchClosedTicketsForSummaryClientScan(salonId, fromStr, toStr) {
+  const colRef = collection(db, `salons/${salonId}/tickets`);
+  const out = [];
+  const PAGE = _ticketSummaryPageSize;
+  let lastDoc = null;
+  let fromMs = null;
+  if (fromStr) {
+    const p = fromStr.split('-').map(Number);
+    if (p.length === 3) fromMs = new Date(p[0], p[1] - 1, p[2], 0, 0, 0, 0).getTime();
+  }
+  const maxPages = 250;
+  for (let page = 0; page < maxPages; page++) {
+    const q = lastDoc
+      ? query(colRef, orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(PAGE))
+      : query(colRef, orderBy('createdAt', 'desc'), limit(PAGE));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    let oldestInPageMs = Infinity;
+    for (const d of snap.docs) {
+      const data = d.data();
+      const row = { id: d.id, ...data };
+      const ts = data?.createdAt;
+      if (ts && typeof ts.toDate === 'function') {
+        const tms = ts.toDate().getTime();
+        if (!isNaN(tms) && tms < oldestInPageMs) oldestInPageMs = tms;
+      }
+      if (String(data.status || '').toUpperCase() !== 'CLOSED') continue;
+      if (!passesTicketsDateFilter(row, fromStr, toStr)) continue;
+      out.push(row);
+    }
+    if (snap.size < PAGE) break;
+    if (fromMs != null && Number.isFinite(oldestInPageMs) && oldestInPageMs < fromMs) break;
+    lastDoc = snap.docs[snap.docs.length - 1];
+  }
+  return out;
+}
+
+/**
+ * Load all CLOSED tickets for Summary (not the paged list snapshot).
+ * Uses the same date semantics as the Closed tab: submitted time (createdAt).
+ */
+async function fetchClosedTicketsForSummary(salonId, fromStr, toStr) {
+  try {
+    return await _fetchClosedTicketsForSummaryIndexed(salonId, fromStr, toStr);
+  } catch (e) {
+    if (e?.code === 'failed-precondition') {
+      console.warn('[Tickets] Summary: using client-filter scan (Firestore index missing or still building)', e.message || e);
+      return await _fetchClosedTicketsForSummaryClientScan(salonId, fromStr, toStr);
+    }
+    throw e;
+  }
+}
+
 function _fmtYmdLocal(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
@@ -1764,21 +1919,6 @@ function getSummaryFilterDateRangeFromDom() {
   };
 }
 
-function summaryDocMatchesEmployee(d, staffId) {
-  const techSelfOnly =
-    isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin();
-  if (techSelfOnly) {
-    return ticketBelongsToTicketsTechnician({
-      technicianStaffId: d.employeeId,
-      technicianName: d.employeeName || ''
-    });
-  }
-  return ticketMatchesEmployeeFilter(
-    { technicianStaffId: d.employeeId, technicianName: d.employeeName || '' },
-    staffId
-  );
-}
-
 /** Mirrors canSeeTicket's location gate for summary rows.
  *  Behavior:
  *   • Single-branch mode / owners: legacy rows without a locationId stay
@@ -1806,55 +1946,10 @@ function summaryDocMatchesLocation(d) {
   return !viewerIsMultiBranch;
 }
 
-function summaryDocClosedDateKeyString(d) {
-  const k = d.closedDateKey;
-  if (k == null) return null;
-  if (typeof k === 'object' && typeof k.toDate === 'function') {
-    const dt = k.toDate();
-    if (isNaN(dt.getTime())) return null;
-    return _fmtYmdLocal(dt);
-  }
-  const s = String(k).trim();
-  return s !== '' ? s : null;
-}
-
-/** Date filter for ticketSummaries: closedDateKey (string) or closedAt timestamp. */
-function passesSummaryDocDateFilter(d, fromStr, toStr) {
-  if (!fromStr && !toStr) return true;
-  const ks = summaryDocClosedDateKeyString(d);
-  if (ks != null) {
-    if (fromStr && ks < fromStr) return false;
-    if (toStr && ks > toStr) return false;
-    return true;
-  }
-  const ca = d.closedAt;
-  if (ca && typeof ca.toDate === 'function') {
-    const dt = ca.toDate();
-    if (isNaN(dt.getTime())) return false;
-    const tMs = dt.getTime();
-    if (fromStr) {
-      const p = fromStr.split('-').map(Number);
-      if (p.length === 3) {
-        const from = new Date(p[0], p[1] - 1, p[2], 0, 0, 0, 0);
-        if (tMs < from.getTime()) return false;
-      }
-    }
-    if (toStr) {
-      const p = toStr.split('-').map(Number);
-      if (p.length === 3) {
-        const toEnd = new Date(p[0], p[1] - 1, p[2], 23, 59, 59, 999);
-        if (tMs > toEnd.getTime()) return false;
-      }
-    }
-    return true;
-  }
-  return false;
-}
-
-function buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId) {
+function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employeeId) {
   const techSelfOnly =
     isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin();
-  const filtered = (currentTickets || []).filter((t) => {
+  const filtered = (ticketList || []).filter((t) => {
     if (!canSeeTicket(t)) return false;
     if (String(t.status || '').toUpperCase() !== 'CLOSED') return false;
     if (!passesTicketsDateFilter(t, fromStr, toStr)) return false;
@@ -1906,6 +2001,10 @@ function buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId) {
   return { summaryRows, totalTickets, totalServices, totalRevenue };
 }
 
+function buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId) {
+  return buildSummaryRowsFromClosedTicketList(currentTickets, fromStr, toStr, employeeId);
+}
+
 function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totalTickets, totalServices, totalRevenue) {
   if (!summaryRows || summaryRows.length === 0) {
     wrap.style.display = 'none';
@@ -1942,99 +2041,16 @@ function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, tot
 
 let _ticketsSummaryFetchSeq = 0;
 
-const _ticketSummaryPageSize = 500;
-
-/** Load every ticketSummaries doc for the query (no arbitrary cap like limit(5000)). */
-async function fetchAllTicketSummaryDocs(colRef, fromStr, toStr) {
-  const out = [];
-  const PAGE = _ticketSummaryPageSize;
-  if (!fromStr && !toStr) {
-    let lastDoc = null;
-    for (;;) {
-      const q = lastDoc
-        ? query(colRef, orderBy(documentId()), startAfter(lastDoc), limit(PAGE))
-        : query(colRef, orderBy(documentId()), limit(PAGE));
-      const snap = await getDocs(q);
-      if (snap.empty) break;
-      out.push(...snap.docs);
-      if (snap.size < PAGE) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-    }
-    return out;
-  }
-  if (fromStr && toStr) {
-    let lastDoc = null;
-    for (;;) {
-      const q = lastDoc
-        ? query(
-            colRef,
-            where('closedDateKey', '>=', fromStr),
-            where('closedDateKey', '<=', toStr),
-            orderBy('closedDateKey'),
-            startAfter(lastDoc),
-            limit(PAGE)
-          )
-        : query(
-            colRef,
-            where('closedDateKey', '>=', fromStr),
-            where('closedDateKey', '<=', toStr),
-            orderBy('closedDateKey'),
-            limit(PAGE)
-          );
-      const snap = await getDocs(q);
-      if (snap.empty) break;
-      out.push(...snap.docs);
-      if (snap.size < PAGE) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-    }
-    return out;
-  }
-  if (fromStr) {
-    let lastDoc = null;
-    for (;;) {
-      const q = lastDoc
-        ? query(
-            colRef,
-            where('closedDateKey', '>=', fromStr),
-            orderBy('closedDateKey'),
-            startAfter(lastDoc),
-            limit(PAGE)
-          )
-        : query(colRef, where('closedDateKey', '>=', fromStr), orderBy('closedDateKey'), limit(PAGE));
-      const snap = await getDocs(q);
-      if (snap.empty) break;
-      out.push(...snap.docs);
-      if (snap.size < PAGE) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-    }
-    return out;
-  }
-  let lastDoc = null;
-  for (;;) {
-    const q = lastDoc
-      ? query(
-          colRef,
-          where('closedDateKey', '<=', toStr),
-          orderBy('closedDateKey', 'desc'),
-          startAfter(lastDoc),
-          limit(PAGE)
-        )
-      : query(colRef, where('closedDateKey', '<=', toStr), orderBy('closedDateKey', 'desc'), limit(PAGE));
-    const snap = await getDocs(q);
-    if (snap.empty) break;
-    out.push(...snap.docs);
-    if (snap.size < PAGE) break;
-    lastDoc = snap.docs[snap.docs.length - 1];
-  }
-  return out;
-}
-
 /**
- * Summary tab: aggregate from salons/{salonId}/ticketSummaries (not live tickets).
- * summaryRows: [{ name, tickets, services, total }, ...]
+ * Summary tab: aggregate from all CLOSED tickets in Firestore (same date rules as Closed tab: createdAt).
+ * Rows in ticketSummaries are still written on close for optional analytics; the UI does not depend on them.
  */
 async function loadAndRenderTicketsSummary() {
   const seq = ++_ticketsSummaryFetchSeq;
+  if (currentTicketsTab === 'summary') {
+    syncTicketsTimePeriodSelectOptions();
+    ensureTicketsSummaryDefaultTimePeriod();
+  }
   const panel = document.getElementById('ticketsSummaryPanel');
   const wrap = panel?.querySelector('.tickets-summary-table-wrap');
   const emptyMsg = document.getElementById('ticketsSummaryEmpty');
@@ -2078,99 +2094,25 @@ async function loadAndRenderTicketsSummary() {
   });
 
   try {
-    const col = collection(db, `salons/${salonId}/ticketSummaries`);
-    const rawDocs = await fetchAllTicketSummaryDocs(col, fromStr, toStr);
+    const closedTickets = await fetchClosedTicketsForSummary(salonId, fromStr, toStr);
+    if (seq !== _ticketsSummaryFetchSeq) return;
+
+    console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: fetched CLOSED ticket docs', closedTickets.length);
+
+    const fb = buildSummaryRowsFromClosedTicketList(closedTickets, fromStr, toStr, employeeId);
 
     if (seq !== _ticketsSummaryFetchSeq) return;
 
-    console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: fetched summary docs (all pages)', rawDocs.length);
-
-    let rows = rawDocs.map((x) => ({ id: x.id, ...x.data() }));
-    const nMapped = rows.length;
-    const rowsAfterDate = rows.filter((d) => passesSummaryDocDateFilter(d, fromStr, toStr));
-    const nAfterDate = rowsAfterDate.length;
-    rows = rowsAfterDate
-      .filter((d) => summaryDocMatchesLocation(d))
-      .filter((d) => summaryDocMatchesEmployee(d, employeeId));
-    const nAfterEmployee = rows.length;
-    console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: after filters', {
-      mappedRows: nMapped,
-      afterDateFilter: nAfterDate,
-      afterEmployeeFilter: nAfterEmployee
-    });
-
-    const groups = new Map();
-    for (const d of rows) {
-      const idPart =
-        d.employeeId != null && String(d.employeeId).trim() !== '' ? String(d.employeeId).trim() : '';
-      const nk = normalizeTicketTechName(d.employeeName || '');
-      const gkey = idPart ? `id:${idPart}` : `name:${nk || 'unknown'}`;
-      if (!groups.has(gkey)) {
-        groups.set(gkey, { name: 'Unknown', tickets: 0, services: 0, total: 0 });
-      }
-      const g = groups.get(gkey);
-      const nm =
-        d.employeeName != null && String(d.employeeName).trim() !== ''
-          ? String(d.employeeName).trim()
-          : '';
-      if (nm && g.name === 'Unknown') g.name = nm;
-      const tc = Number(d.ticketsCount);
-      g.tickets += Number.isFinite(tc) ? tc : 0;
-      const sc = Number(d.servicesCount);
-      g.services += Number.isFinite(sc) ? sc : 0;
-      const ta = Number(d.totalAmount);
-      g.total += Number.isFinite(ta) ? ta : 0;
-    }
-
-    const sorted = [...groups.values()].sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+    paintTicketsSummaryTable(
+      wrap,
+      tbody,
+      tfoot,
+      emptyMsg,
+      fb.summaryRows,
+      fb.totalTickets,
+      fb.totalServices,
+      fb.totalRevenue
     );
-
-    let totalTickets = 0;
-    let totalServices = 0;
-    let totalRevenue = 0;
-    sorted.forEach((r) => {
-      totalTickets += r.tickets;
-      totalServices += r.services;
-      totalRevenue += r.total;
-    });
-
-    const summaryRows = sorted.map((r) => ({
-      name: !r.name || !String(r.name).trim() ? 'Unknown' : r.name.trim(),
-      tickets: r.tickets,
-      services: r.services,
-      total: r.total
-    }));
-
-    console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: grouped summaryRows', summaryRows.length);
-
-    if (seq !== _ticketsSummaryFetchSeq) return;
-
-    const noDateFilter = !fromStr && !toStr;
-    if (
-      summaryRows.length === 0 &&
-      noDateFilter &&
-      rawDocs.length === 0 &&
-      _ticketsListSnapshotReady
-    ) {
-      const fb = buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId);
-      if (
-        paintTicketsSummaryTable(
-          wrap,
-          tbody,
-          tfoot,
-          emptyMsg,
-          fb.summaryRows,
-          fb.totalTickets,
-          fb.totalServices,
-          fb.totalRevenue
-        )
-      ) {
-        return;
-      }
-    }
-
-    paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totalTickets, totalServices, totalRevenue);
   } catch (e) {
     console.error('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: catch', {
       message: e?.message,
@@ -2250,6 +2192,39 @@ function syncTicketsTimePeriodSelectOptions() {
   const l2 = computeRangeForPreset('last_two_weeks');
   setLabel('last_two_weeks', `Last Two Weeks (${_ticketsRangeLabelMd(l2.from, l2.to)})`);
   setLabel('custom', 'Custom time period');
+}
+
+/** Summary tab: sync custom date row visibility; default to Today only when selection is missing (invalid). Respect ALL DATES — do not force it back to Today. */
+function ensureTicketsSummaryDefaultTimePeriod() {
+  const periodSel = document.getElementById('ticketsTimePeriodSelect');
+  const customWrap = document.getElementById('ticketsTimePeriodCustomWrap');
+  const fromEl = document.getElementById('ticketsFilterDateFrom');
+  const toEl = document.getElementById('ticketsFilterDateTo');
+  if (!periodSel) return;
+  const v = String(periodSel.value || '').trim();
+  if (v === '') {
+    const todayOpt = periodSel.querySelector('option[value="today"]');
+    if (todayOpt) {
+      todayOpt.selected = true;
+      periodSel.value = 'today';
+    }
+    if (customWrap) customWrap.style.display = 'none';
+    const r = computeRangeForPreset('today');
+    if (fromEl) fromEl.value = r.from;
+    if (toEl) toEl.value = r.to;
+    return;
+  }
+  if (v === 'all') {
+    if (customWrap) customWrap.style.display = 'none';
+    if (fromEl) fromEl.value = '';
+    if (toEl) toEl.value = '';
+    return;
+  }
+  if (v === 'custom') {
+    if (customWrap) customWrap.style.display = 'inline-flex';
+    return;
+  }
+  if (customWrap) customWrap.style.display = 'none';
 }
 
 function applyTicketsTimePeriodFromSelect() {
@@ -2445,14 +2420,9 @@ function renderTicketsList() {
     if (summaryPanel) summaryPanel.style.display = 'block';
     listEl.innerHTML = '';
     listEl.classList.remove('tickets-list--closed', 'tickets-list--archived');
-    const timePeriodWrap = document.getElementById('ticketsTimePeriodWrap');
-    if (timePeriodWrap) timePeriodWrap.style.display = 'flex';
+    ffTicketsSetTimePeriodFiltersVisible(true);
     syncTicketsTimePeriodSelectOptions();
-    const periodSel = document.getElementById('ticketsTimePeriodSelect');
-    const customWrap = document.getElementById('ticketsTimePeriodCustomWrap');
-    if (periodSel && customWrap) {
-      customWrap.style.display = periodSel.value === 'custom' ? 'inline-flex' : 'none';
-    }
+    ensureTicketsSummaryDefaultTimePeriod();
     populateTicketsEmployeeSelect();
     updateTicketsEmployeeFilterVisibility();
     void loadAndRenderTicketsSummary();
@@ -2477,13 +2447,14 @@ function renderTicketsList() {
     : currentTickets.filter(t => t.status === statusFilter);
   toShow = toShow.filter(t => canSeeTicket(t));
 
-  const timePeriodWrap = document.getElementById('ticketsTimePeriodWrap');
   const showDateFilters = currentTicketsTab === 'closed' || currentTicketsTab === 'archived';
-  if (timePeriodWrap) timePeriodWrap.style.display = showDateFilters ? 'flex' : 'none';
-  if (showDateFilters) syncTicketsTimePeriodSelectOptions();
+  const hideDeskFiltersHere = showDateFilters && ffTicketsHideFrontDeskFiltersOnThisView();
+  const filtersOn = showDateFilters && !hideDeskFiltersHere;
+  ffTicketsSetTimePeriodFiltersVisible(filtersOn);
+  if (showDateFilters && !hideDeskFiltersHere) syncTicketsTimePeriodSelectOptions();
   const periodSel = document.getElementById('ticketsTimePeriodSelect');
   const customWrap = document.getElementById('ticketsTimePeriodCustomWrap');
-  if (showDateFilters && periodSel && customWrap) {
+  if (showDateFilters && !hideDeskFiltersHere && periodSel && customWrap) {
     customWrap.style.display = periodSel.value === 'custom' ? 'inline-flex' : 'none';
   }
 
@@ -2491,12 +2462,12 @@ function renderTicketsList() {
   const toEl = document.getElementById('ticketsFilterDateTo');
   const fromStr = showDateFilters && fromEl ? (fromEl.value || '').trim() : '';
   const toStr = showDateFilters && toEl ? (toEl.value || '').trim() : '';
-  const hasDateFilter = showDateFilters && (fromStr || toStr);
+  const hasDateFilter = showDateFilters && !hideDeskFiltersHere && (fromStr || toStr);
   const countAfterStatus = toShow.length;
   if (hasDateFilter) {
     toShow = toShow.filter(t => passesTicketsDateFilter(t, fromStr, toStr));
   }
-  if (showDateFilters) populateTicketsEmployeeSelect();
+  if (showDateFilters && !hideDeskFiltersHere) populateTicketsEmployeeSelect();
   updateTicketsEmployeeFilterVisibility();
   const empEl = document.getElementById('ticketsEmployeeSelect');
   let employeeId = showDateFilters && empEl ? (empEl.value || 'all') : 'all';
@@ -3116,6 +3087,37 @@ function populateTicketForm(t) {
   setupTicketFormToggles();
 }
 
+/** Push current price/note inputs into #ticketLinesData so Close/Save sees latest edits (e.g. before blur). */
+function syncTicketFormLinesFromDom() {
+  const linesEl = document.getElementById('ticketLinesData');
+  if (!linesEl) return;
+  let lines;
+  try {
+    lines = JSON.parse(linesEl.value || '[]');
+  } catch (_) {
+    return;
+  }
+  if (!Array.isArray(lines) || lines.length === 0) return;
+  const cont = document.getElementById('ticketPerformedList');
+  if (!cont) return;
+  const priceInputs = cont.querySelectorAll('.ticket-price-input');
+  const noteInputs = cont.querySelectorAll('.ticket-note-input');
+  if (priceInputs.length === 0 && noteInputs.length === 0) return;
+  priceInputs.forEach((inp) => {
+    const idx = parseInt(inp.getAttribute('data-idx'), 10);
+    if (!Number.isFinite(idx) || !lines[idx]) return;
+    const num = parseFloat(inp.value) || 0;
+    lines[idx].ticketPrice = num;
+    lines[idx].isOverride = num !== (Number(lines[idx].catalogPrice) || 0);
+  });
+  noteInputs.forEach((inp) => {
+    const idx = parseInt(inp.getAttribute('data-idx'), 10);
+    if (!Number.isFinite(idx) || !lines[idx]) return;
+    lines[idx].note = (inp.value || '').trim() || null;
+  });
+  linesEl.value = JSON.stringify(lines);
+}
+
 function renderPerformedLines(lines, readOnly = false) {
   const cont = document.getElementById('ticketPerformedList');
   if (!cont) return;
@@ -3395,11 +3397,23 @@ async function doCloseTicket(ticketId) {
   const ok = await ticketConfirm('Mark this ticket as Closed? (Checkout done)', 'Close ticket');
   if (!ok) return;
   _justClosedTicketId = ticketId;
-  closeTicketModal();
-  editingTicketId = null;
   try {
-    await closeTicket(ticketId);
+    syncTicketFormLinesFromDom();
+    const customerNameEl = document.getElementById('ticketCustomerName');
+    const customerName = customerNameEl ? customerNameEl.value.trim() : '';
+    const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
+    const linesEl = document.getElementById('ticketLinesData');
+    const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
+    const total = lines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
+    await closeTicket(ticketId, {
+      customerName,
+      performedLines: lines,
+      total,
+      forUids,
+      forNames
+    });
     showToast('Ticket closed', 'success');
+    closeTicketModal();
   } catch (err) {
     showToast(err?.message || 'Failed', 'error');
     _justClosedTicketId = null;
@@ -3738,9 +3752,18 @@ function _ffBuildPopover(anchorBtn, items) {
     b.addEventListener('click', () => { _ffCloseAllPopovers(); onClick?.(); });
     pop.appendChild(b);
   });
-  // Auto-close on outside click
+  // Auto-close on outside click (pop may be removed earlier — ignore stale listeners so nested menus work)
   setTimeout(() => {
-    const off = (e) => { if (!pop.contains(e.target)) { _ffCloseAllPopovers(); document.removeEventListener('mousedown', off, true); } };
+    const off = (e) => {
+      if (!pop.isConnected) {
+        document.removeEventListener('mousedown', off, true);
+        return;
+      }
+      if (!pop.contains(e.target)) {
+        _ffCloseAllPopovers();
+        document.removeEventListener('mousedown', off, true);
+      }
+    };
     document.addEventListener('mousedown', off, true);
   }, 0);
   return pop;
@@ -4161,7 +4184,15 @@ function addSharedServiceV2() {
 // Navigation
 // =====================
 export function goToTickets() {
-  if (typeof window.ffCurrentUserHasTicketsViewPermission === 'function' && !window.ffCurrentUserHasTicketsViewPermission()) {
+  const _ticketsLoadState =
+    typeof window.ffStaffPermissionLoadState === 'function' ? window.ffStaffPermissionLoadState() : 'ready';
+  const _ticketsTrustPerm =
+    _ticketsLoadState === 'staff_loading' || _ticketsLoadState === 'staff_unresolved';
+  const _ticketsPermOk =
+    _ticketsTrustPerm ||
+    (typeof window.ffCurrentUserHasTicketsViewPermission === 'function' &&
+      window.ffCurrentUserHasTicketsViewPermission());
+  if (!_ticketsPermOk) {
     if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
     return;
   }
@@ -4193,10 +4224,16 @@ export function goToTickets() {
   });
   if (wrap) wrap.style.display = 'none';
 
-  const headerEl = document.querySelector('.header');
-  if (headerEl) {
-    document.documentElement.style.setProperty('--header-h', `${headerEl.offsetHeight}px`);
-  }
+  try {
+    if (typeof window.ffSyncShellHeaderInset === 'function') {
+      window.ffSyncShellHeaderInset();
+    } else {
+      const headerEl = document.querySelector('.header');
+      if (headerEl) {
+        document.documentElement.style.setProperty('--header-h', `${headerEl.offsetHeight}px`);
+      }
+    }
+  } catch (e) {}
 
   if (ticketsScreen) {
     ticketsScreen.style.display = 'flex';
@@ -4228,18 +4265,25 @@ export function goToTickets() {
 
   document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
   const ticketsBtn = document.getElementById('ticketsBtn');
-  if (ticketsBtn && typeof window.ffCurrentUserHasTicketsViewPermission === 'function' && window.ffCurrentUserHasTicketsViewPermission()) {
+  if (ticketsBtn && _ticketsPermOk) {
     ticketsBtn.classList.add('active');
   }
   if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
   updateNewTicketButtonVisibility();
+  try {
+    if (typeof window.ffSyncShellHeaderInset === 'function') window.ffSyncShellHeaderInset();
+  } catch (e) {}
 
   if (_ticketsDataReady && currentUserProfile) {
     enrichTicketsProfileFromMemberDoc()
-      .then(() => setupTicketsUI())
-      .then(() => loadTicketsMembersForAvatars())
       .then(() => {
         subscribeTickets({ resetLoading: true });
+        renderTicketsList();
+        updateTicketsNavBadge();
+        return setupTicketsUI();
+      })
+      .then(() => loadTicketsMembersForAvatars())
+      .then(() => {
         renderTicketsList();
         updateTicketsNavBadge();
       })
@@ -4247,21 +4291,29 @@ export function goToTickets() {
         console.error('[Tickets] setupTicketsUI failed', err);
       });
   } else {
-    loadCurrentUserProfile().then(async () => {
-      await enrichTicketsProfileFromMemberDoc();
-      await loadServiceCategories();
-      await loadServices();
-      await setupTicketsUI();
-      _ticketsDataReady = true;
-      await loadTicketsMembersForAvatars();
-      subscribeTickets({ resetLoading: true });
-      renderTicketsList();
-      updateTicketsNavBadge();
-    }).catch((err) => {
-      console.error('[Tickets] goToTickets init failed', err);
-    });
+    loadCurrentUserProfile()
+      .then(async () => {
+        await enrichTicketsProfileFromMemberDoc();
+        subscribeTickets({ resetLoading: true });
+        renderTicketsList();
+        updateTicketsNavBadge();
+        await loadServiceCategories();
+        await loadServices();
+        await setupTicketsUI();
+        _ticketsDataReady = true;
+        await loadTicketsMembersForAvatars();
+        renderTicketsList();
+        updateTicketsNavBadge();
+      })
+      .catch((err) => {
+        console.error('[Tickets] goToTickets init failed', err);
+      });
   }
 }
+
+try {
+  window.__ffGoToTicketsReal = goToTickets;
+} catch (e) {}
 
 function doServiceSelect(svc) {
   if (svc) addServiceToTicket(svc);
@@ -4419,6 +4471,10 @@ export function initTickets() {
       }).catch(() => {});
     }, 1000);
   });
+
+  try {
+    updateTicketsTabsVisibility();
+  } catch (_) {}
 
   console.log('[Tickets] Initialized');
 }

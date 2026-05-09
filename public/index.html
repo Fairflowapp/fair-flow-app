@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- FF_BUILD_STAMP: 20260415-goToQueue-ffMarkUiReady-fallback - View Source on production. -->
+<!-- FF_BUILD_STAMP: 20260505-salon-typo-hygiene - View Source on production. -->
 
 <html lang="en">
 
@@ -42,6 +42,12 @@
     }
   })();
   console.log('[BUILD MARKER] index.html loaded at', new Date().toISOString());
+  window.ffDebugQueueAndStaffAccess = window.ffDebugQueueAndStaffAccess || function () {
+    console.warn(
+      '[FairFlow] ffDebugQueueAndStaffAccess: main app script not finished. Use window.ffDebugQueueAndStaffAccess() after load, or hard-refresh (Ctrl+Shift+R).'
+    );
+    return { _status: 'stub', hint: 'Call window.ffDebugQueueAndStaffAccess() after "[BUILD MARKER] app.js logic loaded" in console.' };
+  };
   window.goToChat = window.goToChat || function() {
     if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
     ['tasksScreen','inboxScreen','mediaScreen','trainingScreen','timeClockScreen','pointsAppScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
@@ -178,6 +184,77 @@ body.ff-logged-out {
 html:has(body.ff-logged-out) {
   overflow: hidden;
 }
+
+/* Full-screen splash while Firebase restores session (avoids flashing the login form on mobile). */
+#ff-auth-splash {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 300000;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: max(24px, env(safe-area-inset-top, 0px)) max(24px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(24px, env(safe-area-inset-left, 0px));
+  box-sizing: border-box;
+  background: linear-gradient(165deg, #faf5ff 0%, #f3e8ff 38%, #fdf2f8 100%);
+  pointer-events: none;
+  transition: opacity 0.35s ease, visibility 0.35s ease;
+}
+body.ff-auth-splash-visible #ff-auth-splash {
+  display: flex;
+}
+body:not(.ff-auth-splash-visible) #ff-auth-splash {
+  opacity: 0;
+  visibility: hidden;
+}
+.ff-auth-splash__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  max-width: 280px;
+  text-align: center;
+}
+.ff-auth-splash__video {
+  display: none;
+  width: min(200px, 56vw);
+  height: auto;
+  max-height: min(200px, 40vh);
+  border-radius: 20px;
+  box-shadow: 0 20px 50px rgba(91, 33, 182, 0.18);
+  object-fit: cover;
+}
+.ff-auth-splash__video.ff-auth-splash__video--on {
+  display: block;
+}
+.ff-auth-splash__logo {
+  width: min(132px, 36vw);
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 12px 28px rgba(124, 58, 237, 0.25));
+}
+.ff-auth-splash__logo.ff-auth-splash__logo--hide {
+  display: none;
+}
+.ff-auth-splash__spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid rgba(124, 58, 237, 0.2);
+  border-top-color: #7c3aed;
+  animation: ff-auth-splash-spin 0.85s linear infinite;
+}
+@keyframes ff-auth-splash-spin {
+  to { transform: rotate(360deg); }
+}
+.ff-auth-splash__hint {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #6b21b6;
+  letter-spacing: 0.02em;
+}
+
 body.ff-logged-out::before {
   content: '';
   position: fixed;
@@ -573,6 +650,30 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
 }
 #ticketsBtn.active .nav-icon svg {
   stroke: #7c3aed !important;
+}
+
+/* Main nav: pin small notification badge to icon corner (Tickets / Tasks / Chat / Inbox) */
+.toolbar.toolbar-nav-main .nav-item .nav-icon {
+  position: relative;
+  overflow: visible;
+}
+.toolbar.toolbar-nav-main .nav-item .nav-icon .ff-nav-icon-badge:not(:empty) {
+  position: absolute;
+  top: -5px;
+  right: -8px;
+  margin-left: 0 !important;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1.5px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 #mediaBtn.active {
   color:#7c3aed !important;
@@ -1346,6 +1447,15 @@ select,input[type="password"],input[type="text"]{height:42px;padding:0 16px;bord
 /* Queue Join row only: slimmer pill than global .btn-primary */
 .joinbar #joinBtn{padding:8px 12px;min-width:unset}
 
+/* Desktop: wrappers are invisible to flex — same child order as before */
+#joinBar .ff-join-pin-actions-row,
+#joinBar .ff-join-split {
+  display: contents;
+}
+
+/* "More" queue actions: mobile-only UI; hidden on desktop */
+#ffJoinMoreToggle{display:none!important}
+
 .btn-ghost{border:1px solid var(--border);background:#fff;border-radius:999px;padding:10px 18px;font-weight:800;cursor:pointer}
 
 /* Main area */
@@ -1365,6 +1475,47 @@ select,input[type="password"],input[type="text"]{height:42px;padding:0 16px;bord
     overflow-y: auto;
     overflow-x: hidden;
     padding-right: 6px;
+    padding-bottom: 20px;
+    overflow-anchor: none;
+}
+
+/* Queue technician filter: compact mobile layout (see ffRenderQueueFilterChips) */
+#ffQueueFilterBar.ff-queue-filter-compact {
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 0;
+}
+#ffQueueFilterBar.ff-queue-filter-compact .ff-queue-filter-select {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 42px;
+  padding: 10px 36px 10px 14px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  font-size: 12px;
+  font-weight: 400;
+  background-color: #fff;
+  color: #374151;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+#ffQueueFilterBar.ff-queue-filter-compact .ff-queue-filter-select.ff-queue-filter-select--all {
+  color: #9ca3af;
+}
+#ffQueueFilterBar.ff-queue-filter-compact .ff-queue-filter-select:focus {
+  outline: none;
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+}
+#ffQueueFilterBar.ff-queue-filter-compact .ff-queue-filter-select:disabled {
+  opacity: 0.85;
+  cursor: not-allowed;
+  background-color: #f9fafb;
 }
 
 #queueList > li.ff-queue-empty-state,
@@ -2423,6 +2574,781 @@ dialog footer button, .code-dialog footer button {
   display: none !important;
 }
 
+@media (max-width: 640px) {
+  /*
+   * Do not set z-index on #main-app-content here. A numeric z-index creates a stacking context so
+   * the whole subtree (including .header / fixed bottom nav) stays *below* sibling shells such as
+   * #ticketsScreen (z-index 9850), which hid tabs and swallowed taps. Omitting z-index lets
+   * .header (100340) and .toolbar.toolbar-nav-main (100350) stack above those panels.
+   */
+  #main-app-content {
+    max-width: 100%;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  /* Full-screen modules outside #main-app-content use bottom:0; leave space for fixed bottom nav */
+  #ticketsScreen,
+  #tasksScreen,
+  #inventoryScreen,
+  #pointsAppScreen,
+  #mediaScreen,
+  #scheduleScreen,
+  #timeClockScreen,
+  .inbox-screen {
+    bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Extra scroll room so queue row actions (e.g. FINISH) sit above the tab bar when scrolled */
+  .available-list,
+  .inservice-list {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+    scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .header {
+    top: 0;
+    z-index: 100340 !important;
+  }
+
+  .header-inner {
+    position: relative;
+    min-height: 48px;
+    padding: calc(7px + env(safe-area-inset-top, 0px)) 12px 7px;
+    gap: 10px;
+    justify-content: space-between;
+  }
+
+  .brandbox {
+    flex: 1 1 0;
+    min-width: 0;
+    margin-left: 0;
+    display: flex;
+    align-items: center;
+  }
+
+  .header #brandLogo {
+    display: none !important;
+  }
+
+  .header .ff-app-title {
+    display: block !important;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    max-width: min(52vw, 220px);
+    overflow: hidden;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    line-height: 1.2;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .header .ff-app-title::after {
+    content: none;
+  }
+
+  .header-toolbar-rest {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: flex-end;
+    position: static;
+    z-index: auto;
+  }
+
+  .header .toolbar.toolbar-nav-right {
+    position: static;
+    z-index: auto;
+    margin-left: auto;
+  }
+
+  .header .user-avatar-wrapper {
+    z-index: 100385 !important;
+  }
+
+  #userAvatarDropdown.user-avatar-dropdown {
+    z-index: 100390 !important;
+  }
+
+  .toolbar.toolbar-nav-main {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100350;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+    min-width: 0;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: #ffffff;
+    border-top: 1px solid #e5e7eb;
+    box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.10);
+    pointer-events: auto;
+  }
+
+  .header .toolbar.toolbar-nav-main #inboxBtn,
+  .toolbar.toolbar-nav-main #inventoryNavBtn,
+  .toolbar.toolbar-nav-main #scheduleBtn,
+  .toolbar.toolbar-nav-main #trainingBtn,
+  #headerCustomerSupportBtn {
+    display: none !important;
+  }
+
+  .header .toolbar.toolbar-nav-main #queueBtn,
+  .header .toolbar.toolbar-nav-main #ticketsBtn,
+  .header .toolbar.toolbar-nav-main #tasksBtn,
+  .header .toolbar.toolbar-nav-main #chatBtn,
+  .header .toolbar.toolbar-nav-main #mediaBtn {
+    min-height: 54px !important;
+    height: 54px !important;
+    padding: 6px 4px !important;
+    border-radius: 14px !important;
+    color: #6b7280 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    font-size: 11px !important;
+    line-height: 1.1 !important;
+    font-weight: 700 !important;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  .header .toolbar.toolbar-nav-main #queueBtn.active,
+  .header .toolbar.toolbar-nav-main #ticketsBtn.active,
+  .header .toolbar.toolbar-nav-main #tasksBtn.active,
+  .header .toolbar.toolbar-nav-main #chatBtn.active,
+  .header .toolbar.toolbar-nav-main #mediaBtn.active {
+    color: #7c3aed !important;
+    background: #f5f3ff !important;
+    box-shadow: none !important;
+  }
+
+  .header .toolbar.toolbar-nav-main #queueBtn.active .nav-icon,
+  .header .toolbar.toolbar-nav-main #ticketsBtn.active .nav-icon,
+  .header .toolbar.toolbar-nav-main #tasksBtn.active .nav-icon,
+  .header .toolbar.toolbar-nav-main #chatBtn.active .nav-icon,
+  .header .toolbar.toolbar-nav-main #mediaBtn.active .nav-icon {
+    opacity: 1 !important;
+  }
+
+  .header .toolbar.toolbar-nav-main #queueBtn.active .nav-icon svg,
+  .header .toolbar.toolbar-nav-main #ticketsBtn.active .nav-icon svg,
+  .header .toolbar.toolbar-nav-main #tasksBtn.active .nav-icon svg,
+  .header .toolbar.toolbar-nav-main #chatBtn.active .nav-icon svg,
+  .header .toolbar.toolbar-nav-main #mediaBtn.active .nav-icon svg {
+    stroke: #7c3aed !important;
+    opacity: 1 !important;
+  }
+
+  .header .toolbar.toolbar-nav-main .nav-icon {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .header .toolbar.toolbar-nav-main .nav-icon svg {
+    width: 18px;
+    height: 18px;
+    stroke: currentColor !important;
+  }
+
+  .toolbar.toolbar-nav-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    margin-left: auto;
+    padding-left: 0;
+    border-left: 0;
+    gap: 6px;
+  }
+
+  .header-toolbar-divider {
+    display: none !important;
+  }
+
+  .header .toolbar.toolbar-nav-right #appsBtn {
+    position: absolute !important;
+    left: 12px;
+    right: auto;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 100004;
+    width: 34px;
+    height: 34px !important;
+    min-height: 34px !important;
+    padding: 0 !important;
+    border-radius: 999px !important;
+    color: #ffffff !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    font-size: 0 !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+  }
+
+  .header .toolbar.toolbar-nav-right #appsBtn .nav-icon {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .header .toolbar.toolbar-nav-right #appsBtn .nav-icon svg {
+    width: 20px;
+    height: 20px;
+    stroke: currentColor !important;
+  }
+
+  .header-user-identity {
+    display: none !important;
+  }
+
+  .header-user-name,
+  .header-user-role {
+    display: none !important;
+  }
+
+  #userAvatarBtn {
+    width: 24px;
+    height: 34px;
+    padding: 0 2px !important;
+    gap: 0 !important;
+    justify-content: center;
+  }
+
+  .header .user-avatar-circle {
+    display: none !important;
+  }
+
+  .header .user-avatar-circle svg {
+    display: none !important;
+  }
+
+  #userAvatarBtn > span {
+    color: #ffffff !important;
+    font-size: 12px !important;
+    line-height: 1;
+    margin-left: 0;
+  }
+
+  .joinbar {
+    max-width: none;
+    width: 100%;
+    margin: 0;
+    padding: 10px 14px 12px;
+    gap: 10px;
+    flex-direction: column;
+    align-items: stretch;
+    flex-wrap: nowrap;
+  }
+
+  #joinBar > label {
+    display: none !important;
+  }
+
+  .joinbar #nameSelect {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    flex: none;
+    box-sizing: border-box;
+  }
+
+  #joinBar .ff-join-pin-actions-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.46fr);
+    gap: 9px;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    align-items: stretch;
+  }
+
+  #joinBar .ff-join-pin-actions-row .pinwrap {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    flex: none;
+  }
+
+  #joinBar .ff-join-pin-actions-row .pinwrap input[type="password"],
+  #joinBar .ff-join-pin-actions-row .pinwrap input[type="text"] {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  #joinBar .ff-join-split {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    min-width: 0;
+    min-height: 42px;
+    height: 42px;
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid #6d28d9;
+    box-sizing: border-box;
+    box-shadow: 0 2px 8px rgba(109, 40, 217, 0.18);
+  }
+
+  #joinBar .ff-join-split #joinBtn {
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-shrink: 1;
+    min-height: 0;
+    height: auto;
+    margin: 0;
+    padding: 0 10px;
+    border: none;
+    border-radius: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    max-width: none;
+    width: auto;
+  }
+
+  #joinBar .ff-join-split #ffJoinMoreToggle.ff-join-more-available {
+    display: inline-flex !important;
+    flex: 0 0 40px;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    height: auto;
+    min-height: 0;
+    align-self: stretch;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.35);
+    background: #7c3aed;
+    color: #fff;
+    font-size: 12px;
+    box-sizing: border-box;
+    box-shadow: none;
+  }
+
+  .joinbar select,
+  .joinbar input[type="password"],
+  .joinbar input[type="text"] {
+    width: 100%;
+    min-width: 0;
+  }
+
+  #joinBar.joinbar {
+    position: relative;
+    z-index: 1;
+  }
+
+  .joinbar .ff-join-pin-actions-row + span {
+    display: none !important;
+  }
+
+  #joinBar #queueControls {
+    position: absolute;
+    right: 14px;
+    left: auto;
+    top: 100%;
+    margin-top: 6px;
+    flex: none;
+    width: min(280px, calc(100vw - 28px));
+    min-width: min(240px, calc(100vw - 28px));
+    max-width: calc(100vw - 28px);
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 10px !important;
+    flex-wrap: nowrap;
+    padding: 10px 12px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15);
+    box-sizing: border-box;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-6px);
+    transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+    z-index: 20;
+  }
+
+  #joinBar.ff-join-more-open #queueControls {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
+  #joinBar #queueControls #reorderBtn {
+    width: 100%;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  #joinBar #queueControls #manageQueueBtn,
+  #joinBar #queueControls #resetBtn {
+    align-self: center;
+  }
+
+  #appsOverlayBackdrop {
+    z-index: 100500 !important;
+  }
+
+  #appsPanel {
+    z-index: 100501 !important;
+  }
+
+  .joinbar .btn-ghost {
+    min-height: 42px;
+    padding: 9px 14px;
+  }
+
+  .wrap {
+    max-width: none;
+    width: 100%;
+    padding: 10px 14px calc(120px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .grid,
+  .grid2 {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .col {
+    min-height: auto;
+    padding: 12px;
+  }
+
+  .item {
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  /* Available: badge | name (shrinks) | START split — same row, twin pill proportions */
+  .available-list .item {
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+  }
+
+  .available-list .item .badge + div {
+    min-width: 0;
+  }
+
+  /* Allow name pill to shrink so START stays on same row (inline flexShrink:0 from JS) */
+  .available-list .item .name-pill {
+    flex-shrink: 1 !important;
+    min-width: 0;
+  }
+
+  .controls {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .available-list .item .controls.ff-queue-avail-ctrls:has(.ff-queue-start-split) {
+    grid-column: auto;
+    justify-self: end;
+    align-self: center;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+
+  .name-pill {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Available queue row: START + chevron; secondary actions in expandable panel (mobile only) */
+  .available-list .item .controls.ff-queue-avail-ctrls {
+    position: relative;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .available-list .item .ff-queue-start-split {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: stretch;
+    order: 1;
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid #d1d5db;
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    max-width: 100%;
+    align-self: center;
+  }
+
+  /* Match queue name pill: inline 15px / 6px 12px / 900 (see renderQueue namePill) */
+  .available-list .item .ff-queue-start-split .start-btn {
+    border-radius: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    flex: 0 1 auto;
+    min-width: 0;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    font-size: 15px !important;
+    font-weight: 900 !important;
+    letter-spacing: 0.02em !important;
+    padding: 6px 12px !important;
+    line-height: 1.2 !important;
+  }
+
+  .available-list .item .ff-queue-start-split-toggle {
+    flex: 0 0 auto;
+    width: 34px;
+    min-width: 34px;
+    border: none;
+    border-left: 1px solid rgba(0, 0, 0, 0.1);
+    background: #e5e7eb;
+    color: #374151;
+    cursor: pointer;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 11px;
+    line-height: 1;
+    box-sizing: border-box;
+  }
+
+  .available-list .item.ff-queue-row-more-open {
+    overflow: visible;
+    z-index: 1;
+    position: relative;
+  }
+
+  /* Let the mobile "more" dropdown escape the list scroll box while open */
+  body.ff-queue-avail-more-open .list.available-list,
+  body.ff-queue-avail-more-open .list.inservice-list {
+    overflow: visible !important;
+  }
+
+  .available-list .item .ff-queue-more-panel {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    width: max-content;
+    min-width: 168px;
+    max-width: min(92vw, 280px);
+    flex-direction: column;
+    align-items: stretch;
+    align-content: stretch;
+    gap: 8px;
+    padding: 8px;
+    margin: 0;
+    order: 2;
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+    z-index: 45;
+  }
+
+  .available-list .item .ff-queue-more-panel > * {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .available-list .item .ff-queue-more-panel > button {
+    justify-content: center;
+  }
+
+  .available-list .item.ff-queue-row-more-open .ff-queue-more-panel {
+    display: flex;
+  }
+
+  /* In service: same row as name; FINISH | ▼; phone in dropdown (mobile only) */
+  .inservice-list .item {
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+  }
+
+  .inservice-list .item .badge + div {
+    min-width: 0;
+  }
+
+  .inservice-list .item .name-pill {
+    flex-shrink: 1 !important;
+    min-width: 0;
+  }
+
+  .inservice-list .item .controls.ff-inservice-ctrls:has(.ff-inservice-finish-split) {
+    grid-column: auto;
+    justify-self: end;
+    align-self: center;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+
+  .inservice-list .item .controls.ff-inservice-ctrls {
+    position: relative;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .inservice-list .item .ff-inservice-finish-split {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: stretch;
+    order: 1;
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid #d1d5db;
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    max-width: 100%;
+    align-self: center;
+  }
+
+  /* Match web/desktop: neutral gray FINISH (same family as .finish-btn + START split chevron) */
+  .inservice-list .item .ff-inservice-finish-split .finish-btn {
+    border-radius: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    flex: 0 1 auto;
+    min-width: 0;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    font-size: 15px !important;
+    font-weight: 900 !important;
+    letter-spacing: 0.02em !important;
+    padding: 6px 12px !important;
+    line-height: 1.2 !important;
+    background: #e5e7eb !important;
+    color: #111827 !important;
+  }
+
+  .inservice-list .item .ff-inservice-finish-split .finish-btn:hover {
+    background: #d1d5db !important;
+  }
+
+  .inservice-list .item .ff-inservice-finish-split-toggle {
+    flex: 0 0 auto;
+    width: 34px;
+    min-width: 34px;
+    border: none;
+    border-left: 1px solid rgba(0, 0, 0, 0.1);
+    background: #e5e7eb;
+    color: #374151;
+    cursor: pointer;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 11px;
+    line-height: 1;
+    box-sizing: border-box;
+  }
+
+  .inservice-list .item.ff-inservice-row-more-open {
+    overflow: visible;
+    z-index: 1;
+    position: relative;
+  }
+
+  .inservice-list .item .ff-inservice-more-panel {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    width: max-content;
+    min-width: 168px;
+    max-width: min(92vw, 280px);
+    flex-direction: column;
+    align-items: stretch;
+    align-content: stretch;
+    gap: 8px;
+    padding: 8px;
+    margin: 0;
+    order: 2;
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+    z-index: 45;
+  }
+
+  .inservice-list .item .ff-inservice-more-panel > * {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .inservice-list .item .ff-inservice-more-panel > button {
+    justify-content: center;
+  }
+
+  .inservice-list .item.ff-inservice-row-more-open .ff-inservice-more-panel {
+    display: flex;
+  }
+}
+
+@media (min-width: 641px) {
+  .available-list .item .ff-queue-more-panel {
+    display: contents !important;
+  }
+
+  .available-list .item .ff-queue-start-split {
+    display: contents !important;
+  }
+
+  .available-list .item .ff-queue-start-split-toggle {
+    display: none !important;
+  }
+
+  .available-list .item.ff-queue-row-more-open .ff-queue-more-panel {
+    display: contents !important;
+  }
+
+  .inservice-list .item .ff-inservice-more-panel {
+    display: contents !important;
+  }
+
+  .inservice-list .item .ff-inservice-finish-split {
+    display: contents !important;
+  }
+
+  .inservice-list .item .ff-inservice-finish-split-toggle {
+    display: none !important;
+  }
+
+  .inservice-list .item.ff-inservice-row-more-open .ff-inservice-more-panel {
+    display: contents !important;
+  }
+}
+
 </style>
 
 
@@ -2641,7 +3567,94 @@ dialog footer button, .code-dialog footer button {
   </script>
 </head>
 
-<body class="ff-app-loading">
+<body class="ff-app-loading ff-auth-splash-visible">
+  <script>
+    /* tickets.js loads late in the SafeLoader chain; without this, Tickets nav clicks no-op until the module arrives. */
+    (function () {
+      function ffGoToTicketsShellNav() {
+        try {
+          var tasksScreen = document.getElementById('tasksScreen');
+          var ownerView = document.getElementById('owner-view');
+          var joinBar = document.querySelector('.joinBar');
+          var queueControls = document.getElementById('queueControls');
+          var userProfileScreen = document.getElementById('userProfileScreen');
+          var wrap = document.querySelector('.wrap');
+          var inboxScreen = document.getElementById('inboxScreen');
+          var chatScreen = document.getElementById('chatScreen');
+          var mediaScreen = document.getElementById('mediaScreen');
+          var trainingScreen = document.getElementById('trainingScreen');
+          var scheduleScreen = document.getElementById('scheduleScreen');
+          var timeClockScreenTk = document.getElementById('timeClockScreen');
+          var manageQueueScreen = document.getElementById('manageQueueScreen');
+          [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen, trainingScreen, scheduleScreen, timeClockScreenTk, manageQueueScreen].forEach(function (el) {
+            if (el) el.style.display = 'none';
+          });
+          if (wrap) wrap.style.display = 'none';
+          var ticketsScreen = document.getElementById('ticketsScreen');
+          if (ticketsScreen) {
+            ticketsScreen.style.display = 'flex';
+            ticketsScreen.style.setProperty('pointer-events', 'auto', 'important');
+          }
+          document.querySelectorAll('.btn-pill').forEach(function (b) {
+            b.classList.remove('active');
+          });
+          var ticketsBtn = document.getElementById('ticketsBtn');
+          if (ticketsBtn) ticketsBtn.classList.add('active');
+          if (typeof window.ffSyncShellHeaderInset === 'function') window.ffSyncShellHeaderInset();
+          if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+        } catch (e) {}
+      }
+      window.goToTickets = function ffGoToTicketsEarly() {
+        if (window.__ffGoToTicketsReal) return window.__ffGoToTicketsReal();
+        ffGoToTicketsShellNav();
+        if (window.__ffGoToTicketsPoll) return;
+        window.__ffGoToTicketsPoll = true;
+        var n = 0;
+        var iv = setInterval(function () {
+          n++;
+          if (window.__ffGoToTicketsReal) {
+            clearInterval(iv);
+            window.__ffGoToTicketsPoll = false;
+            try {
+              window.__ffGoToTicketsReal();
+            } catch (err) {}
+          } else if (n > 400) {
+            clearInterval(iv);
+            window.__ffGoToTicketsPoll = false;
+          }
+        }, 25);
+      };
+    })();
+  </script>
+
+  <!-- Boot splash: shown until first auth + profile gate complete (persisted login on phone). -->
+  <div id="ff-auth-splash" class="ff-auth-splash" role="status" aria-live="polite" aria-busy="true" aria-label="Loading Fair Flow">
+    <div class="ff-auth-splash__inner">
+      <video id="ffAuthSplashVideo" class="ff-auth-splash__video" muted playsinline loop preload="metadata" poster="fairflow-logo.png?v=12" aria-hidden="true">
+        <!-- Optional: add ff-splash.mp4 to /public and uncomment:
+        <source src="/ff-splash.mp4" type="video/mp4" />
+        -->
+      </video>
+      <img class="ff-auth-splash__logo" src="fairflow-logo.png?v=12" alt="" width="132" height="132" decoding="async" />
+      <div class="ff-auth-splash__spinner" aria-hidden="true"></div>
+      <p class="ff-auth-splash__hint">Loading…</p>
+    </div>
+  </div>
+  <script>
+    (function ffAuthSplashMaybeUseVideo() {
+      try {
+        var v = document.getElementById('ffAuthSplashVideo');
+        var logo = document.querySelector('.ff-auth-splash__logo');
+        if (!v || !logo) return;
+        var src = v.querySelector('source');
+        if (src && String(src.getAttribute('src') || '').trim()) {
+          v.classList.add('ff-auth-splash__video--on');
+          logo.classList.add('ff-auth-splash__logo--hide');
+          v.play().catch(function () {});
+        }
+      } catch (e) {}
+    })();
+  </script>
 
   <!-- LOGIN SECTION -->
   <section id="login-section" style="position:relative;z-index:2;max-width:400px;margin:40px auto;padding:32px;background:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.08);pointer-events:auto;">
@@ -2761,24 +3774,29 @@ dialog footer button, .code-dialog footer button {
       <div style="display:flex;gap:8px;margin-bottom:20px;">
         <div class="ff-onb-pill" data-step="1" style="flex:1;height:4px;border-radius:4px;background:#7c3aed;"></div>
         <div class="ff-onb-pill" data-step="2" style="flex:1;height:4px;border-radius:4px;background:#e5e7eb;"></div>
-        <div class="ff-onb-pill" data-step="3" style="flex:1;height:4px;border-radius:4px;background:#e5e7eb;"></div>
       </div>
 
-      <div id="ffOnboardingStepBadge" style="font-size:12px;font-weight:600;color:#7c3aed;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px;">Step 1 of 3</div>
+      <div id="ffOnboardingStepBadge" style="font-size:12px;font-weight:600;color:#7c3aed;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px;">Step 1 of 2</div>
       <h2 id="ffOnboardingTitle" style="margin:0 0 6px 0;font-size:24px;font-weight:700;color:#111827;">Welcome to Fair Flow</h2>
       <p id="ffOnboardingSubtitle" style="margin:0 0 24px 0;font-size:14px;color:#6b7280;line-height:1.5;">Let's get your business set up in a minute.</p>
 
       <!-- STEP 1: Add first location -->
       <div id="ffOnboardingStep1" class="ff-onb-step">
-        <div style="margin-bottom:14px;">
+        <div id="ffOnbLocationNameWrap" style="margin-bottom:14px;">
           <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">Location name <span style="color:#dc2626;">*</span></label>
           <input id="ffOnbLocationName" type="text" placeholder="e.g. Brickell"
                  style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #d1d5db;font-size:14px;box-sizing:border-box;" />
         </div>
-        <div style="margin-bottom:14px;">
+        <div id="ffOnbLocationAddressWrap" style="margin-bottom:14px;">
           <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">Address <span style="color:#9ca3af;font-weight:400;">(optional)</span></label>
           <input id="ffOnbLocationAddress" type="text" placeholder="123 Main St, City, State"
                  style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #d1d5db;font-size:14px;box-sizing:border-box;" />
+        </div>
+        <div id="ffOnbOwnerPinWrap" style="margin-bottom:14px;">
+          <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">Owner PIN code <span style="color:#dc2626;">*</span></label>
+          <input id="ffOnbOwnerPin" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="4-6 digits"
+                 style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #d1d5db;font-size:14px;box-sizing:border-box;" />
+          <p style="margin:6px 0 0 0;font-size:11px;color:#6b7280;">Used for owner/admin actions and staff identity.</p>
         </div>
         <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">You can add more locations later under Apps - Management.</p>
       </div>
@@ -2957,13 +3975,13 @@ dialog footer button, .code-dialog footer button {
 
         <button id="queueBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span>Queue</button>
 
-        <button id="ticketsBtn" class="btn-pill nav-item core-nav" onclick="window.goToTickets && window.goToTickets()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></span>Tickets<span id="ticketsNavBadge" class="ff-home-tasks-badge" style="display:none;"></span></button>
+        <button id="ticketsBtn" class="btn-pill nav-item core-nav" onclick="window.goToTickets && window.goToTickets()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg><span id="ticketsNavBadge" class="ff-home-tasks-badge ff-nav-icon-badge" style="display:none;"></span></span>Tickets</button>
 
-        <button id="tasksBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>Tasks<span class="ff-home-tasks-badge"></span></button>
+        <button id="tasksBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="ff-home-tasks-badge ff-nav-icon-badge"></span></span>Tasks</button>
 
-        <button id="chatBtn" class="btn-pill nav-item core-nav" onclick="window.goToChat && window.goToChat()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>Chat<span id="chatNavBadge" class="ff-home-tasks-badge"></span></button>
+        <button id="chatBtn" class="btn-pill nav-item core-nav" onclick="window.goToChat && window.goToChat()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span id="chatNavBadge" class="ff-home-tasks-badge ff-nav-icon-badge"></span></span>Chat</button>
 
-        <button id="inboxBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg></span>Inbox<span class="ff-inbox-badge ff-home-tasks-badge"></span></button>
+        <button id="inboxBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg><span class="ff-inbox-badge ff-home-tasks-badge ff-nav-icon-badge"></span></span>Inbox</button>
 
         <button id="mediaBtn" class="btn-pill nav-item hide-4" onclick="window.goToMedia && window.goToMedia()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span>Media</button>
 
@@ -3025,17 +4043,152 @@ dialog footer button, .code-dialog footer button {
   </div>
   <script>
   (function(){
+    var mobileHeaderTitleMap = [
+      { button: 'queueBtn', screen: 'owner-view', title: 'Queue' },
+      { button: 'ticketsBtn', screen: 'ticketsScreen', title: 'Tickets' },
+      { button: 'tasksBtn', screen: 'tasksScreen', title: 'Tasks' },
+      { button: 'chatBtn', screen: 'chatScreen', title: 'Chat' },
+      { button: 'mediaBtn', screen: 'mediaScreen', title: 'Media' },
+      { button: 'inventoryNavBtn', screen: 'inventoryScreen', title: 'Inventory' },
+      { button: 'inboxBtn', screen: 'inboxScreen', title: 'Inbox' }
+    ];
+
+    function isVisible(el){
+      if(!el) return false;
+      var style = window.getComputedStyle ? window.getComputedStyle(el) : el.style;
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    }
+
+    function setMobileHeaderTitle(){
+      var titleEl = document.querySelector('.header .ff-app-title');
+      if(!titleEl) return;
+
+      var appsPanel = document.getElementById('appsPanel');
+      if(isVisible(appsPanel)){
+        titleEl.textContent = 'Apps';
+        return;
+      }
+
+      for(var i = 0; i < mobileHeaderTitleMap.length; i++){
+        var item = mobileHeaderTitleMap[i];
+        var btn = document.getElementById(item.button);
+        if(btn && btn.classList && btn.classList.contains('active')){
+          titleEl.textContent = item.title;
+          return;
+        }
+      }
+
+      for(var j = 0; j < mobileHeaderTitleMap.length; j++){
+        var fallback = mobileHeaderTitleMap[j];
+        var screen = document.getElementById(fallback.screen);
+        if(isVisible(screen)){
+          titleEl.textContent = fallback.title;
+          return;
+        }
+      }
+
+      titleEl.textContent = 'Queue';
+    }
+
     function setHeaderH(){
       var h=document.querySelector('.header');
       if(h) document.documentElement.style.setProperty('--header-h', h.offsetHeight+'px');
     }
+    /** Call after Queue ↔ Tickets (and similar): fixed shells use --header-h; remeasure avoids overlap that swallows tab taps. */
+    window.ffSyncShellHeaderInset = function ffSyncShellHeaderInset() {
+      setHeaderH();
+      requestAnimationFrame(function () {
+        setHeaderH();
+        requestAnimationFrame(setHeaderH);
+      });
+    };
     setHeaderH();
+    setMobileHeaderTitle();
     window.addEventListener('load', setHeaderH);
+    window.addEventListener('load', setMobileHeaderTitle);
     window.addEventListener('resize', setHeaderH);
+    window.addEventListener('resize', setMobileHeaderTitle);
+    document.addEventListener('click', function(){ setTimeout(setMobileHeaderTitle, 0); }, true);
     if(typeof ResizeObserver!=='undefined'){
       var h=document.querySelector('.header');
       if(h) new ResizeObserver(setHeaderH).observe(h);
     }
+    if(typeof MutationObserver!=='undefined'){
+      var targets = ['queueBtn','ticketsBtn','tasksBtn','chatBtn','mediaBtn','inventoryNavBtn','inboxBtn','appsPanel','owner-view','ticketsScreen','tasksScreen','chatScreen','mediaScreen','inventoryScreen','inboxScreen'];
+      var observer = new MutationObserver(function () {
+        setMobileHeaderTitle();
+        setHeaderH();
+      });
+      targets.forEach(function(id){
+        var el = document.getElementById(id);
+        if(el) observer.observe(el, { attributes: true, attributeFilter: ['class','style'] });
+      });
+    }
+    window.ffUpdateMobileHeaderTitle = setMobileHeaderTitle;
+  })();
+  </script>
+  <script>
+  (function(){
+    var MQ = '(max-width: 640px)';
+    function isMobileJoinMore(){ return window.matchMedia(MQ).matches; }
+    function bar(){ return document.getElementById('joinBar'); }
+    function toggle(){ return document.getElementById('ffJoinMoreToggle'); }
+    function qc(){ return document.getElementById('queueControls'); }
+    function qcHidden(){
+      var q = qc();
+      if(!q) return true;
+      if(q.style.display === 'none') return true;
+      try { return window.getComputedStyle(q).display === 'none'; } catch(e) { return true; }
+    }
+    function closeMenu(){
+      var b = bar(), t = toggle();
+      if(b) b.classList.remove('ff-join-more-open');
+      if(t) t.setAttribute('aria-expanded', 'false');
+    }
+    function syncAvailable(){
+      var b = bar(), t = toggle();
+      if(!t) return;
+      if(!isMobileJoinMore() || !b || qcHidden()){
+        t.classList.remove('ff-join-more-available');
+        closeMenu();
+        return;
+      }
+      t.classList.add('ff-join-more-available');
+    }
+    function onToggleClick(e){
+      e.preventDefault();
+      e.stopPropagation();
+      var b = bar(), t = toggle();
+      if(!b || !t || !t.classList.contains('ff-join-more-available')) return;
+      var open = b.classList.toggle('ff-join-more-open');
+      t.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    function onDocPointerDown(e){
+      if(!isMobileJoinMore()) return;
+      var b = bar();
+      if(!b || !b.classList.contains('ff-join-more-open')) return;
+      var node = e.target;
+      if(node && b.contains(node)) return;
+      closeMenu();
+    }
+    function onKeydown(e){
+      if(e.key === 'Escape') closeMenu();
+    }
+    function init(){
+      var t = toggle(), q = qc();
+      if(t) t.addEventListener('click', onToggleClick);
+      document.addEventListener('pointerdown', onDocPointerDown, true);
+      document.addEventListener('keydown', onKeydown);
+      window.addEventListener('resize', syncAvailable);
+      if(typeof MutationObserver !== 'undefined' && q){
+        new MutationObserver(syncAvailable).observe(q, { attributes: true, attributeFilter: ['style'] });
+      }
+      syncAvailable();
+    }
+    if(document.readyState === 'loading')
+      document.addEventListener('DOMContentLoaded', init);
+    else
+      init();
   })();
   </script>
 
@@ -4309,6 +5462,7 @@ dialog footer button, .code-dialog footer button {
 
       <select id="nameSelect" class="grow" style="cursor:pointer;font-size:12px;"></select>
 
+      <div class="ff-join-pin-actions-row">
       <div class="grow pinwrap">
 
         <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" placeholder="PIN (hidden)" style="cursor:text;"/>
@@ -4317,7 +5471,12 @@ dialog footer button, .code-dialog footer button {
 
       </div>
 
+      <div class="ff-join-split">
       <button id="joinBtn" class="btn-primary" style="background:#7c3aed;background-image:none;border-color:#7c3aed;color:#fff;">Join</button>
+
+      <button type="button" id="ffJoinMoreToggle" class="ff-join-more-toggle" aria-expanded="false" aria-haspopup="true" aria-controls="queueControls" aria-label="More queue actions" title="More queue actions"><span aria-hidden="true">▼</span></button>
+      </div>
+      </div>
 
       <span style="flex:1"></span>
 
@@ -4732,16 +5891,34 @@ console.log('[BUILD MARKER] app.js logic loaded at', new Date().toISOString());
 // ===== FIREBASE AUTH FOUNDATION =====
 // Minimal Firebase Auth wiring (no full auth UI)
 
-const firebaseConfig = {
-  apiKey: "AIzaSyCoj6A2Eoa0uDrelIJxycZCL6cTw570FCI",
-  authDomain: "fairflowapp-db841.firebaseapp.com",
-  projectId: "fairflowapp-db841",
-  storageBucket: "fairflowapp-db841.firebasestorage.app",
-  messagingSenderId: "823186963319",
-  appId: "1:823186963319:web:2bc2d386311b2898643f72",
-  measurementId: "G-S7T9WN343B"
-};
+const hostname = window.location.hostname || "";
+const params = new URLSearchParams(window.location.search);
+const FF_ENV = params.get("env") === "staging" || hostname.includes("fair-flow-staging.web.app")
+  ? "staging"
+  : "production";
+
+const firebaseConfig = FF_ENV === "staging"
+  ? {
+      apiKey: "AIzaSyDTBRAIbEmgx5uJ3I81mw5qfhlCpZAX4VI",
+      authDomain: "fair-flow-staging.firebaseapp.com",
+      projectId: "fair-flow-staging",
+      storageBucket: "fair-flow-staging.firebasestorage.app",
+      messagingSenderId: "529214117704",
+      appId: "1:529214117704:web:b346f764c7f7ae716d457d"
+    }
+  : {
+      apiKey: "AIzaSyCoj6A2Eoa0uDrelIJxycZCL6cTw570FCI",
+      authDomain: "fairflowapp-db841.firebaseapp.com",
+      projectId: "fairflowapp-db841",
+      storageBucket: "fairflowapp-db841.firebasestorage.app",
+      messagingSenderId: "823186963319",
+      appId: "1:823186963319:web:2bc2d386311b2898643f72",
+      measurementId: "G-S7T9WN343B"
+    };
+
+window.FF_ENV = FF_ENV;
 window.firebaseConfig = firebaseConfig;
+console.log("[FirebaseEnv]", FF_ENV, firebaseConfig.projectId);
 
 if (typeof window !== 'undefined' && typeof window.__initFirebaseModular === 'function') {
   window.__initFirebaseModular();
@@ -4750,6 +5927,21 @@ if (typeof window !== 'undefined' && typeof window.__initFirebaseModular === 'fu
 // Initialize Firebase Auth
 let ffAuth = null;
 let ffCurrentUser = null;
+
+function ffRemoveAuthSplash() {
+  try {
+    document.body.classList.remove('ff-auth-splash-visible');
+    var sp = document.getElementById('ff-auth-splash');
+    if (sp) {
+      sp.setAttribute('aria-busy', 'false');
+      try {
+        var vid = document.getElementById('ffAuthSplashVideo');
+        if (vid) vid.pause();
+      } catch (e1) {}
+    }
+  } catch (e) {}
+}
+window.ffRemoveAuthSplash = ffRemoveAuthSplash;
 
 async function initFirebaseAuth() {
   try {
@@ -4810,6 +6002,7 @@ async function initFirebaseAuth() {
               if (mainContent) mainContent.style.display = 'none';
               if (authBanner) authBanner.style.display = 'none';
               if (loginSection) loginSection.style.display = 'none';
+              ffRemoveAuthSplash();
               setTimeout(async () => {
                 try {
                   const { signOut } = window.__firebaseAuthFunctions || {};
@@ -4853,6 +6046,7 @@ async function initFirebaseAuth() {
             if (mainContent) mainContent.style.display = 'none';
             if (authBanner) authBanner.style.display = 'none';
             // app.js will call showCompleteSetupScreen(user) which flips on complete-setup-section.
+            ffRemoveAuthSplash();
             return;
           }
 
@@ -4916,6 +6110,7 @@ async function initFirebaseAuth() {
             });
           } catch (e) { console.warn('[QueueSafetyNet] scheduling failed', e); }
           if (typeof renderBrand === 'function') renderBrand();
+          ffRemoveAuthSplash();
         })();
       } else {
         // Signed out - hide app shell completely (sync with app.js showLoginScreen + overlays)
@@ -4931,6 +6126,7 @@ async function initFirebaseAuth() {
         if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
         if (typeof stopTrainingNotificationsSubscription === 'function') stopTrainingNotificationsSubscription();
         if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
+        ffRemoveAuthSplash();
       }
     });
     
@@ -4945,6 +6141,7 @@ async function initFirebaseAuth() {
     const loginSection = document.getElementById('login-section');
     if (loginSection) loginSection.style.display = 'block';
     if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
+    ffRemoveAuthSplash();
   }
 }
 
@@ -6918,11 +8115,23 @@ function ffGetStaffList() {
   return settings.workers;
 }
 
+/** Firestore / imports / legacy JSON may use bool, number, or string for permission flags. */
+function ffStaffPermissionValueIsTrue(val) {
+  if (val === true) return true;
+  if (val === 1) return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes';
+  }
+  return false;
+}
+window.ffStaffPermissionValueIsTrue = ffStaffPermissionValueIsTrue;
+
 /** Join dropdown: staff row must have permissions.queue_join === true (same key as Permissions tab). */
 function ffStaffHasQueueJoinPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.queue_join === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.queue_join));
 }
 
 /**
@@ -6933,7 +8142,7 @@ function ffStaffMayBypassQueueLocationForJoin(staff) {
   if (!staff || typeof staff !== 'object') return false;
   if (!ffStaffHasQueueJoinPermission(staff)) return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.queue_bypass_location === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.queue_bypass_location));
 }
 
 /** One-time URL: ?ffQueueJoinKiosk=1 enables join-only Queue tab on this browser; =0 clears. Persists in localStorage. */
@@ -6970,24 +8179,101 @@ function ffCurrentUserIsQueueSharedStationJoin() {
   return ffStaffMayBypassQueueLocationForJoin(ffResolveStaffRowForQueueStationMode());
 }
 
-/** Queue screen: staff row must have permissions.queue_view === true (same key as Permissions tab). */
+/** Legacy default when permissions.queue_view was never written (full Queue for staff roles). */
+function ffStaffQueueViewImplicitAllowed(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  if (staff.isAdmin === true || staff.isManager === true) return true;
+  const r = String(staff.role || '').toLowerCase().trim();
+  if (
+    ['manager', 'admin', 'owner', 'front_desk', 'assistant_manager', 'reception', 'service_provider', 'service provider'].includes(r)
+  ) {
+    return true;
+  }
+  if (['technician', 'tech', 'staff'].includes(r)) return true;
+  /* staff-cloud default role is technician — rows with no role still behave as floor staff */
+  if (!r && staff.isAdmin !== true && staff.isManager !== true) return true;
+  return false;
+}
+
+/** Queue screen: staff.permissions.queue_view (explicit), or legacy allow when perms omit queue flags. */
 function ffStaffHasQueueViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.queue_view === true);
+  if (p && typeof p === 'object') {
+    if (Object.prototype.hasOwnProperty.call(p, 'queue_view')) {
+      return ffStaffPermissionValueIsTrue(p.queue_view);
+    }
+    /* Kiosk / join-only: queue_join set but queue_view omitted → keep full Queue off (join-only path still works). */
+    if (Object.prototype.hasOwnProperty.call(p, 'queue_join')) {
+      return false;
+    }
+  }
+  return ffStaffQueueViewImplicitAllowed(staff);
 }
 
 /** Read-only queue: lists/filters read-only; join bar disabled on this device. queue_join still allows join from kiosk / bypass station. */
 function ffStaffHasQueueLockedViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.queue_locked_view === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.queue_locked_view));
+}
+
+/** Same uid field family as app.js ffResolveStaffDocumentIdForLogin + schedule-ui (userUid). */
+function ffStaffRowMatchesAuthUid(staff, authUid) {
+  if (!staff || !authUid) return false;
+  const u = String(authUid).trim();
+  if (!u) return false;
+  const keys = ['uid', 'firebaseUid', 'firebaseAuthUid', 'authUid', 'userUid'];
+  for (let i = 0; i < keys.length; i++) {
+    const v = staff[keys[i]];
+    if (v != null && String(v).trim() === u) return true;
+  }
+  return false;
+}
+
+/** True when the row is explicitly linked to a different Firebase user (stale ff_authedStaffId_v1 / session id). */
+function ffStaffRowAuthLinkageConflicts(staff, authUser) {
+  if (!staff || typeof staff !== 'object' || !authUser) return false;
+  const uid = String(authUser.uid || '').trim();
+  const email = authUser.email ? String(authUser.email).toLowerCase().trim() : '';
+  const sEmail = staff.email ? String(staff.email).toLowerCase().trim() : '';
+  if (sEmail && email && sEmail !== email) return true;
+  const keys = ['uid', 'firebaseUid', 'firebaseAuthUid', 'authUid', 'userUid'];
+  let anyUid = false;
+  let matched = false;
+  for (let i = 0; i < keys.length; i++) {
+    const v = staff[keys[i]];
+    if (v == null || String(v).trim() === '') continue;
+    anyUid = true;
+    if (String(v).trim() === uid) matched = true;
+  }
+  if (anyUid && uid && !matched) return true;
+  return false;
+}
+
+function ffSyncAuthedStaffIdFromRow(staffRow) {
+  try {
+    const sid = String((staffRow && (staffRow.id || staffRow.staffId)) || '').trim();
+    if (!sid) return;
+    window.__ff_authedStaffId = sid;
+    if (typeof localStorage !== 'undefined') localStorage.setItem('ff_authedStaffId_v1', sid);
+  } catch (_) {}
 }
 
 function ffResolveCurrentStaffRowFromFfStaffV1() {
   try {
-    const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
-    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    let staffList = [];
+    try {
+      if (typeof window !== 'undefined' && typeof window.ffGetStaffStore === 'function') {
+        const st = window.ffGetStaffStore();
+        if (st && Array.isArray(st.staff)) staffList = st.staff;
+      }
+    } catch (e0) {}
+    if (!staffList.length) {
+      const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+      staffList = Array.isArray(store.staff) ? store.staff : [];
+    }
+    const u = window.auth && window.auth.currentUser;
     const activeStaffId = String(
       window.__ff_authedStaffId ||
       (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : '') ||
@@ -6998,26 +8284,28 @@ function ffResolveCurrentStaffRowFromFfStaffV1() {
         const id = String((s && (s.id || s.staffId)) || '').trim();
         return id && id === activeStaffId;
       });
-      if (byActiveStaffId) return byActiveStaffId;
+      if (byActiveStaffId && (!u || !ffStaffRowAuthLinkageConflicts(byActiveStaffId, u))) {
+        return byActiveStaffId;
+      }
     }
-    const u = window.auth && window.auth.currentUser;
     if (u) {
       const uid = String(u.uid || '').trim();
       const email = u.email ? String(u.email).toLowerCase().trim() : '';
       if (uid) {
-        const byUid = staffList.find(
-          (s) =>
-            s != null &&
-            ((s.uid != null && String(s.uid).trim() === uid) ||
-              (s.firebaseUid != null && String(s.firebaseUid).trim() === uid))
-        );
-        if (byUid) return byUid;
+        const byUid = staffList.find((s) => s != null && ffStaffRowMatchesAuthUid(s, uid));
+        if (byUid) {
+          ffSyncAuthedStaffIdFromRow(byUid);
+          return byUid;
+        }
       }
       if (email) {
         const byEmail = staffList.find(
           (s) => s && s.email && String(s.email).toLowerCase().trim() === email
         );
-        if (byEmail) return byEmail;
+        if (byEmail) {
+          ffSyncAuthedStaffIdFromRow(byEmail);
+          return byEmail;
+        }
       }
     }
     return null;
@@ -7077,6 +8365,50 @@ function ffCurrentUserSalonOwnerPermissionBypass() {
     return false;
   }
 }
+
+/**
+ * Whether permission checks should treat "no resolved staff row" as loading vs real deny.
+ * - staff_loading: signed in, staff cache not hydrated yet (staff-cloud has not finished first sync).
+ * - staff_unresolved: sync finished (ff_staff_cloud_hydrated_v1) but no row matches, or non-empty list with no match.
+ */
+function ffStaffPermissionLoadState() {
+  try {
+    if (!(window.auth && window.auth.currentUser)) return 'signed_out';
+    if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) {
+      return 'ready';
+    }
+    const row = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+    if (row) return 'ready';
+    var n = 0;
+    try {
+      if (typeof window.ffGetStaffStore === 'function') {
+        var st = window.ffGetStaffStore();
+        if (st && Array.isArray(st.staff)) n = st.staff.length;
+      }
+    } catch (e0) {}
+    if (!n) {
+      try {
+        var raw = localStorage.getItem('ff_staff_v1');
+        var store = raw ? JSON.parse(raw) : {};
+        if (store && Array.isArray(store.staff)) n = store.staff.length;
+      } catch (e1) {}
+    }
+    var hydrated = false;
+    try {
+      hydrated = !!(typeof sessionStorage !== 'undefined' && sessionStorage.getItem('ff_staff_cloud_hydrated_v1'));
+    } catch (eH) {}
+    if (n === 0) {
+      if (hydrated) return 'staff_unresolved';
+      return 'staff_loading';
+    }
+    /* Staff list present but no matching row: only treat as definitive after cloud marked hydrated (avoids "not linked" flash on refresh). */
+    if (!hydrated) return 'staff_loading';
+    return 'staff_unresolved';
+  } catch (e) {
+    return 'staff_loading';
+  }
+}
+window.ffStaffPermissionLoadState = ffStaffPermissionLoadState;
 
 function ffCurrentUserHasQueueViewPermission() {
   if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
@@ -7297,7 +8629,7 @@ function ffCurrentUserHasQueueScreenAccess() {
 function ffStaffHasTicketsViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.tickets_view === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.tickets_view));
 }
 
 function ffCurrentUserHasTicketsViewPermission() {
@@ -7310,7 +8642,7 @@ window.ffCurrentUserHasTicketsViewPermission = ffCurrentUserHasTicketsViewPermis
 function ffStaffHasChatManagePermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.chat_manage === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.chat_manage));
 }
 function ffCurrentUserHasChatManagePermission() {
   if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
@@ -7322,7 +8654,7 @@ window.ffCurrentUserHasChatManagePermission = ffCurrentUserHasChatManagePermissi
 function ffStaffHasChatFreeTextPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.chat_free_text === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.chat_free_text));
 }
 function ffCurrentUserHasChatFreeTextPermission() {
   if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
@@ -7335,7 +8667,7 @@ window.ffCurrentUserHasChatFreeTextPermission = ffCurrentUserHasChatFreeTextPerm
 function ffStaffHasTasksViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.tasks_view === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.tasks_view));
 }
 
 function ffCurrentUserHasTasksViewPermission() {
@@ -7349,8 +8681,8 @@ function ffStaffHasTasksUsePermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
   if (!p || typeof p !== 'object') return false;
-  if (p.tasks_use === true) return true;
-  if (p.tasks_view === true && p.tasks_use !== false) return true;
+  if (ffStaffPermissionValueIsTrue(p.tasks_use)) return true;
+  if (ffStaffPermissionValueIsTrue(p.tasks_view) && p.tasks_use !== false) return true;
   return false;
 }
 function ffCurrentUserHasTasksUsePermission() {
@@ -7363,7 +8695,7 @@ window.ffCurrentUserHasTasksUsePermission = ffCurrentUserHasTasksUsePermission;
 function ffStaffHasTasksManagePermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.tasks_manage === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.tasks_manage));
 }
 function ffCurrentUserHasTasksManagePermission() {
   if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
@@ -7375,7 +8707,7 @@ window.ffCurrentUserHasTasksManagePermission = ffCurrentUserHasTasksManagePermis
 function ffStaffHasTasksResetPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.tasks_reset === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.tasks_reset));
 }
 function ffCurrentUserHasTasksResetPermission() {
   if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
@@ -7406,7 +8738,7 @@ window.ffRefreshTasksPermissionControls = ffRefreshTasksPermissionControls;
 function ffStaffHasInboxViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.inbox_view === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.inbox_view));
 }
 
 function ffCurrentUserHasInboxViewPermission() {
@@ -7419,7 +8751,7 @@ window.ffCurrentUserHasInboxViewPermission = ffCurrentUserHasInboxViewPermission
 function ffStaffHasHistoryViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.history_view === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.history_view));
 }
 
 function ffCurrentUserHasHistoryViewPermission() {
@@ -7432,7 +8764,7 @@ window.ffCurrentUserHasHistoryViewPermission = ffCurrentUserHasHistoryViewPermis
 function ffStaffHasDashboardViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.dashboard_view === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.dashboard_view));
 }
 
 function ffCurrentUserHasDashboardViewPermission() {
@@ -7445,7 +8777,7 @@ window.ffCurrentUserHasDashboardViewPermission = ffCurrentUserHasDashboardViewPe
 function ffStaffHasHistoryExportPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.history_export === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.history_export));
 }
 function ffCurrentUserHasHistoryExportPermission() {
   if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
@@ -7457,7 +8789,7 @@ window.ffCurrentUserHasHistoryExportPermission = ffCurrentUserHasHistoryExportPe
 function ffStaffHasHistoryClearPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.history_clear === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.history_clear));
 }
 function ffCurrentUserHasHistoryClearPermission() {
   if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
@@ -7487,7 +8819,7 @@ window.ffApplyHistoryActionButtonsVisibility = ffApplyHistoryActionButtonsVisibi
 function ffStaffHasStaffViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.staff_view === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.staff_view));
 }
 
 function ffCurrentUserHasStaffViewPermission() {
@@ -7503,7 +8835,7 @@ function ffStaffHasQueueReorderPermission(staff) {
     return true;
   }
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.queue_reorder === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.queue_reorder));
 }
 
 function ffCurrentUserHasQueueReorderPermission() {
@@ -7522,7 +8854,7 @@ function ffStaffHasQueueResetPermission(staff) {
   const roleLc = String(staff.role || '').toLowerCase().trim();
   if (roleLc === 'owner' || roleLc === 'admin' || roleLc === 'manager' || staff.isAdmin === true || staff.isManager === true) return true;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.queue_reset === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.queue_reset));
 }
 
 function ffCurrentUserHasQueueResetPermission() {
@@ -7534,7 +8866,7 @@ function ffCurrentUserHasQueueResetPermission() {
 function ffStaffHasQueueManagePermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions;
-  return !!(p && typeof p === 'object' && p.queue_manage === true);
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.queue_manage));
 }
 
 function ffCurrentUserHasQueueManagePermission() {
@@ -7552,13 +8884,13 @@ function ffStaffHasPointsOwnPermission(staff) {
 function ffStaffHasPointsAllPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions || {};
-  return p.points_view_all === true || p.points_manage === true;
+  return ffStaffPermissionValueIsTrue(p.points_view_all) || ffStaffPermissionValueIsTrue(p.points_manage);
 }
 
 function ffStaffHasPointsManagePermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   const p = staff.permissions || {};
-  return p.points_manage === true;
+  return ffStaffPermissionValueIsTrue(p.points_manage);
 }
 
 function ffCurrentUserHasPointsAccess() {
@@ -7663,21 +8995,33 @@ function ffUpdateMainNavTabVisibility() {
   }
   const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
   const p = (staff && staff.permissions) || {};
-  const queueOk = typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess();
+  const loadState = typeof ffStaffPermissionLoadState === 'function' ? ffStaffPermissionLoadState() : 'ready';
+  // Treat staff_unresolved like loading for nav: without a resolved row, explicit permission
+  // checks hide Queue/Tickets/Tasks/Inbox while Chat/Media still show (tabUnlessExplicitOff when !staff).
+  const trustLoadingNav = loadState === 'staff_loading' || loadState === 'staff_unresolved';
+  const queueOk =
+    (typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess()) ||
+    trustLoadingNav;
   setNavElVisible(document.getElementById('queueBtn'), queueOk);
-  const ticketsOk = typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission();
+  const ticketsOk =
+    (typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission()) ||
+    trustLoadingNav;
   setNavElVisible(document.getElementById('ticketsBtn'), ticketsOk);
-  const tasksOk = typeof ffCurrentUserHasTasksViewPermission === 'function' && ffCurrentUserHasTasksViewPermission();
+  const tasksOk =
+    (typeof ffCurrentUserHasTasksViewPermission === 'function' && ffCurrentUserHasTasksViewPermission()) ||
+    trustLoadingNav;
   setNavElVisible(document.getElementById('tasksBtn'), tasksOk);
   function tabUnlessExplicitOff(key) {
     if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
     if (!staff) return true;
     return p[key] !== false;
   }
-  setNavElVisible(document.getElementById('chatBtn'), tabUnlessExplicitOff('chat_view'));
-  const inboxOk = typeof ffCurrentUserHasInboxViewPermission === 'function' && ffCurrentUserHasInboxViewPermission();
+  setNavElVisible(document.getElementById('chatBtn'), tabUnlessExplicitOff('chat_view') || trustLoadingNav);
+  const inboxOk =
+    (typeof ffCurrentUserHasInboxViewPermission === 'function' && ffCurrentUserHasInboxViewPermission()) ||
+    trustLoadingNav;
   setNavElVisible(document.getElementById('inboxBtn'), inboxOk);
-  setNavElVisible(document.getElementById('mediaBtn'), tabUnlessExplicitOff('media_view'));
+  setNavElVisible(document.getElementById('mediaBtn'), tabUnlessExplicitOff('media_view') || trustLoadingNav);
   setNavElVisible(document.getElementById('inventoryNavBtn'), tabUnlessExplicitOff('inventory_view'));
   let scheduleOk = true;
   if (ffCurrentUserSalonOwnerPermissionBypass()) {
@@ -7734,23 +9078,25 @@ function ffUpdateAppsPanelPermissionVisibility() {
 
   const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
   const p = (staff && staff.permissions) || {};
+  const appsLoadState = typeof ffStaffPermissionLoadState === 'function' ? ffStaffPermissionLoadState() : 'ready';
+  const trustLoadingApps = appsLoadState === 'staff_loading' || appsLoadState === 'staff_unresolved';
   function tabUnlessExplicitOff(key) {
     if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
     if (!staff) return true;
     return p[key] !== false;
   }
 
-  setAppsTileVisible('.apps-panel-item[data-app="queue"]', typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess());
-  setAppsTileVisible('.apps-panel-item[data-app="tasks"]', typeof ffCurrentUserHasTasksViewPermission === 'function' && ffCurrentUserHasTasksViewPermission());
-  setAppsTileVisible('.apps-panel-item[data-app="tickets"]', typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission());
-  setAppsTileVisible('.apps-panel-item[data-app="inbox"]', typeof ffCurrentUserHasInboxViewPermission === 'function' && ffCurrentUserHasInboxViewPermission());
-  setAppsTileVisible('.apps-panel-item[data-app="chat"]', tabUnlessExplicitOff('chat_view'));
-  setAppsTileVisible('.apps-panel-item[data-app="media"]', tabUnlessExplicitOff('media_view'));
+  setAppsTileVisible('.apps-panel-item[data-app="queue"]', (typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess()) || trustLoadingApps);
+  setAppsTileVisible('.apps-panel-item[data-app="tasks"]', (typeof ffCurrentUserHasTasksViewPermission === 'function' && ffCurrentUserHasTasksViewPermission()) || trustLoadingApps);
+  setAppsTileVisible('.apps-panel-item[data-app="tickets"]', (typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission()) || trustLoadingApps);
+  setAppsTileVisible('.apps-panel-item[data-app="inbox"]', (typeof ffCurrentUserHasInboxViewPermission === 'function' && ffCurrentUserHasInboxViewPermission()) || trustLoadingApps);
+  setAppsTileVisible('.apps-panel-item[data-app="chat"]', tabUnlessExplicitOff('chat_view') || trustLoadingApps);
+  setAppsTileVisible('.apps-panel-item[data-app="media"]', tabUnlessExplicitOff('media_view') || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="training"]', tabUnlessExplicitOff('training_view'));
   var pointsOk = typeof window.ffCurrentUserHasPointsAccess === 'function'
     ? window.ffCurrentUserHasPointsAccess()
     : tabUnlessExplicitOff('points_view');
-  setAppsTileVisible('.apps-panel-item[data-app="points"]', pointsOk);
+  setAppsTileVisible('.apps-panel-item[data-app="points"]', pointsOk || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="inventory"]', tabUnlessExplicitOff('inventory_view'));
 
   let scheduleOk = true;
@@ -7765,10 +9111,10 @@ function ffUpdateAppsPanelPermissionVisibility() {
   }
   setAppsTileVisible('.apps-panel-item[data-app="schedule"]', scheduleOk);
 
-  setAppsTileVisible('.apps-panel-item[data-app="dashboard"]', typeof ffCurrentUserHasDashboardViewPermission === 'function' && ffCurrentUserHasDashboardViewPermission());
+  setAppsTileVisible('.apps-panel-item[data-app="dashboard"]', (typeof ffCurrentUserHasDashboardViewPermission === 'function' && ffCurrentUserHasDashboardViewPermission()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="settings"]:not([data-staff])', tabUnlessExplicitOff('settings_view'));
-  setAppsTileVisible('.apps-panel-item[data-app="settings"][data-staff="true"]', typeof ffCurrentUserHasStaffViewPermission === 'function' && ffCurrentUserHasStaffViewPermission());
-  setAppsTileVisible('.apps-panel-item[data-app="history"]', typeof ffCurrentUserHasHistoryViewPermission === 'function' && ffCurrentUserHasHistoryViewPermission());
+  setAppsTileVisible('.apps-panel-item[data-app="settings"][data-staff="true"]', (typeof ffCurrentUserHasStaffViewPermission === 'function' && ffCurrentUserHasStaffViewPermission()) || trustLoadingApps);
+  setAppsTileVisible('.apps-panel-item[data-app="history"]', (typeof ffCurrentUserHasHistoryViewPermission === 'function' && ffCurrentUserHasHistoryViewPermission()) || trustLoadingApps);
   // Time Clock tile: PIN-based kiosk, so visible to staff-linked accounts
   // AND to admins/owners (the latter need access for the Manage view).
   (function () {
@@ -7833,6 +9179,7 @@ function ffApplyQueueViewGate() {
   const lockedView =
     typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission();
   const allowed = fullQueueView || joinOnlyPartial || lockedView;
+  const permLoadState = typeof ffStaffPermissionLoadState === 'function' ? ffStaffPermissionLoadState() : 'ready';
   try {
     window.__ff_queue_join_only_ui = !!(joinOnlyPartial && allowed && !lockedView);
     window.__ff_queue_locked_view = !!lockedView;
@@ -7878,11 +9225,96 @@ function ffApplyQueueViewGate() {
     } catch (e2) {}
     if (joinBar) joinBar.style.display = 'none';
     if (wrapContent) wrapContent.style.display = 'none';
-    if (blocked) blocked.style.display = 'block';
+    if (blocked) {
+      if (permLoadState === 'staff_loading') {
+        blocked.textContent =
+          'Syncing your team access… This usually takes a few seconds after you open the app. If this stays longer than about a minute, refresh the page or check your connection.';
+      } else if (permLoadState === 'staff_unresolved') {
+        blocked.textContent =
+          'This login is not linked to a staff profile in this salon, or the link does not match your account. Ask an administrator to verify your Fair Flow user is connected to the correct staff row and permissions.';
+      } else {
+        blocked.textContent =
+          'You don\'t have permission to open the queue screen here. Ask an administrator to enable "View queue", or use the salon queue kiosk / wall device (join-only mode).';
+      }
+      blocked.style.display = 'block';
+    }
     if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
   }
   if (typeof ffUpdateMainNavTabVisibility === 'function') ffUpdateMainNavTabVisibility();
 }
+
+/**
+ * Run in DevTools console on staging: ffDebugQueueAndStaffAccess()
+ * Prints why Queue / permissions look wrong (resolved staff row, queue_view, linkage conflicts).
+ */
+window.ffDebugQueueAndStaffAccess = function ffDebugQueueAndStaffAccess() {
+  var u = window.auth && window.auth.currentUser;
+  var staffList = [];
+  try {
+    if (typeof window.ffGetStaffStore === 'function') {
+      var st = window.ffGetStaffStore();
+      if (st && Array.isArray(st.staff)) staffList = st.staff;
+    }
+  } catch (e0) {}
+  if (!staffList.length) {
+    try {
+      var store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+      staffList = Array.isArray(store.staff) ? store.staff : [];
+    } catch (e1) {}
+  }
+  var row = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+  var conflict = u && row ? ffStaffRowAuthLinkageConflicts(row, u) : false;
+  var out = {
+    authUid: u ? u.uid : null,
+    authEmail: u && u.email ? u.email : null,
+    currentSalonId: typeof window.currentSalonId !== 'undefined' ? window.currentSalonId : null,
+    sessionRole: window.__ff_user_role || null,
+    authedStaffId: window.__ff_authedStaffId || null,
+    localStorageStaffId:
+      typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null,
+    staffStoreCount: staffList.length,
+    staffPermissionLoadState:
+      typeof ffStaffPermissionLoadState === 'function' ? ffStaffPermissionLoadState() : null,
+    resolvedStaffRow: row
+      ? {
+          id: row.id || row.staffId || null,
+          name: row.name || null,
+          permissions: row.permissions || null,
+          queue_view_raw: row.permissions ? row.permissions.queue_view : undefined,
+          queue_view_effective: row.permissions
+            ? !!ffStaffPermissionValueIsTrue(row.permissions.queue_view)
+            : false,
+          queue_join_effective: row.permissions
+            ? !!ffStaffPermissionValueIsTrue(row.permissions.queue_join)
+            : false,
+          queue_locked_view_effective: row.permissions
+            ? !!ffStaffPermissionValueIsTrue(row.permissions.queue_locked_view)
+            : false
+        }
+      : null,
+    linkageConflictWithAuth: !!conflict,
+    ownerBypass: typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' ? ffCurrentUserSalonOwnerPermissionBypass() : false,
+    hasQueueView:
+      typeof ffCurrentUserHasQueueViewPermission === 'function' ? ffCurrentUserHasQueueViewPermission() : null,
+    joinOnlyPartial:
+      typeof ffCurrentUserIsQueueJoinOnlyPartialAccess === 'function'
+        ? ffCurrentUserIsQueueJoinOnlyPartialAccess()
+        : null,
+    lockedQueueView:
+      typeof ffCurrentUserHasQueueLockedViewPermission === 'function'
+        ? ffCurrentUserHasQueueLockedViewPermission()
+        : null,
+    queueScreenAllowed:
+      typeof ffCurrentUserHasQueueScreenAccess === 'function' ? ffCurrentUserHasQueueScreenAccess() : null,
+    staffCallDiag:
+      typeof window.ffStaffCallDiagSnapshot === 'function' ? window.ffStaffCallDiagSnapshot() : null
+  };
+  console.log('[FairFlow] ffDebugQueueAndStaffAccess →', out);
+  return out;
+};
+try {
+  console.log('[FairFlow] ffDebugQueueAndStaffAccess ready — run: window.ffDebugQueueAndStaffAccess()');
+} catch (_) {}
 
 /** Queue first-paint guard: remove after staff-backed permission state is usable (or timeout). */
 function ffMarkUiReady() {
@@ -7915,15 +9347,14 @@ function ffMaybeQueueUiReadyAfterAuth() {
       if (gen !== window.__ffQueueGateGen) return;
       ffMarkUiReady();
     }, 1800);
-    document.addEventListener(
-      'ff-staff-cloud-updated',
-      function ffQueueGateOnStaffOnce() {
-        if (gen !== window.__ffQueueGateGen) return;
-        clearTimeout(t);
-        ffMarkUiReady();
-      },
-      { once: true }
-    );
+    function ffQueueGateOnStaff(ev) {
+      if (gen !== window.__ffQueueGateGen) return;
+      if (ev && ev.detail && ev.detail.provisional) return;
+      clearTimeout(t);
+      document.removeEventListener('ff-staff-cloud-updated', ffQueueGateOnStaff);
+      ffMarkUiReady();
+    }
+    document.addEventListener('ff-staff-cloud-updated', ffQueueGateOnStaff);
   } catch (e) {
     ffMarkUiReady();
   }
@@ -8070,6 +9501,7 @@ function ffSyncLegacyWorkersFromStaffStore(staffData, persistToSettingsStore) {
     console.warn('[ffSyncLegacyWorkersFromStaffStore] Failed to mirror ff_staff_v1 into settings.workers:', e);
   }
 }
+window.ffSyncLegacyWorkersFromStaffStore = ffSyncLegacyWorkersFromStaffStore;
 
 function ffNormalizeHexColor(color, fallback) {
   const raw = String(color || fallback || '').trim();
@@ -8674,9 +10106,24 @@ function ffQueueTechTypeDisplayLabel(typeId) {
 
 function ffHideQueueFilterBar() {
   const bar = document.getElementById('ffQueueFilterBar');
-  if (bar) bar.style.display = 'none';
+  if (bar) {
+    bar.style.display = 'none';
+    bar.classList.remove('ff-queue-filter-compact');
+  }
 }
 window.ffHideQueueFilterBar = ffHideQueueFilterBar;
+
+function ffQueueFilterBarUseMobileCompact(allChipsCount) {
+  try {
+    return (
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(max-width: 640px)').matches &&
+      allChipsCount > 1
+    );
+  } catch (_) {
+    return false;
+  }
+}
 
 function ffRenderQueueFilterChips() {
   const bar = document.getElementById('ffQueueFilterBar');
@@ -8704,31 +10151,80 @@ function ffRenderQueueFilterChips() {
     typeof ffCurrentUserIsQueueSharedStationJoin === 'function' && ffCurrentUserIsQueueSharedStationJoin();
   if (types.length === 0 && !sharedStation) {
     bar.style.display = 'none';
+    bar.classList.remove('ff-queue-filter-compact');
     return;
   }
   bar.style.display = 'flex';
   bar.innerHTML = '';
   const allChips = types.length === 0 ? ['all'] : ['all', ...types];
-  allChips.forEach(type => {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    const label = type === 'all' ? 'All' : ffQueueTechTypeDisplayLabel(type);
-    chip.textContent = label;
-    const isActive = window._ffQueueFilter === type;
-    chip.style.cssText = `padding:4px 12px;border-radius:999px;border:1px solid ${isActive ? '#7c3aed' : '#e5e7eb'};background:${isActive ? '#7c3aed' : '#fff'};color:${isActive ? '#fff' : '#374151'};font-size:12px;font-weight:500;cursor:${filterReadOnly ? 'not-allowed' : 'pointer'};transition:all 0.15s;white-space:nowrap;opacity:${filterReadOnly ? '0.9' : '1'};`;
-    if (!filterReadOnly) {
-      chip.addEventListener('click', function() {
-        window._ffQueueFilter = type;
+  if (!allChips.includes(window._ffQueueFilter)) {
+    window._ffQueueFilter = 'all';
+  }
+
+  const useCompact = ffQueueFilterBarUseMobileCompact(allChips.length);
+
+  if (useCompact) {
+    bar.classList.add('ff-queue-filter-compact');
+    const cur = window._ffQueueFilter || 'all';
+
+    const selId = 'ffQueueFilterSelect';
+    const sel = document.createElement('select');
+    sel.id = selId;
+    sel.className =
+      'ff-queue-filter-select' + (cur === 'all' ? ' ff-queue-filter-select--all' : '');
+    sel.setAttribute('aria-label', 'Filter queue by service provider type');
+    allChips.forEach(type => {
+      const opt = document.createElement('option');
+      opt.value = type;
+      opt.textContent = type === 'all' ? 'All' : ffQueueTechTypeDisplayLabel(type);
+      sel.appendChild(opt);
+    });
+    sel.value = cur;
+    if (filterReadOnly) {
+      sel.disabled = true;
+    } else {
+      sel.addEventListener('change', function () {
+        window._ffQueueFilter = sel.value;
         ffRenderQueueFilterChips();
         renderQueue();
         renderService();
       });
-    } else {
-      chip.disabled = true;
-      chip.setAttribute('aria-disabled', 'true');
     }
-    bar.appendChild(chip);
-  });
+    bar.appendChild(sel);
+  } else {
+    bar.classList.remove('ff-queue-filter-compact');
+    allChips.forEach(type => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      const label = type === 'all' ? 'All' : ffQueueTechTypeDisplayLabel(type);
+      chip.textContent = label;
+      const isActive = window._ffQueueFilter === type;
+      chip.style.cssText = `padding:4px 12px;border-radius:999px;border:1px solid ${isActive ? '#7c3aed' : '#e5e7eb'};background:${isActive ? '#7c3aed' : '#fff'};color:${isActive ? '#fff' : '#374151'};font-size:12px;font-weight:500;cursor:${filterReadOnly ? 'not-allowed' : 'pointer'};transition:all 0.15s;white-space:nowrap;opacity:${filterReadOnly ? '0.9' : '1'};`;
+      if (!filterReadOnly) {
+        chip.addEventListener('click', function () {
+          window._ffQueueFilter = type;
+          ffRenderQueueFilterChips();
+          renderQueue();
+          renderService();
+        });
+      } else {
+        chip.disabled = true;
+        chip.setAttribute('aria-disabled', 'true');
+      }
+      bar.appendChild(chip);
+    });
+  }
+
+  if (!window.__ffQueueFilterBarResizeWired) {
+    window.__ffQueueFilterBarResizeWired = true;
+    window.addEventListener('resize', function () {
+      clearTimeout(window.__ffQueueFilterBarResizeTimer);
+      window.__ffQueueFilterBarResizeTimer = setTimeout(function () {
+        if (typeof ffRenderQueueFilterChips === 'function') ffRenderQueueFilterChips();
+      }, 200);
+    });
+  }
+
   if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
 }
 // --- End Queue Filter ------------------------------------------------------
@@ -8739,6 +10235,273 @@ function ffQueueEmptyAvailableHtml() {
     '<div class="ff-queue-empty-title">No service providers</div>' +
     '<div class="ff-queue-empty-sub">They will appear here when they join the queue</div></div>';
 }
+
+/** Stable id for an Available row (survives renderQueue rebuild + 2s queue cloud poll). */
+function ffQueueAvailableRowStableKey(q) {
+  if (!q) return '';
+  return String(q.staffId || '') + '\u0001' + String(q.name || '').trim().toLowerCase();
+}
+
+/** Stable id for an In service row (survives renderService rebuild + queue cloud poll). */
+function ffServiceInServiceRowStableKey(s) {
+  if (!s) return '';
+  return String(s.staffId || '') + '\u0001' + String(s.name || '').trim().toLowerCase();
+}
+
+function ffQueueSyncAvailMoreBodyClass() {
+  if (typeof document === 'undefined') return;
+  var has = document.querySelector(
+    '.available-list li.item.ff-queue-row-more-open, .inservice-list li.item.ff-inservice-row-more-open'
+  );
+  if (has) {
+    document.body.classList.add('ff-queue-avail-more-open');
+  } else {
+    document.body.classList.remove('ff-queue-avail-more-open');
+  }
+}
+
+/** Preserve scroll on both queue cards across renderQueue/renderService (reduces mobile “jumps”). */
+function ffQueueReadBothListScrollTops() {
+  if (typeof document === 'undefined') return { avail: 0, insvc: 0 };
+  var a = document.querySelector('.available-list');
+  var i = document.querySelector('.inservice-list');
+  return {
+    avail: a ? a.scrollTop : 0,
+    insvc: i ? i.scrollTop : 0
+  };
+}
+
+function ffQueueApplyBothListScrollTops(pos) {
+  if (!pos || typeof document === 'undefined') return;
+  requestAnimationFrame(function () {
+    var a = document.querySelector('.available-list');
+    var i = document.querySelector('.inservice-list');
+    if (a && typeof pos.avail === 'number') a.scrollTop = pos.avail;
+    if (i && typeof pos.insvc === 'number') i.scrollTop = pos.insvc;
+    requestAnimationFrame(function () {
+      if (a && typeof pos.avail === 'number') a.scrollTop = pos.avail;
+      if (i && typeof pos.insvc === 'number') i.scrollTop = pos.insvc;
+    });
+  });
+}
+
+/**
+ * Mobile-only UX: wrap secondary queue actions (call, remove, hold) in a panel
+ * opened from a chevron next to START. Desktop uses display:contents (see CSS).
+ */
+function ffQueueMaybeSplitAvailableControls(ctrls, reorderMode) {
+  if (reorderMode || !ctrls || ctrls.querySelector('.ff-queue-start-split')) return;
+  var start = ctrls.querySelector('.start-btn');
+  if (!start) return;
+  var nodes = [];
+  while (ctrls.firstChild) {
+    nodes.push(ctrls.firstChild);
+    ctrls.removeChild(ctrls.firstChild);
+  }
+  var si = nodes.indexOf(start);
+  if (si < 0) {
+    nodes.forEach(function (n) {
+      ctrls.appendChild(n);
+    });
+    return;
+  }
+  nodes.splice(si, 1);
+  if (nodes.length === 0) {
+    ctrls.appendChild(start);
+    return;
+  }
+  var panel = document.createElement('div');
+  panel.className = 'ff-queue-more-panel';
+  nodes.forEach(function (n) {
+    panel.appendChild(n);
+  });
+  var split = document.createElement('div');
+  split.className = 'ff-queue-start-split';
+  var menuBtn = document.createElement('button');
+  menuBtn.type = 'button';
+  menuBtn.className = 'ff-queue-start-split-toggle';
+  menuBtn.setAttribute('aria-label', 'More row actions');
+  menuBtn.setAttribute('aria-expanded', 'false');
+  menuBtn.innerHTML = '<span aria-hidden="true">▼</span>';
+  split.appendChild(start);
+  split.appendChild(menuBtn);
+  ctrls.appendChild(panel);
+  ctrls.appendChild(split);
+}
+
+/** Mobile-only UX: FINISH + chevron; call (etc.) in dropdown — same pattern as Available START. */
+function ffServiceMaybeSplitInServiceControls(ctrls) {
+  if (!ctrls || ctrls.querySelector('.ff-inservice-finish-split')) return;
+  var fin = ctrls.querySelector('.finish-btn');
+  if (!fin) return;
+  var nodes = [];
+  while (ctrls.firstChild) {
+    nodes.push(ctrls.firstChild);
+    ctrls.removeChild(ctrls.firstChild);
+  }
+  var fi = nodes.indexOf(fin);
+  if (fi < 0) {
+    nodes.forEach(function (n) {
+      ctrls.appendChild(n);
+    });
+    return;
+  }
+  nodes.splice(fi, 1);
+  if (nodes.length === 0) {
+    ctrls.appendChild(fin);
+    return;
+  }
+  var panel = document.createElement('div');
+  panel.className = 'ff-inservice-more-panel';
+  nodes.forEach(function (n) {
+    panel.appendChild(n);
+  });
+  var split = document.createElement('div');
+  split.className = 'ff-inservice-finish-split';
+  var menuFin = document.createElement('button');
+  menuFin.type = 'button';
+  menuFin.className = 'ff-inservice-finish-split-toggle';
+  menuFin.setAttribute('aria-label', 'More in service actions');
+  menuFin.setAttribute('aria-expanded', 'false');
+  menuFin.innerHTML = '<span aria-hidden="true">▼</span>';
+  split.appendChild(fin);
+  split.appendChild(menuFin);
+  ctrls.appendChild(panel);
+  ctrls.appendChild(split);
+}
+
+(function ffQueueInitAvailableMobileSplitMenu() {
+  if (window.__ffQueueAvailMobileSplitBound) return;
+  window.__ffQueueAvailMobileSplitBound = true;
+  function ffQueueCloseAllMobileQueueDropdowns() {
+    document.querySelectorAll('.available-list li.item.ff-queue-row-more-open').forEach(function (li) {
+      li.classList.remove('ff-queue-row-more-open');
+      var t = li.querySelector('.ff-queue-start-split-toggle');
+      if (t) t.setAttribute('aria-expanded', 'false');
+    });
+    document.querySelectorAll('.inservice-list li.item.ff-inservice-row-more-open').forEach(function (li) {
+      li.classList.remove('ff-inservice-row-more-open');
+      var t = li.querySelector('.ff-inservice-finish-split-toggle');
+      if (t) t.setAttribute('aria-expanded', 'false');
+    });
+    try {
+      delete window.__ffQueueAvailMoreOpenKey;
+    } catch (eClose) {
+      window.__ffQueueAvailMoreOpenKey = '';
+    }
+    try {
+      delete window.__ffInServiceMoreOpenKey;
+    } catch (eClose2) {
+      window.__ffInServiceMoreOpenKey = '';
+    }
+    if (typeof ffQueueSyncAvailMoreBodyClass === 'function') ffQueueSyncAvailMoreBodyClass();
+  }
+
+  window.ffQueueCloseAllMobileQueueDropdowns = ffQueueCloseAllMobileQueueDropdowns;
+
+  document.addEventListener(
+    'click',
+    function (e) {
+      var mq = window.matchMedia('(max-width: 640px)');
+      if (!mq.matches) return;
+      var toggleIn = e.target.closest && e.target.closest('.ff-inservice-finish-split-toggle');
+      if (toggleIn) {
+        e.preventDefault();
+        e.stopPropagation();
+        var liIn = toggleIn.closest('li.item');
+        if (!liIn || !liIn.closest('.inservice-list')) return;
+        document.querySelectorAll('.available-list li.item.ff-queue-row-more-open').forEach(function (x) {
+          x.classList.remove('ff-queue-row-more-open');
+          var t2 = x.querySelector('.ff-queue-start-split-toggle');
+          if (t2) t2.setAttribute('aria-expanded', 'false');
+        });
+        try {
+          delete window.__ffQueueAvailMoreOpenKey;
+        } catch (eIn1) {}
+        var openIn = !liIn.classList.contains('ff-inservice-row-more-open');
+        document.querySelectorAll('.inservice-list li.item.ff-inservice-row-more-open').forEach(function (x) {
+          if (x !== liIn) {
+            x.classList.remove('ff-inservice-row-more-open');
+            var t2 = x.querySelector('.ff-inservice-finish-split-toggle');
+            if (t2) t2.setAttribute('aria-expanded', 'false');
+          }
+        });
+        liIn.classList.toggle('ff-inservice-row-more-open', openIn);
+        toggleIn.setAttribute('aria-expanded', openIn ? 'true' : 'false');
+        if (openIn) {
+          window.__ffInServiceMoreOpenKey = liIn.getAttribute('data-ff-service-row-key') || '';
+        } else {
+          var rowKin = liIn.getAttribute('data-ff-service-row-key');
+          if (rowKin && window.__ffInServiceMoreOpenKey === rowKin) {
+            try {
+              delete window.__ffInServiceMoreOpenKey;
+            } catch (eIn2) {
+              window.__ffInServiceMoreOpenKey = '';
+            }
+          }
+        }
+        if (typeof ffQueueSyncAvailMoreBodyClass === 'function') ffQueueSyncAvailMoreBodyClass();
+        return;
+      }
+      var toggle = e.target.closest && e.target.closest('.ff-queue-start-split-toggle');
+      if (toggle) {
+        e.preventDefault();
+        e.stopPropagation();
+        var li = toggle.closest('li.item');
+        if (!li || !li.closest('.available-list')) return;
+        document.querySelectorAll('.inservice-list li.item.ff-inservice-row-more-open').forEach(function (x) {
+          x.classList.remove('ff-inservice-row-more-open');
+          var t2 = x.querySelector('.ff-inservice-finish-split-toggle');
+          if (t2) t2.setAttribute('aria-expanded', 'false');
+        });
+        try {
+          delete window.__ffInServiceMoreOpenKey;
+        } catch (eAv1) {}
+        var open = !li.classList.contains('ff-queue-row-more-open');
+        document.querySelectorAll('.available-list li.item.ff-queue-row-more-open').forEach(function (x) {
+          if (x !== li) {
+            x.classList.remove('ff-queue-row-more-open');
+            var t2 = x.querySelector('.ff-queue-start-split-toggle');
+            if (t2) t2.setAttribute('aria-expanded', 'false');
+          }
+        });
+        li.classList.toggle('ff-queue-row-more-open', open);
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) {
+          window.__ffQueueAvailMoreOpenKey = li.getAttribute('data-ff-queue-row-key') || '';
+        } else {
+          var rowK = li.getAttribute('data-ff-queue-row-key');
+          if (rowK && window.__ffQueueAvailMoreOpenKey === rowK) {
+            try {
+              delete window.__ffQueueAvailMoreOpenKey;
+            } catch (e3) {
+              window.__ffQueueAvailMoreOpenKey = '';
+            }
+          }
+        }
+        if (typeof ffQueueSyncAvailMoreBodyClass === 'function') ffQueueSyncAvailMoreBodyClass();
+        return;
+      }
+      if (
+        e.target.closest('.ff-queue-more-panel') ||
+        e.target.closest('.ff-queue-start-split') ||
+        e.target.closest('.ff-inservice-more-panel') ||
+        e.target.closest('.ff-inservice-finish-split')
+      ) {
+        return;
+      }
+      ffQueueCloseAllMobileQueueDropdowns();
+    },
+    true
+  );
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (!window.matchMedia('(max-width: 640px)').matches) return;
+    ffQueueCloseAllMobileQueueDropdowns();
+  });
+})();
+
 function ffQueueEmptyInServiceHtml() {
   return '<div class="ff-queue-empty-inner"><div class="ff-queue-empty-icon" aria-hidden="true">' +
     '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg></div>' +
@@ -8762,19 +10525,30 @@ function ffTasksEmptyPendingHtml() {
 
 function renderQueue(){
 
+  var _ffQListScroll = typeof ffQueueReadBothListScrollTops === 'function' ? ffQueueReadBothListScrollTops() : null;
   queueList.innerHTML="";
 
   if (!ffCurrentUserHasQueueScreenAccess()) {
+    try {
+      delete window.__ffQueueAvailMoreOpenKey;
+    } catch (eEarly) {}
+    if (typeof ffQueueSyncAvailMoreBodyClass === 'function') ffQueueSyncAvailMoreBodyClass();
+    if (typeof ffQueueApplyBothListScrollTops === 'function') ffQueueApplyBothListScrollTops(_ffQListScroll);
     return;
   }
 
   const filteredQueue = filterQueue(queue, window._ffQueueFilter || 'all');
   if (filteredQueue.length === 0) {
+    try {
+      delete window.__ffQueueAvailMoreOpenKey;
+    } catch (eEmpty) {}
     const empty = document.createElement("li");
     empty.className = "ff-queue-empty-state";
     empty.innerHTML = ffQueueEmptyAvailableHtml();
     queueList.appendChild(empty);
+    if (typeof ffQueueSyncAvailMoreBodyClass === 'function') ffQueueSyncAvailMoreBodyClass();
     if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
+    if (typeof ffQueueApplyBothListScrollTops === 'function') ffQueueApplyBothListScrollTops(_ffQListScroll);
     return;
   }
   const queueLocked =
@@ -8791,6 +10565,7 @@ function renderQueue(){
     }
 
     const li=document.createElement("li"); li.className="item"; li.setAttribute("held",q.held?"true":"false");
+    li.setAttribute('data-ff-queue-row-key', ffQueueAvailableRowStableKey(q));
 
     const badge=document.createElement("div"); badge.className="badge"; badge.textContent=i+1;
 
@@ -8825,7 +10600,7 @@ function renderQueue(){
     queuePill.style.textOverflow = "ellipsis";
     nm.appendChild(queuePill);
 
-    const ctrls=document.createElement("div"); ctrls.className="controls";
+    const ctrls=document.createElement("div"); ctrls.className="controls ff-queue-avail-ctrls";
     ctrls.style.gap = "10px";
 
     const start=btn("START","start-btn");
@@ -9022,11 +10797,31 @@ function renderQueue(){
       ctrls.append(up, down, del);
     }
 
+    ffQueueMaybeSplitAvailableControls(ctrls, reorderMode);
+    var rowKeyStable = ffQueueAvailableRowStableKey(q);
+    if (window.__ffQueueAvailMoreOpenKey && window.__ffQueueAvailMoreOpenKey === rowKeyStable) {
+      li.classList.add('ff-queue-row-more-open');
+      var _togRestore = ctrls.querySelector('.ff-queue-start-split-toggle');
+      if (_togRestore) _togRestore.setAttribute('aria-expanded', 'true');
+    }
+
     li.append(badge,nm,ctrls); queueList.appendChild(li);
 
   });
 
+  if (typeof ffQueueSyncAvailMoreBodyClass === 'function') ffQueueSyncAvailMoreBodyClass();
+  if (
+    window.__ffQueueAvailMoreOpenKey &&
+    !document.querySelector('.available-list li.item.ff-queue-row-more-open')
+  ) {
+    try {
+      delete window.__ffQueueAvailMoreOpenKey;
+    } catch (eEnd) {}
+  }
+
   if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
+
+  if (typeof ffQueueApplyBothListScrollTops === 'function') ffQueueApplyBothListScrollTops(_ffQListScroll);
 
 }
 
@@ -9111,19 +10906,30 @@ async function selfRemoveFromQueue(i) {
 
 function renderService(){
 
+  var _ffSvcListScroll = typeof ffQueueReadBothListScrollTops === 'function' ? ffQueueReadBothListScrollTops() : null;
   serviceList.innerHTML="";
 
   if (!ffCurrentUserHasQueueScreenAccess()) {
+    try {
+      delete window.__ffInServiceMoreOpenKey;
+    } catch (eSvcEarly) {}
+    if (typeof ffQueueSyncAvailMoreBodyClass === 'function') ffQueueSyncAvailMoreBodyClass();
+    if (typeof ffQueueApplyBothListScrollTops === 'function') ffQueueApplyBothListScrollTops(_ffSvcListScroll);
     return;
   }
 
   const filteredService = filterQueue(service, window._ffQueueFilter || 'all');
   if (filteredService.length === 0) {
+    try {
+      delete window.__ffInServiceMoreOpenKey;
+    } catch (eSvcEmpty) {}
     const empty = document.createElement("li");
     empty.className = "ff-queue-empty-state";
     empty.innerHTML = ffQueueEmptyInServiceHtml();
     serviceList.appendChild(empty);
+    if (typeof ffQueueSyncAvailMoreBodyClass === 'function') ffQueueSyncAvailMoreBodyClass();
     if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
+    if (typeof ffQueueApplyBothListScrollTops === 'function') ffQueueApplyBothListScrollTops(_ffSvcListScroll);
     return;
   }
   const queueLockedSvc =
@@ -9140,6 +10946,7 @@ function renderService(){
     }
 
     const li=document.createElement("li"); li.className="item";
+    li.setAttribute('data-ff-service-row-key', ffServiceInServiceRowStableKey(s));
 
     const badge=document.createElement("div"); badge.className="badge"; badge.textContent="-";
 
@@ -9175,11 +10982,9 @@ function renderService(){
 
     const fin=btn("FINISH","finish-btn"); fin.onclick=() =>guardFinish(s.name, ()=>finish(si));
     const canViewServiceRowControls = canViewQueueRowActionControls(s);
-    const ctrls=document.createElement("div"); ctrls.className="controls";
+    const ctrls=document.createElement("div"); ctrls.className="controls ff-inservice-ctrls";
     ctrls.style.gap = "10px";
 
-    // A row that is already in the local IN SERVICE list should show the phone immediately,
-    // even before the async presence write round-trips through Firestore.
     if (canManageCalls && presenceMeta.staffId && !queueLockedSvc) {
       const callWrap = document.createElement("div");
       callWrap.style.cssText = "display:flex;align-items:center;gap:4px;white-space:nowrap;";
@@ -9245,21 +11050,37 @@ function renderService(){
       if (svcTip) callStatus.setAttribute("title", svcTip);
       callWrap.append(callBtn, callStatus);
       ctrls.append(callWrap);
-      if (canViewServiceRowControls) {
-        ctrls.append(fin);
-      }
-      li.append(badge,nm,ctrls); serviceList.appendChild(li);
-      return;
     }
-
     if (canViewServiceRowControls) {
       ctrls.append(fin);
     }
+
+    ffServiceMaybeSplitInServiceControls(ctrls);
+
+    var svcKeyStable = ffServiceInServiceRowStableKey(s);
+    if (window.__ffInServiceMoreOpenKey && window.__ffInServiceMoreOpenKey === svcKeyStable) {
+      li.classList.add('ff-inservice-row-more-open');
+      var _svcTog = ctrls.querySelector('.ff-inservice-finish-split-toggle');
+      if (_svcTog) _svcTog.setAttribute('aria-expanded', 'true');
+    }
+
     li.append(badge,nm,ctrls); serviceList.appendChild(li);
 
   });
 
+  if (typeof ffQueueSyncAvailMoreBodyClass === 'function') ffQueueSyncAvailMoreBodyClass();
+  if (
+    window.__ffInServiceMoreOpenKey &&
+    !document.querySelector('.inservice-list li.item.ff-inservice-row-more-open')
+  ) {
+    try {
+      delete window.__ffInServiceMoreOpenKey;
+    } catch (eSvcEnd) {}
+  }
+
   if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
+
+  if (typeof ffQueueApplyBothListScrollTops === 'function') ffQueueApplyBothListScrollTops(_ffSvcListScroll);
 
 }
 
@@ -9748,12 +11569,20 @@ function join() {
 }
 
 function startSpecific(idx){
+  if (typeof window.ffQueueCloseAllMobileQueueDropdowns === 'function') {
+    window.ffQueueCloseAllMobileQueueDropdowns();
+  }
   if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
     ffQueueLockedViewToast();
     return;
   }
 
-  const [it]=queue.splice(idx,1); service.push({name:it.name, staffId: it.staffId || resolveStaffNameToId(it.name)});
+  const [it]=queue.splice(idx,1);
+  const moveName = String(it.name || '').trim();
+  service.push({
+    name: moveName || it.name,
+    staffId: it.staffId || resolveStaffNameToId(moveName || it.name)
+  });
 
   save(); renderQueue(); renderService();
 
@@ -9805,14 +11634,21 @@ function toggleHold(i){
 }
 
 function finish(i){
+  if (typeof window.ffQueueCloseAllMobileQueueDropdowns === 'function') {
+    window.ffQueueCloseAllMobileQueueDropdowns();
+  }
   if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
     ffQueueLockedViewToast();
     return;
   }
 
   const [it]=service.splice(i,1);
-
-  queue.push({name:it.name, staffId: it.staffId || resolveStaffNameToId(it.name), held:false}); // back to end
+  const backName = String(it.name || '').trim();
+  queue.push({
+    name: backName || it.name,
+    staffId: it.staffId || resolveStaffNameToId(backName || it.name),
+    held: false
+  }); // back to end
 
   save(); renderQueue(); renderService();
 
@@ -10772,6 +12608,12 @@ function goToQueue() {
   if (ownerView) {
     ownerView.style.display = '';
   }
+  // Mobile: open Queue with filter "All" so compact dropdown + lists stay in sync
+  try {
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches) {
+      window._ffQueueFilter = 'all';
+    }
+  } catch (e) {}
   ffApplyQueueViewGate();
 
   // Show/hide Queue management controls (ffApplyQueueViewGate already calls this when allowed; repeat for consistency)
@@ -10813,9 +12655,13 @@ function goToQueue() {
 
   // Show queue filter bar
   if (typeof ffRenderQueueFilterChips === 'function') ffRenderQueueFilterChips();
+  if (typeof renderQueue === 'function') renderQueue();
+  if (typeof renderService === 'function') renderService();
 
-  // If queue chrome stayed invisible (body never got ff-queue-ui-visible after auth/staff gate), force first-paint unlock when user explicitly opens Queue.
   try {
+    if (typeof window.ffSyncShellHeaderInset === 'function') {
+      window.ffSyncShellHeaderInset();
+    }
     if (typeof ffMarkUiReady === 'function' && document.body && !document.body.classList.contains('ff-logged-out')) {
       if (!document.body.classList.contains('ff-queue-ui-visible')) {
         ffMarkUiReady();
@@ -10983,6 +12829,10 @@ async function waitForTrainingSalonId(maxWaitMs = 10000) {
 }
 
 function resolveCurrentTrainingStaffRecord() {
+  const authUser =
+    (window.auth && window.auth.currentUser) ||
+    (window.ffAuth && window.ffAuth.currentUser) ||
+    null;
   const directStaffId = String(
     window.__ff_authedStaffId ||
     (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null) ||
@@ -11006,9 +12856,25 @@ function resolveCurrentTrainingStaffRecord() {
     const staffStore = window.ffGetStaffStore();
     const staffList = Array.isArray(staffStore?.staff) ? staffStore.staff : [];
     let currentStaff = null;
+
     if (directStaffId) {
-      currentStaff = staffList.find((staff) => String(staff?.id || staff?.staffId || '').trim() === directStaffId) || null;
-      return currentStaff || { id: directStaffId, name: directName || '', email: authEmail || '' };
+      const byId = staffList.find((staff) => String(staff?.id || staff?.staffId || '').trim() === directStaffId) || null;
+      const linkageConflict =
+        byId &&
+        authUser &&
+        typeof ffStaffRowAuthLinkageConflicts === 'function' &&
+        ffStaffRowAuthLinkageConflicts(byId, authUser);
+      if (byId && !linkageConflict) {
+        return byId;
+      }
+      // Stale ff_authedStaffId_v1, wrong row, or id not yet in store — resolve by Auth below (avoids staffNotifications permission-denied).
+    }
+
+    if (authUser && typeof ffStaffRowMatchesAuthUid === 'function') {
+      const uid = String(authUser.uid || '').trim();
+      if (uid) {
+        currentStaff = staffList.find((s) => s != null && ffStaffRowMatchesAuthUid(s, uid)) || null;
+      }
     }
     if (!currentStaff && authEmail) {
       currentStaff = staffList.find((staff) => String(staff?.email || '').trim().toLowerCase() === authEmail) || null;
@@ -11017,14 +12883,23 @@ function resolveCurrentTrainingStaffRecord() {
       const normalizedName = directName.toLowerCase();
       currentStaff = staffList.find((staff) => String(staff?.name || staff?.fullName || '').trim().toLowerCase() === normalizedName) || null;
     }
-    if (currentStaff?.id && currentStaff.id !== directStaffId) {
-      window.__ff_authedStaffId = currentStaff.id;
-      try { localStorage.setItem('ff_authedStaffId_v1', currentStaff.id); } catch (_) {}
+    if (currentStaff?.id) {
+      if (typeof ffSyncAuthedStaffIdFromRow === 'function') {
+        ffSyncAuthedStaffIdFromRow(currentStaff);
+      } else {
+        window.__ff_authedStaffId = currentStaff.id;
+        try {
+          localStorage.setItem('ff_authedStaffId_v1', currentStaff.id);
+        } catch (_) {}
+      }
     }
     if (currentStaff?.name && !window.__ff_authedStaffName) {
       window.__ff_authedStaffName = currentStaff.name;
     }
-    return currentStaff || (directStaffId ? { id: directStaffId, name: directName || '', email: authEmail || '' } : null);
+    if (currentStaff) return currentStaff;
+
+    if (directStaffId) return { id: directStaffId, name: directName || '', email: authEmail || '' };
+    return null;
   } catch (err) {
     console.warn('[Training] Failed resolving current staff record', err);
     return directStaffId ? { id: directStaffId, name: directName || '', email: authEmail || '' } : null;
@@ -11471,16 +13346,32 @@ async function ensureTrainingItemsSubscription() {
 
 async function ensureTrainingNotificationsSubscription() {
   const salonId = await waitForTrainingSalonId();
-  const staffId = getCurrentTrainingStaffId();
   if (!salonId) {
     console.warn('[Training] Notifications subscription skipped: salonId not ready');
     return;
   }
-  const subKey = `${salonId}__${staffId}`;
+  const staffId = String(getCurrentTrainingStaffId() || '').trim();
   if (!staffId) {
     console.warn('[Training] Notifications subscription skipped: staffId not ready');
     return;
   }
+  /* Avoid permission-denied when ff_authedStaffId exists before ff_staff_v1 sync (rules need a row linked to Auth). */
+  const authUser =
+    (window.auth && window.auth.currentUser) ||
+    (window.ffAuth && window.ffAuth.currentUser) ||
+    null;
+  if (authUser && typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function') {
+    const row = ffResolveCurrentStaffRowFromFfStaffV1();
+    const resolvedId = String((row && (row.id || row.staffId)) || '').trim();
+    if (!resolvedId || resolvedId !== staffId) {
+      console.warn('[Training] Notifications subscription deferred: staff row not aligned with session yet', {
+        staffId,
+        resolvedStaffId: resolvedId || null,
+      });
+      return;
+    }
+  }
+  const subKey = `${salonId}__${staffId}`;
   if (trainingNotificationsSubKey === subKey && typeof trainingNotificationsUnsub === 'function') return;
   stopTrainingNotificationsSubscription();
   const db = getTrainingDb();
@@ -11531,7 +13422,23 @@ async function ensureTrainingNotificationsSubscription() {
       });
     },
     (err) => {
-      console.error('[Training] staffNotifications snapshot error', err);
+      const hint =
+        typeof window.ffDebugQueueAndStaffAccess === 'function'
+          ? ' Run ffDebugQueueAndStaffAccess() in the console and share the output.'
+          : '';
+      /* Allow retry after staff sync; otherwise subKey blocks ff-staff-cloud-updated re-subscribe. */
+      try {
+        trainingNotificationsSubKey = '';
+        if (typeof trainingNotificationsUnsub === 'function') trainingNotificationsUnsub();
+      } catch (_) {}
+      trainingNotificationsUnsub = null;
+      console.error('[Training] staffNotifications snapshot error', {
+        code: err && err.code,
+        message: err && err.message,
+        salonId,
+        forStaffId: staffId,
+        hint
+      }, err);
     }
   );
 }
@@ -21701,6 +23608,12 @@ function setTasksTab(tabName) {
         tab.style.fontWeight = '500';
       }
     });
+
+    var tasksTabMob = document.getElementById('tasksTabSelectMobile');
+    if (tasksTabMob) {
+      var tl = (tabName || 'opening').toLowerCase();
+      if (tasksTabMob.value !== tl) tasksTabMob.value = tl;
+    }
     
     // Always update the active tab BEFORE rendering (single source of truth)
     window.currentTasksTab = tabName.toLowerCase();
@@ -21994,6 +23907,7 @@ function getCurrentTasksTab() {
 
 function setSettingsModalTab(tabName, options) {
   try {
+    tabName = String(tabName || 'opening').toLowerCase();
     const tabs = document.querySelectorAll('.tasks-settings-tab');
     
     // Update tab styles
@@ -22010,9 +23924,14 @@ function setSettingsModalTab(tabName, options) {
         tab.style.fontWeight = '500';
       }
     });
+
+    var settingsTabMob = document.getElementById('tasksSettingsTabSelectMobile');
+    if (settingsTabMob && settingsTabMob.value !== tabName) {
+      settingsTabMob.value = tabName;
+    }
     
     // Update single source of truth for current tab
-    window.currentTasksTab = tabName.toLowerCase();
+    window.currentTasksTab = tabName;
     
     // Clear editing state when switching tabs
     editingTaskId = null;
@@ -24207,7 +26126,7 @@ function renderTasksList(tab, opts) {
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 ${infoButtonHtml}
-                <button type="button" class="task-return-arrow" data-task-id="${keyId || ''}"${useDis}>-</button>
+                <button type="button" class="task-return-arrow" data-task-id="${keyId || ''}" title="Return task" aria-label="Return task"${useDis}>↺</button>
                 <button type="button" class="task-done-btn" data-task-id="${keyId || ''}"${useDis}>MARK DONE</button>
               </div>
             </div>
@@ -24223,15 +26142,18 @@ function renderTasksList(tab, opts) {
         document.querySelectorAll(".task-return-arrow").forEach(btn => {
           btn.style.background = 'none';
           btn.style.border = 'none';
-          btn.style.color = '#d0d0d0';
-          btn.style.fontSize = '16px';
+          btn.style.color = '#6b7280';
+          btn.style.fontSize = '18px';
+          btn.style.lineHeight = '1';
+          btn.style.width = '24px';
+          btn.style.height = '24px';
           btn.style.padding = '0';
           btn.style.cursor = 'pointer';
           btn.addEventListener('mouseenter', () => {
-            btn.style.color = '#888';
+            btn.style.color = '#374151';
           });
           btn.addEventListener('mouseleave', () => {
-            btn.style.color = '#d0d0d0';
+            btn.style.color = '#6b7280';
           });
           btn.addEventListener("click", async (e) => {
             e.preventDefault();
@@ -24698,8 +26620,16 @@ function addTaskToDraft() {
       saveTasksToStorage();
     }
     
-    // Re-render main screen list
-    renderTasksList(window.currentTasksTab);
+    // Re-render main screen list immediately, even while Settings modal is open.
+    // renderTasksList normally skips MY LIST when settings are open, which made
+    // newly added tasks appear only after the cloud refresh or a manual reload.
+    const wasSettingsOpen = isTasksSettingsOpen;
+    try {
+      isTasksSettingsOpen = false;
+      renderTasksList(tab, { force: true });
+    } finally {
+      isTasksSettingsOpen = wasSettingsOpen;
+    }
 
     // Close the add form after a successful add so it does not look like a
     // second blank task failed validation.
@@ -24790,6 +26720,46 @@ function handleTaskAssignToChange() {
       assignToTechnicianTypes.style.display = 'none';
     }
   }
+  if (typeof ffSyncTaskAssignToMobileToggleLabel === 'function') ffSyncTaskAssignToMobileToggleLabel();
+  if (typeof ffCloseTaskAssignToMobilePanelIfMobile === 'function') ffCloseTaskAssignToMobilePanelIfMobile();
+}
+
+function ffToggleTaskAssignToMobilePanel() {
+  try {
+    if (typeof window !== 'undefined' && window.innerWidth > 768) return;
+    var wrap = document.getElementById('taskAssignToRadiosWrap');
+    var btn = document.getElementById('taskAssignToMobileToggle');
+    var sec = document.getElementById('taskAssignToSection');
+    if (!wrap || !btn) return;
+    var open = !wrap.classList.contains('is-open');
+    wrap.classList.toggle('is-open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (sec) sec.classList.toggle('tasks-assign-panel-open', open);
+  } catch (e) {}
+}
+
+function ffSyncTaskAssignToMobileToggleLabel() {
+  try {
+    var btn = document.getElementById('taskAssignToMobileToggle');
+    if (!btn) return;
+    var labelEl = btn.querySelector('.tasks-assign-to-mobile-toggle-label');
+    var checked = document.querySelector('#tasksSettingsModal input[name="taskAssignTo"]:checked');
+    var map = { all: 'Everyone', manager: 'Managers Only', technicians: 'Service Provider' };
+    var v = checked ? String(checked.value) : 'all';
+    if (labelEl) labelEl.textContent = map[v] || map.all;
+  } catch (e) {}
+}
+
+function ffCloseTaskAssignToMobilePanelIfMobile() {
+  try {
+    if (typeof window !== 'undefined' && window.innerWidth > 768) return;
+    var wrap = document.getElementById('taskAssignToRadiosWrap');
+    var btn = document.getElementById('taskAssignToMobileToggle');
+    var sec = document.getElementById('taskAssignToSection');
+    if (wrap) wrap.classList.remove('is-open');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+    if (sec) sec.classList.remove('tasks-assign-panel-open');
+  } catch (e) {}
 }
 
 function cancelTasksModalForm() {
@@ -24820,6 +26790,7 @@ function cancelTasksModalForm() {
     if (toggleBtn) {
       toggleBtn.textContent = 'Add Task';
     }
+    if (typeof ffCloseTaskAssignToMobilePanelIfMobile === 'function') ffCloseTaskAssignToMobilePanelIfMobile();
   } catch (e) {
     console.error('[Tasks] Error canceling form:', e);
   }
@@ -25288,6 +27259,8 @@ function resetAddFormScheduleFields() {
   if (assignToAll) assignToAll.checked = true;
   const assignToTechnicianTypes = document.getElementById('taskAssignToTechnicianTypes');
   if (assignToTechnicianTypes) assignToTechnicianTypes.style.display = 'none';
+  if (typeof ffSyncTaskAssignToMobileToggleLabel === 'function') ffSyncTaskAssignToMobileToggleLabel();
+  if (typeof ffCloseTaskAssignToMobilePanelIfMobile === 'function') ffCloseTaskAssignToMobilePanelIfMobile();
 }
 
 function toggleTasksModalForm() {
@@ -25462,6 +27435,19 @@ function openTasksSettings(options) {
       });
       modal.__ffTasksTabsBound = true;
     }
+
+    if (!modal.__ffSettingsMobileSelectBound) {
+      var mobTabSel = document.getElementById('tasksSettingsTabSelectMobile');
+      if (mobTabSel) {
+        mobTabSel.addEventListener('change', function () {
+          var v = this.value;
+          ensureAdminThen(function () {
+            setSettingsModalTab(v);
+          });
+        });
+      }
+      modal.__ffSettingsMobileSelectBound = true;
+    }
     
     // Initialize alert window settings with defaults if missing
     let alertWindows = {};
@@ -25556,6 +27542,8 @@ function openTasksSettings(options) {
     if (toggleBtn) {
       toggleBtn.textContent = 'Add Task';
     }
+    if (typeof ffCloseTaskAssignToMobilePanelIfMobile === 'function') ffCloseTaskAssignToMobilePanelIfMobile();
+    if (typeof ffSyncTaskAssignToMobileToggleLabel === 'function') ffSyncTaskAssignToMobileToggleLabel();
     
     // Setup "All week" checkbox toggle for weekly days
     const allWeekCb = document.getElementById('taskAddWeeklyAllWeek');
@@ -29720,13 +31708,10 @@ function initializeAppsPanel() {
         const uid = user && user.uid ? String(user.uid).trim() : '';
         const email = user && user.email ? String(user.email).toLowerCase().trim() : '';
         if (!staff && uid) {
-          staff = staffList.find(function (s) {
-            return s && (
-              String(s.uid || '').trim() === uid ||
-              String(s.firebaseUid || '').trim() === uid ||
-              String(s.userUid || '').trim() === uid
-            );
-          }) || null;
+          staff =
+            staffList.find(function (s) {
+              return s && typeof ffStaffRowMatchesAuthUid === 'function' && ffStaffRowMatchesAuthUid(s, uid);
+            }) || null;
         }
         if (!staff && email) {
           staff = staffList.find(function (s) {
@@ -29735,25 +31720,31 @@ function initializeAppsPanel() {
         }
         if (!staff) {
           const staffId = String(window.__ff_authedStaffId || (function () { try { return localStorage.getItem('ff_authedStaffId_v1'); } catch (e) { return ''; } })() || '').trim();
-          staff = staffList.find(function (s) { return s && String(s.id) === staffId; }) || null;
+          staff =
+            staffList.find(function (s) {
+              return s && String(s.id || s.staffId || '').trim() === staffId;
+            }) || null;
         }
       } catch (e) { /* ignore */ }
     }
     var p = (staff && staff.permissions) ? staff.permissions : {};
-    var anySchedule = p.schedule_edit === true || p.schedule_view_all === true || p.schedule_view_own === true;
+    var anySchedule =
+      ffStaffPermissionValueIsTrue(p.schedule_edit) ||
+      ffStaffPermissionValueIsTrue(p.schedule_view_all) ||
+      ffStaffPermissionValueIsTrue(p.schedule_view_own);
     if (!anySchedule) {
       if (scheduleAccountOverrideFullAccess()) {
         return { canEdit: true, viewAll: true, viewOwnOnly: false, readOnly: false, noAccess: false };
       }
       return { canEdit: false, viewAll: false, viewOwnOnly: false, readOnly: true, noAccess: true };
     }
-    if (p.schedule_edit === true) {
+    if (ffStaffPermissionValueIsTrue(p.schedule_edit)) {
       return { canEdit: true, viewAll: true, viewOwnOnly: false, readOnly: false, noAccess: false };
     }
-    if (p.schedule_view_all === true) {
+    if (ffStaffPermissionValueIsTrue(p.schedule_view_all)) {
       return { canEdit: false, viewAll: true, viewOwnOnly: false, readOnly: true, noAccess: false };
     }
-    if (p.schedule_view_own === true) {
+    if (ffStaffPermissionValueIsTrue(p.schedule_view_own)) {
       return { canEdit: false, viewAll: false, viewOwnOnly: true, readOnly: true, noAccess: false };
     }
     return { canEdit: false, viewAll: false, viewOwnOnly: false, readOnly: true, noAccess: true };
@@ -29939,7 +31930,7 @@ function initializeAppsPanel() {
     function ffPermRuleParentIsOn(rule, perms) {
       if (!rule) return true;
       if (rule.parentMode === 'notFalse') return perms[rule.parentKey] !== false;
-      return perms[rule.parentKey] === true;
+      return ffStaffPermissionValueIsTrue(perms[rule.parentKey]);
     }
 
     function ffPermRuleForGroupTitle(title) {
@@ -29981,10 +31972,10 @@ function initializeAppsPanel() {
       if (changedKey === 'points_view_own' && changedValue === true) {
         perms.points_view_own = true;
       }
-      if (perms.points_manage === true) {
+      if (ffStaffPermissionValueIsTrue(perms.points_manage)) {
         perms.points_view_own = true;
         perms.points_view_all = true;
-      } else if (perms.points_view_all === true) {
+      } else if (ffStaffPermissionValueIsTrue(perms.points_view_all)) {
         perms.points_view_own = true;
       } else if (perms.points_view_own === false) {
         perms.points_view_all = false;
@@ -30290,7 +32281,10 @@ function initializeAppsPanel() {
         // `value` reflects the RAW stored flag (non-inverted). All cascade
         // guards below operate on this raw value. We flip to the displayed
         // value only at the very end, if perm.inverted === true.
-        var value = typeof perm.getValue === 'function' ? perm.getValue(staff) : permissions[perm.key] === true;
+        var value =
+          typeof perm.getValue === 'function'
+            ? perm.getValue(staff)
+            : ffStaffPermissionValueIsTrue(permissions[perm.key]);
         var rowOpts = {};
         if (tabRule && tabRule.childKeys.indexOf(perm.key) !== -1) {
           if (!ffPermRuleParentIsOn(tabRule, permissions)) {
@@ -30299,7 +32293,7 @@ function initializeAppsPanel() {
           }
         }
         if (group.title === 'Queue' && perm.key === 'queue_bypass_location') {
-          if (permissions.queue_join !== true) {
+          if (!ffStaffPermissionValueIsTrue(permissions.queue_join)) {
             value = false;
             rowOpts.disabled = true;
           }
@@ -30377,7 +32371,7 @@ function initializeAppsPanel() {
         // default (false = "enforce location") shows as ON, so we can't
         // blindly set checked=false. Helper computes the correct snap-back.
         function __snapbackUiChecked(rawStored) {
-          return isInverted ? !(rawStored === true) : (rawStored === true);
+          return isInverted ? !ffStaffPermissionValueIsTrue(rawStored) : ffStaffPermissionValueIsTrue(rawStored);
         }
 
         var childRuleForKey = null;
@@ -30392,7 +32386,7 @@ function initializeAppsPanel() {
           return;
         }
 
-        if (permissionKey === 'queue_bypass_location' && permsRef.queue_join !== true) {
+        if (permissionKey === 'queue_bypass_location' && !ffStaffPermissionValueIsTrue(permsRef.queue_join)) {
           checkbox.checked = __snapbackUiChecked(permsRef[permissionKey]);
           return;
         }
@@ -32351,6 +34345,119 @@ function initializeAppsPanel() {
     if (role === 'admin') return ffFlatPermissionsFromDefaultAdmin();
     return {};
   }
+
+  function normalizeStaffEmailForMerge(email) {
+    return String(email || '').trim().toLowerCase();
+  }
+
+  function findExistingStaffByEmail(normalizedEmail, currentSalonIdOrAccountId) {
+    const emailKey = normalizeStaffEmailForMerge(normalizedEmail);
+    console.log('[StaffMerge] checking email', { email: emailKey, accountId: currentSalonIdOrAccountId || null });
+    if (!emailKey) return null;
+
+    const staffStore = ffGetStaffStore();
+    const staffList = Array.isArray(staffStore.staff) ? staffStore.staff : [];
+    const authUser =
+      (window.auth && window.auth.currentUser) ||
+      (window.ffAuth && window.ffAuth.currentUser) ||
+      (window.__ffAuth && window.__ffAuth.currentUser) ||
+      null;
+    const currentUid = authUser && authUser.uid ? String(authUser.uid).trim() : '';
+    const currentEmail = normalizeStaffEmailForMerge(authUser && authUser.email);
+    const activeStaffId = String(
+      window.__ff_authedStaffId ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : '') ||
+      ''
+    ).trim();
+
+    const match = staffList.find(function(staff) {
+      if (!staff || typeof staff !== 'object') return false;
+      const staffEmail = normalizeStaffEmailForMerge(staff.email);
+      const staffEmailLower = normalizeStaffEmailForMerge(staff.emailLower);
+      if ((staffEmail && staffEmail === emailKey) || (staffEmailLower && staffEmailLower === emailKey)) {
+        return true;
+      }
+
+      const linkedIds = [
+        staff.userId,
+        staff.uid,
+        staff.authUid,
+        staff.memberId,
+        staff.firebaseUid,
+        staff.firebaseAuthUid
+      ].map(function(value) { return value == null ? '' : String(value).trim(); }).filter(Boolean);
+
+      if (linkedIds.some(function(value) { return normalizeStaffEmailForMerge(value) === emailKey; })) {
+        return true;
+      }
+
+      if (currentUid && currentEmail === emailKey && linkedIds.indexOf(currentUid) !== -1) {
+        return true;
+      }
+
+      if (currentEmail === emailKey && activeStaffId && String(staff.id || staff.staffId || '').trim() === activeStaffId) {
+        return true;
+      }
+
+      return false;
+    });
+
+    if (match) {
+      console.log('[StaffMerge] found existing staff', { staffId: match.id || match.staffId || null, email: emailKey });
+    }
+    return match || null;
+  }
+  window.findExistingStaffByEmail = findExistingStaffByEmail;
+
+  function mergeAddStaffFormIntoExistingStaff(existingStaff, formStaff) {
+    const merged = { ...existingStaff };
+    const fillIfMissing = function(field, value) {
+      if (value === undefined || value === null || value === '') return;
+      if (merged[field] === undefined || merged[field] === null || merged[field] === '') {
+        merged[field] = value;
+      }
+    };
+
+    fillIfMissing('name', formStaff.name);
+    fillIfMissing('firstName', formStaff.firstName);
+    fillIfMissing('lastName', formStaff.lastName);
+    fillIfMissing('email', formStaff.email);
+    fillIfMissing('emailLower', formStaff.emailLower);
+    fillIfMissing('phone', formStaff.phone);
+    fillIfMissing('birthday', formStaff.birthday);
+    fillIfMissing('pin', formStaff.pin);
+    fillIfMissing('role', formStaff.role);
+    fillIfMissing('managerType', formStaff.managerType);
+    fillIfMissing('employmentType', formStaff.employmentType);
+    fillIfMissing('weeklyHoursTarget', formStaff.weeklyHoursTarget);
+
+    if (merged.isAdmin !== true && merged.isManager !== true) {
+      if (formStaff.isAdmin === true) merged.isAdmin = true;
+      if (formStaff.isManager === true) merged.isManager = true;
+    }
+
+    if (!merged.permissions || Object.keys(merged.permissions).length === 0) {
+      merged.permissions = formStaff.permissions || {};
+    }
+
+    const existingLocations = Array.isArray(merged.allowedLocationIds) ? merged.allowedLocationIds : [];
+    const formLocations = Array.isArray(formStaff.allowedLocationIds) ? formStaff.allowedLocationIds : [];
+    const mergedLocations = Array.from(new Set(existingLocations.concat(formLocations).filter(Boolean)));
+    if (mergedLocations.length) merged.allowedLocationIds = mergedLocations;
+    fillIfMissing('primaryLocationId', formStaff.primaryLocationId);
+
+    if (!Array.isArray(merged.technicianTypes) || merged.technicianTypes.length === 0) {
+      if (Array.isArray(formStaff.technicianTypes) && formStaff.technicianTypes.length > 0) {
+        merged.technicianTypes = formStaff.technicianTypes;
+      }
+    }
+
+    fillIfMissing('defaultSchedule', formStaff.defaultSchedule);
+    fillIfMissing('constraints', formStaff.constraints);
+    merged.isArchived = existingStaff.isArchived === true ? true : false;
+    merged.updatedAtMs = Date.now();
+    return merged;
+  }
   
   // Save staff member function (extracted for reuse)
   function saveStaffMember() {
@@ -32394,27 +34501,33 @@ function initializeAppsPanel() {
         }
         return false;
       }
+
+      // Get optional fields from form
+      const email = document.getElementById('staffEmail')?.value.trim() || '';
+      const normalizedEmail = normalizeStaffEmailForMerge(email);
+      const phone = document.getElementById('staffPhone')?.value.trim() || '';
+      const birthdayAdd = document.getElementById('staffAddBirthday')
+        ? String(document.getElementById('staffAddBirthday').value || '').trim()
+        : '';
+
+      const currentSalonOrAccountId = String(window.currentSalonId || window.currentAccountId || window.accountId || '').trim();
+      const existingStaffByEmail = normalizedEmail
+        ? findExistingStaffByEmail(normalizedEmail, currentSalonOrAccountId)
+        : null;
       
       // Check for duplicate PIN in existing staff
       const staffStore = ffGetStaffStore();
       const existingWithPin = staffStore.staff.find(function(s) {
-        return s.pin && String(s.pin) === String(pin);
+        return (!existingStaffByEmail || s.id !== existingStaffByEmail.id) && s.pin && String(s.pin) === String(pin);
       });
       
-      if (existingWithPin) {
+      if (existingWithPin && (!existingStaffByEmail || !existingStaffByEmail.pin)) {
         if (errorDiv) {
           errorDiv.textContent = 'This PIN is already in use';
           errorDiv.style.display = 'block';
         }
         return false;
       }
-      
-      // Get optional fields from form
-      const email = document.getElementById('staffEmail')?.value.trim() || '';
-      const phone = document.getElementById('staffPhone')?.value.trim() || '';
-      const birthdayAdd = document.getElementById('staffAddBirthday')
-        ? String(document.getElementById('staffAddBirthday').value || '').trim()
-        : '';
       
       const managerType = getSelectedManagerTypeValue('staffManagerType');
       const roleFields = buildStaffRoleFields(role, managerType);
@@ -32446,6 +34559,7 @@ function initializeAppsPanel() {
         pin: String(pin).trim(),
         role: roleFields.role,
         email: email ? String(email) : undefined,
+        emailLower: normalizedEmail || undefined,
         phone: phone ? String(phone) : undefined,
         invited: false,
         invitedAt: null,
@@ -32481,8 +34595,40 @@ function initializeAppsPanel() {
       if (birthdayAdd) {
         newStaffMember.birthday = birthdayAdd;
       }
+
+      if (existingStaffByEmail) {
+        const existingIndex = staffStore.staff.findIndex(function(s) {
+          return s && s.id === existingStaffByEmail.id;
+        });
+        if (existingIndex !== -1) {
+          staffStore.staff[existingIndex] = mergeAddStaffFormIntoExistingStaff(existingStaffByEmail, newStaffMember);
+          ffSaveStaffStore(staffStore);
+          renderStaffList();
+          selectStaffMember(staffStore.staff[existingIndex].id);
+          console.log('[StaffMerge] merged existing staff', { staffId: staffStore.staff[existingIndex].id, email: normalizedEmail });
+          if (typeof showToast === 'function') showToast('Staff member updated', 'success');
+          else if (window.ffToast && typeof window.ffToast.show === 'function') window.ffToast.show('Staff member updated', { variant: 'success' });
+          else console.log('Staff member updated');
+
+          if (document.getElementById('staffFirstName')) document.getElementById('staffFirstName').value = '';
+          if (document.getElementById('staffLastName')) document.getElementById('staffLastName').value = '';
+          if (document.getElementById('staffEmail')) document.getElementById('staffEmail').value = '';
+          if (document.getElementById('staffPhone')) document.getElementById('staffPhone').value = '';
+          if (document.getElementById('staffRole')) document.getElementById('staffRole').value = '';
+          if (document.getElementById('staffManagerType')) document.getElementById('staffManagerType').value = 'manager';
+          if (document.getElementById('staffPin')) document.getElementById('staffPin').value = '';
+          if (document.getElementById('staffAddBirthday')) document.getElementById('staffAddBirthday').value = '';
+          toggleStaffRoleSections('');
+
+          if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            ffStaffSendInvite(staffStore.staff[existingIndex].id);
+          }
+          return true;
+        }
+      }
       
       // Add to staff store and save
+      console.log('[StaffMerge] creating new staff', { email: normalizedEmail || null });
       staffStore.staff.push(newStaffMember);
       ffSaveStaffStore(staffStore);
       
@@ -41465,12 +43611,30 @@ function isReminderActive(category) {
   }
 }
 
+function ffSyncTasksMobileTabSelectOptions() {
+  try {
+    var sel = document.getElementById('tasksTabSelectMobile');
+    if (!sel) return;
+    var labels = { opening: 'Opening', closing: 'Closing', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
+    var prev = sel.value;
+    ['opening', 'closing', 'weekly', 'monthly', 'yearly'].forEach(function (v) {
+      var opt = sel.querySelector('option[value="' + v + '"]');
+      if (!opt) return;
+      var n = countIncompleteTasks(v);
+      var base = labels[v] || v;
+      opt.textContent = n > 0 ? base + ' (' + n + ')' : base;
+    });
+    if (prev && sel.querySelector('option[value="' + prev + '"]')) sel.value = prev;
+  } catch (e) {}
+}
+
 // Update all tab badges
 function updateAllTabBadges() {
   const categories = ['Opening', 'Closing', 'Weekly', 'Monthly', 'Yearly'];
   categories.forEach(category => {
     updateTabBadge(category);
   });
+  ffSyncTasksMobileTabSelectOptions();
 }
 
 // Make updateAllTabBadges globally available
@@ -44849,6 +47013,10 @@ document.addEventListener('visibilitychange', function() {
     if (typeof window.tasksCloudRefresh === 'function') {
       window.tasksCloudRefresh();
     }
+    try {
+      if (typeof ffApplyQueueViewGate === 'function') ffApplyQueueViewGate();
+      if (typeof ffUpdateMainNavTabVisibility === 'function') ffUpdateMainNavTabVisibility();
+    } catch (e) {}
   }
 });
 
@@ -44857,9 +47025,9 @@ window.__ffQueueCloudInit = function() {
   if (typeof window.initQueueCloud !== 'function') return;
   window.initQueueCloud({
     applyState: function(q, s, l, qd, meta) {
-      // After a local save, ignore Firestore updates for 5s to avoid race condition
+      // After a local save, ignore Firestore updates briefly to avoid race with slow writes / snapshots
       const forceApply = meta && meta.force === true;
-      if (!forceApply && Date.now() - window.__ff_lastSaveTime < 5000) return;
+      if (!forceApply && Date.now() - window.__ff_lastSaveTime < 6000) return;
       queue = q;
       service = s;
       log = l;
@@ -44879,7 +47047,7 @@ window.__ffQueueCloudInit = function() {
       return { queue: queue, service: service, log: log, queuesData: getQueuesData() };
     },
     onLogChange: function() {
-      if (Date.now() - window.__ff_lastSaveTime < 5000) return;
+      if (Date.now() - window.__ff_lastSaveTime < 6000) return;
       if (typeof renderHistory === 'function') renderHistory();
     }
   });
@@ -47653,6 +49821,57 @@ function hookSettingsGuard_DISABLED(){
         flex-wrap: wrap;
       }
     }
+    /* Mobile: single dropdown instead of tab buttons (avoids overlap with staff filter) */
+    #tasksScreen .tasks-mobile-period-wrap {
+      display: none;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    #tasksScreen .tasks-mobile-period-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748b;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      margin: 0;
+      line-height: 1.2;
+    }
+    #tasksScreen .tasks-tab-select-mobile {
+      flex: 1;
+      min-width: 0;
+      font-size: 13px !important;
+      font-weight: 500;
+      color: #374151 !important;
+      background: #fff !important;
+      border: 1px solid #e5e7eb !important;
+      border-radius: 8px !important;
+      padding: 8px 10px !important;
+      min-height: 40px !important;
+      height: 40px !important;
+      box-sizing: border-box !important;
+      cursor: pointer !important;
+      line-height: 1.2 !important;
+      appearance: auto !important;
+    }
+    @media (max-width: 768px) {
+      #tasksScreen .tasks-tabbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 10px 12px 10px;
+        flex-wrap: nowrap;
+      }
+      #tasksScreen .tasks-mobile-period-wrap {
+        display: flex;
+      }
+      #tasksScreen .tasks-tabs-left {
+        display: none !important;
+      }
+    }
     #tasksScreen .tasks-tabs-left {
       display: flex;
       gap: 0;
@@ -47754,6 +49973,32 @@ function hookSettingsGuard_DISABLED(){
     }
     #tasksScreen #reset-btn:hover {
       background: #fff5f5 !important;
+    }
+    /* Mobile: staff filter + gear + reset on one row (after base .tasks-tabs-right / staff-wrap rules) */
+    @media (max-width: 768px) {
+      #tasksScreen .tasks-tabs-right {
+        width: 100%;
+        margin-left: 0;
+        align-self: stretch;
+        flex-wrap: nowrap;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 8px;
+      }
+      #tasksScreen .tasks-staff-type-filter-wrap {
+        flex: 1 1 auto;
+        min-width: 0;
+        flex-shrink: 1;
+      }
+      #tasksScreen #tasksAdminFilter {
+        max-width: none !important;
+        flex: 1 1 auto;
+        min-width: 0 !important;
+        width: auto;
+      }
+      #tasksScreen #btnTasksSettings {
+        margin-left: auto;
+      }
     }
     /* Tasks tabs - same rhythm as #ticketsScreen .tickets-tab */
     #tasksScreen .tasks-tab {
@@ -48186,12 +50431,65 @@ function hookSettingsGuard_DISABLED(){
       background: transparent;
     }
     
+    /* Tasks Settings: tab row + mobile dropdown (same idea as main Tasks screen) */
+    #tasksScreen #tasksSettingsModal .tasks-settings-tabs-row {
+      margin: -16px -20px 12px -20px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+      background: #f9fafb;
+      flex-shrink: 0;
+    }
+    #tasksScreen #tasksSettingsModal .tasks-settings-tab-mobile-wrap {
+      display: none;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      box-sizing: border-box;
+    }
+    #tasksScreen #tasksSettingsModal .tasks-settings-mobile-tab-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748b;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      margin: 0;
+      line-height: 1.2;
+    }
+    #tasksScreen #tasksSettingsModal .tasks-settings-tab-select-mobile {
+      flex: 1;
+      min-width: 0;
+      font-size: 13px !important;
+      font-weight: 500;
+      color: #374151 !important;
+      background: #fff !important;
+      border: 1px solid #e5e7eb !important;
+      border-radius: 8px !important;
+      padding: 8px 10px !important;
+      min-height: 40px !important;
+      height: 40px !important;
+      box-sizing: border-box !important;
+      cursor: pointer !important;
+      line-height: 1.2 !important;
+      appearance: auto !important;
+    }
+    @media (max-width: 768px) {
+      #tasksScreen #tasksSettingsModal .tasks-settings-tab-mobile-wrap {
+        display: flex;
+        padding: 10px 16px 10px;
+        width: 100%;
+      }
+      #tasksScreen #tasksSettingsModal #tasksSettingsTabs {
+        display: none !important;
+      }
+    }
     /* Make tabs row fixed at top in Tasks Settings modal */
     #tasksScreen #tasksSettingsModal #tasksSettingsTabs {
       position: relative;
-      background: #fff !important;
+      display: flex;
+      padding: 0 20px;
+      background: transparent !important;
       z-index: 20;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+      border-bottom: none;
       flex-shrink: 0;
     }
     
@@ -48230,6 +50528,83 @@ function hookSettingsGuard_DISABLED(){
       align-items: center;
       gap: 16px;
       flex-wrap: wrap;
+    }
+
+    /* Add Task form: desktop = name/info + assign side-by-side; mobile = stacked full width + assign filter */
+    #tasksScreen #tasksSettingsModal .tasks-add-form-grid {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    #tasksScreen #tasksSettingsModal .tasks-add-form-main {
+      flex: 1;
+      min-width: 0;
+    }
+    #tasksScreen #tasksSettingsModal .tasks-add-form-assign {
+      flex: 0 0 220px;
+    }
+    #tasksScreen #tasksSettingsModal #taskAssignToMobileToggle {
+      display: none;
+    }
+    #tasksScreen #tasksSettingsModal .tasks-assign-to-mobile-toggle {
+      box-sizing: border-box;
+      width: 100%;
+      margin: 0 0 0;
+      padding: 8px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      color: #374151;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: inherit;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      text-align: left;
+    }
+    #tasksScreen #tasksSettingsModal .tasks-assign-to-mobile-toggle-chevron {
+      flex-shrink: 0;
+      font-size: 10px;
+      color: #6b7280;
+      transition: transform 0.15s ease;
+    }
+    #tasksScreen #tasksSettingsModal .task-assign-to-radios-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    @media (max-width: 768px) {
+      #tasksScreen #tasksSettingsModal .tasks-add-form-grid {
+        flex-direction: column;
+        gap: 12px;
+        align-items: stretch;
+      }
+      #tasksScreen #tasksSettingsModal .tasks-add-form-assign {
+        flex: none;
+        width: 100%;
+        max-width: none;
+      }
+      #tasksScreen #tasksSettingsModal #taskAssignToMobileToggle {
+        display: flex;
+      }
+      #tasksScreen #tasksSettingsModal .task-assign-to-radios-wrap:not(.is-open) {
+        display: none !important;
+      }
+      #tasksScreen #tasksSettingsModal .task-assign-to-radios-wrap.is-open {
+        display: flex !important;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 8px;
+        padding: 8px;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+      }
+      #tasksScreen #tasksSettingsModal #taskAssignToSection.tasks-assign-panel-open .tasks-assign-to-mobile-toggle-chevron {
+        transform: rotate(180deg);
+      }
     }
     
     #tasksScreen .tasks-modal-footer {
@@ -48349,6 +50724,16 @@ function hookSettingsGuard_DISABLED(){
     
     <!-- Tab row (thin toolbar - same footprint as Tickets / Inbox / Media) -->
     <div class="tasks-tabbar">
+      <div class="tasks-mobile-period-wrap">
+        <span class="tasks-mobile-period-label" id="tasksMobilePeriodLabel">Task type</span>
+        <select id="tasksTabSelectMobile" class="tasks-tab-select-mobile" aria-label="Task type" onchange="setTasksTab(this.value)">
+          <option value="opening">Opening</option>
+          <option value="closing">Closing</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </div>
       <div class="tasks-tabs-left">
         <button type="button" class="tasks-tab" data-tab="opening" onclick="console.log('TAB CLICKED:', 'opening'); setTasksTab('opening')">Opening<span class="ff-tab-badge" data-ff-badge="opening"></span></button>
         <button type="button" class="tasks-tab" data-tab="closing" onclick="console.log('TAB CLICKED:', 'closing'); setTasksTab('closing')">Closing<span class="ff-tab-badge" data-ff-badge="closing"></span></button>
@@ -48414,13 +50799,25 @@ function hookSettingsGuard_DISABLED(){
           <button id="tasksSettingsClose" class="tasks-modal-close" aria-label="Close">x</button>
         </div>
         <div class="tasks-modal-content">
-          <!-- Tab bar inside Settings modal -->
-          <div id="tasksSettingsTabs" style="display:flex;border-bottom:1px solid #e5e7eb;background:#f9fafb;margin:-16px -20px 12px -20px;padding:0 20px;">
+          <!-- Tab bar inside Settings modal (desktop); mobile uses dropdown in .tasks-settings-tab-mobile-wrap -->
+          <div id="tasksSettingsTabsRow" class="tasks-settings-tabs-row">
+            <div class="tasks-settings-tab-mobile-wrap">
+              <span class="tasks-settings-mobile-tab-label">Task type</span>
+              <select id="tasksSettingsTabSelectMobile" class="tasks-settings-tab-select-mobile" aria-label="Task type">
+                <option value="opening">Opening</option>
+                <option value="closing">Closing</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+            <div id="tasksSettingsTabs" style="display:flex;">
             <button class="tasks-settings-tab" data-tab="opening" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent;">Opening</button>
             <button class="tasks-settings-tab" data-tab="closing" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent;">Closing</button>
             <button class="tasks-settings-tab" data-tab="weekly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent;">Weekly</button>
             <button class="tasks-settings-tab" data-tab="monthly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent;">Monthly</button>
             <button class="tasks-settings-tab" data-tab="yearly" style="flex:1;padding:10px 16px;border:none;background:transparent;cursor:pointer;font-size:10px;font-weight:600;color:#6b7280;border-bottom:2px solid transparent;">Yearly</button>
+            </div>
           </div>
           
           <!-- Scrollable body content wrapper -->
@@ -48652,21 +51049,25 @@ function hookSettingsGuard_DISABLED(){
           
           <!-- Collapsible form section -->
             <div id="tasksAddFormWrap" style="display:none;padding:12px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;margin-bottom:0;">
-              <div style="display:flex;gap:16px;align-items:flex-start;">
-                <!-- Left side: Task Name and Info -->
-                <div style="flex:1;">
+              <div class="tasks-add-form-grid">
+                <!-- Task Name and Info: full-width row each on mobile -->
+                <div class="tasks-add-form-main">
                   <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Task Name</label>
-                  <input type="text" id="taskNameInput" class="taskNameInput" placeholder="e.g., Turn on lights" style="width:100%;padding:8px;margin-bottom:4px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;color:#111827;">
+                  <input type="text" id="taskNameInput" class="taskNameInput" placeholder="e.g., Turn on lights" style="width:100%;padding:8px;margin-bottom:4px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;color:#111827;box-sizing:border-box;">
                   <div id="taskNameError" style="color:#dc2626;font-size:10px;margin-bottom:8px;min-height:14px;display:none;"></div>
                   
                   <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Info / Instructions</label>
-                  <input type="text" id="taskInfoInput" class="taskInfoInput" placeholder="Write the instructions..." style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;color:#111827;">
+                  <input type="text" id="taskInfoInput" class="taskInfoInput" placeholder="Write the instructions..." style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;color:#111827;box-sizing:border-box;">
                 </div>
                 
-                <!-- Right side: Assign To -->
-                <div id="taskAssignToSection" style="flex:0 0 220px;margin-bottom:8px;">
+                <!-- Assign To: on mobile, tap row opens option list below -->
+                <div id="taskAssignToSection" class="tasks-add-form-assign" style="margin-bottom:8px;">
                   <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Assign To</label>
-                  <div style="display:flex;flex-direction:column;gap:6px;">
+                  <button type="button" id="taskAssignToMobileToggle" class="tasks-assign-to-mobile-toggle" aria-expanded="false" aria-controls="taskAssignToRadiosWrap" onclick="ffToggleTaskAssignToMobilePanel(); return false;">
+                    <span class="tasks-assign-to-mobile-toggle-label">Everyone</span>
+                    <span class="tasks-assign-to-mobile-toggle-chevron" aria-hidden="true">▾</span>
+                  </button>
+                  <div id="taskAssignToRadiosWrap" class="task-assign-to-radios-wrap">
                     <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer;padding:6px 8px;border-radius:4px;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='transparent'">
                       <input type="radio" name="taskAssignTo" value="all" id="taskAssignToAll" checked style="cursor:pointer;accent-color:#7c3aed;">
                       <span>Everyone</span>
@@ -48990,15 +51391,16 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260501_points"></script>
+  <script type="module" src="/app.js?v=20260509_staffid_notify"></script>
   <script>
     (function () {
       var scripts = [
-        { src: "/staff-cloud.js?v=20260501_final3", type: "module", delay: 700 },
+        { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module", delay: 700 },
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260501_points", delay: 1050 },
         { src: "/location-switcher.js?v=20260501_points", type: "module", delay: 1200 },
         { src: "/queue-cloud.js?v=20260501_points", type: "module", delay: 1350 },
+        { src: "/tickets.js?v=20260505_summary_today_dom", type: "module", delay: 1400 },
         { src: "/tasks-cloud.js?v=20260501_points", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
         { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
@@ -49007,17 +51409,16 @@ function hookSettingsGuard_DISABLED(){
         { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
         { src: "/schedule-ui.js?v=20260501_points", type: "module", delay: 2300 },
         { src: "/dashboard.js?v=20260501_dashboard_perm", type: "module", delay: 2500 },
-        { src: "/inbox.js?v=20260501_points", type: "module", delay: 2700 },
+        { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
+        { src: "/inbox.js?v=20260504_index_fallback", type: "module", delay: 2700 },
         { src: "/chat.js?v=20260501_points", type: "module", delay: 2900 },
         { src: "/staff-documents.js?v=20260501_points", type: "module", delay: 3200 },
-        { src: "/staff-call-cloud.js?v=20260501_points", type: "module", delay: 3400 },
+        { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/settings-cloud.js?v=20260501_points", type: "module", delay: 3600 },
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260501_points", type: "module", delay: 4000 },
-        { src: "/tickets.js?v=20260501_points", type: "module", delay: 4300 },
         { src: "/media-upload.js?v=20260501_navfix", type: "module", delay: 4600 },
         { src: "/inventory.js?v=20260501_navfix", type: "module", delay: 4900 },
-        { src: "/onboarding-wizard.js?v=20260501_points", type: "module", delay: 5200 },
         { src: "/locations-manage.js?v=20260501_points", type: "module", delay: 5400 },
         { src: "/queue-analytics.js?v=20260501_points", type: "module", delay: 5700 },
         { src: "/tickets-analytics.js?v=20260501_points", type: "module", delay: 6000 },
@@ -49297,31 +51698,76 @@ function hookSettingsGuard_DISABLED(){
     #ticketsScreen {
       pointer-events: auto !important;
     }
-    /* -- Tickets Screen Layout (match Media toolbar row: thin bar, filters right) -- */
+    /* Top row: tab labels + NEW only. Filters live in #ticketsFiltersRow below — never overlap Summary. */
     #ticketsScreen .tickets-tabs {
-      display:flex; align-items:stretch; justify-content:flex-start;
-      flex-wrap:wrap; background:#fff; flex-shrink:0;
-      border-bottom:1px solid #e5e7eb; padding:2px 20px 0; gap:12px;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      background: #fff;
+      flex-shrink: 0;
       position: relative;
       z-index: 2;
+      padding: 0;
+      gap: 0;
+      border-bottom: 1px solid #e5e7eb;
+      box-sizing: border-box;
+    }
+    #ticketsScreen .tickets-tabs__top {
+      display: flex;
+      flex-direction: row;
+      align-items: flex-end;
+      justify-content: flex-start;
+      flex-wrap: nowrap;
+      gap: 12px;
+      padding: 2px 20px 0;
+      box-sizing: border-box;
+      width: 100%;
     }
     #ticketsScreen #ticketsTabsNav {
-      display:flex; align-items:stretch; flex-shrink:0; gap:0;
+      display: flex;
+      align-items: stretch;
+      flex: 1 1 0;
+      min-width: 0;
+      gap: 14px;
+      align-self: stretch;
+      min-height: 36px;
     }
     #ticketsScreen #ticketsToolbarRight {
-      display:flex; align-items:center; gap:8px; margin-left:auto;
-      flex-wrap:nowrap; min-width:0; flex:1; justify-content:flex-end;
-      align-self:center;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+      flex-grow: 0;
+      margin-left: auto;
+      align-self: flex-end;
+    }
+    #ticketsScreen #ticketsFiltersRow {
+      display: none;
+      flex-direction: row;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px 20px 10px;
+      border-top: 1px solid #f3f4f6;
+      background: #fafafa;
     }
     #ticketsScreen #ticketsTimePeriodWrap {
-      display:none;
-      align-items:center;
-      flex-shrink:0;
-      min-width:auto;
+      display: none;
+      align-items: center;
+      flex: 1 1 auto;
+      min-width: 0;
+      width: 100%;
     }
     #ticketsScreen .tickets-time-period-row {
-      display:flex; align-items:center; flex-wrap:nowrap; gap:6px 8px;
-      min-width:auto;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px 8px;
+      width: 100%;
+      justify-content: flex-start;
+      box-sizing: border-box;
     }
     #ticketsScreen .tickets-time-period-label {
       font-size:10px; font-weight:600; color:#64748b;
@@ -49447,9 +51893,98 @@ function hookSettingsGuard_DISABLED(){
       font-size:13px; font-weight:500; color:#374151;
       border-bottom:2px solid transparent; margin-bottom:-1px;
       display:flex; align-items:center; justify-content:center;
+      align-self:stretch;
       box-sizing:border-box; position:relative; z-index:0;
+      white-space:nowrap;
+    }
+    /* Gear: margin-left auto + slight translateX only — vertical position unchanged */
+    #ticketsScreen #ticketsManageServicesBtn {
+      align-self: center;
+      margin-left: auto;
+      transform: translateX(6px);
     }
     #ticketsScreen .tickets-tab.active { color:#7c3aed; border-bottom-color:#7c3aed; font-weight:500; font-size:13px; z-index:1; }
+    #ticketsScreen #ticketsNewBtn {
+      flex-shrink: 0;
+    }
+    #ticketsScreen #ticketsNewBtn .tickets-new-btn__sm {
+      display: none;
+    }
+    @media (max-width: 767px) {
+      #ticketsScreen .tickets-tabs__top {
+        padding: 6px 10px 0;
+        gap: 8px;
+      }
+      #ticketsScreen #ticketsTabsNav {
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        gap: 16px;
+        padding: 4px 0 0;
+        align-items: flex-end;
+        min-height: 0;
+      }
+      #ticketsScreen #ticketsTabsNav::-webkit-scrollbar {
+        display: none;
+      }
+      #ticketsScreen #ticketsToolbarRight {
+        gap: 8px;
+      }
+      #ticketsScreen #ticketsFiltersRow {
+        padding: 8px 10px 10px;
+      }
+      #ticketsScreen #ticketsNewBtn {
+        padding: 5px 8px !important;
+        font-size: 11px !important;
+        font-weight: 600;
+        min-height: 28px !important;
+        box-shadow: 0 1px 5px rgba(124, 58, 237, 0.22) !important;
+        flex-shrink: 0;
+      }
+      #ticketsScreen #ticketsNewBtn .tickets-new-btn__lg {
+        display: none;
+      }
+      #ticketsScreen #ticketsNewBtn .tickets-new-btn__sm {
+        display: inline;
+      }
+      #ticketsScreen .tickets-tab {
+        flex: 0 0 auto;
+        flex-shrink: 0 !important;
+        flex-grow: 0;
+        white-space: nowrap;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+        align-items: center;
+        padding: 6px 7px 5px;
+        min-height: 44px;
+        min-width: max-content !important;
+        width: max-content;
+        max-width: none !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        font-size: 12px;
+        letter-spacing: -0.015em;
+        margin-bottom: -1px;
+        align-self: flex-end;
+      }
+      #ticketsScreen #ticketsTabsNav > .tickets-tab,
+      #ticketsScreen #ticketsTabsNav > #ticketsManageServicesBtn {
+        flex-shrink: 0 !important;
+      }
+      @media (max-width: 380px) {
+        #ticketsScreen .tickets-tab {
+          font-size: 11px;
+          padding: 6px 4px 5px;
+        }
+      }
+      #ticketsScreen #ticketsTimePeriodSelect,
+      #ticketsScreen #ticketsEmployeeSelect {
+        max-width: 100%;
+      }
+    }
     #ticketsScreen .tickets-body {
       flex:1; overflow-y:auto; padding:16px 12px;
       display:flex; flex-direction:column; align-items:center;
@@ -49617,18 +52152,23 @@ function hookSettingsGuard_DISABLED(){
     }
   </style>
 
-  <!-- Tabs (left) | Filters + New + gear (right) - same bar rhythm as Media -->
+  <!-- Top row: tabs + NEW. Second row: filters only (Summary / Closed) — never crowds tab labels. -->
   <div class="tickets-tabs">
+    <div class="tickets-tabs__top">
     <div id="ticketsTabsNav">
       <button class="tickets-tab active" data-tab="ready">Ready</button>
       <button class="tickets-tab" data-tab="closed">Closed</button>
       <button id="ticketsArchivedTab" class="tickets-tab" data-tab="archived" style="display:none;">Archived</button>
       <button id="ticketsSummaryTab" class="tickets-tab" data-tab="summary">Summary</button>
-      <button id="ticketsManageServicesBtn" title="Manage Services" aria-label="Manage Services" type="button" style="display:none;align-items:center;justify-content:center;width:30px;height:30px;min-width:30px;min-height:30px;margin-left:6px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;flex-shrink:0;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
+      <button id="ticketsManageServicesBtn" title="Manage Services" aria-label="Manage Services" type="button" style="display:none;align-items:center;justify-content:center;width:30px;height:30px;min-width:30px;min-height:30px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;flex-shrink:0;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l-.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
     </div>
     <div id="ticketsToolbarRight">
+    <button type="button" id="ticketsNewBtn" aria-label="New ticket" onclick="window.openTicketModal && window.openTicketModal()" style="padding:8px 18px;background:#7c3aed;color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(124,58,237,0.25);white-space:nowrap;min-height:36px;box-sizing:border-box;display:none;align-items:center;gap:4px;"><span class="tickets-new-btn__lg">+ New Ticket</span><span class="tickets-new-btn__sm">+ NEW</span></button>
+    </div>
+    </div>
+    <div id="ticketsFiltersRow" class="tickets-tabs__filters">
     <div id="ticketsTimePeriodWrap">
       <div class="tickets-time-period-row">
         <span class="tickets-time-period-label">TIME PERIOD</span>
@@ -49653,14 +52193,12 @@ function hookSettingsGuard_DISABLED(){
           </select>
       </div>
     </div>
-
-    <button id="ticketsNewBtn" onclick="window.openTicketModal && window.openTicketModal()" style="padding:8px 18px;background:#7c3aed;color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(124,58,237,0.25);white-space:nowrap;min-height:36px;box-sizing:border-box;display:none;align-items:center;">+ New Ticket</button>
     </div>
   </div>
 
   <!-- Body -->
   <div class="tickets-body">
-    <div id="ticketsLoading" style="text-align:center;padding:40px;color:#9ca3af;">Loading-</div>
+    <div id="ticketsLoading" style="text-align:center;padding:40px;color:#9ca3af;">Loading…</div>
     <div id="ticketsEmpty" style="display:none;text-align:center;padding:40px;color:#9ca3af;font-size:15px;">No tickets here yet.</div>
     <div id="ticketsSummaryPanel" style="display:none;padding:16px 12px 24px;">
       <div id="ticketsSummaryEmpty" class="tickets-summary-state" style="display:none;" aria-live="polite"></div>

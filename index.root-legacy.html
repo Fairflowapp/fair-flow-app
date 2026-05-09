@@ -1952,16 +1952,30 @@ console.log('[BUILD MARKER] app.js logic loaded at', new Date().toISOString());
 // ===== FIREBASE AUTH FOUNDATION =====
 // Minimal Firebase Auth wiring (no full auth UI)
 
-const firebaseConfig = {
-  apiKey: "AIzaSyCoj6A2Eoa0uDrelIJxycZCL6cTw570FCI",
-  authDomain: "fairflowapp-db841.firebaseapp.com",
-  projectId: "fairflowapp-db841",
-  storageBucket: "fairflowapp-db841.firebasestorage.app",
-  messagingSenderId: "823186963319",
-  appId: "1:823186963319:web:2bc2d386311b2898643f72",
-  measurementId: "G-S7T9WN343B"
-};
+const FF_ENV = new URLSearchParams(window.location.search).get("env") === "staging" ? "staging" : "production";
+
+const firebaseConfig = FF_ENV === "staging"
+  ? {
+      apiKey: "AIzaSyDTBRAIbEmgx5uJ3I81mw5qfhlCpZAX4VI",
+      authDomain: "fair-flow-staging.firebaseapp.com",
+      projectId: "fair-flow-staging",
+      storageBucket: "fair-flow-staging.firebasestorage.app",
+      messagingSenderId: "529214117704",
+      appId: "1:529214117704:web:b346f764c7f7ae716d457d"
+    }
+  : {
+      apiKey: "AIzaSyCoj6A2Eoa0uDrelIJxycZCL6cTw570FCI",
+      authDomain: "fairflowapp-db841.firebaseapp.com",
+      projectId: "fairflowapp-db841",
+      storageBucket: "fairflowapp-db841.firebasestorage.app",
+      messagingSenderId: "823186963319",
+      appId: "1:823186963319:web:2bc2d386311b2898643f72",
+      measurementId: "G-S7T9WN343B"
+    };
+
+window.FF_ENV = FF_ENV;
 window.firebaseConfig = firebaseConfig;
+console.log("[FirebaseEnv]", FF_ENV, firebaseConfig.projectId);
 
 if (typeof window !== 'undefined' && typeof window.__initFirebaseModular === 'function') {
   window.__initFirebaseModular();
@@ -10441,7 +10455,7 @@ function renderTasksList(tab, opts) {
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 ${infoButtonHtml}
-                <button type="button" class="task-return-arrow" data-task-id="${keyId || ''}">↺</button>
+                <button type="button" class="task-return-arrow" data-task-id="${keyId || ''}" title="Return task" aria-label="Return task">↺</button>
                 <button type="button" class="task-done-btn" data-task-id="${keyId || ''}">MARK DONE</button>
               </div>
             </div>
@@ -10457,15 +10471,18 @@ function renderTasksList(tab, opts) {
         document.querySelectorAll(".task-return-arrow").forEach(btn => {
           btn.style.background = 'none';
           btn.style.border = 'none';
-          btn.style.color = '#d0d0d0';
-          btn.style.fontSize = '16px';
+          btn.style.color = '#6b7280';
+          btn.style.fontSize = '18px';
+          btn.style.lineHeight = '1';
+          btn.style.width = '24px';
+          btn.style.height = '24px';
           btn.style.padding = '0';
           btn.style.cursor = 'pointer';
           btn.addEventListener('mouseenter', () => {
-            btn.style.color = '#888';
+            btn.style.color = '#374151';
           });
           btn.addEventListener('mouseleave', () => {
-            btn.style.color = '#d0d0d0';
+            btn.style.color = '#6b7280';
           });
           btn.addEventListener("click", async (e) => {
             e.preventDefault();
@@ -10754,8 +10771,14 @@ function addTaskToDraft() {
     // Re-render Settings modal list to show new task
     renderSettingsTaskList(tab);
     
-    // Re-render main screen list
-    renderTasksList(window.currentTasksTab);
+    // Re-render main screen list immediately, even while Settings modal is open.
+    const wasSettingsOpen = isTasksSettingsOpen;
+    try {
+      isTasksSettingsOpen = false;
+      renderTasksList(tab, { force: true });
+    } finally {
+      isTasksSettingsOpen = wasSettingsOpen;
+    }
     
     console.log('[Tasks] Task added to draft for tab:', tab);
     

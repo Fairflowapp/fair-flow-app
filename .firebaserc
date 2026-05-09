@@ -1,6 +1,7 @@
 {
   "projects": {
-    "default": "fairflowapp-db841"
+    "default": "fairflowapp-db841",
+    "staging": "fair-flow-staging"
   },
   "targets": {},
   "etags": {}
