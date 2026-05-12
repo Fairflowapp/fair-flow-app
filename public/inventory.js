@@ -4529,7 +4529,6 @@ function renderReceiptInfoModal() {
       ${listBlock}
     </div>
     <div class="ff-inv2-modal-actions ff-inv2-receipt-info-footer">
-      <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-cancel" data-inv-receipt-info-cancel="1">Close</button>
       <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-primary" data-inv-receipt-info-save="1" data-order-id="${oidEsc}">Save</button>
     </div>
   </div>
@@ -5794,6 +5793,21 @@ function renderInventoryOrderDetailModal() {
   ${exportMenuBlock}
 </div>`
       : `<div class="ff-inv2-order-detail-line-filter ff-inv2-order-detail-line-filter--export-only" role="toolbar" aria-label="Export">${exportMenuBlock}</div>`;
+  let odSalonCurCode = "USD";
+  let odSalonCurSym = "";
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetSalonCurrencyCode === "function") {
+      odSalonCurCode = String(window.ffGetSalonCurrencyCode()).trim() || "USD";
+    }
+    if (typeof window !== "undefined" && typeof window.ffGetCurrencySymbol === "function") {
+      odSalonCurSym = String(window.ffGetCurrencySymbol(odSalonCurCode)).trim();
+    }
+  } catch (e) {
+    odSalonCurSym = "";
+  }
+  if (!odSalonCurSym) odSalonCurSym = odSalonCurCode;
+  const odSalonCurCodeEsc = escapeHtml(odSalonCurCode);
+  const odSalonCurSymEsc = escapeHtml(odSalonCurSym);
   const itemRows = displayPairs
     .map(({ it, idx }) => {
       const vis = getOrderLineReceiveVisualState(it);
@@ -5820,11 +5834,11 @@ function renderInventoryOrderDetailModal() {
           ? escapeHtml(String(it.price).replace(/,/g, "").trim())
           : "";
       const invPriceInline = invRef
-        ? `<span class="ff-inv2-od-inv-price-inline" title="Price → saves to inventory">
-  <input type="number" class="ff-inv2-od-inv-price-input ff-inv2-od-inv-price-input--inline" min="0" step="any" inputmode="decimal" autocomplete="off"
+        ? `<span class="ff-inv2-od-inv-price-inline" title="Unit price (${odSalonCurCodeEsc}) — saves to inventory">
+  <span class="ff-inv2-od-inv-price-cur" aria-hidden="true">${odSalonCurSymEsc}</span><input type="number" class="ff-inv2-od-inv-price-input ff-inv2-od-inv-price-input--inline" min="0" step="any" inputmode="decimal" autocomplete="off"
     data-inv-order-line-inv-price="1" data-order-id="${oidEsc}" data-line-idx="${idx}"
     value="${priceFieldVal}" placeholder="—"
-    aria-label="Inventory unit price"${priceFieldDisabled} />
+    aria-label="Inventory unit price, ${odSalonCurCodeEsc}"${priceFieldDisabled} />
 </span>`
         : "";
       const itemCell = `<td class="ff-inv2-od-td ff-inv2-od-td--item"><div class="ff-inv2-od-item-stack"><div class="ff-inv2-od-item-name-row"><span class="ff-inv2-od-item-name" title="${name}">${name}</span>${invPriceInline}</div>${groupSpan}</div></td>`;
@@ -7800,11 +7814,24 @@ function injectMockStylesOnce() {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  gap: 1px;
+  min-width: 0;
+}
+#inventoryScreen .ff-inv2-order-detail-items--checklist .ff-inv2-od-inv-price-cur {
+  flex-shrink: 0;
+  font-size: 8px;
+  font-weight: 700;
+  color: #64748b;
+  line-height: 1;
+  max-width: 2.1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 #inventoryScreen .ff-inv2-order-detail-items--checklist .ff-inv2-od-inv-price-input--inline {
-  width: 2.6rem;
-  max-width: 16vw;
-  padding: 0 2px;
+  width: 2.35rem;
+  max-width: 14vw;
+  padding: 0 1px;
   font-size: 9px;
   line-height: 1.15;
   height: 16px;
@@ -11809,6 +11836,93 @@ function injectMockStylesOnce() {
   #inventoryScreen .ff-inv2-layout--no-category-aside .ff-inv2-main {
     grid-row: 1;
   }
+  /* Inventory → Insights (mobile only): hide category column + crumb, compact header, subtabs scroll, clear bottom nav */
+  #inventoryScreen .ff-inv2-layout:has(.ff-inv2-main-tab-body--insights) {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  #inventoryScreen .ff-inv2-layout:has(.ff-inv2-main-tab-body--insights) .ff-inv2-aside {
+    display: none !important;
+  }
+  #inventoryScreen .ff-inv2-layout:has(.ff-inv2-main-tab-body--insights) .ff-inv2-main {
+    grid-row: 1;
+    min-height: 0;
+  }
+  #inventoryScreen .ff-inv2-layout:has(.ff-inv2-main-tab-body--insights) .ff-inv2-main-head {
+    display: none !important;
+  }
+  /* Inventory → Orders (mobile): hide redundant top "Orders" line — main tab already indicates Orders */
+  #inventoryScreen .ff-inv2-layout:has(.ff-inv2-main-tab-body--orders) .ff-inv2-main-head {
+    display: none !important;
+  }
+  #inventoryScreen .ff-inv2-main-tab-body--insights {
+    padding: 8px 10px calc(72px + env(safe-area-inset-bottom, 0px));
+    gap: 8px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    min-height: 0;
+    flex: 1 1 0%;
+    max-height: 100%;
+    overscroll-behavior-y: contain;
+  }
+  #inventoryScreen .ff-inv2-main-tab-body--insights .ff-inv2-insights-wrap {
+    gap: 8px;
+    min-width: 0;
+  }
+  #inventoryScreen .ff-inv2-main-tab-body--insights .ff-inv2-insights-wrap > .ff-inv2-insights-head {
+    padding: 8px 10px;
+    gap: 4px;
+  }
+  #inventoryScreen .ff-inv2-main-tab-body--insights .ff-inv2-insights-head {
+    gap: 4px;
+  }
+  #inventoryScreen .ff-inv2-main-tab-body--insights .ff-inv2-insights-head-row {
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+  #inventoryScreen .ff-inv2-main-tab-body--insights .ff-inv2-insights-title {
+    font-size: 14px;
+    line-height: 1.25;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #inventoryScreen .ff-inv2-main-tab-body--insights .ff-inv2-insights-range-label {
+    flex: 0 0 auto;
+    gap: 4px;
+    font-size: 11px;
+  }
+  #inventoryScreen .ff-inv2-main-tab-body--insights .ff-inv2-insights-range-select {
+    padding: 4px 22px 4px 8px;
+    font-size: 12px;
+    max-width: min(150px, 46vw);
+  }
+  #inventoryScreen .ff-inv2-main-tab-body--insights .ff-inv2-insights-custom {
+    gap: 8px;
+  }
+  #inventoryScreen .ff-inv2-main-tab-body--insights .ff-inv2-insights-subtabs {
+    margin: 0 0 4px;
+    padding: 0 0 2px;
+    gap: 0;
+    min-width: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+  }
+  #inventoryScreen .ff-inv2-main-tab-body--insights .ff-inv2-insights-subtab {
+    flex: 0 0 auto;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
   #inventoryScreen #ff-inv-order-detail-backdrop.ff-inv2-modal-backdrop {
     align-items: stretch;
     justify-content: stretch;
@@ -11843,11 +11957,39 @@ function injectMockStylesOnce() {
     flex-direction: column;
     margin-bottom: 0;
   }
+  /* Order detail: slightly larger export ▾ next to All/Open/Done — easier tap, chips unchanged */
+  #inventoryScreen #ff-inv-order-detail-backdrop .ff-inv2-order-detail-line-filter .ff-inv2-od-export-menu summary.ff-inv2-od-export-menu-trigger {
+    font-size: 16px;
+    padding: 4px 6px;
+    min-width: 30px;
+    min-height: 30px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* Clear fixed bottom nav (~70px + bar padding); #inventoryScreen stacks below .toolbar-nav-main (z-index 100350). */
   #inventoryScreen #ff-inv-order-detail-backdrop .ff-inv2-order-detail-footer {
-    padding-bottom: calc(52px + env(safe-area-inset-bottom, 12px));
+    padding: 8px 6px calc(78px + env(safe-area-inset-bottom, 0px));
     background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, #fff 10px);
     position: relative;
     z-index: 2;
+  }
+  #inventoryScreen #ff-inv-order-detail-backdrop .ff-inv2-order-detail-footer .ff-inv2-modal-btn {
+    padding: 6px 3px;
+    font-size: 10px;
+    line-height: 1.15;
+  }
+  /* Receipt Information (nested modal): clear fixed bottom nav — #inventoryScreen below tab bar */
+  #inventoryScreen #ff-inv-receipt-info-backdrop.ff-inv2-modal-backdrop {
+    padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+  }
+  #inventoryScreen #ff-inv-receipt-info-backdrop .ff-inv2-receipt-info-card {
+    max-height: calc(100vh - 140px - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100dvh - 140px - env(safe-area-inset-bottom, 0px));
+  }
+  #inventoryScreen #ff-inv-receipt-info-backdrop .ff-inv2-receipt-info-footer {
+    padding-bottom: 12px;
   }
   #inventoryScreen .ff-inv2-toolbar {
     flex-wrap: nowrap;
