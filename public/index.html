@@ -90,7 +90,7 @@
       return window.goToInventory();
     }
     try {
-      await import('/inventory.js?v=20260501_navfix');
+      await import('/inventory.js?v=20260505_inv_od_footer_one_row');
     } catch (e) {
       console.error('[Inventory mock] load failed', e);
       return;
@@ -2706,6 +2706,14 @@ dialog footer button, .code-dialog footer button {
   .hide-4 { display: none !important; }
 }
 
+/* Media: do not use .hide-4 — it hides the tab below 1160px and wins over the mobile bottom bar (≤640px).
+   Hide it only on mid widths where the bar is still the top header (641–1160px). */
+@media (max-width: 1160px) and (min-width: 641px) {
+  .header .toolbar.toolbar-nav-main #mediaBtn:not(.ff-nav-tab-hidden) {
+    display: none !important;
+  }
+}
+
 /* Main nav hidden by permission (beats .core-nav and #mediaBtn display:inline-flex !important).
    NOTE: nav uses class="toolbar toolbar-nav-main" on one element; must use .toolbar.toolbar-nav-main
    (no space), otherwise the rule never matches and tabs stay visible. */
@@ -2715,7 +2723,7 @@ dialog footer button, .code-dialog footer button {
 .header .toolbar.toolbar-nav-main #ticketsBtn.ff-nav-tab-hidden,
 .header .toolbar.toolbar-nav-main #tasksBtn.ff-nav-tab-hidden,
 .header .toolbar.toolbar-nav-main #inboxBtn.ff-nav-tab-hidden,
-.header .toolbar #mediaBtn.ff-nav-tab-hidden {
+.header .toolbar.toolbar-nav-main #mediaBtn.ff-nav-tab-hidden {
   display: none !important;
   visibility: hidden !important;
   pointer-events: none !important;
@@ -2861,7 +2869,8 @@ dialog footer button, .code-dialog footer button {
   .header .toolbar.toolbar-nav-main #ticketsBtn,
   .header .toolbar.toolbar-nav-main #tasksBtn,
   .header .toolbar.toolbar-nav-main #chatBtn,
-  .header .toolbar.toolbar-nav-main #mediaBtn {
+  .header .toolbar.toolbar-nav-main #mediaBtn:not(.ff-nav-tab-hidden) {
+    display: flex !important;
     min-height: 54px !important;
     height: 54px !important;
     padding: 6px 4px !important;
@@ -2883,7 +2892,7 @@ dialog footer button, .code-dialog footer button {
   .header .toolbar.toolbar-nav-main #ticketsBtn.active,
   .header .toolbar.toolbar-nav-main #tasksBtn.active,
   .header .toolbar.toolbar-nav-main #chatBtn.active,
-  .header .toolbar.toolbar-nav-main #mediaBtn.active {
+  .header .toolbar.toolbar-nav-main #mediaBtn:not(.ff-nav-tab-hidden).active {
     color: #7c3aed !important;
     background: #f5f3ff !important;
     box-shadow: none !important;
@@ -2893,7 +2902,7 @@ dialog footer button, .code-dialog footer button {
   .header .toolbar.toolbar-nav-main #ticketsBtn.active .nav-icon,
   .header .toolbar.toolbar-nav-main #tasksBtn.active .nav-icon,
   .header .toolbar.toolbar-nav-main #chatBtn.active .nav-icon,
-  .header .toolbar.toolbar-nav-main #mediaBtn.active .nav-icon {
+  .header .toolbar.toolbar-nav-main #mediaBtn:not(.ff-nav-tab-hidden).active .nav-icon {
     opacity: 1 !important;
   }
 
@@ -2901,7 +2910,7 @@ dialog footer button, .code-dialog footer button {
   .header .toolbar.toolbar-nav-main #ticketsBtn.active .nav-icon svg,
   .header .toolbar.toolbar-nav-main #tasksBtn.active .nav-icon svg,
   .header .toolbar.toolbar-nav-main #chatBtn.active .nav-icon svg,
-  .header .toolbar.toolbar-nav-main #mediaBtn.active .nav-icon svg {
+  .header .toolbar.toolbar-nav-main #mediaBtn:not(.ff-nav-tab-hidden).active .nav-icon svg {
     stroke: #7c3aed !important;
     opacity: 1 !important;
   }
@@ -4139,7 +4148,7 @@ dialog footer button, .code-dialog footer button {
 
         <button id="inboxBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg><span class="ff-inbox-badge ff-home-tasks-badge ff-nav-icon-badge"></span></span>Inbox</button>
 
-        <button id="mediaBtn" class="btn-pill nav-item hide-4" onclick="window.goToMedia && window.goToMedia()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span>Media</button>
+        <button id="mediaBtn" class="btn-pill nav-item" onclick="window.goToMedia && window.goToMedia()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span>Media</button>
 
         <button type="button" id="inventoryNavBtn" class="btn-pill nav-item core-nav hide-4" onclick="window.goToInventory && window.goToInventory()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>Inventory</button>
 
@@ -4205,6 +4214,13 @@ dialog footer button, .code-dialog footer button {
       { button: 'tasksBtn', screen: 'tasksScreen', title: 'Tasks' },
       { button: 'chatBtn', screen: 'chatScreen', title: 'Chat' },
       { button: 'mediaBtn', screen: 'mediaScreen', title: 'Media' },
+      { button: 'settingsBtn', screen: 'userProfileScreen', title: 'Settings' },
+      { button: null, screen: 'myProfileScreen', title: 'My Profile' },
+      { button: 'scheduleBtn', screen: 'scheduleScreen', title: 'Schedule' },
+      { button: 'timeClockBtn', screen: 'timeClockScreen', title: 'Time Clock' },
+      { button: null, screen: 'pointsAppScreen', title: 'Fair Flow Points' },
+      { button: 'dashboardBtn', screen: 'dashboardScreen', title: 'Dashboard' },
+      { button: 'trainingBtn', screen: 'trainingScreen', title: 'Training' },
       { button: 'inventoryNavBtn', screen: 'inventoryScreen', title: 'Inventory' },
       { button: 'inboxBtn', screen: 'inboxScreen', title: 'Inbox' }
     ];
@@ -4225,8 +4241,15 @@ dialog footer button, .code-dialog footer button {
         return;
       }
 
+      var staffModalEl = document.getElementById('staffMembersModal');
+      if(staffModalEl && isVisible(staffModalEl)){
+        titleEl.textContent = 'Staff Members';
+        return;
+      }
+
       for(var i = 0; i < mobileHeaderTitleMap.length; i++){
         var item = mobileHeaderTitleMap[i];
+        if(!item.button) continue;
         var btn = document.getElementById(item.button);
         if(btn && btn.classList && btn.classList.contains('active')){
           titleEl.textContent = item.title;
@@ -4238,8 +4261,13 @@ dialog footer button, .code-dialog footer button {
         var fallback = mobileHeaderTitleMap[j];
         var screen = document.getElementById(fallback.screen);
         if(fallback.screen === 'owner-view'){
-          var tsVis = document.getElementById('tasksScreen');
-          if(tsVis && isVisible(tsVis)) continue;
+          var skipOwnerQueue = false;
+          var ownerSkipIds = ['tasksScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen'];
+          for(var si = 0; si < ownerSkipIds.length; si++){
+            var se = document.getElementById(ownerSkipIds[si]);
+            if(se && isVisible(se)) { skipOwnerQueue = true; break; }
+          }
+          if(skipOwnerQueue) continue;
         }
         if(isVisible(screen)){
           titleEl.textContent = fallback.title;
@@ -4274,7 +4302,7 @@ dialog footer button, .code-dialog footer button {
       if(h) new ResizeObserver(setHeaderH).observe(h);
     }
     if(typeof MutationObserver!=='undefined'){
-      var targets = ['queueBtn','ticketsBtn','tasksBtn','chatBtn','mediaBtn','inventoryNavBtn','inboxBtn','appsPanel','owner-view','ticketsScreen','tasksScreen','chatScreen','mediaScreen','inventoryScreen','inboxScreen'];
+      var targets = ['queueBtn','ticketsBtn','tasksBtn','chatBtn','mediaBtn','inventoryNavBtn','inboxBtn','trainingBtn','scheduleBtn','timeClockBtn','settingsBtn','dashboardBtn','appsPanel','staffMembersModal','owner-view','ticketsScreen','tasksScreen','chatScreen','mediaScreen','inventoryScreen','inboxScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen'];
       var observer = new MutationObserver(function () {
         setMobileHeaderTitle();
         setHeaderH();
@@ -8894,9 +8922,12 @@ function ffRefreshTasksPermissionControls() {
 }
 window.ffRefreshTasksPermissionControls = ffRefreshTasksPermissionControls;
 
-/** Inbox: staff.permissions.inbox_view === true (top bar + Inbox screen). */
+/** Inbox: explicit inbox_view, or legacy desk/manager roles (same rules as public/inbox.js inboxCanViewInboxEval). */
 function ffStaffHasInboxViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
+  const role = String(staff.role || '').toLowerCase().trim();
+  if (['manager', 'admin', 'owner', 'front_desk', 'assistant_manager'].indexOf(role) !== -1) return true;
+  if (staff.isAdmin === true || staff.isManager === true) return true;
   const p = staff.permissions;
   return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.inbox_view));
 }
@@ -9108,7 +9139,7 @@ window.ffApplyPointsSettingsButtonsVisibility = ffApplyPointsSettingsButtonsVisi
  * Queue (#queueBtn): queue_view OR join-only on kiosk / bypass station (see ffCurrentUserIsQueueJoinOnlyPartialAccess).
  * Tickets (#ticketsBtn): permissions.tickets_view === true.
  * Tasks (#tasksBtn): permissions.tasks_view === true.
- * Inbox (#inboxBtn): permissions.inbox_view === true.
+ * Inbox (#inboxBtn): permissions.inbox_view === true, or legacy manager/desk staff (see ffStaffHasInboxViewPermission).
  * Other tab keys use !== false so existing staff keep tabs until revoked.
  */
 function ffUpdateMainNavTabVisibility() {
@@ -12885,6 +12916,7 @@ function goToTimeClock() {
   const tcb = document.getElementById('timeClockBtn');
   if (tcb) tcb.classList.add('active');
   if (typeof window.ffInitTimeClockUI === 'function') window.ffInitTimeClockUI();
+  if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
 }
 window.goToTimeClock = goToTimeClock;
 
@@ -12893,6 +12925,7 @@ function hideTimeClockScreen() {
   if (s) s.style.display = 'none';
   const tcb = document.getElementById('timeClockBtn');
   if (tcb) tcb.classList.remove('active');
+  if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
   if (window.__ffTCClockTick) { try { clearInterval(window.__ffTCClockTick); } catch (e) {} window.__ffTCClockTick = null; }
   if (window.__ffTCKbHandler) { try { document.removeEventListener('keydown', window.__ffTCKbHandler); } catch (e) {} window.__ffTCKbHandler = null; }
   if (window.__ffTCMgEscHandler) { try { document.removeEventListener('keydown', window.__ffTCMgEscHandler); } catch (e) {} window.__ffTCMgEscHandler = null; }
@@ -14266,6 +14299,8 @@ async function saveTrainingVideoProgress(trainingId, blockId, metrics) {
       trainingId,
       blockId,
       staffId,
+      // Firestore trainingProgress create rule requires status (string).
+      status: completed ? 'completed' : 'in_progress',
       percentWatched,
       lastTimeSec,
       durationSec,
@@ -14499,9 +14534,9 @@ function bindTrainingVideoTracking(trainingId) {
     const blockId = videoEl.dataset.blockId || '';
     if (!blockId) return;
     const key = getTrainingVideoProgressCacheKey(trainingId, blockId);
-    const savedProgress = trainingVideoProgressMap[key];
     const restorePosition = () => {
-      const resumeSec = Number(savedProgress?.lastTimeSec || 0);
+      const progress = trainingVideoProgressMap[key];
+      const resumeSec = Number(progress?.lastTimeSec || 0);
       const durationSec = Number(videoEl.duration || 0);
       if (!resumeSec || !durationSec || !Number.isFinite(durationSec)) return;
       if (resumeSec >= durationSec) return;
@@ -16419,6 +16454,7 @@ async function goToTraining() {
   document.querySelectorAll('.btn-pill').forEach((b) => b.classList.remove('active'));
   const trainingBtn = document.getElementById('trainingBtn');
   if (trainingBtn) trainingBtn.classList.add('active');
+  if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
   const canManage = canManageTraining();
   trainingViewMode = canManage ? 'all' : 'my';
   if (!canSeeTrainingTabs()) trainingViewMode = 'my';
@@ -16459,6 +16495,7 @@ async function goToTraining() {
   if (reportsView) reportsView.style.display = 'none';
   if (reportDetailsView) reportDetailsView.style.display = 'none';
   renderTrainingLibrary();
+  if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
 }
 
 window.goToTraining = goToTraining;
@@ -17320,6 +17357,11 @@ function goToUserProfile(section) {
   }
   userProfileScreen.style.display = 'block';
 
+  document.querySelectorAll('.btn-pill').forEach(function (b) { b.classList.remove('active'); });
+  const settingsNavBtn = document.getElementById('settingsBtn');
+  if (settingsNavBtn) settingsNavBtn.classList.add('active');
+  if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
+
   if (typeof window.ffSyncUserProfileBillingMenuVisibility === 'function') {
     window.ffSyncUserProfileBillingMenuVisibility();
   }
@@ -17496,6 +17538,8 @@ function goToMyProfile() {
   if (wrap) wrap.style.display = 'none';
 
   myProfileScreen.style.display = 'block';
+  document.querySelectorAll('.btn-pill').forEach(function (b) { b.classList.remove('active'); });
+  if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
   if (typeof window.ffInitMyProfileHandlers === 'function') {
     window.ffInitMyProfileHandlers();
   }
@@ -22283,14 +22327,20 @@ function renderSettingsTaskList(tabKey) {
         
         let oneTimeEditHtml = '';
         if (tab === 'opening' || tab === 'closing') {
+          const todayStr = typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '';
+          const otDateVal = task.oneTimeDate ? String(task.oneTimeDate).slice(0, 10) : todayStr;
           oneTimeEditHtml = `
                 <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;margin-top:8px;cursor:pointer;user-select:none;">
                   <span class="staff-permission-toggle" style="flex:0 0 auto;">
-                    <input type="checkbox" class="tasks-edit-onetime" data-task-id="${resolvedTaskId}" ${task.isOneTime === true ? 'checked' : ''}>
+                    <input type="checkbox" class="tasks-edit-onetime" data-task-id="${resolvedTaskId}" onchange="ffToggleTaskEditOneTimeDateRow(this)" ${task.isOneTime === true ? 'checked' : ''}>
                     <span class="staff-permission-toggle-slider"></span>
                   </span>
-                  <span>One-Time Task (today only)</span>
-                </label>`;
+                  <span>One-Time Task</span>
+                </label>
+                <div class="tasks-edit-onetime-date-row" data-task-id="${resolvedTaskId}" style="margin-top:8px;${task.isOneTime === true ? '' : 'display:none;'}">
+                  <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Show on date</label>
+                  <input type="date" class="tasks-edit-onetime-date" data-task-id="${resolvedTaskId}" value="${escapeHtmlDraft(otDateVal)}" min="${escapeHtmlDraft(todayStr)}" style="width:100%;max-width:220px;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;color:#111827;">
+                </div>`;
         }
         
         return `
@@ -26900,8 +26950,29 @@ function addTaskToDraft() {
     if (tab === 'opening' || tab === 'closing') {
       const otCb = document.getElementById('taskOneTimeCheckbox');
       if (otCb && otCb.checked) {
+        const dateInp = document.getElementById('taskOneTimeDateInput');
+        const d = dateInp && dateInp.value ? String(dateInp.value).slice(0, 10) : '';
+        const todayStr = typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '';
+        if (!d) {
+          if (errorEl) {
+            errorEl.textContent = 'Pick a date for the one-time task';
+            errorEl.style.display = 'block';
+            errorEl.style.color = '#dc2626';
+          }
+          dateInp?.focus();
+          return;
+        }
+        if (todayStr && d < todayStr) {
+          if (errorEl) {
+            errorEl.textContent = 'One-time date cannot be in the past';
+            errorEl.style.display = 'block';
+            errorEl.style.color = '#dc2626';
+          }
+          dateInp?.focus();
+          return;
+        }
         taskObj.isOneTime = true;
-        taskObj.oneTimeDate = typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '';
+        taskObj.oneTimeDate = d;
       }
     }
     
@@ -27142,6 +27213,12 @@ function cancelTasksModalForm() {
     if (toggleBtn) {
       toggleBtn.textContent = 'Add Task';
     }
+    const otCbCancel = document.getElementById('taskOneTimeCheckbox');
+    if (otCbCancel) otCbCancel.checked = false;
+    const otDateWrapCancel = document.getElementById('taskOneTimeDateWrap');
+    if (otDateWrapCancel) otDateWrapCancel.style.display = 'none';
+    const otDateInpCancel = document.getElementById('taskOneTimeDateInput');
+    if (otDateInpCancel) otDateInpCancel.value = '';
     if (typeof ffCloseTaskAssignToMobilePanelIfMobile === 'function') ffCloseTaskAssignToMobilePanelIfMobile();
   } catch (e) {
     console.error('[Tasks] Error canceling form:', e);
@@ -27558,12 +27635,23 @@ function saveEditTask(taskId) {
     
     if (tab === 'opening' || tab === 'closing') {
       const otEdit = document.querySelector('.tasks-edit-onetime[data-task-id="' + String(taskId) + '"]');
+      const otDateInp = document.querySelector('.tasks-edit-onetime-date[data-task-id="' + String(taskId) + '"]');
       if (otEdit) {
         if (otEdit.checked) {
+          const d = otDateInp && otDateInp.value ? String(otDateInp.value).slice(0, 10) : '';
+          const todayStr = typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '';
+          if (!d) {
+            alert('Pick a date for the one-time task');
+            otDateInp?.focus();
+            return;
+          }
+          if (todayStr && d < todayStr) {
+            alert('One-time date cannot be in the past');
+            otDateInp?.focus();
+            return;
+          }
           task.isOneTime = true;
-          task.oneTimeDate = task.oneTimeDate
-            ? String(task.oneTimeDate).slice(0, 10)
-            : (typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '');
+          task.oneTimeDate = d;
         } else {
           task.isOneTime = false;
           delete task.oneTimeDate;
@@ -27612,7 +27700,54 @@ function updateAddFormScheduleFields() {
   if (yearlyDiv) yearlyDiv.style.display = (tab === 'yearly') ? 'block' : 'none';
   const oneTimeRow = document.getElementById('taskOneTimeRow');
   if (oneTimeRow) oneTimeRow.style.display = (tab === 'opening' || tab === 'closing') ? 'block' : 'none';
+  if (typeof ffSyncTaskAddOneTimeDateVisibility === 'function') ffSyncTaskAddOneTimeDateVisibility();
 }
+
+/** Add-task form: show date when One-Time is checked (Opening/Closing). */
+function ffSyncTaskAddOneTimeDateVisibility() {
+  try {
+    const tab = getCurrentTasksTab();
+    const cb = document.getElementById('taskOneTimeCheckbox');
+    const wrap = document.getElementById('taskOneTimeDateWrap');
+    const inp = document.getElementById('taskOneTimeDateInput');
+    if (!cb || !wrap) return;
+    const oc = tab === 'opening' || tab === 'closing';
+    if (!oc) {
+      wrap.style.display = 'none';
+      return;
+    }
+    if (cb.checked) {
+      wrap.style.display = 'block';
+      const todayStr = typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '';
+      if (inp && todayStr) {
+        inp.min = todayStr;
+        if (!inp.value) inp.value = todayStr;
+      }
+    } else {
+      wrap.style.display = 'none';
+    }
+  } catch (e) {}
+}
+
+function ffToggleTaskEditOneTimeDateRow(checkbox) {
+  try {
+    const id = checkbox && checkbox.getAttribute ? checkbox.getAttribute('data-task-id') : '';
+    if (!id || !checkbox) return;
+    const item = checkbox.closest('.tasks-modal-draft-item');
+    const row = item ? item.querySelector('.tasks-edit-onetime-date-row[data-task-id="' + id + '"]') : null;
+    if (!row) return;
+    row.style.display = checkbox.checked ? 'block' : 'none';
+    if (checkbox.checked) {
+      const inp = row.querySelector('.tasks-edit-onetime-date');
+      if (inp) {
+        const todayStr = typeof ffTasksLocalDateString === 'function' ? ffTasksLocalDateString(new Date()) : '';
+        if (todayStr) inp.min = todayStr;
+        if (!inp.value && todayStr) inp.value = todayStr;
+      }
+    }
+  } catch (e) {}
+}
+window.ffToggleTaskEditOneTimeDateRow = ffToggleTaskEditOneTimeDateRow;
 
 function resetAddFormScheduleFields() {
   const allWeek = document.getElementById('taskAddWeeklyAllWeek');
@@ -27629,6 +27764,10 @@ function resetAddFormScheduleFields() {
   
   const otCb = document.getElementById('taskOneTimeCheckbox');
   if (otCb) otCb.checked = false;
+  const otDateWrap = document.getElementById('taskOneTimeDateWrap');
+  if (otDateWrap) otDateWrap.style.display = 'none';
+  const otDateInp = document.getElementById('taskOneTimeDateInput');
+  if (otDateInp) otDateInp.value = '';
   
   // Reset assignTo to default
   const assignToAll = document.getElementById('taskAssignToAll');
@@ -27676,6 +27815,15 @@ function toggleTasksModalForm() {
           radio.addEventListener('change', handleTaskAssignToChange);
         }
       });
+      
+      const otOneTime = document.getElementById('taskOneTimeCheckbox');
+      if (otOneTime && !otOneTime.__ffOneTimeBound) {
+        otOneTime.__ffOneTimeBound = true;
+        otOneTime.addEventListener('change', function() {
+          if (typeof ffSyncTaskAddOneTimeDateVisibility === 'function') ffSyncTaskAddOneTimeDateVisibility();
+        });
+      }
+      if (typeof ffSyncTaskAddOneTimeDateVisibility === 'function') ffSyncTaskAddOneTimeDateVisibility();
       
       // Setup taskAddBtn and taskCancelBtn if not already bound
       const taskAddBtn = document.getElementById('taskAddBtn');
@@ -30174,6 +30322,19 @@ function initializeAppsPanel() {
           case 'inbox':
             if (typeof window.goToInbox === 'function') {
               window.goToInbox();
+            } else {
+              import('/inbox.js?v=20260505_inbox_btn_top_right_layout')
+                .then(function (m) {
+                  if (m && typeof m.goToInbox === 'function') {
+                    window.goToInbox = m.goToInbox;
+                    m.goToInbox();
+                  } else if (typeof window.goToInbox === 'function') {
+                    window.goToInbox();
+                  }
+                })
+                .catch(function (err) {
+                  console.error('[Apps Panel] Failed to load Inbox', err);
+                });
             }
             break;
           case 'tickets':
@@ -35104,6 +35265,8 @@ function initializeAppsPanel() {
       staffMembersModal.style.top = headerHeight + 'px';
       staffMembersModal.style.height = `calc(100vh - ${headerHeight}px)`;
       staffMembersModal.style.display = 'flex';
+      document.querySelectorAll('.btn-pill').forEach(function (b) { b.classList.remove('active'); });
+      if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
       
       // Reset toggle to show active staff by default
       showArchivedStaff = false;
@@ -35328,6 +35491,7 @@ function initializeAppsPanel() {
     }
     if (staffMembersModal) {
       staffMembersModal.style.display = 'none';
+      if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
       // Reset form state when closing
       hideStaffAddForm();
       // Exit edit mode and clean up pointer-events class
@@ -38666,14 +38830,17 @@ function initializeUserProfileMenu() {
         try {
           await ffLoadPointsLeaderboard();
           ffRenderPointsLeaderboard();
-          return;
         } catch (retryErr) {
           e = retryErr;
+          if (list) list.innerHTML = '<div style="padding:24px;text-align:center;color:#b91c1c;font-size:13px;">Failed to load your points.</div>';
+          if (typeof showToast === 'function') showToast(e?.message || 'Failed to load your points', 'error');
         }
+      } else {
+        if (list) list.innerHTML = '<div style="padding:24px;text-align:center;color:#b91c1c;font-size:13px;">Failed to load your points.</div>';
+        if (typeof showToast === 'function') showToast(e?.message || 'Failed to load your points', 'error');
       }
-      if (list) list.innerHTML = '<div style="padding:24px;text-align:center;color:#b91c1c;font-size:13px;">Failed to load your points.</div>';
-      if (typeof showToast === 'function') showToast(e?.message || 'Failed to load your points', 'error');
     }
+    if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
   };
 
   if (typeof document !== 'undefined' && !document.__ffPointsAppLocationListenerBound) {
@@ -51477,8 +51644,12 @@ function hookSettingsGuard_DISABLED(){
                         <input type="checkbox" id="taskOneTimeCheckbox">
                         <span class="staff-permission-toggle-slider"></span>
                       </span>
-                      <span>One-Time Task (today only)</span>
+                      <span>One-Time Task</span>
                     </label>
+                    <div id="taskOneTimeDateWrap" style="display:none;margin-top:8px;">
+                      <label for="taskOneTimeDateInput" style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:4px;">Show on date</label>
+                      <input type="date" id="taskOneTimeDateInput" style="width:100%;max-width:220px;padding:8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;color:#111827;box-sizing:border-box;">
+                    </div>
                   </div>
                 </div>
                 
@@ -51808,7 +51979,7 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260509_staffid_notify"></script>
+  <script type="module" src="/app.js?v=20260510_firestore_lp"></script>
   <script>
     (function () {
       var scripts = [
@@ -51827,15 +51998,15 @@ function hookSettingsGuard_DISABLED(){
         { src: "/schedule-ui.js?v=20260501_points", type: "module", delay: 2300 },
         { src: "/dashboard.js?v=20260501_dashboard_perm", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
-        { src: "/inbox.js?v=20260504_index_fallback", type: "module", delay: 2700 },
+        { src: "/inbox.js?v=20260505_inbox_btn_top_right_layout", type: "module", delay: 2700 },
+        { src: "/media-upload.js?v=20260513_remove_delete_media_btn", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260505_chat_flow_desktop_mobile", type: "module", delay: 2900 },
-        { src: "/staff-documents.js?v=20260501_points", type: "module", delay: 3200 },
+        { src: "/staff-documents.js?v=20260505_full_specialist_doc_type", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/settings-cloud.js?v=20260501_points", type: "module", delay: 3600 },
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260501_points", type: "module", delay: 4000 },
-        { src: "/media-upload.js?v=20260501_navfix", type: "module", delay: 4600 },
-        { src: "/inventory.js?v=20260501_navfix", type: "module", delay: 4900 },
+        { src: "/inventory.js?v=20260505_inv_od_footer_one_row", type: "module", delay: 4900 },
         { src: "/locations-manage.js?v=20260501_points", type: "module", delay: 5400 },
         { src: "/queue-analytics.js?v=20260501_points", type: "module", delay: 5700 },
         { src: "/tickets-analytics.js?v=20260501_points", type: "module", delay: 6000 },
@@ -52024,6 +52195,60 @@ function hookSettingsGuard_DISABLED(){
       line-height: 1.2 !important;
       appearance: auto !important;
     }
+    #inboxScreen .inbox-tabbar-inner .inbox-desktop-tab-buttons {
+      display: flex;
+      flex: 1;
+      align-items: stretch;
+      min-width: 0;
+    }
+    #inboxScreen .inbox-tabbar-inner .inbox-desktop-tab-buttons .inbox-tab {
+      flex: 1;
+    }
+    /* Mobile-only: status as dropdown (To handle); desktop keeps tab buttons */
+    #inboxScreen .inbox-status-mobile-wrap {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+    }
+    #inboxScreen .inbox-status-mobile-label {
+      flex-shrink: 0;
+    }
+    #inboxScreen #inboxStatusFilterSelect.inbox-status-filter-select {
+      font-size: 11px !important;
+      color: #374151 !important;
+      background: #fff !important;
+      border: 1px solid #e5e7eb !important;
+      border-radius: 8px !important;
+      padding: 8px 10px !important;
+      min-height: 36px !important;
+      height: 36px !important;
+      box-sizing: border-box !important;
+      flex: 1;
+      min-width: 0;
+      max-width: none !important;
+      cursor: pointer !important;
+      line-height: 1.2 !important;
+      appearance: auto !important;
+    }
+    @media (max-width: 640px) {
+      #inboxScreen #inboxTabs.inbox-tabbar-inner:not(.hidden) {
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px 10px !important;
+      }
+      #inboxScreen #inboxTabs.inbox-tabbar-inner:not(.hidden) .inbox-status-mobile-wrap {
+        display: flex !important;
+      }
+      #inboxScreen #inboxTabs.inbox-tabbar-inner:not(.hidden) .inbox-desktop-tab-buttons {
+        display: none !important;
+      }
+      #inboxScreen #inboxTabs.inbox-tabbar-inner:not(.hidden) #inboxSettingsBtn {
+        margin-left: 0;
+      }
+    }
     #inboxScreen .inbox-tabbar-inner {
       background: #fff !important;
       padding: 2px 20px 0 !important;
@@ -52034,6 +52259,29 @@ function hookSettingsGuard_DISABLED(){
         flex-wrap: wrap !important;
       }
     }
+    /* My Requests / technician: only the clickable "+ New Request" top-right — no duplicate plain label */
+    #inboxScreen #inboxContentHeaderRow {
+      display: flex !important;
+      flex-direction: row !important;
+      align-items: center !important;
+      justify-content: flex-end !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+      gap: 12px !important;
+      flex-wrap: wrap !important;
+      margin-bottom: 20px !important;
+    }
+    #inboxScreen #inboxContentHeaderRow .inbox-new-request-actions {
+      display: flex !important;
+      flex-direction: row !important;
+      align-items: center !important;
+      justify-content: flex-end !important;
+      flex-wrap: wrap !important;
+      gap: 10px !important;
+      margin-inline-start: auto !important;
+      flex-shrink: 0 !important;
+    }
+
     .inbox-view-btn.active {
       background: #7c3aed !important;
       color: #fff !important;
@@ -53148,6 +53396,8 @@ function hookSettingsGuard_DISABLED(){
 }
 .media-work-card:hover{box-shadow:0 4px 12px rgba(0,0,0,0.1);}
 #mediaScreen .btn-pill:not(#mediaUploadWorkBtn),.media-module-modal .btn-pill:not(.btn-danger){background:#7c3aed!important;color:#fff!important;font-size:10px!important;}
+#mediaUploadWorkBtn .media-upload-btn-label-short{display:none!important}
+#mediaUploadWorkBtn .media-upload-btn-label-full{display:inline!important}
 #mediaUploadWorkBtn{
   background:#7c3aed!important;
   color:#fff!important;
@@ -53173,8 +53423,136 @@ function hookSettingsGuard_DISABLED(){
 #workDetailsModal .btn-danger:hover{background:#fef2f2!important;border-color:#dc2626!important;}
 #workDetailsModal #workDetailsActions{display:flex!important;flex-wrap:wrap!important;gap:8px!important;align-items:center!important;}
 #workDetailsModal #workDetailsActions .action-hint{grid-column:1/-1!important;font-size:10px!important;}
-/* Ensure MEDIA button exists, but keep normal nav visual weight */
-.header #mediaBtn,.toolbar #mediaBtn{display:inline-flex!important;visibility:visible!important;}
+/* Mobile: bottom tab bar uses z-index 100350 — media modals must stack above it */
+@media (max-width: 640px) {
+  #workDetailsModal,
+  #uploadWorkModal,
+  #markPostedModal {
+    z-index: 100400 !important;
+  }
+  #workDetailsModal > div:first-child,
+  #uploadWorkModal > div:first-child,
+  #markPostedModal > div:first-child {
+    max-height: min(92vh, calc(100dvh - 24px)) !important;
+    padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)) !important;
+    box-sizing: border-box !important;
+  }
+}
+/* Media toolbar: on narrow screens stack rows so Filters/Sort/Upload don’t overflow off-screen */
+@media (max-width: 768px) {
+  #mediaScreen > .media-toolbar-row {
+    flex-direction: column;
+    align-items: stretch;
+    padding-left: 12px;
+    padding-right: 12px;
+    gap: 10px;
+  }
+  #mediaControlsWrap {
+    margin-left: 0 !important;
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}
+@media (max-width: 640px) {
+  /* My Uploads: keep one tight row (+ optional micro-scroll) */
+  #mediaScreen[data-media-tab="my_uploads"] #mediaControlsWrap {
+    flex-wrap: nowrap !important;
+    gap: 4px !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  #mediaScreen[data-media-tab="my_uploads"] #mediaFilterTrigger,
+  #mediaScreen[data-media-tab="my_uploads"] #mediaSortTrigger {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+  }
+  /* To handle: row 1 = Filters + Employee + Sort; row 2 = Category (full width) */
+  #mediaScreen[data-media-tab="to_handle"] #mediaControlsWrap {
+    flex-wrap: wrap !important;
+    align-items: stretch !important;
+    overflow-x: visible !important;
+    gap: 6px 4px !important;
+    -webkit-overflow-scrolling: auto;
+    scrollbar-width: auto;
+  }
+  #mediaScreen[data-media-tab="to_handle"] #mediaControlsWrap > div.media-dropdown-anchor:first-child {
+    order: 1;
+    flex: 1 1 calc(33.333% - 3px) !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  #mediaScreen[data-media-tab="to_handle"] #mediaControlsWrap > #mediaEmployeeFilterWrap {
+    order: 2;
+    flex: 1 1 calc(33.333% - 3px) !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  #mediaScreen[data-media-tab="to_handle"] #mediaControlsWrap > div.media-dropdown-anchor:nth-child(4) {
+    order: 3;
+    flex: 1 1 calc(33.333% - 3px) !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  #mediaScreen[data-media-tab="to_handle"] #mediaControlsWrap > #mediaCategoryFilterWrap {
+    order: 4;
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  #mediaScreen[data-media-tab="to_handle"] #mediaFilterTrigger,
+  #mediaScreen[data-media-tab="to_handle"] #mediaSortTrigger,
+  #mediaScreen[data-media-tab="to_handle"] #mediaEmployeeFilterTrigger {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+  }
+  #mediaScreen[data-media-tab="to_handle"] #mediaCategoryFilterTrigger {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  #mediaScreen #mediaFilterTrigger,
+  #mediaScreen #mediaSortTrigger,
+  #mediaScreen #mediaEmployeeFilterTrigger,
+  #mediaScreen #mediaCategoryFilterTrigger {
+    padding: 5px 6px !important;
+    font-size: 9px !important;
+  }
+  #mediaScreen #mediaUploadWorkBtn,
+  #mediaScreen #mediaUploadWorkBtn.btn-pill {
+    flex: 0 0 auto !important;
+    padding: 5px 8px !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    min-height: 30px !important;
+    height: auto !important;
+    min-width: 0 !important;
+    border-radius: 8px !important;
+    line-height: 1.1 !important;
+  }
+  #mediaUploadWorkBtn .media-upload-btn-label-full{display:none!important}
+  #mediaUploadWorkBtn .media-upload-btn-label-short{display:inline!important}
+}
 </style>
 <!-- Inventory mock screen (sidebar + table; content from /inventory.js) -->
 <div id="inventoryScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f8fafc;z-index:300;flex-direction:column;overflow:hidden;"></div>
@@ -53217,31 +53595,31 @@ function hookSettingsGuard_DISABLED(){
   </div>
 </div>
 <!-- Media Module Screen (like Inbox) -->
-<div id="mediaScreen" class="media-screen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f9fafb;z-index:300;flex-direction:column;overflow:hidden;">
+<div id="mediaScreen" class="media-screen" data-media-tab="my_uploads" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f9fafb;z-index:300;flex-direction:column;overflow:hidden;">
   <!-- Tabs (left) | Filters + Sort + Upload (right, grouped) -->
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;gap:12px;flex-wrap:wrap;">
-    <div id="mediaTabsWrap" style="display:flex;align-items:center;gap:0;position:relative;z-index:2;">
+  <div class="media-toolbar-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;gap:12px;flex-wrap:wrap;">
+    <div id="mediaTabsWrap" style="display:flex;align-items:center;gap:0;position:relative;z-index:2;min-width:0;">
       <button type="button" id="mediaTabMyUploads" class="media-tab-btn active" data-media-tab="my_uploads" style="border-right:0!important;border-radius:8px 0 0 8px!important;">My Uploads</button>
       <button type="button" id="mediaTabToHandle" class="media-tab-btn" data-media-tab="to_handle" style="display:none;border-left:none!important;border-radius:0 8px 8px 0!important;">To handle</button>
     </div>
-    <div id="mediaControlsWrap" style="display:flex;align-items:center;gap:8px;margin-left:auto;">
-      <div style="position:relative;">
+    <div id="mediaControlsWrap" style="display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap;min-width:0;">
+      <div class="media-dropdown-anchor" style="position:relative;flex-shrink:0;">
         <button type="button" id="mediaFilterTrigger" style="padding:8px 14px;font-size:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;cursor:pointer;display:flex;align-items:center;gap:6px;">Filters <span style="font-size:10px;">-</span></button>
         <div id="mediaFilterDropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:140px;z-index:100;max-height:280px;overflow-y:auto;"></div>
       </div>
-      <div id="mediaEmployeeFilterWrap" style="position:relative;display:none;">
+      <div id="mediaEmployeeFilterWrap" style="position:relative;display:none;flex-shrink:0;">
         <button type="button" id="mediaEmployeeFilterTrigger" style="padding:8px 14px;font-size:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;cursor:pointer;display:flex;align-items:center;gap:6px;">Employee: All <span style="font-size:10px;">-</span></button>
         <div id="mediaEmployeeFilterDropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:160px;z-index:100;max-height:280px;overflow-y:auto;"></div>
       </div>
-      <div id="mediaCategoryFilterWrap" style="position:relative;display:none;">
+      <div id="mediaCategoryFilterWrap" style="position:relative;display:none;flex-shrink:0;">
         <button type="button" id="mediaCategoryFilterTrigger" style="padding:8px 14px;font-size:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;cursor:pointer;display:flex;align-items:center;gap:6px;">Category: All Categories <span style="font-size:10px;">-</span></button>
         <div id="mediaCategoryFilterDropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:160px;z-index:100;max-height:280px;overflow-y:auto;"></div>
       </div>
-      <div style="position:relative;">
+      <div class="media-dropdown-anchor" style="position:relative;flex-shrink:0;">
         <button type="button" id="mediaSortTrigger" style="padding:8px 14px;font-size:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;cursor:pointer;display:flex;align-items:center;gap:6px;">Sort <span style="font-size:10px;">-</span></button>
         <div id="mediaSortDropdown" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:140px;z-index:100;"></div>
       </div>
-      <button type="button" id="mediaUploadWorkBtn" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;white-space:nowrap;">+ Upload Work</button>
+      <button type="button" id="mediaUploadWorkBtn" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;white-space:nowrap;flex-shrink:0;"><span class="media-upload-btn-label-full">+ Upload Work</span><span class="media-upload-btn-label-short">+ UPLOAD WORK</span></button>
     </div>
   </div>
   <div id="mediaToHandleSubRow" style="display:none;align-items:center;flex-wrap:wrap;gap:8px;padding:6px 20px 10px;border-bottom:1px solid #e5e7eb;background:#fafafa;flex-shrink:0;">
@@ -53460,11 +53838,23 @@ function hookSettingsGuard_DISABLED(){
   </div>
   <!-- Tabs (only for managers/admins) - hidden by default, shown in setupInboxUI for manager/admin -->
   <div id="inboxTabs" class="inbox-tabbar inbox-tabbar-inner hidden" style="border-bottom:1px solid #e5e7eb;background:#fff;padding:2px 20px 0;">
+    <div class="inbox-status-mobile-wrap">
+      <span class="inbox-filter-label inbox-status-mobile-label">Status</span>
+      <select id="inboxStatusFilterSelect" class="inbox-status-filter-select" aria-label="Filter by status">
+        <option value="open">Open</option>
+        <option value="needs_info">Needs Info</option>
+        <option value="approved">Approved</option>
+        <option value="denied">Denied</option>
+        <option value="archived">Archived</option>
+      </select>
+    </div>
+    <div class="inbox-desktop-tab-buttons">
     <button class="inbox-tab active" data-inbox-tab="open" onclick="setInboxTab('open')">Open<span id="inboxOpenBadge" class="ff-home-tasks-badge"></span></button>
     <button class="inbox-tab" data-inbox-tab="needs_info" onclick="setInboxTab('needs_info')">Needs Info<span id="inboxNeedsInfoBadge" class="ff-home-tasks-badge"></span></button>
     <button class="inbox-tab" data-inbox-tab="approved" onclick="setInboxTab('approved')">Approved</button>
     <button class="inbox-tab" data-inbox-tab="denied" onclick="setInboxTab('denied')">Denied</button>
     <button class="inbox-tab" data-inbox-tab="archived" onclick="setInboxTab('archived')">Archived</button>
+    </div>
     <button id="inboxSettingsBtn" type="button" aria-label="Inbox settings" title="Inbox settings" style="display:none;flex-shrink:0;width:30px;height:30px;min-width:30px;min-height:30px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;cursor:pointer;margin-left:8px;align-items:center;justify-content:center;padding:0;color:#6b7280;">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
     </button>
@@ -53473,10 +53863,9 @@ function hookSettingsGuard_DISABLED(){
   <!-- Content area (fades in when ready to avoid flash of empty state) -->
   <div id="inboxContent" style="flex:1;padding:24px;overflow-y:auto;background:#f9fafb;transition:opacity 0.2s ease;">
     <div id="inboxContentContainer" style="max-width:900px;margin:0 auto;">
-      <!-- Header: title + New Request (button must stay outside #inboxViewSwitcher so technicians still see it when switcher is hidden) -->
-      <div id="inboxContentHeaderRow" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;width:100%;">
-        <h3 id="inboxListTitle" style="margin:0;font-size:16px;font-weight:600;color:#374151;flex:1;min-width:0;text-align:right;">My Requests</h3>
-        <div style="display:flex;gap:10px;align-items:center;flex-shrink:0;">
+      <!-- My Requests / technician: single purple button where the old non-clickable title was (top-right); web + mobile -->
+      <div id="inboxContentHeaderRow">
+        <div class="inbox-new-request-actions">
           <button id="inboxCreateRequestBtn" type="button" onclick="openCreateRequestModal()" class="btn-pill" style="background:#7c3aed;color:#fff;padding:10px 20px;font-size:14px;border-color:#7c3aed;white-space:nowrap;">+ New Request</button>
           <button id="btnManageRequestTypes" onclick="openManageRequestTypesModal()" style="display:none;padding:10px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;color:#6b7280;">Manage request types</button>
         </div>

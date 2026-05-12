@@ -1,0 +1,11 @@
+---
+description: Firebase Hosting deploys only to staging unless production is explicitly requested
+alwaysApply: true
+---
+
+# פריסה / רענון – רק Staging
+
+- כשהמשתמשת מבקשת **פריסה**, **deploy**, **רענון** ל-hosting, או מילים דומות: הרץ **רק** ל־staging.
+- השתמש תמיד ב־`firebase deploy --only hosting --project fair-flow-staging` (או שווה ערך מפורש ל־`fair-flow-staging`).
+- **אל** תפרוס ל־production (`fairflowapp-db841`) ואל תריץ `firebase deploy --only hosting` בלי `--project` אם זה עלול לפגוע בפרודקשן — אלא אם המשתמשת **אומרת במפורש** שהיא רוצה production / פרודקשן עכשיו.
+- פריסה לפרודקשן תיעשה רק כשהיא תבקש זאת במפורש (למשל בסוף התהליך).

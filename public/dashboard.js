@@ -1405,6 +1405,7 @@ function bindAutoHideOnOtherNav() {
       if (s) s.style.display = "none";
       const navBtn = document.getElementById(NAV_BTN_ID);
       if (navBtn) navBtn.classList.remove("active");
+      if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
       if (_refreshTimer) {
         clearInterval(_refreshTimer);
         _refreshTimer = null;
@@ -1450,6 +1451,8 @@ export function goToDashboard() {
 
   if (_refreshTimer) clearInterval(_refreshTimer);
   _refreshTimer = setInterval(() => { refresh(); }, 30000);
+
+  if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
 }
 
 function ensureInjected() {

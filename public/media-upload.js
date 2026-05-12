@@ -5,7 +5,7 @@
 
 import { getDoc, getDocs, doc, collection, query, where, setDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "/app.js?v=20260509_staffid_notify";
+import { db, auth } from "/app.js?v=20260510_firestore_lp";
 import {
   createWorkWithMedia,
   addMediaToExistingWork,
@@ -13,6 +13,8 @@ import {
   getContentWork,
   getMediaItems,
   getPostedHistory,
+  resolveWorkCardPreviewUrl,
+  resolveMediaItemsForDisplay,
   addPostedHistory,
   updateContentWork,
   archiveContentWork,
@@ -25,7 +27,7 @@ import {
   createMediaCategory,
   updateMediaCategory,
   deleteMediaCategory,
-} from "./media-cloud.js?v=20260420_media_works_per_location";
+} from "./media-cloud.js?v=20260513_no_staging_banner";
 
 let currentUserProfile = null;
 let userWorks = [];
@@ -41,6 +43,11 @@ let currentMediaCategoryFilter = "all"; // categoryId or "all"; filter by catego
 let mediaCategories = [];
 let unsubMediaCategories = null;
 const MEDIA_UPLOAD_POINTS_DAILY_CAP = 10;
+/** First Firestore snapshot received (avoid empty-state flash while queries run). */
+let mediaMyWorksHydrated = false;
+let mediaAllWorksHydrated = false;
+/** Skip tearing down subscriptions when uid/staff/salon/to-handle unchanged (faster return to Media). */
+let _mediaWorkListSubKey = "";
 
 /** Same defaults as Staff → Permissions → Media → "To handle" in index.html */
 function legacyMediaHandleFromStaffDoc(st) {
@@ -158,6 +165,13 @@ async function enrichStaffDocIfMissing(salonId, user, userData, existing) {
 async function loadUserProfile() {
   const user = auth.currentUser;
   if (!user) return null;
+  const sidPre = typeof window !== "undefined" && window.currentSalonId ? String(window.currentSalonId).trim() : "";
+  const authedPre =
+    typeof window !== "undefined" && window.__ff_authedStaffId ? String(window.__ff_authedStaffId).trim() : "";
+  const profileCacheKey = `${user.uid}|${sidPre}|${authedPre}`;
+  if (currentUserProfile && currentUserProfile._ffMediaProfileKey === profileCacheKey) {
+    return currentUserProfile;
+  }
   try {
     const snap = await getDoc(doc(db, "users", user.uid));
     let d;
@@ -227,6 +241,7 @@ async function loadUserProfile() {
       createdByRole: role,
       salonId,
       mediaHandleAllowed,
+      _ffMediaProfileKey: profileCacheKey,
     };
     if (salonId) {
       setDoc(doc(db, `salons/${salonId}/members`, user.uid), {
@@ -266,6 +281,8 @@ function setMediaTab(tab) {
   currentMediaTab = tab;
   currentMediaFilter = "all";
   currentMediaEmployeeFilter = "all";
+  const screenEl = document.getElementById("mediaScreen");
+  if (screenEl) screenEl.setAttribute("data-media-tab", tab);
   const myBtn = document.getElementById("mediaTabMyUploads");
   const toHandleBtn = document.getElementById("mediaTabToHandle");
   if (myBtn) {
@@ -390,11 +407,54 @@ function getSortLabel(id) {
   return SORT_OPTIONS.find((s) => s.id === id)?.label || "Sort";
 }
 
+const MEDIA_DROPDOWN_FLOAT_MQ = "(max-width: 768px)";
+
+function _clearMediaDropdownPanelPosition(panel) {
+  if (!panel) return;
+  panel.style.position = "";
+  panel.style.top = "";
+  panel.style.left = "";
+  panel.style.right = "";
+  panel.style.width = "";
+  panel.style.minWidth = "";
+  panel.style.maxWidth = "";
+  panel.style.zIndex = "";
+}
+
+/** Narrow viewports: use fixed + viewport clamp so menus aren’t clipped when the toolbar overflows horizontally. */
+function _positionMediaDropdownPanel(panel, trigger) {
+  if (!panel || !trigger) return;
+  try {
+    if (typeof window.matchMedia === "function" && window.matchMedia(MEDIA_DROPDOWN_FLOAT_MQ).matches) {
+      const rect = trigger.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const margin = 10;
+      const desiredW = Math.min(260, Math.max(140, vw - margin * 2));
+      let left = rect.left;
+      if (left + desiredW > vw - margin) left = vw - margin - desiredW;
+      if (left < margin) left = margin;
+      panel.style.position = "fixed";
+      panel.style.top = `${Math.round(rect.bottom + 4)}px`;
+      panel.style.left = `${Math.round(left)}px`;
+      panel.style.right = "auto";
+      panel.style.width = `${Math.round(desiredW)}px`;
+      panel.style.minWidth = "";
+      panel.style.maxWidth = "";
+      panel.style.zIndex = "5000";
+    } else {
+      _clearMediaDropdownPanelPosition(panel);
+    }
+  } catch (_) {
+    _clearMediaDropdownPanelPosition(panel);
+  }
+}
+
 function closeMediaDropdowns() {
   const fd = document.getElementById("mediaFilterDropdown");
   const sd = document.getElementById("mediaSortDropdown");
   const ed = document.getElementById("mediaEmployeeFilterDropdown");
   const cd = document.getElementById("mediaCategoryFilterDropdown");
+  [fd, sd, ed, cd].forEach(_clearMediaDropdownPanelPosition);
   if (fd) fd.style.display = "none";
   if (sd) sd.style.display = "none";
   if (ed) ed.style.display = "none";
@@ -537,17 +597,14 @@ function renderMediaFilters() {
 // Card rendering
 // =====================
 
-function getPreviewUrl(work) {
-  return work._firstMediaUrl || null;
-}
-
 async function enrichWorkWithPreview(work) {
   if (work._firstMediaUrl) return work;
   try {
-    const items = await getMediaItems(work.id);
-    const first = items[0];
-    if (first?.mediaUrl) work._firstMediaUrl = first.mediaUrl;
-  } catch (_) {}
+    const url = await resolveWorkCardPreviewUrl(work);
+    if (url) work._firstMediaUrl = url;
+  } catch (e) {
+    console.warn("[Media] enrichWorkWithPreview", work?.id, e);
+  }
   return work;
 }
 
@@ -658,6 +715,18 @@ function applyToHandleVisibility() {
   const myUploadsBtn = document.getElementById("mediaTabMyUploads");
   if (myUploadsBtn) myUploadsBtn.style.borderRadius = showToHandle ? "8px 0 0 8px" : "8px";
   updateMediaUploadWorkButtonVisibility();
+  const mediaScreenEl = document.getElementById("mediaScreen");
+  if (mediaScreenEl) mediaScreenEl.setAttribute("data-media-tab", currentMediaTab);
+}
+
+/** Thumbnail for grid: enriched cache, or denormalized preview on work doc (no subcollection read). */
+function syncCardPreviewUrlFromDoc(work) {
+  if (!work) return "";
+  const injected = work._firstMediaUrl != null ? String(work._firstMediaUrl).trim() : "";
+  if (injected && /^https?:\/\//i.test(injected)) return injected;
+  const pre = work.previewMediaUrl != null ? String(work.previewMediaUrl).trim() : "";
+  if (pre && /^https?:\/\//i.test(pre)) return pre;
+  return "";
 }
 
 function getStatusLabels(work) {
@@ -675,7 +744,21 @@ function renderMediaList() {
   const list = document.getElementById("mediaList");
   const empty = document.getElementById("mediaListEmpty");
   const loading = document.getElementById("mediaListLoading");
-  if (!list || !empty) return;
+  if (!list || !empty || !loading) return;
+
+  const awaitingMy =
+    currentMediaTab === "my_uploads" && auth.currentUser && !mediaMyWorksHydrated;
+  const awaitingAll =
+    currentMediaTab === "to_handle" &&
+    auth.currentUser &&
+    canHandleMediaWork() &&
+    !mediaAllWorksHydrated;
+  if (awaitingMy || awaitingAll) {
+    loading.style.display = "block";
+    list.style.display = "none";
+    empty.style.display = "none";
+    return;
+  }
 
   const works = currentMediaTab === "my_uploads" ? userWorks : allWorks;
   const filtered = works.filter((w) => w.status !== "deleted");
@@ -686,7 +769,7 @@ function renderMediaList() {
   const filteredByCategory = applyCategoryFilter(filteredByEmployee, currentMediaCategoryFilter);
   const sorted = applySort(filteredByCategory, currentMediaSort);
 
-  if (works.length === 0 && currentMediaTab === "my_uploads") {
+  if (works.length === 0 && currentMediaTab === "my_uploads" && mediaMyWorksHydrated) {
     loading.style.display = "none";
     list.style.display = "none";
     empty.style.display = "block";
@@ -707,7 +790,7 @@ function renderMediaList() {
     card.style.cssText = "background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;cursor:pointer;transition:box-shadow 0.2s;";
     card.onclick = () => openWorkDetails(work.id);
 
-    const previewUrl = work._firstMediaUrl || "";
+    const previewUrl = syncCardPreviewUrlFromDoc(work);
     const preview = previewUrl
       ? `<div style="aspect-ratio:1;background:#f3f4f6;overflow:hidden;"><img src="${previewUrl}" alt="" style="width:100%;height:100%;object-fit:cover;"></div>`
       : `<div style="aspect-ratio:1;background:#f3f4f6;display:flex;align-items:center;justify-content:center;color:#9ca3af;">
@@ -1055,6 +1138,11 @@ function validateUpload() {
   return true;
 }
 
+function formatMediaUploadError(err) {
+  const raw = err && (err.message || err.code) ? `${err.code || ""} ${err.message || err}`.trim() : String(err || "");
+  return raw || "Upload failed";
+}
+
 async function doUpload() {
   if (auth.currentUser && !currentUserProfile) {
     try {
@@ -1142,7 +1230,7 @@ async function doUpload() {
     }
   } catch (e) {
     console.error("[Media] Upload failed", e);
-    showUploadMessage(`Error: ${e.message || "Upload failed"}`, true);
+    showUploadMessage(formatMediaUploadError(e), true);
   } finally {
     if (submitBtn) {
       submitBtn.disabled = false;
@@ -1318,14 +1406,73 @@ async function openWorkDetails(workId) {
   const work = await getContentWork(workId);
   if (!work) return;
 
-  const items = await getMediaItems(workId);
-  const history = await getPostedHistory(workId);
+  const sid = work.salonId != null && String(work.salonId).trim() !== "" ? String(work.salonId).trim() : null;
+  let items = await getMediaItems(workId, sid);
+  items = await resolveMediaItemsForDisplay(items);
+  const history = await getPostedHistory(workId, sid);
   await enrichWorkWithPreview(work);
   const canHandleMedia = canHandleMediaWork();
   const isAdminUser = isAdmin();
   const inToHandleView = currentMediaTab === "to_handle";
   const showManagerRow = inToHandleView && canHandleMedia;
   const showAdminRow = inToHandleView && isAdminUser;
+
+  /** Crowded toolbar: collapse into one "Actions" menu on narrow screens, only on To handle with manager/admin controls. */
+  const useMobileActionMenu =
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(max-width: 640px)").matches &&
+    inToHandleView &&
+    (showManagerRow || showAdminRow);
+
+  const pendingButtons = [];
+  const pendingExtras = [];
+  const addActionBtn = (btn) => {
+    pendingButtons.push(btn);
+  };
+  const addActionExtra = (el) => {
+    pendingExtras.push(el);
+  };
+
+  const btnStyle = "font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;";
+
+  const flushWorkDetailActions = () => {
+    if (useMobileActionMenu && pendingButtons.length > 0) {
+      const wrap = document.createElement("div");
+      wrap.className = "media-work-detail-actions-menu";
+      wrap.style.cssText = "width:100%;";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "btn-pill media-action-btn";
+      toggle.textContent = "Actions \u25BE";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.style.cssText = btnStyle + "width:100%;box-sizing:border-box;font-weight:600;";
+      const panel = document.createElement("div");
+      panel.className = "media-work-detail-actions-panel";
+      panel.style.cssText = "display:none;flex-direction:column;gap:8px;width:100%;margin-top:8px;";
+      toggle.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const open = panel.style.display !== "flex";
+        panel.style.display = open ? "flex" : "none";
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      };
+      pendingButtons.forEach((btn) => {
+        btn.style.width = "100%";
+        btn.style.boxSizing = "border-box";
+        panel.appendChild(btn);
+      });
+      pendingExtras.forEach((el) => {
+        panel.appendChild(el);
+      });
+      wrap.appendChild(toggle);
+      wrap.appendChild(panel);
+      actions.appendChild(wrap);
+    } else {
+      pendingButtons.forEach((btn) => actions.appendChild(btn));
+      pendingExtras.forEach((el) => actions.appendChild(el));
+    }
+  };
 
   const previewsHtml = items
     .map((m) => {
@@ -1359,7 +1506,6 @@ async function openWorkDetails(workId) {
 
   const firstMedia = items[0];
 
-  const btnStyle = "font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;";
   const downloadBtn = document.createElement("button");
   downloadBtn.type = "button";
   downloadBtn.className = "btn-pill media-action-btn";
@@ -1420,9 +1566,10 @@ async function openWorkDetails(workId) {
       }
     }
   };
-  actions.appendChild(downloadBtn);
+  addActionBtn(downloadBtn);
 
   const shareBtn = document.createElement("button");
+  shareBtn.type = "button";
   shareBtn.className = "btn-pill";
   shareBtn.textContent = "Share";
   shareBtn.style.cssText = btnStyle;
@@ -1437,7 +1584,7 @@ async function openWorkDetails(workId) {
       navigator.clipboard?.writeText(firstMedia.mediaUrl).then(() => alert("Link copied"));
     } else alert("No media to share");
   };
-  actions.appendChild(shareBtn);
+  addActionBtn(shareBtn);
 
   const role = (currentUserProfile?.createdByRole || "").toLowerCase();
   const uid = auth.currentUser?.uid;
@@ -1493,7 +1640,7 @@ async function openWorkDetails(workId) {
         }
       });
     };
-    actions.appendChild(selfDeleteBtn);
+    addActionBtn(selfDeleteBtn);
     if (!isEligible) {
       let hintText = "";
       if ((work?.postedCount || 0) > 0) hintText = "Posted – you can only delete before posting.";
@@ -1504,7 +1651,7 @@ async function openWorkDetails(workId) {
       hint.className = "action-hint";
       hint.style.cssText = "font-size:10px;color:#9ca3af;margin-top:4px;";
       hint.textContent = hintText;
-      actions.appendChild(hint);
+      addActionExtra(hint);
     }
   }
 
@@ -1514,7 +1661,7 @@ async function openWorkDetails(workId) {
     markPostedBtn.textContent = "Mark as Posted";
     markPostedBtn.style.cssText = btnStyle;
     markPostedBtn.onclick = () => openMarkPostedModal(workId);
-    actions.appendChild(markPostedBtn);
+    addActionBtn(markPostedBtn);
 
     const featuredBtn = document.createElement("button");
     featuredBtn.className = "btn-pill media-action-btn";
@@ -1525,7 +1672,7 @@ async function openWorkDetails(workId) {
       openWorkDetails(workId);
       renderMediaList();
     };
-    actions.appendChild(featuredBtn);
+    addActionBtn(featuredBtn);
   }
 
   if (showAdminRow) {
@@ -1537,27 +1684,7 @@ async function openWorkDetails(workId) {
       closeWorkDetails();
       renderMediaList();
     };
-    actions.appendChild(archiveBtn);
-
-    const deleteMediaBtn = document.createElement("button");
-    deleteMediaBtn.className = "btn-pill media-action-btn";
-    deleteMediaBtn.textContent = "Delete Media";
-    deleteMediaBtn.style.cssText = btnStyle;
-    deleteMediaBtn.disabled = items.length === 0;
-    if (items.length === 0) deleteMediaBtn.title = "No media to delete";
-    deleteMediaBtn.onclick = async () => {
-      if (items.length === 0) return;
-      if (confirm("This will remove the uploaded media files but keep the work record and history.")) {
-        try {
-          await deleteAllMediaFromWork(workId);
-          openWorkDetails(workId);
-          renderMediaList();
-        } catch (e) {
-          alert("Failed: " + (e.message || "Unknown error"));
-        }
-      }
-    };
-    actions.appendChild(deleteMediaBtn);
+    addActionBtn(archiveBtn);
 
     const duplicateBtn = document.createElement("button");
     duplicateBtn.className = "btn-pill media-action-btn";
@@ -1568,7 +1695,7 @@ async function openWorkDetails(workId) {
       openWorkDetails(workId);
       renderMediaList();
     };
-    actions.appendChild(duplicateBtn);
+    addActionBtn(duplicateBtn);
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "btn-pill btn-danger media-action-btn";
@@ -1581,8 +1708,10 @@ async function openWorkDetails(workId) {
         renderMediaList();
       }
     };
-    actions.appendChild(deleteBtn);
+    addActionBtn(deleteBtn);
   }
+
+  flushWorkDetailActions();
 
   content.onclick = async (e) => {
     const mediaId = e.target?.closest?.("[data-media-id]")?.dataset?.mediaId;
@@ -1776,13 +1905,20 @@ export async function goToMedia() {
   const screen = document.getElementById("mediaScreen");
   if (screen) {
     screen.style.display = "flex";
+    screen.setAttribute("data-media-tab", currentMediaTab);
     document.querySelectorAll(".btn-pill").forEach((b) => b.classList.remove("active"));
     const btn = document.getElementById("mediaBtn");
     if (btn) btn.classList.add("active");
   }
   updateMediaUploadWorkButtonVisibility();
   renderMediaFilters();
-  renderMediaList();
+  if (auth.currentUser) {
+    renderMediaList();
+  } else {
+    mediaMyWorksHydrated = true;
+    mediaAllWorksHydrated = true;
+    renderMediaList();
+  }
 
   if (auth.currentUser) {
     void (async () => {
@@ -1794,6 +1930,9 @@ export async function goToMedia() {
         renderMediaList();
       } catch (e) {
         console.warn("[Media] goToMedia profile/subscriptions", e);
+        mediaMyWorksHydrated = true;
+        mediaAllWorksHydrated = true;
+        renderMediaList();
       }
     })();
   } else {
@@ -1892,7 +2031,10 @@ function initMediaModule() {
       e.stopPropagation();
       const open = filterDropdown.style.display === "block";
       closeMediaDropdowns();
-      if (!open) filterDropdown.style.display = "block";
+      if (!open) {
+        _positionMediaDropdownPanel(filterDropdown, filterTrigger);
+        filterDropdown.style.display = "block";
+      }
     };
   }
   if (sortTrigger && sortDropdown) {
@@ -1900,7 +2042,10 @@ function initMediaModule() {
       e.stopPropagation();
       const open = sortDropdown.style.display === "block";
       closeMediaDropdowns();
-      if (!open) sortDropdown.style.display = "block";
+      if (!open) {
+        _positionMediaDropdownPanel(sortDropdown, sortTrigger);
+        sortDropdown.style.display = "block";
+      }
     };
   }
   const employeeTrigger = document.getElementById("mediaEmployeeFilterTrigger");
@@ -1910,7 +2055,10 @@ function initMediaModule() {
       e.stopPropagation();
       const open = employeeDropdown.style.display === "block";
       closeMediaDropdowns();
-      if (!open && currentMediaTab === "to_handle") employeeDropdown.style.display = "block";
+      if (!open && currentMediaTab === "to_handle") {
+        _positionMediaDropdownPanel(employeeDropdown, employeeTrigger);
+        employeeDropdown.style.display = "block";
+      }
     };
   }
   const categoryTrigger = document.getElementById("mediaCategoryFilterTrigger");
@@ -1920,7 +2068,10 @@ function initMediaModule() {
       e.stopPropagation();
       const open = categoryDropdown.style.display === "block";
       closeMediaDropdowns();
-      if (!open) categoryDropdown.style.display = "block";
+      if (!open) {
+        _positionMediaDropdownPanel(categoryDropdown, categoryTrigger);
+        categoryDropdown.style.display = "block";
+      }
     };
   }
   [filterDropdown, sortDropdown, employeeDropdown, categoryDropdown].forEach((el) => {
@@ -1948,6 +2099,15 @@ function initMediaModule() {
 }
 
 function setupMediaWorkListSubscriptions() {
+  const canAll = canHandleMediaWork();
+  const subKey = `${currentUserProfile?.uid || ""}|${currentUserProfile?.staffId || ""}|${currentUserProfile?.salonId || ""}|${canAll ? "1" : "0"}`;
+  if (unsubMyWorks && _mediaWorkListSubKey === subKey) {
+    applyToHandleVisibility();
+    renderMediaList();
+    return;
+  }
+  _mediaWorkListSubKey = subKey;
+
   if (unsubMyWorks) {
     unsubMyWorks();
     unsubMyWorks = null;
@@ -1956,6 +2116,9 @@ function setupMediaWorkListSubscriptions() {
     unsubAllWorks();
     unsubAllWorks = null;
   }
+
+  mediaMyWorksHydrated = false;
+  mediaAllWorksHydrated = false;
 
   if (currentUserProfile?.staffId || currentUserProfile?.uid) {
     unsubMyWorks = subscribeContentWorks({}, async (works) => {
@@ -1966,23 +2129,52 @@ function setupMediaWorkListSubscriptions() {
         const workCreatedByUid = String(work?.createdByUid || "").trim();
         return (staffId && workStaffId === staffId) || (uid && workCreatedByUid === uid);
       });
+      mediaMyWorksHydrated = true;
+      userWorks = ownWorks.slice();
+      populateWorksDropdown();
+      renderMediaList();
       const toEnrich = ownWorks.slice(0, 20);
       const enriched = await Promise.all(toEnrich.map((w) => enrichWorkWithPreview({ ...w })));
+      for (const w of enriched) {
+        const url = w._firstMediaUrl != null ? String(w._firstMediaUrl).trim() : "";
+        const hasPre = w.previewMediaUrl != null && String(w.previewMediaUrl).trim();
+        if (url && /^https?:\/\//i.test(url) && !hasPre) {
+          void updateContentWork(w.id, { previewMediaUrl: url }).catch(() => {});
+        }
+      }
       userWorks = [...enriched, ...ownWorks.slice(20)];
       populateWorksDropdown();
       renderMediaList();
     });
+  } else {
+    mediaMyWorksHydrated = true;
+    userWorks = [];
   }
 
   applyToHandleVisibility();
   if (canHandleMediaWork()) {
     unsubAllWorks = subscribeContentWorks({}, async (works) => {
-      const toEnrich = works.slice(0, 20);
+      const arr = Array.isArray(works) ? works : [];
+      mediaAllWorksHydrated = true;
+      allWorks = arr.slice();
+      renderMediaFilters();
+      renderMediaList();
+      const toEnrich = arr.slice(0, 20);
       const enriched = await Promise.all(toEnrich.map((w) => enrichWorkWithPreview({ ...w })));
-      allWorks = [...enriched, ...works.slice(20)];
+      for (const w of enriched) {
+        const url = w._firstMediaUrl != null ? String(w._firstMediaUrl).trim() : "";
+        const hasPre = w.previewMediaUrl != null && String(w.previewMediaUrl).trim();
+        if (url && /^https?:\/\//i.test(url) && !hasPre) {
+          void updateContentWork(w.id, { previewMediaUrl: url }).catch(() => {});
+        }
+      }
+      allWorks = [...enriched, ...arr.slice(20)];
       renderMediaFilters();
       renderMediaList();
     });
+  } else {
+    mediaAllWorksHydrated = true;
+    allWorks = [];
   }
 }
 
@@ -1990,6 +2182,12 @@ export function initMediaUpload() {
   onAuthStateChanged(auth, async (user) => {
     if (!user) {
       hideMediaScreen();
+      currentUserProfile = null;
+      _mediaWorkListSubKey = "";
+      mediaMyWorksHydrated = true;
+      mediaAllWorksHydrated = true;
+      userWorks = [];
+      allWorks = [];
       if (unsubMyWorks) {
         unsubMyWorks();
         unsubMyWorks = null;

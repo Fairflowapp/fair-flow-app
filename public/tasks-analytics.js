@@ -6,7 +6,7 @@
  */
 
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db, auth } from "/app.js?v=20260509_staffid_notify";
+import { db, auth } from "/app.js?v=20260510_firestore_lp";
 
 const LOG = "[TasksAnalytics]";
 const SCREEN_ID = "tasksAnalyticsScreen";

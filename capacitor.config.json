@@ -3,7 +3,7 @@
   "appName": "Fair Flow",
   "webDir": "public",
   "server": {
-    "url": "https://fair-flow-staging.web.app",
+    "url": "https://fairflowapp-db841.web.app",
     "cleartext": true
   }
 }

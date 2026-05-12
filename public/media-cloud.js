@@ -26,7 +26,7 @@ import {
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
-import { db, auth, storage } from "/app.js?v=20260509_staffid_notify";
+import { db, auth, storage } from "/app.js?v=20260510_firestore_lp";
 
 // =====================
 // Paths
@@ -214,6 +214,7 @@ export async function updateContentWork(workId, updates) {
   const allowed = [
     "staffId", "staffName", "serviceType", "categoryId", "categoryName", "categoryIds", "categoryNames",
     "caption", "featured", "duplicate", "status", "postedCount",
+    "previewMediaUrl", "previewStoragePath",
     "updatedAt"
   ];
   const safe = {};
@@ -365,6 +366,15 @@ async function uploadAndCreateMediaItem(workId, file, mediaType, sortOrder) {
   const salonId = await getSalonId();
   if (!salonId) throw new Error("No salonId");
 
+  const coll = mediaItemsRef(salonId, workId);
+  let isFirst = true;
+  try {
+    const emptyCheck = await getDocs(coll);
+    isFirst = emptyCheck.empty;
+  } catch (_) {
+    isFirst = true;
+  }
+
   const mediaId = genMediaId();
   const path = mediaStoragePath(salonId, workId, mediaId, file.name);
   const fileRef = storageRef(storage, path);
@@ -378,6 +388,14 @@ async function uploadAndCreateMediaItem(workId, file, mediaType, sortOrder) {
     storagePath: path,
     sortOrder,
   });
+
+  if (isFirst) {
+    await updateContentWork(workId, {
+      previewMediaUrl: mediaUrl,
+      previewStoragePath: path,
+    }).catch((e) => console.warn("[MediaCloud] preview denorm failed", workId, e));
+  }
+
   return { mediaId, mediaUrl, storagePath: path };
 }
 
@@ -486,17 +504,94 @@ export async function deleteAllMediaFromWork(workId) {
     }
     await deleteDoc(mediaItemsRef(salonId, workId, item.id));
   }
-  await updateContentWork(workId, { updatedAt: serverTimestamp() });
+  await updateContentWork(workId, {
+    previewMediaUrl: null,
+    previewStoragePath: null,
+  });
 }
 
 /**
  * Get all media items for a work.
  */
-export async function getMediaItems(workId) {
-  const salonId = await getSalonId();
-  if (!salonId) return [];
-  const snap = await getDocs(query(mediaItemsRef(salonId, workId), orderBy("sortOrder", "asc")));
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+export async function getMediaItems(workId, salonIdOverride = null) {
+  const salonId =
+    salonIdOverride != null && String(salonIdOverride).trim() !== ""
+      ? String(salonIdOverride).trim()
+      : await getSalonId();
+  if (!salonId || !workId) return [];
+  // Avoid orderBy(): missing sortOrder / index / transport flakiness can yield empty or failed reads.
+  const coll = mediaItemsRef(salonId, workId);
+  const snap = await getDocs(coll);
+  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  items.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  return items;
+}
+
+/**
+ * First preview URL for list cards: prefers https mediaUrl, else refreshes from storagePath.
+ * @param {string} workId
+ * @param {string|null} [salonIdOverride] - use work.salonId when present (multi-account / stale window)
+ * @returns {Promise<string>}
+ */
+export async function resolveFirstWorkPreviewUrl(workId, salonIdOverride = null) {
+  const items = await getMediaItems(workId, salonIdOverride);
+  const first = items[0];
+  if (!first) return "";
+  const raw = first.mediaUrl != null ? String(first.mediaUrl).trim() : "";
+  if (raw && /^https?:\/\//i.test(raw)) return raw;
+  const path = first.storagePath != null ? String(first.storagePath).trim() : "";
+  if (path) {
+    try {
+      const fileRef = storageRef(storage, path);
+      const u = await getDownloadURL(fileRef);
+      return u && String(u).trim() ? String(u).trim() : "";
+    } catch (e) {
+      console.warn("[MediaCloud] resolveFirstWorkPreviewUrl getDownloadURL", workId, e);
+    }
+  }
+  return raw || "";
+}
+
+/**
+ * Best URL for grid thumbnails: denormalized preview on work doc, then subcollection / Storage.
+ */
+export async function resolveWorkCardPreviewUrl(work) {
+  if (!work?.id) return "";
+  const pre = work.previewMediaUrl != null ? String(work.previewMediaUrl).trim() : "";
+  if (pre && /^https?:\/\//i.test(pre)) return pre;
+  const pth = work.previewStoragePath != null ? String(work.previewStoragePath).trim() : "";
+  if (pth) {
+    try {
+      const fileRef = storageRef(storage, pth);
+      const u = await getDownloadURL(fileRef);
+      if (u && String(u).trim()) return String(u).trim();
+    } catch (e) {
+      console.warn("[MediaCloud] resolveWorkCardPreviewUrl storagePath", work.id, e);
+    }
+  }
+  const sid = work.salonId != null && String(work.salonId).trim() !== "" ? String(work.salonId).trim() : null;
+  return resolveFirstWorkPreviewUrl(work.id, sid);
+}
+
+/** Ensure each item has an https mediaUrl when storagePath is available (modal / video src). */
+export async function resolveMediaItemsForDisplay(items) {
+  if (!Array.isArray(items) || !items.length) return items || [];
+  return Promise.all(
+    items.map(async (m) => {
+      const raw = m.mediaUrl != null ? String(m.mediaUrl).trim() : "";
+      if (raw && /^https?:\/\//i.test(raw)) return m;
+      const path = m.storagePath != null ? String(m.storagePath).trim() : "";
+      if (!path) return m;
+      try {
+        const fileRef = storageRef(storage, path);
+        const u = await getDownloadURL(fileRef);
+        if (u && String(u).trim()) return { ...m, mediaUrl: String(u).trim() };
+      } catch (e) {
+        console.warn("[MediaCloud] resolveMediaItemsForDisplay", m.id, e);
+      }
+      return m;
+    })
+  );
 }
 
 /**
@@ -510,9 +605,10 @@ export function subscribeMediaItems(workId, callback) {
       if (callback) callback([]);
       return;
     }
-    const q = query(mediaItemsRef(salonId, workId), orderBy("sortOrder", "asc"));
-    unsub = onSnapshot(q, (snap) => {
+    const coll = mediaItemsRef(salonId, workId);
+    unsub = onSnapshot(coll, (snap) => {
       const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      items.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
       if (callback) callback(items);
     });
   })();
@@ -556,11 +652,20 @@ export async function addPostedHistory(workId, data) {
 /**
  * Get posted history for a work.
  */
-export async function getPostedHistory(workId) {
-  const salonId = await getSalonId();
-  if (!salonId) return [];
-  const snap = await getDocs(query(postedHistoryRef(salonId, workId), orderBy("createdAt", "desc")));
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+export async function getPostedHistory(workId, salonIdOverride = null) {
+  const salonId =
+    salonIdOverride != null && String(salonIdOverride).trim() !== ""
+      ? String(salonIdOverride).trim()
+      : await getSalonId();
+  if (!salonId || !workId) return [];
+  const snap = await getDocs(postedHistoryRef(salonId, workId));
+  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  items.sort((a, b) => {
+    const ta = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+    const tb = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+    return tb - ta;
+  });
+  return items;
 }
 
 /**
@@ -574,9 +679,14 @@ export function subscribePostedHistory(workId, callback) {
       if (callback) callback([]);
       return;
     }
-    const q = query(postedHistoryRef(salonId, workId), orderBy("createdAt", "desc"));
-    unsub = onSnapshot(q, (snap) => {
+    const coll = postedHistoryRef(salonId, workId);
+    unsub = onSnapshot(coll, (snap) => {
       const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      items.sort((a, b) => {
+        const ta = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+        const tb = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+        return tb - ta;
+      });
       if (callback) callback(items);
     });
   })();

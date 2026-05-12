@@ -19,7 +19,7 @@ import {
   onSnapshot, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "/app.js?v=20260509_staffid_notify";
+import { db, auth } from "/app.js?v=20260510_firestore_lp";
 
 // Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
 // window level in capture phase to beat any other handler that might

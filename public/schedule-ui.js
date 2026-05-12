@@ -12,7 +12,7 @@ import {
   deleteField,
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { auth, db } from "/app.js?v=20260509_staffid_notify";
+import { auth, db } from "/app.js?v=20260510_firestore_lp";
 import { generateWeeklySchedule } from "./schedule-generator.js?v=20260420_cross_loc_busy";
 import { validateScheduleDraft } from "./schedule-validator.js?v=20260409_coverage_total_staff_skip";
 import {
@@ -4854,6 +4854,7 @@ function hideScheduleScreen() {
   if (screen) screen.style.display = "none";
   const btn = document.getElementById("scheduleBtn");
   if (btn) btn.classList.remove("active");
+  if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
 }
 
 export async function goToSchedule() {
@@ -4912,6 +4913,8 @@ export async function goToSchedule() {
   if (scheduleBtn) scheduleBtn.classList.add("active");
 
   await refreshSchedulePreview();
+
+  if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
 
   if (Array.isArray(schedulePreviewState.staffList) && schedulePreviewState.staffList.length) {
     const sid = String(

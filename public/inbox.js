@@ -28,14 +28,14 @@ import {
 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth, storage } from "/app.js?v=20260509_staffid_notify";
+import { db, auth, storage } from "/app.js?v=20260510_firestore_lp";
 import {
   ffSyncStaffDocumentOnInboxApprove,
   ffSyncStaffDocumentOnInboxReject,
   ffSendExpiryChatReminderForStaffDocContext,
   ffStaffDocumentTypeSelectOptionsHtml,
   ffExpirationTimestampToYmdInput,
-} from "./staff-documents.js";
+} from "./staff-documents.js?v=20260505_full_specialist_doc_type";
 
 // Category order for display (Schedule → Payments → Operations → Documents → Other at end)
 const REQUEST_CATEGORY_ORDER = ['schedule', 'payments', 'operations', 'documents', 'other'];
@@ -259,8 +259,27 @@ function applyTechInboxMerge(loadingEl) {
   renderInboxList();
 }
 
+/** Map users/membership role strings to the Inbox notion of "line staff" (= technician). */
+function inboxNormalizeLineStaffRoleLc(raw) {
+  const r = String(raw || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+  if (
+    r === "technician" ||
+    r === "tech" ||
+    r === "staff" ||
+    r === "service_provider" ||
+    r === "service provider" ||
+    r === "serviceprovider"
+  ) {
+    return "technician";
+  }
+  return r;
+}
+
 function inboxUserRoleLc() {
-  return String((currentUserProfile && currentUserProfile.role) || "").toLowerCase();
+  return inboxNormalizeLineStaffRoleLc((currentUserProfile && currentUserProfile.role) || "");
 }
 
 /** Roles that historically had full inbox access before per-staff permission flags. */
@@ -320,7 +339,7 @@ function inboxCanViewInboxEval(profile) {
   // Owner/admin/manager always have inbox_view access, even if the permissions map
   // is missing (e.g. a brand-new owner whose users/{uid} doc has no staff merge yet).
   // This mirrors the legacy desk-role behaviour used by inboxCanManageInboxEval below.
-  const role = String(profile.role || "").toLowerCase();
+  const role = inboxNormalizeLineStaffRoleLc(profile.role || "");
   if (inboxLegacyDeskRoleLc(role)) return true;
   const p = profile.permissions || {};
   return p.inbox_view === true;
@@ -328,7 +347,7 @@ function inboxCanViewInboxEval(profile) {
 
 function inboxCanManageInboxEval(profile) {
   if (!profile) return false;
-  const role = String(profile.role || "").toLowerCase();
+  const role = inboxNormalizeLineStaffRoleLc(profile.role || "");
   const p = profile.permissions || {};
   if (p.inbox_manage === false) return false;
   if (p.inbox_manage === true) return true;
@@ -337,7 +356,7 @@ function inboxCanManageInboxEval(profile) {
 
 function inboxCanSendRequestsEval(profile) {
   if (!profile) return false;
-  const role = String(profile.role || "").toLowerCase();
+  const role = inboxNormalizeLineStaffRoleLc(profile.role || "");
   const p = profile.permissions || {};
   if (inboxCanManageInboxEval(profile)) return true;
   if (p.inbox_send === false) return false;
@@ -347,6 +366,13 @@ function inboxCanSendRequestsEval(profile) {
   }
   if (p.inbox_manage === false) return false;
   return inboxLegacyDeskRoleLc(role);
+}
+
+/** Firestore inboxItems create rules require string identity fields; staging user/staff docs sometimes store role as a number. */
+function ffInboxRuleString(v) {
+  if (v == null) return '';
+  if (typeof v === 'string') return v;
+  return String(v);
 }
 
 function inboxCanViewInbox() {
@@ -406,7 +432,7 @@ async function loadSalonUsersForRecipients() {
           uid: d.id,
           name: (u.name || '').trim(),
           staffId: u.staffId || '',
-          role: (u.role || '').toLowerCase()
+          role: inboxNormalizeLineStaffRoleLc(u.role || ''),
         };
       })
       .filter(u => u.name);
@@ -465,6 +491,9 @@ export function goToInbox(onReady) {
 
   if (typeof window.ffCurrentUserHasInboxViewPermission === 'function' && !window.ffCurrentUserHasInboxViewPermission()) {
     if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+    if (typeof showToast === 'function') {
+      showToast('Inbox is turned off for this staff profile (enable View Inbox in permissions).', 'error');
+    }
     return;
   }
 
@@ -629,7 +658,14 @@ function getAllRequestTypes() {
     (t) => t.category === 'other' && !hidden.has(t.id) && !automatedInboxTypes.has(t.id)
   );
   const customVisible = custom.filter(t => !hidden.has(t.id));
-  return [...withoutOther, ...customVisible, ...otherOnly];
+  const combined = [...withoutOther, ...customVisible, ...otherOnly];
+  const seen = new Set();
+  return combined.filter((t) => {
+    const id = t && t.id != null ? String(t.id) : '';
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 /** Returns types grouped by category for the New Request modal (Schedule, Payments, Operations, Documents, Custom, Other). */
@@ -679,10 +715,12 @@ async function loadCurrentUserProfile() {
       // Register in members directory so others can find this user in "Send to"
       if (currentUserProfile.salonId) {
         const memberData = {
-          name: currentUserProfile.name || currentUserProfile.displayName || user.email || '',
-          role: currentUserProfile.role || '',
-          staffId: currentUserProfile.staffId || '',
-          email: user.email || ''
+          name: ffInboxRuleString(
+            currentUserProfile.name || currentUserProfile.displayName || user.email || ''
+          ),
+          role: ffInboxRuleString(currentUserProfile.role),
+          staffId: ffInboxRuleString(currentUserProfile.staffId),
+          email: ffInboxRuleString(user.email)
         };
         // Include avatarUrl so Chat, Tickets, Staff Members show the correct photo
         if (currentUserProfile.avatarUrl) {
@@ -726,7 +764,6 @@ function setupInboxUI() {
   const emptyStateBtn  = document.getElementById('emptyStateNewRequestBtn');
   const emptyStateMsg  = document.getElementById('emptyStateMessage');
   const inboxTabs      = document.getElementById('inboxTabs');
-  const listTitle      = document.getElementById('inboxListTitle');
 
   const canCreateRequests = canSend;
   const isAdminOrOwner = (role === 'admin' || role === 'owner');
@@ -761,9 +798,8 @@ function setupInboxUI() {
     // Technicians see their own requests only — hide status tabs and view switcher
     const viewSwitcher = document.getElementById('inboxViewSwitcher');
     if (viewSwitcher) viewSwitcher.style.display = 'none';
-    if (headerRow) headerRow.style.display = '';
+    if (headerRow) headerRow.style.display = showNewRequest ? '' : 'none';
     if (inboxTabs) inboxTabs.classList.add('hidden');
-    if (listTitle) listTitle.textContent = canSend ? 'My Requests' : 'Inbox';
     if (emptyStateMsg) emptyStateMsg.textContent = canSend ? 'No requests yet' : 'No updates yet';
     currentInboxTab = 'my_requests';
   } else if (sendOnlyDesk) {
@@ -771,11 +807,7 @@ function setupInboxUI() {
     const viewSwitcher = document.getElementById('inboxViewSwitcher');
     if (viewSwitcher) viewSwitcher.style.display = 'none';
     if (filterRow) filterRow.style.display = 'none';
-    if (headerRow) headerRow.style.display = '';
-    if (listTitle) {
-      listTitle.style.display = '';
-      listTitle.textContent = 'My Requests';
-    }
+    if (headerRow) headerRow.style.display = showNewRequest ? '' : 'none';
     if (inboxTabs) {
       inboxTabs.classList.add('hidden');
       inboxTabs.style.display = 'none';
@@ -791,9 +823,7 @@ function setupInboxUI() {
       btn.classList.toggle('active', (btn.dataset.inboxView || '') === inboxViewMode);
     });
     if (filterRow) filterRow.style.display = inboxViewMode === 'mine' ? 'none' : 'flex';
-    if (listTitle) listTitle.style.display = inboxViewMode === 'mine' ? '' : 'none';
-    if (listTitle) listTitle.textContent = 'My Requests';
-    if (headerRow) headerRow.style.display = inboxViewMode === 'mine' ? '' : 'none';
+    if (headerRow) headerRow.style.display = inboxViewMode === 'mine' && showNewRequest ? '' : 'none';
     // In "My Requests": hide status tabs (Open/Needs Info/etc) and center New Request button
     if (inboxViewMode === 'mine') {
       if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
@@ -806,6 +836,7 @@ function setupInboxUI() {
     document.querySelectorAll('.inbox-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.inboxTab === currentInboxTab);
     });
+    syncInboxStatusFilterSelect();
   } else {
     // View inbox without send/manage — minimal UI
     const viewSwitcher = document.getElementById('inboxViewSwitcher');
@@ -815,10 +846,6 @@ function setupInboxUI() {
     if (inboxTabs) {
       inboxTabs.classList.add('hidden');
       inboxTabs.style.display = 'none';
-    }
-    if (listTitle) {
-      listTitle.style.display = '';
-      listTitle.textContent = 'Inbox';
     }
     if (emptyStateBtn) emptyStateBtn.style.display = 'none';
     if (emptyStateMsg) emptyStateMsg.textContent = 'No access to requests for this account';
@@ -835,35 +862,56 @@ window.setInboxViewMode = function(mode) {
   document.querySelectorAll('.inbox-view-btn').forEach(b => {
     b.classList.toggle('active', (b.dataset.inboxView || '') === mode);
   });
-  const listTitle = document.getElementById('inboxListTitle');
   const filterRow = document.getElementById('inboxFilterRow');
   const inboxTabs = document.getElementById('inboxTabs');
   const emptyStateBtn = document.getElementById('emptyStateNewRequestBtn');
   const headerNewBtn = document.getElementById('inboxCreateRequestBtn');
   const headerRow = document.getElementById('inboxContentHeaderRow');
-  if (listTitle) listTitle.style.display = mode === 'mine' ? '' : 'none';
-  if (listTitle) listTitle.textContent = 'My Requests';
-  if (headerRow) headerRow.style.display = mode === 'mine' ? '' : 'none';
+  if (headerRow) headerRow.style.display = mode === 'mine' && inboxCanSendRequests() ? '' : 'none';
   if (filterRow) filterRow.style.display = mode === 'mine' ? 'none' : 'flex';
   if (mode === 'mine') {
     if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
   } else {
     if (inboxTabs) { inboxTabs.classList.remove('hidden'); inboxTabs.style.display = ''; }
+    syncInboxStatusFilterSelect();
   }
   if (emptyStateBtn) emptyStateBtn.style.display = 'none';
   if (headerNewBtn) headerNewBtn.style.display = mode === 'mine' && inboxCanSendRequests() ? '' : 'none';
   loadInboxItems();
 };
 
+function syncInboxStatusFilterSelect() {
+  const statusSel = document.getElementById("inboxStatusFilterSelect");
+  if (!statusSel) return;
+  const t = String(currentInboxTab || "").trim();
+  if (statusSel.querySelector(`option[value="${t}"]`)) statusSel.value = t;
+}
+
+function ffWireInboxStatusFilterSelect() {
+  const sel = document.getElementById("inboxStatusFilterSelect");
+  if (!sel || sel.__ffInboxStatusBound) return;
+  sel.__ffInboxStatusBound = true;
+  sel.addEventListener("change", () => {
+    const v = String(sel.value || "").trim();
+    if (!v) return;
+    if (typeof window.setInboxTab === "function") window.setInboxTab(v);
+  });
+}
+
 // =====================
 // Tab Management
 // =====================
-window.setInboxTab = function(tab) {
+window.setInboxTab = function (tab) {
   currentInboxTab = tab;
   // Update active tab
-  document.querySelectorAll('.inbox-tab').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.inboxTab === tab);
+  document.querySelectorAll(".inbox-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.inboxTab === tab);
   });
+  const statusSel = document.getElementById("inboxStatusFilterSelect");
+  if (statusSel) {
+    const opt = statusSel.querySelector(`option[value="${tab}"]`);
+    if (opt) statusSel.value = tab;
+  }
   loadInboxItems();
 };
 
@@ -1126,6 +1174,19 @@ function updateInboxBadges() {
   const needsInfoBadge = document.getElementById('inboxNeedsInfoBadge');
   if (needsInfoBadge) needsInfoBadge.textContent = needsInfoCount > 0 ? needsInfoCount : '';
 
+  const statusSel = document.getElementById('inboxStatusFilterSelect');
+  if (statusSel) {
+    const setOpt = (val, base, n) => {
+      const o = statusSel.querySelector(`option[value="${val}"]`);
+      if (o) o.textContent = n > 0 ? `${base} (${n})` : base;
+    };
+    setOpt('open', 'Open', openCount);
+    setOpt('needs_info', 'Needs Info', needsInfoCount);
+    setOpt('approved', 'Approved', 0);
+    setOpt('denied', 'Denied', 0);
+    setOpt('archived', 'Archived', 0);
+  }
+
   // Nav INBOX badge = total unread (Open + Needs Info)
   const navBadge = document.querySelector('#inboxBtn .ff-inbox-badge');
   if (navBadge) navBadge.textContent = totalCount > 0 ? totalCount : '';
@@ -1265,16 +1326,7 @@ function _renderInboxListInner() {
   const listEl = document.getElementById('inboxList');
   if (!listEl) return;
 
-  // Title by role and view: technician = "My Requests"; manager "mine" / "To handle"
-  const listTitle = document.getElementById('inboxListTitle');
   const role = inboxUserRoleLc();
-  if (listTitle) {
-    if (role === "technician") listTitle.textContent = inboxCanSendRequests() ? "My Requests" : "Inbox";
-    else {
-      listTitle.style.display = inboxViewMode === 'mine' ? '' : 'none';
-      listTitle.textContent = 'My Requests';
-    }
-  }
 
   // Remove only dynamically-added group elements (preserve loading/empty state divs)
   listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach(el => el.remove());
@@ -2615,7 +2667,7 @@ function showPromptModal(options) {
             cursor:pointer;font-size:14px;font-weight:500;
           ">${escapeHtml(cancelLabel)}</button>
           <button class="inbox-prompt-ok" style="
-            padding:12px 24px;border:none;background:#111;color:#fff;border-radius:10px;
+            padding:12px 24px;border:none;background:#7c3aed;color:#fff;border-radius:10px;
             cursor:pointer;font-size:14px;font-weight:600;
           ">${escapeHtml(confirmLabel)}</button>
         </div>
@@ -3022,7 +3074,7 @@ function openAddCustomTypeForm(settingsContent, editTypeId, editData) {
       <input type="hidden" id="customTypeIcon" value="📝">
     </div>
     <div style="display:flex;gap:8px;">
-      <button type="button" id="btnSaveCustomType" style="padding:8px 16px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Save</button>
+      <button type="button" id="btnSaveCustomType" style="padding:8px 16px;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Save</button>
       <button type="button" onclick="document.getElementById('addCustomTypeForm').remove()" style="padding:8px 16px;border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;">Cancel</button>
     </div>
   `;
@@ -3115,6 +3167,9 @@ async function ffResolveStaffFirestoreIdByScanInbox(salonId, uid, emailHint) {
       const row = d.data() || {};
       const fid = String(row.firebaseUid || row.firebaseAuthUid || row.authUid || "").trim();
       if (fid && fid === u) return d.id;
+      // Firestore rules (staffDocUidMatches) also accept staff row `uid` / `userUid`
+      const uidOnRow = String(row.uid || row.userUid || "").trim();
+      if (uidOnRow && uidOnRow === u) return d.id;
     }
     if (em) {
       for (const d of snap.docs) {
@@ -3233,7 +3288,9 @@ function createRequestForm(type) {
     ? `<p style="margin:8px 0 0;font-size:13px;color:#6b7280;text-align:center;max-width:400px;margin-left:auto;margin-right:auto;">${esc(typeInfo.description.trim())}</p>`
     : '';
   const isRenewal = type === 'document_renewal_request';
-  const technicians = isRenewal ? (_inboxUsersCache || []).filter((u) => u.role === 'technician') : [];
+  const technicians = isRenewal
+    ? (_inboxUsersCache || []).filter((u) => inboxNormalizeLineStaffRoleLc(u.role) === 'technician')
+    : [];
   const renewalStaffHtml =
     technicians.length === 0
       ? `<div style="margin-bottom:16px;padding:10px 12px;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#b91c1c;">No service providers in the directory. Staff must sign in once so they appear under members.</div>`
@@ -3622,7 +3679,7 @@ function createRequestForm(type) {
   submitBtn.style.cssText = `
     width: 100%;
     padding: 12px;
-    background: #111;
+    background: #7c3aed;
     color: #fff;
     border: none;
     border-radius: 8px;
@@ -3659,11 +3716,33 @@ async function submitRequest(type) {
     return;
   }
 
+  const salonIdForStaff = String(currentUserProfile.salonId || '').trim();
+  if (!salonIdForStaff) {
+    showToast('No salon is selected for this account.', 'error');
+    return;
+  }
+
+  let creatorStaffId = String(currentUserProfile.staffId || '').trim();
+  if (!creatorStaffId) {
+    creatorStaffId = await resolveSubmittingStaffIdForDocumentUpload(salonIdForStaff);
+  }
+  if (!creatorStaffId) {
+    showToast(
+      'Your login is not linked to a staff profile in this salon. Ask a manager to link your account, then try again.',
+      'error'
+    );
+    return;
+  }
+  if (String(currentUserProfile.staffId || '').trim() !== creatorStaffId) {
+    currentUserProfile.staffId = creatorStaffId;
+    await mergeSalonStaffIntoUserProfile(currentUserProfile);
+  }
+
   if (!inboxCanSendRequests()) {
     showToast('You do not have permission to create requests.', 'error');
     return;
   }
-  
+
   try {
     // Collect form data
     let data = {};
@@ -4021,7 +4100,7 @@ async function submitRequest(type) {
     const baseDoc = {
       tenantId: salonId,
       locationId: activeLocationIdForCreate,
-      type: type,
+      type: ffInboxRuleString(type),
       status: type === "supplies" ? "pending" : "open",
       priority: 'normal',
       assignedTo: null,
@@ -4046,9 +4125,17 @@ async function submitRequest(type) {
       const forStaffId = sentToStaffIds[0] || '';
       const forStaffName = sentToNames[0] || '';
 
-      console.log('[Inbox] Sending request: createdByUid=', currentUserProfile.uid, 'forUid=', forUid, 'forName=', forStaffName);
+      const forUidStr = ffInboxRuleString(forUid).trim();
+      const forStaffIdStr = ffInboxRuleString(forStaffId);
+      const forStaffNameStr = ffInboxRuleString(forStaffName);
+      const createdByNameStr = ffInboxRuleString(
+        creatorName || currentUserProfile.name || currentUserProfile.displayName
+      );
+      const createdByRoleStr = ffInboxRuleString(currentUserProfile.role);
 
-      if (forUid === currentUserProfile.uid) {
+      console.log('[Inbox] Sending request: createdByUid=', currentUserProfile.uid, 'forUid=', forUidStr, 'forName=', forStaffNameStr);
+
+      if (forUidStr === currentUserProfile.uid) {
         showToast('Cannot send a request to yourself', 'error');
         return;
       }
@@ -4056,29 +4143,33 @@ async function submitRequest(type) {
       const requestDoc = {
         ...baseDoc,
         createdByUid: currentUserProfile.uid,
-        createdByStaffId: currentUserProfile.staffId || '',
-        createdByName: creatorName || currentUserProfile.name || '',
-        createdByRole: currentUserProfile.role || '',
-        forUid,
-        forStaffId,
-        forStaffName,
+        createdByStaffId: creatorStaffId,
+        createdByName: createdByNameStr,
+        createdByRole: createdByRoleStr,
+        forUid: forUidStr,
+        forStaffId: forStaffIdStr,
+        forStaffName: forStaffNameStr,
         createdAt: serverTimestamp(),
         lastActivityAt: serverTimestamp(),
         updatedAt: null
       };
       const docRef = await addDoc(collection(db, `salons/${salonId}/inboxItems`), requestDoc);
-      console.log('[Inbox] Request created with forUid=', forUid, 'docId=', docRef.id);
+      console.log('[Inbox] Request created with forUid=', forUidStr, 'docId=', docRef.id);
     } else {
       // Technician creating for self — direct Firestore (forUid = creator)
+      const createdByNameStr = ffInboxRuleString(
+        creatorName || currentUserProfile.name || currentUserProfile.displayName
+      );
+      const createdByRoleStr = ffInboxRuleString(currentUserProfile.role);
       const requestDoc = {
         ...baseDoc,
         createdByUid: currentUserProfile.uid,
-        createdByStaffId: currentUserProfile.staffId || '',
-        createdByName: creatorName || currentUserProfile.name || '',
-        createdByRole: currentUserProfile.role || '',
+        createdByStaffId: creatorStaffId,
+        createdByName: createdByNameStr,
+        createdByRole: createdByRoleStr,
         forUid: currentUserProfile.uid,
-        forStaffId: currentUserProfile.staffId || '',
-        forStaffName: creatorName || currentUserProfile.name || '',
+        forStaffId: creatorStaffId,
+        forStaffName: createdByNameStr,
         createdAt: serverTimestamp(),
         lastActivityAt: serverTimestamp(),
         updatedAt: null
@@ -4320,7 +4411,7 @@ function showRequestDetails(requestId) {
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Your Reply</h3>
         <textarea id="staffReplyInput" rows="3" placeholder="Answer the question..." style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;margin-bottom:12px;box-sizing:border-box;"></textarea>
-        <button onclick="submitStaffReply('${requestId}')" style="width:100%;padding:10px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+        <button onclick="submitStaffReply('${requestId}')" style="width:100%;padding:10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
           Submit Reply
         </button>
       </div>
@@ -4338,7 +4429,7 @@ function showRequestDetails(requestId) {
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Your action</h3>
         <p style="font-size:13px;color:#6b7280;margin-bottom:12px;">Upload a renewed document for management to review.</p>
-        <button type="button" onclick="closeRequestDetailsModal(); openCreateRequestModal(); selectRequestType('document_upload');" style="width:100%;padding:12px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
+        <button type="button" onclick="closeRequestDetailsModal(); openCreateRequestModal(); selectRequestType('document_upload');" style="width:100%;padding:12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
           📤 Upload a Document
         </button>
       </div>
@@ -5558,6 +5649,15 @@ window.ffTryConsumeInboxUploadDeepLink = ffTryConsumeInboxUploadDeepLink;
 // Initialization
 // =====================
 export function initInbox() {
+  window.goToInbox = goToInbox;
+  ffWireInboxStatusFilterSelect();
+
+  if (typeof window !== 'undefined' && window.__ffInboxInitV1) {
+    console.log('[Inbox] Already initialized');
+    return;
+  }
+  if (typeof window !== 'undefined') window.__ffInboxInitV1 = true;
+
   console.log('[Inbox] Initializing');
   
   // Wire up inbox button
@@ -5589,6 +5689,7 @@ export function initInbox() {
         else if (bid === 'ticketsBtn' && typeof window.goToTickets === 'function') window.goToTickets();
         else if (bid === 'tasksBtn' && typeof window.openTasks === 'function') window.openTasks();
         else if (bid === 'chatBtn' && typeof window.goToChat === 'function') window.goToChat();
+        else if (bid === 'mediaBtn' && typeof window.goToMedia === 'function') window.goToMedia();
         else if (bid === 'logBtn' && (typeof window.openLog === 'function' || typeof openLog === 'function')) (window.openLog || openLog)();
         else if (bid === 'appsBtn') { /* Apps panel handled by its own click */ }
       }
@@ -5703,7 +5804,7 @@ onAuthStateChanged(auth, async (user) => {
     let profile = { uid: user.uid, ...userDoc.data() };
     profile = await mergeSalonStaffIntoUserProfile(profile);
     void ffRefreshInboxNavVisibility();
-    const roleLc = String(profile.role || '').toLowerCase();
+    const roleLc = inboxNormalizeLineStaffRoleLc(profile.role || '');
     const runBadge =
       profile.salonId &&
       (inboxCanManageInboxEval(profile) || roleLc === 'technician');

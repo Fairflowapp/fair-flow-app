@@ -37,10 +37,11 @@ service firebase.storage {
       allow write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
     }
 
-    // Training module images (same salon as authenticated user)
+    // Training images/videos — same as mediaWorks: any signed-in user can read/write.
+    // PIN / multi-salon flows often lack users.salonId or role on members; strict checks caused storage/unauthorized.
+    // Who may edit training *content* is enforced in Firestore (trainingItems), not here.
     match /salons/{salonId}/training/{allPaths=**} {
-      allow read: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
-      allow write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+      allow read, write: if signedIn();
     }
 
     // Staff documents: any signed-in user can read/write (tighten later: uid==staffId or same salon)

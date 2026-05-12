@@ -102,7 +102,7 @@
  */
 
 import { doc, getDoc, addDoc, updateDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db, auth } from "/app.js?v=20260509_staffid_notify";
+import { db, auth } from "/app.js?v=20260510_firestore_lp";
 
 // ───────────────────────── salon id resolution ─────────────────────────
 // Mirrors the multi-salon modules: the selected membership/session salon is

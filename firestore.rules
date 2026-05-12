@@ -29,9 +29,18 @@ service cloud.firestore {
         && (
           userDocData().salonId == salonId
           || hasActiveMembership(salonId)
+          || membershipStaffId(salonId) != ''
         ))
         || memberExists(salonId)
-        || isStaffInSalon(salonId);
+        || isStaffInSalon(salonId)
+        // Multi-salon: client uses salons/{chosenSalonId}/... while users.salonId / members doc
+        // may lag; membership subdoc supplies activeStaffIdForSalon — link staff row to auth uid.
+        || (
+          isSignedIn()
+          && userExists()
+          && activeStaffIdForSalon(salonId) != ''
+          && staffDocUidMatches(salonId, activeStaffIdForSalon(salonId))
+        );
     }
 
     function belongsToSalon(salonId) {
@@ -90,18 +99,22 @@ service cloud.firestore {
         : '';
     }
 
+    /** Role on salons/{salonId}/members/{uid} — multi-salon / invite flows often omit users/{uid}.role */
+    function memberDocRoleLower(salonId) {
+      return memberExists(salonId)
+        && memberDocData(salonId).role is string
+        ? memberDocData(salonId).role.lower()
+        : '';
+    }
+
     function activeUserRoleForSalon(salonId) {
-      return membershipRole(salonId) != '' ? membershipRole(salonId) : userRole();
+      return membershipRole(salonId) != '' ? membershipRole(salonId)
+        : (memberDocRoleLower(salonId) != '' ? memberDocRoleLower(salonId) : userRole());
     }
 
     function isManager(salonId) {
       return belongsToSalon(salonId)
         && activeUserRoleForSalon(salonId) in ['manager', 'admin', 'owner'];
-    }
-
-    function isTechnician(salonId) {
-      return belongsToSalon(salonId)
-        && activeUserRoleForSalon(salonId) == 'technician';
     }
 
     function isAdminOrOwner(salonId) {
@@ -112,6 +125,31 @@ service cloud.firestore {
     function isOwner(salonId) {
       return belongsToSalon(salonId)
         && activeUserRoleForSalon(salonId) == 'owner';
+    }
+
+    /** True when this user is the salon doc ownerUid (covers multi-salon when member role is missing). */
+    function isFirestoreSalonOwnerUid(salonId) {
+      return isSignedIn()
+        && salonId is string
+        && exists(/databases/$(database)/documents/salons/$(salonId))
+        && get(/databases/$(database)/documents/salons/$(salonId)).data.ownerUid == request.auth.uid;
+    }
+
+    /** Training library create/edit/delete: managers + salon ownerUid + assistant / front-desk roles */
+    function canManageTrainingContent(salonId) {
+      return isFirestoreSalonOwnerUid(salonId)
+        || (
+          belongsToSalon(salonId)
+          && activeUserRoleForSalon(salonId) in [
+            'manager',
+            'admin',
+            'owner',
+            'assistant_manager',
+            'assistant manager',
+            'front_desk',
+            'front desk'
+          ]
+        );
     }
 
     /** Ticket summary rows on close: same users doc roles the Tickets UI treats as staff/tech (not only manager/admin/owner). */
@@ -165,6 +203,12 @@ service cloud.firestore {
             memberExists(salonId)
             && memberDocData(salonId).staffId is string
             && memberDocData(salonId).staffId == staffId
+          )
+          // Staging: staff row sometimes lacks uid/email but users/{uid}.staffId already matches this doc id
+          || (
+            userExists()
+            && userDocData().staffId is string
+            && userDocData().staffId == staffId
           )
         );
     }
@@ -221,9 +265,14 @@ service cloud.firestore {
         : '';
     }
 
+    /** staffId from users/{uid}/memberships/{salonId} whenever the doc exists (any status).
+     *  hasActiveMembership() still requires status == active for stricter ops; staging often
+     *  leaves status missing or non-active while staffId is already valid. */
     function membershipStaffId(salonId) {
-      return hasActiveMembership(salonId)
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId))
         && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId is string
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId != ''
         ? get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId
         : '';
     }
@@ -280,14 +329,6 @@ service cloud.firestore {
         ? mySalonStaffDocData(salonId).permissions.media_upload == true
         : true
       );
-    }
-
-    /** Inbox: technicians need inbox_send === true when the flag exists on staff doc; missing flag = legacy allow. */
-    function permInboxSendAllowed(salonId) {
-      return mySalonStaffDocData(salonId) == null
-        || !(mySalonStaffDocData(salonId).permissions is map)
-        || !mySalonStaffDocData(salonId).permissions.keys().hasAny(['inbox_send'])
-        || mySalonStaffDocData(salonId).permissions.inbox_send == true;
     }
 
     function permPointsOwnAllowed(salonId) {
@@ -546,48 +587,116 @@ service cloud.firestore {
         return request.resource.data.diff(resource.data).changedKeys();
       }
 
+      /**
+       * Inbox "To handle" in the UI also treats salon staff doc isManager/isAdmin/front_desk
+       * as leadership. Staging / multi-salon often has users.role lagging while staff is correct;
+       * without this, create + list queries fail with PERMISSION_DENIED while prod works.
+       */
+      function inboxManagerLike() {
+        return isManager(salonId)
+          || (
+            belongsToSalon(salonId)
+            && mySalonStaffDocData(salonId) != null
+            && legacyStaffMediaHandleFromDoc(mySalonStaffDocData(salonId))
+          );
+      }
+
+      /**
+       * UI labels this "Service provider"; users/memberships may store technician, tech, staff,
+       * service_provider, or "service provider" — isTechnician() only checked 'technician', which
+       * blocked Inbox list + submit for most line staff on staging.
+       */
+      function inboxLineStaffLike() {
+        let staff = mySalonStaffDocData(salonId);
+        let sr = (staff != null && staff.role is string) ? staff.role.lower() : '';
+        let r = activeUserRoleForSalon(salonId);
+        return belongsToSalon(salonId)
+          && !inboxManagerLike()
+          && (
+            r in ['technician', 'tech', 'staff', 'service_provider', 'service provider']
+            || sr in ['technician', 'tech', 'staff', 'service_provider', 'service provider']
+            || (
+              r == ''
+              && sr == ''
+              && staff != null
+              && !legacyStaffMediaHandleFromDoc(staff)
+            )
+          );
+      }
+
+      /**
+       * Read/list: participant is always author or recipient — Firestore list filters match these.
+       * Staging often has currentSalonId while users.salonId / memberships lag, so belongsToSalon(salonId)
+       * is false even though docs here legitimately belong to the signed-in user (tenantId matches path).
+       * Managers still need belongsToSalon + inboxManagerLike to scan the full queue.
+       */
+      function inboxParticipantSelfRead() {
+        return isSignedIn()
+          && userExists()
+          && (
+            resource.data.createdByUid == request.auth.uid
+            || resource.data.forUid == request.auth.uid
+          );
+      }
+
+      // inboxItems create: createdByRole may be string or (legacy staging) number.
+      function inboxNewRequestDocFieldsValid() {
+        return request.resource.data.tenantId == salonId
+          && request.resource.data.type is string
+          && request.resource.data.status in ['open', 'pending']
+          && request.resource.data.priority is string
+          && request.resource.data.createdByUid == request.auth.uid
+          && request.resource.data.forUid is string
+          && request.resource.data.createdByStaffId is string
+          && request.resource.data.forStaffId is string
+          && request.resource.data.createdByName is string
+          // Staging seed data occasionally stored users.role as a number; client normalizes on write.
+          && (
+            request.resource.data.createdByRole is string
+            || request.resource.data.createdByRole is int
+            || request.resource.data.createdByRole is float
+          )
+          && request.resource.data.forStaffName is string
+          && request.resource.data.decidedBy == null
+          && request.resource.data.decidedAt == null
+          && request.resource.data.managerNotes == null
+          && request.resource.data.responseNote == null
+          && request.resource.data.assignedTo == null
+          && request.resource.data.needsInfoQuestion == null
+          && request.resource.data.staffReply == null
+          && request.resource.data.visibility == 'managers_only'
+          && request.resource.data.unreadForManagers == true;
+      }
+
+      /**
+       * Create: author must match an existing staff row for this salon (uid/email/member/users.staffId).
+       * Do not additionally require permInboxSend / inboxLineStaffLike — staging often has flags or
+       * activeStaffIdForSalon out of sync while the row is still legitimately theirs; managers keep
+       * inboxManagerLike() without needing a linked staff doc id.
+       */
+      function inboxCreatorOwnsStaffRow(salonId) {
+        return request.resource.data.createdByUid == request.auth.uid
+          && staffDocUidMatches(salonId, request.resource.data.createdByStaffId);
+      }
+
       // CREATE
-      allow create: if belongsToSalon(salonId)
-        // Required fields
-        && request.resource.data.tenantId == salonId
-        && request.resource.data.type is string
-        && request.resource.data.status in ['open', 'pending']
-        && request.resource.data.priority is string
-        // Identity
-        && request.resource.data.createdByUid == request.auth.uid
-        && request.resource.data.forUid is string
-        && request.resource.data.createdByStaffId is string
-        && request.resource.data.forStaffId is string
-        // Snapshots
-        && request.resource.data.createdByName is string
-        && request.resource.data.createdByRole is string
-        && request.resource.data.forStaffName is string
-        // Lock decision fields at creation
-        && request.resource.data.decidedBy == null
-        && request.resource.data.decidedAt == null
-        && request.resource.data.managerNotes == null
-        && request.resource.data.responseNote == null
-        && request.resource.data.assignedTo == null
-        && request.resource.data.needsInfoQuestion == null
-        && request.resource.data.staffReply == null
-        && request.resource.data.visibility == 'managers_only'
-        && request.resource.data.unreadForManagers == true
-        // Permission check: technician can create when inbox_send allows; manager can create for anyone
+      allow create: if inboxNewRequestDocFieldsValid()
         && (
-          (isTechnician(salonId)
-            && request.resource.data.createdByUid == request.auth.uid
-            && permInboxSendAllowed(salonId))
-          || isManager(salonId)
+          inboxManagerLike()
+          || (isSignedIn() && inboxCreatorOwnsStaffRow(salonId))
         );
 
-      // READ: manager sees all; technician sees requests they created OR are recipient of
-      allow read: if belongsToSalon(salonId)
-        && (
-          isManager(salonId)
-          || (isTechnician(salonId) && (
-            resource.data.createdByUid == request.auth.uid ||
-            resource.data.forUid == request.auth.uid
-          ))
+      // READ: participant may always read own rows (multi-salon / staging); managers need salon + role
+      allow read: if inboxParticipantSelfRead()
+        || (
+          belongsToSalon(salonId)
+          && (
+            inboxManagerLike()
+            || (inboxLineStaffLike() && (
+              resource.data.createdByUid == request.auth.uid ||
+              resource.data.forUid == request.auth.uid
+            ))
+          )
         );
 
       // UPDATE
@@ -597,7 +706,7 @@ service cloud.firestore {
           // them with a minimal set of status fields — bypasses full identity-equality checks because
           // these docs are created by the scanner and have no strict "author" constraints.
           (
-            isManager(salonId)
+            inboxManagerLike()
             && resource.data.type == 'inventory_suggestion'
             && changedKeys().hasOnly([
               'status',
@@ -613,7 +722,7 @@ service cloud.firestore {
           ||
           // Managers: update management fields
           (
-            isManager(salonId)
+            inboxManagerLike()
             && request.resource.data.tenantId == resource.data.tenantId
             && request.resource.data.type == resource.data.type
             && request.resource.data.createdByUid == resource.data.createdByUid
@@ -648,7 +757,7 @@ service cloud.firestore {
           // Manager: edit nested data (type / dates) before approve — only data + updatedAt may change
           // (Avoid field-by-field == on optional keys like staffDocumentId / decidedBy; those break when null vs missing.)
           (
-            isManager(salonId)
+            inboxManagerLike()
             && (resource.data.type == 'document_upload' || resource.data.type == 'document_request')
             && (resource.data.status == 'open' || resource.data.status == 'needs_info')
             && (
@@ -658,9 +767,9 @@ service cloud.firestore {
             )
           )
           ||
-          // Any role: creator can reply when needs_info
+          // Any role: creator can reply when needs_info (membership / primary salon may lag staging)
           (
-            belongsToSalon(salonId)
+            userExists()
             && resource.data.createdByUid == request.auth.uid
             && resource.data.status == 'needs_info'
             && request.resource.data.tenantId == resource.data.tenantId
@@ -681,13 +790,13 @@ service cloud.firestore {
 
       // DELETE — only when already archived (manager can permanently delete)
       allow delete: if belongsToSalon(salonId)
-        && isManager(salonId)
+        && inboxManagerLike()
         && resource.data.status == 'archived';
 
       // Events subcollection (audit trail)
       match /events/{eventId} {
         allow read: if belongsToSalon(salonId)
-          && (isManager(salonId) || resource.data.forUid == request.auth.uid);
+          && (inboxManagerLike() || resource.data.forUid == request.auth.uid);
         allow write: if false;
       }
     }
@@ -709,11 +818,17 @@ service cloud.firestore {
 
       // Staff documents (Inbox approve → staff doc sync; Staff Member > Documents tab)
       match /documents/{documentId} {
-        allow read: if belongsToSalon(salonId)
-          && (
-            isManager(salonId)
-            || (isTechnician(salonId) && userStaffId() == staffId)
-          );
+        // Managers: any staff member's docs. Line staff: own row only — use matchesOwnStaffId /
+        // staffDocUidMatches (not isTechnician + userStaffId), or "service provider" / multi-salon
+        // staging breaks and approved Inbox uploads disappear from Staff Member > Documents.
+        allow read: if (belongsToSalon(salonId) && isManager(salonId))
+          || matchesOwnStaffId(salonId, staffId)
+          || (
+            memberExists(salonId)
+            && memberStaffId(salonId) is string
+            && memberStaffId(salonId) == staffId
+          )
+          || staffDocUidMatches(salonId, staffId);
         allow create, update: if belongsToSalon(salonId) && isManager(salonId);
         // Permanent delete (UI: archived docs only); client also enforces archived
         allow delete: if belongsToSalon(salonId) && isManager(salonId)
@@ -1450,14 +1565,14 @@ service cloud.firestore {
         && request.resource.data.salonId is string
         && request.resource.data.title is string
         && request.resource.data.category is string
-        && isManager(request.resource.data.salonId);
+        && canManageTrainingContent(request.resource.data.salonId);
       allow update: if userExists()
         && canAccessSalon(resource.data.salonId)
         && request.resource.data.salonId == resource.data.salonId
-        && isManager(resource.data.salonId);
+        && canManageTrainingContent(resource.data.salonId);
       allow delete: if userExists()
         && canAccessSalon(resource.data.salonId)
-        && isManager(resource.data.salonId);
+        && canManageTrainingContent(resource.data.salonId);
     }
 
     match /trainingProgress/{progressId} {
@@ -1465,7 +1580,7 @@ service cloud.firestore {
         && resource.data.salonId is string
         && canAccessSalon(resource.data.salonId)
         && (
-          isManager(resource.data.salonId)
+          canManageTrainingContent(resource.data.salonId)
           || (activeStaffIdForSalon(resource.data.salonId) != ''
             && resource.data.staffId == activeStaffIdForSalon(resource.data.salonId))
         );
@@ -1476,7 +1591,7 @@ service cloud.firestore {
         && request.resource.data.trainingId is string
         && request.resource.data.status is string
         && (
-          isManager(request.resource.data.salonId)
+          canManageTrainingContent(request.resource.data.salonId)
           || (activeStaffIdForSalon(request.resource.data.salonId) != ''
             && request.resource.data.staffId == activeStaffIdForSalon(request.resource.data.salonId))
         );
@@ -1484,7 +1599,7 @@ service cloud.firestore {
         && canAccessSalon(resource.data.salonId)
         && trainingProgressIdentityUnchanged()
         && (
-          isManager(resource.data.salonId)
+          canManageTrainingContent(resource.data.salonId)
           || (activeStaffIdForSalon(resource.data.salonId) != ''
             && resource.data.staffId == activeStaffIdForSalon(resource.data.salonId))
         );

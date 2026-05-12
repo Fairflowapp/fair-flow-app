@@ -30,7 +30,7 @@ import {
   deleteObject,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
-import { db, auth, storage } from "/app.js?v=20260509_staffid_notify";
+import { db, auth, storage } from "/app.js?v=20260510_firestore_lp";
 
 // --- Phase 2: Inbox → staff /documents sync (approve / reject) ---
 
@@ -51,7 +51,7 @@ function stripUndefined(obj) {
  */
 export function ffStaffDocumentTypeSelectOptionsHtml() {
   return `
-          <option value="">Select...</option>
+          <option value="">Select document type…</option>
           <optgroup label="Employment &amp; tax">
             <option value="I-9">I-9 (employment eligibility)</option>
             <option value="W-2">W-2</option>
@@ -67,6 +67,7 @@ export function ffStaffDocumentTypeSelectOptionsHtml() {
           <optgroup label="Beauty, spa &amp; wellness (professional)">
             <option value="Cosmetology license">Cosmetology license</option>
             <option value="Esthetician license">Esthetician license</option>
+            <option value="Full Specialist">Full Specialist</option>
             <option value="Nail technician license">Nail technician license</option>
             <option value="Barber license">Barber license</option>
             <option value="Massage therapy license">Massage therapy license</option>
@@ -278,6 +279,8 @@ async function ffResolveStaffFirestoreIdByScan(dbConn, salonId, uid, emailHint) 
       const row = d.data() || {};
       const fid = trimStr(row.firebaseUid || row.firebaseAuthUid || row.authUid);
       if (fid && fid === u) return d.id;
+      const uidOnRow = trimStr(row.uid || row.userUid);
+      if (uidOnRow && uidOnRow === u) return d.id;
     }
     if (em) {
       for (const d of snap.docs) {
@@ -298,11 +301,29 @@ async function ffResolveStaffFirestoreIdByScan(dbConn, salonId, uid, emailHint) 
  * `forStaffId` on the inbox row).
  */
 export async function ffResolveStaffDocumentOwnerStaffIdWithFallback(dbConn, salonId, inboxItem) {
+  const t = trimStr(inboxItem?.type);
+  // document_upload: Storage path is authoritative (salons/{sid}/staff/{ownerId}/documents/...).
+  // Staging often has users.staffId / createdByStaffId out of sync with the Staff Members row;
+  // preferring those fields first wrote the approved doc under the wrong staff id.
+  if (t === "document_upload") {
+    const fromPath = await ffResolveStaffDocumentOwnerFromUploadPath(dbConn, salonId, inboxItem);
+    if (fromPath) {
+      const direct = ffResolveStaffDocumentOwnerStaffId(inboxItem);
+      if (direct && direct !== fromPath) {
+        console.warn("[staff-documents] Owner staff id mismatch (using filePath segment)", {
+          fromPath,
+          direct,
+        });
+      }
+      return fromPath;
+    }
+  }
+
   const direct = ffResolveStaffDocumentOwnerStaffId(inboxItem);
   if (direct) return direct;
 
-  const fromPath = await ffResolveStaffDocumentOwnerFromUploadPath(dbConn, salonId, inboxItem);
-  if (fromPath) return fromPath;
+  const fromPathFallback = await ffResolveStaffDocumentOwnerFromUploadPath(dbConn, salonId, inboxItem);
+  if (fromPathFallback) return fromPathFallback;
 
   const uid = ffResolveStaffDocumentOwnerUidForFallback(inboxItem);
   const sid = trimStr(salonId);
@@ -471,6 +492,31 @@ export async function ffSyncStaffDocumentOnInboxApprove(dbConn, params) {
   } catch (_) {}
 
   return documentId;
+}
+
+/**
+ * Re-run Inbox → staff /documents sync for an already-approved document row.
+ * Use when an older bug attached metadata to the wrong `staff/{id}` (Documents tab empty).
+ * Console (logged-in manager): `ffResyncStaffDocumentFromInbox('SALON_ID','INBOX_ITEM_ID')`
+ */
+export async function ffResyncStaffDocumentFromInbox(dbConn, salonId, inboxItemId) {
+  const sid = trimStr(salonId);
+  const iid = trimStr(inboxItemId);
+  if (!sid || !iid) return null;
+  const iref = doc(dbConn, "salons", sid, "inboxItems", iid);
+  const snap = await getDoc(iref);
+  if (!snap.exists()) return null;
+  const data = snap.data() || {};
+  const t = trimStr(data.type);
+  if (t !== "document_upload" && t !== "document_request") return null;
+  if (String(data.status || "").trim() !== "approved") return null;
+  const approver = auth?.currentUser?.uid ? String(auth.currentUser.uid) : null;
+  return ffSyncStaffDocumentOnInboxApprove(dbConn, {
+    salonId: sid,
+    inboxItemId: iid,
+    inboxItem: { id: iid, ...data },
+    approverUid: approver,
+  });
 }
 
 /**
@@ -2185,6 +2231,8 @@ if (typeof window !== "undefined") {
   window.ffMountStaffDocuments = ffMountStaffDocuments;
   window.ffMountStaffDocumentsSummaryStrip = ffMountStaffDocumentsSummaryStrip;
   window.ffStaffDocToast = ffToast;
+  window.ffResyncStaffDocumentFromInbox = (salonId, inboxItemId) =>
+    ffResyncStaffDocumentFromInbox(db, salonId, inboxItemId);
   /** For console debugging: run `ffStaffDocDebugContext()` while Staff → Documents is open. */
   window.ffStaffDocDebugContext = function () {
     return {

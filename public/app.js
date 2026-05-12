@@ -21,6 +21,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import {
   getFirestore,
+  initializeFirestore,
   doc,
   getDoc,
   getDocs,
@@ -164,7 +165,14 @@ const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 window.__ffAuth = auth;
 window.__ffGetUid = () => (auth.currentUser && auth.currentUser.uid) || null;
-export const db = getFirestore(app);
+/** Android WebView / some mobile networks break default gRPC/WebChannel — long polling is more reliable. */
+let db;
+try {
+  db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+} catch (_) {
+  db = getFirestore(app);
+}
+export { db };
 window.ffDb = db;   // expose for non-module scripts (staff cloud sync)
 
 /**

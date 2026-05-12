@@ -2,7 +2,7 @@
  * Inventory — categories/subcategories from Firestore (salon inventoryCategories).
  * Table rows/groups persist on the selected subcategory Firestore document.
  */
-import { db, auth, storage } from "/app.js?v=20260509_staffid_notify";
+import { db, auth, storage } from "/app.js?v=20260510_firestore_lp";
 import {
   doc,
   getDoc,
@@ -101,6 +101,10 @@ function _ffInvDocInActiveLoc(data) {
 let _expandedCategoryIds = new Set();
 /** @type {string | null} */
 let _selectedSubcategoryId = null;
+/** Mobile: full categories panel open (false = compact strip after picking a subcategory). */
+let _invMobileCatsPanelOpen = true;
+/** Create Order: category checkbox panel — hidden until +START NEW ORDER LIST (Inventory tab sidebar unchanged). */
+let _invObPickPanelOpen = false;
 
 /** Categories tree from Firestore (sidebar + modal draft base). */
 let _categoryTree = [];
@@ -152,6 +156,19 @@ let _editCellKey = null;
 /** Local UI-only column widths (px). `groupSubById` = width per Stock/Current/Order/Price under that group id. */
 let _invColWidths = null;
 
+const INV_MOBILE_COL_HIDE_SS_KEY = "ff_inv_mobile_col_hide_v1";
+/** Narrow screens only: hide optional columns to free horizontal space. Stock/Current/Order/Price + Name always stay. */
+let _invMobileColHide = {
+  dnd: false,
+  num: false,
+  code: false,
+  supplier: false,
+  url: false,
+  nameExpanded: false,
+};
+/** @type {ReturnType<typeof setTimeout> | null} */
+let _invNameHeaderTapTimer = null;
+
 /** Row context menu (right-click or ⋯): local UI only */
 let _invRowMenu = null; // { rowId: string, left: number, top: number } | null
 /** Delete row confirmation modal */
@@ -166,7 +183,7 @@ let _invTableSaveTimer = null;
 /** Row drag-reorder: row id being dragged (HTML5 DnD). */
 let _invRowDndDragId = null;
 
-const STYLE_ID = "ff-inv2-mock-styles-v123";
+const STYLE_ID = "ff-inv2-mock-styles-v152-order-detail-footer-one-row";
 
 /** One-step undo for row/group delete: delayed Firestore write + toast. */
 const INV_UNDO_MS = 5000;
@@ -212,9 +229,11 @@ let _invOrderShoppingDraft = {};
 let _invOrderReceiveBusy = false;
 /** Order Details: Confirm Purchase (draft shopping → inventory) in flight. */
 let _invOrderPurchaseBusy = false;
+/** In flight: order detail line → inventory unit price update. */
+let _invOrderInvPriceBusy = false;
 
 function isInvOrderDetailCommitBusy() {
-  return _invOrderReceiveBusy || _invOrderPurchaseBusy;
+  return _invOrderReceiveBusy || _invOrderPurchaseBusy || _invOrderInvPriceBusy;
 }
 /** Order Details line filter (display only). Open = not fully received (includes partial lines). */
 /** @type {"all" | "open" | "received"} */
@@ -252,6 +271,9 @@ let _invOrderBuilderPreviewSeq = 0;
 /** Order Builder: locally-added manual items (mirror of Firestore draft doc). */
 /** @type {Array<Record<string, unknown>>} */
 let _invOrderBuilderManualLines = [];
+/** Create Order: user overrides for auto-fill line quantities (key = preview line itemId). */
+/** @type {Record<string, number>} */
+let _invOrderBuilderAutoQtyOverrides = {};
 
 /** Doc id used for the legacy single-draft (migrated on first load). */
 const INVENTORY_LEGACY_DRAFT_DOC_ID = "active";
@@ -1631,6 +1653,35 @@ function parseRowIdFromInventoryItemId(itemId) {
   return s;
 }
 
+/**
+ * Resolve Firestore inventory cell coordinates from a saved order line (auto, linked, or legacy).
+ * @returns {{ catId: string, subId: string, rowId: string, groupId: string } | null}
+ */
+function parseInventoryCellRefFromOrderLine(it) {
+  if (!it || typeof it !== "object") return null;
+  let catId = it.categoryId != null ? String(it.categoryId).trim() : "";
+  let subId = it.subcategoryId != null ? String(it.subcategoryId).trim() : "";
+  let groupId = it.groupId != null ? String(it.groupId).trim() : "";
+  const iid = String(it.itemId ?? "").trim();
+  const lid = String(it.linkedInventoryItemId ?? "").trim();
+  for (const cand of [iid, lid]) {
+    if (!cand || !cand.includes(":")) continue;
+    const parts = cand.split(":");
+    if (parts.length >= 3) {
+      if (!subId) subId = parts[0] || "";
+      if (!groupId) groupId = parts[parts.length - 1] || "";
+    }
+  }
+  const rowId = parseRowIdFromInventoryItemId(iid || lid);
+  if (!subId || !rowId || !groupId) return null;
+  if (!catId) {
+    const m = findCategoryAndSubForSubId(subId);
+    if (m) catId = String(m.category.id);
+  }
+  if (!catId) return null;
+  return { catId, subId, rowId, groupId };
+}
+
 function getItemOrderQty(it) {
   if (it == null || typeof it !== "object") return 0;
   return typeof it.orderQty === "number" ? it.orderQty : parseNum(it.orderQty);
@@ -1646,6 +1697,99 @@ function getOrderLinePrice(it) {
   if (it == null || typeof it !== "object") return 0;
   if (it.price == null || it.price === "") return 0;
   return typeof it.price === "number" ? it.price : parseNum(it.price);
+}
+
+/**
+ * Persist a unit price from Order Details to the inventory subcategory row cell + mirror on the order line.
+ */
+async function commitOrderLineInventoryPrice(orderId, lineIdx, rawVal) {
+  if (_invOrderInvPriceBusy) return;
+  const o = _invOrdersList.find((x) => x.id === orderId);
+  if (!o || !Array.isArray(o.items)) return;
+  const it = o.items[lineIdx];
+  if (!it || typeof it !== "object") return;
+  const ref = parseInventoryCellRefFromOrderLine(it);
+  if (!ref) {
+    inventoryOrderDraftToast("This line is not linked to inventory.", "error");
+    return;
+  }
+  const priceStr = String(rawVal ?? "").trim().replace(/,/g, "");
+  if (priceStr === "") {
+    inventoryOrderDraftToast("Enter a price.", "info");
+    return;
+  }
+  const priceNum = parseNum(priceStr);
+  if (!Number.isFinite(priceNum) || priceNum < 0) {
+    inventoryOrderDraftToast("Invalid price.", "error");
+    return;
+  }
+  const prevRaw = it.price != null ? String(it.price).replace(/,/g, "").trim() : "";
+  if (prevRaw !== "" && Math.abs(parseNum(prevRaw) - priceNum) < 1e-9 && prevRaw === priceStr) {
+    return;
+  }
+
+  const salonId = await getSalonId();
+  if (!salonId) {
+    inventoryOrderDraftToast("Could not resolve salon.", "error");
+    return;
+  }
+
+  _invOrderInvPriceBusy = true;
+  mountOrRefreshMockUi();
+  try {
+    const subRef = doc(
+      db,
+      `salons/${salonId}/inventoryCategories/${ref.catId}/inventorySubcategories/${ref.subId}`
+    );
+    const snap = await getDoc(subRef);
+    if (!snap.exists()) throw new Error("SUB_MISSING");
+    const data = snap.data();
+    const rowsRaw = Array.isArray(data.rows) ? data.rows : [];
+    const rowsNorm = rowsRaw.map((raw) => normalizeRowFromFirestore(raw));
+    const row = rowsNorm.find((r) => r.id === ref.rowId);
+    if (!row) throw new Error("ROW_MISSING");
+    const cell = row.byGroup[ref.groupId];
+    if (!cell) throw new Error("CELL_MISSING");
+    cell.price = priceStr;
+    const rowsPayload = rowsNorm.map((r) => serializeInventoryRowForFirestore(r));
+    await updateDoc(subRef, { rows: rowsPayload, updatedAt: serverTimestamp() });
+
+    const orderRef = doc(db, `salons/${salonId}/inventoryOrders`, orderId);
+    const ordSnap = await getDoc(orderRef);
+    if (ordSnap.exists()) {
+      const od = ordSnap.data();
+      const itemsNext = Array.isArray(od.items)
+        ? od.items.map((x) => (x && typeof x === "object" ? { ...x } : {}))
+        : [];
+      if (itemsNext[lineIdx]) {
+        itemsNext[lineIdx] = { ...itemsNext[lineIdx], price: priceStr };
+        await updateDoc(orderRef, { items: itemsNext, updatedAt: serverTimestamp() });
+      }
+    }
+
+    const localO = _invOrdersList.find((x) => x.id === orderId);
+    if (localO && Array.isArray(localO.items) && localO.items[lineIdx]) {
+      localO.items[lineIdx] = { ...localO.items[lineIdx], price: priceStr };
+    }
+    inventoryOrderDraftToast("Inventory price updated.", "success");
+
+    const meta = getSelectedSubMeta();
+    if (meta && meta.category.id === ref.catId && meta.sub.id === ref.subId) {
+      const key = `${ref.catId}:${ref.subId}`;
+      if (_invTableLoadedForSubId === key) {
+        const seq = ++_invTableLoadSeq;
+        _invTableLoading = true;
+        mountOrRefreshMockUi();
+        void loadInventoryTableForSub(meta.category.id, meta.sub.id, seq, key);
+      }
+    }
+  } catch (e) {
+    console.error("[Inventory] order line inventory price failed", e);
+    inventoryOrderDraftToast("Could not update inventory price.", "error");
+  } finally {
+    _invOrderInvPriceBusy = false;
+    mountOrRefreshMockUi();
+  }
 }
 
 function getOrderDetailTotals(items) {
@@ -1812,8 +1956,8 @@ function buildOrderDetailCsvContent(o) {
   ensureShoppingDraft(o.id);
   const shop = _invOrderShoppingDraft[o.id];
   const header = showExtra
-    ? ["Checked", "Item", "K", "N", "B", "Recv total"]
-    : ["Checked", "Item", "K", "N", "B"];
+    ? ["Checked", "Item", "Code", "QTY", "Buy", "Recv total"]
+    : ["Checked", "Item", "Code", "QTY", "Buy"];
   const lines = [header.map(escapeCsvCell).join(",")];
   for (const { it, idx } of pairs) {
     const ordQ = formatOrderDisplay(getItemOrderQty(it));
@@ -1860,7 +2004,7 @@ function buildOrderDetailPrintDocumentHtml(o) {
   let thead = "";
   let tbody = "";
   if (showExtra) {
-    thead = `<thead><tr><th>✓</th><th>Item</th><th>K</th><th>N</th><th>B</th><th>Recv total</th></tr></thead>`;
+    thead = `<thead><tr><th>✓</th><th>Item</th><th>Code</th><th>QTY</th><th>Buy</th><th>Recv total</th></tr></thead>`;
     for (const { it, idx } of pairs) {
       const ordQ = formatOrderDisplay(getItemOrderQty(it));
       const cumStr = formatOrderDisplay(getItemReceivedCumulative(it));
@@ -1881,7 +2025,7 @@ function buildOrderDetailPrintDocumentHtml(o) {
 </tr>`;
     }
   } else {
-    thead = `<thead><tr><th>✓</th><th>Item</th><th>K</th><th>N</th><th>B</th></tr></thead>`;
+    thead = `<thead><tr><th>✓</th><th>Item</th><th>Code</th><th>QTY</th><th>Buy</th></tr></thead>`;
     for (const { it, idx } of pairs) {
       const ordQ = formatOrderDisplay(getItemOrderQty(it));
       const chk = shop && shop.checked[idx] ? "Yes" : "";
@@ -2205,6 +2349,33 @@ function sortOrderBuilderLines(lines) {
   });
 }
 
+/** Apply persisted user edits to auto-generated preview line quantities. */
+function applyAutoQtyOverridesToLines(lines) {
+  if (!Array.isArray(lines)) return lines;
+  const ov = _invOrderBuilderAutoQtyOverrides;
+  if (!ov || typeof ov !== "object") return lines;
+  for (const line of lines) {
+    if (!line || line.itemId == null) continue;
+    const key = String(line.itemId);
+    if (Object.prototype.hasOwnProperty.call(ov, key)) {
+      const n = Number(ov[key]);
+      if (Number.isFinite(n) && n >= 0) line.orderQty = n;
+    }
+  }
+  return lines;
+}
+
+/** Drop override keys that no longer match any preview line (after category changes / refresh). */
+function pruneAutoQtyOverridesToExistingLines(lines) {
+  if (!Array.isArray(lines) || !_invOrderBuilderAutoQtyOverrides) return;
+  const ids = new Set(
+    lines.map((l) => (l && l.itemId != null ? String(l.itemId) : "")).filter(Boolean)
+  );
+  for (const k of Object.keys(_invOrderBuilderAutoQtyOverrides)) {
+    if (!ids.has(k)) delete _invOrderBuilderAutoQtyOverrides[k];
+  }
+}
+
 async function fetchSubcategoryInventoryDoc(salonId, catId, subId) {
   if (_invUsingSharedCatalog) {
     const data = await buildSharedInventoryTableData(salonId, catId, subId);
@@ -2257,10 +2428,11 @@ function syncOrderBuilderPreviewFromCurrentSub() {
   const meta = getSelectedSubMeta();
   if (!meta || !_groups || !_rows) {
     _invOrderBuilderPreviewLines = [];
+    pruneAutoQtyOverridesToExistingLines([]);
     _invOrderBuilderPreviewLoading = false;
     return;
   }
-  _invOrderBuilderPreviewLines = buildOrderLinesFromGroupsRows(
+  const built = buildOrderLinesFromGroupsRows(
     _groups,
     _rows,
     meta.sub.id,
@@ -2268,6 +2440,9 @@ function syncOrderBuilderPreviewFromCurrentSub() {
     meta.category.id,
     meta.category.name != null ? String(meta.category.name) : null
   );
+  sortOrderBuilderLines(built);
+  _invOrderBuilderPreviewLines = applyAutoQtyOverridesToLines(built);
+  pruneAutoQtyOverridesToExistingLines(_invOrderBuilderPreviewLines);
   _invOrderBuilderPreviewLoading = false;
 }
 
@@ -2307,11 +2482,14 @@ async function refreshOrderBuilderPreviewAsync() {
     }
     sortOrderBuilderLines(lines);
     if (seq !== _invOrderBuilderPreviewSeq) return;
-    _invOrderBuilderPreviewLines = lines;
+    const merged = applyAutoQtyOverridesToLines(lines);
+    _invOrderBuilderPreviewLines = merged;
+    pruneAutoQtyOverridesToExistingLines(merged);
   } catch (e) {
     console.error("[Inventory] order builder preview failed", e);
     if (seq !== _invOrderBuilderPreviewSeq) return;
     _invOrderBuilderPreviewLines = [];
+    pruneAutoQtyOverridesToExistingLines([]);
     inventoryOrderDraftToast("Could not load inventory for this selection.", "error");
   } finally {
     if (seq === _invOrderBuilderPreviewSeq) {
@@ -2368,9 +2546,18 @@ function renderOrderBuilderCustomTreeHtml() {
 function renderOrderBuilderSourceHtml() {
   seedOrderBuilderSelectionIfEmpty();
   expandOrderBuilderCatsForCurrentSelection();
-  return `<div class="ff-inv2-ob-source">
+  if (!_invObPickPanelOpen) {
+    return "";
+  }
+  const doneBtn = `<button type="button" class="ff-inv2-ob-mobile-done" data-inv-ob-mobile-collapse-source="1" aria-label="Done choosing categories">Done</button>`;
+  return `<div class="ff-inv2-ob-source" id="ff-inv2-ob-source">
+  <div class="ff-inv2-ob-source-top">
+    <div class="ff-inv2-ob-source-copy">
   <p class="ff-inv2-ob-source-title">Create Order</p>
   <p class="ff-inv2-ob-source-hint">Pick categories or subcategories to include, then review below.</p>
+    </div>
+    ${doneBtn}
+  </div>
   <div class="ff-inv2-ob-custom">${renderOrderBuilderCustomTreeHtml()}</div>
 </div>`;
 }
@@ -2470,7 +2657,11 @@ async function saveInventoryOrderDraft() {
   if (_invSaveOrderDraftBusy) return;
   const autoLines = Array.isArray(_invOrderBuilderPreviewLines) ? _invOrderBuilderPreviewLines : [];
   const manualLines = Array.isArray(_invOrderBuilderManualLines) ? _invOrderBuilderManualLines : [];
-  const linesRaw = [...autoLines, ...manualLines];
+  const linesRaw = [...autoLines, ...manualLines].filter((L) => {
+    if (!L) return false;
+    const q = typeof L.orderQty === "number" ? L.orderQty : parseNum(L.orderQty);
+    return q > 0;
+  });
   if (linesRaw.length === 0) return;
   const salonId = await getSalonId();
   if (!salonId) {
@@ -2548,6 +2739,7 @@ async function saveInventoryOrderDraft() {
     });
     // Clear the persistent active-draft doc so the next Create Order starts fresh.
     await clearInventoryOrderDraft();
+    _invObPickPanelOpen = false;
     inventoryOrderDraftToast("Order saved", "success");
   } catch (e) {
     console.error("[Inventory] save order draft failed", e);
@@ -2572,7 +2764,7 @@ function renderOrderListSectionHtml() {
     ? `<button type="button" class="ff-inv2-btn" id="ff-inv2-save-order-draft"${saveDisabled ? " disabled" : ""}>${busy ? "Saving…" : "Save as Order"}</button>`
     : "";
   const addItemBtn = !loading
-    ? `<button type="button" class="ff-inv2-btn" data-inv-ob-add-item="1"${busy ? " disabled" : ""}>+ Add Item</button>`
+    ? `<button type="button" class="ff-inv2-btn ff-inv2-ob-add-item-btn" data-inv-ob-add-item="1"${busy ? " disabled" : ""}>+ Add Item</button>`
     : "";
   const nameInput = hasRows && !loading
     ? `<div class="ff-inv2-order-save-name-row">
@@ -2602,7 +2794,7 @@ function renderOrderListSectionHtml() {
   <td class="ff-inv2-ol-td">${nameHtml}</td>
   ${subTd}
   <td class="ff-inv2-ol-td">${escapeHtml(l.groupName != null && String(l.groupName) !== "" ? String(l.groupName) : "—")}</td>
-  <td class="ff-inv2-ol-td ff-inv2-num">${qtyInputHtml}</td>
+  <td class="ff-inv2-ol-td ff-inv2-num ff-inv2-ol-td--qty">${qtyInputHtml}</td>
   <td class="ff-inv2-ol-td">—</td>
   <td class="ff-inv2-ol-td">—</td>
   <td class="ff-inv2-ol-td ff-inv2-ol-url-wrap">${removeBtn}</td>
@@ -2611,13 +2803,17 @@ function renderOrderListSectionHtml() {
           const subTd = showSubCol
             ? `<td class="ff-inv2-ol-td">${escapeHtml(l.subcategoryName != null ? String(l.subcategoryName) : "")}</td>`
             : "";
+          const iidEsc = escapeHtml(String(l.itemId ?? ""));
+          const oq =
+            typeof l.orderQty === "number" ? l.orderQty : Number(l.orderQty) || 0;
+          const qtyInputHtml = `<input type="number" min="0" step="1" class="ff-inv2-ol-qty-input" data-inv-ob-auto-qty="${iidEsc}" value="${escapeHtml(String(oq))}" aria-label="Order qty" />`;
           return `<tr>
   <td class="ff-inv2-ol-td">${escapeHtml(l.rowNo)}</td>
   <td class="ff-inv2-ol-td">${escapeHtml(l.code)}</td>
   <td class="ff-inv2-ol-td">${escapeHtml(l.itemName)}</td>
   ${subTd}
   <td class="ff-inv2-ol-td">${escapeHtml(l.groupName)}</td>
-  <td class="ff-inv2-ol-td ff-inv2-num">${escapeHtml(formatOrderDisplay(l.orderQty))}</td>
+  <td class="ff-inv2-ol-td ff-inv2-num ff-inv2-ol-td--qty">${qtyInputHtml}</td>
   <td class="ff-inv2-ol-td">${escapeHtml(l.price)}</td>
   <td class="ff-inv2-ol-td">${escapeHtml(l.supplier)}</td>
   <td class="ff-inv2-ol-td ff-inv2-ol-url-wrap"><span class="ff-inv2-ol-url">${escapeHtml(l.url)}</span></td>
@@ -2629,6 +2825,9 @@ function renderOrderListSectionHtml() {
   if (loading) {
     body = `<p class="ff-inv2-order-list-loading">Loading inventory for the selected source…</p>`;
   } else if (hasRows) {
+    const olSwipeHint = isInvMobileNarrow()
+      ? `<p class="ff-inv2-order-list-table-hint" role="note">Swipe sideways to see Qty, Price, and other columns.</p>`
+      : "";
     body = `<div class="ff-inv2-order-list-scroll"><table class="ff-inv2-order-list-table">
 <thead><tr>
 <th class="ff-inv2-ol-th">#</th>
@@ -2636,13 +2835,13 @@ function renderOrderListSectionHtml() {
 <th class="ff-inv2-ol-th">Item</th>
 ${subTh}
 <th class="ff-inv2-ol-th">Group</th>
-<th class="ff-inv2-ol-th">Qty</th>
+<th class="ff-inv2-ol-th ff-inv2-ol-th--qty">Qty</th>
 <th class="ff-inv2-ol-th">Price</th>
 <th class="ff-inv2-ol-th">Supplier</th>
 <th class="ff-inv2-ol-th">URL</th>
 </tr></thead>
 <tbody>${rowsHtml}</tbody>
-</table></div>`;
+</table></div>${olSwipeHint}`;
   } else {
     body = `<p class="ff-inv2-order-list-empty">No line items with positive order quantity (Stock − Current).</p>`;
   }
@@ -2671,9 +2870,9 @@ ${subTh}
   <span class="ff-inv2-draft-chip-status" data-inv-draft-status data-state="${_invOrderDraftSaveStatus}">${escapeHtml(statusText)}</span>
   <span class="ff-inv2-draft-chip-caret" aria-hidden="true">▾</span>
 </button>`;
-  // "+ New" starts a fresh draft, deactivating (but not deleting) the current one.
+  // New order list: starts a fresh draft, deactivating (but not deleting) the current one.
   const newDraftBtn = !loading
-    ? `<button type="button" class="ff-inv2-draft-new-btn" data-inv-ob-new-draft="1"${busy ? " disabled" : ""} title="Start a new draft">+ New</button>`
+    ? `<button type="button" class="ff-inv2-draft-new-btn" data-inv-ob-new-draft="1"${busy ? " disabled" : ""} title="Start a new order list (current draft is kept under Drafts)">+START NEW ORDER LIST</button>`
     : "";
 
   return `<div class="ff-inv2-order-list-card">
@@ -2940,6 +3139,16 @@ function ffApplyDraftSnapshotToLocalState(docId, d) {
   _invOrderBuilderCustomSubIds = Array.isArray(d.selectedSubcategoryIds)
     ? new Set(d.selectedSubcategoryIds.map(String))
     : new Set();
+  _invOrderBuilderAutoQtyOverrides = {};
+  const rawOv = d.autoQtyOverrides;
+  if (rawOv && typeof rawOv === "object" && !Array.isArray(rawOv)) {
+    for (const [k, v] of Object.entries(rawOv)) {
+      if (!k) continue;
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) _invOrderBuilderAutoQtyOverrides[k] = n;
+    }
+  }
+  _invObPickPanelOpen = false;
   _invOrderSaveNameDraft = typeof d.orderName === "string" ? d.orderName : "";
   if (d.updatedAt && typeof d.updatedAt.toMillis === "function") {
     _invOrderDraftLastSavedAt = d.updatedAt.toMillis();
@@ -3014,6 +3223,7 @@ async function loadInventoryOrderDraft(forceReload) {
       _invActiveDraftId = null;
       _invOrderBuilderManualLines = [];
       _invOrderBuilderCustomSubIds = new Set();
+      _invOrderBuilderAutoQtyOverrides = {};
       _invOrderSaveNameDraft = "";
       _invOrderDraftLastSavedAt = 0;
       _invOrderDraftSaveStatus = "idle";
@@ -3082,12 +3292,22 @@ async function flushInventoryOrderDraftSave() {
     const manualItems = _invOrderBuilderManualLines
       .map(sanitizeManualItemForDraft)
       .filter((x) => x && x.itemName);
+    /** @type {Record<string, number>} */
+    const autoQtyOverrides = {};
+    if (_invOrderBuilderAutoQtyOverrides && typeof _invOrderBuilderAutoQtyOverrides === "object") {
+      for (const [k, v] of Object.entries(_invOrderBuilderAutoQtyOverrides)) {
+        if (!k) continue;
+        const n = Number(v);
+        if (Number.isFinite(n) && n >= 0) autoQtyOverrides[k] = n;
+      }
+    }
     const payload = {
       status: "draft",
       isActive: true,
       manualItems,
       selectedSubcategoryIds: Array.from(_invOrderBuilderCustomSubIds),
       orderName: String(_invOrderSaveNameDraft ?? ""),
+      autoQtyOverrides,
       updatedAt: serverTimestamp(),
       updatedBy: uid,
     };
@@ -3277,6 +3497,7 @@ async function deleteInventoryDraftFromPicker(draftId) {
       _invActiveDraftId = null;
       _invOrderBuilderManualLines = [];
       _invOrderBuilderCustomSubIds = new Set();
+      _invOrderBuilderAutoQtyOverrides = {};
       _invOrderSaveNameDraft = "";
       _invOrderDraftLastSavedAt = 0;
       _invOrderDraftSaveStatus = "idle";
@@ -3319,14 +3540,30 @@ async function createNewInventoryOrderDraft() {
   _invActiveDraftId = null;
   _invOrderBuilderManualLines = [];
   _invOrderBuilderCustomSubIds = new Set();
+  _invOrderBuilderAutoQtyOverrides = {};
   _invOrderSaveNameDraft = "";
   _invOrderDraftLastSavedAt = 0;
   _invOrderDraftSaveStatus = "idle";
   _invOrderDraftResumeToastShown = true;
   _invOrderDraftLoaded = true;
+  _invOrderBuilderExpandedCatIds = new Set();
+  _invObPickPanelOpen = true;
   inventoryOrderDraftToast("Started a new draft", "info");
   mountOrRefreshMockUi();
   void refreshOrderBuilderPreviewAsync();
+  try {
+    if (typeof requestAnimationFrame !== "undefined") {
+      requestAnimationFrame(() => {
+        const root = document.getElementById("inventoryScreen");
+        const el = root && root.querySelector("#ff-inv2-ob-source");
+        if (el && typeof el.scrollIntoView === "function") {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      });
+    }
+  } catch (_) {
+    /* ignore */
+  }
 }
 
 /** Remove the active draft entirely (after Save as Order). Other drafts are untouched. */
@@ -3334,6 +3571,7 @@ async function clearInventoryOrderDraft() {
   const draftIdToDelete = _invActiveDraftId;
   _invOrderBuilderManualLines = [];
   _invOrderBuilderCustomSubIds = new Set();
+  _invOrderBuilderAutoQtyOverrides = {};
   _invOrderSaveNameDraft = "";
   _invActiveDraftId = null;
   _invOrderDraftLastSavedAt = 0;
@@ -3358,6 +3596,7 @@ async function clearInventoryOrderDraft() {
           manualItems: [],
           selectedSubcategoryIds: [],
           orderName: "",
+          autoQtyOverrides: {},
           updatedAt: serverTimestamp(),
         },
         { merge: false }
@@ -3369,11 +3608,26 @@ async function clearInventoryOrderDraft() {
 }
 
 function renderInventoryTableCardHtml() {
+  let sharedBtnLabel = "+ Add from Shared";
+  let narrow = false;
+  try {
+    if (typeof matchMedia !== "undefined" && matchMedia("(max-width: 767.98px)").matches) {
+      sharedBtnLabel = "+ Shared";
+      narrow = true;
+    }
+  } catch (_) {}
+  const colsBtn =
+    narrow
+      ? `<button type="button" class="ff-inv2-btn ff-inv2-btn--toolbar-cols" id="ff-inv2-mobile-cols-reset" title="Bring back #, Code, Supplier, URL, or drag column after hiding them (double-tap a header to hide).">Columns</button>`
+      : "";
   return `<div class="ff-inv2-table-card">
       <div class="ff-inv2-toolbar">
         <button type="button" class="ff-inv2-btn" id="ff-inv2-add-row">+ Add Row</button>
-        <button type="button" class="ff-inv2-btn" id="ff-inv2-add-from-shared">+ Add from Shared</button>
         <button type="button" class="ff-inv2-btn" id="ff-inv2-add-group">+ Add Group</button>
+        ${colsBtn}
+        <button type="button" class="ff-inv2-btn ff-inv2-btn--toolbar-shared" id="ff-inv2-add-from-shared">${escapeHtml(
+          sharedBtnLabel
+        )}</button>
       </div>
       <div class="ff-inv2-table-scroll">
         <table class="ff-inv2-table">
@@ -5523,14 +5777,23 @@ function renderInventoryOrderDetailModal() {
     .map((it, idx) => ({ it, idx }))
     .filter(({ it }) => orderDetailLineMatchesFilter(it));
   const displayPairs = sortOrderDetailPairsOpenFirst(filteredPairs);
+  const toolsDisabledClass = receiveDisabled ? " ff-inv2-od-tools-details--disabled" : "";
+  const exportMenuBlock = `<details class="ff-inv2-od-export-menu ff-inv2-od-tools-details${toolsDisabledClass}">
+  <summary class="ff-inv2-od-export-menu-trigger" title="Print or export CSV" aria-label="Print or export CSV"><span aria-hidden="true">▾</span></summary>
+  <div class="ff-inv2-od-tools-menu ff-inv2-od-export-menu-popup" role="group" aria-label="Export options">
+    <button type="button" class="ff-inv2-od-tools-menu-item" data-inv-order-detail-print="1"${receiveDisabled}>Print</button>
+    <button type="button" class="ff-inv2-od-tools-menu-item" data-inv-order-detail-export-csv="1"${receiveDisabled}>Export CSV</button>
+  </div>
+</details>`;
   const lineFilterBar =
     items.length > 0
       ? `<div class="ff-inv2-order-detail-line-filter" role="toolbar" aria-label="Filter lines">
   <button type="button" class="ff-inv2-od-filter-chip${fil === "all" ? " ff-inv2-od-filter--active" : ""}" data-inv-order-detail-filter="all"${receiveDisabled}>All</button>
   <button type="button" class="ff-inv2-od-filter-chip${fil === "open" ? " ff-inv2-od-filter--active" : ""}" data-inv-order-detail-filter="open"${receiveDisabled}>Open</button>
   <button type="button" class="ff-inv2-od-filter-chip${fil === "received" ? " ff-inv2-od-filter--active" : ""}" data-inv-order-detail-filter="received"${receiveDisabled}>Done</button>
+  ${exportMenuBlock}
 </div>`
-      : "";
+      : `<div class="ff-inv2-order-detail-line-filter ff-inv2-order-detail-line-filter--export-only" role="toolbar" aria-label="Export">${exportMenuBlock}</div>`;
   const itemRows = displayPairs
     .map(({ it, idx }) => {
       const vis = getOrderLineReceiveVisualState(it);
@@ -5549,7 +5812,22 @@ function renderInventoryOrderDetailModal() {
         gLine !== "" ? `<span class="ff-inv2-od-item-group">(${escapeHtml(gLine)})</span>` : "";
       const codeRaw = it.code != null ? String(it.code) : "";
       const code = escapeHtml(codeRaw);
-      const itemCell = `<td class="ff-inv2-od-td ff-inv2-od-td--item"><div class="ff-inv2-od-item-stack"><span class="ff-inv2-od-item-name" title="${name}">${name}</span>${groupSpan}</div></td>`;
+      const invRef = parseInventoryCellRefFromOrderLine(it);
+      const priceFieldBusy = detailCommitBusy || _invOrderInvPriceBusy;
+      const priceFieldDisabled = priceFieldBusy ? " disabled" : "";
+      const priceFieldVal =
+        it.price != null && String(it.price).trim() !== ""
+          ? escapeHtml(String(it.price).replace(/,/g, "").trim())
+          : "";
+      const invPriceInline = invRef
+        ? `<span class="ff-inv2-od-inv-price-inline" title="Price → saves to inventory">
+  <input type="number" class="ff-inv2-od-inv-price-input ff-inv2-od-inv-price-input--inline" min="0" step="any" inputmode="decimal" autocomplete="off"
+    data-inv-order-line-inv-price="1" data-order-id="${oidEsc}" data-line-idx="${idx}"
+    value="${priceFieldVal}" placeholder="—"
+    aria-label="Inventory unit price"${priceFieldDisabled} />
+</span>`
+        : "";
+      const itemCell = `<td class="ff-inv2-od-td ff-inv2-od-td--item"><div class="ff-inv2-od-item-stack"><div class="ff-inv2-od-item-name-row"><span class="ff-inv2-od-item-name" title="${name}">${name}</span>${invPriceInline}</div>${groupSpan}</div></td>`;
       const codeCell = `<td class="ff-inv2-od-td ff-inv2-od-td--code"><span class="ff-inv2-od-item-code${codeRaw === "" ? " ff-inv2-od-item-code--empty" : ""}">${codeRaw !== "" ? code : "—"}</span></td>`;
       const qbAttr = qb !== "" ? escapeHtml(qb) : "";
       return `<tr class="ff-inv2-od-tr ${vis.rowClass}" data-inv-detail-shopping-row="1" data-line-idx="${idx}">
@@ -5567,9 +5845,9 @@ function renderInventoryOrderDetailModal() {
   const theadChecklist = `<thead><tr>
 <th class="ff-inv2-od-th ff-inv2-od-th--narrow ff-inv2-od-th--center" aria-label="Got it"></th>
 <th class="ff-inv2-od-th ff-inv2-od-th--item">Item</th>
-<th class="ff-inv2-od-th ff-inv2-od-th--code ff-inv2-od-th--letter" title="Code">K</th>
-<th class="ff-inv2-od-th ff-inv2-od-th--num ff-inv2-od-th--letter" title="Needed">N</th>
-<th class="ff-inv2-od-th ff-inv2-od-th--num ff-inv2-od-th--letter" title="Bought">B</th>
+<th class="ff-inv2-od-th ff-inv2-od-th--code ff-inv2-od-th--col-head" scope="col" title="Product code">Code</th>
+<th class="ff-inv2-od-th ff-inv2-od-th--num ff-inv2-od-th--col-head" scope="col" title="Quantity you need">QTY</th>
+<th class="ff-inv2-od-th ff-inv2-od-th--num ff-inv2-od-th--col-head" scope="col" title="Quantity bought">Buy</th>
 </tr></thead>`;
   const itemsTableBody = items.length
     ? filteredPairs.length === 0
@@ -5579,7 +5857,7 @@ function renderInventoryOrderDetailModal() {
 ${theadChecklist}
 <tbody>${itemRows}</tbody>
 </table></div>`
-    : `<p class="ff-inv2-order-detail-no-items">No line items.</p>`;
+    : `${lineFilterBar}<p class="ff-inv2-order-detail-no-items">No line items.</p>`;
   const orderedMeta =
     o.orderedAt != null
       ? `<div class="ff-inv2-order-detail-meta-row"><dt>Ordered</dt><dd>${escapeHtml(orderedAt)}</dd></div>
@@ -5600,7 +5878,6 @@ ${theadChecklist}
     <p class="ff-inv2-order-detail-totals-line ff-inv2-order-detail-totals-line--sub">Open ${receiveSummaryCounts.open} · Partial ${receiveSummaryCounts.partial} · Done ${receiveSummaryCounts.received} · Remaining qty ${escapeHtml(formatOrderDisplay(receiveSummaryCounts.remainingQty))}</p>
   </div>
 </details>`;
-  const shoppingHint = "";
   const purchaseCommitBtn =
     items.length > 0
       ? `<button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-primary ff-inv2-order-detail-purchase-btn" data-inv-order-detail-confirm-purchase="1" data-order-id="${oidEsc}"${receiveDisabled}>${purchaseBusy ? "Updating…" : "Confirm Purchase"}</button>`
@@ -5612,16 +5889,11 @@ ${theadChecklist}
         <h2 id="ff-inv-order-detail-title" class="ff-inv2-order-detail-title">${orderTitle}</h2>
         <span class="ff-inv2-order-detail-status-pill">${escapeHtml(statusLabel)}</span>
       </div>
-      <div class="ff-inv2-order-detail-head-actions">
-        <button type="button" class="ff-inv2-od-detail-action" data-inv-order-detail-print="1"${receiveDisabled}>Print</button>
-        <button type="button" class="ff-inv2-od-detail-action" data-inv-order-detail-export-csv="1"${receiveDisabled}>Export CSV</button>
-      </div>
     </header>
     ${extrasBlock}
     <div class="ff-inv2-order-detail-main">
     ${itemsTableBody}
     </div>
-    ${shoppingHint}
     <div class="ff-inv2-modal-actions ff-inv2-order-detail-footer">
       <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-cancel" data-inv-order-detail-close="1"${receiveDisabled}>Close</button>
       <button type="button" class="ff-inv2-modal-btn ff-inv2-modal-btn-cancel ff-inv2-order-detail-receipt-btn" data-inv-order-receipt-info="1" data-order-id="${oidEsc}"${receiveDisabled}>Receipt Information</button>
@@ -5889,18 +6161,287 @@ function getInvColWidths() {
   return _invColWidths;
 }
 
+function isInvMobileNarrow() {
+  try {
+    return typeof matchMedia !== "undefined" && matchMedia("(max-width: 767.98px)").matches;
+  } catch (_) {
+    return false;
+  }
+}
+
+function loadInvMobileColHideFromStorage() {
+  try {
+    const s = sessionStorage.getItem(INV_MOBILE_COL_HIDE_SS_KEY);
+    if (!s) return;
+    const o = JSON.parse(s);
+    if (o && typeof o === "object") {
+      _invMobileColHide = {
+        ..._invMobileColHide,
+        dnd: !!o.dnd,
+        num: !!o.num,
+        code: !!o.code,
+        supplier: !!o.supplier,
+        url: !!o.url,
+        nameExpanded: !!o.nameExpanded,
+      };
+    }
+  } catch (_) {}
+}
+
+function persistInvMobileColHide() {
+  try {
+    sessionStorage.setItem(INV_MOBILE_COL_HIDE_SS_KEY, JSON.stringify(_invMobileColHide));
+  } catch (_) {}
+}
+
+function applyInvMobileColumnClasses() {
+  const root = document.getElementById("inventoryScreen");
+  if (!root) return;
+  loadInvMobileColHideFromStorage();
+  if (!isInvMobileNarrow()) {
+    root.classList.remove(
+      "ff-inv-mobile-hide-dnd",
+      "ff-inv-mobile-hide-num",
+      "ff-inv-mobile-hide-code",
+      "ff-inv-mobile-hide-supplier",
+      "ff-inv-mobile-hide-url",
+      "ff-inv-mobile-name-expanded"
+    );
+  } else {
+    root.classList.toggle("ff-inv-mobile-hide-dnd", !!_invMobileColHide.dnd);
+    root.classList.toggle("ff-inv-mobile-hide-num", !!_invMobileColHide.num);
+    root.classList.toggle("ff-inv-mobile-hide-code", !!_invMobileColHide.code);
+    root.classList.toggle("ff-inv-mobile-hide-supplier", !!_invMobileColHide.supplier);
+    root.classList.toggle("ff-inv-mobile-hide-url", !!_invMobileColHide.url);
+    root.classList.toggle("ff-inv-mobile-name-expanded", !!_invMobileColHide.nameExpanded);
+  }
+  syncInvColWidthsToDom();
+}
+
+function toggleInvMobileOptionalCol(key) {
+  if (key === "dnd") _invMobileColHide.dnd = !_invMobileColHide.dnd;
+  else if (key === "num") _invMobileColHide.num = !_invMobileColHide.num;
+  else if (key === "code") _invMobileColHide.code = !_invMobileColHide.code;
+  else if (key === "supplier") _invMobileColHide.supplier = !_invMobileColHide.supplier;
+  else if (key === "url") _invMobileColHide.url = !_invMobileColHide.url;
+  else return;
+  persistInvMobileColHide();
+  applyInvMobileColumnClasses();
+}
+
+/** Mobile: restore #, Code, drag, Supplier, URL after hiding via double-tap header. */
+function resetInvMobileOptionalColumns() {
+  _invMobileColHide.dnd = false;
+  _invMobileColHide.num = false;
+  _invMobileColHide.code = false;
+  _invMobileColHide.supplier = false;
+  _invMobileColHide.url = false;
+  persistInvMobileColHide();
+  applyInvMobileColumnClasses();
+}
+
+function invMobileAnyOptionalColumnHidden() {
+  const h = _invMobileColHide;
+  return !!(h.dnd || h.num || h.code || h.supplier || h.url);
+}
+
+let _invMobColLastTouch = { t: 0, key: "", x: 0, y: 0 };
+
+function ensureInvMobileColHeaderBindOnce() {
+  if (document.documentElement.dataset.ffInvMobileColBind === "1") return;
+  document.documentElement.dataset.ffInvMobileColBind = "1";
+  let resizeT = null;
+  window.addEventListener(
+    "resize",
+    () => {
+      if (resizeT) clearTimeout(resizeT);
+      resizeT = setTimeout(() => applyInvMobileColumnClasses(), 150);
+    },
+    { passive: true }
+  );
+
+  document.addEventListener(
+    "touchend",
+    (ev) => {
+      if (!isInvMobileNarrow()) return;
+      const th = ev.target && ev.target.closest && ev.target.closest("#inventoryScreen th[data-inv-mobile-col]");
+      if (!th) return;
+      if (ev.target.closest && ev.target.closest(".col-resize-handle")) return;
+      const key = th.getAttribute("data-inv-mobile-col");
+      if (!key) return;
+
+      if (key === "name") {
+        if (_invNameHeaderTapTimer) {
+          clearTimeout(_invNameHeaderTapTimer);
+          _invNameHeaderTapTimer = null;
+          _invMobileColHide.nameExpanded = false;
+          persistInvMobileColHide();
+          applyInvMobileColumnClasses();
+        } else {
+          _invNameHeaderTapTimer = setTimeout(() => {
+            _invNameHeaderTapTimer = null;
+            _invMobileColHide.nameExpanded = true;
+            persistInvMobileColHide();
+            applyInvMobileColumnClasses();
+          }, 320);
+        }
+        return;
+      }
+
+      const now = ev.timeStamp || Date.now();
+      const touch = ev.changedTouches && ev.changedTouches[0];
+      const x = touch ? touch.clientX : 0;
+      const y = touch ? touch.clientY : 0;
+      const dt = now - _invMobColLastTouch.t;
+      const same =
+        _invMobColLastTouch.key === key &&
+        dt < 420 &&
+        dt > 30 &&
+        Math.abs(x - _invMobColLastTouch.x) < 48 &&
+        Math.abs(y - _invMobColLastTouch.y) < 48;
+      if (same) {
+        toggleInvMobileOptionalCol(key);
+        _invMobColLastTouch = { t: 0, key: "", x: 0, y: 0 };
+      } else {
+        _invMobColLastTouch = { t: now, key, x, y };
+      }
+    },
+    { passive: true, capture: true }
+  );
+
+  document.addEventListener(
+    "dblclick",
+    (ev) => {
+      if (!isInvMobileNarrow()) return;
+      const th = ev.target && ev.target.closest && ev.target.closest("#inventoryScreen th[data-inv-mobile-col]");
+      if (!th) return;
+      if (ev.target.closest && ev.target.closest(".col-resize-handle")) return;
+      const key = th.getAttribute("data-inv-mobile-col");
+      if (!key) return;
+      ev.preventDefault();
+      if (key === "name") {
+        if (_invNameHeaderTapTimer) {
+          clearTimeout(_invNameHeaderTapTimer);
+          _invNameHeaderTapTimer = null;
+        }
+        _invMobileColHide.nameExpanded = false;
+        persistInvMobileColHide();
+        applyInvMobileColumnClasses();
+        return;
+      }
+      toggleInvMobileOptionalCol(key);
+    },
+    true
+  );
+}
+
+/**
+ * Mobile only: tight widths per Stock / Current / Order / Price from longest cell in each
+ * logical column (so a wide Price does not widen Current). Desktop: one width for all four.
+ * @returns {[number, number, number, number]}
+ */
+function getInvMobileGroupSubColWidthsPx(w, groupId) {
+  const base = w.groupSubById[groupId] ?? 72;
+  const one = () => {
+    const b = base;
+    return /** @type {[number, number, number, number]} */ ([b, b, b, b]);
+  };
+  if (!isInvMobileNarrow()) return one();
+
+  const capNum = Math.min(72, base);
+  const capPrice = Math.min(112, base + 32);
+  const tightLen = (maxLen, minPx, capPx) => {
+    const t = Math.ceil(12 + maxLen * 8);
+    return Math.max(minPx, Math.min(capPx, t));
+  };
+
+  if (!Array.isArray(_rows) || _rows.length === 0) {
+    return /** @type {[number, number, number, number]} */ ([
+      Math.min(capNum, 46),
+      Math.min(capNum, 46),
+      Math.min(capNum, 46),
+      Math.min(capPrice, 56),
+    ]);
+  }
+
+  let maxStock = 1;
+  let maxCur = 1;
+  let maxOrd = 1;
+  let maxPrice = 1;
+  for (const row of _rows) {
+    const v = row.byGroup && row.byGroup[groupId];
+    if (!v) continue;
+    const { approved } = getCellApprovedInfo(v);
+    const order = computeOrder(v.stock, v.current, approved);
+    const stockN = typeof v.stock === "number" ? v.stock : parseNum(v.stock);
+    const curN = typeof v.current === "number" ? v.current : parseNum(v.current);
+    const stockS = String(formatOrderDisplay(stockN) || "").replace(/\s/g, "");
+    const curS = String(formatOrderDisplay(curN) || "").replace(/\s/g, "");
+    const ordS = String(formatOrderDisplay(order) || "").replace(/\s/g, "");
+    const priceS = String(v.price != null ? v.price : "")
+      .trim()
+      .replace(/\s/g, "");
+    if (stockS.length > maxStock) maxStock = stockS.length;
+    if (curS.length > maxCur) maxCur = curS.length;
+    if (ordS.length > maxOrd) maxOrd = ordS.length;
+    if (priceS.length > maxPrice) maxPrice = priceS.length;
+  }
+
+  return /** @type {[number, number, number, number]} */ ([
+    tightLen(maxStock, 32, capNum),
+    tightLen(maxCur, 32, capNum),
+    tightLen(maxOrd, 32, capNum),
+    tightLen(maxPrice, 38, capPrice),
+  ]);
+}
+
+function computeInvTableScrollClientWidth(root) {
+  const sc = root && root.querySelector && root.querySelector(".ff-inv2-table-scroll");
+  let cw = sc && sc.clientWidth ? sc.clientWidth : 0;
+  if (!cw) {
+    try {
+      cw = Math.max(280, Math.floor(window.innerWidth));
+    } catch (_) {
+      cw = 360;
+    }
+  }
+  return cw;
+}
+
+/** After mount, horizontal layout may be 0 until flex finishes — sync col widths again. */
+function scheduleSyncInvColWidthsAfterLayout() {
+  if (typeof requestAnimationFrame !== "undefined") {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        syncInvColWidthsToDom();
+      });
+    });
+  } else {
+    setTimeout(() => syncInvColWidthsToDom(), 0);
+  }
+}
+
 function renderColgroup() {
   if (_groups === null) return "";
   const w = getInvColWidths();
   const rd = w.rowDnd ?? 28;
+  let nameColW = w.name;
+  if (isInvMobileNarrow()) {
+    try {
+      nameColW = Math.min(w.name, Math.max(92, Math.floor(window.innerWidth * 0.34)));
+    } catch (_) {
+      nameColW = Math.min(w.name, 140);
+    }
+  }
   const parts = [];
   parts.push(`<col style="width:${rd}px;min-width:${rd}px" />`);
   parts.push(`<col style="width:${w.hash}px;min-width:${w.hash}px" />`);
   parts.push(`<col style="width:${w.code}px;min-width:${w.code}px" />`);
-  parts.push(`<col style="width:${w.name}px;min-width:${w.name}px" />`);
+  parts.push(`<col style="width:${nameColW}px;min-width:${nameColW}px" />`);
   for (const g of _groups) {
-    const cw = w.groupSubById[g.id] ?? 72;
+    const w4 = getInvMobileGroupSubColWidthsPx(w, g.id);
     for (let c = 0; c < 4; c++) {
+      const cw = w4[c];
       parts.push(`<col style="width:${cw}px;min-width:${cw}px" />`);
     }
   }
@@ -5917,39 +6458,64 @@ function syncInvColWidthsToDom() {
   const w = getInvColWidths();
   const cols = table.querySelectorAll("colgroup col");
   if (!cols.length) return;
-  const rd = w.rowDnd ?? 28;
+  const mobile = isInvMobileNarrow();
+  const mh = _invMobileColHide;
+  const rdFull = w.rowDnd ?? 28;
+  const rd = mobile && mh.dnd ? 0 : rdFull;
+  const hashW = mobile && mh.num ? 0 : w.hash;
+  const codeW = mobile && mh.code ? 0 : w.code;
+  const supW = mobile && mh.supplier ? 0 : w.supplier;
+  const urlW = mobile && mh.url ? 0 : w.url;
+
+  let sumFixedAfterName = rd + hashW + codeW;
+  for (const g of _groups) {
+    const w4 = getInvMobileGroupSubColWidthsPx(w, g.id);
+    for (const cw of w4) sumFixedAfterName += cw;
+  }
+  sumFixedAfterName += supW + urlW;
+
+  const pad = 20;
+  let namePx = w.name;
+  if (mobile) {
+    const cw = computeInvTableScrollClientWidth(root);
+    const rem = Math.max(92, cw - sumFixedAfterName - pad);
+    const capped = Math.max(92, Math.min(w.name, rem));
+    namePx = w.name >= rem - 2 ? rem : capped;
+  }
+
   table.style.setProperty("--inv-sticky-hash-left", `${rd}px`);
-  table.style.setProperty("--inv-sticky-code-left", `${rd + w.hash}px`);
-  table.style.setProperty("--inv-sticky-name-left", `${rd + w.hash + w.code}px`);
+  table.style.setProperty("--inv-sticky-code-left", `${rd + hashW}px`);
+  table.style.setProperty("--inv-sticky-name-left", `${rd + hashW + codeW}px`);
   let i = 0;
   cols[i].style.width = `${rd}px`;
   cols[i].style.minWidth = `${rd}px`;
   i++;
-  cols[i].style.width = `${w.hash}px`;
-  cols[i].style.minWidth = `${w.hash}px`;
+  cols[i].style.width = `${hashW}px`;
+  cols[i].style.minWidth = `${hashW}px`;
   i++;
-  cols[i].style.width = `${w.code}px`;
-  cols[i].style.minWidth = `${w.code}px`;
+  cols[i].style.width = `${codeW}px`;
+  cols[i].style.minWidth = `${codeW}px`;
   i++;
-  cols[i].style.width = `${w.name}px`;
-  cols[i].style.minWidth = `${w.name}px`;
+  cols[i].style.width = `${namePx}px`;
+  cols[i].style.minWidth = mobile ? "92px" : `${Math.max(120, w.name)}px`;
   i++;
   for (const g of _groups) {
-    const cw = w.groupSubById[g.id] ?? 72;
+    const w4 = getInvMobileGroupSubColWidthsPx(w, g.id);
     for (let c = 0; c < 4; c++) {
+      const cw = w4[c];
       cols[i].style.width = `${cw}px`;
       cols[i].style.minWidth = `${cw}px`;
       i++;
     }
   }
   if (cols[i]) {
-    cols[i].style.width = `${w.supplier}px`;
-    cols[i].style.minWidth = `${w.supplier}px`;
+    cols[i].style.width = `${supW}px`;
+    cols[i].style.minWidth = `${supW}px`;
     i++;
   }
   if (cols[i]) {
-    cols[i].style.width = `${w.url}px`;
-    cols[i].style.minWidth = `${w.url}px`;
+    cols[i].style.width = `${urlW}px`;
+    cols[i].style.minWidth = `${urlW}px`;
   }
 }
 
@@ -5965,12 +6531,14 @@ function bindInvColumnResizeOnce() {
 
   function onMove(e) {
     if (!drag) return;
+    if (e.pointerId != null && drag.pointerId != null && e.pointerId !== drag.pointerId) return;
     e.preventDefault();
     const dx = e.clientX - drag.startX;
     const st = getInvColWidths();
     if (drag.kind === "hash") st.hash = Math.max(60, Math.round(drag.startWidth + dx));
     else if (drag.kind === "code") st.code = Math.max(60, Math.round(drag.startWidth + dx));
-    else if (drag.kind === "name") st.name = Math.max(120, Math.round(drag.startWidth + dx));
+    else if (drag.kind === "name")
+      st.name = Math.max(isInvMobileNarrow() ? 92 : 120, Math.round(drag.startWidth + dx));
     else if (drag.kind === "url") st.url = Math.max(60, Math.round(drag.startWidth + dx));
     else if (drag.kind === "supplier") st.supplier = Math.max(60, Math.round(drag.startWidth + dx));
     else if (drag.kind === "group" && drag.groupId) {
@@ -5979,43 +6547,69 @@ function bindInvColumnResizeOnce() {
     syncInvColWidthsToDom();
   }
 
-  function onUp() {
+  function onUp(e) {
+    if (e && e.pointerId != null && drag && drag.pointerId != null && e.pointerId !== drag.pointerId) return;
     const hadDrag = !!drag;
+    const el = drag && drag.handleEl;
+    const pid = drag && drag.pointerId;
+    if (el && pid != null) {
+      try {
+        el.releasePointerCapture(pid);
+      } catch (_) {}
+    }
     if (drag) {
       drag = null;
       document.body.style.userSelect = "";
     }
-    document.removeEventListener("mousemove", onMove);
-    document.removeEventListener("mouseup", onUp);
+    document.removeEventListener("pointermove", onMove, true);
+    document.removeEventListener("pointerup", onUp, true);
+    document.removeEventListener("pointercancel", onUp, true);
     if (hadDrag) {
-      void persistColumnWidthsToFirestore().catch((e) => console.error("[Inventory] column widths save failed", e));
+      void persistColumnWidthsToFirestore().catch((err) => console.error("[Inventory] column widths save failed", err));
+      scheduleSyncInvColWidthsAfterLayout();
     }
   }
 
+  function startDrag(h, clientX, pointerId) {
+    const kind = h.getAttribute("data-inv-resize");
+    const st = getInvColWidths();
+    let startWidth = 0;
+    if (kind === "hash") startWidth = st.hash;
+    else if (kind === "code") startWidth = st.code;
+    else if (kind === "name") startWidth = st.name;
+    else if (kind === "url") startWidth = st.url;
+    else if (kind === "supplier") startWidth = st.supplier;
+    else if (kind === "group") {
+      const gid = h.getAttribute("data-group-id");
+      startWidth = st.groupSubById[gid] ?? 72;
+    } else return;
+    drag = {
+      kind,
+      startX: clientX,
+      startWidth,
+      groupId: h.getAttribute("data-group-id"),
+      pointerId: pointerId != null ? pointerId : undefined,
+      handleEl: h,
+    };
+    document.body.style.userSelect = "none";
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
+    document.addEventListener("pointercancel", onUp, true);
+  }
+
   document.addEventListener(
-    "mousedown",
+    "pointerdown",
     (e) => {
+      if (e.isPrimary === false) return;
+      if (e.button !== 0 && e.pointerType === "mouse") return;
       const h = e.target.closest("#inventoryScreen .ff-inv2-table .col-resize-handle");
       if (!h) return;
       e.preventDefault();
       e.stopPropagation();
-      const kind = h.getAttribute("data-inv-resize");
-      const st = getInvColWidths();
-      const startX = e.clientX;
-      let startWidth = 0;
-      if (kind === "hash") startWidth = st.hash;
-      else if (kind === "code") startWidth = st.code;
-      else if (kind === "name") startWidth = st.name;
-      else if (kind === "url") startWidth = st.url;
-      else if (kind === "supplier") startWidth = st.supplier;
-      else if (kind === "group") {
-        const gid = h.getAttribute("data-group-id");
-        startWidth = st.groupSubById[gid] ?? 72;
-      } else return;
-      drag = { kind, startX, startWidth, groupId: h.getAttribute("data-group-id") };
-      document.body.style.userSelect = "none";
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
+      try {
+        h.setPointerCapture(e.pointerId);
+      } catch (_) {}
+      startDrag(h, e.clientX, e.pointerId);
     },
     true
   );
@@ -6298,6 +6892,18 @@ function handleInventoryInput(ev) {
     }
     return;
   }
+  if (t.hasAttribute("data-inv-ob-auto-qty")) {
+    const iid = t.getAttribute("data-inv-ob-auto-qty");
+    if (iid) {
+      const n = Number(t.value);
+      const q = Number.isFinite(n) && n >= 0 ? n : 0;
+      _invOrderBuilderAutoQtyOverrides[iid] = q;
+      const idx = _invOrderBuilderPreviewLines.findIndex((L) => L && String(L.itemId) === iid);
+      if (idx >= 0) _invOrderBuilderPreviewLines[idx].orderQty = q;
+      scheduleInventoryOrderDraftSave();
+    }
+    return;
+  }
   if (t.hasAttribute("data-inv-ob-add-input")) {
     if (!_invOrderBuilderAddModal) return;
     const field = t.getAttribute("data-inv-ob-add-input");
@@ -6466,6 +7072,7 @@ function handleInventoryInput(ev) {
 
 function injectMockStylesOnce() {
   if (document.getElementById(STYLE_ID)) return;
+  document.querySelectorAll('style[id^="ff-inv2-mock-styles-v"]').forEach((s) => s.remove());
   const el = document.createElement("style");
   el.id = STYLE_ID;
   el.textContent = `
@@ -6480,6 +7087,51 @@ function injectMockStylesOnce() {
   min-height: 0;
   overflow: hidden;
 }
+#inventoryScreen .ff-inv2-layout--no-category-aside .ff-inv2-main {
+  flex: 1;
+  min-width: 0;
+}
+#inventoryScreen .ff-inv2-od-inv-price-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid #f1f5f9;
+}
+#inventoryScreen .ff-inv2-od-inv-price-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #64748b;
+  flex-shrink: 0;
+}
+#inventoryScreen .ff-inv2-od-inv-price-input {
+  width: 3.75rem;
+  max-width: 26vw;
+  padding: 2px 5px;
+  font-size: 11px;
+  line-height: 1.2;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #0f172a;
+}
+#inventoryScreen .ff-inv2-od-inv-price-input:focus {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 0;
+  border-color: #a78bfa;
+}
+#inventoryScreen .ff-inv2-od-inv-price-hint {
+  font-size: 8px;
+  font-weight: 600;
+  color: #94a3b8;
+  flex-shrink: 0;
+  width: auto;
+  margin: 0;
+  line-height: 1.1;
+}
 #inventoryScreen .ff-inv2-aside {
   width: 280px;
   min-width: 280px;
@@ -6490,6 +7142,24 @@ function injectMockStylesOnce() {
   border-right: 1px solid #e2e8f0;
   background: #fff;
   box-shadow: 2px 0 12px rgba(15, 23, 42, 0.04);
+}
+#inventoryScreen .ff-inv2-mobile-cat-strip {
+  display: none;
+}
+#inventoryScreen .ff-inv2-aside-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#inventoryScreen .ff-inv2-mobile-aside-collapse {
+  display: none;
+}
+#inventoryScreen .ff-inv2-aside-head-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 #inventoryScreen .ff-inv2-aside-head {
   padding: 18px 16px 12px;
@@ -6984,6 +7654,37 @@ function injectMockStylesOnce() {
   gap: 3px;
   margin: 0 0 4px;
   flex-shrink: 0;
+  align-items: center;
+}
+#inventoryScreen .ff-inv2-order-detail-line-filter--export-only {
+  justify-content: flex-end;
+}
+#inventoryScreen .ff-inv2-od-export-menu {
+  margin-left: 2px;
+  align-self: center;
+}
+#inventoryScreen .ff-inv2-od-export-menu.ff-inv2-od-tools-details {
+  width: auto;
+}
+#inventoryScreen .ff-inv2-od-export-menu summary.ff-inv2-od-export-menu-trigger {
+  list-style: none;
+  cursor: pointer;
+  margin: 0;
+  padding: 0 2px 0 4px;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 700;
+  color: #5b21b6;
+  user-select: none;
+  border: none;
+  background: transparent;
+}
+#inventoryScreen .ff-inv2-od-export-menu summary.ff-inv2-od-export-menu-trigger::-webkit-details-marker {
+  display: none;
+}
+#inventoryScreen .ff-inv2-od-export-menu-popup {
+  left: 0;
+  right: auto;
 }
 #inventoryScreen .ff-inv2-order-detail-main {
   flex: 1;
@@ -7043,6 +7744,18 @@ function injectMockStylesOnce() {
   font-weight: 800;
   color: #475569;
 }
+#inventoryScreen .ff-inv2-order-detail-items--checklist .ff-inv2-od-th--col-head {
+  text-transform: none;
+  letter-spacing: 0.03em;
+  font-size: 7px;
+  font-weight: 700;
+  color: #64748b;
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
 #inventoryScreen .ff-inv2-order-detail-items--checklist .ff-inv2-od-th--narrow {
   width: 24px;
 }
@@ -7071,6 +7784,31 @@ function injectMockStylesOnce() {
   flex-direction: column;
   gap: 0;
   min-width: 0;
+}
+#inventoryScreen .ff-inv2-order-detail-items--checklist .ff-inv2-od-item-name-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+#inventoryScreen .ff-inv2-order-detail-items--checklist .ff-inv2-od-item-name-row .ff-inv2-od-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+#inventoryScreen .ff-inv2-order-detail-items--checklist .ff-inv2-od-inv-price-inline {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+#inventoryScreen .ff-inv2-order-detail-items--checklist .ff-inv2-od-inv-price-input--inline {
+  width: 2.6rem;
+  max-width: 16vw;
+  padding: 0 2px;
+  font-size: 9px;
+  line-height: 1.15;
+  height: 16px;
+  border-radius: 4px;
 }
 #inventoryScreen .ff-inv2-order-detail-items--checklist .ff-inv2-od-td--item {
   min-width: 0;
@@ -7320,7 +8058,101 @@ function injectMockStylesOnce() {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+#inventoryScreen .ff-inv2-od-tools-row {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  margin: 0 0 6px;
+}
+#inventoryScreen .ff-inv2-od-tools-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  max-width: 170px;
+}
+#inventoryScreen .ff-inv2-od-tools-hint-top {
+  font-size: 9px;
+  font-weight: 600;
+  color: #94a3b8;
+  line-height: 1.2;
+  text-align: right;
+  width: 100%;
+}
+#inventoryScreen .ff-inv2-od-tools-hint-bottom {
+  font-size: 9px;
+  color: #94a3b8;
+  line-height: 1.2;
+  text-align: right;
+  width: 100%;
+}
+#inventoryScreen .ff-inv2-od-tools-details {
+  position: relative;
+  width: 100%;
+}
+#inventoryScreen .ff-inv2-od-tools-details summary.ff-inv2-od-tools-trigger {
+  list-style: none;
+  cursor: pointer;
+  margin: 0;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid #ddd6fe;
+  background: #faf5ff;
+  color: #5b21b6;
+  text-align: center;
+  user-select: none;
+}
+#inventoryScreen .ff-inv2-od-tools-details summary.ff-inv2-od-tools-trigger::-webkit-details-marker {
+  display: none;
+}
+#inventoryScreen .ff-inv2-od-tools-details--disabled summary.ff-inv2-od-tools-trigger,
+#inventoryScreen .ff-inv2-od-tools-details--disabled summary.ff-inv2-od-export-menu-trigger {
+  pointer-events: none;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+#inventoryScreen .ff-inv2-od-tools-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 6;
+  min-width: 148px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#inventoryScreen .ff-inv2-od-tools-menu-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #0f172a;
+  cursor: pointer;
+  font-family: inherit;
+}
+#inventoryScreen .ff-inv2-od-tools-menu-item:hover:not(:disabled) {
+  background: #f5f3ff;
+}
+#inventoryScreen .ff-inv2-od-tools-menu-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 #inventoryScreen .ff-inv2-od-detail-action {
   margin: 0;
@@ -7734,17 +8566,27 @@ function injectMockStylesOnce() {
 }
 #inventoryScreen .ff-inv2-order-detail-footer {
   justify-content: flex-start;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 10px;
-  margin-top: 4px;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 4px;
+  padding: 8px 6px 10px;
+  margin-top: auto;
   flex-shrink: 0;
   border-top: 1px solid #f1f5f9;
 }
 #inventoryScreen .ff-inv2-order-detail-footer-spacer {
-  flex: 1 1 auto;
-  min-width: 8px;
+  display: none;
+}
+#inventoryScreen .ff-inv2-order-detail-footer .ff-inv2-modal-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 7px 5px;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+  word-break: break-word;
+  border-radius: 6px;
 }
 #inventoryScreen .ff-inv2-order-detail-receipt-btn {
   font-weight: 600;
@@ -8117,20 +8959,23 @@ function injectMockStylesOnce() {
   0%, 100% { opacity: 0.2; }
   50% { opacity: 1; }
 }
-/* "+ New" button next to the Draft chip — small, subtle, doesn't steal attention from Save as Order. */
+/* "New order list" next to the Draft chip — starts a fresh draft */
 #inventoryScreen .ff-inv2-draft-new-btn {
   display: inline-flex;
   align-items: center;
-  padding: 3px 10px;
+  justify-content: center;
+  padding: 4px 12px;
   font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.02em;
   color: #5b21b6;
   background: #fff;
   border: 1px solid #ddd6fe;
   border-radius: 999px;
   cursor: pointer;
   font-family: inherit;
-  line-height: 1.4;
+  line-height: 1.25;
+  white-space: nowrap;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 #inventoryScreen .ff-inv2-draft-new-btn:hover:not(:disabled) {
@@ -8303,6 +9148,21 @@ function injectMockStylesOnce() {
 }
 /* Inline editable qty input for manual Order-list rows — matches the "plain cell" look
  * from the Inventory table. Transparent by default; hover / focus reveal the edit state. */
+#inventoryScreen .ff-inv2-order-list-table th.ff-inv2-ol-th--qty,
+#inventoryScreen .ff-inv2-order-list-table td.ff-inv2-ol-td--qty {
+  width: 80px;
+  min-width: 72px;
+  max-width: 104px;
+  text-align: right;
+  vertical-align: middle;
+  box-sizing: border-box;
+}
+#inventoryScreen .ff-inv2-order-list-table td.ff-inv2-ol-td--qty .ff-inv2-ol-qty-input {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  display: block;
+}
 #inventoryScreen .ff-inv2-ol-qty-input {
   width: 100%;
   max-width: 64px;
@@ -8604,6 +9464,56 @@ function injectMockStylesOnce() {
   border-bottom: 1px solid #e2e8f0;
   background: #fafafa;
   flex-shrink: 0;
+}
+#inventoryScreen .ff-inv2-ob-source-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+#inventoryScreen .ff-inv2-ob-source-copy {
+  flex: 1;
+  min-width: 0;
+}
+#inventoryScreen .ff-inv2-ob-source-copy .ff-inv2-ob-source-hint {
+  margin: 0;
+}
+#inventoryScreen .ff-inv2-ob-mobile-done {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #5b21b6;
+  background: #fff;
+  border: 1px solid #ddd6fe;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+#inventoryScreen .ff-inv2-ob-mobile-done:hover {
+  background: #f5f3ff;
+}
+#inventoryScreen .ff-inv2-order-list-table-hint {
+  margin: 0;
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  line-height: 1.35;
+}
+#inventoryScreen .ff-inv2-ob-add-item-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  border-radius: 8px;
 }
 #inventoryScreen .ff-inv2-main-tab-body--insights {
   padding: 12px 16px 24px;
@@ -10141,6 +11051,11 @@ function injectMockStylesOnce() {
   gap: 8px;
   justify-content: flex-end;
 }
+#inventoryScreen .ff-inv2-modal-actions.ff-inv2-order-detail-footer {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 4px;
+}
 #inventoryScreen .ff-inv2-modal-field {
   display: block;
   margin: 0 0 16px;
@@ -10670,6 +11585,436 @@ function injectMockStylesOnce() {
   outline: 2px solid #a78bfa;
   outline-offset: 2px;
 }
+
+/* Mobile: fixed 280px aside leaves almost no room for the grid — stack categories on top */
+@media (max-width: 767.98px) {
+  #inventoryScreen .ff-inv2-mobile-cat-strip {
+    display: none;
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-cats-collapsed {
+    grid-template-rows: auto minmax(0, 1fr) !important;
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-cats-collapsed .ff-inv2-mobile-cat-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    margin: 0;
+    border: none;
+    border-bottom: 1px solid #e2e8f0;
+    background: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e293b;
+    cursor: pointer;
+    flex-shrink: 0;
+    text-align: left;
+    font-family: inherit;
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-cats-collapsed .ff-inv2-mobile-cat-strip:focus-visible {
+    outline: 2px solid #a78bfa;
+    outline-offset: -2px;
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-cats-collapsed .ff-inv2-aside-panel {
+    display: none !important;
+  }
+  #inventoryScreen .ff-inv2-mobile-cat-strip-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #inventoryScreen .ff-inv2-mobile-cat-strip-chev {
+    flex-shrink: 0;
+    color: #7c3aed;
+    font-size: 12px;
+  }
+  #inventoryScreen .ff-inv2-mobile-aside-collapse {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    margin: 0 4px 0 0;
+    border: 1px solid #e9d5ff;
+    border-radius: 8px;
+    background: #faf5ff;
+    color: #5b21b6;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+    font-family: inherit;
+  }
+  #inventoryScreen .ff-inv2-mobile-aside-collapse:focus-visible {
+    outline: 2px solid #a78bfa;
+    outline-offset: 2px;
+  }
+
+  /* Grid: categories = capped height row; main = all remaining space ( big table scroll area ) */
+  #inventoryScreen .ff-inv2-layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(100px, min(30vh, 260px)) minmax(0, 1fr);
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #inventoryScreen .ff-inv2-aside {
+    grid-row: 1;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    min-height: 0;
+    height: 100%;
+    max-height: none;
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  #inventoryScreen .ff-inv2-main {
+    grid-row: 2;
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 10px 10px 12px;
+  }
+  #inventoryScreen .ff-inv2-aside-head {
+    padding: 12px 12px 10px;
+    flex-shrink: 0;
+  }
+  #inventoryScreen .ff-inv2-aside-head-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  #inventoryScreen .ff-inv2-aside-head-row > .ff-inv2-aside-head-left {
+    flex: 1 1 100%;
+    margin-bottom: 2px;
+  }
+  #inventoryScreen .ff-inv2-aside-head-row > .ff-inv2-aside-head-actions {
+    margin-left: auto;
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+  #inventoryScreen .ff-inv2-aside-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 6px 10px 10px;
+  }
+  #inventoryScreen .ff-inv2-aside-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #inventoryScreen .ff-inv2-main-head {
+    margin-bottom: 4px;
+    flex-shrink: 0;
+  }
+  #inventoryScreen .ff-inv2-main-tabs {
+    gap: 6px;
+    margin-bottom: 6px;
+    flex-shrink: 0;
+  }
+  #inventoryScreen .ff-inv2-main-tab {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  #inventoryScreen .ff-inv2-main-tab-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+  /* Create Order (mobile): inventory sidebar + crumb hidden; single scroll through picker + order list */
+  #inventoryScreen .ff-inv2-layout--mobile-create-order {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-create-order .ff-inv2-aside {
+    display: none !important;
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-create-order .ff-inv2-main {
+    grid-row: 1;
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-create-order .ff-inv2-main-head {
+    display: none !important;
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-create-order .ff-inv2-main-tab-body--order {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-create-order .ff-inv2-order-builder-wrap {
+    flex: 0 0 auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-create-order .ff-inv2-order-builder-wrap .ff-inv2-order-list-card {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-create-order .ff-inv2-order-list-scroll {
+    flex: 0 0 auto !important;
+    min-height: auto !important;
+    max-height: none !important;
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    -webkit-overflow-scrolling: touch !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  #inventoryScreen .ff-inv2-order-detail-list-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  #inventoryScreen .ff-inv2-order-detail-items--checklist {
+    min-width: 0;
+    width: 100%;
+  }
+  #inventoryScreen #ff-inv-order-detail-backdrop .ff-inv2-order-detail-list-scroll {
+    overflow-x: hidden;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+  }
+  #inventoryScreen .ff-inv2-layout--mobile-create-order .ff-inv2-ob-custom {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  #inventoryScreen .ff-inv2-layout--no-category-aside {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  #inventoryScreen .ff-inv2-layout--no-category-aside .ff-inv2-main {
+    grid-row: 1;
+  }
+  #inventoryScreen #ff-inv-order-detail-backdrop.ff-inv2-modal-backdrop {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+    padding-top: max(10px, env(safe-area-inset-top, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #inventoryScreen #ff-inv-order-detail-backdrop .ff-inv2-order-detail-card {
+    max-width: none;
+    width: 100%;
+    max-height: none;
+    height: 100%;
+    min-height: 0;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #inventoryScreen #ff-inv-order-detail-backdrop .ff-inv2-order-detail-hero {
+    flex-shrink: 0;
+  }
+  #inventoryScreen #ff-inv-order-detail-backdrop .ff-inv2-order-detail-extras {
+    flex-shrink: 0;
+  }
+  #inventoryScreen #ff-inv-order-detail-backdrop .ff-inv2-order-detail-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 0;
+  }
+  #inventoryScreen #ff-inv-order-detail-backdrop .ff-inv2-order-detail-footer {
+    padding-bottom: calc(52px + env(safe-area-inset-bottom, 12px));
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, #fff 10px);
+    position: relative;
+    z-index: 2;
+  }
+  #inventoryScreen .ff-inv2-toolbar {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  #inventoryScreen .ff-inv2-toolbar::-webkit-scrollbar {
+    height: 0;
+  }
+  #inventoryScreen .ff-inv2-toolbar .ff-inv2-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 7px 8px;
+    font-size: 11px;
+  }
+  #inventoryScreen .ff-inv2-toolbar .ff-inv2-btn--toolbar-shared {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 10px;
+    padding: 7px 6px;
+    max-width: 42%;
+  }
+  #inventoryScreen .ff-inv2-toolbar .ff-inv2-btn--toolbar-cols {
+    flex: 0 0 auto;
+    font-weight: 600;
+    color: #5b21b6;
+    background: #f5f3ff;
+    border: 1px solid #ddd6fe;
+  }
+  #inventoryScreen .ff-inv2-btn--toolbar-cols:focus:not(:focus-visible) {
+    outline: none;
+  }
+  #inventoryScreen .ff-inv2-table-card {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  #inventoryScreen .ff-inv2-table-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    background: #fff;
+    overflow-x: auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+  /* At least full card width; wider when many columns (horizontal scroll). */
+  #inventoryScreen .ff-inv2-table {
+    width: 100% !important;
+    min-width: max-content !important;
+  }
+  #inventoryScreen .ff-inv2-table .col-resize-handle {
+    width: 14px;
+    right: -3px;
+  }
+  #inventoryScreen .ff-inv2-td-numcell {
+    min-width: 0 !important;
+    padding-left: 4px !important;
+    padding-right: 4px !important;
+  }
+  #inventoryScreen .ff-inv2-order-cell {
+    min-width: 0 !important;
+    padding-left: 4px !important;
+    padding-right: 4px !important;
+  }
+  #inventoryScreen .ff-inv2-table thead .ff-inv2-subh {
+    padding-left: 3px !important;
+    padding-right: 3px !important;
+  }
+  #inventoryScreen .ff-inv2-crumb {
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  /*
+   * Optional columns: use visibility:collapse — not display:none — so column indices stay aligned
+   * with <colgroup> (display:none breaks table-layout:fixed and made one numeric col steal width).
+   */
+  #inventoryScreen.ff-inv-mobile-hide-dnd .ff-inv2-th-dnd,
+  #inventoryScreen.ff-inv-mobile-hide-dnd .ff-inv2-td-dnd {
+    visibility: collapse !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+  #inventoryScreen.ff-inv-mobile-hide-num .ff-inv2-th-num,
+  #inventoryScreen.ff-inv-mobile-hide-num .ff-inv2-td-no {
+    visibility: collapse !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+  #inventoryScreen.ff-inv-mobile-hide-code .ff-inv2-th-code,
+  #inventoryScreen.ff-inv-mobile-hide-code .ff-inv2-td-code {
+    visibility: collapse !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+  #inventoryScreen.ff-inv-mobile-hide-supplier .ff-inv2-th-supplier,
+  #inventoryScreen.ff-inv-mobile-hide-supplier .ff-inv2-td-supplier {
+    visibility: collapse !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+  #inventoryScreen.ff-inv-mobile-hide-url .ff-inv2-th-url,
+  #inventoryScreen.ff-inv-mobile-hide-url .ff-inv2-td-url {
+    visibility: collapse !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+  #inventoryScreen.ff-inv-mobile-name-expanded .ff-inv2-td-name .ff-inv2-cell-view,
+  #inventoryScreen.ff-inv-mobile-name-expanded .ff-inv2-td-name .ff-inv2-cell-input--editing {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+    word-break: break-word;
+  }
+  #inventoryScreen .ff-inv2-draft-new-btn {
+    font-size: 10px;
+    padding: 5px 8px;
+    white-space: normal;
+    text-align: center;
+    max-width: 9rem;
+    line-height: 1.15;
+  }
+  #inventoryScreen .ff-inv2-order-list-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  #inventoryScreen .ff-inv2-order-list-head-actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  #inventoryScreen .ff-inv2-order-list-head-actions .ff-inv2-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  #inventoryScreen .ff-inv2-ob-add-item-btn {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+  /* Create Order: same checkbox tree as desktop — give it a bit more vertical room on phones */
+  #inventoryScreen .ff-inv2-ob-custom {
+    max-height: min(42vh, 300px);
+  }
+}
 `;
   document.head.appendChild(el);
 }
@@ -10910,21 +12255,27 @@ function renderTableHeaderHtml() {
   const groupCells = _groups.map((g) => renderGroupHeaderTh(g)).join("");
   const subHeaders = _groups
     .map((g) => {
-      const cw = w.groupSubById[g.id] ?? 72;
-      return `<th class="ff-inv2-subh" style="width:${cw}px;min-width:${cw}px">Stock</th><th class="ff-inv2-subh" style="width:${cw}px;min-width:${cw}px">Current</th><th class="ff-inv2-subh" style="width:${cw}px;min-width:${cw}px">Order</th><th class="ff-inv2-subh" style="width:${cw}px;min-width:${cw}px">Price</th>`;
+      const w4 = getInvMobileGroupSubColWidthsPx(w, g.id);
+      const labels = ["Stock", "Current", "Order", "Price"];
+      return w4
+        .map(
+          (cw, idx) =>
+            `<th class="ff-inv2-subh" style="width:${cw}px;min-width:${cw}px">${labels[idx]}</th>`
+        )
+        .join("");
     })
     .join("");
   return `
 ${renderColgroup()}
 <thead>
   <tr>
-    <th rowspan="2" class="ff-inv2-th-dnd" aria-hidden="true"></th>
-    <th rowspan="2" class="ff-inv2-th-num" title="#"><span class="ff-inv2-th-inner">#</span>${thResizeHandle("hash")}</th>
-    <th rowspan="2" class="ff-inv2-th-code">Code${thResizeHandle("code")}</th>
-    <th rowspan="2" class="ff-inv2-th-name">Name${thResizeHandle("name")}</th>
+    <th rowspan="2" class="ff-inv2-th-dnd" data-inv-mobile-col="dnd" aria-hidden="true" title="Mobile: double-tap to hide/show. Toolbar: Columns — show all."></th>
+    <th rowspan="2" class="ff-inv2-th-num" data-inv-mobile-col="num" title="# · Mobile: double-tap hide/show. Columns button restores."><span class="ff-inv2-th-inner">#</span>${thResizeHandle("hash")}</th>
+    <th rowspan="2" class="ff-inv2-th-code" data-inv-mobile-col="code" title="Mobile: double-tap hide/show. Columns button — restore all.">Code${thResizeHandle("code")}</th>
+    <th rowspan="2" class="ff-inv2-th-name" data-inv-mobile-col="name" title="Mobile: drag the thin line on the right edge of a header to resize · tap/double-tap name">Name${thResizeHandle("name")}</th>
     ${groupCells}
-    <th rowspan="2" class="ff-inv2-th-supplier">Supplier${thResizeHandle("supplier")}</th>
-    <th rowspan="2" class="ff-inv2-th-url">URL${thResizeHandle("url")}</th>
+    <th rowspan="2" class="ff-inv2-th-supplier" data-inv-mobile-col="supplier" title="Mobile: double-tap · Columns shows all">Supplier${thResizeHandle("supplier")}</th>
+    <th rowspan="2" class="ff-inv2-th-url" data-inv-mobile-col="url" title="Mobile: double-tap · Columns shows all">URL${thResizeHandle("url")}</th>
   </tr>
   <tr>${subHeaders}</tr>
 </thead>`;
@@ -11451,6 +12802,14 @@ function ensureInventoryScreenDelegates(root) {
   root.addEventListener("focusout", (ev) => {
     const t = ev.target;
     if (!(t instanceof HTMLInputElement)) return;
+    if (t.hasAttribute("data-inv-order-line-inv-price") && root.contains(t)) {
+      const oid = t.getAttribute("data-order-id");
+      const idxStr = t.getAttribute("data-line-idx");
+      if (oid != null && idxStr != null) {
+        void commitOrderLineInventoryPrice(oid, Number(idxStr), t.value);
+      }
+      return;
+    }
     if (t.getAttribute("data-inv") !== "url") return;
     if (!t.classList.contains("ff-inv2-cell-input--editing")) return;
     const key = t.getAttribute("data-edit-key");
@@ -11599,12 +12958,30 @@ function ensureInventoryScreenDelegates(root) {
     const t = ev.target;
     if (!(t instanceof HTMLElement)) return;
 
+    const mobileCatStrip = t.closest("[data-inv-mobile-cat-strip]");
+    if (mobileCatStrip && root.contains(mobileCatStrip)) {
+      ev.preventDefault();
+      _invMobileCatsPanelOpen = true;
+      mountOrRefreshMockUi();
+      return;
+    }
+    const mobileAsideCollapse = t.closest("[data-inv-mobile-aside-collapse]");
+    if (mobileAsideCollapse && root.contains(mobileAsideCollapse)) {
+      ev.preventDefault();
+      _invMobileCatsPanelOpen = false;
+      mountOrRefreshMockUi();
+      return;
+    }
+
     const invMainTabBtn = t.closest("[data-inv-main-tab]");
     if (invMainTabBtn && root.contains(invMainTabBtn)) {
       ev.preventDefault();
       const tab = invMainTabBtn.getAttribute("data-inv-main-tab");
       if (tab === "inventory" || tab === "orderBuilder" || tab === "orders" || tab === "insights") {
         if (_invMainTab !== tab) {
+          if (tab === "orderBuilder") {
+            _invObPickPanelOpen = false;
+          }
           _invMainTab = tab;
           if (tab !== "orders") {
             _invOrdersDetailOrderId = null;
@@ -11813,6 +13190,8 @@ function ensureInventoryScreenDelegates(root) {
     if (odPrintBtn && root.contains(odPrintBtn)) {
       ev.preventDefault();
       if (isInvOrderDetailCommitBusy()) return;
+      const det = odPrintBtn.closest("details");
+      if (det) det.open = false;
       triggerOrderDetailPrint();
       return;
     }
@@ -11820,6 +13199,8 @@ function ensureInventoryScreenDelegates(root) {
     if (odCsvBtn && root.contains(odCsvBtn)) {
       ev.preventDefault();
       if (isInvOrderDetailCommitBusy()) return;
+      const det = odCsvBtn.closest("details");
+      if (det) det.open = false;
       triggerOrderDetailExportCsv();
       return;
     }
@@ -12563,6 +13944,24 @@ function ensureInventoryScreenDelegates(root) {
       void createNewInventoryOrderDraft();
       return;
     }
+    if (t.closest("[data-inv-ob-mobile-collapse-source]") && root.contains(t.closest("[data-inv-ob-mobile-collapse-source]"))) {
+      ev.preventDefault();
+      _invObPickPanelOpen = false;
+      mountOrRefreshMockUi();
+      try {
+        if (typeof requestAnimationFrame !== "undefined") {
+          requestAnimationFrame(() => {
+            const el = root.querySelector(".ff-inv2-order-list-head");
+            if (el && typeof el.scrollIntoView === "function") {
+              el.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+          });
+        }
+      } catch (_) {
+        /* ignore */
+      }
+      return;
+    }
     // Drafts picker: open
     const draftsPickerOpenBtn = t.closest("[data-inv-drafts-picker-open]");
     if (draftsPickerOpenBtn && root.contains(draftsPickerOpenBtn)) {
@@ -12615,6 +14014,17 @@ function ensureInventoryScreenDelegates(root) {
       _editCellKey = null;
       addInventoryRow();
       mountOrRefreshMockUi();
+    } else if (t.id === "ff-inv2-mobile-cols-reset") {
+      ev.preventDefault();
+      if (t instanceof HTMLElement) t.blur();
+      const hadHidden = invMobileAnyOptionalColumnHidden();
+      resetInvMobileOptionalColumns();
+      if (typeof window !== "undefined" && window.ffToast && typeof window.ffToast.show === "function") {
+        window.ffToast.show(hadHidden ? "All optional columns visible again." : "No columns were hidden.", {
+          variant: "info",
+          durationMs: 3200,
+        });
+      }
     } else if (t.id === "ff-inv2-add-from-shared") {
       ev.preventDefault();
       _editCellKey = null;
@@ -12626,6 +14036,7 @@ function ensureInventoryScreenDelegates(root) {
       mountOrRefreshMockUi();
     }
   });
+  ensureInvMobileColHeaderBindOnce();
 }
 
 /**
@@ -12675,11 +14086,13 @@ if (typeof window !== "undefined") {
       _invActiveDraftId = null;
       _invOrderBuilderManualLines = [];
       _invOrderBuilderCustomSubIds = new Set();
+      _invOrderBuilderAutoQtyOverrides = {};
       _invOrderSaveNameDraft = "";
       _invOrderDraftLastSavedAt = 0;
       _invOrderDraftSaveStatus = "idle";
       _invOrderDraftResumeToastShown = false;
       _invSuggestionsScannedThisSession = false;
+      _invObPickPanelOpen = false;
       _invTableLoadedForSubId = null;
       _selectedSubcategoryId = null;
       // Always re-load categories from Firestore with the new location filter,
@@ -12761,9 +14174,38 @@ function mountOrRefreshMockUi() {
   root.classList.add("ff-inv2-screen");
 
   const meta = getSelectedSubMeta();
-  const crumb = meta
-    ? `<span class="ff-inv2-crumb"><strong>${escapeHtml(meta.category.name)}</strong> · ${escapeHtml(meta.sub.name)}</span>`
-    : `<span class="ff-inv2-crumb">Select a subcategory</span>`;
+  const crumb =
+    _invMainTab === "orders"
+      ? `<span class="ff-inv2-crumb"><strong>Orders</strong></span>`
+      : meta
+        ? `<span class="ff-inv2-crumb"><strong>${escapeHtml(meta.category.name)}</strong> · ${escapeHtml(meta.sub.name)}</span>`
+        : `<span class="ff-inv2-crumb">Select a subcategory</span>`;
+  const invStripLabel = meta
+    ? `${meta.category.name} · ${meta.sub.name}`
+    : "Select a subcategory";
+  const hideCategoryAside = _invMainTab === "orders";
+  let invMobileCollapsed = false;
+  if (!hideCategoryAside) {
+    try {
+      invMobileCollapsed =
+        typeof matchMedia !== "undefined" &&
+        matchMedia("(max-width: 767.98px)").matches &&
+        !_invMobileCatsPanelOpen &&
+        !!_selectedSubcategoryId;
+    } catch (_) {}
+  }
+
+  let layoutMobileCreateOrder = "";
+  try {
+    if (
+      typeof matchMedia !== "undefined" &&
+      matchMedia("(max-width: 767.98px)").matches &&
+      _invMainTab === "orderBuilder"
+    ) {
+      layoutMobileCreateOrder = " ff-inv2-layout--mobile-create-order";
+    }
+  } catch (_) {}
+  const layoutNoCats = hideCategoryAside ? " ff-inv2-layout--no-category-aside" : "";
 
   if (_invOrdersDetailOrderId) {
     ensureShoppingDraft(_invOrdersDetailOrderId);
@@ -12796,18 +14238,31 @@ function mountOrRefreshMockUi() {
   } catch (_) {}
 
   root.innerHTML = `
-<div class="ff-inv2-layout">
-  <aside class="ff-inv2-aside" aria-label="Categories">
+<div class="ff-inv2-layout${invMobileCollapsed ? " ff-inv2-layout--mobile-cats-collapsed" : ""}${layoutMobileCreateOrder}${layoutNoCats}">
+  ${
+    hideCategoryAside
+      ? ""
+      : `<aside class="ff-inv2-aside" aria-label="Categories">
+    <button type="button" class="ff-inv2-mobile-cat-strip" data-inv-mobile-cat-strip="1" aria-expanded="${invMobileCollapsed ? "false" : "true"}" aria-controls="ff-inv2-aside-panel">
+      <span class="ff-inv2-mobile-cat-strip-text">${escapeHtml(invStripLabel)}</span>
+      <span class="ff-inv2-mobile-cat-strip-chev" aria-hidden="true">▾</span>
+    </button>
+    <div class="ff-inv2-aside-panel" id="ff-inv2-aside-panel">
     <div class="ff-inv2-aside-head ff-inv2-aside-head-row">
-      <span>Categories</span>
-      <span style="display:inline-flex;gap:6px;align-items:center;">
+      <span class="ff-inv2-aside-head-left">
+        <button type="button" class="ff-inv2-mobile-aside-collapse" data-inv-mobile-aside-collapse="1" aria-label="Collapse category list">▲</button>
+        <span>Categories</span>
+      </span>
+      <span class="ff-inv2-aside-head-actions" style="display:inline-flex;gap:6px;align-items:center;">
         <button type="button" class="ff-inv2-aside-add" data-inv-import-shared-catalog="1">Import Shared</button>
         <button type="button" class="ff-inv2-aside-add" data-cat-manage-open="1">+ Add</button>
       </span>
     </div>
     ${_ffInvDebugBanner}
     <div class="ff-inv2-aside-body" id="ff-inv2-aside-body">${renderSidebarHtml()}</div>
-  </aside>
+    </div>
+  </aside>`
+  }
   <main class="ff-inv2-main" id="ff-inv2-main">
     <div class="ff-inv2-main-head">${crumb}</div>
     ${renderInvMainTabsHtml()}
@@ -12831,24 +14286,25 @@ ${renderInventoryOrderCellBreakdownModal()}
 ${renderInventoryDraftsPickerModal()}`;
 
   ensureInventoryScreenDelegates(root);
-  syncInvColWidthsToDom();
+  ensureInvMobileColHeaderBindOnce();
+  applyInvMobileColumnClasses();
+  scheduleSyncInvColWidthsAfterLayout();
   syncOrderBuilderCategoryCheckboxIndeterminate(root);
 
   const asideBody = root.querySelector("#ff-inv2-aside-body");
-  if (!asideBody) return;
-
-  asideBody.querySelectorAll("[data-cat-toggle]").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const id = el.getAttribute("data-cat-toggle");
-      if (!id) return;
-      if (_expandedCategoryIds.has(id)) _expandedCategoryIds.delete(id);
-      else _expandedCategoryIds.add(id);
-      mountOrRefreshMockUi();
+  if (asideBody) {
+    asideBody.querySelectorAll("[data-cat-toggle]").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = el.getAttribute("data-cat-toggle");
+        if (!id) return;
+        if (_expandedCategoryIds.has(id)) _expandedCategoryIds.delete(id);
+        else _expandedCategoryIds.add(id);
+        mountOrRefreshMockUi();
+      });
     });
-  });
 
-  asideBody.querySelectorAll(".ff-inv2-sub[data-sub-id]").forEach((el) => {
+    asideBody.querySelectorAll(".ff-inv2-sub[data-sub-id]").forEach((el) => {
     const go = async () => {
       const id = el.getAttribute("data-sub-id");
       if (!id) return;
@@ -12876,6 +14332,11 @@ ${renderInventoryDraftsPickerModal()}`;
       _invOrdersMarkOrderedConfirmOrderId = null;
       _invOrdersRenameModal = null;
       _invOrderCellBreakdownModal = null;
+      try {
+        if (typeof matchMedia !== "undefined" && matchMedia("(max-width: 767.98px)").matches) {
+          _invMobileCatsPanelOpen = false;
+        }
+      } catch (_) {}
       mountOrRefreshMockUi();
     };
     el.addEventListener("click", go);
@@ -12886,6 +14347,7 @@ ${renderInventoryDraftsPickerModal()}`;
       }
     });
   });
+  }
 }
 
 function hideFullscreenPeersForInventory() {
@@ -13098,6 +14560,7 @@ async function ffAddInventorySuggestionToOrder(suggestion, opts) {
   _invOrderDraftLoaded = false;
   await goToInventory();
   _invMainTab = "orderBuilder";
+  _invObPickPanelOpen = false;
   _invOrderBuilderPreviewLoading = true;
   mountOrRefreshMockUi();
   await loadInventoryOrderDraft(true);
