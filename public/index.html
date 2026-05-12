@@ -138,6 +138,8 @@
 *{box-sizing:border-box}
 
 body{margin:0;background:var(--bg);color:var(--text);font-family:'Avenir Next', 'Open Sans', Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;}
+/* Reserve scrollbar width so body overflow toggles (e.g. Apps panel) do not shift layout */
+html{scrollbar-gutter:stable;}
 
 /* Invite mode: hide app shell while overlay is active */
 body.ff-invite-mode { overflow: hidden; }
@@ -2770,6 +2772,165 @@ dialog footer button, .code-dialog footer button {
     scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
   }
 
+  /* Time Clock: PIN view sets inline overflowY:hidden — restore scroll on mobile; inline padding wins without !important */
+  #timeClockScreen #timeClockScreenContent {
+    min-height: 0;
+    flex: 1 1 0%;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)) !important;
+    scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Time Clock — Manage: one row [primary ▼][tabs][Filters][+]; Clock/Loc/Time in dropdown */
+  #timeClockScreenContent .ff-tc-manage-root {
+    gap: 6px !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-toolbar {
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    gap: 4px !important;
+    min-width: 0;
+    overflow: visible !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-toolbar .ff-tc-manage-row2 {
+    display: contents !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-primary-slot {
+    position: relative !important;
+    flex-shrink: 0 !important;
+    z-index: 55;
+  }
+  #timeClockScreenContent .ff-tc-manage-mobile-primary-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-primary-inline {
+    display: none !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: calc(100% + 4px) !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    min-width: min(288px, calc(100vw - 40px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    padding: 10px 12px !important;
+    margin: 0 !important;
+    background: #fff !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 12px !important;
+    box-shadow: 0 12px 28px -6px rgba(17, 24, 39, 0.18) !important;
+    z-index: 56 !important;
+    box-sizing: border-box !important;
+    flex-wrap: nowrap !important;
+    flex: none !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-primary-slot.ff-tc-manage-primary-open .ff-tc-manage-primary-inline {
+    display: flex !important;
+  }
+  #timeClockScreenContent .ff-tc-mobile-primary-chevron {
+    transition: transform 0.15s ease;
+  }
+  #timeClockScreenContent .ff-tc-manage-primary-open .ff-tc-mobile-primary-chevron {
+    transform: rotate(180deg);
+  }
+  #timeClockScreenContent .ff-tc-manage-row-tabs {
+    flex: 1 1 auto !important;
+    justify-content: center !important;
+    align-self: center !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-toolbar-quick {
+    flex-shrink: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    margin-left: auto !important;
+  }
+  #timeClockScreenContent #tcManageBack,
+  #timeClockScreenContent #tcMQuickLocBtn,
+  #timeClockScreenContent #tcMPeriodBtn,
+  #timeClockScreenContent #tcMClearStaff {
+    padding: 4px 8px !important;
+    font-size: 10px !important;
+    gap: 4px !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-primary-open .ff-tc-manage-primary-inline #tcManageBack,
+  #timeClockScreenContent .ff-tc-manage-primary-open .ff-tc-manage-primary-inline #tcMQuickLocBtn,
+  #timeClockScreenContent .ff-tc-manage-primary-open .ff-tc-manage-primary-inline #tcMPeriodBtn,
+  #timeClockScreenContent .ff-tc-manage-primary-open .ff-tc-manage-primary-inline #tcMClearStaff {
+    width: 100% !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+  }
+  #timeClockScreenContent #tcManageBack svg,
+  #timeClockScreenContent #tcMQuickLocBtn svg,
+  #timeClockScreenContent #tcMPeriodBtn svg {
+    flex-shrink: 0;
+  }
+  #timeClockScreenContent #tcMQuickLocBtn > span,
+  #timeClockScreenContent #tcMPeriodBtn > span {
+    max-width: 76px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #timeClockScreenContent .ff-tc-manage-primary-open .ff-tc-manage-primary-inline #tcMQuickLocBtn > span,
+  #timeClockScreenContent .ff-tc-manage-primary-open .ff-tc-manage-primary-inline #tcMPeriodBtn > span {
+    max-width: none !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-mode {
+    padding: 2px !important;
+    gap: 2px !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-mode .tc-mode-pill {
+    padding: 4px 8px !important;
+    font-size: 9px !important;
+    line-height: 1.2 !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-filters-btn {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    padding: 0 !important;
+    justify-content: center !important;
+    align-items: center !important;
+    border-radius: 10px !important;
+    gap: 0 !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-filters-label {
+    display: none !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-filters-btn svg {
+    width: 15px !important;
+    height: 15px !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-add-btn {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    justify-content: center !important;
+    align-items: center !important;
+    gap: 0 !important;
+    box-shadow: 0 4px 12px rgba(123, 63, 228, 0.38) !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-add-label {
+    display: none !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-add-btn svg {
+    width: 18px !important;
+    height: 18px !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-table-card {
+    border-radius: 14px !important;
+  }
+
   .header {
     top: 0;
     z-index: 100340 !important;
@@ -3511,6 +3672,56 @@ dialog footer button, .code-dialog footer button {
 
   .inservice-list .item.ff-inservice-row-more-open .ff-inservice-more-panel {
     display: contents !important;
+  }
+
+  /* Time Clock — Manage: desktop one row — row2 display:contents; order = primary (Clock/Loc/Time) | tabs | quick */
+  #timeClockScreenContent .ff-tc-manage-toolbar .ff-tc-manage-row2 {
+    display: contents !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-toolbar {
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 8px !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-mobile-primary-btn {
+    display: none !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-primary-slot {
+    order: 1 !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    position: static !important;
+    z-index: auto !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-primary-inline {
+    display: flex !important;
+    position: static !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 8px !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    max-width: none !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-toolbar #tcMModeToggle.ff-tc-manage-row-tabs {
+    order: 2 !important;
+    align-self: center !important;
+    flex: 0 0 auto !important;
+  }
+  #timeClockScreenContent .ff-tc-manage-toolbar-quick {
+    order: 3 !important;
+    margin-left: 0 !important;
   }
 }
 
@@ -30177,6 +30388,13 @@ function initializeAppsPanel() {
     console.warn('[Navigation] Apps button, panel, or backdrop not found');
     return;
   }
+
+  if (window.__ffAppsPanelInited) {
+    if (typeof ffUpdateAppsPanelPermissionVisibility === 'function') ffUpdateAppsPanelPermissionVisibility();
+    if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
+    if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
+    return;
+  }
   
   // Ensure panel and backdrop start hidden
   appsPanel.style.display = 'none';
@@ -30417,6 +30635,7 @@ function initializeAppsPanel() {
   if (typeof ffUpdateAppsPanelPermissionVisibility === 'function') ffUpdateAppsPanelPermissionVisibility();
   if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
   if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
+  window.__ffAppsPanelInited = true;
   
   /* SANITY TEST CHECKLIST:
    * - open/close works (X/backdrop/ESC)
@@ -41346,15 +41565,21 @@ function initializeUserProfileMenu() {
     const staffById = {}; staffList.forEach((s) => { staffById[String(s.id)] = s; });
 
     container.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:8px;height:100%;max-width:1280px;margin:0 auto;width:100%;padding-top:0;">
+      <div class="ff-tc-manage-root" style="display:flex;flex-direction:column;gap:8px;height:100%;max-width:1280px;margin:0 auto;width:100%;padding-top:0;">
         <div id="tcMSummary" style="display:none;"></div>
 
-        <!-- Unified toolbar: Clock + Location + Period on left, Mode + Filters + Add on right -->
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <button id="tcManageBack" type="button" aria-label="Back to clock"
+        <!-- Toolbar: mobile = [primary ▼][Time Cards|Summary][Filters][+]; desktop = inline Clock/Loc/Time + tabs + quick -->
+        <div class="ff-tc-manage-toolbar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%;min-width:0;">
+          <div class="ff-tc-manage-primary-slot">
+            <button type="button" id="tcMMobilePrimaryBtn" class="ff-tc-manage-mobile-primary-btn" aria-expanded="false" aria-haspopup="true" aria-label="Clock, location, and date range"
+              style="display:none;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#374151;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);flex-shrink:0;">
+              <svg class="ff-tc-mobile-primary-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            <div class="ff-tc-manage-primary-inline" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1 1 auto;min-width:0;">
+          <button id="tcManageBack" type="button" class="ff-tc-manage-back" aria-label="Back to clock"
             style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:6px 12px;font-size:11px;color:#374151;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:all 0.15s ease;flex-shrink:0;">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
-            Clock
+            <span class="ff-tc-manage-back-label">Clock</span>
           </button>
           <div id="tcMQuickLocWrap" style="position:relative;"></div>
           <div id="tcMPeriodWrap" style="position:relative;">
@@ -41421,32 +41646,34 @@ function initializeUserProfileMenu() {
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           ` : ''}
-
-          <!-- Right-aligned actions: mode / filters / add -->
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto;">
-            <div id="tcMModeToggle" style="display:inline-flex;gap:4px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
+            </div>
+          </div>
+          <div id="tcMModeToggle" class="ff-tc-manage-mode ff-tc-manage-row-tabs" style="display:inline-flex;gap:4px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
               ${['cards','summary'].map((mv) => `
                 <button type="button" class="tc-mode-pill" data-mode="${mv}"
                   style="border:none;border-radius:999px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;background:${st.mode === mv ? 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)' : 'transparent'};color:${st.mode === mv ? '#fff' : '#6b7280'};letter-spacing:0.02em;transition:all 0.15s ease;">${mv === 'cards' ? 'Time Cards' : 'Summary'}</button>
               `).join('')}
-            </div>
-            <button id="tcMOptions" type="button"
+          </div>
+          <div class="ff-tc-manage-row2" style="display:flex;align-items:center;gap:8px;flex-shrink:0;min-width:0;box-sizing:border-box;">
+          <div class="ff-tc-manage-toolbar-quick" style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto;">
+            <button id="tcMOptions" type="button" class="ff-tc-manage-filters-btn" aria-label="Filters" title="Filters"
               style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:6px 12px;font-size:11px;color:#374151;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:all 0.15s ease;">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="7" y1="12" x2="17" y2="12"></line><line x1="10" y1="18" x2="14" y2="18"></line></svg>
-              Filters
+              <span class="ff-tc-manage-filters-label">Filters</span>
             </button>
             ${st.mode === 'cards' ? `
-              <button id="tcManageAdd" type="button"
+              <button id="tcManageAdd" type="button" class="ff-tc-manage-add-btn" aria-label="Add Time Card" title="Add Time Card"
                 style="display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%);color:#fff;border:none;border-radius:999px;padding:7px 14px;font-size:11px;font-weight:700;letter-spacing:0.02em;cursor:pointer;box-shadow:0 6px 16px -4px rgba(123,63,228,0.45);transition:transform 0.1s ease;">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                Add Time Card
+                <span class="ff-tc-manage-add-label">Add Time Card</span>
               </button>
             ` : ''}
+          </div>
           </div>
         </div>
 
         <!-- Table card -->
-        <div style="flex:1;min-height:0;display:flex;flex-direction:column;background:#fff;border:1px solid rgba(229,231,235,0.9);border-radius:18px;box-shadow:0 10px 32px -16px rgba(123,63,228,0.12), 0 2px 6px rgba(0,0,0,0.04);overflow:hidden;">
+        <div class="ff-tc-manage-table-card" style="flex:1;min-height:0;display:flex;flex-direction:column;background:#fff;border:1px solid rgba(229,231,235,0.9);border-radius:18px;box-shadow:0 10px 32px -16px rgba(123,63,228,0.12), 0 2px 6px rgba(0,0,0,0.04);overflow:hidden;">
           <div id="tcMTableScroll" style="flex:1;min-height:0;overflow:auto;">
             <table id="tcMTable" style="width:100%;border-collapse:collapse;font-size:12px;color:#111827;">
               <thead id="tcMThead" style="position:sticky;top:0;background:linear-gradient(180deg,#f9fafb 0%,#f3f4f6 100%);z-index:1;"></thead>
@@ -41548,7 +41775,7 @@ function initializeUserProfileMenu() {
     if (quickLocWrap) {
       const current = st.filterLocationId ? (locById[st.filterLocationId] && locById[st.filterLocationId].name) || 'Location' : 'All locations';
       quickLocWrap.innerHTML = `
-        <button id="tcMQuickLocBtn" type="button"
+        <button id="tcMQuickLocBtn" type="button" class="ff-tc-quick-loc-btn"
           style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:6px 12px;font-size:11px;font-weight:600;color:${st.filterLocationId ? '#5b21b6' : '#6b7280'};cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
           <span>${_ffTCEscape(current)}</span>
@@ -41658,8 +41885,44 @@ function initializeUserProfileMenu() {
     });
 
     // Wiring
+    const primarySlot = container.querySelector('.ff-tc-manage-primary-slot');
+    const mobilePrimaryBtn = container.querySelector('#tcMMobilePrimaryBtn');
+    if (window.__ffTCPrimaryDocClose) {
+      try { document.removeEventListener('click', window.__ffTCPrimaryDocClose, true); } catch (_) {}
+      window.__ffTCPrimaryDocClose = null;
+    }
+    const closeTcPrimaryMobileMenu = () => {
+      if (primarySlot) primarySlot.classList.remove('ff-tc-manage-primary-open');
+      if (mobilePrimaryBtn) mobilePrimaryBtn.setAttribute('aria-expanded', 'false');
+      if (window.__ffTCPrimaryDocClose) {
+        try { document.removeEventListener('click', window.__ffTCPrimaryDocClose, true); } catch (_) {}
+        window.__ffTCPrimaryDocClose = null;
+      }
+    };
+    if (mobilePrimaryBtn && primarySlot) {
+      mobilePrimaryBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (primarySlot.classList.contains('ff-tc-manage-primary-open')) {
+          closeTcPrimaryMobileMenu();
+          return;
+        }
+        closeTcPrimaryMobileMenu();
+        primarySlot.classList.add('ff-tc-manage-primary-open');
+        mobilePrimaryBtn.setAttribute('aria-expanded', 'true');
+        setTimeout(() => {
+          window.__ffTCPrimaryDocClose = (ev) => {
+            if (!primarySlot.classList.contains('ff-tc-manage-primary-open')) return;
+            if (primarySlot.contains(ev.target)) return;
+            closeTcPrimaryMobileMenu();
+          };
+          document.addEventListener('click', window.__ffTCPrimaryDocClose, true);
+        }, 0);
+      });
+    }
+
     const backBtn = container.querySelector('#tcManageBack');
     if (backBtn) backBtn.addEventListener('click', () => {
+      closeTcPrimaryMobileMenu();
       window.__ffTCState.view = 'clock';
       ffInitTimeClockUI();
     });
@@ -41674,11 +41937,13 @@ function initializeUserProfileMenu() {
     const addDrawer = container.querySelector('#tcMAddDrawer');
 
     const closeAllOverlays = () => {
+      closeTcPrimaryMobileMenu();
       if (optsPanel) optsPanel.style.display = 'none';
       if (addDrawer) { addDrawer.style.display = 'none'; addDrawer.innerHTML = ''; }
       if (backdrop) backdrop.style.display = 'none';
     };
     const openOptsPanel = () => {
+      closeTcPrimaryMobileMenu();
       if (!optsPanel) return;
       optsPanel.style.display = 'flex';
       if (backdrop) backdrop.style.display = 'block';
@@ -41691,9 +41956,14 @@ function initializeUserProfileMenu() {
     if (window.__ffTCMgEscHandler) { try { document.removeEventListener('keydown', window.__ffTCMgEscHandler); } catch (_) {} }
     window.__ffTCMgEscHandler = (e) => {
       if (e.key !== 'Escape') return;
+      const primaryOpen = primarySlot && primarySlot.classList.contains('ff-tc-manage-primary-open');
       const anyOpen = (optsPanel && optsPanel.style.display !== 'none')
                    || (addDrawer && addDrawer.style.display !== 'none');
-      if (anyOpen) { e.preventDefault(); closeAllOverlays(); }
+      if (primaryOpen || anyOpen) {
+        e.preventDefault();
+        closeTcPrimaryMobileMenu();
+        if (anyOpen) closeAllOverlays();
+      }
     };
     document.addEventListener('keydown', window.__ffTCMgEscHandler);
 
