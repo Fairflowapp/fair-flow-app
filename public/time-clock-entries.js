@@ -423,12 +423,9 @@ export async function ffGetOpenTimeEntryForStaff(staffId, salonIdOpt) {
  *
  * Returns: Array of `{ id, ...data }`, sorted by clockInAt descending.
  *
- * Rationale for doing the bounds filter client-side: the callers we have
- * today already load locations + staff in memory and filter on them, and the
- * full time-entries collection is expected to stay small (< few thousand
- * docs per salon per year). A single `orderBy(clockInAt)` query keeps the
- * index requirements minimal. If volume grows, this can be swapped for a
- * `where("clockInAt", ">=", from)` compound query without changing callers.
+ * When `from` and/or `to` are set, the query uses Firestore range filters on
+ * `clockInAt` so entries inside the period are returned (not "newest 500
+ * globally" then clipped). Falls back to the legacy scan if the query fails.
  */
 export async function ffListTimeEntriesForSalon(options = {}) {
   const salonId = (typeof options.salonId === "string" && options.salonId.trim())
@@ -451,12 +448,8 @@ export async function ffListTimeEntriesForSalon(options = {}) {
     ? Math.min(options.maxResults, 2000)
     : 500;
 
-  try {
-    const colRef = timeEntriesCollectionRef(salonId);
-    // orderBy(clockInAt, desc) so newest first. No `where` so we avoid needing
-    // a composite index while the collection stays small.
-    const q = query(colRef, orderBy("clockInAt", "desc"), limit(maxResults));
-    const snap = await getDocs(q);
+  const colRef = timeEntriesCollectionRef(salonId);
+  const mapSnapToRows = (snap) => {
     const rows = [];
     snap.forEach((d) => {
       const data = d.data() || {};
@@ -469,9 +462,34 @@ export async function ffListTimeEntriesForSalon(options = {}) {
       rows.push(Object.assign({ id: d.id }, data));
     });
     return rows;
+  };
+
+  const runQuery = async () => {
+    if (fromTs || toTs) {
+      const parts = [];
+      if (fromTs) parts.push(where("clockInAt", ">=", fromTs));
+      if (toTs) parts.push(where("clockInAt", "<", toTs));
+      parts.push(orderBy("clockInAt", "desc"));
+      parts.push(limit(maxResults));
+      return getDocs(query(colRef, ...parts));
+    }
+    return getDocs(query(colRef, orderBy("clockInAt", "desc"), limit(maxResults)));
+  };
+
+  try {
+    const snap = await runQuery();
+    const rows = mapSnapToRows(snap);
+    return rows;
   } catch (e) {
     console.warn("[TimeClockEntries] ffListTimeEntriesForSalon failed", e);
-    return [];
+    // Fallback: older clients / index issues — unbounded newest-N scan + in-memory filters.
+    try {
+      const snap = await getDocs(query(colRef, orderBy("clockInAt", "desc"), limit(maxResults)));
+      return mapSnapToRows(snap);
+    } catch (e2) {
+      console.warn("[TimeClockEntries] ffListTimeEntriesForSalon fallback failed", e2);
+      return [];
+    }
   }
 }
 
