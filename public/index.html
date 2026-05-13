@@ -1979,13 +1979,55 @@ dialog footer button, .code-dialog footer button {
 
 .history-modal-header {
 
+  position: relative;
+
+  display: block;
+
+  margin-bottom: 8px;
+
+}
+
+.history-modal-header-inner {
+
   display: flex;
 
   align-items: center;
 
-  justify-content: space-between;
+  flex-wrap: wrap;
 
-  margin-bottom: 8px;
+  gap: 12px;
+
+  padding-right: 40px;
+
+  box-sizing: border-box;
+
+  min-width: 0;
+
+}
+
+.history-modal-filters {
+
+  display: flex;
+
+  align-items: center;
+
+  flex-wrap: wrap;
+
+  gap: 12px;
+
+  min-width: 0;
+
+}
+
+.history-modal-header .history-close-btn {
+
+  position: absolute;
+
+  top: 0;
+
+  right: 0;
+
+  z-index: 2;
 
 }
 
@@ -2054,6 +2096,328 @@ dialog footer button, .code-dialog footer button {
   text-align: left;
 
   border-bottom: 1px solid #f0f0f0;
+
+}
+
+/* Desktop: compact table rows only (mobile card rows injected by renderHistory) */
+#historyModal tr.history-row-mobile {
+
+  display: none;
+
+}
+
+/* History modal — mobile layout (cards + filters grid; desktop rules above unchanged) */
+@media (max-width: 640px) {
+
+  #historyModal .history-modal-dialog {
+
+    width: calc(100vw - 16px);
+
+    max-width: 100%;
+
+    box-sizing: border-box;
+
+    max-height: min(88vh, calc(100dvh - 76px));
+
+    margin: 8px;
+
+    padding: 12px 14px 14px;
+
+    min-height: 0;
+
+    display: flex;
+
+    flex-direction: column;
+
+  }
+
+  #historyModal .history-modal-header-inner {
+
+    flex-direction: column;
+
+    align-items: stretch;
+
+    gap: 8px;
+
+    padding-right: 44px;
+
+  }
+
+  #historyModal .history-modal-filters {
+
+    display: grid;
+
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    gap: 8px 10px;
+
+    width: 100%;
+
+  }
+
+  #historyModal .history-modal-filters .history-filter-item {
+
+    flex-direction: column !important;
+
+    align-items: stretch !important;
+
+    gap: 4px !important;
+
+    min-width: 0;
+
+  }
+
+  #historyModal .history-modal-filters .history-filter-item > span:first-of-type {
+
+    font-size: 11px;
+
+    font-weight: 600;
+
+    color: #64748b;
+
+  }
+
+  #historyModal .history-modal-filters select,
+
+  #historyModal .history-modal-filters #historyActionFilterBtn {
+
+    width: 100%;
+
+    max-width: 100%;
+
+    box-sizing: border-box;
+
+    min-width: 0 !important;
+
+  }
+
+  #historyModal #historyActionFilterWrap {
+
+    min-width: 0 !important;
+
+    width: 100%;
+
+    max-width: 100%;
+
+  }
+
+  #historyModal #historyActionFilterMenu {
+
+    left: 0 !important;
+
+    right: auto !important;
+
+    min-width: min(280px, calc(100vw - 40px)) !important;
+
+    max-width: calc(100vw - 32px) !important;
+
+    box-sizing: border-box !important;
+
+  }
+
+  #historyModal .history-modal-body {
+
+    flex: 1 1 auto;
+
+    min-height: 0;
+
+    overflow: hidden;
+
+    display: flex;
+
+    flex-direction: column;
+
+  }
+
+  #historyModal .history-table-wrapper {
+
+    flex: 1 1 auto;
+
+    min-height: 0;
+
+    max-height: none !important;
+
+    overflow-x: hidden;
+
+    overflow-y: auto;
+
+    -webkit-overflow-scrolling: touch;
+
+  }
+
+  #historyModal .history-modal-footer {
+
+    flex-shrink: 0;
+
+    margin-top: 12px;
+
+    padding-top: 12px;
+
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+
+    flex-wrap: wrap;
+
+    justify-content: center;
+
+    gap: 8px;
+
+  }
+
+  #historyModal .history-modal-footer button {
+
+    flex: 1 1 auto;
+
+    min-width: 0;
+
+    max-width: 100%;
+
+  }
+
+  #historyModal .history-table thead {
+
+    display: none !important;
+
+  }
+
+  #historyModal tr.history-row-desktop {
+
+    display: none !important;
+
+  }
+
+  #historyModal tr.history-row-mobile {
+
+    display: table-row !important;
+
+  }
+
+  #historyModal tr.history-row-mobile > td {
+
+    border-bottom: none;
+
+    padding: 0 0 10px;
+
+    vertical-align: top;
+
+  }
+
+  #historyModal .history-mobile-card {
+
+    width: 100%;
+
+    max-width: 100%;
+
+    box-sizing: border-box;
+
+    border: 1px solid #e5e7eb;
+
+    border-radius: 10px;
+
+    padding: 10px 12px;
+
+    background: #fafafa;
+
+    overflow-wrap: anywhere;
+
+    word-break: break-word;
+
+  }
+
+  #historyModal .history-mobile-card-top {
+
+    display: flex;
+
+    align-items: flex-start;
+
+    justify-content: space-between;
+
+    gap: 10px;
+
+    font-size: 12px;
+
+    color: #374151;
+
+    margin-bottom: 8px;
+
+    min-width: 0;
+
+  }
+
+  #historyModal .history-mobile-datetime {
+
+    flex: 0 1 auto;
+
+    font-variant-numeric: tabular-nums;
+
+    font-weight: 600;
+
+    color: #111827;
+
+    min-width: 0;
+
+  }
+
+  #historyModal .history-mobile-worker {
+
+    flex: 0 1 auto;
+
+    text-align: right;
+
+    font-size: 12px;
+
+    color: #4b5563;
+
+    min-width: 0;
+
+  }
+
+  #historyModal .history-mobile-worker strong {
+
+    color: #111827;
+
+    font-weight: 600;
+
+  }
+
+  #historyModal .history-mobile-action {
+
+    font-size: 13px;
+
+    line-height: 1.45;
+
+    color: #111827;
+
+    margin-bottom: 8px;
+
+    width: 100%;
+
+    min-width: 0;
+
+  }
+
+  #historyModal .history-mobile-meta {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 4px;
+
+    font-size: 11px;
+
+    line-height: 1.4;
+
+    color: #64748b;
+
+  }
+
+  #historyModal .history-mobile-meta strong {
+
+    color: #374151;
+
+    font-weight: 600;
+
+  }
 
 }
 
@@ -6400,49 +6764,51 @@ dialog footer button, .code-dialog footer button {
     <div class="history-modal-backdrop"></div>
     <div class="history-modal-dialog">
       <div class="history-modal-header">
-        <div style="display:flex;align-items:center;gap:12px;">
+        <div class="history-modal-header-inner">
           <h3>History</h3>
-          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
-            <span>Source:</span>
-            <select id="historySourceFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
-              <option value="all">All</option>
-              <option value="queue">Queue</option>
-              <option value="tasks">Tasks</option>
-              <option value="points">Points</option>
-            </select>
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
-            <span>Order:</span>
-            <select id="historyOrderFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-            </select>
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
-            <span>Range:</span>
-            <select id="historyRangeFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
-              <option value="today">Today</option>
-              <option value="yesterday">Yesterday</option>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-            </select>
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
-            <span>Action:</span>
-            <div id="historyActionFilterWrap" style="position:relative;min-width:150px;">
-              <button id="historyActionFilterBtn" type="button" style="width:100%;padding:4px 32px 4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;background:#fff;color:#111827;text-align:left;position:relative;">
-                All
-                <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;">-</span>
-              </button>
-              <div id="historyActionFilterMenu" style="display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:280px;max-height:260px;overflow:auto;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 12px 32px rgba(15,23,42,0.14);padding:8px;z-index:100090;"></div>
-            </div>
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
-            <span>Worker:</span>
-            <select id="historyWorkerFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;min-width:140px;">
-              <option value="all">All</option>
-            </select>
-          </label>
+          <div class="history-modal-filters">
+            <label class="history-filter-item" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
+              <span>Source:</span>
+              <select id="historySourceFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
+                <option value="all">All</option>
+                <option value="queue">Queue</option>
+                <option value="tasks">Tasks</option>
+                <option value="points">Points</option>
+              </select>
+            </label>
+            <label class="history-filter-item" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
+              <span>Order:</span>
+              <select id="historyOrderFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+              </select>
+            </label>
+            <label class="history-filter-item" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
+              <span>Range:</span>
+              <select id="historyRangeFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
+                <option value="today">Today</option>
+                <option value="yesterday">Yesterday</option>
+                <option value="7d">Last 7 days</option>
+                <option value="30d">Last 30 days</option>
+              </select>
+            </label>
+            <label class="history-filter-item" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
+              <span>Action:</span>
+              <div id="historyActionFilterWrap" style="position:relative;min-width:150px;">
+                <button id="historyActionFilterBtn" type="button" style="width:100%;padding:4px 32px 4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;background:#fff;color:#111827;text-align:left;position:relative;">
+                  All
+                  <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;">-</span>
+                </button>
+                <div id="historyActionFilterMenu" style="display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:280px;max-height:260px;overflow:auto;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 12px 32px rgba(15,23,42,0.14);padding:8px;z-index:100090;"></div>
+              </div>
+            </label>
+            <label class="history-filter-item" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
+              <span>Worker:</span>
+              <select id="historyWorkerFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;min-width:140px;">
+                <option value="all">All</option>
+              </select>
+            </label>
+          </div>
         </div>
         <button id="historyCloseBtn" class="history-close-btn" type="button">x</button>
       </div>
@@ -8768,21 +9134,38 @@ function renderHistory() {
   const tableBody = document.getElementById('historyBody');
   if (!tableBody) return;
   const rows = getFilteredHistoryEntries({ syncActionOptions: true, syncWorkerOptions: true });
-  
-  // Render the table using normalized fields
-  // Always render columns from normalized fields: Date | Time | Action | Role | Performed by | Worker
-  // For empty role/performedBy/worker, show '-' (UI only)
-  tableBody.innerHTML = rows.map(normalized => {
+
+  tableBody.innerHTML = rows.map((normalized) => {
+    const date = escapeHtml(normalized.date || '-');
+    const time = escapeHtml(normalized.time || '-');
+    const action = escapeHtml(normalized.action || '');
+    const role = escapeHtml(normalized.role || '-');
+    const performedBy = escapeHtml(normalized.performedBy || '-');
+    const worker = escapeHtml(normalized.worker || '-');
     return `
-      <tr>
-        <td>${escapeHtml(normalized.date || '-')}</td>
-        <td>${escapeHtml(normalized.time || '-')}</td>
-        <td>${escapeHtml(normalized.action || '')}</td>
-        <td>${escapeHtml(normalized.role || '-')}</td>
-        <td>${escapeHtml(normalized.performedBy || '-')}</td>
-        <td>${escapeHtml(normalized.worker || '-')}</td>
+      <tr class="history-row-desktop">
+        <td>${date}</td>
+        <td>${time}</td>
+        <td>${action}</td>
+        <td>${role}</td>
+        <td>${performedBy}</td>
+        <td>${worker}</td>
       </tr>
-    `;
+      <tr class="history-row-mobile">
+        <td colspan="6">
+          <article class="history-mobile-card" role="group">
+            <div class="history-mobile-card-top">
+              <span class="history-mobile-datetime">${date} · ${time}</span>
+              <span class="history-mobile-worker">Worker: <strong>${worker}</strong></span>
+            </div>
+            <div class="history-mobile-action">${action}</div>
+            <div class="history-mobile-meta">
+              <span>Role: <strong>${role}</strong></span>
+              <span>Performed by: <strong>${performedBy}</strong></span>
+            </div>
+          </article>
+        </td>
+      </tr>`;
   }).join('');
 }
 
