@@ -1981,9 +1981,27 @@ dialog footer button, .code-dialog footer button {
 
   position: relative;
 
-  display: block;
+  display: flex;
+
+  flex-wrap: wrap;
+
+  align-items: center;
+
+  gap: 12px;
 
   margin-bottom: 8px;
+
+}
+
+.history-modal-topbar {
+
+  display: inline-flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  min-width: 0;
 
 }
 
@@ -2106,28 +2124,140 @@ dialog footer button, .code-dialog footer button {
 
 }
 
-/* History modal — mobile layout (cards + filters grid; desktop rules above unchanged) */
+/* History modal — mobile: full-screen sheet + purple app header */
 @media (max-width: 640px) {
+
+  #historyModal.history-modal {
+
+    align-items: stretch !important;
+
+    justify-content: stretch !important;
+
+  }
+
+  #historyModal .history-modal-backdrop {
+
+    background: #f8fafc !important;
+
+  }
 
   #historyModal .history-modal-dialog {
 
-    width: calc(100vw - 16px);
+    width: 100% !important;
 
-    max-width: 100%;
+    height: 100% !important;
 
-    box-sizing: border-box;
+    max-width: none !important;
 
-    max-height: min(88vh, calc(100dvh - 76px));
+    max-height: none !important;
 
-    margin: 8px;
+    border-radius: 0 !important;
 
-    padding: 12px 14px 14px;
+    margin: 0 !important;
 
-    min-height: 0;
+    padding: 0 !important;
+
+    box-shadow: none !important;
+
+    box-sizing: border-box !important;
+
+    min-height: 0 !important;
+
+    display: flex !important;
+
+    flex-direction: column !important;
+
+  }
+
+  #historyModal .history-modal-header {
 
     display: flex;
 
     flex-direction: column;
+
+    align-items: stretch;
+
+    margin-bottom: 0;
+
+    flex-shrink: 0;
+
+    gap: 0;
+
+  }
+
+  #historyModal .history-modal-topbar {
+
+    display: flex !important;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    width: 100%;
+
+    box-sizing: border-box;
+
+    background: #5b21b6;
+
+    color: #fff;
+
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 12px;
+
+    flex-shrink: 0;
+
+    gap: 12px;
+
+  }
+
+  #historyModal .history-modal-topbar h3 {
+
+    margin: 0;
+
+    font-size: 17px;
+
+    font-weight: 700;
+
+    color: #fff !important;
+
+    letter-spacing: 0.02em;
+
+    flex: 1;
+
+    min-width: 0;
+
+  }
+
+  #historyModal .history-modal-header .history-close-btn {
+
+    position: static !important;
+
+    top: auto !important;
+
+    right: auto !important;
+
+    flex-shrink: 0;
+
+    color: #fff !important;
+
+    font-size: 22px;
+
+    line-height: 1;
+
+    padding: 6px 10px;
+
+    min-width: 44px;
+
+    min-height: 44px;
+
+    display: inline-flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    border-radius: 10px;
+
+    background: rgba(255, 255, 255, 0.14);
 
   }
 
@@ -2139,7 +2269,17 @@ dialog footer button, .code-dialog footer button {
 
     gap: 8px;
 
-    padding-right: 44px;
+    padding: 10px 14px 12px !important;
+
+    padding-right: 14px !important;
+
+    flex-shrink: 0;
+
+    border-bottom: 1px solid #e5e7eb;
+
+    background: #fff;
+
+    min-width: 0;
 
   }
 
@@ -2227,6 +2367,10 @@ dialog footer button, .code-dialog footer button {
 
     flex-direction: column;
 
+    padding: 0 14px;
+
+    box-sizing: border-box;
+
   }
 
   #historyModal .history-table-wrapper {
@@ -2249,11 +2393,13 @@ dialog footer button, .code-dialog footer button {
 
     flex-shrink: 0;
 
-    margin-top: 12px;
+    margin-top: 0;
 
-    padding-top: 12px;
+    padding: 12px 14px calc(14px + 56px + env(safe-area-inset-bottom, 0px));
 
-    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid #e5e7eb;
+
+    background: #fff;
 
     flex-wrap: wrap;
 
@@ -6764,8 +6910,11 @@ dialog footer button, .code-dialog footer button {
     <div class="history-modal-backdrop"></div>
     <div class="history-modal-dialog">
       <div class="history-modal-header">
-        <div class="history-modal-header-inner">
+        <div class="history-modal-topbar">
           <h3>History</h3>
+          <button id="historyCloseBtn" class="history-close-btn" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="history-modal-header-inner">
           <div class="history-modal-filters">
             <label class="history-filter-item" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
               <span>Source:</span>
@@ -6810,7 +6959,6 @@ dialog footer button, .code-dialog footer button {
             </label>
           </div>
         </div>
-        <button id="historyCloseBtn" class="history-close-btn" type="button">x</button>
       </div>
       <div class="history-modal-body">
         <div class="history-table-wrapper">
