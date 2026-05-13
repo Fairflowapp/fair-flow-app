@@ -3007,6 +3007,73 @@ if (typeof document !== 'undefined' && !window.__ff_chatLocationListener) {
   });
 }
 
+/**
+ * Sends a Chat free-text reminder with a Training deep link (?ff_training=).
+ * Wired from Training → Reports admin "Send Reminder" (index.html).
+ */
+window.ffSendTrainingReminderChat = async function (payload = {}) {
+  await loadChatUserProfile();
+  if (!chatUserProfile?.salonId || !chatUserProfile?.uid) {
+    throw new Error(
+      chatUserProfile == null
+        ? 'Chat profile could not be loaded (users document missing or network error). Refresh and try again, or open the Chat tab once.'
+        : 'Sign in is required to send chat reminders.'
+    );
+  }
+  const salonId = chatUserProfile.salonId;
+
+  let rUid = String(payload.recipientFirebaseUid || payload.recipientUid || '').trim();
+  const staffId = String(payload.staffId || '').trim();
+
+  if (!rUid && staffId) {
+    try {
+      const staffSnap = await getDoc(doc(db, `salons/${salonId}/staff`, staffId));
+      if (staffSnap.exists()) {
+        const d = staffSnap.data() || {};
+        rUid = String(d.firebaseUid || d.uid || d.firebaseAuthUid || d.userUid || '').trim();
+      }
+    } catch (e) {
+      console.warn('[Chat] Training reminder: staff lookup failed', e);
+    }
+  }
+
+  if (!rUid && payload.recipientEmail) {
+    const email = String(payload.recipientEmail || '').trim().toLowerCase();
+    if (email && typeof window.ffGetStaffStore === 'function') {
+      const row =
+        (window.ffGetStaffStore()?.staff || []).find((s) => String(s.email || '').trim().toLowerCase() === email) ||
+        null;
+      if (row) rUid = String(row.firebaseUid || row.uid || '').trim();
+    }
+  }
+
+  if (!rUid) {
+    throw new Error(
+      'This employee needs a Fair Flow login linked on their staff profile before Chat reminders work.'
+    );
+  }
+
+  const trainingId = String(payload.trainingId || '').trim();
+  const title = String(payload.trainingTitle || 'Training').trim() || 'Training';
+  const recipientName =
+    String(payload.recipientName || payload.staffName || '').trim() || _nameForUidForSend(rUid);
+
+  let deepLink = '';
+  try {
+    const u = new URL(window.location.href);
+    u.hash = '';
+    if (trainingId) u.searchParams.set('ff_training', trainingId);
+    deepLink = u.toString();
+  } catch (_) {
+    deepLink = window.location.href;
+  }
+
+  const intro = String(payload.leadInText || 'Please complete this assigned training when you can.').trim();
+  const body = `${intro}\n\n${title}\n\nOpen training:\n${deepLink}`;
+
+  await _sendFreeTextDirect(rUid, recipientName, null, body);
+};
+
 // ─── Global Exports (no export keywords - avoids parse errors in some envs) ───
 window.goToChat = goToChat;
 window.initChatSettingsSection = initChatSettingsSection;

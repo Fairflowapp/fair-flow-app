@@ -50,7 +50,7 @@
   };
   window.goToChat = window.goToChat || function() {
     if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
-    ['tasksScreen','inboxScreen','mediaScreen','trainingScreen','timeClockScreen','pointsAppScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    ['tasksScreen','inboxScreen','mediaScreen','trainingScreen','timeClockScreen','pointsAppScreen','historyScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     ['#joinBar','.joinbar','.wrap','#queueControls'].forEach(function(sel){var el=document.querySelector(sel);if(el)el.style.display='none';});
     var cs=document.getElementById('chatScreen');if(cs){cs.style.display='flex';cs.classList.remove('chat-mobile-open');}
     document.querySelectorAll('.btn-pill').forEach(function(b){b.classList.remove('active');});
@@ -75,7 +75,7 @@
   };
   window.goToMedia = window.goToMedia || function() {
     if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
-    ['tasksScreen','inboxScreen','trainingScreen','timeClockScreen','pointsAppScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+    ['tasksScreen','inboxScreen','trainingScreen','timeClockScreen','pointsAppScreen','historyScreen','owner-view'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
     var chatScreen=document.getElementById('chatScreen');if(chatScreen)chatScreen.style.display='none';
     var scheduleScreen=document.getElementById('scheduleScreen');if(scheduleScreen)scheduleScreen.style.display='none';
     var joinBar=document.querySelector('.joinBar');if(joinBar)joinBar.style.display='none';
@@ -1851,721 +1851,385 @@ dialog footer button, .code-dialog footer button {
 
 }
 
-.history-modal {
-
-  position: fixed !important;
-
-  inset: 0 !important;
-
-  display: flex;
-
-  align-items: center;
-
-  justify-content: center;
-
-  z-index: 2147483647 !important; /* above everything */
-
-}
-
-.history-modal-footer {
-
-  display: flex;
-
-  gap: 10px;
-
-  justify-content: flex-end;
-
-  margin-top: 16px;
-
-  padding-top: 16px;
-
-  border-top: 1px solid #eee;
-
-}
-
-.history-modal-footer button {
-
-  padding: 8px 16px;
-
-  border-radius: 8px;
-
-  border: 1px solid #ddd;
-
-  background: #fff;
-
-  cursor: pointer;
-
-  font-weight: 600;
-
-}
-
-.history-modal-footer button:hover {
-
-  background: #f5f5f5;
-
-}
-
-#historyClearBtn {
-
-  border-color: #fca5a5;
-
-  color: #b91c1c;
-
-}
-
-.history-modal.hidden {
-
+/* History — full-screen module (#historyScreen); toolbar row removed (global nav + filters only). */
+#historyScreen {
   display: none;
-
-}
-
-.history-modal-backdrop {
-
-  position: absolute !important;
-
-  inset: 0 !important;
-
-  background: rgba(0, 0, 0, 0.25);
-
-  pointer-events: auto;
-
-  z-index: 0;
-
-}
-
-#historyModal .history-modal-backdrop {
-
-  pointer-events: auto;
-
-  z-index: 0;
-
-}
-
-.history-modal-dialog {
-
-  position: relative;
-
-  background: #ffffff;
-
-  border-radius: 12px;
-
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
-
-  padding: 16px 20px;
-
-  width: min(1000px, 90vw);
-
-  max-height: 80vh;
-
-  display: flex;
-
-  flex-direction: column;
-
-  z-index: 2147483647;
-
-  pointer-events: auto;
-
-}
-
-#historyModal .history-modal-dialog {
-
-  position: relative;
-
-  z-index: 1;
-
-  pointer-events: auto;
-
-}
-
-.history-modal-header {
-
-  position: relative;
-
-  display: flex;
-
-  flex-wrap: wrap;
-
-  align-items: center;
-
-  gap: 12px;
-
-  margin-bottom: 8px;
-
-}
-
-.history-modal-topbar {
-
-  display: inline-flex;
-
-  align-items: center;
-
-  gap: 8px;
-
-  min-width: 0;
-
-}
-
-.history-modal-header-inner {
-
-  display: flex;
-
-  align-items: center;
-
-  flex-wrap: wrap;
-
-  gap: 12px;
-
-  padding-right: 40px;
-
-  box-sizing: border-box;
-
-  min-width: 0;
-
-}
-
-.history-modal-filters {
-
-  display: flex;
-
-  align-items: center;
-
-  flex-wrap: wrap;
-
-  gap: 12px;
-
-  min-width: 0;
-
-}
-
-.history-modal-header .history-close-btn {
-
-  position: absolute;
-
-  top: 0;
-
+  position: fixed;
+  top: var(--header-h, 60px);
+  left: 0;
   right: 0;
-
-  z-index: 2;
-
-}
-
-.history-modal-body {
-
+  bottom: 0;
+  z-index: 300;
+  flex-direction: column;
   overflow: hidden;
-
-  pointer-events: auto;
-
+  background: #f8fafc;
+  box-sizing: border-box;
 }
-
-#historyModal .history-modal-body {
-
-  pointer-events: auto;
-
+#historyScreen .ff-history-filter-shell {
+  flex-shrink: 0;
+  min-width: 0;
 }
-
-.history-close-btn {
-
-  border: none;
-
-  background: transparent;
-
-  font-size: 20px;
-
-  cursor: pointer;
-
-  line-height: 1;
-
-}
-
-.history-table-wrapper {
-
-  max-height: 320px;    /* fits about 10 rows */
-
-  overflow-y: auto;
-
-}
-
-/* prevents jump/distortion */
-
-.history-table-wrapper table {
-
-  width: 100%;
-
-  border-collapse: collapse;
-
-}
-
-.history-table {
-
-  width: 100%;
-
-  border-collapse: collapse;
-
-  font-size: 0.85rem;
-
-}
-
-.history-table th,
-
-.history-table td {
-
-  padding: 4px 8px;
-
-  text-align: left;
-
-  border-bottom: 1px solid #f0f0f0;
-
-}
-
-/* Desktop: compact table rows only (mobile card rows injected by renderHistory) */
-#historyModal tr.history-row-mobile {
-
+#historyScreen .ff-history-mobile-filters-toggle {
   display: none;
-
 }
-
-/* History modal — mobile: full-screen sheet + purple app header */
-@media (max-width: 640px) {
-
-  #historyModal.history-modal {
-
-    align-items: stretch !important;
-
-    justify-content: stretch !important;
-
+#historyScreen .ff-history-filters {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  box-sizing: border-box;
+  min-width: 0;
+}
+#historyScreen .ff-history-filters > .history-modal-footer.ff-history-filter-actions {
+  margin-left: auto;
+  margin-top: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+#historyScreen .ff-history-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0 16px;
+  box-sizing: border-box;
+}
+.history-modal-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+}
+#historyScreen .ff-history-filters .history-modal-footer button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  background: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+#historyScreen .ff-history-filters .history-modal-footer button:hover {
+  background: #f5f5f5;
+}
+#historyClearBtn {
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+#historyScreen .history-table-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.history-table-wrapper table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.history-table th,
+.history-table td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid #f0f0f0;
+}
+#historyScreen tr.history-row-mobile {
+  display: none;
+}
+@media (min-width: 641px) {
+  #historyScreen .ff-history-mobile-filters-toggle {
+    display: none !important;
   }
-
-  #historyModal .history-modal-backdrop {
-
-    background: #f8fafc !important;
-
+  #historyScreen .ff-history-mobile-filters-panel {
+    display: contents !important;
   }
-
-  #historyModal .history-modal-dialog {
-
-    width: 100% !important;
-
-    height: 100% !important;
-
-    max-width: none !important;
-
-    max-height: none !important;
-
-    border-radius: 0 !important;
-
-    margin: 0 !important;
-
-    padding: 0 !important;
-
-    box-shadow: none !important;
-
-    box-sizing: border-box !important;
-
-    min-height: 0 !important;
-
-    display: flex !important;
-
-    flex-direction: column !important;
-
-  }
-
-  #historyModal .history-modal-header {
-
-    display: flex;
-
-    flex-direction: column;
-
-    align-items: stretch;
-
-    margin-bottom: 0;
-
-    flex-shrink: 0;
-
-    gap: 0;
-
-  }
-
-  #historyModal .history-modal-topbar {
-
-    display: flex !important;
-
+  /* WEB only: same box size for every filter + one vertical line (center-aligned row). */
+  #historyScreen .ff-history-filters {
     align-items: center;
-
-    justify-content: space-between;
-
-    width: 100%;
-
-    box-sizing: border-box;
-
-    background: #5b21b6;
-
-    color: #fff;
-
-    padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 12px;
-
-    flex-shrink: 0;
-
-    gap: 12px;
-
   }
-
-  #historyModal .history-modal-topbar h3 {
-
+  #historyScreen .ff-history-filters label.history-filter-item {
+    display: grid !important;
+    grid-template-columns: max-content 152px;
+    column-gap: 8px;
+    align-items: center !important;
     margin: 0;
-
-    font-size: 17px;
-
-    font-weight: 700;
-
-    color: #fff !important;
-
-    letter-spacing: 0.02em;
-
-    flex: 1;
-
-    min-width: 0;
-
+    flex: 0 0 auto;
   }
-
-  #historyModal .history-modal-header .history-close-btn {
-
-    position: static !important;
-
-    top: auto !important;
-
-    right: auto !important;
-
-    flex-shrink: 0;
-
-    color: #fff !important;
-
-    font-size: 22px;
-
-    line-height: 1;
-
-    padding: 6px 10px;
-
-    min-width: 44px;
-
-    min-height: 44px;
-
-    display: inline-flex;
-
-    align-items: center;
-
-    justify-content: center;
-
-    border-radius: 10px;
-
-    background: rgba(255, 255, 255, 0.14);
-
+  #historyScreen .ff-history-filters label.history-filter-item > span:first-of-type {
+    align-self: center;
   }
-
-  #historyModal .history-modal-header-inner {
-
-    flex-direction: column;
-
-    align-items: stretch;
-
-    gap: 8px;
-
-    padding: 10px 14px 12px !important;
-
-    padding-right: 14px !important;
-
-    flex-shrink: 0;
-
-    border-bottom: 1px solid #e5e7eb;
-
-    background: #fff;
-
-    min-width: 0;
-
-  }
-
-  #historyModal .history-modal-filters {
-
-    display: grid;
-
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-
-    gap: 8px 10px;
-
-    width: 100%;
-
-  }
-
-  #historyModal .history-modal-filters .history-filter-item {
-
-    flex-direction: column !important;
-
-    align-items: stretch !important;
-
-    gap: 4px !important;
-
-    min-width: 0;
-
-  }
-
-  #historyModal .history-modal-filters .history-filter-item > span:first-of-type {
-
-    font-size: 11px;
-
-    font-weight: 600;
-
-    color: #64748b;
-
-  }
-
-  #historyModal .history-modal-filters select,
-
-  #historyModal .history-modal-filters #historyActionFilterBtn {
-
-    width: 100%;
-
-    max-width: 100%;
-
-    box-sizing: border-box;
-
-    min-width: 0 !important;
-
-  }
-
-  #historyModal #historyActionFilterWrap {
-
-    min-width: 0 !important;
-
-    width: 100%;
-
-    max-width: 100%;
-
-  }
-
-  #historyModal #historyActionFilterMenu {
-
-    left: 0 !important;
-
-    right: auto !important;
-
-    min-width: min(280px, calc(100vw - 40px)) !important;
-
-    max-width: calc(100vw - 32px) !important;
-
+  /* Match every select box to the Action control: same height/border as the button (native <select> is often taller). */
+  #historyScreen .ff-history-filters select {
+    width: 152px !important;
+    min-width: 152px !important;
+    max-width: 152px !important;
     box-sizing: border-box !important;
-
+    height: 30px !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+    margin: 0 !important;
+    padding: 0 26px 0 8px !important;
+    font-size: 13px !important;
+    line-height: 1.2 !important;
+    font-family: inherit !important;
+    color: #111827;
+    background-color: #fff;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='%236b7280' d='M7 10l5 5 5-5H7z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 7px center;
   }
-
-  #historyModal .history-modal-body {
-
-    flex: 1 1 auto;
-
-    min-height: 0;
-
-    overflow: hidden;
-
-    display: flex;
-
-    flex-direction: column;
-
-    padding: 0 14px;
-
+  #historyScreen #historyActionFilterWrap {
+    width: 152px !important;
+    min-width: 152px !important;
+    max-width: 152px !important;
     box-sizing: border-box;
-
   }
-
-  #historyModal .history-table-wrapper {
-
-    flex: 1 1 auto;
-
-    min-height: 0;
-
-    max-height: none !important;
-
-    overflow-x: hidden;
-
-    overflow-y: auto;
-
-    -webkit-overflow-scrolling: touch;
-
+  #historyScreen .ff-history-filters #historyActionFilterBtn {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+    margin: 0 !important;
+    padding: 0 26px 0 8px !important;
+    font-size: 13px !important;
+    line-height: 1.2 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 6px !important;
+    background: #fff !important;
+    color: #111827 !important;
   }
-
-  #historyModal .history-modal-footer {
-
-    flex-shrink: 0;
-
-    margin-top: 0;
-
-    padding: 12px 14px calc(14px + 56px + env(safe-area-inset-bottom, 0px));
-
-    border-top: 1px solid #e5e7eb;
-
-    background: #fff;
-
-    flex-wrap: wrap;
-
-    justify-content: center;
-
-    gap: 8px;
-
-  }
-
-  #historyModal .history-modal-footer button {
-
-    flex: 1 1 auto;
-
-    min-width: 0;
-
-    max-width: 100%;
-
-  }
-
-  #historyModal .history-table thead {
-
-    display: none !important;
-
-  }
-
-  #historyModal tr.history-row-desktop {
-
-    display: none !important;
-
-  }
-
-  #historyModal tr.history-row-mobile {
-
-    display: table-row !important;
-
-  }
-
-  #historyModal tr.history-row-mobile > td {
-
-    border-bottom: none;
-
-    padding: 0 0 10px;
-
-    vertical-align: top;
-
-  }
-
-  #historyModal .history-mobile-card {
-
-    width: 100%;
-
-    max-width: 100%;
-
-    box-sizing: border-box;
-
-    border: 1px solid #e5e7eb;
-
-    border-radius: 10px;
-
-    padding: 10px 12px;
-
-    background: #fafafa;
-
-    overflow-wrap: anywhere;
-
-    word-break: break-word;
-
-  }
-
-  #historyModal .history-mobile-card-top {
-
-    display: flex;
-
-    align-items: flex-start;
-
-    justify-content: space-between;
-
-    gap: 10px;
-
-    font-size: 12px;
-
-    color: #374151;
-
-    margin-bottom: 8px;
-
-    min-width: 0;
-
-  }
-
-  #historyModal .history-mobile-datetime {
-
-    flex: 0 1 auto;
-
-    font-variant-numeric: tabular-nums;
-
-    font-weight: 600;
-
-    color: #111827;
-
-    min-width: 0;
-
-  }
-
-  #historyModal .history-mobile-worker {
-
-    flex: 0 1 auto;
-
-    text-align: right;
-
-    font-size: 12px;
-
-    color: #4b5563;
-
-    min-width: 0;
-
-  }
-
-  #historyModal .history-mobile-worker strong {
-
-    color: #111827;
-
-    font-weight: 600;
-
-  }
-
-  #historyModal .history-mobile-action {
-
-    font-size: 13px;
-
-    line-height: 1.45;
-
-    color: #111827;
-
-    margin-bottom: 8px;
-
-    width: 100%;
-
-    min-width: 0;
-
-  }
-
-  #historyModal .history-mobile-meta {
-
-    display: flex;
-
-    flex-direction: column;
-
-    gap: 4px;
-
-    font-size: 11px;
-
-    line-height: 1.4;
-
-    color: #64748b;
-
-  }
-
-  #historyModal .history-mobile-meta strong {
-
-    color: #374151;
-
-    font-weight: 600;
-
-  }
-
 }
+@media (max-width: 640px) {
+  /* Collapsible filters: closed by default → more space for History cards */
+  #historyScreen .ff-history-filter-shell {
+    border-bottom: 1px solid #e5e7eb;
+    background: #fff;
+  }
+  #historyScreen .ff-history-mobile-filters-toggle {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    margin: 0;
+    border: none;
+    border-bottom: 1px solid transparent;
+    background: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+    box-sizing: border-box;
+  }
+  #historyScreen .ff-history-filter-shell:has(.ff-history-mobile-filters-panel--open)
+    .ff-history-mobile-filters-toggle {
+    border-bottom-color: #e5e7eb;
+  }
+  #historyScreen .ff-history-mobile-filters-toggle-chevron {
+    display: inline-flex;
+    font-size: 10px;
+    line-height: 1;
+    color: #6b7280;
+    transition: transform 0.15s ease;
+  }
+  #historyScreen .ff-history-mobile-filters-toggle--open .ff-history-mobile-filters-toggle-chevron {
+    transform: rotate(180deg);
+  }
+  #historyScreen .ff-history-mobile-filters-panel {
+    display: none;
+    box-sizing: border-box;
+  }
+  #historyScreen .ff-history-mobile-filters-panel.ff-history-mobile-filters-panel--open {
+    display: block;
+  }
+  #historyScreen .ff-history-filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 8px;
+    width: 100%;
+    padding: 8px 10px 10px !important;
+    border-bottom: none;
+  }
+  #historyScreen .ff-history-filters .history-filter-item {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 2px !important;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    font-size: 11px !important;
+  }
+  #historyScreen .ff-history-filters .history-filter-item > span:first-of-type {
+    font-size: 10px !important;
+    font-weight: 600;
+    color: #64748b;
+    line-height: 1.2;
+  }
+  #historyScreen .ff-history-filters select,
+  #historyScreen .ff-history-filters #historyActionFilterBtn {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-width: 0 !important;
+    font-size: 12px !important;
+    padding: 4px 6px !important;
+    border-radius: 6px !important;
+    line-height: 1.25;
+    min-height: 36px;
+  }
+  #historyScreen #historyActionFilterWrap {
+    min-width: 0 !important;
+    width: 100%;
+    max-width: 100%;
+    flex: 1 1 auto;
+  }
+  #historyScreen .ff-history-filters label.history-filter-item {
+    min-height: 0;
+  }
+  #historyScreen #historyActionFilterMenu {
+    left: 0 !important;
+    right: auto !important;
+    min-width: min(280px, calc(100vw - 40px)) !important;
+    max-width: calc(100vw - 32px) !important;
+    box-sizing: border-box !important;
+  }
+  #historyScreen .ff-history-body {
+    padding: 0 12px calc(10px + 56px + env(safe-area-inset-bottom, 0px));
+  }
+  #historyScreen .ff-history-filters > .history-modal-footer.ff-history-filter-actions {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    grid-column: 1 / -1;
+    gap: 8px;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  /* Worker row: full width so Export+Clear sit together on the row below */
+  #historyScreen .ff-history-filters label.history-filter-item:has(#historyWorkerFilter) {
+    grid-column: 1 / -1;
+  }
+  #historyScreen .ff-history-filters > .history-modal-footer.ff-history-filter-actions button {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    min-height: 36px;
+    padding: 4px 6px !important;
+    margin: 0 !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    border-radius: 6px !important;
+    box-sizing: border-box;
+  }
+  #historyScreen .history-table thead {
+    display: none !important;
+  }
+  #historyScreen tr.history-row-desktop {
+    display: none !important;
+  }
+  #historyScreen tr.history-row-mobile {
+    display: table-row !important;
+  }
+  #historyScreen tr.history-row-mobile > td {
+    border-bottom: none;
+    padding: 0 0 6px;
+    vertical-align: top;
+  }
+  #historyScreen .history-mobile-card {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #fafafa;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  #historyScreen .history-mobile-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12px;
+    color: #374151;
+    margin-bottom: 8px;
+    min-width: 0;
+  }
+  #historyScreen .history-mobile-datetime {
+    flex: 0 1 auto;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: #111827;
+    min-width: 0;
+  }
+  #historyScreen .history-mobile-worker {
+    flex: 0 1 auto;
+    text-align: right;
+    font-size: 12px;
+    color: #4b5563;
+    min-width: 0;
+  }
+  #historyScreen .history-mobile-worker strong {
+    color: #111827;
+    font-weight: 600;
+  }
+  #historyScreen .history-mobile-action {
+    font-size: 13px;
+    line-height: 1.45;
+    color: #111827;
+    margin-bottom: 8px;
+    width: 100%;
+    min-width: 0;
+  }
+  #historyScreen .history-mobile-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #64748b;
+  }
+  #historyScreen .history-mobile-meta strong {
+    color: #374151;
+    font-weight: 600;
+  }
+}
+
 
 /* Apps Modal - Compact Launcher Layout */
 #appsPanel {
@@ -5363,6 +5027,12 @@ dialog footer button, .code-dialog footer button {
         return;
       }
 
+      var historyScreenEl = document.getElementById('historyScreen');
+      if(historyScreenEl && isVisible(historyScreenEl)){
+        titleEl.textContent = 'History';
+        return;
+      }
+
       for(var i = 0; i < mobileHeaderTitleMap.length; i++){
         var item = mobileHeaderTitleMap[i];
         if(!item.button) continue;
@@ -5378,7 +5048,7 @@ dialog footer button, .code-dialog footer button {
         var screen = document.getElementById(fallback.screen);
         if(fallback.screen === 'owner-view'){
           var skipOwnerQueue = false;
-          var ownerSkipIds = ['tasksScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen'];
+          var ownerSkipIds = ['tasksScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen','historyScreen'];
           for(var si = 0; si < ownerSkipIds.length; si++){
             var se = document.getElementById(ownerSkipIds[si]);
             if(se && isVisible(se)) { skipOwnerQueue = true; break; }
@@ -5418,7 +5088,7 @@ dialog footer button, .code-dialog footer button {
       if(h) new ResizeObserver(setHeaderH).observe(h);
     }
     if(typeof MutationObserver!=='undefined'){
-      var targets = ['queueBtn','ticketsBtn','tasksBtn','chatBtn','mediaBtn','inventoryNavBtn','inboxBtn','trainingBtn','scheduleBtn','timeClockBtn','settingsBtn','dashboardBtn','appsPanel','staffMembersModal','owner-view','ticketsScreen','tasksScreen','chatScreen','mediaScreen','inventoryScreen','inboxScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen'];
+      var targets = ['queueBtn','ticketsBtn','tasksBtn','chatBtn','mediaBtn','inventoryNavBtn','inboxBtn','trainingBtn','scheduleBtn','timeClockBtn','settingsBtn','dashboardBtn','appsPanel','staffMembersModal','owner-view','ticketsScreen','tasksScreen','chatScreen','mediaScreen','inventoryScreen','inboxScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen','historyScreen'];
       var observer = new MutationObserver(function () {
         setMobileHeaderTitle();
         setHeaderH();
@@ -6906,16 +6576,14 @@ dialog footer button, .code-dialog footer button {
     </div>
   </div>
 
-  <div id="historyModal" class="history-modal code-dialog hidden">
-    <div class="history-modal-backdrop"></div>
-    <div class="history-modal-dialog">
-      <div class="history-modal-header">
-        <div class="history-modal-topbar">
-          <h3>History</h3>
-          <button id="historyCloseBtn" class="history-close-btn" type="button" aria-label="Close">×</button>
-        </div>
-        <div class="history-modal-header-inner">
-          <div class="history-modal-filters">
+  <div id="historyScreen">
+    <div class="ff-history-filter-shell">
+      <button type="button" id="ffHistoryMobileFiltersToggle" class="ff-history-mobile-filters-toggle" aria-expanded="false" aria-controls="ffHistoryMobileFiltersPanel">
+        <span class="ff-history-mobile-filters-toggle-label">Filters</span>
+        <span class="ff-history-mobile-filters-toggle-chevron" aria-hidden="true">▼</span>
+      </button>
+      <div id="ffHistoryMobileFiltersPanel" class="ff-history-mobile-filters-panel" role="region" aria-labelledby="ffHistoryMobileFiltersToggle">
+    <div class="ff-history-filters">
             <label class="history-filter-item" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
               <span>Source:</span>
               <select id="historySourceFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
@@ -6957,10 +6625,14 @@ dialog footer button, .code-dialog footer button {
                 <option value="all">All</option>
               </select>
             </label>
-          </div>
-        </div>
+      <div class="history-modal-footer ff-history-filter-actions">
+        <button id="historyExportBtn" type="button">Export</button>
+        <button id="historyClearBtn" type="button">Clear</button>
       </div>
-      <div class="history-modal-body">
+    </div>
+      </div>
+    </div>
+    <div class="ff-history-body">
         <div class="history-table-wrapper">
           <table class="history-table">
             <thead>
@@ -6976,12 +6648,6 @@ dialog footer button, .code-dialog footer button {
             <tbody id="historyBody"></tbody>
           </table>
         </div>
-      </div>
-      <div class="history-modal-footer">
-        <button id="historyExportBtn" type="button">Export</button>
-        <button id="historyClearBtn" type="button">Clear</button>
-        <button id="historyCloseBtn2" type="button">Close</button>
-      </div>
     </div>
   </div>
 
@@ -7375,6 +7041,13 @@ async function initFirebaseAuth() {
               });
             }, 0);
           }
+          setTimeout(() => {
+            if (typeof ffMaybeConsumePendingTrainingDeepLink === 'function') {
+              ffMaybeConsumePendingTrainingDeepLink().catch((err) => {
+                console.warn('[Training] Deep-link consume after auth failed', err);
+              });
+            }
+          }, 400);
           if (window.__ff_waiting_for_salon_choice !== true && typeof ensureTrainingNotificationsSubscription === 'function') {
             setTimeout(() => {
               ensureTrainingNotificationsSubscription().catch((err) => {
@@ -8962,7 +8635,14 @@ function getFilteredHistoryEntries(options = {}) {
   if (sourceFilter === 'points') {
     rows = rows.filter(ffIsDeletedPointsHistoryEntry);
   }
-  const rangeValue = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
+  let rangeValue = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
+  try {
+    const rangeSel = document.getElementById('historyRangeFilter');
+    if (rangeSel && typeof rangeSel.value === 'string' && rangeSel.value.trim()) {
+      rangeValue = rangeSel.value.trim();
+    }
+  } catch (_) {}
+  rangeValue = rangeValue === '24h' ? 'today' : rangeValue;
   rows = applyHistoryRangeFilter(rows, rangeValue);
   if (syncActionOptions) {
     syncHistoryActionFilterOptions(rows);
@@ -9425,6 +9105,11 @@ if (typeof document !== 'undefined') {
         console.warn('[Training] Failed to refresh notifications subscription after staff update', err);
       });
     }
+    if (typeof ffMaybeConsumePendingTrainingDeepLink === 'function') {
+      ffMaybeConsumePendingTrainingDeepLink().catch((err) => {
+        console.warn('[Training] Deep-link consume after staff sync failed', err);
+      });
+    }
   });
 }
 
@@ -9487,6 +9172,22 @@ function ffApplyQueueJoinKioskFromUrl() {
   } catch (e) {}
 }
 ffApplyQueueJoinKioskFromUrl();
+
+/** ?ff_training= — captured early; stripped from address bar (state on window.__ffPendingTrainingDeepLinkId). Consumed once auth + salon ready. */
+function ffCaptureTrainingReminderDeepLink() {
+  try {
+    var params = new URLSearchParams(window.location.search || '');
+    var id = String(params.get('ff_training') || '').trim();
+    if (!id || typeof window === 'undefined') return;
+    window.__ffPendingTrainingDeepLinkId = id;
+    var u = new URL(window.location.href);
+    if (u.searchParams.has('ff_training')) {
+      u.searchParams.delete('ff_training');
+      history.replaceState({}, '', u.pathname + u.search + u.hash);
+    }
+  } catch (eCapture) {}
+}
+ffCaptureTrainingReminderDeepLink();
 
 function ffQueueJoinKioskDeviceEnabled() {
   try {
@@ -10485,7 +10186,8 @@ function ffIsFullscreenModuleCoveringQueue() {
     'pointsAppScreen',
     'userProfileScreen',
     'myProfileScreen',
-    'manageQueueScreen'
+    'manageQueueScreen',
+    'historyScreen'
   ];
   for (var i = 0; i < ids.length; i++) {
     var el = document.getElementById(ids[i]);
@@ -13851,11 +13553,15 @@ function goToQueue() {
     settingsDlg.close();
   }
   
-  // ALWAYS close History modal if open
-  const historyModal = document.getElementById('historyModal');
-  if (historyModal) {
-    historyModal.classList.add('hidden');
-    historyModal.style.display = 'none';
+  // Hide History full-screen module if open
+  const historyScreenQueue = document.getElementById('historyScreen');
+  if (historyScreenQueue) {
+    historyScreenQueue.style.display = 'none';
+    try {
+      if (typeof window.ffCollapseHistoryMobileFiltersPanel === 'function') {
+        window.ffCollapseHistoryMobileFiltersPanel();
+      }
+    } catch (_) {}
   }
   
   // ALWAYS close Tasks modal if open (check for common task modal IDs/classes)
@@ -14033,7 +13739,8 @@ function goToTimeClock() {
   }
   const screenIds = [
     'tasksScreen', 'inboxScreen', 'chatScreen', 'mediaScreen', 'ticketsScreen', 'trainingScreen',
-    'userProfileScreen', 'myProfileScreen', 'manageQueueScreen', 'scheduleScreen', 'inventoryScreen', 'pointsAppScreen'
+    'userProfileScreen', 'myProfileScreen', 'manageQueueScreen', 'scheduleScreen', 'inventoryScreen', 'pointsAppScreen',
+    'historyScreen'
   ];
   screenIds.forEach(function (id) {
     const el = document.getElementById(id);
@@ -14156,6 +13863,31 @@ async function waitForTrainingSalonId(maxWaitMs = 10000) {
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return String((typeof window !== 'undefined' ? window.currentSalonId : '') || '').trim();
+}
+
+async function ffMaybeConsumePendingTrainingDeepLink() {
+  var id = String((typeof window !== 'undefined' && window.__ffPendingTrainingDeepLinkId) || '').trim();
+  if (!id) return;
+  if (window.__ffTrainingDeepLinkConsumeInFlight === true) return;
+  if (typeof document !== 'undefined' && document.body && document.body.classList.contains('ff-logged-out')) return;
+  if (window.__ff_waiting_for_salon_choice === true) return;
+
+  window.__ffTrainingDeepLinkConsumeInFlight = true;
+  try {
+    var salonId = await waitForTrainingSalonId(15000);
+    if (!salonId) return;
+    if (typeof goToTraining === 'function') await goToTraining();
+    var found = typeof trainingItems !== 'undefined' && Array.isArray(trainingItems)
+      ? trainingItems.some(function (x) { return String(x && x.id || '') === id; })
+      : false;
+    if (!found) return;
+    if (typeof openTrainingDetails === 'function') await openTrainingDetails(id);
+    window.__ffPendingTrainingDeepLinkId = '';
+  } catch (eDl) {
+    console.warn('[Training] Deep-link consume failed', eDl);
+  } finally {
+    window.__ffTrainingDeepLinkConsumeInFlight = false;
+  }
 }
 
 function resolveCurrentTrainingStaffRecord() {
@@ -14353,7 +14085,11 @@ function shouldDisplayTrainingNotification(notification) {
   // it from the bell/badge so the count matches what the user can actually
   // see in the library.
   const item = trainingItems.find((t) => t.id === notification.trainingId);
-  if (item && !isTrainingVisibleAtCurrentLocation(item)) return false;
+  if (!item || !isTrainingVisibleAtCurrentLocation(item)) return false;
+  /* Technicians see only "My" trainings (role + technician type). The Apps
+     badge must use the same gate or they see "1" with an empty Library. */
+  const userCtx = getCurrentTrainingUserContext();
+  if (!isTrainingRelevantToCurrentUser(item, userCtx)) return false;
   return true;
 }
 
@@ -15174,7 +14910,7 @@ function showTrainingAdminConfirm({ title, message, confirmLabel }) {
     if (existing) existing.remove();
     const overlay = document.createElement('div');
     overlay.id = 'trainingAdminConfirmModal';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:100050;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:100520;display:flex;align-items:center;justify-content:center;padding:20px;';
     const dialog = document.createElement('div');
     dialog.style.cssText = 'width:100%;max-width:420px;background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,0.22);border:1px solid #ede9fe;padding:20px;display:grid;gap:14px;';
     const titleEl = document.createElement('div');
@@ -15223,7 +14959,7 @@ function showTrainingAdminNotice({ title, message, buttonLabel }) {
     if (existing) existing.remove();
     const overlay = document.createElement('div');
     overlay.id = 'trainingAdminNoticeModal';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:100051;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:100521;display:flex;align-items:center;justify-content:center;padding:20px;';
     const dialog = document.createElement('div');
     dialog.style.cssText = 'width:100%;max-width:420px;background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,0.22);border:1px solid #ede9fe;padding:20px;display:grid;gap:14px;';
     const titleEl = document.createElement('div');
@@ -15482,6 +15218,160 @@ function getTrainingReportStaffId(staff) {
   return String(staff?.id || staff?.staffId || staff?.name || '').trim();
 }
 
+/** Resolve the staff JSON row shown in Reports for admin actions (reminder / mark completed). Matches id, alternate keys, uid, email, or display name. */
+function resolveStaffStoreRowForTrainingAdminAction(rawKey) {
+  const key = String(rawKey || '').trim();
+  if (!key) return null;
+  let store = { staff: [] };
+  try {
+    if (typeof window.ffGetStaffStore === 'function') store = window.ffGetStaffStore() || { staff: [] };
+  } catch (_) {}
+  const rows = Array.isArray(store.staff) ? store.staff : [];
+  const eq = (a, b) => String(a || '').trim() === String(b || '').trim();
+  let row =
+    rows.find((s) => eq(s?.id, key)) ||
+    rows.find((s) => eq(s?.staffId, key)) ||
+    rows.find((s) => eq(s?.firebaseUid, key)) ||
+    rows.find((s) => eq(s?.uid, key)) ||
+    null;
+  if (!row) {
+    const kl = key.toLowerCase();
+    row = rows.find((s) => String(s?.email || '').trim().toLowerCase() === kl) || null;
+  }
+  if (!row) row = rows.find((s) => eq(s?.name, key)) || null;
+  return row;
+}
+
+function getTrainingStaffFirestoreDocIdForActions(staffRow) {
+  return String(staffRow?.id || staffRow?.staffId || '').trim();
+}
+
+function wireTrainingReportDetailActionButtons(root) {
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll('.ff-training-report-action-btn[data-action]').forEach((btn) => {
+    if (btn.dataset.ffTrainingActionWired === '1') return;
+    btn.dataset.ffTrainingActionWired = '1';
+    const fire = () => {
+      const action = btn.getAttribute('data-action');
+      let tid = btn.getAttribute('data-training-id') || '';
+      let sk = btn.getAttribute('data-staff-key') || '';
+      try {
+        tid = decodeURIComponent(tid);
+      } catch (_) {}
+      try {
+        sk = decodeURIComponent(sk);
+      } catch (_) {}
+      if (!tid || !sk) return;
+      if (action === 'training-send-reminder') void sendTrainingReminderFromReport(tid, sk);
+      else if (action === 'training-mark-complete') void markTrainingCompletedForStaffFromReport(tid, sk);
+    };
+    let lastFireAt = 0;
+    const fireOnce = () => {
+      const n = Date.now();
+      if (n - lastFireAt < 600) return;
+      lastFireAt = n;
+      fire();
+    };
+    btn.addEventListener(
+      'click',
+      function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        fireOnce();
+      },
+      true
+    );
+    btn.addEventListener(
+      'touchend',
+      function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        fireOnce();
+      },
+      { capture: true, passive: false }
+    );
+  });
+}
+
+window.__ffTrainingReminderDiag = function () {
+  const rd = document.getElementById('trainingReportDetailsView');
+  let csDisp = '';
+  let csPe = '';
+  try {
+    if (rd && window.getComputedStyle) {
+      csDisp = getComputedStyle(rd).display || '';
+      csPe = getComputedStyle(rd).pointerEvents || '';
+    }
+  } catch (_) {}
+  return {
+    paneExists: !!rd,
+    paneInlineDisplay: rd ? rd.style.display : '',
+    paneComputedDisplay: csDisp,
+    panePointerEvents: csPe,
+    reminderButtons:
+      rd && rd.querySelectorAll ? rd.querySelectorAll('[data-action="training-send-reminder"]').length : 0,
+    docDelegationBound: window.__ffTrainingReportDlgBound === true,
+  };
+};
+
+function ensureTrainingReportDetailsAdminDelegation() {
+  if (window.__ffTrainingReportDlgBound === true) return;
+  window.__ffTrainingReportDlgBound = true;
+  /** Dedupe rapid click + older iOS quirks */
+  let lastKey = '';
+  let lastTs = 0;
+  const run = (ev) => {
+    const rd = document.getElementById('trainingReportDetailsView');
+    if (!rd) return false;
+    if (rd.style.display === 'none') return false;
+    const raw = ev.target;
+    let el = raw && raw.nodeType === 1 ? raw : (raw && raw.parentElement ? raw.parentElement : null);
+    if (!el || typeof el.closest !== 'function') return false;
+    const btn = el.closest('[data-action="training-send-reminder"], [data-action="training-mark-complete"]');
+    if (!btn || !rd.contains(btn)) return false;
+    const action = btn.getAttribute('data-action');
+    let tid = btn.getAttribute('data-training-id') || '';
+    let sk = btn.getAttribute('data-staff-key') || '';
+    try {
+      tid = decodeURIComponent(tid);
+    } catch (_) {}
+    try {
+      sk = decodeURIComponent(sk);
+    } catch (_) {}
+    if (!tid || !sk) return false;
+    const now = Date.now();
+    const k = `${action}::${tid}::${sk}`;
+    if (k === lastKey && now - lastTs < 700) return true;
+    lastKey = k;
+    lastTs = now;
+    if (action === 'training-send-reminder') void sendTrainingReminderFromReport(tid, sk);
+    else if (action === 'training-mark-complete') void markTrainingCompletedForStaffFromReport(tid, sk);
+    return true;
+  };
+  document.addEventListener(
+    'click',
+    function (ev) {
+      try {
+        run(ev);
+      } catch (_) {}
+    },
+    true
+  );
+  document.addEventListener(
+    'touchend',
+    function (ev) {
+      try {
+        run(ev);
+      } catch (_) {}
+    },
+    { capture: true, passive: true }
+  );
+}
+
+function bindTrainingReportDetailsAdminActionsOnce() {
+  ensureTrainingReportDetailsAdminDelegation();
+}
+
 function getTrainingCompletedEntries(trainingId) {
   return trainingAllProgressList.filter((p) => p.trainingId === trainingId && !p.blockId && p.status === 'completed');
 }
@@ -15540,6 +15430,14 @@ function renderTrainingReportEmployeeCard(item, staff) {
     : (progressEntry?.quizLastResult === 'failed' ? 'Failed' : 'Not Attempted');
   const lastAttemptAt = progressEntry?.quizLastAttemptAt ? getSortTime(progressEntry.quizLastAttemptAt) : 0;
   const lastAttemptText = lastAttemptAt ? new Date(lastAttemptAt).toLocaleDateString() : '';
+  const encTid = encodeURIComponent(String(item.id || ''));
+  const adminLookupToken = String(
+    staffId ||
+      String(staff?.email || '').trim() ||
+      String(staff?.firebaseUid || staff?.uid || '').trim() ||
+      ''
+  ).trim();
+  const encSk = encodeURIComponent(adminLookupToken);
   const quizStatusHtml = !quizQuestions.length
     ? '<div style="font-size:12px;color:#9ca3af;">No quiz in this training.</div>'
     : (progressEntry?.quizSubmittedAt
@@ -15548,11 +15446,11 @@ function renderTrainingReportEmployeeCard(item, staff) {
         ? '<div style="font-size:12px;color:#6b7280;">Completed manually by admin without quiz submission.</div>'
         : '<div style="font-size:12px;color:#b45309;">Quiz not submitted yet.</div>'));
   const actionButtons = [];
-  if (!completedEntry) {
-    actionButtons.push(`<button type="button" class="btn-pill" style="font-size:11px;padding:5px 10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd;" onclick="sendTrainingReminderFromReport('${item.id}', '${staffId}')">Send Reminder</button>`);
+  if (!completedEntry && adminLookupToken) {
+    actionButtons.push(`<button type="button" class="btn-pill ff-training-report-action-btn" style="font-size:11px;padding:5px 10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:rgba(124,58,237,0.18);position:relative;z-index:2;" data-action="training-send-reminder" data-training-id="${encTid}" data-staff-key="${encSk}">Send Reminder</button>`);
   }
-  if (!completedEntry && canOverrideTrainingCompletion()) {
-    actionButtons.push(`<button type="button" class="btn-pill" style="font-size:11px;padding:5px 10px;background:#7c3aed;color:#fff;border-color:#7c3aed;" onclick="markTrainingCompletedForStaffFromReport('${item.id}', '${staffId}')">Mark Completed</button>`);
+  if (!completedEntry && canOverrideTrainingCompletion() && adminLookupToken) {
+    actionButtons.push(`<button type="button" class="btn-pill ff-training-report-action-btn" style="font-size:11px;padding:5px 10px;background:#7c3aed;color:#fff;border-color:#7c3aed;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:rgba(124,58,237,0.18);position:relative;z-index:2;" data-action="training-mark-complete" data-training-id="${encTid}" data-staff-key="${encSk}">Mark Completed</button>`);
   }
   const adminActionsHtml = actionButtons.length
     ? `<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:4px;">${actionButtons.join('')}</div>`
@@ -15578,8 +15476,20 @@ function renderTrainingReportEmployeeCard(item, staff) {
   `;
 }
 
-async function markTrainingCompletedForStaffFromReport(trainingId, staffId) {
+async function markTrainingCompletedForStaffFromReport(trainingId, staffLookupKey) {
   if (!canOverrideTrainingCompletion()) return;
+  const staffRow = resolveStaffStoreRowForTrainingAdminAction(staffLookupKey);
+  const firestoreStaffId = staffRow ? getTrainingStaffFirestoreDocIdForActions(staffRow) : '';
+  if (!firestoreStaffId) {
+    await showTrainingAdminNotice({
+      title: 'Could not mark completed',
+      message: staffRow
+        ? 'This employee record is missing a Staff ID in the roster. Edit the employee in Staff, ensure the profile is saved, then try again.'
+        : 'Employee details were not found for this row.',
+      buttonLabel: 'OK',
+    });
+    return;
+  }
   const ok = await showTrainingAdminConfirm({
     title: 'Mark Training Completed',
     message: 'This will mark the employee as completed for this training, even if they have not finished all steps yet.',
@@ -15587,7 +15497,7 @@ async function markTrainingCompletedForStaffFromReport(trainingId, staffId) {
   });
   if (!ok) return;
   try {
-    await markTrainingCompletedForStaff(trainingId, staffId);
+    await markTrainingCompletedForStaff(trainingId, firestoreStaffId);
     trainingAllProgressList = await fetchAllTrainingProgressForSalon();
     openReportTrainingDetails(trainingId);
   } catch (err) {
@@ -15600,14 +15510,23 @@ async function markTrainingCompletedForStaffFromReport(trainingId, staffId) {
   }
 }
 
-async function sendTrainingReminderFromReport(trainingId, staffId) {
+async function sendTrainingReminderFromReport(trainingId, staffLookupKey) {
   const item = trainingItems.find((x) => x.id === trainingId);
-  const staffStore = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : { staff: [] };
-  const staff = (staffStore.staff || []).find((s) => s.id === staffId) || null;
+  const staff = resolveStaffStoreRowForTrainingAdminAction(staffLookupKey);
+  const firestoreStaffId = staff ? getTrainingStaffFirestoreDocIdForActions(staff) : '';
   if (!item || !staff) {
     await showTrainingAdminNotice({
       title: 'Could not send reminder',
       message: 'Training or employee details were not found.',
+      buttonLabel: 'OK',
+    });
+    return;
+  }
+  if (!firestoreStaffId) {
+    await showTrainingAdminNotice({
+      title: 'Could not send reminder',
+      message:
+        'This employee record has no Staff ID in the roster, so we cannot resolve their login for Chat. Open Staff, open this employee, save the profile, then try again.',
       buttonLabel: 'OK',
     });
     return;
@@ -15618,7 +15537,7 @@ async function sendTrainingReminderFromReport(trainingId, staffId) {
     confirmLabel: 'Send Reminder',
   });
   if (!ok) return;
-  const reminderKey = `${trainingId}__${staffId}`;
+  const reminderKey = `${trainingId}__${firestoreStaffId}`;
   const existingState = trainingReminderSendState[reminderKey];
   if (existingState?.inFlight) return;
   if (existingState?.lastSentAt && (Date.now() - existingState.lastSentAt) < 5000) return;
@@ -15628,9 +15547,18 @@ async function sendTrainingReminderFromReport(trainingId, staffId) {
   };
   try {
     if (typeof window.ffSendTrainingReminderChat !== 'function') {
+      try {
+        await import('/chat.js?v=20260512_training_reminder_v8');
+      } catch (eImp) {
+        console.warn('[Training] Could not load chat module for reminder', eImp);
+      }
+    }
+    if (typeof window.ffSendTrainingReminderChat !== 'function') {
       throw new Error('Chat reminders are not available right now.');
     }
     await window.ffSendTrainingReminderChat({
+      trainingId,
+      staffId: firestoreStaffId,
       recipientUid: staff.uid || '',
       recipientFirebaseUid: staff.firebaseUid || '',
       recipientEmail: staff.email || '',
@@ -16279,7 +16207,10 @@ function getCurrentTrainingUserContext() {
     } catch (_) {}
   }
 
-  return { currentRole, currentTechnicianTypes };
+  let normRole = normalizeTrainingAudienceRole(currentRole) || String(currentRole || '').toLowerCase().trim();
+  if (!normRole && getCurrentTrainingStaffId()) normRole = 'technician';
+
+  return { currentRole: normRole, currentTechnicianTypes };
 }
 
 /**
@@ -16304,21 +16235,68 @@ function isTrainingVisibleAtCurrentLocation(item) {
   return locIds.some((id) => String(id || '').trim() === activeLocId);
 }
 
+/** Map Firestore / legacy labels to canonical training audience roles */
+function normalizeTrainingAudienceRole(raw) {
+  const s = String(raw || '').toLowerCase().trim().replace(/[\s_-]+/g, '_');
+  if (!s) return '';
+  if (
+    s === 'tech' ||
+    s === 'staff' ||
+    s === 'technician' ||
+    s === 'specialist' ||
+    s === 'service_provider' ||
+    s === 'serviceprovider' ||
+    s === 'service' ||
+    s === 'artist' ||
+    s === 'provider' ||
+    s === 'employee' ||
+    s === 'worker' ||
+    s === 'liner' ||
+    s === 'line_staff'
+  ) return 'technician';
+  if (s === 'mgr' || s === 'mgmt') return 'manager';
+  if (s === 'administrator' || s === 'super_admin' || s === 'superadmin') return 'admin';
+  return s;
+}
+
+/** Map stored technician-type tokens (IDs or labels) incl. human "All …" variants */
+function normalizeTrainingTechTypeKey(raw) {
+  const s = String(raw || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
+  if (!s) return '';
+  if (
+    s === 'all_technicians' ||
+    s === 'alltechnicians' ||
+    s === 'all_service_providers' ||
+    s === 'allserviceproviders' ||
+    s === 'everyone' ||
+    s === 'all'
+  ) return 'all_technicians';
+  return s;
+}
+
 function isTrainingRelevantToCurrentUser(item, ctx) {
-  const role = String(ctx?.currentRole || '').toLowerCase();
+  const role = normalizeTrainingAudienceRole(ctx?.currentRole || '');
   if (!role) return false;
-  const visibleToRoles = Array.isArray(item?.visibleToRoles) ? item.visibleToRoles.map((r) => String(r || '').toLowerCase()) : [];
-  if (!visibleToRoles.includes(role)) return false;
+  const visibleSet = new Set(
+    (Array.isArray(item?.visibleToRoles) ? item.visibleToRoles : []).map((r) => normalizeTrainingAudienceRole(r)).filter(Boolean)
+  );
+  if (!visibleSet.has(role)) return false;
   // Location gate: trainings targeted at specific locations only reach
   // staff who are currently working at one of those locations.
   if (!isTrainingVisibleAtCurrentLocation(item)) return false;
   if (role !== 'technician') return true;
 
-  const techTypes = Array.isArray(item?.technicianTypes) ? item.technicianTypes.map((t) => String(t || '').toLowerCase()) : [];
-  if (!techTypes.length) return true;
-  if (techTypes.includes('all_technicians')) return true;
+  const techTypesRaw = Array.isArray(item?.technicianTypes) ? item.technicianTypes : [];
+  const techNorm = techTypesRaw.map(normalizeTrainingTechTypeKey).filter(Boolean);
+  if (!techNorm.length) return true;
+  if (techNorm.includes('all_technicians')) return true;
+
   const myTypes = Array.isArray(ctx?.currentTechnicianTypes) ? ctx.currentTechnicianTypes : [];
-  return techTypes.some((t) => myTypes.includes(t));
+  const myNorm = myTypes.map(normalizeTrainingTechTypeKey).filter(Boolean);
+  // Profiles without technician types loaded yet: don't block "open to everyone" trainings
+  // (fixes mobile where staff doc types hydrate later than Library render).
+  if (!myNorm.length) return false;
+  return techNorm.some((tid) => myNorm.includes(tid));
 }
 
 function isTrainingRequiredForUser(item, ctx) {
@@ -17376,6 +17354,7 @@ function bindTrainingReportsSubTabs() {
 }
 
 function renderTrainingReports() {
+  ensureTrainingReportDetailsAdminDelegation();
   bindTrainingReportsSubTabs();
   if (trainingReportsSubMode === 'byTraining') {
     renderReportsByTraining();
@@ -17494,6 +17473,7 @@ function renderReportsByEmployee() {
 function openReportTrainingDetails(trainingId) {
   const libraryView = document.getElementById('trainingLibraryView');
   const reportsView = document.getElementById('trainingReportsView');
+  const detailsView = document.getElementById('trainingDetailsView');
   const reportDetailsView = document.getElementById('trainingReportDetailsView');
   if (!reportDetailsView) return;
   const item = trainingItems.find((x) => x.id === trainingId);
@@ -17533,8 +17513,12 @@ function openReportTrainingDetails(trainingId) {
       ${employeeCards || '<div style="font-size:12px;color:#9ca3af;">No employees assigned to this training.</div>'}
     </div>
   `;
+  if (libraryView) libraryView.style.display = 'none';
+  if (detailsView) detailsView.style.display = 'none';
   if (reportsView) reportsView.style.display = 'none';
   reportDetailsView.style.display = 'block';
+  wireTrainingReportDetailActionButtons(reportDetailsView);
+  bindTrainingReportDetailsAdminActionsOnce();
 }
 
 function backFromReportTrainingDetails() {
@@ -22365,7 +22349,7 @@ function removeBlockingOverlays() {
     // Full-screen app panels - never force pointer-events:none (breaks Tickets/Tasks/Inbox when hidden then shown).
     const APP_SCREEN_IDS = new Set([
       'ticketsScreen', 'tasksScreen', 'inboxScreen', 'mediaScreen', 'chatScreen',
-      'scheduleScreen', 'timeClockScreen', 'trainingScreen', 'pointsAppScreen'
+      'scheduleScreen', 'timeClockScreen', 'trainingScreen', 'pointsAppScreen', 'historyScreen'
     ]);
     const SKIP_POINTER_EVENTS_FIX_IDS = new Set(['appsOverlayBackdrop', 'appsPanel']);
     
@@ -22373,7 +22357,7 @@ function removeBlockingOverlays() {
     const knownOverlayIds = [
       'codePromptOverlay',
       'log-secure-overlay',
-      'historyModal',
+      'historyScreen',
       'tasksAdminAccessModal',
       'tasksResetModal',
       'tasksFinishModal',
@@ -22733,51 +22717,64 @@ try {
 }
 
 const historyButton = document.getElementById('logBtn');
-const historyModal = document.getElementById('historyModal');
-const historyCloseBtn = document.getElementById('historyCloseBtn');
-const historyBackdrop = document.querySelector('.history-modal-backdrop');
 
 function openHistoryModal() {
-  // Try to get modal element fresh in case it wasn't found at page load
-  const modalElement = document.getElementById('historyModal') || historyModal;
-  if (!modalElement) {
-    console.error('[History] historyModal element not found');
+  if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try { window.ffCloseGlobalBlockingOverlays(); } catch (_) {}
+  }
+  const screen = document.getElementById('historyScreen');
+  if (!screen) {
+    console.error('[History] historyScreen element not found');
     return;
   }
-  const overlayExists = !!document.getElementById('historyModal') || !!document.querySelector('.history-modal');
-  console.log('[History] showing modal', { 
-    overlayExists: overlayExists, 
-    modalExists: !!modalElement,
-    modalHasHiddenClass: modalElement.classList.contains('hidden'),
-    modalDisplay: getComputedStyle(modalElement).display,
-    modalVisibility: getComputedStyle(modalElement).visibility
+  const screenIds = [
+    'tasksScreen', 'inboxScreen', 'chatScreen', 'mediaScreen', 'ticketsScreen', 'trainingScreen',
+    'userProfileScreen', 'myProfileScreen', 'manageQueueScreen', 'scheduleScreen', 'inventoryScreen', 'pointsAppScreen',
+    'timeClockScreen'
+  ];
+  screenIds.forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
   });
-  // Remove hidden class and ensure visibility
-  modalElement.classList.remove('hidden');
-  modalElement.style.display = 'flex'; // Ensure it's visible
-  modalElement.style.visibility = 'visible';
-  modalElement.style.pointerEvents = 'auto'; // Ensure modal is interactive
-  
-  // Ensure dialog is above backdrop and clickable
-  const dialog = modalElement.querySelector('.history-modal-dialog');
-  if (dialog) {
-    dialog.style.pointerEvents = 'auto';
-    dialog.style.position = 'relative';
-    dialog.style.zIndex = '1';
-  }
-  
-  // Wire Escape key handler (only once per open)
+  const ownerView = document.getElementById('owner-view');
+  const joinBar = document.getElementById('joinBar');
+  const queueControls = document.getElementById('queueControls');
+  const wrap = document.querySelector('.wrap');
+  if (ownerView) ownerView.style.display = 'none';
+  if (joinBar) joinBar.style.display = 'none';
+  if (queueControls) queueControls.style.display = 'none';
+  if (wrap) wrap.style.display = 'none';
+
+  screen.classList.remove('hidden');
+  screen.style.display = 'flex';
+  screen.style.flexDirection = 'column';
+  screen.style.visibility = 'visible';
+  screen.style.opacity = '';
+  screen.style.pointerEvents = 'auto';
+  screen.style.zIndex = '';
+
+  document.querySelectorAll('.btn-pill').forEach(function (b) {
+    try { b.classList.remove('active'); } catch (_) {}
+  });
+  var _logNav = document.getElementById('logBtn');
+  if (_logNav) _logNav.classList.add('active');
+
   if (!window.__ffHistoryEscapeHandler) {
-    window.__ffHistoryEscapeHandler = (e) => {
-      if (e.key === 'Escape' && !modalElement.classList.contains('hidden')) {
+    window.__ffHistoryEscapeHandler = function (e) {
+      if (e.key !== 'Escape') return;
+      var s = document.getElementById('historyScreen');
+      if (s && s.style.display !== 'none') {
         closeHistoryModal();
-        document.removeEventListener('keydown', window.__ffHistoryEscapeHandler);
+        try {
+          document.removeEventListener('keydown', window.__ffHistoryEscapeHandler);
+        } catch (_) {}
         window.__ffHistoryEscapeHandler = null;
       }
     };
     document.addEventListener('keydown', window.__ffHistoryEscapeHandler);
   }
-  
+
   // Sync filter dropdowns with current state
   const sourceSelect = document.getElementById('historySourceFilter');
   if (sourceSelect) {
@@ -22797,22 +22794,30 @@ function openHistoryModal() {
   if (workerSelect) {
     workerSelect.value = window.__historyWorkerFilter || 'all';
   }
-  if (typeof ffApplyHistoryActionButtonsVisibility === 'function') ffApplyHistoryActionButtonsVisibility();
   try { ffSyncPointsCorrectionsToHistory(true); } catch (_) {}
   renderHistory();
+  if (typeof ffApplyHistoryActionButtonsVisibility === 'function') ffApplyHistoryActionButtonsVisibility();
+  if (typeof ffCollapseHistoryMobileFiltersPanel === 'function') ffCollapseHistoryMobileFiltersPanel();
+  if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
+  try { if (typeof window.ffApplyQueueViewGate === 'function') window.ffApplyQueueViewGate(); } catch (_) {}
 }
 
 function closeHistoryModal() {
-  const modalElement = document.getElementById('historyModal') || historyModal;
-  if (!modalElement) {
-    console.warn('[History] closeHistoryModal: modal element not found');
-    return;
+  try {
+    if (window.__ffHistoryEscapeHandler) {
+      document.removeEventListener('keydown', window.__ffHistoryEscapeHandler);
+      window.__ffHistoryEscapeHandler = null;
+    }
+  } catch (_) {}
+  if (typeof ffCollapseHistoryMobileFiltersPanel === 'function') ffCollapseHistoryMobileFiltersPanel();
+  const screen = document.getElementById('historyScreen');
+  if (screen) {
+    screen.style.display = 'none';
+    screen.classList.add('hidden');
   }
-  // Hide modal by adding hidden class and removing display style
-  modalElement.classList.add('hidden');
-  modalElement.style.display = 'none';
-  modalElement.style.visibility = 'hidden';
-  console.log('[History] Modal closed');
+  if (typeof goToQueue === 'function') goToQueue();
+  if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
+  console.log('[History] screen closed');
 }
 
 // History button handler - wire directly to openLog() - no PIN, no wrappers
@@ -22833,37 +22838,8 @@ if (historyButton && !historyButton.__ffHistoryBound) {
   console.log('[History] Button wired to openLog() (fallback handler) - no PIN checks');
 }
 
-// Wire close buttons with guard flags to prevent duplicate listeners
-if (historyCloseBtn && !historyCloseBtn.__ffCloseBound) {
-  historyCloseBtn.__ffCloseBound = true;
-  historyCloseBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    closeHistoryModal();
-  });
-  // Ensure button is clickable
-  historyCloseBtn.style.pointerEvents = 'auto';
-  historyCloseBtn.style.cursor = 'pointer';
-  console.log('[History] X button wired to closeHistoryModal()');
-}
-
-// Wire backdrop click to close (only if clicking backdrop itself, not dialog)
-if (historyBackdrop && !historyBackdrop.__ffCloseBound) {
-  historyBackdrop.__ffCloseBound = true;
-  historyBackdrop.addEventListener('click', (e) => {
-    // Only close if clicking the backdrop itself, not if event bubbled from dialog
-    if (e.target === historyBackdrop) {
-      e.preventDefault();
-      e.stopPropagation();
-      closeHistoryModal();
-    }
-  });
-  console.log('[History] Backdrop wired to closeHistoryModal()');
-}
-
 const historyExportBtn = document.getElementById('historyExportBtn');
 const historyClearBtn = document.getElementById('historyClearBtn');
-const historyCloseBtn2 = document.getElementById('historyCloseBtn2');
 
 function exportHistory() {
   if (typeof ffCurrentUserHasHistoryExportPermission === 'function' && !ffCurrentUserHasHistoryExportPermission()) {
@@ -22945,19 +22921,34 @@ if (typeof ffApplyHistoryActionButtonsVisibility === 'function') {
   ffApplyHistoryActionButtonsVisibility();
 }
 
-// Wire bottom Close button with guard flag
-if (historyCloseBtn2 && !historyCloseBtn2.__ffCloseBound) {
-  historyCloseBtn2.__ffCloseBound = true;
-  historyCloseBtn2.addEventListener('click', (e) => {
+function ffCollapseHistoryMobileFiltersPanel() {
+  try {
+    var p = document.getElementById('ffHistoryMobileFiltersPanel');
+    var t = document.getElementById('ffHistoryMobileFiltersToggle');
+    if (p) p.classList.remove('ff-history-mobile-filters-panel--open');
+    if (t) {
+      t.classList.remove('ff-history-mobile-filters-toggle--open');
+      t.setAttribute('aria-expanded', 'false');
+    }
+  } catch (_) {}
+}
+window.ffCollapseHistoryMobileFiltersPanel = ffCollapseHistoryMobileFiltersPanel;
+
+(function ffBindHistoryMobileFiltersToggle() {
+  var toggle = document.getElementById('ffHistoryMobileFiltersToggle');
+  var panel = document.getElementById('ffHistoryMobileFiltersPanel');
+  if (!toggle || !panel || toggle.__ffHistoryMobileFiltersToggleBound) return;
+  toggle.__ffHistoryMobileFiltersToggleBound = true;
+  toggle.addEventListener('click', function (e) {
     e.preventDefault();
     e.stopPropagation();
-    closeHistoryModal();
+    if (!(typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches)) return;
+    var open = !panel.classList.contains('ff-history-mobile-filters-panel--open');
+    panel.classList.toggle('ff-history-mobile-filters-panel--open', open);
+    toggle.classList.toggle('ff-history-mobile-filters-toggle--open', open);
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
-  // Ensure button is clickable
-  historyCloseBtn2.style.pointerEvents = 'auto';
-  historyCloseBtn2.style.cursor = 'pointer';
-  console.log('[History] Close button wired to closeHistoryModal()');
-}
+})();
 
 // Wire up history source filter dropdown
 const historySourceFilterSelect = document.getElementById('historySourceFilter');
@@ -24848,7 +24839,7 @@ function openTasks() {
     }
 
     // Hide any other fullscreen peer modules so Tasks isn't rendered over another screen.
-    ['chatScreen','inboxScreen','mediaScreen','ticketsScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','pointsAppScreen','myProfileScreen','manageQueueScreen']
+    ['chatScreen','inboxScreen','mediaScreen','ticketsScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','pointsAppScreen','myProfileScreen','manageQueueScreen','historyScreen']
       .forEach(function(id){ var el = document.getElementById(id); if (el) el.style.display = 'none'; });
     
     // Hide main content and Queue-specific controls (joinBar and queueControls)
@@ -27930,10 +27921,19 @@ window.ffCloseGlobalBlockingOverlays = function () {
     if (settingsDlg && settingsDlg.open) settingsDlg.close();
   } catch (e) {}
   try {
-    var historyModal = document.getElementById('historyModal');
-    if (historyModal) {
-      historyModal.classList.add('hidden');
-      historyModal.style.display = 'none';
+    var historyScreenEl = document.getElementById('historyScreen');
+    if (historyScreenEl) {
+      historyScreenEl.style.display = 'none';
+    }
+    try {
+      if (typeof window.ffCollapseHistoryMobileFiltersPanel === 'function') {
+        window.ffCollapseHistoryMobileFiltersPanel();
+      }
+    } catch (_) {}
+    if (typeof ffIsFullscreenModuleCoveringQueue === 'function' && !ffIsFullscreenModuleCoveringQueue()) {
+      var ov = document.getElementById('owner-view');
+      if (ov) ov.style.display = '';
+      if (typeof ffApplyQueueViewGate === 'function') ffApplyQueueViewGate();
     }
   } catch (e) {}
   try {
@@ -31008,7 +31008,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260505_chat_flow_desktop_mobile');
+            const m = await import('/chat.js?v=20260512_training_reminder_v8');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -39952,7 +39952,7 @@ function initializeUserProfileMenu() {
     if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
       try { window.ffCloseGlobalBlockingOverlays(); } catch (_) {}
     }
-    ['owner-view','tasksScreen','inboxScreen','chatScreen','mediaScreen','ticketsScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','userProfileScreen','myProfileScreen','manageQueueScreen'].forEach(function(id) {
+    ['owner-view','tasksScreen','inboxScreen','chatScreen','mediaScreen','ticketsScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','userProfileScreen','myProfileScreen','manageQueueScreen','historyScreen'].forEach(function(id) {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
@@ -44690,7 +44690,7 @@ window.updateTaskNoteDisplay = updateTaskNoteDisplay;
       'tasksInstructionsModal',
       'codePromptOverlay',
       'log-secure-overlay',
-      'historyModal'
+      'historyScreen'
     ];
     
     modalIds.forEach(modalId => {
@@ -48945,8 +48945,8 @@ if (!window.__ffQueueLocationListenerBound) {
     // If the History modal is open when the user switches locations, make
     // sure the rows it shows belong to the new branch and not the old one.
     try {
-      const hm = document.getElementById('historyModal');
-      if (hm && !hm.classList.contains('hidden') && typeof renderHistory === 'function') {
+      const hm = document.getElementById('historyScreen');
+      if (hm && hm.style.display !== 'none' && typeof renderHistory === 'function') {
         renderHistory();
       }
     } catch (_) {}
@@ -51596,17 +51596,21 @@ function hookSettingsGuard_DISABLED(){
 
 
   window.__ff_click_handler = function(ev){
+    try {
+      var tgt = ev && ev.target;
+      if (tgt && tgt.nodeType !== 1) tgt = tgt.parentElement;
+      if (!tgt || typeof tgt.closest !== 'function') return;
     // Skip clicks inside user dropdown menu and wrapper - allow them to propagate normally
     const userDropdown = document.getElementById('userAvatarDropdown');
     const userAvatarWrapper = document.querySelector('.user-avatar-wrapper');
-    if (userDropdown && (userDropdown.contains(ev.target) || ev.target.closest('#userAvatarDropdown'))) {
+    if (userDropdown && (userDropdown.contains(tgt) || tgt.closest('#userAvatarDropdown'))) {
       return;
     }
-    if (userAvatarWrapper && (userAvatarWrapper.contains(ev.target) || ev.target.closest('.user-avatar-wrapper'))) {
+    if (userAvatarWrapper && (userAvatarWrapper.contains(tgt) || tgt.closest('.user-avatar-wrapper'))) {
       return;
     }
 
-    var t = ev.target.closest('button, [role=\"button\"]'); if(!t) return;
+    var t = tgt.closest('button, [role=\"button\"]'); if(!t) return;
 
     var txt = (t.textContent||'').trim().toUpperCase();
 
@@ -51637,6 +51641,8 @@ function hookSettingsGuard_DISABLED(){
       addLine('REORDER');
 
     }
+
+    } catch (eFfCh) {}
 
   };
 
@@ -53325,8 +53331,8 @@ function hookSettingsGuard_DISABLED(){
         { src: "/dashboard.js?v=20260501_dashboard_perm", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260505_inbox_btn_top_right_layout", type: "module", delay: 2700 },
-        { src: "/media-upload.js?v=20260513_remove_delete_media_btn", type: "module", delay: 2780 },
-        { src: "/chat.js?v=20260505_chat_flow_desktop_mobile", type: "module", delay: 2900 },
+        { src: "/media-upload.js?v=20260513_media_hide_wrap_zfix", type: "module", delay: 2780 },
+        { src: "/chat.js?v=20260512_training_reminder_v8", type: "module", delay: 2900 },
         { src: "/staff-documents.js?v=20260505_full_specialist_doc_type", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/settings-cloud.js?v=20260501_points", type: "module", delay: 3600 },
@@ -54764,6 +54770,15 @@ function hookSettingsGuard_DISABLED(){
     box-sizing: border-box !important;
   }
 }
+/* Media: keep queue from showing through; only #mediaContent scrolls (flex + overscroll containment). */
+#mediaScreen {
+  isolation: isolate;
+  overscroll-behavior: none;
+}
+#mediaScreen #mediaContent {
+  min-height: 0;
+  overscroll-behavior-y: contain;
+}
 /* Media toolbar: on narrow screens stack rows so Filters/Sort/Upload don’t overflow off-screen */
 @media (max-width: 768px) {
   #mediaScreen > .media-toolbar-row {
@@ -54921,7 +54936,7 @@ function hookSettingsGuard_DISABLED(){
   </div>
 </div>
 <!-- Media Module Screen (like Inbox) -->
-<div id="mediaScreen" class="media-screen" data-media-tab="my_uploads" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f9fafb;z-index:300;flex-direction:column;overflow:hidden;">
+<div id="mediaScreen" class="media-screen" data-media-tab="my_uploads" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f9fafb;z-index:9860;flex-direction:column;overflow:hidden;pointer-events:auto;">
   <!-- Tabs (left) | Filters + Sort + Upload (right, grouped) -->
   <div class="media-toolbar-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;gap:12px;flex-wrap:wrap;">
     <div id="mediaTabsWrap" style="display:flex;align-items:center;gap:0;position:relative;z-index:2;min-width:0;">

@@ -1885,6 +1885,7 @@ export async function goToMedia() {
   const ownerView = document.getElementById("owner-view");
   const joinBar = document.getElementById("joinBar");
   const queueControls = document.getElementById("queueControls");
+  const wrapEl = document.querySelector(".wrap");
 
   if (tasksScreen) tasksScreen.style.display = "none";
   if (inboxScreen) inboxScreen.style.display = "none";
@@ -1901,6 +1902,7 @@ export async function goToMedia() {
   if (ownerView) ownerView.style.display = "none";
   if (joinBar) joinBar.style.display = "none";
   if (queueControls) queueControls.style.display = "none";
+  if (wrapEl) wrapEl.style.display = "none";
 
   const screen = document.getElementById("mediaScreen");
   if (screen) {
@@ -1938,6 +1940,10 @@ export async function goToMedia() {
   } else {
     applyToHandleVisibility();
   }
+
+  try {
+    if (typeof window.ffApplyQueueViewGate === "function") window.ffApplyQueueViewGate();
+  } catch (_) {}
 }
 
 function hideMediaScreen() {
