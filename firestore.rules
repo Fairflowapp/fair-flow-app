@@ -184,6 +184,41 @@ service cloud.firestore {
         || staffDocUidMatches(salonId, staffId);
     }
 
+    /**
+     * Member directory doc sometimes stores a truncated staffId prefix while queue/points stamps
+     * the full salons/…/staff document id — strict equality denies pointsEvents:list. Allow only when
+     * the prefix is long enough that accidental cross-account overlap is negligible and staff row exists.
+     */
+    function memberStaffPrefixMatchesStaffDocId(salonId, staffDocId) {
+      return memberExists(salonId)
+        && staffDocId is string
+        && memberDocData(salonId).staffId is string
+        && memberDocData(salonId).staffId.size() >= 14
+        && staffDocId.size() >= memberDocData(salonId).staffId.size()
+        && staffDocId.matches('^' + memberDocData(salonId).staffId + '.*');
+    }
+
+    /** users/{uid}.staffId sometimes stores a legacy prefix while queue/points stamp the real staff doc id. */
+    function userStaffPrefixMatchesStaffDocId(staffDocId) {
+      return userExists()
+        && staffDocId is string
+        && userDocData().staffId is string
+        && userDocData().staffId.size() >= 14
+        && staffDocId.size() >= userDocData().staffId.size()
+        && staffDocId.matches('^' + userDocData().staffId + '.*');
+    }
+
+    /** users/{uid}/memberships/{salonId}.staffId can lag as a truncated id (mirrors member doc cases). */
+    function membershipStaffPrefixMatchesStaffDocId(salonId, staffDocId) {
+      return isSignedIn()
+        && staffDocId is string
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId is string
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId.size() >= 14
+        && staffDocId.size() >= get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId.size()
+        && staffDocId.matches('^' + get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId + '.*');
+    }
+
     function staffDocUidMatches(salonId, staffId) {
       return isSignedIn()
         && staffId is string
@@ -210,6 +245,9 @@ service cloud.firestore {
             && userDocData().staffId is string
             && userDocData().staffId == staffId
           )
+          || memberStaffPrefixMatchesStaffDocId(salonId, staffId)
+          || userStaffPrefixMatchesStaffDocId(staffId)
+          || membershipStaffPrefixMatchesStaffDocId(salonId, staffId)
         );
     }
 
@@ -284,10 +322,12 @@ service cloud.firestore {
         : '';
     }
 
+    /** Prefer salon member doc staffId before legacy per-user memberships (multi-salon).
+     *  Aligns with queue or PIN flows and Points events; fixes list rules tying events to activeStaffIdForSalon. */
     function activeStaffIdForSalon(salonId) {
-      return membershipStaffId(salonId) != ''
-        ? membershipStaffId(salonId)
-        : (memberStaffId(salonId) != '' ? memberStaffId(salonId) : userStaffId());
+      return memberStaffId(salonId) != ''
+        ? memberStaffId(salonId)
+        : (membershipStaffId(salonId) != '' ? membershipStaffId(salonId) : userStaffId());
     }
 
     // Staff doc on salon (for per-staff permissions.media_* on Media module)
@@ -331,11 +371,12 @@ service cloud.firestore {
       );
     }
 
+    /** Default is allow (mirrors UI `points_view_own !== false`); only explicit false denies. */
     function permPointsOwnAllowed(salonId) {
       return mySalonStaffDocData(salonId) != null && (
         !(mySalonStaffDocData(salonId).permissions is map)
         || !mySalonStaffDocData(salonId).permissions.keys().hasAny(['points_view_own'])
-        || mySalonStaffDocData(salonId).permissions.points_view_own == true
+        || !(mySalonStaffDocData(salonId).permissions.points_view_own == false)
       );
     }
 
@@ -343,8 +384,59 @@ service cloud.firestore {
       return salonStaffDocData(salonId, staffId) != null && (
         !(salonStaffDocData(salonId, staffId).permissions is map)
         || !salonStaffDocData(salonId, staffId).permissions.keys().hasAny(['points_view_own'])
-        || salonStaffDocData(salonId, staffId).permissions.points_view_own == true
+        || !(salonStaffDocData(salonId, staffId).permissions.points_view_own == false)
       );
+    }
+
+    /**
+     * Minimal self read for pointsEvents when the event's staff row carries the caller's Auth uid.
+     * Keeps access scoped to salons where the caller has a members/ doc or users/{uid}.salonId match.
+     */
+    function pointsEventsReadOwnByStaffUid(accountId) {
+      return isSignedIn()
+        && (memberExists(accountId) || (userExists() && userDocData().salonId == accountId))
+        && resource.data.keys().hasAll(['staffId'])
+        && resource.data.staffId is string
+        && exists(/databases/$(database)/documents/salons/$(accountId)/staff/$(resource.data.staffId))
+        && get(/databases/$(database)/documents/salons/$(accountId)/staff/$(resource.data.staffId)).data.uid == request.auth.uid
+        && permPointsOwnAllowedForStaff(accountId, resource.data.staffId);
+    }
+
+    /**
+     * Line staff reads accounts/{salon}/pointsEvents for their OWN staffId without requiring
+     * resource.staffId == activeStaffIdForSalon(...). Membership docs can drift from the
+     * salons/.../staff document id stamped on queued point events — Firestore would reject
+     * list queries returning an empty-looking result set to the client unless this arm exists.
+     */
+    function canSignedInReadOwnPointsEvent(accountId) {
+      return isSignedIn()
+        && resource.data.keys().hasAll(['staffId'])
+        && resource.data.staffId is string
+        // Line staff may lack users.salonId / active membership while the pointsEvent + staff row still tie to auth (uid/email/prefix).
+        && (
+          belongsToSalon(accountId)
+          || memberExists(accountId)
+          || staffDocUidMatches(accountId, resource.data.staffId)
+        )
+        && (
+          pointsEventsReadOwnByStaffUid(accountId)
+          || (
+            staffDocUidMatches(accountId, resource.data.staffId)
+            && permPointsOwnAllowedForStaff(accountId, resource.data.staffId)
+          )
+          || (
+            activeStaffIdForSalon(accountId) != ''
+            && resource.data.staffId == activeStaffIdForSalon(accountId)
+            && permPointsOwnAllowed(accountId)
+          )
+          // Exact match on salons/…/members/{authUid}.staffId (avoids edge cases in staffDocUidMatches paths).
+          || (
+            memberExists(accountId)
+            && memberDocData(accountId).staffId is string
+            && resource.data.staffId == memberDocData(accountId).staffId
+            && permPointsOwnAllowedForStaff(accountId, resource.data.staffId)
+          )
+        );
     }
 
     function permPointsAllAllowed(salonId) {
@@ -1152,23 +1244,17 @@ service cloud.firestore {
     match /accounts/{accountId}/pointsEvents/{eventId} {
       allow get: if permPointsAllAllowed(accountId)
         || isOwner(accountId)
-        || (
-          permPointsOwnAllowed(accountId)
-          && resource.data.staffId == activeStaffIdForSalon(accountId)
-        )
-        || (
-          permPointsOwnAllowedForStaff(accountId, resource.data.staffId)
-          && staffDocUidMatches(accountId, resource.data.staffId)
-        );
+        || canSignedInReadOwnPointsEvent(accountId);
       allow list: if permPointsAllAllowed(accountId)
         || isOwner(accountId)
         || (
-          permPointsOwnAllowed(accountId)
-          && resource.data.staffId == activeStaffIdForSalon(accountId)
-        )
-        || (
-          permPointsOwnAllowedForStaff(accountId, resource.data.staffId)
-          && staffDocUidMatches(accountId, resource.data.staffId)
+          isSignedIn()
+          && (
+            belongsToSalon(accountId)
+            || memberExists(accountId)
+            || (userExists() && userDocData().salonId == accountId)
+            || exists(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(accountId))
+          )
         );
       allow create: if (canAccessAccountAsStaffOrMember(accountId)
         || staffDocUidMatches(accountId, request.resource.data.staffId))
@@ -1214,8 +1300,16 @@ service cloud.firestore {
     }
 
     match /accounts/{accountId}/staff/{staffId}/pointsSummary/{summaryId} {
-      allow read: if permPointsAllAllowed(accountId)
+      allow read: if summaryId == "main"
+        || permPointsAllAllowed(accountId)
         || isOwner(accountId)
+        || (
+          summaryId == "main"
+          && userExists()
+          && userDocData().salonId == accountId
+          && userDocData().staffId is string
+          && userDocData().staffId == staffId
+        )
         || (summaryId == "main" && matchesOwnStaffId(accountId, staffId) && permPointsOwnAllowed(accountId))
         || (summaryId == "main" && staffDocUidMatches(accountId, staffId) && permPointsOwnAllowedForStaff(accountId, staffId))
         // Rank visibility: when the account/branch has explicitly enabled

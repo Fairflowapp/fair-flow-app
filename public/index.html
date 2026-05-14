@@ -9305,15 +9305,9 @@ function ffResolveCurrentStaffRowFromFfStaffV1() {
       (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : '') ||
       ''
     ).trim();
-    if (activeStaffId) {
-      const byActiveStaffId = staffList.find((s) => {
-        const id = String((s && (s.id || s.staffId)) || '').trim();
-        return id && id === activeStaffId;
-      });
-      if (byActiveStaffId && (!u || !ffStaffRowAuthLinkageConflicts(byActiveStaffId, u))) {
-        return byActiveStaffId;
-      }
-    }
+    // Prefer Firebase linkage over session/localStorage hints when logged in —
+    // otherwise a stale kiosk staffId (often rows without uid/email) impersonates any user and
+    // breaks Points visibility (admins briefly see technician private dashboards, etc.).
     if (u) {
       const uid = String(u.uid || '').trim();
       const email = u.email ? String(u.email).toLowerCase().trim() : '';
@@ -9332,6 +9326,15 @@ function ffResolveCurrentStaffRowFromFfStaffV1() {
           ffSyncAuthedStaffIdFromRow(byEmail);
           return byEmail;
         }
+      }
+    }
+    if (activeStaffId) {
+      const byActiveStaffId = staffList.find((s) => {
+        const id = String((s && (s.id || s.staffId)) || '').trim();
+        return id && id === activeStaffId;
+      });
+      if (byActiveStaffId && (!u || !ffStaffRowAuthLinkageConflicts(byActiveStaffId, u))) {
+        return byActiveStaffId;
       }
     }
     return null;
@@ -38602,6 +38605,282 @@ function initializeUserProfileMenu() {
     return '';
   }
 
+  /**
+   * Merge several staffId hints (roster, cloud, session). Stale sessions often store a *prefix*
+   * of the real document id (e.g. staff_…_c); Firestore then denies list queries on the fake id.
+   * Prefer the longest string — when one candidate is a prefix of another they refer to the same row.
+   */
+  function ffLongestStaffIdCandidate(candidates) {
+    var list = [];
+    if (Array.isArray(candidates)) {
+      for (var i = 0; i < candidates.length; i++) {
+        var v = String(candidates[i] || '').trim();
+        if (v) list.push(v);
+      }
+    }
+    if (!list.length) return '';
+    var best = list[0];
+    for (var j = 1; j < list.length; j++) {
+      var s = list[j];
+      if (s.length > best.length) best = s;
+    }
+    return best;
+  }
+
+  /**
+   * Resolves the real staff document id under salons/{salonId}/staff/{docId}. Listing pointsEvents
+   * with a prefix that is NOT a valid staff doc id causes permission-denied (rules see no staff row).
+   */
+  async function ffResolveCanonicalPointsStaffIdWithVerify(db, api, salonId, preferredId) {
+    var sid = String(salonId || '').trim();
+    var pref = String(preferredId || '').trim();
+    if (!sid || !pref || !db || !api || typeof api.doc !== 'function' || typeof api.getDoc !== 'function') {
+      return pref;
+    }
+    var existsFn = async function(id) {
+      var clean = String(id || '').trim();
+      if (!clean) return false;
+      try {
+        var ref = api.doc(db, 'salons/' + sid + '/staff/' + clean);
+        var sn = await api.getDoc(ref);
+        return !!(sn && typeof sn === 'object' && typeof sn.exists === 'function' && sn.exists());
+      } catch (_) {
+        return false;
+      }
+    };
+    var addCand = function(map, x) {
+      var v = String(x || '').trim();
+      if (v) map[v] = true;
+    };
+    var candidates = {};
+    var uid = String(window.auth?.currentUser?.uid || '').trim();
+    var emailLc = String(window.auth?.currentUser?.email || '').trim().toLowerCase();
+    addCand(candidates, pref);
+    addCand(candidates, ffExpandTruncatedStaffIdFromLocalStore(pref));
+    try {
+      if (typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function') {
+        var rw = ffResolveCurrentStaffRowFromFfStaffV1();
+        var rId = String((rw && (rw.id || rw.staffId)) || '').trim();
+        addCand(candidates, rId);
+        addCand(candidates, ffExpandTruncatedStaffIdFromLocalStore(rId));
+      }
+    } catch (_) {}
+    if (uid) {
+      try {
+        var mref2 = api.doc(db, 'salons/' + sid + '/members/' + uid);
+        var ms2 = await api.getDoc(mref2);
+        if (ms2 && typeof ms2.exists === 'function' && ms2.exists()) {
+          var mid2 = String((ms2.data() || {}).staffId || '').trim();
+          addCand(candidates, mid2);
+          addCand(candidates, ffExpandTruncatedStaffIdFromLocalStore(mid2));
+        }
+      } catch (_) {}
+    }
+    var staffList = [];
+    try {
+      if (typeof window.ffGetStaffStore === 'function') {
+        var st2 = window.ffGetStaffStore();
+        if (st2 && Array.isArray(st2.staff)) staffList = st2.staff;
+      }
+    } catch (e1) {}
+    if (!staffList.length) {
+      try {
+        var raw2 = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+        staffList = Array.isArray(raw2.staff) ? raw2.staff : [];
+      } catch (e2) {}
+    }
+    for (var i = 0; i < staffList.length; i++) {
+      var row = staffList[i];
+      var candidate = String((row && (row.id || row.staffId)) || '').trim();
+      if (!candidate) continue;
+      var linked =
+        !!(uid && typeof ffStaffRowMatchesAuthUid === 'function' && ffStaffRowMatchesAuthUid(row, uid))
+        || !!(emailLc && row && row.email && String(row.email).toLowerCase().trim() === emailLc);
+      var rel =
+        candidate === pref
+        || (pref && candidate.indexOf(pref) === 0)
+        || (pref && pref.indexOf(candidate) === 0);
+      if (linked || rel) {
+        addCand(candidates, candidate);
+        addCand(candidates, ffExpandTruncatedStaffIdFromLocalStore(candidate));
+      }
+    }
+    if (api.collection && api.query && api.where && api.getDocs && uid) {
+      var fields2 = ['uid', 'firebaseUid', 'firebaseAuthUid', 'authUid'];
+      for (var fi = 0; fi < fields2.length; fi++) {
+        try {
+          var snapQ = await api.getDocs(api.query(
+            api.collection(db, 'salons/' + sid + '/staff'),
+            api.where(fields2[fi], '==', uid)
+          ));
+          if (snapQ && snapQ.docs) {
+            for (var di = 0; di < snapQ.docs.length; di++) {
+              addCand(candidates, String(snapQ.docs[di].id || '').trim());
+            }
+          }
+        } catch (_) {}
+      }
+      if (emailLc) {
+        try {
+          var snapE = await api.getDocs(api.query(
+            api.collection(db, 'salons/' + sid + '/staff'),
+            api.where('email', '==', emailLc)
+          ));
+          if (snapE && snapE.docs) {
+            for (var ei = 0; ei < snapE.docs.length; ei++) {
+              addCand(candidates, String(snapE.docs[ei].id || '').trim());
+            }
+          }
+        } catch (_) {}
+      }
+    }
+    var rawKeys = Object.keys(candidates);
+    var pruned = [];
+    for (var pi = 0; pi < rawKeys.length; pi++) {
+      var ak = rawKeys[pi];
+      var dropStrictPrefix = false;
+      for (var pj = 0; pj < rawKeys.length; pj++) {
+        var bk = rawKeys[pj];
+        if (ak !== bk && bk.length > ak.length && bk.indexOf(ak) === 0) {
+          dropStrictPrefix = true;
+          break;
+        }
+      }
+      if (!dropStrictPrefix) pruned.push(ak);
+    }
+    pruned.sort(function(a, b) {
+      return b.length - a.length;
+    });
+    var ki = 0;
+    for (ki = 0; ki < pruned.length; ki++) {
+      if (await existsFn(pruned[ki])) {
+        return pruned[ki];
+      }
+    }
+    if (pruned.length) {
+      try {
+        console.warn('[PointsDiag] using longest pruned staff id (prefix parasite doc)', pruned[0]);
+      } catch (_) {}
+      return pruned[0];
+    }
+    return pref;
+  }
+
+  /** When salons/…/members.staffId is truncated in Firestore but ff_staff cache has exactly one matching doc id prefix, expand to full id (fixes permission-denied on pointsEvents). */
+  function ffExpandTruncatedStaffIdFromLocalStore(partialId) {
+    var p = String(partialId || '').trim();
+    if (!p) return '';
+    var staffList = [];
+    try {
+      if (typeof window.ffGetStaffStore === 'function') {
+        var st = window.ffGetStaffStore();
+        if (st && Array.isArray(st.staff)) staffList = st.staff;
+      }
+    } catch (e1) {}
+    if (!staffList.length) {
+      try {
+        var raw = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+        staffList = Array.isArray(raw.staff) ? raw.staff : [];
+      } catch (e2) {}
+    }
+    var hits = [];
+    var hi = 0;
+    for (hi = 0; hi < staffList.length; hi++) {
+      var s = staffList[hi];
+      var id = String((s && (s.id || s.staffId)) || '').trim();
+      if (!id) continue;
+      if (id === p) continue;
+      if (id.indexOf(p) === 0 && id.length > p.length) hits.push(id);
+    }
+    if (hits.length === 1) {
+      try {
+        console.warn('[PointsDiag] expanded truncated staffId prefix using local roster', { partial: p, resolved: hits[0] });
+      } catch (_) {}
+      return hits[0];
+    }
+    if (hits.length > 1) {
+      try {
+        console.warn('[PointsDiag] ambiguous staffId prefix matches local roster — cannot auto-expand', { partial: p, hits: hits.slice(0, 6) });
+      } catch (_) {}
+    }
+    return '';
+  }
+
+  /** When salons/…/members/{authUid}.staffId is truncated or stale, persist the canonical roster id so future reads and Security Rules align (reduces permission-denied on pointsEvents). Safe-guarded: staff doc must exist and match auth or prefix expansion. */
+  async function ffRepairSalonMemberStaffIdForPoints(db, api, salonId, canonicalStaffId) {
+    const uid = String(window.auth?.currentUser?.uid || '').trim();
+    const sid = String(salonId || '').trim();
+    const canon = String(canonicalStaffId || '').trim();
+    if (!uid || !sid || !canon || !db || !api
+        || typeof api.doc !== 'function' || typeof api.getDoc !== 'function'
+        || typeof api.updateDoc !== 'function') {
+      return { repaired: false, reason: 'missing' };
+    }
+    try {
+      const memberRef = api.doc(db, `salons/${sid}/members/${uid}`);
+      const memberSnap = await api.getDoc(memberRef);
+      if (!memberSnap || typeof memberSnap.exists !== 'function' || !memberSnap.exists()) return { repaired: false, reason: 'no_member' };
+
+      const m = memberSnap.data() || {};
+      const prev = String(m.staffId || '').trim();
+      if (prev === canon) return { repaired: false, reason: 'match' };
+
+      const staffCanonRef = api.doc(db, `salons/${sid}/staff/${canon}`);
+      const staffCanonSnap = await api.getDoc(staffCanonRef);
+      if (!staffCanonSnap || typeof staffCanonSnap.exists !== 'function' || !staffCanonSnap.exists()) {
+        return { repaired: false, reason: 'staff_doc_missing' };
+      }
+
+      const sd = staffCanonSnap.data() || {};
+      const salonStaffUid =
+        String(sd.uid || sd.firebaseUid || sd.firebaseAuthUid || sd.authUid || '').trim();
+      const staffEmailLc = sd.email ? String(sd.email).toLowerCase().trim() : '';
+      const authEmailLc = window.auth?.currentUser?.email
+        ? String(window.auth.currentUser.email).toLowerCase().trim()
+        : '';
+      const staffDocClaimsUser =
+        !!(uid && salonStaffUid && salonStaffUid === uid)
+        || !!(authEmailLc && staffEmailLc && staffEmailLc === authEmailLc);
+
+      const row = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+      const linkedId = String(row?.id || row?.staffId || '').trim();
+      const uidCheck = String(window.auth?.currentUser?.uid || '').trim();
+      const rowEmail = row?.email ? String(row.email).toLowerCase().trim() : '';
+      const linkedViaUid =
+        !!row &&
+        !!uidCheck &&
+        typeof ffStaffRowMatchesAuthUid === 'function' &&
+        ffStaffRowMatchesAuthUid(row, uidCheck);
+      const linkedViaEmail =
+        !!(row && authEmailLc && rowEmail && rowEmail === authEmailLc);
+      const rosterCanonMatch = !!linkedId && linkedId === canon && (linkedViaUid || linkedViaEmail);
+
+      const truncationFix = !!(prev && canon.indexOf(prev) === 0 && canon.length > prev.length);
+      const emptyPrev = !prev;
+
+      const truncationOk = truncationFix && staffDocClaimsUser;
+      const allowRepair =
+        rosterCanonMatch
+        || truncationOk
+        || (emptyPrev && staffDocClaimsUser);
+
+      if (!allowRepair) {
+        return { repaired: false, reason: 'guard' };
+      }
+
+      await api.updateDoc(memberRef, { staffId: canon });
+      try {
+        console.warn('[PointsDiag] repaired salons/members staffId for points', { salonId: sid, was: prev || '(empty)', now: canon });
+      } catch (_) {}
+      return { repaired: true, was: prev, now: canon };
+    } catch (e) {
+      try {
+        console.warn('[PointsDiag] ffRepairSalonMemberStaffIdForPoints failed', e && e.code ? e.code : e);
+      } catch (_) {}
+      return { repaired: false, reason: e?.code || String(e) };
+    }
+  }
+
   async function ffResolveCurrentPointsStaffIdFromCloud(db, api) {
     try {
       const uid = String(window.auth?.currentUser?.uid || '').trim();
@@ -38623,21 +38902,25 @@ function initializeUserProfileMenu() {
           return '';
         }
       }
-      if (salonId) {
+      // Prefer salon membership over users/{uid}/memberships/{salon}: the latter can be stale in
+      // multi-salon mode (Technician leaderboard queried the wrong staffId). Do NOT read
+      // localStorage/__ff_authedStaffId before cloud docs — a stale tablet session impersonates the
+      // wrong ff_staff row (often no firebase uid → no linkage conflict → admin inherits private UI).
+
+      if (!staffId && salonId) {
+        try {
+          const memberSnap = await api.getDoc(api.doc(db, `salons/${salonId}/members/${uid}`));
+          const memberData = memberSnap && memberSnap.exists && memberSnap.exists() ? (memberSnap.data() || {}) : {};
+          staffId = String(memberData.staffId || '').trim();
+        } catch (_) {}
+      }
+      if (!staffId && salonId) {
         try {
           const membershipSnap = await api.getDoc(api.doc(db, `users/${uid}/memberships/${salonId}`));
           const membershipData = membershipSnap && membershipSnap.exists && membershipSnap.exists() ? (membershipSnap.data() || {}) : {};
           staffId = String(membershipData.staffId || '').trim();
         } catch (_) {}
-        if (!staffId) {
-          try {
-            const memberSnap = await api.getDoc(api.doc(db, `salons/${salonId}/members/${uid}`));
-            const memberData = memberSnap && memberSnap.exists && memberSnap.exists() ? (memberSnap.data() || {}) : {};
-            staffId = String(memberData.staffId || '').trim();
-          } catch (_) {}
-        }
       }
-      if (!staffId) staffId = String(window.__ff_authedStaffId || '').trim();
       if (!staffId) {
         const snap = await api.getDoc(api.doc(db, `users/${uid}`));
         const data = snap && snap.exists && snap.exists() ? (snap.data() || {}) : {};
@@ -38649,6 +38932,59 @@ function initializeUserProfileMenu() {
           || await findStaffByField('firebaseAuthUid', uid)
           || await findStaffByField('authUid', uid)
           || await findStaffByField('email', email);
+      }
+      if (staffId) {
+        const exStaff = ffExpandTruncatedStaffIdFromLocalStore(staffId);
+        if (exStaff) staffId = exStaff;
+      }
+      try {
+        if (typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' && window.auth?.currentUser) {
+          const row = ffResolveCurrentStaffRowFromFfStaffV1();
+          const uidCheck = String(window.auth.currentUser.uid || '').trim();
+          const linkedId = String(row?.id || row?.staffId || '').trim();
+          const emailLc = window.auth.currentUser.email
+            ? String(window.auth.currentUser.email).toLowerCase().trim()
+            : '';
+          const rowEmail = row?.email ? String(row.email).toLowerCase().trim() : '';
+          const linkedViaUid =
+            !!row &&
+            !!uidCheck &&
+            typeof ffStaffRowMatchesAuthUid === 'function' &&
+            ffStaffRowMatchesAuthUid(row, uidCheck);
+          const linkedViaEmail = !!(row && emailLc && rowEmail && rowEmail === emailLc);
+          if (linkedId && (linkedViaUid || linkedViaEmail)) {
+            const idsLookLikeSamePrefix =
+              !!staffId &&
+              staffId !== linkedId &&
+              (linkedId.indexOf(staffId) === 0 || staffId.indexOf(linkedId) === 0);
+            const shouldPreferRosterId = !staffId || idsLookLikeSamePrefix;
+            if (staffId && staffId !== linkedId && shouldPreferRosterId) {
+              console.warn(
+                '[PointsDiag] salons/memberships staffId does not match auth-linked roster; using roster id',
+                { previousStaffId: staffId, rosterStaffId: linkedId, salonId: salonId }
+              );
+            }
+            if (shouldPreferRosterId) {
+              staffId = linkedId;
+            } else if (staffId && staffId !== linkedId) {
+              console.warn(
+                '[PointsDiag] keeping cloud staffId over auth-linked roster id for points',
+                { cloudStaffId: staffId, rosterStaffId: linkedId, salonId: salonId }
+              );
+            }
+          }
+        }
+      } catch (_) {}
+      if (staffId) {
+        const exStaff2 = ffExpandTruncatedStaffIdFromLocalStore(staffId);
+        if (exStaff2) staffId = exStaff2;
+      }
+      if (!staffId) staffId = String(window.__ff_authedStaffId || '').trim();
+      if (!staffId && typeof localStorage !== 'undefined') {
+        staffId = String(localStorage.getItem('ff_authedStaffId_v1') || '').trim();
+      }
+      if (!staffId && typeof window.ffStaffCallDiagSnapshot === 'function') {
+        staffId = String(window.ffStaffCallDiagSnapshot().ownStaffId || '').trim();
       }
       if (staffId) {
         try { window.__ff_authedStaffId = staffId; } catch (_) {}
@@ -38670,11 +39006,17 @@ function initializeUserProfileMenu() {
   }
 
   function ffResolvePointsVisibilityMode(/* settings */) {
-    // Visibility is now driven entirely by per-staff permissions (Manage /
-    // View All / View Own). The legacy account-level pointsVisibilityMode
-    // setting is ignored here so the surface area matches the permissions
-    // UI, but the field itself is preserved on the settings doc for any
-    // external consumer that might still read it.
+    // Visibility is driven by per-staff permissions, but privileged **account roles**
+    // (owner/admin/manager and admin cache — same spirit as Schedule) must always see
+    // the full leaderboard. Otherwise firebase-linked ff_staff rows that look like line
+    // staff (same email as salon login) wrongly force private "YOUR POINTS" UI.
+    try {
+      if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return 'full';
+    } catch (_) {}
+    try {
+      const rAcct = String(window.__ff_user_role || '').trim().toLowerCase();
+      if (rAcct === 'owner' || rAcct === 'admin' || rAcct === 'manager') return 'full';
+    } catch (_) {}
     if (ffCurrentUserIsPointsManager()) return 'full';
     const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
     if (typeof ffStaffHasPointsAllPermission === 'function' && ffStaffHasPointsAllPermission(staff)) return 'full';
@@ -38743,13 +39085,27 @@ function initializeUserProfileMenu() {
     return rows;
   }
 
+  /** Firestore Timestamp / seconds map → Date */
+  function ffPointsEventTimestampToDate(ts) {
+    if (!ts) return null;
+    try {
+      if (typeof ts.toDate === 'function') return ts.toDate();
+      if (typeof ts.seconds === 'number') return new Date(ts.seconds * 1000);
+    } catch (_) {}
+    return null;
+  }
+
   function ffPointEventMatchesPeriod(event, period, weekKey) {
     if (!event) return false;
     if (period === 'thisWeek' || period === 'lastWeek' || period === 'customWeek') {
       return String(event.weekKey || '') === weekKey;
     }
     if (period === 'thisMonth') {
-      return String(event.monthKey || '') === ffPointsMonthKey(new Date());
+      var wantMk = ffPointsMonthKey(new Date());
+      if (String(event.monthKey || '') === wantMk) return true;
+      var cAt = ffPointsEventTimestampToDate(event.createdAt);
+      if (cAt && ffPointsMonthKey(cAt) === wantMk) return true;
+      return false;
     }
     return true;
   }
@@ -38760,6 +39116,7 @@ function initializeUserProfileMenu() {
     const { collection, query, where, getDocs } = api;
     const cleanStaffIdFilter = String(staffIdFilter || '').trim();
     let snap;
+    let usedPrivateAliasFallback = false;
     if (cleanStaffIdFilter) {
       snap = await getDocs(query(collection(db, `accounts/${accountId}/pointsEvents`), where('staffId', '==', cleanStaffIdFilter)));
     } else if (period === 'thisWeek' || period === 'lastWeek' || period === 'customWeek') {
@@ -38770,18 +39127,93 @@ function initializeUserProfileMenu() {
       snap = await getDocs(collection(db, `accounts/${accountId}/pointsEvents`));
     }
     const activeLocationId = ffGetPointsActiveLocationId();
-    return snap.docs
-      .map(function(docSnap) { return { id: docSnap.id, ...(docSnap.data() || {}) }; })
-      .filter(function(event) {
-        if (!ffPointEventMatchesPeriod(event, period, weekKey)) return false;
-        if (activeLocationId && event.locationId && String(event.locationId) !== activeLocationId) return false;
-        return true;
-      })
-      .sort(function(a, b) {
-        const at = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
-        const bt = b.createdAt && typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : 0;
-        return bt - at;
-      });
+    // Staff in private mode always see every branch they earned credits in for
+    // their own leaderboard; narrowing by ffGetPointsActiveLocationId() hides
+    // events when daily work used a different __ff_active_location_id.
+    const scopeEventsByActiveLocation =
+      !!activeLocationId && ffPointsVisibilityMode !== 'private';
+    const mapped = snap.docs
+      .map(function(docSnap) { return { id: docSnap.id, ...(docSnap.data() || {}) }; });
+    if (cleanStaffIdFilter && mapped.length === 0 && ffPointsVisibilityMode === 'private') {
+      try {
+        let aliasSnap;
+        if (period === 'thisWeek' || period === 'lastWeek' || period === 'customWeek') {
+          aliasSnap = await getDocs(query(collection(db, `accounts/${accountId}/pointsEvents`), where('weekKey', '==', weekKey)));
+        } else if (period === 'thisMonth') {
+          aliasSnap = await getDocs(query(collection(db, `accounts/${accountId}/pointsEvents`), where('monthKey', '==', ffPointsMonthKey(new Date()))));
+        } else {
+          aliasSnap = await getDocs(collection(db, `accounts/${accountId}/pointsEvents`));
+        }
+        const staffBase = cleanStaffIdFilter.split('_').slice(0, 2).join('_') + '_';
+        const ownRow = ffFindPointsStaffRowById(ffGetLocalStaffForPoints(), cleanStaffIdFilter)
+          || (typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null);
+        const ownName = String(ownRow?.name || ownRow?.staffName || '').trim().toLowerCase();
+        const aliasRows = aliasSnap.docs
+          .map(function(docSnap) { return { id: docSnap.id, ...(docSnap.data() || {}) }; })
+          .filter(function(event) {
+            const eventStaffId = String(event.staffId || '').trim();
+            const eventName = String(event.staffName || '').trim().toLowerCase();
+            if (!eventStaffId) return false;
+            if (staffBase.length > 1 && eventStaffId.indexOf(staffBase) === 0) return true;
+            return !!(ownName && eventName && eventName === ownName);
+          });
+        if (aliasRows.length) {
+          usedPrivateAliasFallback = true;
+          mapped.splice(0, mapped.length, ...aliasRows);
+          try {
+            console.warn('[PointsDiag] private staffId alias fallback matched point events', {
+              requestedStaffId: cleanStaffIdFilter,
+              staffBase,
+              ownName,
+              matchedStaffIds: Array.from(new Set(aliasRows.map(function(event) { return String(event.staffId || '').trim(); })))
+            });
+          } catch (_) {}
+        }
+      } catch (aliasErr) {
+        try {
+          console.warn('[PointsDiag] private staffId alias fallback failed', aliasErr);
+        } catch (_) {}
+      }
+    }
+    const filtered = mapped.filter(function(event) {
+      if (!ffPointEventMatchesPeriod(event, period, weekKey)) return false;
+      if (scopeEventsByActiveLocation && event.locationId && String(event.locationId) !== activeLocationId) return false;
+      return true;
+    });
+    if (cleanStaffIdFilter && typeof console !== 'undefined' && ffPointsVisibilityMode === 'private') {
+      try {
+        console.log('[PointsDiag] technician pointsEvents:', {
+          accountId,
+          staffIdFilter: cleanStaffIdFilter,
+          docCountFirestore: mapped.length,
+          afterPeriodFilters: filtered.length,
+          period: period,
+          usedPrivateAliasFallback: usedPrivateAliasFallback,
+          monthKeyCut: ffPointsMonthKey(new Date()),
+          isoWeekCut: ffPointsWeekKeyOffset(0)
+        });
+        if (mapped.length === 0) {
+          console.warn(
+            '[PointsDiag] ► 0 מאירועי נקודות מהשרת לפי staffId (או הרשאה). בדוקי: האם בשורות למעלה `staffIdFilter` זה אותו ID כמו בשדה staffId במסמכי '
+            + 'accounts/' + accountId + '/pointsEvents ? האם מופיעה שגיאה אדומה permission-denied לפני/אחרי?'
+          );
+        } else if (filtered.length === 0 && mapped.length > 0) {
+          const ev0 = mapped[0] || {};
+          console.warn('[PointsDiag] ► האירועים קיימים אבל נפלטו בסינון "תקופה" — נסי This week / החודש השני', {
+            period: period,
+            appUsesMonthKey: ffPointsMonthKey(new Date()),
+            appUsesWeekKeyForPeriod: weekKey,
+            firstDocMonthKey: ev0.monthKey || null,
+            firstDocWeekKey: ev0.weekKey || null
+          });
+        }
+      } catch (_) {}
+    }
+    return filtered.sort(function(a, b) {
+      const at = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
+      const bt = b.createdAt && typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : 0;
+      return bt - at;
+    });
   }
 
   async function ffLoadPointsFromEvents(accountId, db, api, staffRows, weekKey) {
@@ -38884,8 +39316,120 @@ function initializeUserProfileMenu() {
     ffPointsLeaderboardPrivateRank = null;
     let staffRows = ffGetLocalStaffForPoints();
     const cloudStaffId = await ffResolveCurrentPointsStaffIdFromCloud(db, api);
-    ffPointsCurrentStaffId = cloudStaffId || ffGetCurrentPointsStaffId();
+    var rosterPtsId = '';
+    try {
+      if (typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function') {
+        var rprPts = ffResolveCurrentStaffRowFromFfStaffV1();
+        rosterPtsId = String((rprPts && (rprPts.id || rprPts.staffId)) || '').trim();
+      }
+    } catch (_) {}
+    const cloudPtsExpanded = (ffExpandTruncatedStaffIdFromLocalStore(cloudStaffId) || cloudStaffId || '').trim();
+    try {
+      var lsAuthed = '';
+      if (typeof localStorage !== 'undefined') {
+        try {
+          lsAuthed = String(localStorage.getItem('ff_authedStaffId_v1') || '').trim();
+        } catch (_) {}
+      }
+      var memMerge = ffLongestStaffIdCandidate([
+        cloudPtsExpanded,
+        cloudStaffId,
+        ffExpandTruncatedStaffIdFromLocalStore(cloudStaffId) || '',
+        rosterPtsId,
+        ffExpandTruncatedStaffIdFromLocalStore(rosterPtsId) || '',
+        ffGetCurrentPointsStaffId(),
+        lsAuthed,
+        String(window.__ff_authedStaffId || '').trim()
+      ]);
+      if (memMerge) {
+        ffPointsCurrentStaffId = memMerge;
+      } else if (rosterPtsId) {
+        ffPointsCurrentStaffId = rosterPtsId;
+        if (cloudPtsExpanded && rosterPtsId !== cloudPtsExpanded
+            && rosterPtsId.indexOf(cloudPtsExpanded) !== 0
+            && cloudPtsExpanded.indexOf(rosterPtsId) !== 0) {
+          console.warn('[PointsDiag] roster id vs cloud staffId differ — using roster for points', {
+            rosterPtsId,
+            cloudPtsExpanded
+          });
+        }
+      } else {
+        ffPointsCurrentStaffId = (cloudPtsExpanded || ffGetCurrentPointsStaffId() || '').trim();
+      }
+    } catch (em) {
+      if (rosterPtsId) {
+        ffPointsCurrentStaffId = rosterPtsId;
+        if (cloudPtsExpanded && rosterPtsId !== cloudPtsExpanded
+            && rosterPtsId.indexOf(cloudPtsExpanded) !== 0
+            && cloudPtsExpanded.indexOf(rosterPtsId) !== 0) {
+          console.warn('[PointsDiag] roster id vs cloud staffId differ — using roster for points', {
+            rosterPtsId,
+            cloudPtsExpanded
+          });
+        }
+      } else {
+        ffPointsCurrentStaffId = (cloudPtsExpanded || ffGetCurrentPointsStaffId() || '').trim();
+      }
+    }
+    try {
+      if (cloudPtsExpanded) {
+        var beforeCloudForce = String(ffPointsCurrentStaffId || '').trim();
+        ffPointsCurrentStaffId = cloudPtsExpanded;
+        if (beforeCloudForce && beforeCloudForce !== cloudPtsExpanded) {
+          try {
+            console.warn('[PointsDiag] using cloud staff id for points over local roster', {
+              before: beforeCloudForce,
+              cloudStaffId: cloudPtsExpanded
+            });
+          } catch (_) {}
+        }
+      } else if (ffPointsCurrentStaffId && typeof ffResolveCanonicalPointsStaffIdWithVerify === 'function') {
+        var beforeCanon = String(ffPointsCurrentStaffId || '').trim();
+        var verifiedPts = await ffResolveCanonicalPointsStaffIdWithVerify(
+          db,
+          api,
+          String(window.currentSalonId || ''),
+          ffPointsCurrentStaffId
+        );
+        if (verifiedPts) ffPointsCurrentStaffId = verifiedPts;
+        if (verifiedPts && beforeCanon && verifiedPts !== beforeCanon) {
+          try {
+            console.warn('[PointsDiag] canonical staff doc id for points (was prefix/stale)', {
+              before: beforeCanon,
+              after: verifiedPts
+            });
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    try {
+      if (ffPointsCurrentStaffId && typeof ffRepairSalonMemberStaffIdForPoints === 'function') {
+        await ffRepairSalonMemberStaffIdForPoints(
+          db,
+          api,
+          String(window.currentSalonId || ''),
+          ffPointsCurrentStaffId
+        );
+      }
+    } catch (_) {}
+    try {
+      if (ffPointsCurrentStaffId && typeof ffSyncAuthedStaffIdFromRow === 'function') {
+        ffSyncAuthedStaffIdFromRow({ id: ffPointsCurrentStaffId, staffId: ffPointsCurrentStaffId });
+      }
+    } catch (_) {}
     ffPointsVisibilityMode = ffResolvePointsVisibilityMode(settings);
+    try {
+      if (typeof console !== 'undefined' && ffPointsVisibilityMode === 'private') {
+        console.log('[PointsDiag] leaderboard (private)', {
+          ffPointsCurrentStaffId,
+          firebaseUid: String(window.auth?.currentUser?.uid || ''),
+          accountId,
+          salonId: String(window.currentSalonId || ''),
+          period: ffPointsLeaderboardActivePeriod,
+          next: 'פתחי מיד מתחת: [PointsDiag] technician pointsEvents; אם Goal=0 יש ברוב המקרים גם ► בהזהרה צהובה'
+        });
+      }
+    } catch (_) {}
     if (ffPointsVisibilityMode === 'private' && !ffPointsCurrentStaffId) {
       ffPointsLeaderboardRows = [];
       ffPointsResetToOwnOnlyMode();
@@ -38893,12 +39437,11 @@ function initializeUserProfileMenu() {
       return;
     }
     if (!ffPointsLeaderboardPeriodInitialized) {
-      // First load of this session: private staff with a monthly goal benefit
-      // most from seeing the month immediately. Managers / admins / public
-      // viewers keep "This week" as their default snapshot.
+      // Align private default with the usual admin snapshot ("This week") so kiosk queue points
+      // show immediately; Monthly goal stays available via the period selector.
       if (ffPointsVisibilityMode === 'private') {
-        ffPointsLeaderboardActivePeriod = 'thisMonth';
-        console.log('[PointsApp] private default period -> thisMonth');
+        ffPointsLeaderboardActivePeriod = 'thisWeek';
+        console.log('[PointsApp] private default period -> thisWeek');
       }
       ffPointsLeaderboardPeriodInitialized = true;
     }
@@ -38976,6 +39519,29 @@ function initializeUserProfileMenu() {
         }
         events = [];
         rows = await ffLoadPointsFromSummary(accountId, db, api, staffRows);
+      }
+    }
+    if (ffPointsVisibilityMode === 'private' && ffPointsPeriodUsesSummary(period)) {
+      try {
+        const currentTotal = rows.reduce(function(sum, row) {
+          return sum + (Number(ffPointsLeaderboardValue(row, period)) || 0);
+        }, 0);
+        if (currentTotal === 0) {
+          const summaryRows = await ffLoadPointsFromSummary(accountId, db, api, staffRows);
+          const summaryTotal = summaryRows.reduce(function(sum, row) {
+            return sum + (Number(ffPointsLeaderboardValue(row, period)) || 0);
+          }, 0);
+          if (summaryTotal > 0) {
+            console.warn('[PointsApp] private events empty; using pointsSummary fallback', {
+              period: period,
+              staffId: ffPointsCurrentStaffId,
+              summaryTotal: summaryTotal
+            });
+            rows = summaryRows;
+          }
+        }
+      } catch (summaryFallbackErr) {
+        console.warn('[PointsApp] private summary fallback failed', summaryFallbackErr);
       }
     }
     const eventsByStaff = new Map();
@@ -39986,6 +40552,114 @@ function initializeUserProfileMenu() {
       }
     }
     if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
+  };
+
+  /** Console support: paste `await ffDumpPointsDiagnostics()` — do NOT execute `[PointsDiag]` as JS (that is only a substring in log messages / filter bar). */
+  window.ffDumpPointsDiagnostics = async function() {
+    const snap = {
+      help: '[PointsDiag] is text inside logs. Use Console FILTER box, or call this function.',
+      host: typeof location !== 'undefined' ? location.href : '',
+      userRole: typeof window.__ff_user_role !== 'undefined' ? window.__ff_user_role : '',
+      firebaseUid: String(window.auth?.currentUser?.uid || ''),
+      email: String(window.auth?.currentUser?.email || ''),
+      salonId: String(window.currentSalonId || ''),
+      accountId: typeof ffSharedSetupAccountId === 'function' ? String(ffSharedSetupAccountId() || '') : '',
+      visibility: typeof ffPointsVisibilityMode !== 'undefined' ? ffPointsVisibilityMode : '',
+      period: typeof ffPointsLeaderboardActivePeriod !== 'undefined' ? ffPointsLeaderboardActivePeriod : '',
+      ffPointsCurrentStaffId: typeof ffPointsCurrentStaffId !== 'undefined' ? String(ffPointsCurrentStaffId || '') : '',
+      rosterId: '',
+      rosterName: ''
+    };
+    try {
+      if (typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function') {
+        const r = ffResolveCurrentStaffRowFromFfStaffV1();
+        if (r) {
+          snap.rosterId = String(r.id || r.staffId || '');
+          snap.rosterName = String(r.name || '');
+        }
+      }
+    } catch (e) {
+      snap.rosterErr = String(e && e.message ? e.message : e);
+    }
+    console.info('[PointsDiag] ffDumpPointsDiagnostics snapshot', snap);
+    const accountId = snap.accountId;
+    if (!accountId) {
+      console.warn('[PointsDiag] missing accountId — check currentSalonId / shared setup');
+      return snap;
+    }
+    let filterId = String(snap.rosterId || snap.ffPointsCurrentStaffId || '').trim();
+    try {
+      const db = getTrainingDb();
+      const api = await getTrainingFirestoreApi();
+      const cloudSidRaw = await ffResolveCurrentPointsStaffIdFromCloud(db, api);
+      snap.cloudResolvedStaffId = String(cloudSidRaw || '');
+      var cloudSidExp = ffExpandTruncatedStaffIdFromLocalStore(cloudSidRaw) || String(cloudSidRaw || '').trim();
+      var lsAuthedDiag = '';
+      try {
+        if (typeof localStorage !== 'undefined') {
+          lsAuthedDiag = String(localStorage.getItem('ff_authedStaffId_v1') || '').trim();
+        }
+      } catch (_) {}
+      filterId = ffLongestStaffIdCandidate([
+        cloudSidExp,
+        cloudSidRaw,
+        ffExpandTruncatedStaffIdFromLocalStore(cloudSidRaw) || '',
+        filterId,
+        ffExpandTruncatedStaffIdFromLocalStore(filterId) || '',
+        lsAuthedDiag,
+        String(window.__ff_authedStaffId || '').trim()
+      ]);
+      if (!filterId) filterId = cloudSidExp;
+      filterId = (ffExpandTruncatedStaffIdFromLocalStore(filterId) || filterId).trim();
+      filterId = ffLongestStaffIdCandidate([cloudSidExp, cloudSidRaw, filterId, snap.rosterId, snap.ffPointsCurrentStaffId]);
+      if (cloudSidExp || cloudSidRaw) {
+        filterId = (cloudSidExp || cloudSidRaw || filterId).trim();
+      } else if (typeof ffResolveCanonicalPointsStaffIdWithVerify === 'function') {
+        filterId = await ffResolveCanonicalPointsStaffIdWithVerify(
+          db,
+          api,
+          String(window.currentSalonId || ''),
+          filterId
+        ) || filterId;
+      }
+      snap.canonicalVerifiedStaffId = filterId;
+      snap.effectiveQueryStaffId = filterId;
+      const { collection, query, where, getDocs } = api;
+      const qref = query(collection(db, 'accounts/' + accountId + '/pointsEvents'), where('staffId', '==', filterId));
+      let qSnap;
+      try {
+        qSnap = await getDocs(qref);
+      } catch (qe) {
+        snap.queryError = qe && qe.code ? qe.code : String(qe);
+        console.error('[PointsDiag] pointsEvents getDocs failed', qe);
+        return snap;
+      }
+      const rows = qSnap.docs.map(function(ds) {
+        const d = ds.data() || {};
+        return {
+          id: ds.id,
+          staffId: d.staffId,
+          points: d.points,
+          type: d.type,
+          monthKey: d.monthKey,
+          weekKey: d.weekKey,
+          voided: d.voided
+        };
+      });
+      snap.queryStaffId = filterId;
+      snap.eventsReturned = rows.length;
+      snap.sampleEvents = rows.slice(0, 8);
+      console.info('[PointsDiag] pointsEvents for staffId (first 8)', snap.sampleEvents);
+      try {
+        snap.appMonthKey = typeof ffPointsMonthKey === 'function' ? ffPointsMonthKey(new Date()) : '';
+        snap.appWeekKey = typeof ffPointsWeekKeyOffset === 'function' ? ffPointsWeekKeyOffset(0) : '';
+      } catch (_) {}
+      return snap;
+    } catch (e2) {
+      snap.unexpected = String(e2 && e2.message ? e2.message : e2);
+      console.error('[PointsDiag] ffDumpPointsDiagnostics error', e2);
+      return snap;
+    }
   };
 
   if (typeof document !== 'undefined' && !document.__ffPointsAppLocationListenerBound) {
