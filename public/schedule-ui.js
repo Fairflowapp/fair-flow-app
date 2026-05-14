@@ -3122,6 +3122,7 @@ function renderScheduleViewTabs() {
   const canEdit = scheduleUserCanManualEdit();
   if (modeWrap) {
     modeWrap.style.display = canEdit ? "inline-flex" : "none";
+    modeWrap.classList.toggle("ff-schedule-tabs-visible", canEdit);
   }
   const myShiftsBtn = document.getElementById("scheduleViewMyShiftsBtn");
   const buildScheduleBtn = document.getElementById("scheduleViewBuildScheduleBtn");
@@ -3163,6 +3164,7 @@ function renderScheduleViewTabs() {
     const ctx = getScheduleAccessContext();
     const showTeamTabs = canEdit && schedulePreviewMode === "build" && !ctx.viewOwnOnly;
     toggleWrap.style.display = showTeamTabs ? "inline-flex" : "none";
+    toggleWrap.classList.toggle("ff-schedule-tabs-visible", showTeamTabs);
   }
   const managementBtn = document.getElementById("scheduleViewManagementBtn");
   const techniciansBtn = document.getElementById("scheduleViewTechniciansBtn");
@@ -3411,6 +3413,16 @@ function _ffIcsFormatLocalDateTime(dateKey, timeHHmm) {
   return `${d}T${t}00`;
 }
 
+function _ffCalendarTimezone() {
+  try {
+    const prefs = (typeof window !== "undefined" && window.settings && window.settings.preferences) || {};
+    const tz = typeof prefs.salonTimeZone === "string" ? prefs.salonTimeZone.trim() : "";
+    return tz || Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
+  } catch (_) {
+    return "America/New_York";
+  }
+}
+
 /** iCalendar strings: CR-LF line endings and backslash-escape for TEXT values. */
 function _ffIcsEscape(str) {
   return String(str || "")
@@ -3478,6 +3490,8 @@ function buildMyShiftsIcsForCurrentWeek() {
   })();
 
   const events = [];
+  const calendarLinks = [];
+  const calendarTimezone = _ffCalendarTimezone();
   const pushEvent = ({ dateKey, startTime, endTime, locationName, uidSuffix }) => {
     const dtStart = _ffIcsFormatLocalDateTime(dateKey, startTime);
     const dtEnd = _ffIcsFormatLocalDateTime(dateKey, endTime);
@@ -3499,6 +3513,18 @@ function buildMyShiftsIcsForCurrentWeek() {
     if (locationName) lines.push(`LOCATION:${_ffIcsEscape(locationName)}`);
     lines.push("END:VEVENT");
     events.push(lines.join("\r\n"));
+    const params = new URLSearchParams({
+      action: "TEMPLATE",
+      text: summary,
+      dates: `${dtStart}/${dtEnd}`,
+      details: desc,
+      ctz: calendarTimezone,
+    });
+    if (locationName) params.set("location", locationName);
+    calendarLinks.push({
+      url: `https://calendar.google.com/calendar/render?${params.toString()}`,
+      label: `${dateKey} ${String(startTime || "").trim()}-${String(endTime || "").trim()}`,
+    });
   };
 
   // Active location (the currently-rendered draft).
@@ -3550,16 +3576,143 @@ function buildMyShiftsIcsForCurrentWeek() {
     "END:VCALENDAR",
     "",
   ].join("\r\n");
-  return { ics, eventCount: events.length };
+  return { ics, eventCount: events.length, calendarLinks };
+}
+
+function isLikelyMobileCalendarDevice() {
+  try {
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "")
+      || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent || ""));
+  } catch (_) {
+    return false;
+  }
+}
+
+function isLikelyAndroidCalendarDevice() {
+  try {
+    return /Android/i.test(navigator.userAgent || "");
+  } catch (_) {
+    return false;
+  }
+}
+
+function ffOpenCalendarUrl(url) {
+  if (!url) return;
+  try {
+    const opened = window.open(url, "_blank", "noopener");
+    if (!opened) window.location.href = url;
+  } catch (_) {
+    window.location.href = url;
+  }
+}
+
+function ffDownloadCalendarFile(downloadFile) {
+  if (!downloadFile || !downloadFile.blobUrl || !downloadFile.filename) return;
+  const a = document.createElement("a");
+  a.href = downloadFile.blobUrl;
+  a.download = downloadFile.filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { try { document.body.removeChild(a); } catch (_) {} }, 200);
+}
+
+async function ffShareOrDownloadAllShifts(downloadFile) {
+  if (!downloadFile) return;
+  try {
+    const file = downloadFile.file;
+    const canShareFile =
+      file
+      && typeof navigator !== "undefined"
+      && typeof navigator.share === "function"
+      && typeof navigator.canShare === "function"
+      && navigator.canShare({ files: [file] });
+    if (canShareFile) {
+      await navigator.share({
+        title: "Fair Flow schedule",
+        text: "Fair Flow shifts",
+        files: [file],
+      });
+      ffScheduleAppToast("Choose Calendar to import all shifts.", 3500);
+      return;
+    }
+  } catch (e) {
+    if (e && (e.name === "AbortError" || e.name === "NotAllowedError")) return;
+    console.warn("[ScheduleUI] All-shifts calendar share failed; using download fallback", e);
+  }
+  ffDownloadCalendarFile(downloadFile);
+  ffScheduleAppToast("Calendar file downloaded. Open it to import all shifts.", 4500);
+}
+
+function ffShowMobileCalendarChoice(calendarLinks, downloadFile) {
+  const links = Array.isArray(calendarLinks) ? calendarLinks.filter((x) => x && x.url) : [];
+  if (!links.length) return false;
+  const existing = document.getElementById("ffMobileCalendarChoiceModal");
+  if (existing) existing.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "ffMobileCalendarChoiceModal";
+  overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.42);display:flex;align-items:flex-end;justify-content:center;padding:14px 14px 92px;";
+
+  const panel = document.createElement("div");
+  panel.style.cssText = "width:100%;max-width:420px;background:#fff;border-radius:18px;box-shadow:0 24px 60px rgba(15,23,42,.24);padding:14px;max-height:68vh;overflow:auto;";
+
+  const title = document.createElement("div");
+  title.textContent = "Add shifts to calendar";
+  title.style.cssText = "font-size:16px;font-weight:800;color:#111827;margin-bottom:5px;";
+  panel.appendChild(title);
+
+  const note = document.createElement("div");
+  note.textContent = "Add all shifts together, or open each shift separately in Google Calendar and tap Save.";
+  note.style.cssText = "font-size:12px;color:#6b7280;line-height:1.35;margin-bottom:10px;";
+  panel.appendChild(note);
+
+  if (downloadFile && downloadFile.blobUrl && downloadFile.filename) {
+    const allBtn = document.createElement("button");
+    allBtn.type = "button";
+    allBtn.textContent = `Add all ${links.length} shifts together`;
+    allBtn.style.cssText = "width:100%;display:flex;justify-content:center;align-items:center;margin:8px 0 12px;padding:12px 14px;border:0;border-radius:14px;background:#111827;color:#fff;font-size:14px;font-weight:850;";
+    allBtn.addEventListener("click", async () => {
+      await ffShareOrDownloadAllShifts(downloadFile);
+    });
+    panel.appendChild(allBtn);
+
+    const separator = document.createElement("div");
+    separator.textContent = "Or add one shift at a time";
+    separator.style.cssText = "font-size:11px;font-weight:800;color:#6b7280;text-align:center;margin:2px 0 8px;text-transform:uppercase;letter-spacing:.04em;";
+    panel.appendChild(separator);
+  }
+
+  links.forEach((link, idx) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = `Open shift ${idx + 1}: ${link.label || "shift"}`;
+    btn.style.cssText = "width:100%;display:flex;justify-content:center;align-items:center;margin:7px 0;padding:10px 12px;border:1px solid #c4b5fd;border-radius:12px;background:#ede9fe;color:#5b21b6;font-size:12px;font-weight:800;";
+    btn.addEventListener("click", () => ffOpenCalendarUrl(link.url));
+    panel.appendChild(btn);
+  });
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.textContent = "Close";
+  closeBtn.style.cssText = "width:100%;margin-top:10px;padding:9px 14px;border:0;border-radius:12px;background:#f3f4f6;color:#374151;font-size:12px;font-weight:700;";
+  closeBtn.addEventListener("click", () => overlay.remove());
+  panel.appendChild(closeBtn);
+
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  return true;
 }
 
 /**
- * Triggers a browser download of the current week's shifts as a .ics file.
- * Works universally — iPhone / Android / desktop open it in the default
- * calendar app (Apple Calendar / Google Calendar / Outlook / etc.).
+ * Shares or downloads the current week's shifts as a .ics file. Mobile devices
+ * prefer the native share sheet so the user can choose Calendar explicitly.
  */
-function downloadMyShiftsIcsForCurrentWeek() {
-  const { ics, eventCount } = buildMyShiftsIcsForCurrentWeek();
+async function downloadMyShiftsIcsForCurrentWeek() {
+  const { ics, eventCount, calendarLinks } = buildMyShiftsIcsForCurrentWeek();
   if (!ics || eventCount === 0) {
     ffScheduleAppToast("No shifts found for you this week.", 4000);
     return;
@@ -3568,19 +3721,46 @@ function downloadMyShiftsIcsForCurrentWeek() {
   const filename = `my-shifts-${weekStart}.ics`;
   try {
     const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
+    const mobileDownloadUrl = URL.createObjectURL(blob);
+    const file = new File([blob], filename, { type: "text/calendar" });
+    const downloadFile = { blobUrl: mobileDownloadUrl, filename, file };
+    if (isLikelyAndroidCalendarDevice() && ffShowMobileCalendarChoice(calendarLinks, downloadFile)) {
+      return;
+    }
+    const canShareCalendarFile =
+      typeof navigator !== "undefined"
+      && typeof navigator.share === "function"
+      && typeof navigator.canShare === "function"
+      && navigator.canShare({ files: [file] });
+    if (isLikelyMobileCalendarDevice() && canShareCalendarFile) {
+      await navigator.share({
+        title: "Fair Flow schedule",
+        text: `Fair Flow schedule - ${weekStart}`,
+        files: [file],
+      });
+      ffScheduleAppToast("Choose Calendar to import your shifts.", 3500);
+      return;
+    }
+    if (isLikelyMobileCalendarDevice() && ffShowMobileCalendarChoice(calendarLinks, downloadFile)) return;
+    const url = mobileDownloadUrl;
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
+    a.rel = "noopener";
+    a.style.display = "none";
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
       try { document.body.removeChild(a); } catch (_) {}
       try { URL.revokeObjectURL(url); } catch (_) {}
     }, 200);
-    ffScheduleAppToast(`Added ${eventCount} shift${eventCount === 1 ? "" : "s"} to the calendar file.`, 3500);
+    ffScheduleAppToast(`Calendar file downloaded with ${eventCount} shift${eventCount === 1 ? "" : "s"}. Open it to import.`, 4500);
   } catch (e) {
-    console.warn("[ScheduleUI] ICS download failed", e);
+    if (e && (e.name === "AbortError" || e.name === "NotAllowedError")) {
+      ffScheduleAppToast("Calendar import was cancelled.", 3500);
+      return;
+    }
+    console.warn("[ScheduleUI] ICS share/download failed", e);
     ffScheduleAppToast("Could not generate the calendar file.", 4000);
   }
 }
@@ -3771,9 +3951,9 @@ function renderScheduleSummary(validation, days) {
     `;
     const btn = document.getElementById("scheduleAddToCalendarBtn");
     if (btn && !disabled) {
-      btn.addEventListener("click", (e) => {
+      btn.addEventListener("click", async (e) => {
         e.preventDefault();
-        downloadMyShiftsIcsForCurrentWeek();
+        await downloadMyShiftsIcsForCurrentWeek();
       });
     }
     return;
@@ -4528,13 +4708,87 @@ function renderScheduleBoard(draft, validation, staffList) {
       : `<div style="font-size:11px;color:#6b7280;line-height:1.35;">${roleSafe}${techTypesSafe ? `<br/><span style="font-size:10px;color:#9ca3af;">${techTypesSafe}</span>` : ''}</div>`;
 
     return `
-      <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;">
+      <div class="schedule-board-desktop-row" style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;">
         <div style="padding:7px 9px;border-bottom:1px solid #e5e7eb;background:#fff;display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:0;">
           ${nameControl}
           ${roleRowHtml}
         </div>
         ${cells}
       </div>
+    `;
+  }).join("");
+
+  const mobileRowHtml = filteredStaff.map((staff) => {
+    const staffKey = getScheduleStaffKey(staff);
+    const roleLabel = getScheduleRoleLabel(staff);
+    const weeklyMins = computeStaffWeeklyScheduledMinutes(staffKey, draftDays, assignmentLookup);
+    const weeklyHours = canBuild ? formatWeeklyHoursShort(weeklyMins) : "";
+    const staffName = escapeScheduleHtml(staff.name || "Unknown Staff");
+    const roleSafe = escapeScheduleHtml(roleLabel);
+    const safeStaffName = escapeScheduleAttr(staff.name || "");
+    const dayCards = draftDays.map((day) => {
+      const dayLabel = formatBoardDayLabel(day.date);
+      const assignment = assignmentLookup.get(`${staffKey}::${day.date}`) || null;
+      const manualOff = Boolean(!assignment && dayHasManualOff(day, staffKey));
+      const requestsList = Array.isArray(schedulePreviewState.requests) ? schedulePreviewState.requests : [];
+      const inboxDisp = getInboxApprovalDisplayForDate(staff, requestsList, day.date);
+      const inboxApprovedOff = Boolean(!assignment && !manualOff && staffDayBlockedByApprovedInbox(staff, day.date));
+      const businessStatus = day.businessStatus || getBusinessStatusForDate(day.date);
+      const dayIsClosed = businessStatus?.isOpen === false || getBusinessStatusForDate(day.date).isOpen === false;
+      const assignmentId = assignment ? getAssignmentId(assignment, day.date) : "";
+      const canEditShift = Boolean(assignment && !dayIsClosed && canManual);
+      const editBtn = canEditShift
+        ? `<button type="button" data-schedule-edit-btn="true" data-staff-id="${escapeScheduleAttr(staffKey)}" data-date="${escapeScheduleAttr(day.date)}" data-start="${escapeScheduleAttr(assignment.startTime || "")}" data-end="${escapeScheduleAttr(assignment.endTime || "")}" data-staff-name="${safeStaffName}" title="Edit hours" aria-label="Edit shift hours" style="border:none;background:#ede9fe;color:#7c3aed;border-radius:999px;font-size:11px;font-weight:800;padding:3px 7px;cursor:pointer;line-height:1.2;">Edit</button>`
+        : "";
+      const manualAddBtn =
+        !assignment && !manualOff && !dayIsClosed && canManual
+          ? `<button type="button" data-schedule-manual-add="true" data-approved-inbox="${inboxApprovedOff ? "1" : "0"}" data-staff-id="${escapeScheduleAttr(staffKey)}" data-date="${escapeScheduleAttr(day.date)}" data-staff-name="${safeStaffName}" title="Add shift manually" aria-label="Add shift manually" style="border:1px dashed #c4b5fd;background:#faf5ff;color:#7c3aed;border-radius:999px;font-size:11px;font-weight:800;padding:3px 8px;cursor:pointer;line-height:1.2;white-space:nowrap;">+ Add shift</button>`
+          : "";
+      const noteParts = [];
+      if (manualOff) noteParts.push("Marked OFF");
+      if (inboxApprovedOff && inboxDisp.hasFullDayRequest) noteParts.push("Approved day off");
+      if (inboxDisp.lateStart) noteParts.push(`Approved START ${formatScheduleTimeShortAmPm(inboxDisp.lateStart)}`);
+      if (inboxDisp.earlyLeave) noteParts.push(`Approved leave by ${formatScheduleTimeShortAmPm(inboxDisp.earlyLeave)}`);
+      const noteHtml = noteParts.length
+        ? `<div style="margin-top:5px;font-size:11px;font-weight:700;color:#64748b;line-height:1.35;">${noteParts.map(escapeScheduleHtml).join("<br/>")}</div>`
+        : "";
+      const statusHtml = dayIsClosed
+        ? `<span style="color:#9ca3af;font-size:13px;font-weight:700;">Closed</span>`
+        : assignment
+          ? `<span ${canManual ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : `style="user-select:none;"`}>${escapeScheduleHtml(assignment.startTime || "--:--")} - ${escapeScheduleHtml(assignment.endTime || "--:--")}</span>`
+          : manualOff
+            ? `<span style="color:#64748b;font-weight:800;">Marked OFF</span>`
+            : inboxApprovedOff
+              ? `<span style="color:#0f766e;font-weight:800;">Approved off</span>`
+              : `<span style="color:#9ca3af;font-weight:800;">Off</span>`;
+      return `
+        <div style="border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;padding:7px 9px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <div style="min-width:0;">
+              <div style="font-size:12px;font-weight:900;color:#111827;line-height:1.15;">${dayLabel.title}</div>
+              <div style="font-size:10px;color:#9ca3af;margin-top:0;">${dayLabel.subtitle}</div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:7px;text-align:right;font-size:13px;font-weight:900;color:${assignment ? "#5b21b6" : "#6b7280"};line-height:1.25;min-width:0;">
+              ${statusHtml}
+              ${editBtn || manualAddBtn}
+            </div>
+          </div>
+          ${noteHtml}
+        </div>
+      `;
+    }).join("");
+    return `
+      <article class="schedule-mobile-staff-card" style="border:1px solid #e5e7eb;border-radius:16px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,0.04);overflow:hidden;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 14px;border-bottom:1px solid #ddd6fe;background:#f5f3ff;">
+          <div style="min-width:0;">
+            <div style="font-size:14px;font-weight:900;color:#5b21b6;line-height:1.25;">${staffName}${weeklyHours ? ` <span style="font-size:12px;color:#7c3aed;font-weight:700;">(${weeklyHours})</span>` : ""}</div>
+            <div style="font-size:12px;color:#6d28d9;margin-top:3px;font-weight:600;">${roleSafe}</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;padding:8px;">
+          ${dayCards}
+        </div>
+      </article>
     `;
   }).join("");
 
@@ -4551,9 +4805,45 @@ function renderScheduleBoard(draft, validation, staffList) {
     canPickStandBy,
     standByView: schedulePreviewView,
   });
+  const mobileStandByHtml = (() => {
+    const map = standByMap && typeof standByMap === "object" ? standByMap : {};
+    const viewKey = schedulePreviewView === "technicians" ? "technicians" : "management";
+    const standbyTextStyle = "font-size:13px;font-weight:800;color:#374151;line-height:1.35;";
+    const dayCards = draftDays.map((day) => {
+      const dayLabel = formatBoardDayLabel(day.date);
+      const bs = day.businessStatus || getBusinessStatusForDate(day.date);
+      const dayIsClosed = bs.isOpen === false || getBusinessStatusForDate(day.date).isOpen === false;
+      const entry = parseStandByDayEntry(map[day.date]);
+      const slotIds = entry[viewKey] || ["", ""];
+      const names = dayIsClosed
+        ? `<span style="color:#9ca3af;font-size:13px;font-weight:700;">Closed</span>`
+        : renderStandBySlotNamesHtml(slotIds, staffList, draft, standbyTextStyle);
+      const editBtn = canPickStandBy && !dayIsClosed
+        ? `<button type="button" data-schedule-standby-edit="true" data-date="${escapeScheduleAttr(day.date)}" title="Choose stand by" aria-label="Edit stand by for this day" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:999px;font-size:12px;font-weight:800;padding:5px 10px;cursor:pointer;">Edit</button>`
+        : "";
+      return `
+        <div style="border:1px solid #e5e7eb;border-radius:12px;background:#f8fafc;padding:10px 11px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <div>
+            <div style="font-size:12px;font-weight:900;color:#111827;">${dayLabel.title}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-top:1px;">${dayLabel.subtitle}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;text-align:right;">${names}${editBtn}</div>
+        </div>
+      `;
+    }).join("");
+    return `
+      <details class="schedule-mobile-staff-card" style="border:1px solid #e5e7eb;border-radius:16px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,0.04);overflow:hidden;">
+        <summary style="list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:#f8fafc;border-bottom:1px solid #f1f5f9;cursor:pointer;">
+          <span style="font-size:13px;font-weight:900;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;">Stand By</span>
+          <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:999px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;font-weight:900;">▼</span>
+        </summary>
+        <div style="display:flex;flex-direction:column;gap:8px;padding:10px;">${dayCards}</div>
+      </details>
+    `;
+  })();
 
   board.innerHTML = `
-    <section style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;overflow:auto;">
+    <section class="schedule-board-desktop" style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;overflow:auto;">
       <div style="min-width:${firstColW + (draftDays.length * 104)}px;">
         <div style="display:grid;grid-template-columns:${gridTemplate};align-items:stretch;">
           <div style="padding:9px 11px;border-bottom:1px solid #e5e7eb;background:#f8fafc;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;">Staff${showStaffAck ? ` <span style="font-weight:600;color:#94a3b8;font-size:10px;">(viewed)</span>` : ""}</div>
@@ -4562,6 +4852,10 @@ function renderScheduleBoard(draft, validation, staffList) {
         ${rowHtml}
         ${standByRowHtml}
       </div>
+    </section>
+    <section class="schedule-board-mobile-list">
+      ${mobileRowHtml}
+      ${mobileStandByHtml}
     </section>
   `;
   bindScheduleBoardDnD();
@@ -4935,6 +5229,18 @@ export async function goToSchedule() {
   }
 }
 
+function setScheduleMobileControlsCollapsed(collapsed) {
+  const screen = document.getElementById("scheduleScreen");
+  const btn = document.getElementById("scheduleMobileControlsToggle");
+  const icon = document.getElementById("scheduleMobileControlsToggleIcon");
+  if (!screen || !btn) return;
+  screen.classList.toggle("ff-schedule-controls-collapsed", collapsed === true);
+  btn.setAttribute("aria-expanded", collapsed === true ? "false" : "true");
+  btn.setAttribute("aria-label", collapsed === true ? "Show schedule controls" : "Collapse schedule controls");
+  btn.setAttribute("title", collapsed === true ? "Show controls" : "Collapse controls");
+  if (icon) icon.textContent = collapsed === true ? "\u25BC" : "\u25B2";
+}
+
 function bindScheduleUi() {
   const scheduleOpenSettingsBtn = document.getElementById("scheduleScreenOpenSettingsBtn");
   if (scheduleOpenSettingsBtn && !scheduleOpenSettingsBtn.__ffOpenScheduleSettingsBound) {
@@ -4946,6 +5252,17 @@ function bindScheduleUi() {
       if (typeof window !== "undefined" && typeof window.goToUserProfile === "function") {
         window.goToUserProfile("schedule");
       }
+    });
+  }
+
+  const scheduleMobileControlsToggle = document.getElementById("scheduleMobileControlsToggle");
+  if (scheduleMobileControlsToggle && !scheduleMobileControlsToggle.__ffScheduleMobileControlsBound) {
+    scheduleMobileControlsToggle.__ffScheduleMobileControlsBound = true;
+    scheduleMobileControlsToggle.addEventListener("click", (e) => {
+      e.preventDefault();
+      const screen = document.getElementById("scheduleScreen");
+      const collapsed = !(screen && screen.classList.contains("ff-schedule-controls-collapsed"));
+      setScheduleMobileControlsCollapsed(collapsed);
     });
   }
 

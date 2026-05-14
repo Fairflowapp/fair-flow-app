@@ -52,6 +52,39 @@
     closePopover();
   }
 
+  function canUseActiveLocationsFallback() {
+    try {
+      if (typeof window.ffCurrentUserSalonOwnerPermissionBypass === "function" && window.ffCurrentUserSalonOwnerPermissionBypass()) {
+        return true;
+      }
+    } catch (e) {}
+    try {
+      var role = String(window.__ff_user_role || "").toLowerCase();
+      return role === "owner" || role === "admin" || role === "manager";
+    } catch (e) {}
+    return false;
+  }
+
+  function getSwitcherLocations() {
+    var allowed =
+      typeof window.ffGetUserAllowedLocations === "function"
+        ? window.ffGetUserAllowedLocations()
+        : [];
+    if (Array.isArray(allowed) && allowed.length > 1) return allowed;
+
+    // During boot the staff-derived allowed list can briefly be empty/partial.
+    // Managers with access to multiple active branches should still keep the
+    // switcher visible instead of losing the icon until the next refresh.
+    if (canUseActiveLocationsFallback() && typeof window.ffGetActiveLocations === "function") {
+      try {
+        var active = window.ffGetActiveLocations() || [];
+        if (Array.isArray(active) && active.length > 1) return active;
+      } catch (e) {}
+    }
+
+    return Array.isArray(allowed) ? allowed : [];
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   // Popover (custom dropdown menu) — portaled to document.body so it floats
   // above sticky navs and modals.
@@ -144,10 +177,7 @@
 
   function renderPopoverBody() {
     var pop = ensurePopoverHost();
-    var locations =
-      typeof window.ffGetUserAllowedLocations === "function"
-        ? window.ffGetUserAllowedLocations()
-        : [];
+    var locations = getSwitcherLocations();
     var currentActive =
       typeof window.ffGetActiveLocationId === "function"
         ? window.ffGetActiveLocationId()
@@ -221,10 +251,7 @@
       return;
     }
 
-    var allowedLocations =
-      typeof window.ffGetUserAllowedLocations === "function"
-        ? window.ffGetUserAllowedLocations()
-        : [];
+    var allowedLocations = getSwitcherLocations();
 
     if (!Array.isArray(allowedLocations) || allowedLocations.length === 0) {
       hide(mount);
