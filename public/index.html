@@ -5596,9 +5596,36 @@ dialog footer button, .code-dialog footer button {
           .ff-toggle-switch input:checked + .ff-toggle-slider::before{transform:translateX(18px);}
           .ff-toggle-switch input:focus-visible + .ff-toggle-slider{box-shadow:0 0 0 3px rgba(124,58,237,.3);}
           .ff-toggle-switch input:disabled + .ff-toggle-slider{opacity:.55;cursor:not-allowed;}
+          .ff-points-settings-card{width:100%;max-width:760px;max-height:92vh;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(15,23,42,0.26);overflow:hidden;display:flex;flex-direction:column;}
+          .ff-points-settings-body{padding:12px 18px;overflow-y:auto;overflow-x:hidden;}
+          #pointsSettingsFields{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px;}
+          .ff-points-mobile-metrics{display:none;}
+          .ff-points-adjust-mobile{display:none;}
+          @media (max-width: 640px){
+            #pointsSettingsModal{align-items:stretch!important;justify-content:center!important;padding:10px!important;overflow:hidden!important;}
+            .ff-points-settings-card{max-width:none!important;width:100%!important;max-height:calc(100vh - 20px)!important;border-radius:14px!important;}
+            .ff-points-settings-body{padding:12px!important;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch;}
+            #pointsSettingsFields{grid-template-columns:1fr!important;gap:10px!important;min-width:0!important;}
+            #pointsSettingsFields label{min-width:0!important;width:100%!important;box-sizing:border-box!important;}
+            #pointsSettingsFields input{width:100%!important;box-sizing:border-box!important;}
+            #pointsShowRankToPrivateWrap{grid-column:auto!important;}
+            #pointsAppScreen .ff-points-leaderboard-header{display:none!important;}
+            #pointsAppScreen .ff-points-leaderboard-row,
+            #pointsAppScreen .ff-points-leaderboard-summary{display:grid!important;grid-template-columns:42px minmax(0,1fr) auto!important;gap:8px 10px!important;align-items:center!important;padding:12px!important;}
+            #pointsAppScreen .ff-points-cell-rank{grid-column:1!important;grid-row:1!important;}
+            #pointsAppScreen .ff-points-cell-staff{grid-column:2!important;grid-row:1!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;}
+            #pointsAppScreen .ff-points-cell-points{grid-column:3!important;grid-row:1!important;}
+            #pointsAppScreen .ff-points-cell-goal,
+            #pointsAppScreen .ff-points-cell-progress{display:none!important;}
+            #pointsAppScreen .ff-points-mobile-metrics{grid-column:1 / -1!important;display:flex!important;flex-wrap:wrap!important;gap:7px!important;margin-top:2px!important;}
+            #pointsAppScreen .ff-points-mobile-chip{display:inline-flex!important;align-items:center!important;gap:4px!important;padding:5px 8px!important;border-radius:999px!important;background:#f8fafc!important;border:1px solid #e5e7eb!important;color:#6b7280!important;font-size:11px!important;font-weight:800!important;}
+            #pointsAppScreen .ff-points-mobile-chip strong{color:#111827!important;font-weight:900!important;}
+            #pointsAppScreen .ff-points-adjust-desktop{display:none!important;}
+            #pointsAppScreen .ff-points-adjust-mobile{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:auto!important;min-width:0!important;max-width:none!important;overflow:visible!important;white-space:nowrap!important;padding:5px 10px!important;}
+          }
         </style>
         <div id="pointsSettingsModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:200002;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()">
-          <div style="width:100%;max-width:760px;max-height:92vh;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(15,23,42,0.26);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+          <div class="ff-points-settings-card" onclick="event.stopPropagation()">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px 10px;border-bottom:1px solid #e5e7eb;">
               <div>
                 <h3 id="pointsSettingsTitle" style="margin:0;font-size:16px;font-weight:800;color:#111827;">Fair Flow Setup</h3>
@@ -5606,8 +5633,8 @@ dialog footer button, .code-dialog footer button {
               </div>
               <button type="button" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()" style="border:none;background:none;color:#6b7280;font-size:22px;line-height:1;cursor:pointer;">x</button>
             </div>
-            <div style="padding:12px 18px;overflow-y:auto;">
-              <div id="pointsSettingsFields" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px;">
+            <div class="ff-points-settings-body">
+              <div id="pointsSettingsFields">
                 <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Task Completed<input id="pointsTaskCompleted" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Photo Upload<input id="pointsPhotoUpload" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Video Upload<input id="pointsVideoUpload" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
@@ -5618,7 +5645,6 @@ dialog footer button, .code-dialog footer button {
                 <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Queue Second<input id="pointsQueueSecond" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Queue Third<input id="pointsQueueThird" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
                 <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Queue Join<input id="pointsQueueJoin" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
-                <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;">Monthly Goal<input id="pointsMonthlyGoal" type="number" min="0" step="1" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:400;"></label>
                 <label id="pointsShowRankToPrivateWrap" style="grid-column:1/-1;display:flex;flex-direction:column;gap:3px;font-size:11px;color:#374151;font-weight:700;margin-top:2px;">Rank Visibility<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;"><span class="ff-toggle-switch"><input id="pointsShowRankToPrivate" type="checkbox"><span class="ff-toggle-slider"></span></span><span style="flex:1;font-size:11px;color:#374151;font-weight:600;line-height:1.35;">Show staff their rank <span id="pointsShowRankToPrivateHint" style="font-size:10px;font-weight:500;color:#9ca3af;">· Applies to staff with "View own Fair Flow Points" permission</span></span></div></label>
               </div>
             </div>
@@ -9934,17 +9960,21 @@ window.ffCurrentUserHasPointsAccess = ffCurrentUserHasPointsAccess;
 
 /**
  * Authoritative gate for opening / saving Fair Flow Points settings (account or branch).
- * Bound to the staff `points_manage` permission so a salon-level manager role alone
- * is NOT enough - a manager must also be granted Manage/Edit Fair Flow Points.
- * Only the salon owner bypasses this to avoid lockout. Admin/manager users
- * still need the explicit `points_manage` permission.
+ * Owners/admins may always manage account-level point values; other staff need
+ * the explicit staff `points_manage` permission.
  */
 function ffCurrentUserCanManagePointsSettings() {
   try {
     if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) return true;
   } catch (_) {}
   try {
+    const role = String(window.__ff_user_role || '').trim().toLowerCase();
+    if (role === 'owner' || role === 'admin') return true;
+  } catch (_) {}
+  try {
     const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+    const staffRole = String(staff?.role || '').trim().toLowerCase();
+    if (staff?.isAdmin === true || staffRole === 'owner' || staffRole === 'admin') return true;
     return ffStaffHasPointsManagePermission(staff);
   } catch (_) {
     return false;
@@ -34227,6 +34257,28 @@ function initializeAppsPanel() {
     if (typeof ffSaveStaffStore === 'function') ffSaveStaffStore(store);
   }
 
+  function ffNormalizeStaffMonthlyPointsGoal(staff) {
+    const enabled = staff && staff.pointsMonthlyGoalEnabled === true;
+    const raw = Number(staff && staff.pointsMonthlyGoal);
+    const goal = Number.isFinite(raw) && raw > 0 ? Math.round(raw) : 0;
+    return {
+      enabled: enabled && goal > 0,
+      goal: goal
+    };
+  }
+
+  function ffSaveStaffMonthlyPointsGoal(staffId, enabled, goal) {
+    if (!staffId) return;
+    const store = (typeof ffGetStaffStore === 'function') ? ffGetStaffStore() : null;
+    if (!store || !Array.isArray(store.staff)) return;
+    const idx = store.staff.findIndex(function(s) { return s && s.id === staffId; });
+    if (idx === -1) return;
+    const n = Number(goal);
+    store.staff[idx].pointsMonthlyGoalEnabled = enabled === true;
+    store.staff[idx].pointsMonthlyGoal = Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+    if (typeof ffSaveStaffStore === 'function') ffSaveStaffStore(store);
+  }
+
   /**
    * Render the Earnings Rules tab for a staff member. Mirrors Mangomint's
    * Compensation layout (two stacked cards: Service Commission + Hourly)
@@ -34244,6 +34296,7 @@ function initializeAppsPanel() {
     const currencySym = ffGetSalonCurrencySymbol();
     const svcOn = rules.serviceCommission.enabled;
     const hourlyOn = rules.hourly.enabled;
+    const pointsGoal = ffNormalizeStaffMonthlyPointsGoal(staff);
 
     // Color tokens match the rest of the staff modal (purple primary) and
     // Mangomint's visual tone: soft cards, subtle borders, toggles in corner.
@@ -34320,6 +34373,22 @@ function initializeAppsPanel() {
       </div>
     `;
 
+    const monthlyPointsGoalCard = `
+      <div style="${cardStyle}">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          ${toggleHtml('ffMonthlyPointsGoalToggle', pointsGoal.enabled)}
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14px;font-weight:600;color:#111827;margin-bottom:2px;">Monthly Points Goal</div>
+            <div style="${subtle}">Set a custom monthly points goal for this staff member.</div>
+          </div>
+        </div>
+        <div id="ffMonthlyPointsGoalBody" style="display:${pointsGoal.enabled ? 'block' : 'none'};margin-top:16px;padding-top:16px;border-top:1px solid #f3f4f6;">
+          <label for="ffMonthlyPointsGoalValue" style="display:block;font-size:12px;color:#374151;font-weight:500;margin-bottom:6px;">Monthly Goal Points</label>
+          <input type="number" id="ffMonthlyPointsGoalValue" value="${pointsGoal.goal || ''}" min="0" step="1" inputmode="numeric" placeholder="120" style="width:160px;max-width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;outline:none;font-size:13px;font-family:inherit;background:#fff;box-sizing:border-box;"/>
+        </div>
+      </div>
+    `;
+
     container.innerHTML = `
       <div style="padding:4px 4px 16px 4px;">
         <div style="margin-bottom:14px;">
@@ -34328,6 +34397,7 @@ function initializeAppsPanel() {
         </div>
         ${serviceCard}
         ${hourlyCard}
+        ${monthlyPointsGoalCard}
         <div id="ffEarningsSavedHint" aria-live="polite" style="font-size:11px;color:#10b981;font-weight:600;height:14px;margin-top:6px;opacity:0;transition:opacity 0.2s ease;">Saved</div>
       </div>
     `;
@@ -34386,6 +34456,7 @@ function initializeAppsPanel() {
     wireToggleVisual('ffEarningsServiceToggle');
     wireToggleVisual('ffEarningsHourlyToggle');
     wireToggleVisual('ffEarningsGreaterOfToggle');
+    wireToggleVisual('ffMonthlyPointsGoalToggle');
 
     // Enable/disable body reveal + persist on every change.
     const svcToggleEl = container.querySelector('#ffEarningsServiceToggle');
@@ -34406,6 +34477,28 @@ function initializeAppsPanel() {
     }
     const greaterEl = container.querySelector('#ffEarningsGreaterOfToggle');
     if (greaterEl) greaterEl.addEventListener('change', persist);
+
+    const pointsGoalToggleEl = container.querySelector('#ffMonthlyPointsGoalToggle');
+    const pointsGoalBody = container.querySelector('#ffMonthlyPointsGoalBody');
+    const pointsGoalInput = container.querySelector('#ffMonthlyPointsGoalValue');
+    const persistPointsGoal = function() {
+      const enabled = !!(pointsGoalToggleEl && pointsGoalToggleEl.checked);
+      let n = Number(pointsGoalInput && pointsGoalInput.value);
+      if (!Number.isFinite(n) || n < 0) n = 0;
+      n = Math.round(n);
+      if (pointsGoalInput) pointsGoalInput.value = n > 0 ? String(n) : '';
+      ffSaveStaffMonthlyPointsGoal(staff.id, enabled, n);
+      flashSaved();
+    };
+    if (pointsGoalToggleEl && pointsGoalBody) {
+      pointsGoalToggleEl.addEventListener('change', function() {
+        pointsGoalBody.style.display = pointsGoalToggleEl.checked ? 'block' : 'none';
+        persistPointsGoal();
+      });
+    }
+    if (pointsGoalInput) {
+      pointsGoalInput.addEventListener('blur', persistPointsGoal);
+    }
 
     // Numeric inputs: clamp on blur, persist on blur (avoid thrashing Firestore
     // on every keystroke while still guaranteeing the last value wins).
@@ -38194,7 +38287,6 @@ function initializeUserProfileMenu() {
     queueSecond: 7,
     queueThird: 5,
     queueJoin: 2,
-    monthlyGoal: 120,
     pointsVisibilityMode: 'full',
     showRankToPrivate: false
   };
@@ -38209,8 +38301,7 @@ function initializeUserProfileMenu() {
     ['queueFirst', 'pointsQueueFirst'],
     ['queueSecond', 'pointsQueueSecond'],
     ['queueThird', 'pointsQueueThird'],
-    ['queueJoin', 'pointsQueueJoin'],
-    ['monthlyGoal', 'pointsMonthlyGoal']
+    ['queueJoin', 'pointsQueueJoin']
   ];
 
   function ffNormalizePointsSettings(data) {
@@ -38425,14 +38516,13 @@ function initializeUserProfileMenu() {
     }
   };
 
-  let ffPointsLeaderboardActivePeriod = 'thisWeek';
+  let ffPointsLeaderboardActivePeriod = 'thisMonth';
   // Tracks whether we've picked the initial period for the current session.
   // Private-mode staff land on "This month" on first load so they see their
   // monthly goal progress immediately; managers/admins keep the weekly default.
   // Once true, the user is free to switch periods without us overriding them.
   let ffPointsLeaderboardPeriodInitialized = false;
   let ffPointsLeaderboardRows = [];
-  let ffPointsLeaderboardMonthlyGoal = FF_POINTS_SETTINGS_DEFAULTS.monthlyGoal;
   let ffPointsVisibilityMode = 'full';
   // When the owner enables Show Rank to Private Staff, we compute a small
   // anonymous rank object {rank, total, percentile, points} for the current
@@ -38554,7 +38644,9 @@ function initializeUserProfileMenu() {
         if (!id) return;
         byId.set(id, {
           id,
-          name: String(staff.name || staff.displayName || staff.email || id).trim() || id
+          name: String(staff.name || staff.displayName || staff.email || id).trim() || id,
+          pointsMonthlyGoalEnabled: staff.pointsMonthlyGoalEnabled === true,
+          pointsMonthlyGoal: Number(staff.pointsMonthlyGoal) || 0
         });
       });
     } catch (e) {
@@ -38567,7 +38659,9 @@ function initializeUserProfileMenu() {
         if (!id || byId.has(id)) return;
         byId.set(id, {
           id,
-          name: String(worker.name || id).trim() || id
+          name: String(worker.name || id).trim() || id,
+          pointsMonthlyGoalEnabled: worker.pointsMonthlyGoalEnabled === true,
+          pointsMonthlyGoal: Number(worker.pointsMonthlyGoal) || 0
         });
       });
     } catch (_) {}
@@ -38579,7 +38673,13 @@ function initializeUserProfileMenu() {
       if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) return true;
     } catch (_) {}
     try {
+      const role = String(window.__ff_user_role || '').trim().toLowerCase();
+      if (role === 'owner' || role === 'admin') return true;
+    } catch (_) {}
+    try {
       const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
+      const staffRole = String(staff?.role || '').trim().toLowerCase();
+      if (staff?.isAdmin === true || staffRole === 'owner' || staffRole === 'admin') return true;
       if (typeof ffStaffHasPointsManagePermission === 'function' && ffStaffHasPointsManagePermission(staff)) return true;
     } catch (_) {}
     return false;
@@ -39063,18 +39163,45 @@ function initializeUserProfileMenu() {
         const summary = snap.exists() ? (snap.data() || {}) : {};
         const weekMatches = String(summary.currentWeekKey || '') === currentWeekKey;
         const monthMatches = String(summary.currentMonthKey || '') === currentMonthKey;
+        const summaryEvents = Array.isArray(summary.breakdownEvents)
+          ? summary.breakdownEvents
+              .map(function(event, idx) {
+                return {
+                  id: String(event.id || ('summary_' + staff.id + '_' + idx)),
+                  staffId: String(event.staffId || staff.id),
+                  staffName: String(event.staffName || staff.name || ''),
+                  type: String(event.type || ''),
+                  sourceModule: String(event.sourceModule || ''),
+                  points: Number(event.points) || 0,
+                  weekKey: String(event.weekKey || ''),
+                  monthKey: String(event.monthKey || ''),
+                  voided: event.voided === true,
+                  sourceMeta: event.sourceMeta && typeof event.sourceMeta === 'object' ? event.sourceMeta : null
+                };
+              })
+              .filter(function(event) {
+                return event.voided !== true
+                  && event.points !== 0
+                  && ffPointEventMatchesPeriod(event, ffPointsLeaderboardActivePeriod, ffPointsEventWeekKeyForPeriod(ffPointsLeaderboardActivePeriod));
+              })
+          : [];
         return {
           staffId: staff.id,
           staffName: staff.name,
+          pointsMonthlyGoalEnabled: staff.pointsMonthlyGoalEnabled === true,
+          pointsMonthlyGoal: Number(staff.pointsMonthlyGoal) || 0,
           weekPoints: weekMatches ? (Number(summary.currentWeek) || 0) : 0,
           monthPoints: monthMatches ? (Number(summary.currentMonth) || 0) : 0,
-          allTimePoints: Number(summary.allTime) || 0
+          allTimePoints: Number(summary.allTime) || 0,
+          events: summaryEvents
         };
       } catch (e) {
         console.warn('[PointsApp] summary load failed for staff', staff.id, e);
         return {
           staffId: staff.id,
           staffName: staff.name,
+          pointsMonthlyGoalEnabled: staff.pointsMonthlyGoalEnabled === true,
+          pointsMonthlyGoal: Number(staff.pointsMonthlyGoal) || 0,
           weekPoints: 0,
           monthPoints: 0,
           allTimePoints: 0
@@ -39228,9 +39355,12 @@ function initializeUserProfileMenu() {
       if (activeLocationId && event.locationId && String(event.locationId) !== activeLocationId) return;
       const staffId = String(event.staffId || '').trim();
       if (!staffId) return;
+      const staff = staffById.get(staffId) || {};
       const previous = pointsByStaff.get(staffId) || {
         staffId,
-        staffName: String(event.staffName || staffById.get(staffId)?.name || staffId).trim() || staffId,
+        staffName: String(event.staffName || staff.name || staffId).trim() || staffId,
+        pointsMonthlyGoalEnabled: staff.pointsMonthlyGoalEnabled === true,
+        pointsMonthlyGoal: Number(staff.pointsMonthlyGoal) || 0,
         weekPoints: 0,
         monthPoints: 0,
         allTimePoints: 0,
@@ -39245,6 +39375,8 @@ function initializeUserProfileMenu() {
         pointsByStaff.set(String(staff.id), {
           staffId: staff.id,
           staffName: staff.name,
+          pointsMonthlyGoalEnabled: staff.pointsMonthlyGoalEnabled === true,
+          pointsMonthlyGoal: Number(staff.pointsMonthlyGoal) || 0,
           weekPoints: 0,
           monthPoints: 0,
           allTimePoints: 0,
@@ -39263,9 +39395,12 @@ function initializeUserProfileMenu() {
       if (event.voided === true) return;
       const staffId = String(event.staffId || '').trim();
       if (!staffId) return;
+      const staff = staffById.get(staffId) || {};
       const previous = pointsByStaff.get(staffId) || {
         staffId,
-        staffName: String(event.staffName || staffById.get(staffId)?.name || staffId).trim() || staffId,
+        staffName: String(event.staffName || staff.name || staffId).trim() || staffId,
+        pointsMonthlyGoalEnabled: staff.pointsMonthlyGoalEnabled === true,
+        pointsMonthlyGoal: Number(staff.pointsMonthlyGoal) || 0,
         weekPoints: 0,
         monthPoints: 0,
         allTimePoints: 0,
@@ -39283,6 +39418,8 @@ function initializeUserProfileMenu() {
         pointsByStaff.set(String(staff.id), {
           staffId: staff.id,
           staffName: staff.name,
+          pointsMonthlyGoalEnabled: staff.pointsMonthlyGoalEnabled === true,
+          pointsMonthlyGoal: Number(staff.pointsMonthlyGoal) || 0,
           weekPoints: 0,
           monthPoints: 0,
           allTimePoints: 0,
@@ -39311,7 +39448,6 @@ function initializeUserProfileMenu() {
         throw settingsErr;
       }
     }
-    ffPointsLeaderboardMonthlyGoal = Number(settings.monthlyGoal) || FF_POINTS_SETTINGS_DEFAULTS.monthlyGoal;
     ffPointsLeaderboardShowRank = settings.showRankToPrivate === true;
     ffPointsLeaderboardPrivateRank = null;
     let staffRows = ffGetLocalStaffForPoints();
@@ -39437,12 +39573,10 @@ function initializeUserProfileMenu() {
       return;
     }
     if (!ffPointsLeaderboardPeriodInitialized) {
-      // Align private default with the usual admin snapshot ("This week") so kiosk queue points
-      // show immediately; Monthly goal stays available via the period selector.
-      if (ffPointsVisibilityMode === 'private') {
-        ffPointsLeaderboardActivePeriod = 'thisWeek';
-        console.log('[PointsApp] private default period -> thisWeek');
-      }
+      // Fair Flow Points opens on the monthly view for every role so monthly
+      // goals and progress are visible immediately.
+      ffPointsLeaderboardActivePeriod = 'thisMonth';
+      console.log('[PointsApp] default period -> thisMonth');
       ffPointsLeaderboardPeriodInitialized = true;
     }
     if (ffPointsVisibilityMode === 'none') {
@@ -39602,6 +39736,12 @@ function initializeUserProfileMenu() {
     if (period === 'thisMonth') return Number(row.monthPoints) || 0;
     if (period === 'allTime') return Number(row.allTimePoints) || 0;
     return Number(row.weekPoints) || 0;
+  }
+
+  function ffPointsRowMonthlyGoal(row) {
+    const enabled = row && row.pointsMonthlyGoalEnabled === true;
+    const goal = Number(row && row.pointsMonthlyGoal);
+    return enabled && Number.isFinite(goal) && goal > 0 ? Math.round(goal) : 0;
   }
 
   function ffUpdatePointsPeriodControls() {
@@ -39906,11 +40046,11 @@ function initializeUserProfileMenu() {
     if (ffPointsVisibilityMode === 'private') {
       const row = rows[0] || {};
       const points = Number(row.points) || 0;
-      const goal = Number(ffPointsLeaderboardMonthlyGoal) || 0;
-      const rawPercent = showGoal && goal > 0 ? Math.round((points / goal) * 100) : 0;
+      const goal = ffPointsRowMonthlyGoal(row);
+      const rawPercent = goal > 0 ? Math.round((points / goal) * 100) : 0;
       const cappedPercent = Math.min(999, Math.max(0, rawPercent));
       const barFillPercent = Math.min(100, Math.max(0, rawPercent));
-      const goalReached = showGoal && goal > 0 && points >= goal;
+      const goalReached = goal > 0 && points >= goal;
       // Staff in private mode get a visual donut breakdown by source
       // (Tasks / Queue / Media / Tickets / Manual Adjustment) plus a
       // collapsible full event log so they understand exactly how their
@@ -39952,9 +40092,9 @@ function initializeUserProfileMenu() {
         : '';
       // Goal block: shows "16 / 120 · 13% of monthly goal" with a progress
       // bar so staff can see at a glance both their absolute score and
-      // their progress toward the configured monthlyGoal. Only rendered
-      // in monthly view; for weekly / all-time the goal isn't meaningful.
-      const goalHtml = (showGoal && goal > 0)
+      // their progress toward their staff-specific monthly goal. In private
+      // mode it stays inside YOUR POINTS even when the current filter is weekly.
+      const goalHtml = (goal > 0)
         ? '<div style="margin-top:10px;">'
           + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11px;color:#6b7280;margin-bottom:4px;">'
           +   '<span style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#6d28d9;">Monthly goal</span>'
@@ -39969,9 +40109,7 @@ function initializeUserProfileMenu() {
           + '</div>'
           + (goalReached ? '<div style="margin-top:6px;font-size:11px;color:#16a34a;font-weight:700;text-align:right;">Goal reached</div>' : '')
           + '</div>'
-        : (showGoal && !goal
-          ? '<div style="margin-top:8px;font-size:11px;color:#9ca3af;text-align:right;">No monthly goal set</div>'
-          : '');
+        : '<div style="margin-top:8px;font-size:11px;color:#9ca3af;text-align:right;">No monthly goal set</div>';
       list.innerHTML = '<div style="padding:14px;border:1px solid #ede9fe;border-radius:13px;background:#faf5ff;">'
         + '<div style="font-size:11px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Your points</div>'
         + '<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:14px;">'
@@ -39988,42 +40126,59 @@ function initializeUserProfileMenu() {
     const canManageAdjust = (typeof window.ffCurrentUserIsPointsManager === 'function')
       ? window.ffCurrentUserIsPointsManager() === true
       : false;
-    const gridCols = '42px 1fr 84px' + (showGoal ? ' 112px' : '') + (canManageAdjust ? ' 72px' : '');
-    const adjustButtonHtml = function(row) {
+    const showManagerGoalValue = canManageAdjust;
+    const showManagerProgressValue = showManagerGoalValue;
+    const gridCols = '42px 1fr' + (showManagerGoalValue ? ' 96px' : '') + ' 84px' + (showManagerProgressValue ? ' 92px' : '') + (canManageAdjust ? ' 72px' : '');
+    const adjustButtonHtml = function(row, mobile) {
       if (!canManageAdjust) return '';
       const sid = escapeHtmlDraft(String(row.staffId || ''));
       const sname = escapeHtmlDraft(String(row.staffName || row.staffId || ''));
-      return '<button type="button" class="ff-points-adjust-btn" data-adjust-staff-id="' + sid + '" data-adjust-staff-name="' + sname + '" title="Adjust points" style="justify-self:end;padding:4px 9px;border:1px solid #ddd6fe;border-radius:999px;background:#f5f3ff;color:#6d28d9;font-size:11px;font-weight:800;cursor:pointer;line-height:1;">± Adjust</button>';
+      return '<button type="button" class="ff-points-adjust-btn ' + (mobile ? 'ff-points-adjust-mobile' : 'ff-points-adjust-desktop') + '" data-adjust-staff-id="' + sid + '" data-adjust-staff-name="' + sname + '" title="Adjust points" style="justify-self:end;padding:4px 9px;border:1px solid #ddd6fe;border-radius:999px;background:#f5f3ff;color:#6d28d9;font-size:11px;font-weight:800;cursor:pointer;line-height:1;">± Adjust</button>';
     };
     const body = rows.map(function(row) {
       const points = Number(row.points) || 0;
       const rankNum = Number(row.rank) || 0;
-      const percent = ffPointsLeaderboardMonthlyGoal > 0
-        ? Math.min(999, Math.round((points / ffPointsLeaderboardMonthlyGoal) * 100))
+      const rowGoal = ffPointsRowMonthlyGoal(row);
+      const percent = rowGoal > 0
+        ? Math.min(999, Math.round((points / rowGoal) * 100))
         : 0;
+      const goalText = rowGoal > 0 ? (percent + '% of goal') : 'No monthly goal set';
+      const goalValueText = rowGoal > 0 ? String(rowGoal) : 'No goal';
+      const progressValueText = rowGoal > 0 ? (percent + '%') : '-';
+      const mobileMetricsHtml = showManagerGoalValue
+        ? '<div class="ff-points-mobile-metrics">'
+          + '<span class="ff-points-mobile-chip">Goal <strong>' + goalValueText + '</strong></span>'
+          + '<span class="ff-points-mobile-chip">Progress <strong>' + progressValueText + '</strong></span>'
+          + adjustButtonHtml(row, true)
+          + '</div>'
+        : '';
       const isCurrent = ffPointsCurrentStaffId && String(row.staffId || '') === ffPointsCurrentStaffId;
       if (ffPointsVisibilityMode === 'partial') {
-        return '<div style="display:grid;grid-template-columns:' + gridCols + ';gap:8px;align-items:center;padding:8px 10px;border:1px solid ' + (isCurrent ? '#c4b5fd' : '#f1f5f9') + ';border-radius:9px;background:' + (isCurrent ? '#faf5ff' : '#fff') + ';margin-bottom:6px;">'
-          + '<div style="font-size:12px;font-weight:800;color:#7c3aed;">#' + rankNum + '</div>'
-          + '<div style="font-size:12px;color:#111827;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtmlDraft(row.staffName || row.staffId || 'Staff') + (isCurrent ? ' <span style="color:#7c3aed;font-size:10px;font-weight:800;">You</span>' : '') + '</div>'
-          + '<div style="font-size:13px;color:#111827;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;">' + points + '</div>'
-          + (showGoal ? '<div style="font-size:11px;color:#6b7280;text-align:right;">' + percent + '% of goal</div>' : '')
-          + adjustButtonHtml(row)
+        return '<div class="ff-points-leaderboard-row" style="display:grid;grid-template-columns:' + gridCols + ';gap:8px;align-items:center;padding:8px 10px;border:1px solid ' + (isCurrent ? '#c4b5fd' : '#f1f5f9') + ';border-radius:9px;background:' + (isCurrent ? '#faf5ff' : '#fff') + ';margin-bottom:6px;">'
+          + '<div class="ff-points-cell-rank" style="font-size:12px;font-weight:800;color:#7c3aed;">#' + rankNum + '</div>'
+          + '<div class="ff-points-cell-staff" style="font-size:12px;color:#111827;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtmlDraft(row.staffName || row.staffId || 'Staff') + (isCurrent ? ' <span style="color:#7c3aed;font-size:10px;font-weight:800;">You</span>' : '') + '</div>'
+          + (showManagerGoalValue ? '<div class="ff-points-cell-goal" style="font-size:12px;color:' + (rowGoal > 0 ? '#111827' : '#9ca3af') + ';text-align:right;font-weight:800;font-variant-numeric:tabular-nums;">' + goalValueText + '</div>' : '')
+          + '<div class="ff-points-cell-points" style="font-size:13px;color:#111827;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;">' + points + '</div>'
+          + (showManagerProgressValue ? '<div class="ff-points-cell-progress" style="font-size:11px;color:#6b7280;text-align:right;font-weight:800;">' + progressValueText + '</div>' : '')
+          + mobileMetricsHtml
+          + adjustButtonHtml(row, false)
           + '</div>';
       }
       return '<details style="border:1px solid #f1f5f9;border-radius:9px;background:#fff;margin-bottom:6px;overflow:hidden;">'
-        + '<summary style="display:grid;grid-template-columns:' + gridCols + ';gap:8px;align-items:center;padding:8px 10px;cursor:pointer;list-style:none;">'
-        + '<div style="font-size:12px;font-weight:800;color:#7c3aed;">#' + rankNum + '</div>'
-        + '<div style="font-size:12px;color:#111827;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtmlDraft(row.staffName || row.staffId || 'Staff') + '</div>'
-        + '<div style="font-size:13px;color:#111827;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;">' + points + '</div>'
-        + (showGoal ? '<div style="font-size:11px;color:#6b7280;text-align:right;">' + percent + '% of goal</div>' : '')
-        + adjustButtonHtml(row)
+        + '<summary class="ff-points-leaderboard-summary" style="display:grid;grid-template-columns:' + gridCols + ';gap:8px;align-items:center;padding:8px 10px;cursor:pointer;list-style:none;">'
+        + '<div class="ff-points-cell-rank" style="font-size:12px;font-weight:800;color:#7c3aed;">#' + rankNum + '</div>'
+        + '<div class="ff-points-cell-staff" style="font-size:12px;color:#111827;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtmlDraft(row.staffName || row.staffId || 'Staff') + '</div>'
+        + (showManagerGoalValue ? '<div class="ff-points-cell-goal" style="font-size:12px;color:' + (rowGoal > 0 ? '#111827' : '#9ca3af') + ';text-align:right;font-weight:800;font-variant-numeric:tabular-nums;">' + goalValueText + '</div>' : '')
+        + '<div class="ff-points-cell-points" style="font-size:13px;color:#111827;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;">' + points + '</div>'
+        + (showManagerProgressValue ? '<div class="ff-points-cell-progress" style="font-size:11px;color:#6b7280;text-align:right;font-weight:800;">' + progressValueText + '</div>' : '')
+        + mobileMetricsHtml
+        + adjustButtonHtml(row, false)
         + '</summary>'
         + ffRenderPointEvents(row)
         + '</details>';
     }).join('');
-    const header = '<div style="display:grid;grid-template-columns:' + gridCols + ';gap:8px;align-items:center;padding:0 10px 7px;color:#9ca3af;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;">'
-      + '<div>Rank</div><div>Staff</div><div style="text-align:right;">Points</div>' + (showGoal ? '<div style="text-align:right;">Goal</div>' : '') + (canManageAdjust ? '<div></div>' : '') + '</div>';
+    const header = '<div class="ff-points-leaderboard-header" style="display:grid;grid-template-columns:' + gridCols + ';gap:8px;align-items:center;padding:0 10px 7px;color:#9ca3af;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;">'
+      + '<div>Rank</div><div>Staff</div>' + (showManagerGoalValue ? '<div style="text-align:right;">Monthly Goal</div>' : '') + '<div style="text-align:right;">Points</div>' + (showManagerProgressValue ? '<div style="text-align:right;">Progress</div>' : '') + (canManageAdjust ? '<div></div>' : '') + '</div>';
     list.innerHTML = header + body;
     if (canManageAdjust) {
       list.querySelectorAll('.ff-points-adjust-btn').forEach(function(btn) {

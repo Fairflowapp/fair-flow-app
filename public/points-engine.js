@@ -18,7 +18,6 @@ const POINTS_SETTINGS_DEFAULTS = {
   queueSecond: 7,
   queueThird: 5,
   queueJoin: 2,
-  monthlyGoal: 120,
   pointsVisibilityMode: "full",
 };
 
@@ -187,12 +186,32 @@ export async function ffCreatePointsEvent(input) {
     tx.set(eventRef, eventPayload);
     console.log("[Points] event created");
 
+    const previousBreakdownEvents = Array.isArray(summary.breakdownEvents)
+      ? summary.breakdownEvents.filter((event) => event && event.voided !== true)
+      : [];
+    const summaryBreakdownEvent = {
+      id: eventId,
+      staffId,
+      staffName,
+      locationId,
+      type,
+      sourceModule,
+      points,
+      weekKey,
+      monthKey,
+      voided: false,
+    };
+    if (sourceMeta) summaryBreakdownEvent.sourceMeta = sourceMeta;
+    const breakdownEvents = [...previousBreakdownEvents, summaryBreakdownEvent]
+      .slice(-100);
+
     tx.set(summaryRef, {
       allTime: allTime + points,
       currentWeek: currentWeek + points,
       currentMonth: currentMonth + points,
       currentWeekKey: weekKey,
       currentMonthKey: monthKey,
+      breakdownEvents,
       updatedAt: serverTimestamp(),
     }, { merge: true });
     console.log("[Points] summary updated");
