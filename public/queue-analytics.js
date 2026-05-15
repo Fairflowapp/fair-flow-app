@@ -544,6 +544,35 @@ function injectStyles() {
       #${SCREEN_ID} .qa-action-btn { flex: 1; }
       #${SCREEN_ID} .qa-hour-modal-summary { grid-template-columns: 1fr; }
     }
+    @media (max-width: 640px) {
+      body.ff-dashboard-analytics-open .header {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        z-index: 100340 !important;
+      }
+      #${SCREEN_ID} {
+        top: var(--header-h, 60px) !important;
+        bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+      }
+      #${SCREEN_ID} .qa-wrap {
+        padding: 14px 18px calc(160px + env(safe-area-inset-bottom, 0px)) 18px;
+        box-sizing: border-box;
+      }
+      #${SCREEN_ID} #ffQaInsights {
+        margin-bottom: calc(46px + env(safe-area-inset-bottom, 0px));
+      }
+      #${SCREEN_ID} .qa-insights-list {
+        padding-bottom: 28px;
+      }
+      #${SCREEN_ID} .qa-insight:last-child {
+        margin-bottom: 16px;
+      }
+    }
   `;
   document.head.appendChild(style);
 }
@@ -2141,6 +2170,8 @@ function hideOtherScreens() {
 function hideSelf() {
   const screen = document.getElementById(SCREEN_ID);
   if (screen) screen.style.display = "none";
+  document.body.classList.remove("ff-dashboard-analytics-open");
+  if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
 }
 
 function bindAutoHideOnOtherNav() {
@@ -2173,9 +2204,11 @@ export function goToQueueAnalytics() {
     screen.style.display = "flex";
     screen.style.setProperty("pointer-events", "auto", "important");
   }
+  document.body.classList.add("ff-dashboard-analytics-open");
 
   document.querySelectorAll(".btn-pill").forEach((b) => b.classList.remove("active"));
   refresh();
+  if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
 }
 
 function ensureInjected() {

@@ -1427,11 +1427,11 @@ async function ffRunExpiryChatNotify(docId) {
   const now0 = Date.now();
   if (dk === _ffExpiryNotifyDedupe.key && now0 - _ffExpiryNotifyDedupe.at < 1500) {
     ffToast("Reminder just sent. Try again in a moment.", "info");
-    return;
+    return false;
   }
   if (_ffExpiryNotifyInFlight) {
     ffToast("Still sending the previous reminder…", "info");
-    return;
+    return false;
   }
   // Set immediately after checks — otherwise two parallel calls can both pass the guard and send twice.
   _ffExpiryNotifyInFlight = true;
@@ -1439,17 +1439,18 @@ async function ffRunExpiryChatNotify(docId) {
     ffToast("Sending reminder…", "info");
     if (!auth.currentUser) {
       ffToast("Sign in required.", "error");
-      return;
+      return false;
     }
     const { salonId, staffId } = _mountCtx;
     if (!salonId || !staffId || !did) {
       ffToast("Missing context. Refresh the page.", "error");
-      return;
+      return false;
     }
 
     await ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId: did });
     _ffExpiryNotifyDedupe = { key: dk, at: Date.now() };
     console.log("[staff-documents] Chat reminder flow finished (check toast + Chat).");
+    return true;
   } catch (err) {
     console.warn("[staff-documents] expiry_chat_notify", err);
     if (!err?.ffToastShown) {
@@ -1460,6 +1461,7 @@ async function ffRunExpiryChatNotify(docId) {
           : String(err?.message || err || "Could not send chat message.");
       ffToast(hint, "error");
     }
+    return false;
   } finally {
     _ffExpiryNotifyInFlight = false;
   }
@@ -1554,7 +1556,11 @@ function formatLifecycleLabel(raw) {
 
 /** Unified empty / no-results copy in the Documents panel. */
 function staffDocsEmptyMessageHtml(message) {
-  return `<div class="ff-staff-doc-empty" style="margin:0;font-size:13px;line-height:1.45;color:#6b7280;text-align:center;padding:28px 16px;min-height:72px;box-sizing:border-box;">${escapeHtml(message)}</div>`;
+  return `<div class="ff-staff-doc-empty" style="margin:0;font-size:13px;line-height:1.45;color:#6b7280;text-align:center;padding:28px 16px;min-height:260px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;flex:1;">${escapeHtml(message)}</div>`;
+}
+
+function staffDocsShellStyle() {
+  return "padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;min-height:calc(100dvh - 250px);box-sizing:border-box;display:flex;flex-direction:column;";
 }
 
 function expiryBadgeState(expirationRaw) {
@@ -1781,38 +1787,17 @@ const STAFF_DOC_FILTER_CHIPS = [
 ];
 
 function renderFilterChipsHtml(currentFilter, list) {
-  const common =
-    "font-size:11px;line-height:1.2;min-height:30px;padding:4px 11px;border-radius:999px;cursor:pointer;font-weight:600;font-family:inherit;box-sizing:border-box;";
-  const ringSel = "box-shadow:0 0 0 2px rgba(124,58,237,0.45);";
-  const palette = {
-    all: {
-      base: "border:1px solid #e5e7eb;background:#fff;color:#374151;",
-      sel: "border:1px solid #7c3aed;background:#ede9fe;color:#5b21b6;" + ringSel,
-    },
-    expired: {
-      base: "border:1px solid #f87171;background:#fecaca;color:#7f1d1d;",
-      sel: "border:1px solid #7c3aed;background:#fecaca;color:#7f1d1d;" + ringSel,
-    },
-    expiring_soon: {
-      base: "border:1px solid #fdba74;background:#ffedd5;color:#c2410c;",
-      sel: "border:1px solid #7c3aed;background:#ffedd5;color:#c2410c;" + ringSel,
-    },
-    active: {
-      base: "border:1px solid #a7f3d0;background:#d1fae5;color:#065f46;",
-      sel: "border:1px solid #7c3aed;background:#d1fae5;color:#065f46;" + ringSel,
-    },
-    archived: {
-      base: "border:1px solid #e5e7eb;background:#f3f4f6;color:#6b7280;",
-      sel: "border:1px solid #7c3aed;background:#f3f4f6;color:#4b5563;" + ringSel,
-    },
-  };
-  return STAFF_DOC_FILTER_CHIPS.map((c) => {
+  const options = STAFF_DOC_FILTER_CHIPS.map((c) => {
     const n = countForChipId(list, c.id);
-    const isSel = currentFilter === c.id;
-    const pal = palette[c.id] || palette.all;
-    const style = common + (isSel ? pal.sel : pal.base);
-    return `<button type="button" data-ff-doc-filter="${escapeHtml(c.id)}" style="${style}">${escapeHtml(c.label)} <span style="opacity:0.88;font-weight:700;">(${n})</span></button>`;
+    const selected = currentFilter === c.id ? " selected" : "";
+    return `<option value="${escapeHtml(c.id)}"${selected}>${escapeHtml(c.label)} (${n})</option>`;
   }).join("");
+  return `<label style="display:flex;align-items:center;gap:8px;width:100%;">
+    <span style="font-size:11px;font-weight:600;color:#6b7280;white-space:nowrap;">Filter</span>
+    <select data-ff-doc-filter-select aria-label="Document filter" style="width:100%;min-height:36px;padding:7px 34px 7px 11px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#111827;font-size:12px;font-weight:600;font-family:inherit;box-sizing:border-box;cursor:pointer;">
+      ${options}
+    </select>
+  </label>`;
 }
 
 function renderSearchRowHtml() {
@@ -1831,7 +1816,7 @@ function renderListContentBody(list) {
   const q = normalizeStaffDocSearch(_staffDocumentsSearchQuery);
   const chips = renderFilterChipsHtml(f, list);
   const searchRow = renderSearchRowHtml();
-  const chipsWrap = `<div class="ff-staff-doc-filters" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">${chips}</div>`;
+  const chipsWrap = `<div class="ff-staff-doc-filters" style="display:flex;align-items:center;gap:8px;">${chips}</div>`;
   const searchWrap = `<div style="margin-top:10px;">${searchRow}</div>`;
   const head = `<div class="ff-staff-doc-toolbar" style="margin:0 0 16px 0;padding-bottom:14px;border-bottom:1px solid #f3f4f6;">${chipsWrap}${searchWrap}</div>`;
 
@@ -1873,16 +1858,50 @@ function ensureStaffDocSearchListeners(container) {
     };
   }
   container.addEventListener("input", _onStaffDocSearchInput);
+  container.addEventListener("change", (e) => {
+    const sel = e.target && e.target.closest && e.target.closest("select[data-ff-doc-filter-select]");
+    if (!sel) return;
+    const id = sel.value;
+    if (id && STAFF_DOC_FILTER_IDS.has(id) && _staffDocumentsFilter !== id) {
+      _staffDocumentsFilter = id;
+      if (_lastDocList !== null && _ffBoundContainer) {
+        renderListIntoContainer(_ffBoundContainer, _lastDocList);
+      }
+    }
+  });
 }
 
 /** Direct handler on the button — does not rely on bubbling to the documents container. */
 function wireStaffDocExpiryChatButtons(container) {
   if (!container || !container.querySelectorAll) return;
   container.querySelectorAll('button[data-ff-doc-action="expiry_chat_notify"]').forEach((btn) => {
-    btn.onclick = (ev) => {
+    btn.onclick = async (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      void ffRunExpiryChatNotify(btn.getAttribute("data-doc-id"));
+      if (btn.disabled) return;
+      const originalText = btn.textContent || "Send chat reminder";
+      btn.disabled = true;
+      btn.textContent = "Sending...";
+      btn.style.opacity = "0.75";
+      btn.style.cursor = "wait";
+      const ok = await ffRunExpiryChatNotify(btn.getAttribute("data-doc-id"));
+      if (ok) {
+        btn.textContent = "Sent";
+        btn.style.opacity = "1";
+        btn.style.cursor = "default";
+        setTimeout(() => {
+          try {
+            btn.disabled = false;
+            btn.textContent = originalText;
+            btn.style.cursor = "pointer";
+          } catch (_) {}
+        }, 2500);
+      } else {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        btn.style.opacity = "1";
+        btn.style.cursor = "pointer";
+      }
     };
   });
 }
@@ -1904,11 +1923,11 @@ function renderListIntoContainer(container, list) {
 
   if (!list.length) {
     _staffDocumentsSearchQuery = "";
-    container.innerHTML = `<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">${renderEmpty()}</div>`;
+    container.innerHTML = `<div style="${staffDocsShellStyle()}">${renderEmpty()}</div>`;
     return;
   }
   const body = renderListContentBody(list);
-  container.innerHTML = `<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">${body}</div>`;
+  container.innerHTML = `<div style="${staffDocsShellStyle()}">${body}</div>`;
   wireStaffDocExpiryChatButtons(container);
 
   if (wasSearch) {

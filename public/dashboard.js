@@ -318,6 +318,71 @@ function injectStyles() {
       #${SCREEN_ID} .dash-grid { grid-template-columns: 1fr; }
       #${SCREEN_ID} .dash-stats { grid-template-columns: 1fr 1fr; }
     }
+    @media (max-width: 640px) {
+      body.ff-dashboard-open .header {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        z-index: 100340 !important;
+      }
+      #${SCREEN_ID} {
+        top: var(--header-h, 60px) !important;
+        bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+        z-index: 9850;
+      }
+      #${SCREEN_ID} .dash-wrap {
+        padding: 14px 18px calc(118px + env(safe-area-inset-bottom, 0px)) 18px;
+        box-sizing: border-box;
+      }
+      #${SCREEN_ID} .dash-head-row {
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      #${SCREEN_ID} .dash-range-controls {
+        align-items: stretch;
+        gap: 8px;
+      }
+      #${SCREEN_ID} .dash-range-label {
+        width: 100%;
+      }
+      #${SCREEN_ID} .dash-range-select {
+        width: 100%;
+        min-height: 38px;
+        border-radius: 12px;
+      }
+      #${SCREEN_ID} .dash-range-custom {
+        width: 100%;
+        flex-wrap: wrap;
+      }
+      #${SCREEN_ID} .dash-range-date {
+        flex: 1 1 135px;
+        min-width: 0;
+      }
+      #${SCREEN_ID} .dash-kpis {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      #${SCREEN_ID} .dash-kpi {
+        padding: 10px 11px;
+        border-radius: 13px;
+      }
+      #${SCREEN_ID} .dash-kpi-value {
+        font-size: 22px;
+      }
+      #${SCREEN_ID} .dash-card {
+        padding: 13px 14px;
+        border-radius: 15px;
+      }
+      #${SCREEN_ID} .dash-insight {
+        padding: 12px 12px;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+    }
   `;
   document.head.appendChild(style);
 }
@@ -1260,8 +1325,14 @@ function renderModuleCards(snap, range) {
     "time-analytics": "goToTimeAnalytics",
     "tasks-analytics": "goToTasksAnalytics",
   };
+  const ANALYTICS_MODULES = {
+    "queue-analytics": { src: "/queue-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToQueueAnalytics" },
+    "tickets-analytics": { src: "/tickets-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToTicketsAnalytics" },
+    "time-analytics": { src: "/time-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToTimeAnalytics" },
+    "tasks-analytics": { src: "/tasks-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToTasksAnalytics" },
+  };
   root.querySelectorAll("[data-dash-action]").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
+    btn.addEventListener("click", async (e) => {
       e.preventDefault();
       const action = btn.getAttribute("data-dash-action");
       const label = ANALYTICS_LABELS[action] || "Analytics";
@@ -1275,11 +1346,31 @@ function renderModuleCards(snap, range) {
           console.warn(LOG, "route navigation failed", routeFn, err);
         }
       }
+      const moduleMeta = ANALYTICS_MODULES[action];
+      if (moduleMeta?.src) {
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = `Loading ${label}...`;
+        try {
+          const mod = await import(moduleMeta.src);
+          const fn = window[routeFn] || mod?.[moduleMeta.exportName];
+          if (typeof fn === "function") {
+            fn();
+            return;
+          }
+          console.warn(LOG, "analytics module loaded without route", action);
+        } catch (err) {
+          console.warn(LOG, "analytics module load failed", action, err);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      }
       try {
         if (window.ffToast && typeof window.ffToast.info === "function") {
-          window.ffToast.info(`${label} screen — coming soon`, 3500);
+          window.ffToast.info(`${label} is still loading. Please try again in a moment.`, 3500);
         } else if (typeof window.showToast === "function") {
-          window.showToast(`${label} screen — coming soon`, 3500);
+          window.showToast(`${label} is still loading. Please try again in a moment.`, 3500);
         }
       } catch (err) {
         console.warn(LOG, "toast failed", err);
@@ -1403,6 +1494,7 @@ function bindAutoHideOnOtherNav() {
     btn._ffDashHideHandler = () => {
       const s = screen();
       if (s) s.style.display = "none";
+      document.body.classList.remove("ff-dashboard-open");
       const navBtn = document.getElementById(NAV_BTN_ID);
       if (navBtn) navBtn.classList.remove("active");
       if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
@@ -1442,6 +1534,7 @@ export function goToDashboard() {
     screen.style.display = "flex";
     screen.style.setProperty("pointer-events", "auto", "important");
   }
+  document.body.classList.add("ff-dashboard-open");
 
   document.querySelectorAll(".btn-pill").forEach((b) => b.classList.remove("active"));
   const btn = document.getElementById(NAV_BTN_ID);

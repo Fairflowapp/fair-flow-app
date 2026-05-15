@@ -66,6 +66,11 @@ let chatFlowDraft      = null;   // { title, allowedSenders, steps } for builder
 let chatReplyContext   = null;   // { uid, name, conversationId }
 let allConversations   = [];     // kept in sync by onSnapshot
 let lastNonEmptyConversations = [];
+let lastRenderedConversations = [];
+let lastRenderedThreadListHtml = '';
+let cachedConversationsById = {};
+let currentThreadFallback = null;
+let chatMessagesLoading = false;
 let currentMessages    = [];     // kept in sync by onSnapshot for open conversation
 let currentConvId      = null;   // currently open thread
 let chatSendMode       = 'template'; // 'template' | 'flow' (free text uses textarea, not this flag)
@@ -459,6 +464,25 @@ function _otherUidFromParticipants(parts, myUid) {
   return parts.find(u => u && u !== myUid) || '';
 }
 
+function _cacheConversations(list) {
+  if (!Array.isArray(list)) return;
+  list.forEach(c => {
+    if (c && c.id) cachedConversationsById[c.id] = c;
+  });
+}
+
+function _conversationById(convId) {
+  const id = String(convId || '');
+  if (!id) return null;
+  return (
+    (Array.isArray(allConversations) && allConversations.find(c => c && c.id === id)) ||
+    (Array.isArray(lastRenderedConversations) && lastRenderedConversations.find(c => c && c.id === id)) ||
+    (Array.isArray(lastNonEmptyConversations) && lastNonEmptyConversations.find(c => c && c.id === id)) ||
+    cachedConversationsById[id] ||
+    null
+  );
+}
+
 function timeAgo(ts) {
   if (!ts) return '';
   const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -824,12 +848,18 @@ function subscribeToConversationList() {
       if (nextConversations.length > 0) {
         allConversations = nextConversations;
         lastNonEmptyConversations = nextConversations;
+      } else if (allDocs.length > 0) {
+        // If location metadata is stale/missing, do not show an empty chat list.
+        allConversations = allDocs;
+        lastNonEmptyConversations = allDocs;
       } else if (lastNonEmptyConversations.length > 0) {
         const staleForLoc = lastNonEmptyConversations.filter(c => _convMatchesLocation(c, locKey));
         allConversations = staleForLoc.length > 0 ? staleForLoc : [];
       } else {
         allConversations = nextConversations;
       }
+      _cacheConversations(allDocs);
+      _cacheConversations(allConversations);
       console.log(
         '[Chat] threads snapshot: locKey=', locKey,
         'totalDocs=', allDocs.length,
@@ -882,20 +912,39 @@ function renderThreadList() {
 
   const uid = chatUserProfile?.uid || '';
   const locKey = _chatEffectiveLocKey();
+  const lastNonEmptyForLoc = Array.isArray(lastNonEmptyConversations)
+    ? lastNonEmptyConversations.filter(c => _convMatchesLocation(c, locKey))
+    : [];
+  const lastRenderedForLoc = Array.isArray(lastRenderedConversations)
+    ? lastRenderedConversations.filter(c => _convMatchesLocation(c, locKey))
+    : [];
   const conversationsToRender = (Array.isArray(allConversations) && allConversations.length > 0)
     ? allConversations
-    : (Array.isArray(lastNonEmptyConversations) && lastNonEmptyConversations.length > 0)
-      ? lastNonEmptyConversations.filter(c => _convMatchesLocation(c, locKey))
-      : [];
+    : lastNonEmptyForLoc.length > 0
+      ? lastNonEmptyForLoc
+      : lastRenderedForLoc.length > 0
+        ? lastRenderedForLoc
+        : (Array.isArray(lastNonEmptyConversations) && lastNonEmptyConversations.length > 0)
+          ? lastNonEmptyConversations
+          : (Array.isArray(lastRenderedConversations) && lastRenderedConversations.length > 0)
+            ? lastRenderedConversations
+            : [];
 
   if (conversationsToRender.length === 0) {
-    if (empty) empty.style.display = 'block';
-    list.innerHTML = '';
+    if (lastRenderedThreadListHtml) {
+      if (empty) empty.style.display = 'none';
+      list.innerHTML = lastRenderedThreadListHtml;
+    } else {
+      if (empty) empty.style.display = 'block';
+      list.innerHTML = '';
+    }
     return;
   }
   if (empty) empty.style.display = 'none';
+  lastRenderedConversations = conversationsToRender.slice();
+  _cacheConversations(conversationsToRender);
 
-  list.innerHTML = conversationsToRender.map(conv => {
+  const nextHtml = conversationsToRender.map(conv => {
     const convId = conv.id;
     const otherUid = _otherUidFromParticipants(conv.participants, uid);
     const otherName = _nameForUid(otherUid) || 'Unknown';
@@ -914,7 +963,10 @@ function renderThreadList() {
     const selected = (currentConvId === convId) ? 'is-selected' : '';
     return `
       <div class="chat-thread-card ${selected} ${unread > 0 ? 'chat-thread-card-unread' : ''}"
-           onclick="window._openThread('${escHtml(convId)}')">
+           data-conv-id="${escHtml(convId)}"
+           data-other-uid="${escHtml(otherUid)}"
+           data-other-name="${escHtml(otherName)}"
+           onclick="window._openThread('${escHtml(convId)}', this)">
         <div class="ctc-avatars">
           ${myAvatarHtml}
           ${otherAvatarHtml}
@@ -933,6 +985,8 @@ function renderThreadList() {
       </div>
     `;
   }).join('');
+  lastRenderedThreadListHtml = nextHtml;
+  list.innerHTML = nextHtml;
 }
 
 function _rememberConversationForList(conv) {
@@ -949,13 +1003,49 @@ function _rememberConversationForList(conv) {
   };
   allConversations = mergeInto(allConversations);
   lastNonEmptyConversations = mergeInto(lastNonEmptyConversations);
+  lastRenderedConversations = mergeInto(lastRenderedConversations);
+}
+
+function _cacheVisibleThreadListHtml() {
+  try {
+    const list = document.getElementById('chatFeedList');
+    const html = list && typeof list.innerHTML === 'string' ? list.innerHTML.trim() : '';
+    if (html) lastRenderedThreadListHtml = list.innerHTML;
+  } catch (_) {}
+}
+
+function _restoreVisibleThreadListHtml() {
+  try {
+    const list = document.getElementById('chatFeedList');
+    if (!list || !lastRenderedThreadListHtml) return false;
+    const empty = document.getElementById('chatFeedEmpty');
+    if (empty) empty.style.display = 'none';
+    list.innerHTML = lastRenderedThreadListHtml;
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 // ─── Open / Close Thread ───────────────────────────────────────────────────────
-window._openThread = async function(convId) {
+window._openThread = async function(convId, sourceEl) {
+  _cacheVisibleThreadListHtml();
   if (Array.isArray(allConversations) && allConversations.length > 0) {
     lastNonEmptyConversations = allConversations.slice();
+    lastRenderedConversations = allConversations.slice();
   }
+  const sourceOtherUid = sourceEl && sourceEl.getAttribute ? sourceEl.getAttribute('data-other-uid') : '';
+  const sourceOtherNameAttr = sourceEl && sourceEl.getAttribute ? sourceEl.getAttribute('data-other-name') : '';
+  const sourceOtherNameText = sourceEl && sourceEl.querySelector ? (sourceEl.querySelector('.ctc-name')?.textContent || '') : '';
+  const sourceOtherName = sourceOtherNameAttr && sourceOtherNameAttr !== CHAT_NAME_LOADING && sourceOtherNameAttr !== 'Unknown'
+    ? sourceOtherNameAttr
+    : sourceOtherNameText;
+  const cachedConv = _conversationById(convId);
+  currentThreadFallback = {
+    convId,
+    otherUid: sourceOtherUid || _otherUidFromParticipants(cachedConv?.participants, chatUserProfile?.uid || ''),
+    otherName: sourceOtherName || '',
+  };
   currentConvId = convId;
   // On narrow mobile screens, show the conversation view with a back button.
   // Desktop/tablet keeps the left conversation list visible.
@@ -966,6 +1056,8 @@ window._openThread = async function(convId) {
   // Update header title
   _setConversationHeader(convId);
   renderThreadList();
+  currentMessages = [];
+  chatMessagesLoading = true;
   _subscribeToMessages(convId);
   renderConversation(convId);
   markThreadRead(convId)
@@ -979,8 +1071,12 @@ window.closeConversation = function() {
   if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
   currentMessages = [];
   currentConvId = null;
+  currentThreadFallback = null;
+  chatMessagesLoading = false;
   document.getElementById('chatScreen')?.classList.remove('chat-mobile-open');
+  _restoreVisibleThreadListHtml();
   renderThreadList();
+  _restoreVisibleThreadListHtml();
   _renderEmptyConversation();
   _syncChatConvFreeTextComposer();
 };
@@ -999,8 +1095,8 @@ function renderConversation(convId) {
     return;
   }
 
-  const conv = allConversations.find(c => c.id === convId);
-  const otherUid = _otherUidFromParticipants(conv?.participants, uid);
+  const conv = _conversationById(convId);
+  const otherUid = _otherUidFromParticipants(conv?.participants, uid) || (currentThreadFallback?.convId === convId ? currentThreadFallback.otherUid : '');
   const replyBtn = document.getElementById('chatConvReplyBtn');
   if (replyBtn) {
     replyBtn.setAttribute('data-other-uid', otherUid);
@@ -1009,7 +1105,9 @@ function renderConversation(convId) {
   }
 
   if (msgs.length === 0) {
-    container.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">No messages yet.</div>';
+    container.innerHTML = chatMessagesLoading
+      ? '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Loading messages...</div>'
+      : '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">No messages yet.</div>';
     _syncChatConvFreeTextComposer();
     return;
   }
@@ -1069,9 +1167,10 @@ function _setConversationHeader(convId) {
     return;
   }
   const uid  = chatUserProfile?.uid || '';
-  const conv = allConversations.find(c => c.id === convId);
-  const otherUid = _otherUidFromParticipants(conv?.participants, uid);
-  title.textContent = _nameForUid(otherUid) || 'Conversation';
+  const conv = _conversationById(convId);
+  const fallbackName = currentThreadFallback?.convId === convId ? currentThreadFallback.otherName : '';
+  const otherUid = _otherUidFromParticipants(conv?.participants, uid) || (currentThreadFallback?.convId === convId ? currentThreadFallback.otherUid : '');
+  title.textContent = _nameForUid(otherUid) || fallbackName || 'Conversation';
 }
 
 function _renderEmptyConversation() {
@@ -1265,33 +1364,10 @@ window.openThreadReply = async function() {
 
 // ─── Mark Thread Read ──────────────────────────────────────────────────────────
 async function markThreadRead(convId) {
-  if (!chatUserProfile?.salonId || !chatUserProfile?.uid) return;
-  const uid = chatUserProfile.uid;
-  try {
-    // Reset unread counter on conversation doc
-    await updateDoc(
-      doc(db, `salons/${chatUserProfile.salonId}/conversations`, convId),
-      { [`unreadFor.${uid}`]: 0 }
-    );
-  } catch(e) {}
-
-  // Best-effort: mark recent messages as read (last 60)
-  try {
-    const snap = await getDocs(query(
-      collection(db, `salons/${chatUserProfile.salonId}/conversations/${convId}/messages`),
-      orderBy('sentAt', 'desc'),
-      limit(60)
-    ));
-    const batch = writeBatch(db);
-    snap.docs.forEach(d => {
-      const data = d.data() || {};
-      const rb = Array.isArray(data.readBy) ? data.readBy : [];
-      if (!rb.includes(uid)) {
-        batch.update(d.ref, { readBy: arrayUnion(uid) });
-      }
-    });
-    await batch.commit();
-  } catch(e) {}
+  // Disabled client-side read receipts for now: Firestore rules can reject the
+  // unread/readBy commits on legacy chat rows, which floods the console with
+  // 403 errors. Reading and sending messages do not depend on this write.
+  return;
 }
 
 // ─── Send Modal (new message from main screen) ────────────────────────────────
@@ -2100,18 +2176,41 @@ function _subscribeToMessages(convId) {
   if (!chatUserProfile?.salonId) return;
   if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
 
+  const msgQuery = query(
+    collection(db, `salons/${chatUserProfile.salonId}/conversations/${convId}/messages`),
+    orderBy('sentAt','asc'),
+    limit(300)
+  );
+
   chatMsgsUnsub = onSnapshot(
-    query(
-      collection(db, `salons/${chatUserProfile.salonId}/conversations/${convId}/messages`),
-      orderBy('sentAt','asc'),
-      limit(300)
-    ),
+    msgQuery,
     snap => {
       currentMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      chatMessagesLoading = false;
       if (currentConvId === convId) renderConversation(convId);
     },
-    err => console.error('[Chat] messages snapshot error', err)
+    err => {
+      chatMessagesLoading = false;
+      console.error('[Chat] messages snapshot error', err);
+      if (currentConvId === convId) renderConversation(convId);
+    }
   );
+
+  setTimeout(async () => {
+    if (currentConvId !== convId || !chatMessagesLoading) return;
+    try {
+      const snap = await getDocs(msgQuery);
+      if (currentConvId !== convId) return;
+      currentMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      chatMessagesLoading = false;
+      renderConversation(convId);
+    } catch (e) {
+      if (currentConvId !== convId) return;
+      chatMessagesLoading = false;
+      console.error('[Chat] messages fallback load error', e);
+      renderConversation(convId);
+    }
+  }, 900);
 }
 
 // ─── Admin Templates + Flows Settings ───────────────────────────────────────────

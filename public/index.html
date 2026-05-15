@@ -473,6 +473,18 @@ header .brand{display:flex;align-items:center;gap:1rem}
 body.ff-avatar-dropdown-open .header-inner {
   pointer-events: none;
 }
+
+body.ff-staff-members-open #joinBar,
+body.ff-staff-members-open .joinbar,
+body.ff-staff-members-open #queueControls,
+body.ff-staff-members-open .wrap {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+body.ff-staff-members-open .header {
+  z-index: 100340 !important;
+}
 body.ff-avatar-dropdown-open #userAvatarDropdown {
   pointer-events: auto !important;
 }
@@ -2390,6 +2402,17 @@ dialog footer button, .code-dialog footer button {
 }
 
 @media (max-width: 640px) {
+  #appsPanel {
+    max-height: calc(100dvh - 88px) !important;
+    overflow: hidden !important;
+  }
+
+  #appsPanel > div:last-child {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
   .apps-launcher-grid {
     grid-template-columns: 1fr;
   }
@@ -2942,7 +2965,7 @@ dialog footer button, .code-dialog footer button {
   background: rgba(124, 58, 237, 0.14) !important;
   background-image: none !important;
   color: #111827 !important;
-  font-weight: 600 !important;
+  font-weight: 400 !important;
 }
 
 .staff-nav-item.is-active *,
@@ -2963,6 +2986,191 @@ dialog footer button, .code-dialog footer button {
 #staffDetailsNav .staff-nav-item.is-active:hover {
   background: rgba(124, 58, 237, 0.20) !important;
   background-image: none !important;
+}
+
+@media (max-width: 640px) {
+  #staffMembersModal .staff-modal-content {
+    display: block !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #staffMembersModal .staff-sidebar {
+    width: 100% !important;
+    min-height: 100% !important;
+    border-right: none !important;
+    background: #fff !important;
+    box-sizing: border-box !important;
+    padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  #staffMembersModal .staff-content-area {
+    display: none !important;
+    width: 100% !important;
+    min-height: 100% !important;
+    padding: 58px 18px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+    box-sizing: border-box !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #staffMembersModal.ff-staff-mobile-detail .staff-sidebar,
+  #staffMembersModal.ff-staff-mobile-add .staff-sidebar,
+  #staffMembersModal.ff-staff-mobile-tab .staff-sidebar {
+    display: none !important;
+  }
+
+  #staffMembersModal.ff-staff-mobile-detail .staff-content-area,
+  #staffMembersModal.ff-staff-mobile-add .staff-content-area,
+  #staffMembersModal.ff-staff-mobile-tab .staff-content-area {
+    display: block !important;
+  }
+
+  #staffMembersModal .ff-staff-mobile-back {
+    display: none !important;
+    align-items: center !important;
+    justify-content: center !important;
+    position: absolute !important;
+    top: 16px !important;
+    left: 22px !important;
+    width: 28px !important;
+    height: 28px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 999px !important;
+    background: #fff !important;
+    color: #7c3aed !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    font-size: 0 !important;
+    font-weight: 800 !important;
+    cursor: pointer !important;
+    box-sizing: border-box !important;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08) !important;
+    z-index: 100004 !important;
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+  }
+
+  #staffMembersModal.ff-staff-mobile-lock {
+    top: var(--header-h, 60px) !important;
+    height: calc(100dvh - var(--header-h, 60px)) !important;
+    bottom: auto !important;
+  }
+
+  #staffMembersModal.ff-staff-mobile-detail .ff-staff-mobile-back,
+  #staffMembersModal.ff-staff-mobile-add .ff-staff-mobile-back,
+  #staffMembersModal.ff-staff-mobile-tab .ff-staff-mobile-back {
+    display: flex !important;
+  }
+
+  #staffMembersModal.ff-staff-mobile-tab #staffDetailsHeader,
+  #staffMembersModal.ff-staff-mobile-tab #staffDetailsNav {
+    display: none !important;
+  }
+
+  #staffMembersModal.ff-staff-mobile-detail #staffDetailsTabContent,
+  #staffMembersModal.ff-staff-mobile-detail #staffScheduleTabContent,
+  #staffMembersModal.ff-staff-mobile-detail #staffLocationsTabContent,
+  #staffMembersModal.ff-staff-mobile-detail #staffPermissionsTabContent,
+  #staffMembersModal.ff-staff-mobile-detail #staffEarningsTabContent,
+  #staffMembersModal.ff-staff-mobile-detail #staffDocumentsTabContent {
+    display: none !important;
+  }
+
+  #staffMembersModal .ff-staff-mobile-back::before {
+    content: "‹" !important;
+    color: #7c3aed;
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  #staffMembersModal #staffDetailsContainer > div[style*="display:flex"][style*="gap:20px"] {
+    flex-direction: column !important;
+    gap: 12px !important;
+    margin-top: 12px !important;
+  }
+
+  #staffMembersModal #staffDetailsNav {
+    width: 100% !important;
+    max-height: none !important;
+    border-radius: 14px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #fff !important;
+  }
+
+  #staffMembersModal #staffDetailsNav .staff-nav-item {
+    position: relative !important;
+    width: 100% !important;
+    min-height: 46px !important;
+    padding: 13px 44px 13px 14px !important;
+    border-radius: 0 !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    background: #fff !important;
+  }
+
+  #staffMembersModal #staffDetailsNav .staff-nav-item:last-child {
+    border-bottom: none !important;
+  }
+
+  #staffMembersModal #staffDetailsNav .staff-nav-item::after {
+    content: "›";
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9ca3af;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  #staffMembersModal.ff-staff-mobile-tab #staffDetailsContainer,
+  #staffMembersModal.ff-staff-mobile-tab #staffDetailsContainer > div,
+  #staffMembersModal.ff-staff-mobile-tab #staffDetailsContainer > div > div,
+  #staffMembersModal.ff-staff-mobile-tab #staffDetailsTabContent,
+  #staffMembersModal.ff-staff-mobile-tab #staffScheduleTabContent,
+  #staffMembersModal.ff-staff-mobile-tab #staffLocationsTabContent,
+  #staffMembersModal.ff-staff-mobile-tab #staffPermissionsTabContent,
+  #staffMembersModal.ff-staff-mobile-tab #staffEarningsTabContent,
+  #staffMembersModal.ff-staff-mobile-tab #staffDocumentsTabContent {
+    width: 100% !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+  }
+
+  #staffMembersModal.ff-staff-mobile-tab #staffDetailsTabContent > div,
+  #staffMembersModal.ff-staff-mobile-tab #staffScheduleTabContent > div,
+  #staffMembersModal.ff-staff-mobile-tab #staffLocationsTabContent > div,
+  #staffMembersModal.ff-staff-mobile-tab #staffPermissionsTabContent > div,
+  #staffMembersModal.ff-staff-mobile-tab #staffEarningsTabContent > div,
+  #staffMembersModal.ff-staff-mobile-tab #staffDocumentsTabContent > div {
+    width: 100% !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+  }
+
+  #staffMembersModal .staff-sidebar-item {
+    position: relative !important;
+    min-height: 38px !important;
+    padding: 10px 34px 10px 10px !important;
+  }
+
+  #staffMembersModal .staff-sidebar-item::after {
+    content: "›";
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9ca3af;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+  }
 }
 
 /* Staff modal pointer-events fix - allow header/dropdown clicks to pass through */
@@ -4912,6 +5120,58 @@ dialog footer button, .code-dialog footer button {
 #myProfileScreen .ff-myp-stack {
   margin-bottom: 14px;
 }
+#myProfileScreen .ff-myp-warning-card {
+  background: #fff;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+#myProfileScreen .ff-myp-warning-list {
+  margin: 10px 0 14px 18px;
+  padding: 0;
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.55;
+}
+#myProfileScreen .ff-myp-warning-list li {
+  margin-bottom: 6px;
+}
+#myProfileScreen .ff-myp-support-link {
+  color: #7c3aed;
+  font-weight: 700;
+  text-decoration: none;
+}
+#myProfileScreen .ff-myp-support-link:hover {
+  text-decoration: underline;
+}
+@media (max-width: 640px) {
+  #myProfileScreen {
+    max-width: none !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 14px 14px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+  }
+  #myProfileScreen > div[style*="display:flex"][style*="gap:20px"] {
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+  #myProfileScreen > div[style*="display:flex"][style*="gap:20px"] > div:first-child {
+    width: 100% !important;
+  }
+  #myProfileScreen > div[style*="display:flex"][style*="gap:20px"] > div:first-child nav {
+    flex-direction: row !important;
+    gap: 8px !important;
+    overflow-x: auto !important;
+    padding-bottom: 2px !important;
+  }
+  #myProfileScreen .my-profile-tab-btn {
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+  }
+}
 </style>
 
   <!-- Firebase SDK (modular) -->
@@ -5479,6 +5739,21 @@ dialog footer button, .code-dialog footer button {
       var titleEl = document.querySelector('.header .ff-app-title');
       if(!titleEl) return;
 
+      var dashboardScreenEl = document.getElementById('dashboardScreen');
+      if(dashboardScreenEl && isVisible(dashboardScreenEl)){
+        titleEl.textContent = 'Dashboard';
+        return;
+      }
+
+      var dashboardAnalyticsIds = ['queueAnalyticsScreen','ticketsAnalyticsScreen','timeAnalyticsScreen','tasksAnalyticsScreen'];
+      for(var da = 0; da < dashboardAnalyticsIds.length; da++){
+        var dashboardAnalyticsEl = document.getElementById(dashboardAnalyticsIds[da]);
+        if(dashboardAnalyticsEl && isVisible(dashboardAnalyticsEl)){
+          titleEl.textContent = 'Dashboard';
+          return;
+        }
+      }
+
       var appsPanel = document.getElementById('appsPanel');
       if(isVisible(appsPanel)){
         titleEl.textContent = 'Apps';
@@ -5512,7 +5787,7 @@ dialog footer button, .code-dialog footer button {
         var screen = document.getElementById(fallback.screen);
         if(fallback.screen === 'owner-view'){
           var skipOwnerQueue = false;
-          var ownerSkipIds = ['tasksScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen','historyScreen'];
+          var ownerSkipIds = ['tasksScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen','queueAnalyticsScreen','ticketsAnalyticsScreen','timeAnalyticsScreen','tasksAnalyticsScreen','historyScreen'];
           for(var si = 0; si < ownerSkipIds.length; si++){
             var se = document.getElementById(ownerSkipIds[si]);
             if(se && isVisible(se)) { skipOwnerQueue = true; break; }
@@ -5552,7 +5827,7 @@ dialog footer button, .code-dialog footer button {
       if(h) new ResizeObserver(setHeaderH).observe(h);
     }
     if(typeof MutationObserver!=='undefined'){
-      var targets = ['queueBtn','ticketsBtn','tasksBtn','chatBtn','mediaBtn','inventoryNavBtn','inboxBtn','trainingBtn','scheduleBtn','timeClockBtn','settingsBtn','dashboardBtn','appsPanel','staffMembersModal','owner-view','ticketsScreen','tasksScreen','chatScreen','mediaScreen','inventoryScreen','inboxScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen','historyScreen'];
+      var targets = ['queueBtn','ticketsBtn','tasksBtn','chatBtn','mediaBtn','inventoryNavBtn','inboxBtn','trainingBtn','scheduleBtn','timeClockBtn','settingsBtn','dashboardBtn','appsPanel','staffMembersModal','owner-view','ticketsScreen','tasksScreen','chatScreen','mediaScreen','inventoryScreen','inboxScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen','queueAnalyticsScreen','ticketsAnalyticsScreen','timeAnalyticsScreen','tasksAnalyticsScreen','historyScreen'];
       var observer = new MutationObserver(function () {
         setMobileHeaderTitle();
         setHeaderH();
@@ -5868,6 +6143,7 @@ dialog footer button, .code-dialog footer button {
         <nav style="display:flex;flex-direction:column;gap:4px;">
           <button type="button" class="my-profile-tab-btn user-profile-menu-item user-profile-menu-item--active" data-my-profile-tab="details" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Details</button>
           <button type="button" class="my-profile-tab-btn user-profile-menu-item" data-my-profile-tab="password" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Password</button>
+          <button type="button" class="my-profile-tab-btn user-profile-menu-item" data-my-profile-tab="delete-account" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Delete Account</button>
         </nav>
       </div>
       <div style="flex:1;min-width:0;">
@@ -5925,6 +6201,31 @@ dialog footer button, .code-dialog footer button {
             </div>
             <div class="ff-myp-actions">
               <button type="button" id="myProfileChangePinBtn" class="ff-myp-btn">Update PIN</button>
+            </div>
+          </div>
+        </div>
+        <div id="myProfilePanelDeleteAccount" style="display:none;">
+          <div class="ff-myp-warning-card">
+            <h3 class="ff-myp-title">Delete Account</h3>
+            <p class="ff-myp-sub">
+              Account deletion for Fair Flow business workspaces is handled by request so our team can review the impact safely.
+            </p>
+            <ul class="ff-myp-warning-list">
+              <li>Deleting an Owner account may affect the entire business workspace.</li>
+              <li>This may impact staff accounts, schedules, tickets, inventory, media, locations, memberships, and associated operational data.</li>
+              <li>Some information may be retained temporarily for legal, billing, security, or operational reasons.</li>
+              <li>This action may affect connected staff users.</li>
+            </ul>
+            <p class="ff-myp-sub">
+              To request account deletion, contact
+              <a class="ff-myp-support-link" href="mailto:support@fairflowapp.com">support@fairflowapp.com</a>.
+            </p>
+            <div class="ff-myp-actions">
+              <button
+                type="button"
+                class="ff-myp-btn"
+                onclick="window.location.href='mailto:support@fairflowapp.com?subject=Fair%20Flow%20Account%20Deletion%20Request';"
+              >Request Account Deletion</button>
             </div>
           </div>
         </div>
@@ -10285,12 +10586,17 @@ window.ffCurrentUserHasHistoryViewPermission = ffCurrentUserHasHistoryViewPermis
 /** Dashboard: staff.permissions.dashboard_view === true (Apps launcher tile + Dashboard screen). */
 function ffStaffHasDashboardViewPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
+  const roleLc = String(staff.role || '').toLowerCase().trim();
+  if (roleLc === 'owner' || roleLc === 'admin' || roleLc === 'manager' || staff.isAdmin === true || staff.isManager === true) {
+    return true;
+  }
   const p = staff.permissions;
   return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.dashboard_view));
 }
 
 function ffCurrentUserHasDashboardViewPermission() {
   if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
   return ffStaffHasDashboardViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 window.ffCurrentUserHasDashboardViewPermission = ffCurrentUserHasDashboardViewPermission;
@@ -19281,8 +19587,10 @@ window.ffSwitchMyProfileTab = function ffSwitchMyProfileTab(tab) {
   });
   const d = document.getElementById('myProfilePanelDetails');
   const p = document.getElementById('myProfilePanelPassword');
+  const del = document.getElementById('myProfilePanelDeleteAccount');
   if (d) d.style.display = tab === 'details' ? 'block' : 'none';
   if (p) p.style.display = tab === 'password' ? 'block' : 'none';
+  if (del) del.style.display = tab === 'delete-account' ? 'block' : 'none';
 };
 
 window.ffInitMyProfileScreen = async function ffInitMyProfileScreen() {
@@ -33336,6 +33644,94 @@ function initializeAppsPanel() {
   
   // Toggle state for showing archived staff
   let showArchivedStaff = false;
+
+  function ffStaffMembersIsMobile() {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function ffStaffMobileShowList() {
+    const modal = document.getElementById('staffMembersModal');
+    if (!modal) return;
+    modal.classList.remove('ff-staff-mobile-detail');
+    modal.classList.remove('ff-staff-mobile-add');
+    modal.classList.remove('ff-staff-mobile-tab');
+    try {
+      const content = modal.querySelector('.staff-modal-content');
+      if (content) content.scrollTop = 0;
+    } catch (_) {}
+  }
+
+  function ffStaffMobileShowDetail(mode) {
+    if (!ffStaffMembersIsMobile()) return;
+    const modal = document.getElementById('staffMembersModal');
+    if (!modal) return;
+    modal.classList.remove('ff-staff-mobile-detail');
+    modal.classList.remove('ff-staff-mobile-add');
+    modal.classList.remove('ff-staff-mobile-tab');
+    modal.classList.add(mode === 'add' ? 'ff-staff-mobile-add' : (mode === 'tab' ? 'ff-staff-mobile-tab' : 'ff-staff-mobile-detail'));
+    try {
+      const content = modal.querySelector('.staff-content-area');
+      if (content) content.scrollTop = 0;
+    } catch (_) {}
+  }
+
+  if (!document.__ffStaffMobileBackDelegated) {
+    document.__ffStaffMobileBackDelegated = true;
+    document.addEventListener('click', function(event) {
+      const target = event.target && event.target.closest ? event.target.closest('#staffMembersModal .ff-staff-mobile-back') : null;
+      if (!target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const modal = document.getElementById('staffMembersModal');
+      if (modal && modal.classList.contains('ff-staff-mobile-tab')) {
+        modal.classList.remove('ff-staff-mobile-tab');
+        modal.classList.add('ff-staff-mobile-detail');
+        try {
+          const content = modal.querySelector('.staff-content-area');
+          if (content) content.scrollTop = 0;
+        } catch (_) {}
+        return;
+      }
+      ffStaffMobileShowList();
+    }, true);
+  }
+
+  function ffPrepareStaffMembersForeground() {
+    try {
+      [
+        'owner-view',
+        'ticketsScreen',
+        'tasksScreen',
+        'chatScreen',
+        'mediaScreen',
+        'inventoryScreen',
+        'inboxScreen',
+        'trainingScreen',
+        'scheduleScreen',
+        'timeClockScreen',
+        'pointsAppScreen',
+        'dashboardScreen',
+        'historyScreen',
+        'myProfileScreen',
+        'userProfileScreen',
+        'manageQueueScreen'
+      ].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      ['#joinBar', '.joinbar', '#queueControls', '.wrap'].forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) {
+          el.style.setProperty('display', 'none', 'important');
+          el.style.setProperty('visibility', 'hidden', 'important');
+        });
+      });
+      if (typeof window.ffSyncShellHeaderInset === 'function') window.ffSyncShellHeaderInset();
+    } catch (_) {}
+  }
   
   // Render staff list in LEFT sidebar grouped by role (names only)
   function renderStaffList() {
@@ -33526,6 +33922,7 @@ function initializeAppsPanel() {
     selectedStaffId = staffId;
     renderStaffList(); // Re-render to update highlights
     renderStaffDetails();
+    ffStaffMobileShowDetail('detail');
     
     // Hide the form when showing details
     const form = document.getElementById('staffAddForm');
@@ -33789,6 +34186,7 @@ function initializeAppsPanel() {
           btn.onclick = function() {
             const tab = btn.getAttribute('data-tab');
             switchTab(tab);
+            ffStaffMobileShowDetail('tab');
           };
         });
       }
@@ -37015,6 +37413,9 @@ function initializeAppsPanel() {
     const jumpToTab = jumpToStaffId ? String(options.jumpToTab || 'details').trim() : 'details';
 
     if (staffMembersModal) {
+      ffPrepareStaffMembersForeground();
+      document.body.classList.add('ff-staff-members-open');
+      staffMembersModal.classList.toggle('ff-staff-mobile-lock', ffStaffMembersIsMobile());
       // Get the global header element to calculate its height
       const header = document.querySelector('.header');
       let headerHeight = 0;
@@ -37024,7 +37425,7 @@ function initializeAppsPanel() {
       
       // Position Staff Members below the header
       staffMembersModal.style.top = headerHeight + 'px';
-      staffMembersModal.style.height = `calc(100vh - ${headerHeight}px)`;
+      staffMembersModal.style.height = `calc(100dvh - ${headerHeight}px)`;
       staffMembersModal.style.display = 'flex';
       document.querySelectorAll('.btn-pill').forEach(function (b) { b.classList.remove('active'); });
       if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
@@ -37252,6 +37653,11 @@ function initializeAppsPanel() {
     }
     if (staffMembersModal) {
       staffMembersModal.style.display = 'none';
+      document.body.classList.remove('ff-staff-members-open');
+        staffMembersModal.classList.remove('ff-staff-mobile-detail');
+        staffMembersModal.classList.remove('ff-staff-mobile-add');
+        staffMembersModal.classList.remove('ff-staff-mobile-tab');
+        staffMembersModal.classList.remove('ff-staff-mobile-lock');
       if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
       // Reset form state when closing
       hideStaffAddForm();
@@ -37296,6 +37702,7 @@ function initializeAppsPanel() {
       // Optional: subtle active state (slightly darker gradient)
       addBtn.style.opacity = '0.9';
     }
+    ffStaffMobileShowDetail('add');
     
     // Wire up role select to show/hide technician types section
     const roleSelect = document.getElementById('staffRole');
@@ -37943,6 +38350,7 @@ function initializeAppsPanel() {
     if (addBtn) {
       addBtn.style.opacity = '1';
     }
+    ffStaffMobileShowList();
     
     // Clear form fields
     if (form) {
@@ -54597,6 +55005,7 @@ function hookSettingsGuard_DISABLED(){
       </div>
       <!-- Right Content Area -->
       <div class="staff-content-area" style="flex:1;overflow-y:auto;padding:12px 20px;">
+        <button type="button" class="ff-staff-mobile-back" aria-label="Back to staff list"></button>
         <!-- Placeholder Message -->
         <p id="staffPlaceholderMessage" style="margin:0;font-size:14px;color:#6b7280;text-align:center;display:flex;align-items:center;justify-content:center;height:100%;">Select a staff member to view details</p>
         
@@ -54798,7 +55207,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 2000 },
         { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
         { src: "/schedule-ui.js?v=20260514_schedule_nav_guard", type: "module", delay: 2300 },
-        { src: "/dashboard.js?v=20260501_dashboard_perm", type: "module", delay: 2500 },
+        { src: "/dashboard.js?v=20260514_mobile_analytics_ready", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260505_inbox_btn_top_right_layout", type: "module", delay: 2700 },
         { src: "/media-upload.js?v=20260513_media_hide_wrap_zfix", type: "module", delay: 2780 },
@@ -54810,10 +55219,10 @@ function hookSettingsGuard_DISABLED(){
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },
         { src: "/inventory.js?v=20260505_inv_od_footer_one_row", type: "module", delay: 4900 },
         { src: "/locations-manage.js?v=20260501_points", type: "module", delay: 5400 },
-        { src: "/queue-analytics.js?v=20260501_points", type: "module", delay: 5700 },
-        { src: "/tickets-analytics.js?v=20260501_points", type: "module", delay: 6000 },
-        { src: "/time-analytics.js?v=20260501_points", type: "module", delay: 6300 },
-        { src: "/tasks-analytics.js?v=20260501_points", type: "module", delay: 6600 }
+        { src: "/queue-analytics.js?v=20260514_mobile_analytics_ready", type: "module", delay: 5700 },
+        { src: "/tickets-analytics.js?v=20260514_mobile_analytics_ready", type: "module", delay: 6000 },
+        { src: "/time-analytics.js?v=20260514_mobile_analytics_ready", type: "module", delay: 6300 },
+        { src: "/tasks-analytics.js?v=20260514_mobile_analytics_ready", type: "module", delay: 6600 }
       ];
       function wait(ms) {
         return new Promise(function (resolve) { setTimeout(resolve, ms); });
@@ -55398,6 +55807,10 @@ function hookSettingsGuard_DISABLED(){
       #ticketsScreen #ticketsToolbarRight {
         gap: 8px;
       }
+      #ticketsScreen #ticketsManageServicesBtn {
+        transform: translateX(0);
+        margin-right: 4px;
+      }
       #ticketsScreen #ticketsFiltersRow {
         padding: 8px 10px 10px;
       }
@@ -55408,6 +55821,7 @@ function hookSettingsGuard_DISABLED(){
         min-height: 28px !important;
         box-shadow: 0 1px 5px rgba(124, 58, 237, 0.22) !important;
         flex-shrink: 0;
+        transform: translateY(-2px);
       }
       #ticketsScreen #ticketsNewBtn .tickets-new-btn__lg {
         display: none;
@@ -55878,6 +56292,8 @@ function hookSettingsGuard_DISABLED(){
 
     /* Mobile: show list OR conversation (with Back) */
     @media (max-width: 860px) {
+      #chatTopBar .chat-topbar-icon,
+      #chatTopBar .chat-topbar-title { display:none !important; }
       #chatThreadListWrap { width:100%; border-right:none; }
       #chatConvView { display:none; }
       #chatScreen.chat-mobile-open #chatThreadListWrap { display:none; }
@@ -55885,12 +56301,31 @@ function hookSettingsGuard_DISABLED(){
       #chatConvBackBtn { display:inline-flex; }
       /* In an open thread, use bottom Reply / composer — hide top New Message to avoid wrong flow */
       #chatScreen.chat-mobile-open #chatTopBar #chatSendBtn { display: none !important; }
+      #chatScreen.chat-mobile-open #chatTopBar {
+        justify-content: flex-start;
+      }
+      #chatScreen.chat-mobile-open #chatTopBar .chat-topbar-icon,
+      #chatScreen.chat-mobile-open #chatTopBar .chat-topbar-title,
+      #chatScreen.chat-mobile-open #chatTopBar .chat-topbar-actions {
+        display: none !important;
+      }
+      #chatScreen.chat-mobile-open #chatMobileTopBackBtn {
+        display: inline-flex !important;
+      }
+      #chatScreen.chat-mobile-open #chatConvHeaderAvatar {
+        display: none !important;
+      }
     }
   </style>
 
   <!-- -- Top Bar (Thread List header) - same footprint as Inbox/Media/Tickets toolbars -- -->
   <div id="chatTopBar">
     <div class="chat-topbar-title-wrap">
+      <button id="chatMobileTopBackBtn" type="button" onclick="window.closeConversation && window.closeConversation()"
+        aria-label="Back to conversations"
+        style="display:none;align-items:center;justify-content:center;width:34px;height:34px;border-radius:999px;border:1px solid #e5e7eb;background:#fff;color:#7c3aed;cursor:pointer;font-size:22px;font-weight:700;line-height:1;box-shadow:0 1px 3px rgba(15,23,42,0.08);">
+        ‹
+      </button>
       <svg class="chat-topbar-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
       <h3 class="chat-topbar-title">Chat</h3>
     </div>
@@ -55928,9 +56363,9 @@ function hookSettingsGuard_DISABLED(){
       <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#fff;border-bottom:1px solid #e5e7eb;flex-shrink:0;">
         <button id="chatConvBackBtn" type="button" onclick="window.closeConversation && window.closeConversation()"
           style="display:none;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;cursor:pointer;color:#374151;font-weight:800;">
-          -
+          ‹
         </button>
-        <div style="width:32px;height:32px;border-radius:50%;background:#ede9fe;color:#7c3aed;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">-</div>
+        <div id="chatConvHeaderAvatar" style="width:32px;height:32px;border-radius:50%;background:#ede9fe;color:#7c3aed;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">-</div>
         <span id="chatConvTitle" style="font-size:15px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Select a conversation</span>
       </div>
       <!-- Messages area -->
@@ -56409,7 +56844,7 @@ function hookSettingsGuard_DISABLED(){
 <div id="mediaScreen" class="media-screen" data-media-tab="my_uploads" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f9fafb;z-index:9860;flex-direction:column;overflow:hidden;pointer-events:auto;">
   <!-- Tabs (left) | Filters + Sort + Upload (right, grouped) -->
   <div class="media-toolbar-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;gap:12px;flex-wrap:wrap;">
-    <div id="mediaTabsWrap" style="display:flex;align-items:center;gap:0;position:relative;z-index:2;min-width:0;">
+    <div id="mediaTabsWrap" style="display:none;align-items:center;gap:0;position:relative;z-index:2;min-width:0;">
       <button type="button" id="mediaTabMyUploads" class="media-tab-btn active" data-media-tab="my_uploads" style="border-right:0!important;border-radius:8px 0 0 8px!important;">My Uploads</button>
       <button type="button" id="mediaTabToHandle" class="media-tab-btn" data-media-tab="to_handle" style="display:none;border-left:none!important;border-radius:0 8px 8px 0!important;">To handle</button>
     </div>

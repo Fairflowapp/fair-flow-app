@@ -521,6 +521,35 @@ function injectStyles() {
       #${SCREEN_ID} .ta-action-btn { flex: 1; }
       #${SCREEN_ID} .ta-card-value { font-size: 19px; }
     }
+    @media (max-width: 640px) {
+      body.ff-dashboard-analytics-open .header {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        z-index: 100340 !important;
+      }
+      #${SCREEN_ID} {
+        top: var(--header-h, 60px) !important;
+        bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+      }
+      #${SCREEN_ID} .ta-wrap {
+        padding: 14px 18px calc(170px + env(safe-area-inset-bottom, 0px)) 18px;
+        box-sizing: border-box;
+      }
+      #${SCREEN_ID} #ffTaInsights {
+        margin-bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+      }
+      #${SCREEN_ID} .ta-insights {
+        padding-bottom: 32px;
+      }
+      #${SCREEN_ID} .ta-insight:last-child {
+        margin-bottom: 18px;
+      }
+    }
   `;
   document.head.appendChild(style);
 }
@@ -1488,6 +1517,8 @@ function hideOtherScreens() {
 function hideSelf() {
   const screen = document.getElementById(SCREEN_ID);
   if (screen) screen.style.display = "none";
+  document.body.classList.remove("ff-dashboard-analytics-open");
+  if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
 }
 
 function bindAutoHideOnOtherNav() {
@@ -1520,8 +1551,10 @@ export function goToTicketsAnalytics() {
     screen.style.display = "flex";
     screen.style.setProperty("pointer-events", "auto", "important");
   }
+  document.body.classList.add("ff-dashboard-analytics-open");
   document.querySelectorAll(".btn-pill").forEach((b) => b.classList.remove("active"));
   refresh();
+  if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
 }
 
 function ensureInjected() {

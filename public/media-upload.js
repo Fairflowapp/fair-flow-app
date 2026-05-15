@@ -705,7 +705,7 @@ function applyToHandleVisibility() {
   if (!showToHandle) currentMediaTab = "my_uploads";
   const tabsWrap = document.getElementById("mediaTabsWrap");
   if (tabsWrap) {
-    tabsWrap.style.setProperty("display", "flex", "important");
+    tabsWrap.style.setProperty("display", showToHandle ? "flex" : "none", "important");
   }
   const toHandleBtn = document.getElementById("mediaTabToHandle");
   if (toHandleBtn) {
@@ -1926,6 +1926,7 @@ export async function goToMedia() {
     void (async () => {
       try {
         await loadUserProfile();
+        applyToHandleVisibility();
         setupMediaWorkListSubscriptions();
         updateMediaUploadWorkButtonVisibility();
         renderMediaFilters();
