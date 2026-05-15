@@ -32,6 +32,7 @@ let _lastShownCallId = null;
 let _timedOutCalls = new Set();
 let _queuedQueuePresenceSync = null;
 let _callExpiryTimers = {};
+let _presenceWriteDenied = false;
 
 function diagLog(label, data) {
   if (data === undefined) {
@@ -680,6 +681,7 @@ function buildOwnPresencePayload(forceWrite) {
 }
 
 async function writeOwnPresenceHeartbeat(forceWrite = false) {
+  if (_presenceWriteDenied) return;
   const payload = buildOwnPresencePayload(forceWrite);
   if (!payload) {
     diagWarn("writeOwnPresenceHeartbeat skipped", {
@@ -711,6 +713,17 @@ async function writeOwnPresenceHeartbeat(forceWrite = false) {
       path
     });
   } catch (e) {
+    if (e && e.code === "permission-denied") {
+      _presenceWriteDenied = true;
+      stopHeartbeatLoop();
+      diagWarn("writeOwnPresenceHeartbeat disabled after permission-denied", {
+        uid: _uid,
+        salonId: _salonId,
+        staffId: _staffId,
+        path
+      });
+      return;
+    }
     console.warn("[StaffCall] Heartbeat write failed", e);
     diagWarn("writeOwnPresenceHeartbeat failed", {
       forceWrite,
@@ -743,6 +756,7 @@ function stopHeartbeatLoop() {
 async function loadContextForUser(user) {
   if (!user) {
     diagLog("auth cleared", { uid: null, salonId: null, staffId: null });
+    _presenceWriteDenied = false;
     _salonId = null;
     _staffId = null;
     _uid = null;
@@ -763,6 +777,7 @@ async function loadContextForUser(user) {
   }
 
   _uid = user.uid;
+  _presenceWriteDenied = false;
   diagLog("auth user detected", {
     uid: user.uid,
     email: user.email || null,

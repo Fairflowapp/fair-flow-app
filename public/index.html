@@ -5150,27 +5150,126 @@ dialog footer button, .code-dialog footer button {
     max-width: none !important;
     width: 100% !important;
     margin: 0 !important;
-    padding: 14px 14px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+    padding: 18px 18px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
     box-sizing: border-box !important;
     overflow-x: hidden !important;
   }
-  #myProfileScreen > div[style*="display:flex"][style*="gap:20px"] {
+  #myProfileScreen .my-profile-hero {
     flex-direction: column !important;
-    gap: 12px !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+    margin-bottom: 20px !important;
+    text-align: center !important;
   }
-  #myProfileScreen > div[style*="display:flex"][style*="gap:20px"] > div:first-child {
+  #myProfileScreen .my-profile-inline-title {
+    display: none !important;
+  }
+  #myProfileScreen #myProfileAvatarWrap {
+    width: 74px !important;
+    height: 74px !important;
+  }
+  #myProfileScreen #myProfileAvatarWrap > div {
+    width: 74px !important;
+    height: 74px !important;
+  }
+  #myProfileScreen .my-profile-identity {
+    width: 100% !important;
+    max-width: 280px !important;
+    flex: 0 0 auto !important;
+    text-align: center !important;
+  }
+  #myProfileScreen #myProfileHeaderName {
+    font-size: 20px !important;
+    font-weight: 700 !important;
+    line-height: 1.2 !important;
+    margin-bottom: 4px !important;
+  }
+  #myProfileScreen #myProfileHeaderEmail {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    font-size: 14px !important;
+    line-height: 1.35 !important;
+  }
+  #myProfileScreen .my-profile-layout {
+    flex-direction: column !important;
+    gap: 10px !important;
+    align-items: stretch !important;
     width: 100% !important;
   }
-  #myProfileScreen > div[style*="display:flex"][style*="gap:20px"] > div:first-child nav {
-    flex-direction: row !important;
+  #myProfileScreen .my-profile-nav-col {
+    width: 100% !important;
+  }
+  #myProfileScreen .my-profile-nav {
+    flex-direction: column !important;
     gap: 8px !important;
-    overflow-x: auto !important;
-    padding-bottom: 2px !important;
+    overflow-x: visible !important;
+    padding-bottom: 0 !important;
+    width: 100% !important;
   }
   #myProfileScreen .my-profile-tab-btn {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
     flex: 0 0 auto !important;
+    width: 100% !important;
     white-space: nowrap !important;
+    text-align: left !important;
+    min-height: 46px !important;
+    padding: 0 14px !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 12px !important;
+    background: #fff !important;
+    color: #111827 !important;
+    font-size: 14px !important;
+    font-weight: 400 !important;
+    box-sizing: border-box !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
   }
+  #myProfileScreen .my-profile-tab-btn::after {
+    content: "›";
+    color: #7c3aed;
+    font-size: 22px;
+    font-weight: 500;
+    line-height: 1;
+  }
+  #myProfileScreen .my-profile-tab-btn.user-profile-menu-item--active {
+    background: #f4edff !important;
+    color: #111827 !important;
+  }
+  #myProfileScreen:not(.ff-myp-mobile-panel-open) .my-profile-content {
+    display: none !important;
+  }
+  #myProfileScreen.ff-myp-mobile-panel-open .my-profile-nav-col {
+    display: none !important;
+  }
+  #myProfileScreen.ff-myp-mobile-panel-open .my-profile-content {
+    display: block !important;
+    width: 100% !important;
+  }
+  #myProfileMobileBackBtn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 34px !important;
+    height: 34px !important;
+    margin: 0 0 10px 0 !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 999px !important;
+    background: #fff !important;
+    color: #7c3aed !important;
+    cursor: pointer !important;
+    font-size: 22px !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.08) !important;
+  }
+}
+#myProfileMobileBackBtn {
+  display: none;
 }
 </style>
 
@@ -6112,8 +6211,8 @@ dialog footer button, .code-dialog footer button {
   <div id="myProfileScreen" style="display:none;max-width:800px;margin:12px auto 40px;padding:0 24px;">
     <p id="myProfileBanner" style="display:none;margin:0 0 12px 0;padding:10px 12px;border-radius:8px;font-size:13px;"></p>
 
-    <div style="display:flex;align-items:center;gap:20px;margin-bottom:20px;flex-wrap:wrap;">
-      <span style="font-size:13px;font-weight:600;color:#6b7280;letter-spacing:0.02em;flex-shrink:0;padding-top:4px;">My Profile</span>
+    <div class="my-profile-hero" style="display:flex;align-items:center;gap:20px;margin-bottom:20px;flex-wrap:wrap;">
+      <span class="my-profile-inline-title" style="font-size:13px;font-weight:600;color:#6b7280;letter-spacing:0.02em;flex-shrink:0;padding-top:4px;">My Profile</span>
       <div id="myProfileAvatarWrap" style="position:relative;flex-shrink:0;width:80px;height:80px;">
         <div style="width:80px;height:80px;border-radius:50%;border:2px solid var(--border);background:#f3f4f6;overflow:hidden;position:relative;box-sizing:border-box;">
           <img id="myProfileAvatarImg" alt="" style="width:100%;height:100%;object-fit:cover;display:none;">
@@ -6132,21 +6231,22 @@ dialog footer button, .code-dialog footer button {
         </button>
         <input type="file" id="myProfileAvatarInput" accept="image/*" style="display:none;">
       </div>
-      <div style="flex:1;min-width:0;">
+      <div class="my-profile-identity" style="flex:1;min-width:0;">
         <h2 id="myProfileHeaderName" style="margin:0 0 4px 0;font-size:16px;font-weight:600;color:#111827;">-</h2>
         <p id="myProfileHeaderEmail" style="margin:0;font-size:12px;color:#6b7280;">-</p>
       </div>
     </div>
 
-    <div style="display:flex;gap:20px;align-items:flex-start;min-width:0;">
-      <div style="flex-shrink:0;width:160px;">
-        <nav style="display:flex;flex-direction:column;gap:4px;">
+    <div class="my-profile-layout" style="display:flex;gap:20px;align-items:flex-start;min-width:0;">
+      <div class="my-profile-nav-col" style="flex-shrink:0;width:160px;">
+        <nav class="my-profile-nav" style="display:flex;flex-direction:column;gap:4px;">
           <button type="button" class="my-profile-tab-btn user-profile-menu-item user-profile-menu-item--active" data-my-profile-tab="details" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Details</button>
           <button type="button" class="my-profile-tab-btn user-profile-menu-item" data-my-profile-tab="password" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Password</button>
           <button type="button" class="my-profile-tab-btn user-profile-menu-item" data-my-profile-tab="delete-account" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Delete Account</button>
         </nav>
       </div>
-      <div style="flex:1;min-width:0;">
+      <div class="my-profile-content" style="flex:1;min-width:0;">
+        <button type="button" id="myProfileMobileBackBtn" aria-label="Back to profile options" onclick="window.ffMyProfileMobileBack && window.ffMyProfileMobileBack()">‹</button>
         <div id="myProfilePanelDetails" class="my-profile-panel">
           <div class="ff-myp-card">
             <h3 class="ff-myp-title">Details</h3>
@@ -6186,21 +6286,6 @@ dialog footer button, .code-dialog footer button {
             </div>
             <div class="ff-myp-actions">
               <button type="button" id="myProfileChangePasswordSubmitBtn" class="ff-myp-btn">Update password</button>
-            </div>
-          </div>
-          <div class="ff-myp-card">
-            <h3 class="ff-myp-title">Salon PIN</h3>
-            <p class="ff-myp-sub">4-6 digits for in-app PIN flows.</p>
-            <div class="ff-myp-field">
-              <label class="ff-myp-label" for="myProfileNewPin">New PIN</label>
-              <input type="password" id="myProfileNewPin" class="ff-myp-input ff-myp-input--narrow" inputmode="numeric" maxlength="6" autocomplete="off">
-            </div>
-            <div class="ff-myp-field">
-              <label class="ff-myp-label" for="myProfileNewPin2">Confirm PIN</label>
-              <input type="password" id="myProfileNewPin2" class="ff-myp-input ff-myp-input--narrow" inputmode="numeric" maxlength="6" autocomplete="off">
-            </div>
-            <div class="ff-myp-actions">
-              <button type="button" id="myProfileChangePinBtn" class="ff-myp-btn">Update PIN</button>
             </div>
           </div>
         </div>
@@ -19578,7 +19663,12 @@ window.ffMyProfilePatchLocalStaffCache = function ffMyProfilePatchLocalStaffCach
   }
 };
 
-window.ffSwitchMyProfileTab = function ffSwitchMyProfileTab(tab) {
+window.ffMyProfileMobileBack = function ffMyProfileMobileBack() {
+  const screen = document.getElementById('myProfileScreen');
+  if (screen) screen.classList.remove('ff-myp-mobile-panel-open');
+};
+
+window.ffSwitchMyProfileTab = function ffSwitchMyProfileTab(tab, options) {
   document.querySelectorAll('.my-profile-tab-btn').forEach(function (btn) {
     const t = btn.getAttribute('data-my-profile-tab');
     const active = t === tab;
@@ -19591,10 +19681,16 @@ window.ffSwitchMyProfileTab = function ffSwitchMyProfileTab(tab) {
   if (d) d.style.display = tab === 'details' ? 'block' : 'none';
   if (p) p.style.display = tab === 'password' ? 'block' : 'none';
   if (del) del.style.display = tab === 'delete-account' ? 'block' : 'none';
+  const screen = document.getElementById('myProfileScreen');
+  const openMobilePanel = !(options && options.open === false);
+  if (screen && window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
+    if (openMobilePanel) screen.classList.add('ff-myp-mobile-panel-open');
+    else screen.classList.remove('ff-myp-mobile-panel-open');
+  }
 };
 
 window.ffInitMyProfileScreen = async function ffInitMyProfileScreen() {
-  window.ffSwitchMyProfileTab('details');
+  window.ffSwitchMyProfileTab('details', { open: false });
   const staffId = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '';
   const salonId = window.currentSalonId || '';
   const banner = document.getElementById('myProfileBanner');
@@ -39067,7 +39163,7 @@ function initializeUserProfileMenu() {
   if (window.__ff_userProfileMenuInitialized) return;
   window.__ff_userProfileMenuInitialized = true;
   
-  const menuItems = document.querySelectorAll('.user-profile-menu-item');
+  const menuItems = document.querySelectorAll('#userProfileScreen .user-profile-menu-item[data-section]');
   const cards = document.querySelectorAll('.user-profile-card');
   const passwordModal = document.getElementById('userProfilePasswordModal');
   const passwordModalClose = document.getElementById('userProfilePasswordModalClose');
@@ -45617,6 +45713,7 @@ function initializeUserProfileMenu() {
 
   // Menu item click handler
   function handleMenuClick(section, opts) {
+    if (!section) return;
     opts = opts || {};
     if (ffSettingsIsMobile() && opts.mobileDetail !== true) {
       const profileScreen = document.getElementById('userProfileScreen');
