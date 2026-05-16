@@ -1302,6 +1302,55 @@ function normalizeStoragePath(p) {
   return s.replace(/^\/+/, "") || null;
 }
 
+/* ---- Capacitor native helpers (Android) ---- */
+function _isCapacitorAndroid() {
+  return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && /Android/i.test(navigator.userAgent));
+}
+
+function _blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onloadend = () => resolve(r.result.split(",")[1]);
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
+async function _capSaveAndShare(blob, fileName) {
+  const { Filesystem, Share } = window.Capacitor.Plugins;
+  if (!Filesystem || !Share) throw new Error("Plugins not available");
+  const base64 = await _blobToBase64(blob);
+  const saved = await Filesystem.writeFile({
+    path: fileName,
+    data: base64,
+    directory: "CACHE",
+  });
+  const fileUri = saved.uri;
+  await Share.share({ files: [fileUri], dialogTitle: "Share" });
+}
+
+async function _capDownloadToDevice(blob, fileName) {
+  const { Filesystem } = window.Capacitor.Plugins;
+  if (!Filesystem) throw new Error("Filesystem plugin not available");
+  const base64 = await _blobToBase64(blob);
+  try {
+    await Filesystem.writeFile({
+      path: "Download/" + fileName,
+      data: base64,
+      directory: "EXTERNAL_STORAGE",
+      recursive: true,
+    });
+    return true;
+  } catch (_) {
+    await Filesystem.writeFile({
+      path: fileName,
+      data: base64,
+      directory: "DOCUMENTS",
+    });
+    return true;
+  }
+}
+
 /** Cloud Function `mediaDownloadFile` via Hosting rewrite — no direct Storage URL fetch. */
 async function fetchBlobViaHttpProxy(storagePath) {
   if (!storagePath || !auth.currentUser) {
@@ -1381,7 +1430,16 @@ async function triggerMediaFileDownload(blob, fileName, mediaUrlFallback, opts =
 
   closeIosTabIfUnused();
 
-  // Primary: classic download (works after async; showSaveFilePicker often loses user activation or Cancel = no file).
+  if (_isCapacitorAndroid()) {
+    try {
+      await _capDownloadToDevice(blob, fileName);
+      showMediaMessage("Image saved to your device.");
+      return;
+    } catch (e) {
+      console.warn("[Media] Capacitor download failed, trying fallback", e);
+    }
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -1574,15 +1632,51 @@ async function openWorkDetails(workId) {
   shareBtn.textContent = "Share";
   shareBtn.style.cssText = btnStyle;
   shareBtn.onclick = async () => {
-    if (firstMedia?.mediaUrl && navigator.share) {
-      try {
-        await navigator.share({ title: Array.isArray(work.categoryNames) ? work.categoryNames.join(", ") : work.categoryName || work.serviceType || "Work", url: firstMedia.mediaUrl, text: work.caption || "" });
-      } catch (e) {
-        if (e.name !== "AbortError") alert("Share failed: " + (e.message || "Unknown error"));
+    if (!firstMedia?.mediaUrl && !firstMedia?.storagePath) {
+      alert("No media to share");
+      return;
+    }
+    const shareTitle = Array.isArray(work.categoryNames) ? work.categoryNames.join(", ") : work.categoryName || work.serviceType || "Work";
+    shareBtn.disabled = true;
+    shareBtn.textContent = "Loading…";
+    try {
+      let storagePath = normalizeStoragePath(firstMedia.storagePath) || extractStoragePathFromMediaUrl(firstMedia.mediaUrl);
+      let blob = null;
+      if (storagePath && auth.currentUser) {
+        try { blob = await fetchBlobViaHttpProxy(storagePath); } catch (_) {}
       }
-    } else if (firstMedia?.mediaUrl) {
-      navigator.clipboard?.writeText(firstMedia.mediaUrl).then(() => alert("Link copied"));
-    } else alert("No media to share");
+      if (blob && blob.size > 0) {
+        const ext = (storagePath || firstMedia.mediaUrl || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|heic|heif)$/i)?.[1] || "jpg";
+        const isVideo = /^(mp4|webm|mov)$/i.test(ext);
+        const mimeType = blob.type || (isVideo ? `video/${ext}` : `image/${ext === "jpg" ? "jpeg" : ext}`);
+        const shareFileName = `work-${workId}.${ext}`;
+        if (_isCapacitorAndroid()) {
+          try {
+            await _capSaveAndShare(blob, shareFileName);
+            return;
+          } catch (e) {
+            console.warn("[Media] Capacitor share failed", e);
+          }
+        }
+        if (navigator.share && typeof navigator.canShare === "function") {
+          const file = new File([blob], shareFileName, { type: mimeType });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({ title: shareTitle, text: work.caption || "", files: [file] });
+            return;
+          }
+        }
+      }
+      if (firstMedia?.mediaUrl && navigator.share) {
+        await navigator.share({ title: shareTitle, url: firstMedia.mediaUrl, text: work.caption || "" });
+      } else if (firstMedia?.mediaUrl) {
+        navigator.clipboard?.writeText(firstMedia.mediaUrl).then(() => alert("Link copied"));
+      }
+    } catch (e) {
+      if (e.name !== "AbortError") alert("Share failed: " + (e.message || "Unknown error"));
+    } finally {
+      shareBtn.disabled = false;
+      shareBtn.textContent = "Share";
+    }
   };
   addActionBtn(shareBtn);
 
