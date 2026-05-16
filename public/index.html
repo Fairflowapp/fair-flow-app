@@ -105,7 +105,7 @@
 
 <meta charset="utf-8"/>
 
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"/>
 
 <title>Fair Flow App</title>
 <meta name="application-name" content="Fair Flow App"/>
@@ -114,6 +114,19 @@
 <!-- Tab/address-bar icon size is chosen by the browser/OS (not enlargeable from HTML). Use a sharp square PNG. Bump ?v= when replacing the file. -->
 <link rel="icon" href="/fairflow-favicon-tab.png?v=3" type="image/png" sizes="64x64"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/fairflow-logo.png?v=12"/>
+
+<script>
+  (function(){
+    try {
+      var ua = navigator.userAgent || '';
+      var platform = navigator.platform || '';
+      var touchMac = platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+      if (/iPhone|iPad|iPod/i.test(ua) || touchMac) {
+        document.documentElement.classList.add('ff-ios-capacitor-safe');
+      }
+    } catch(e) {}
+  })();
+</script>
 
 <style>
 
@@ -144,6 +157,7 @@ html{scrollbar-gutter:stable;}
 /* Invite mode: hide app shell while overlay is active */
 body.ff-invite-mode { overflow: hidden; }
 body.ff-invite-mode #main-app-content,
+body.ff-invite-mode .header,
 body.ff-invite-mode #authBanner,
 body.ff-invite-mode #reset-admin-pin-section {
   display: none !important;
@@ -151,6 +165,9 @@ body.ff-invite-mode #reset-admin-pin-section {
 
 /* Signed out: hide app + any full-screen module that is a sibling of #main-app-content (otherwise queue / tickets stay visible behind login). */
 body.ff-logged-out #main-app-content {
+  display: none !important;
+}
+body.ff-logged-out .header {
   display: none !important;
 }
 body.ff-logged-out #ticketsScreen,
@@ -272,6 +289,11 @@ body:not(.ff-queue-ui-visible) .wrap {
 }
 body.ff-queue-ui-visible #owner-view,
 body.ff-queue-ui-visible .wrap {
+  visibility: visible !important;
+}
+/* Route-level recovery: if Queue is the active route, keep its body visible even if auth-ready classes briefly churn. */
+body.ff-queue-route-active #owner-view,
+body.ff-queue-route-active .wrap {
   visibility: visible !important;
 }
 
@@ -3570,10 +3592,31 @@ dialog footer button, .code-dialog footer button {
    * #ticketsScreen (z-index 9850), which hid tabs and swallowed taps. Omitting z-index lets
    * .header (100340) and .toolbar.toolbar-nav-main (100350) stack above those panels.
    */
+  /* iOS/Capacitor: avoid edge-to-edge horizontal drift; safe-area insets need viewport-fit=cover */
+  html,
+  body {
+    width: 100%;
+    overflow-x: hidden;
+    max-width: 100%;
+  }
+
   #main-app-content {
     max-width: 100%;
     overflow-x: hidden;
     position: relative;
+  }
+
+  #owner-view,
+  .wrap {
+    max-width: 100vw;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+
+  .joinbar {
+    max-width: 100vw;
+    overflow: visible;
+    box-sizing: border-box;
   }
 
   /* Chat lives in-document under the fixed bottom nav — pad so thread composer stays visible */
@@ -4058,14 +4101,51 @@ dialog footer button, .code-dialog footer button {
   }
 
   .header {
+    position: fixed;
+    top: constant(safe-area-inset-top) !important;
+    top: env(safe-area-inset-top, 0px) !important;
+    left: 0;
+    right: 0;
+    width: 100%;
+    z-index: 100450 !important;
+    padding-top: 0 !important;
+    box-sizing: border-box;
+  }
+
+  /* Fixed white layer behind the device status bar (mobile only).
+     On Android (no safe-area inset) the height collapses to 0 and has no effect.
+     On iOS Capacitor it keeps the status-bar area clean white while scrolling. */
+  body::before {
+    content: "";
+    position: fixed;
     top: 0;
-    z-index: 100340 !important;
+    left: 0;
+    right: 0;
+    height: constant(safe-area-inset-top);
+    height: env(safe-area-inset-top, 0px);
+    background: #fff;
+    z-index: 9998;
+    pointer-events: none;
+  }
+
+  /* Hide the white status-bar layer on screens where the header itself is hidden,
+     so the login / invite / logged-out states stay visually clean. */
+  body.ff-invite-mode::before,
+  body.ff-logged-out::before {
+    display: none !important;
+  }
+
+  #main-app-content {
+    padding-top: var(--header-h, 60px);
   }
 
   .header-inner {
     position: relative;
     min-height: 48px;
-    padding: calc(7px + env(safe-area-inset-top, 0px)) 12px 7px;
+    padding-top: 7px;
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+    padding-bottom: 7px;
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
     gap: 10px;
     justify-content: space-between;
   }
@@ -4120,11 +4200,11 @@ dialog footer button, .code-dialog footer button {
   }
 
   .header .user-avatar-wrapper {
-    z-index: 100385 !important;
+    z-index: 100455 !important;
   }
 
   #userAvatarDropdown.user-avatar-dropdown {
-    z-index: 100390 !important;
+    z-index: 100456 !important;
   }
 
   .toolbar.toolbar-nav-main {
@@ -4137,11 +4217,21 @@ dialog footer button, .code-dialog footer button {
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 2px;
     min-width: 0;
-    padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+    padding-top: 8px;
+    padding-bottom: calc(8px + constant(safe-area-inset-bottom));
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(8px, env(safe-area-inset-left, 0px));
+    padding-right: max(8px, env(safe-area-inset-right, 0px));
     background: #ffffff;
     border-top: 1px solid #e5e7eb;
     box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.10);
     pointer-events: auto;
+  }
+
+  @supports (-webkit-touch-callout: none) {
+    .toolbar.toolbar-nav-main {
+      padding-bottom: calc(8px + max(18px, env(safe-area-inset-bottom, 0px)));
+    }
   }
 
   .header .toolbar.toolbar-nav-main #inboxBtn,
@@ -4233,7 +4323,7 @@ dialog footer button, .code-dialog footer button {
 
   .header .toolbar.toolbar-nav-right #appsBtn {
     position: absolute !important;
-    left: 12px;
+    left: max(12px, env(safe-area-inset-left, 0px));
     right: auto;
     top: 50%;
     transform: translateY(-50%);
@@ -4255,7 +4345,7 @@ dialog footer button, .code-dialog footer button {
 
   #ffLocationSwitcher.ff-location-switcher {
     position: absolute !important;
-    left: 50px !important;
+    left: calc(34px + 4px + max(12px, env(safe-area-inset-left, 0px))) !important;
     right: auto !important;
     top: 50% !important;
     transform: translateY(-50%) !important;
@@ -4342,7 +4432,7 @@ dialog footer button, .code-dialog footer button {
 
   #joinBar .ff-join-pin-actions-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 0.46fr);
+    grid-template-columns: minmax(0, 1fr) minmax(86px, 104px);
     gap: 9px;
     width: 100%;
     min-width: 0;
@@ -4424,11 +4514,14 @@ dialog footer button, .code-dialog footer button {
   .joinbar input[type="text"] {
     width: 100%;
     min-width: 0;
+    max-width: 100%;
+    font-size: 16px !important;
+    box-sizing: border-box;
   }
 
   #joinBar.joinbar {
     position: relative;
-    z-index: 1;
+    z-index: 2;
   }
 
   .joinbar .ff-join-pin-actions-row + span {
@@ -4436,11 +4529,11 @@ dialog footer button, .code-dialog footer button {
   }
 
   #joinBar #queueControls {
-    position: absolute;
-    right: 14px;
+    position: fixed;
+    right: var(--ff-join-more-right, 14px);
     left: auto;
-    top: 100%;
-    margin-top: 6px;
+    top: var(--ff-join-more-top, 170px);
+    margin-top: 0;
     flex: none;
     width: min(280px, calc(100vw - 28px));
     min-width: min(240px, calc(100vw - 28px));
@@ -4461,7 +4554,7 @@ dialog footer button, .code-dialog footer button {
     pointer-events: none;
     transform: translateY(-6px);
     transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
-    z-index: 20;
+    z-index: 100330;
   }
 
   #joinBar.ff-join-more-open #queueControls {
@@ -4469,6 +4562,7 @@ dialog footer button, .code-dialog footer button {
     opacity: 1;
     pointer-events: auto;
     transform: translateY(0);
+    z-index: 100330;
   }
 
   #joinBar #queueControls #reorderBtn {
@@ -4544,6 +4638,32 @@ dialog footer button, .code-dialog footer button {
     align-self: center;
     justify-content: flex-end;
     min-width: 0;
+  }
+
+  /* Reorder mode: keep badge, name and arrows/X on one row (same as Android). */
+  .available-list .item.ff-queue-reorder-row {
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .available-list .item.ff-queue-reorder-row .controls.ff-queue-avail-ctrls {
+    grid-column: auto;
+    justify-self: end;
+    align-self: center;
+    display: inline-flex;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: max-content;
+  }
+
+  .available-list .item.ff-queue-reorder-row .badge + div {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .available-list .item.ff-queue-reorder-row .name-pill {
+    max-width: 100%;
   }
 
   .name-pill {
@@ -5714,8 +5834,6 @@ dialog footer button, .code-dialog footer button {
     <button id="authSignInBtn" style="margin-left:12px;padding:4px 12px;border:1px solid #856404;background:#fff;border-radius:4px;cursor:pointer;font-size:12px;color:#856404;">Sign In (Debug)</button>
   </div>
 
-  <div id="main-app-content" style="display:none;">
-
   <!-- Sticky Navigation Header (always visible across all pages) -->
   <div class="header">
 
@@ -5811,6 +5929,20 @@ dialog footer button, .code-dialog footer button {
   </div>
   <script>
   (function(){
+    function ffIsAppleMobileWebView(){
+      try {
+        var ua = navigator.userAgent || '';
+        var platform = navigator.platform || '';
+        var touchMac = platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+        return /iPhone|iPad|iPod/i.test(ua) || touchMac;
+      } catch(e) {
+        return false;
+      }
+    }
+    if(ffIsAppleMobileWebView()){
+      document.body.classList.add('ff-ios-capacitor-safe');
+    }
+
     var mobileHeaderTitleMap = [
       { button: 'queueBtn', screen: 'owner-view', title: 'Queue' },
       { button: 'ticketsBtn', screen: 'ticketsScreen', title: 'Tickets' },
@@ -5904,7 +6036,14 @@ dialog footer button, .code-dialog footer button {
 
     function setHeaderH(){
       var h=document.querySelector('.header');
-      if(h) document.documentElement.style.setProperty('--header-h', h.offsetHeight+'px');
+      if(h) {
+        var topOffset = 0;
+        try {
+          var cs = getComputedStyle(h);
+          if(cs && cs.position === 'fixed') topOffset = parseFloat(cs.top) || 0;
+        } catch(e) {}
+        document.documentElement.style.setProperty('--header-h', (h.offsetHeight + topOffset)+'px');
+      }
     }
     /** Call after Queue ↔ Tickets (and similar): fixed shells use --header-h; remeasure avoids overlap that swallows tab taps. */
     window.ffSyncShellHeaderInset = function ffSyncShellHeaderInset() {
@@ -5942,6 +6081,7 @@ dialog footer button, .code-dialog footer button {
   <script>
   (function(){
     var MQ = '(max-width: 640px)';
+    var lastTouchToggleAt = 0;
     function isMobileJoinMore(){ return window.matchMedia(MQ).matches; }
     function bar(){ return document.getElementById('joinBar'); }
     function toggle(){ return document.getElementById('ffJoinMoreToggle'); }
@@ -5957,6 +6097,17 @@ dialog footer button, .code-dialog footer button {
       if(b) b.classList.remove('ff-join-more-open');
       if(t) t.setAttribute('aria-expanded', 'false');
     }
+    function positionMenu(){
+      var t = toggle(), q = qc();
+      if(!t || !q || !isMobileJoinMore()) return;
+      try {
+        var rect = t.getBoundingClientRect();
+        var top = Math.max(0, rect.bottom + 8);
+        var right = Math.max(14, window.innerWidth - rect.right);
+        q.style.setProperty('--ff-join-more-top', top + 'px');
+        q.style.setProperty('--ff-join-more-right', right + 'px');
+      } catch(e) {}
+    }
     function syncAvailable(){
       var b = bar(), t = toggle();
       if(!t) return;
@@ -5966,12 +6117,36 @@ dialog footer button, .code-dialog footer button {
         return;
       }
       t.classList.add('ff-join-more-available');
+      positionMenu();
     }
+    window.ffSyncJoinMoreToggle = syncAvailable;
     function onToggleClick(e){
+      if(Date.now() - lastTouchToggleAt < 450) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       var b = bar(), t = toggle();
       if(!b || !t || !t.classList.contains('ff-join-more-available')) return;
+      positionMenu();
+      var open = b.classList.toggle('ff-join-more-open');
+      t.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    function onTogglePointerUp(e){
+      if(!isMobileJoinMore()) return;
+      if(Date.now() - lastTouchToggleAt < 120) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      lastTouchToggleAt = Date.now();
+      e.preventDefault();
+      e.stopPropagation();
+      var b = bar(), t = toggle();
+      if(!b || !t || !t.classList.contains('ff-join-more-available')) return;
+      positionMenu();
       var open = b.classList.toggle('ff-join-more-open');
       t.setAttribute('aria-expanded', open ? 'true' : 'false');
     }
@@ -5988,10 +6163,18 @@ dialog footer button, .code-dialog footer button {
     }
     function init(){
       var t = toggle(), q = qc();
-      if(t) t.addEventListener('click', onToggleClick);
+      if(t) {
+        t.addEventListener('click', onToggleClick);
+        t.addEventListener('pointerup', onTogglePointerUp);
+        t.addEventListener('touchend', onTogglePointerUp, { passive: false });
+      }
       document.addEventListener('pointerdown', onDocPointerDown, true);
       document.addEventListener('keydown', onKeydown);
       window.addEventListener('resize', syncAvailable);
+      window.addEventListener('scroll', function(){
+        var b = bar();
+        if(b && b.classList.contains('ff-join-more-open')) positionMenu();
+      }, true);
       if(typeof MutationObserver !== 'undefined' && q){
         new MutationObserver(syncAvailable).observe(q, { attributes: true, attributeFilter: ['style'] });
       }
@@ -6003,6 +6186,8 @@ dialog footer button, .code-dialog footer button {
       init();
   })();
   </script>
+
+  <div id="main-app-content" style="display:none;">
 
   <!-- Apps Launcher Panel -->
   <!-- Apps Overlay Backdrop -->
@@ -12518,6 +12703,7 @@ function renderQueue(){
     }
 
     const li=document.createElement("li"); li.className="item"; li.setAttribute("held",q.held?"true":"false");
+    if (reorderMode && !queueLocked) li.classList.add('ff-queue-reorder-row');
     li.setAttribute('data-ff-queue-row-key', ffQueueAvailableRowStableKey(q));
 
     const badge=document.createElement("div"); badge.className="badge"; badge.textContent=i+1;
@@ -14448,6 +14634,10 @@ window.openSettingsSecure = openSettingsSecure;
 
 // Navigation function to return to Queue view
 function goToQueue() {
+  try {
+    document.body.classList.add('ff-queue-route-active', 'ff-queue-ui-visible', 'ff-ui-ready');
+    document.body.classList.remove('ff-auth-resolving');
+  } catch (e) {}
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
     try {
       window.ffCloseGlobalBlockingOverlays();
@@ -14540,6 +14730,11 @@ function goToQueue() {
   if (scheduleScreenQueue) scheduleScreenQueue.style.display = 'none';
   const timeClockScreenQueue = document.getElementById('timeClockScreen');
   if (timeClockScreenQueue) timeClockScreenQueue.style.display = 'none';
+  ['dashboardScreen','queueAnalyticsScreen','ticketsAnalyticsScreen','timeAnalyticsScreen','tasksAnalyticsScreen']
+    .forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
   
   // Hide Manage Queue screen if visible
   const manageQueueScreen = document.getElementById('manageQueueScreen');
@@ -14563,7 +14758,8 @@ function goToQueue() {
   // ALWAYS show owner-view shell; queue lists + join row gated by queue_view or join-only partial
   const ownerView = document.getElementById('owner-view');
   if (ownerView) {
-    ownerView.style.display = '';
+    ownerView.style.display = 'block';
+    ownerView.style.visibility = 'visible';
   }
   // Mobile: open Queue with filter "All" so compact dropdown + lists stay in sync
   try {
@@ -14614,6 +14810,40 @@ function goToQueue() {
   if (typeof ffRenderQueueFilterChips === 'function') ffRenderQueueFilterChips();
   if (typeof renderQueue === 'function') renderQueue();
   if (typeof renderService === 'function') renderService();
+  if (typeof window.ffSyncJoinMoreToggle === 'function') window.ffSyncJoinMoreToggle();
+
+  // iOS route recovery: after leaving another fixed module, a stale display:none can leave Queue blank.
+  const restoreQueueChrome = function() {
+    try {
+      document.body.classList.add('ff-queue-route-active', 'ff-queue-ui-visible', 'ff-ui-ready');
+      const allowed =
+        (typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess()) ||
+        (typeof ffCurrentUserHasQueueViewPermission === 'function' && ffCurrentUserHasQueueViewPermission()) ||
+        (typeof ffCurrentUserIsQueueJoinOnlyPartialAccess === 'function' && ffCurrentUserIsQueueJoinOnlyPartialAccess()) ||
+        (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission());
+      if (!allowed) return;
+      if (typeof ffIsFullscreenModuleCoveringQueue === 'function' && ffIsFullscreenModuleCoveringQueue()) return;
+      const ov = document.getElementById('owner-view');
+      const jb = document.getElementById('joinBar');
+      const wr = document.querySelector('.wrap');
+      if (ov) {
+        ov.style.display = 'block';
+        ov.style.visibility = 'visible';
+      }
+      if (jb) jb.style.display = 'flex';
+      if (wr) {
+        wr.style.display = 'block';
+        wr.style.visibility = 'visible';
+      }
+      if (typeof window.ffSyncJoinMoreToggle === 'function') window.ffSyncJoinMoreToggle();
+      if (typeof renderQueue === 'function') renderQueue();
+      if (typeof renderService === 'function') renderService();
+    } catch (e) {}
+  };
+  requestAnimationFrame(function() {
+    restoreQueueChrome();
+    setTimeout(restoreQueueChrome, 120);
+  });
 
   try {
     if (typeof window.ffSyncShellHeaderInset === 'function') {
@@ -23221,11 +23451,42 @@ function initializeJoinButton() {
         const freshJoinBtn = document.getElementById("joinBtn");
         
         if (freshJoinBtn) {
-          freshJoinBtn.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+          let lastMobileJoinAt = 0;
+          const triggerJoin = (e, source) => {
+            if (e) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+            const now = Date.now();
+            if (source !== 'click') {
+              if (now - lastMobileJoinAt < 180) return;
+              lastMobileJoinAt = now;
+            } else if (now - lastMobileJoinAt < 450) {
+              return;
+            }
+            try {
+              const joinBar = document.getElementById('joinBar');
+              const moreToggle = document.getElementById('ffJoinMoreToggle');
+              if (joinBar) joinBar.classList.remove('ff-join-more-open');
+              if (moreToggle) moreToggle.setAttribute('aria-expanded', 'false');
+            } catch (_) {}
             handleJoin();
           };
+          freshJoinBtn.onclick = (e) => {
+            triggerJoin(e, 'click');
+          };
+          freshJoinBtn.addEventListener('pointerup', (e) => {
+            if (typeof window.matchMedia === 'function' && !window.matchMedia('(max-width: 640px)').matches) return;
+            triggerJoin(e, 'pointerup');
+          });
+          freshJoinBtn.addEventListener('touchend', (e) => {
+            triggerJoin(e, 'touchend');
+          }, { passive: false });
+          freshJoinBtn.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            triggerJoin(e, 'keyboard');
+          });
           freshJoinBtn.style.cursor = 'pointer';
           freshJoinBtn.style.pointerEvents = 'auto';
           freshJoinBtn.style.position = 'relative';
@@ -23388,9 +23649,17 @@ function removeBlockingOverlays() {
     // Ensure header is always on top (above staff modal z-index:100001)
     const header = document.querySelector('.header');
     if (header) {
-      header.style.zIndex = '100003';
       header.style.pointerEvents = 'auto';
-      header.style.position = 'sticky';
+      const mobileHeaderLock =
+        typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches;
+      if (mobileHeaderLock) {
+        header.style.position = 'fixed';
+        header.style.top = 'env(safe-area-inset-top, 0px)';
+        header.style.left = '0';
+        header.style.right = '0';
+        header.style.width = '100%';
+        header.style.zIndex = '100450';
+      }
     }
     
     // Ensure toolbar buttons are clickable
@@ -31555,8 +31824,15 @@ function initializeNavigation() {
   // Ensure header buttons are all properly set up
   const header = document.querySelector('.header');
   if (header) {
-    header.style.zIndex = '201';
     header.style.pointerEvents = 'auto';
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches) {
+      header.style.position = 'fixed';
+      header.style.top = 'env(safe-area-inset-top, 0px)';
+      header.style.left = '0';
+      header.style.right = '0';
+      header.style.width = '100%';
+      header.style.zIndex = '100450';
+    }
     
     const headerButtons = header.querySelectorAll('button');
       if (headerButtons) {
@@ -46703,10 +46979,18 @@ window.updateTaskNoteDisplay = updateTaskNoteDisplay;
   function applyHeaderStyles() {
     if (!elements.header) return;
     
-    storeOriginalStyle(elements.header, ['zIndex', 'pointerEvents', 'position']);
-    elements.header.style.zIndex = '400';
+    storeOriginalStyle(elements.header, ['zIndex', 'pointerEvents', 'position', 'top', 'left', 'right', 'width']);
+    const mobileHeaderLock =
+      typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches;
+    elements.header.style.zIndex = mobileHeaderLock ? '100450' : '400';
     elements.header.style.pointerEvents = 'auto';
-    elements.header.style.position = 'sticky';
+    elements.header.style.position = mobileHeaderLock ? 'fixed' : 'sticky';
+    if (mobileHeaderLock) {
+      elements.header.style.top = 'env(safe-area-inset-top, 0px)';
+      elements.header.style.left = '0';
+      elements.header.style.right = '0';
+      elements.header.style.width = '100%';
+    }
     
     const headerButtons = elements.header.querySelectorAll('button');
     headerButtons.forEach(btn => {
@@ -54493,6 +54777,59 @@ function hookSettingsGuard_DISABLED(){
         transform: rotate(180deg);
       }
     }
+
+    /* iPhone/Capacitor only: keep Tasks Settings below the app top bar and above the home indicator. */
+    @media (max-width: 640px) {
+      @supports (-webkit-touch-callout: none) {
+        #tasksScreen #tasksSettingsModal.tasks-modal-overlay {
+          top: var(--header-h, 92px) !important;
+          bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important;
+          left: 0 !important;
+          right: 0 !important;
+          height: auto !important;
+          align-items: stretch !important;
+          justify-content: center !important;
+          padding: 8px 10px 10px !important;
+          overflow: hidden !important;
+          box-sizing: border-box !important;
+        }
+
+        #tasksScreen #tasksSettingsModal .tasks-modal-container {
+          width: 100% !important;
+          max-width: none !important;
+          max-height: 100% !important;
+          margin: 0 !important;
+          border-radius: 14px !important;
+          overflow: hidden !important;
+        }
+
+        #tasksScreen #tasksSettingsModal .tasks-modal-header {
+          min-height: 44px !important;
+          padding: 8px 10px !important;
+          background: #fff !important;
+          position: relative !important;
+          z-index: 5 !important;
+        }
+
+        #tasksScreen #tasksSettingsModal .tasks-modal-close {
+          width: 40px !important;
+          height: 40px !important;
+          min-width: 40px !important;
+          min-height: 40px !important;
+          border-radius: 999px !important;
+          background: #f8fafc !important;
+          color: #111827 !important;
+          font-size: 24px !important;
+          pointer-events: auto !important;
+          touch-action: manipulation !important;
+        }
+
+        #tasksScreen #tasksSettingsModal .tasks-modal-content {
+          padding: 12px 14px calc(14px + env(safe-area-inset-bottom, 0px)) !important;
+          overflow: hidden !important;
+        }
+      }
+    }
     
     #tasksScreen .tasks-modal-footer {
       position: relative;
@@ -55296,7 +55633,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/location-helpers.js?v=20260501_points", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
         { src: "/queue-cloud.js?v=20260501_points", type: "module", delay: 1350 },
-        { src: "/tickets.js?v=20260505_summary_today_dom", type: "module", delay: 1400 },
+        { src: "/tickets.js?v=20260515_tickets_badge_upgrade_edit_fix_2", type: "module", delay: 1400 },
         { src: "/tasks-cloud.js?v=20260505_unified_app", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
         { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
@@ -55307,7 +55644,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/dashboard.js?v=20260514_mobile_analytics_ready", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260505_inbox_btn_top_right_layout", type: "module", delay: 2700 },
-        { src: "/media-upload.js?v=20260513_media_hide_wrap_zfix", type: "module", delay: 2780 },
+        { src: "/media-upload.js?v=20260516_custom_java_plugin_fallback", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260512_training_reminder_v8", type: "module", delay: 2900 },
         { src: "/staff-documents.js?v=20260505_full_specialist_doc_type", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },

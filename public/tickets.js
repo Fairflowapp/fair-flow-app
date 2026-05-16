@@ -1139,6 +1139,15 @@ function canSeeTicket(ticket) {
   return false;
 }
 
+function ticketHasRealPostSendEdit(ticket) {
+  if (!ticket || ticket.editedAfterFinalize !== true) return false;
+  const history = Array.isArray(ticket.history) ? ticket.history : [];
+  return history.some((entry) => {
+    const action = String(entry?.action || '').toLowerCase();
+    return action === 'edited_after_send';
+  });
+}
+
 // =====================
 // Tickets CRUD
 // =====================
@@ -1265,26 +1274,20 @@ function subscribeTickets(options) {
   });
 }
 
-/** Red dot + number on TICKETS nav for manager/admin. Counts Ready tickets not yet opened (Firestore seenByFrontDeskAt OR opened this session). */
+/** Red dot + number on TICKETS nav. Counts visible READY tickets, even while user is outside Tickets. */
 function updateTicketsNavBadge() {
   const badge = document.getElementById('ticketsNavBadge');
   if (!badge) return;
-  // Badge only for admin/owner/manager by FIRESTORE role
-  const profileRole = (currentUserProfile?.role || '').toLowerCase();
-  const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
-  if (!isFirebaseAdmin) {
+  if (!currentUserProfile) {
     badge.textContent = '';
     badge.style.display = 'none';
     return;
   }
-  badge.style.display = '';
-  const readyUnread = (currentTickets || []).filter(t => {
-    if ((String(t.status || '').toUpperCase() !== 'READY_FOR_CHECKOUT') || !canSeeTicket(t)) return false;
-    if (_ticketsOpenedThisSession.has(t.id)) return false;
-    if (t.seenByFrontDeskAt) return false;
-    return true;
+  const readyVisible = (currentTickets || []).filter(t => {
+    return String(t.status || '').toUpperCase() === 'READY_FOR_CHECKOUT' && canSeeTicket(t);
   });
-  badge.textContent = readyUnread.length > 0 ? String(readyUnread.length) : '';
+  badge.textContent = readyVisible.length > 0 ? String(readyVisible.length) : '';
+  badge.style.display = readyVisible.length > 0 ? '' : 'none';
 }
 
 function getTicketCustomerPriceApprovedFromForm() {
@@ -1348,10 +1351,17 @@ async function updateTicket(ticketId, updates) {
   delete updates._details;
   delete updates.history;
   const isOnlyMarkingSeen = Object.keys(updates).length === 1 && updates.seenByFrontDeskAt !== undefined;
+  const isServiceUpgradeOnly =
+    (hist[hist.length - 1]?.action === 'service_upgrade_marked' ||
+      hist[hist.length - 1]?.action === 'service_upgrade_cleared') &&
+    Object.keys(updates).every((key) => key === 'serviceUpgrade');
   const statusNow = (String(data.status || '')).toUpperCase();
-  if (!isOnlyMarkingSeen && statusNow === 'READY_FOR_CHECKOUT') {
+  if (!isOnlyMarkingSeen && !isServiceUpgradeOnly && statusNow === 'READY_FOR_CHECKOUT') {
     updates.editedAfterFinalize = true;
     updates.editedAt = serverTimestamp();
+  } else if (isServiceUpgradeOnly) {
+    updates.editedAfterFinalize = false;
+    updates.editedAt = null;
   }
   await updateDoc(ticketRef, {
     ...updates,
@@ -2537,7 +2547,7 @@ function renderTicketsList() {
     const isAdminOrManager = currentUserProfile && ['owner', 'admin', 'manager'].includes((currentUserProfile.role || '').toLowerCase());
     const canSeeEditedFlag = isAdminOrManager;
     const isReady = sk === 'ready';
-    const showEdited = canSeeEditedFlag && isReady && !!t.editedAfterFinalize;
+    const showEdited = canSeeEditedFlag && isReady && t.serviceUpgrade !== true && ticketHasRealPostSendEdit(t);
     const editedBadgeHtml = showEdited ? '<span class="ticket-edited-badge">Edited</span>' : '';
     const customerApprovedBadgeHtml = (t.customerApprovedPrice === true)
       ? '<span class="ticket-customer-approved-badge" title="Customer approved the price">Approved</span>'
@@ -3297,6 +3307,9 @@ function setupTicketServiceUpgradeControl(ticket, canUse) {
       paintTicketServiceUpgradeButton(next);
       await setTicketServiceUpgrade(ticket.id, next);
       ticket.serviceUpgrade = next;
+      ticket.editedAfterFinalize = false;
+      ticket.editedAt = null;
+      renderTicketsList();
       if (next) {
         void awardTicketUpgradePoints(ticket);
       }
@@ -3325,7 +3338,8 @@ async function saveTicket() {
         performedLines: lines,
         total,
         forUids,
-        forNames
+        forNames,
+        _action: 'edited_after_send'
       });
       const t = currentTickets.find(x => x.id === editingTicketId);
       if (t && (String(t.status || '').toUpperCase() === 'READY_FOR_CHECKOUT') && !t.seenByFrontDeskAt) {
@@ -4240,23 +4254,14 @@ export function goToTickets() {
     ticketsScreen.style.setProperty('pointer-events', 'auto', 'important');
   }
 
-  // When any other nav button is clicked:
-  // 1. Hide tickets screen
-  // 2. Unsubscribe from tickets if NOT admin (badge not needed)
+  // When any other nav button is clicked, hide the screen but keep subscription alive
+  // so the red Tickets badge updates even while the user is in Queue/Tasks/Chat.
   const NAV_IDS = ['queueBtn','tasksBtn','chatBtn','inboxBtn','logBtn','appsBtn'];
   NAV_IDS.forEach(id => {
     const btn = document.getElementById(id);
     if (btn && !btn._ffTicketsHideHandler) {
       btn._ffTicketsHideHandler = () => {
         if (ticketsScreen) ticketsScreen.style.display = 'none';
-        // For non-admins: unsubscribe so the nav badge doesn't update
-        const { isPrimaryAdmin } = getTicketVisibility();
-        if (!isPrimaryAdmin && typeof ticketsUnsubscribe === 'function') {
-          ticketsUnsubscribe();
-          ticketsUnsubscribe = null;
-          currentTickets = [];
-        }
-        // Always enforce badge state
         updateTicketsNavBadge();
       };
       btn.addEventListener('click', btn._ffTicketsHideHandler, { capture: true });
@@ -4332,6 +4337,19 @@ function updateNewTicketButtonVisibility() {
   newTicketBtn.style.display = isFirebaseAdmin ? 'none' : 'inline-flex';
 }
 
+function ensureTicketsBackgroundSubscription(attempt = 0) {
+  if (!currentUserProfile) return;
+  if (getActiveTicketsSalonId()) {
+    subscribeTickets();
+    return;
+  }
+  const loadState =
+    typeof window.ffStaffPermissionLoadState === 'function' ? window.ffStaffPermissionLoadState() : 'ready';
+  if (loadState === 'staff_loading' && attempt < 10) {
+    setTimeout(() => ensureTicketsBackgroundSubscription(attempt + 1), 1000);
+  }
+}
+
 async function setupTicketsUI() {
   const container = document.getElementById('ticketServicePickerContainer');
   if (!container) return;
@@ -4403,6 +4421,7 @@ export function initTickets() {
   window.updateTicketsNavBadge = updateTicketsNavBadge;
   window.ffRefreshTicketsTabVisibility = () => {
     updateTicketsTabsVisibility();
+    ensureTicketsBackgroundSubscription();
     const ts = document.getElementById('ticketsScreen');
     if (ts && ts.style.display !== 'none' && ts.style.display !== '') {
       renderTicketsList();
@@ -4457,17 +4476,13 @@ export function initTickets() {
     });
   }
 
-  // Background subscription for badge — ONLY for admin/manager/owner (Firestore role)
-  // This shows the badge in real-time even when not on the Tickets screen
+  // Background subscription for badge: start as soon as the user can access Tickets,
+  // so new READY tickets show on the nav even before opening the Tickets module.
   onAuthStateChanged(auth, (user) => {
     if (!user) return;
     setTimeout(() => {
       loadCurrentUserProfile().then(() => {
-        const profileRole = (currentUserProfile?.role || '').toLowerCase();
-        const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
-        if (isFirebaseAdmin) {
-          subscribeTickets(); // real-time badge for admin/manager
-        }
+        ensureTicketsBackgroundSubscription();
       }).catch(() => {});
     }, 1000);
   });

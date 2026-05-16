@@ -67,3 +67,8 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# Android signing keystore — NEVER commit signing keys to the repo
+keystore/
+*.jks
+*.keystore

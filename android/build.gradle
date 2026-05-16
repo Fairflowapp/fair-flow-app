@@ -1,7 +1,8 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 buildscript {
-    
+    ext.kotlin_version = '2.2.20'
+
     repositories {
         google()
         mavenCentral()
@@ -9,6 +10,10 @@ buildscript {
     dependencies {
         classpath 'com.android.tools.build:gradle:8.13.0'
         classpath 'com.google.gms:google-services:4.4.4'
+        // Required so Capacitor plugins written in Kotlin (e.g. @capacitor/filesystem)
+        // can be compiled and registered into the APK. Without this the plugin module
+        // silently fails to compile and the runtime reports "unable to find plugin".
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files

@@ -1302,53 +1302,143 @@ function normalizeStoragePath(p) {
   return s.replace(/^\/+/, "") || null;
 }
 
-/* ---- Capacitor native helpers (Android) ---- */
-function _isCapacitorAndroid() {
-  return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && /Android/i.test(navigator.userAgent));
+/**
+ * ===== Capacitor helpers (iOS/Android native) =====
+ * Access the Capacitor runtime + plugins that the native shell injects into the
+ * WebView. When running in a regular browser (or in Capacitor without the
+ * plugin installed in the native binary) these all return null and the code
+ * falls back to standard web APIs.
+ */
+function ffGetCapacitor() {
+  return (typeof window !== "undefined" && window.Capacitor) ? window.Capacitor : null;
 }
-
-function _blobToBase64(blob) {
+function ffIsNativeCapacitor() {
+  const Cap = ffGetCapacitor();
+  if (!Cap) return false;
+  try {
+    if (typeof Cap.isNativePlatform === "function") return !!Cap.isNativePlatform();
+    if (typeof Cap.getPlatform === "function") {
+      const p = Cap.getPlatform();
+      return p === "ios" || p === "android";
+    }
+  } catch (_) {}
+  return false;
+}
+/** Low-level Capacitor bridge handle — works regardless of whether plugin JS packages were imported. */
+function ffNativeBridge() {
+  const Cap = ffGetCapacitor();
+  if (!Cap) return null;
+  if (typeof Cap.nativePromise !== "function") return null;
+  return Cap;
+}
+/**
+ * Call a native Capacitor plugin method by name via the low-level bridge.
+ * This works without `import { Foo } from '@capacitor/foo'` (we can't bundle
+ * in this app — the JS is served as-is from Firebase hosting). The plugin
+ * just needs to be installed natively (gradle/podspec), which `npx cap sync`
+ * handles after `npm install @capacitor/<plugin>`.
+ */
+async function ffCallNative(pluginName, methodName, options) {
+  const Cap = ffNativeBridge();
+  if (!Cap) throw new Error("Capacitor native bridge unavailable");
+  return Cap.nativePromise(pluginName, methodName, options || {});
+}
+function ffGetCapShare() {
+  const Cap = ffGetCapacitor();
+  if (Cap && Cap.Plugins && Cap.Plugins.Share) return Cap.Plugins.Share;
+  // Fallback: if we have the native bridge, expose a tiny stub that forwards to nativePromise.
+  if (ffNativeBridge()) return { share: (opts) => ffCallNative("Share", "share", opts) };
+  return null;
+}
+function ffGetCapFs() {
+  const Cap = ffGetCapacitor();
+  if (Cap && Cap.Plugins && Cap.Plugins.Filesystem) return Cap.Plugins.Filesystem;
+  if (ffNativeBridge()) {
+    return {
+      writeFile: (opts) => ffCallNative("Filesystem", "writeFile", opts),
+      getUri: (opts) => ffCallNative("Filesystem", "getUri", opts),
+    };
+  }
+  return null;
+}
+function ffCapDir() {
+  return "CACHE";
+}
+function ffBlobToBase64(blob) {
   return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onloadend = () => resolve(r.result.split(",")[1]);
-    r.onerror = reject;
-    r.readAsDataURL(blob);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      const comma = typeof result === "string" ? result.indexOf(",") : -1;
+      if (comma >= 0) resolve(result.slice(comma + 1));
+      else reject(new Error("blob → base64 failed"));
+    };
+    reader.onerror = () => reject(reader.error || new Error("blob read failed"));
+    reader.readAsDataURL(blob);
   });
 }
+/** Write blob → native file → return URI ("file://..."). Tries custom Android
+ * plugin first (pure Java, ships in this app's APK), then falls back to the
+ * standard @capacitor/filesystem plugin. The custom plugin is more reliable
+ * because @capacitor/filesystem is implemented in Kotlin and requires the
+ * Android project to have the Kotlin Gradle plugin configured to compile. */
+async function ffWriteBlobToCapCache(blob, fileName) {
+  const base64 = await ffBlobToBase64(blob);
 
-async function _capSaveAndShare(blob, fileName) {
-  const { Filesystem, Share } = window.Capacitor.Plugins;
-  if (!Filesystem || !Share) throw new Error("Plugins not available");
-  const base64 = await _blobToBase64(blob);
-  const saved = await Filesystem.writeFile({
+  // Try our custom Java plugin first (Android only; iOS doesn't ship it).
+  if (ffNativeBridge()) {
+    try {
+      const res = await ffCallNative("FfFileShare", "writeAndGetUri", {
+        fileName,
+        data: base64,
+      });
+      if (res && res.uri) return res.uri;
+    } catch (e) {
+      console.warn("[Media] FfFileShare unavailable, falling back to @capacitor/filesystem", e);
+    }
+  }
+
+  // Fallback: standard @capacitor/filesystem (works on iOS, and on Android if
+  // Kotlin gradle plugin is configured).
+  const Filesystem = ffGetCapFs();
+  if (!Filesystem) throw new Error("No native file-write plugin available");
+  await Filesystem.writeFile({
     path: fileName,
     data: base64,
-    directory: "CACHE",
+    directory: ffCapDir(),
+    recursive: true,
   });
-  const fileUri = saved.uri;
-  await Share.share({ files: [fileUri], dialogTitle: "Share" });
+  const res = await Filesystem.getUri({ path: fileName, directory: ffCapDir() });
+  return res && res.uri ? res.uri : null;
 }
-
-async function _capDownloadToDevice(blob, fileName) {
-  const { Filesystem } = window.Capacitor.Plugins;
-  if (!Filesystem) throw new Error("Filesystem plugin not available");
-  const base64 = await _blobToBase64(blob);
-  try {
-    await Filesystem.writeFile({
-      path: "Download/" + fileName,
-      data: base64,
-      directory: "EXTERNAL_STORAGE",
-      recursive: true,
-    });
-    return true;
-  } catch (_) {
-    await Filesystem.writeFile({
-      path: fileName,
-      data: base64,
-      directory: "DOCUMENTS",
-    });
-    return true;
-  }
+/** True if the error message looks like a user cancellation from Capacitor Share. */
+function ffIsShareCancel(err) {
+  if (!err) return false;
+  const msg = String(err.message || err.code || err || "").toLowerCase();
+  return msg.includes("cancel") || msg.includes("dismiss") || msg.includes("user denied");
+}
+/** Persist a blob to the user's device (Photos sheet on iOS, Save sheet on Android). */
+async function ffSaveBlobToDeviceViaShare(blob, fileName) {
+  const Share = ffGetCapShare();
+  if (!ffIsNativeCapacitor() || !Share) throw new Error("Capacitor Share not available");
+  const uri = await ffWriteBlobToCapCache(blob, fileName);
+  if (!uri) throw new Error("Failed to write file to cache");
+  await Share.share({
+    title: fileName,
+    files: [uri],
+    dialogTitle: "Save image",
+  });
+}
+/** Share a blob as an actual image file via the native share sheet. */
+async function ffShareBlobNative(blob, fileName, title, text) {
+  const Share = ffGetCapShare();
+  if (!ffIsNativeCapacitor() || !Share) throw new Error("Capacitor Share not available");
+  const uri = await ffWriteBlobToCapCache(blob, fileName);
+  if (!uri) throw new Error("Failed to write file to cache");
+  const payload = { files: [uri], dialogTitle: title || "Share" };
+  if (title) payload.title = title;
+  if (text) payload.text = text;
+  await Share.share(payload);
 }
 
 /** Cloud Function `mediaDownloadFile` via Hosting rewrite — no direct Storage URL fetch. */
@@ -1564,11 +1654,78 @@ async function openWorkDetails(workId) {
 
   const firstMedia = items[0];
 
+  // Pre-compute share metadata + start prefetching the media blob right away.
+  // Android Chrome/WebView times out the user-activation that authorizes
+  // navigator.share() after a few seconds — if we wait to fetch the blob only
+  // AFTER the user taps Share, the activation has expired by the time share()
+  // is called and the OS share sheet refuses to open the file. By prefetching
+  // here, the blob is usually ready by the time the user taps the button, and
+  // share() is invoked synchronously within the same gesture.
+  const shareMeta = (() => {
+    const sp =
+      normalizeStoragePath(firstMedia?.storagePath || "")
+      || extractStoragePathFromMediaUrl(firstMedia?.mediaUrl || "");
+    const ext = (
+      (sp || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|pdf|heic|heif)$/i)?.[1]
+      || (firstMedia?.mediaUrl || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|pdf)(?:\?|$)/i)?.[1]
+      || "jpg"
+    ).toLowerCase();
+    const mime =
+      ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+      : ext === "png" ? "image/png"
+      : ext === "gif" ? "image/gif"
+      : ext === "webp" ? "image/webp"
+      : ext === "heic" || ext === "heif" ? "image/heic"
+      : ext === "mp4" ? "video/mp4"
+      : ext === "webm" ? "video/webm"
+      : ext === "mov" ? "video/quicktime"
+      : ext === "pdf" ? "application/pdf"
+      : "image/jpeg";
+    const safeExt = ext === "jpeg" ? "jpg" : ext;
+    return { storagePath: sp, ext: safeExt, mime, fileName: `work-${workId}.${safeExt}` };
+  })();
+
+  let shareBlobPromise = null;
+  const startShareBlobPrefetch = () => {
+    if (shareBlobPromise) return shareBlobPromise;
+    const { storagePath } = shareMeta;
+    const mediaUrl = firstMedia?.mediaUrl || "";
+    shareBlobPromise = (async () => {
+      let blob = null;
+      try {
+        if (storagePath && auth.currentUser) {
+          blob = await fetchBlobViaHttpProxy(storagePath);
+        }
+      } catch (e) {
+        console.warn("[Media] share prefetch: proxy failed, trying direct", e);
+      }
+      if ((!blob || blob.size === 0) && mediaUrl) {
+        try {
+          const r = await fetch(mediaUrl, { credentials: "omit", mode: "cors" });
+          if (r.ok) blob = await r.blob();
+        } catch (e) {
+          console.warn("[Media] share prefetch: direct fetch failed", e);
+        }
+      }
+      return blob;
+    })();
+    return shareBlobPromise;
+  };
+  if (firstMedia?.mediaUrl || firstMedia?.storagePath) {
+    startShareBlobPrefetch();
+  }
+
   const downloadBtn = document.createElement("button");
   downloadBtn.type = "button";
   downloadBtn.className = "btn-pill media-action-btn";
   downloadBtn.textContent = "Download";
   downloadBtn.style.cssText = btnStyle + "min-width:96px;white-space:nowrap;box-sizing:border-box;";
+  // Warm the share-blob prefetch so the file is ready by tap time on native too.
+  const warmDownload = () => { try { startShareBlobPrefetch(); } catch (_) {} };
+  downloadBtn.addEventListener("pointerdown", warmDownload, { passive: true });
+  downloadBtn.addEventListener("touchstart", warmDownload, { passive: true });
+  downloadBtn.addEventListener("mouseenter", warmDownload);
+
   downloadBtn.onclick = async (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1576,36 +1733,66 @@ async function openWorkDetails(workId) {
       alert("No media to download");
       return;
     }
+
+    const isNative = ffIsNativeCapacitor();
     const isIOSDevice =
       /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    /** Must open before any await — iOS blocks async window.open (lost user activation). */
+
+    /** Web/iOS Safari: must open before any await — iOS blocks async window.open (lost user activation). */
     let iosDownloadTab = null;
-    if (isIOSDevice) {
+    if (!isNative && isIOSDevice) {
       try {
         iosDownloadTab = window.open("about:blank", "_blank");
       } catch (_) {}
     }
+
     downloadBtn.disabled = true;
     downloadBtn.textContent = "Loading…";
+
+    const { fileName, mime: mimeFromExt } = shareMeta;
     const dlOpts = { iosTab: iosDownloadTab };
-    let storagePath =
-      normalizeStoragePath(firstMedia.storagePath) || extractStoragePathFromMediaUrl(firstMedia.mediaUrl);
-    const ext =
-      (storagePath || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|pdf|heic|heif)$/i)?.[1] ||
-      (firstMedia.mediaUrl || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|pdf)(?:\?|$)/i)?.[1] ||
-      "jpg";
-    const fileName = `work-${workId}.${ext}`;
+
     try {
+      // Get the blob (reuses the share prefetch if it's already in flight / done).
       let blob = null;
-      if (storagePath && auth.currentUser) {
-        blob = await fetchBlobViaHttpProxy(storagePath);
+      try {
+        blob = await startShareBlobPrefetch();
+      } catch (e2) {
+        console.warn("[Media] download: prefetch promise rejected", e2);
       }
-      if (blob && blob.size > 0) {
-        await triggerMediaFileDownload(blob, fileName, undefined, dlOpts);
-      } else {
+
+      // Last-chance direct proxy fetch if prefetch returned nothing.
+      if ((!blob || blob.size === 0) && shareMeta.storagePath && auth.currentUser) {
+        try {
+          blob = await fetchBlobViaHttpProxy(shareMeta.storagePath);
+        } catch (e3) {
+          console.warn("[Media] download: proxy fetch failed", e3);
+        }
+      }
+
+      if (!blob || blob.size === 0) {
         showMediaMessage("Download failed");
+        return;
       }
+
+      const fixedBlob = blob.type === mimeFromExt ? blob : new Blob([blob], { type: mimeFromExt });
+
+      // ---- Native (Capacitor iOS / Android): open the system share sheet so the
+      // user can save the image to Photos / Files / Downloads. This is the
+      // expected native UX in lieu of a hidden browser "download".
+      if (isNative && ffGetCapShare() && ffNativeBridge()) {
+        try {
+          await ffSaveBlobToDeviceViaShare(fixedBlob, fileName);
+          return;
+        } catch (e4) {
+          if (ffIsShareCancel(e4)) return;
+          console.warn("[Media] download: native share failed, falling back to web", e4);
+        }
+      }
+
+      // ---- Web / browser fallback: existing <a download> or iOS-tab blob URL.
+      await triggerMediaFileDownload(fixedBlob, fileName, undefined, dlOpts);
     } catch (err) {
       console.warn("[Media] download", err);
       showMediaMessage("Download failed");
@@ -1631,51 +1818,142 @@ async function openWorkDetails(workId) {
   shareBtn.className = "btn-pill";
   shareBtn.textContent = "Share";
   shareBtn.style.cssText = btnStyle;
+
+  // Warm the prefetch the moment the user just touches/hovers the button — gives
+  // us even more head-start before the actual click that triggers the share.
+  const warmShare = () => { try { startShareBlobPrefetch(); } catch (_) {} };
+  shareBtn.addEventListener("pointerdown", warmShare, { passive: true });
+  shareBtn.addEventListener("touchstart", warmShare, { passive: true });
+  shareBtn.addEventListener("mouseenter", warmShare);
+
   shareBtn.onclick = async () => {
     if (!firstMedia?.mediaUrl && !firstMedia?.storagePath) {
       alert("No media to share");
       return;
     }
-    const shareTitle = Array.isArray(work.categoryNames) ? work.categoryNames.join(", ") : work.categoryName || work.serviceType || "Work";
+
+    const shareTitle = Array.isArray(work.categoryNames)
+      ? work.categoryNames.join(", ")
+      : work.categoryName || work.serviceType || "Work";
+    const shareText = work.caption || "";
+    const mediaUrl = firstMedia?.mediaUrl || "";
+    const { mime: mimeFromExt, fileName } = shareMeta;
+
     shareBtn.disabled = true;
-    shareBtn.textContent = "Loading…";
+    const origText = shareBtn.textContent;
+    shareBtn.textContent = "Preparing…";
+
     try {
-      let storagePath = normalizeStoragePath(firstMedia.storagePath) || extractStoragePathFromMediaUrl(firstMedia.mediaUrl);
+      // Get the pre-fetched blob. If it's already resolved by the time we await
+      // here, the await completes in a microtask and preserves user-activation
+      // — critical for navigator.share() to be allowed by Android Chrome.
       let blob = null;
-      if (storagePath && auth.currentUser) {
-        try { blob = await fetchBlobViaHttpProxy(storagePath); } catch (_) {}
+      try {
+        blob = await startShareBlobPrefetch();
+      } catch (e) {
+        console.warn("[Media] share: prefetch promise rejected", e);
       }
-      if (blob && blob.size > 0) {
-        const ext = (storagePath || firstMedia.mediaUrl || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|heic|heif)$/i)?.[1] || "jpg";
-        const isVideo = /^(mp4|webm|mov)$/i.test(ext);
-        const mimeType = blob.type || (isVideo ? `video/${ext}` : `image/${ext === "jpg" ? "jpeg" : ext}`);
-        const shareFileName = `work-${workId}.${ext}`;
-        if (_isCapacitorAndroid()) {
+
+      const fixedBlob = (blob && blob.size > 0)
+        ? (blob.type === mimeFromExt ? blob : new Blob([blob], { type: mimeFromExt }))
+        : null;
+
+      // ---- Native (Capacitor iOS / Android): use the native Share plugin with
+      // a real file URI written to the app's cache. This bypasses Web Share API
+      // entirely, so it works on every Android device regardless of WebView age.
+      const isNative = ffIsNativeCapacitor();
+      const capShare = ffGetCapShare();
+      const hasBridge = !!ffNativeBridge();
+      console.log("[Media] share: native detection", {
+        hasCapacitor: !!ffGetCapacitor(),
+        isNative,
+        hasShare: !!capShare,
+        hasBridge,
+        hasBlob: !!fixedBlob,
+        blobSize: fixedBlob?.size || 0,
+      });
+      if (fixedBlob && isNative && capShare && hasBridge) {
+        try {
+          await ffShareBlobNative(fixedBlob, fileName, shareTitle, shareText);
+          return;
+        } catch (eNative) {
+          if (ffIsShareCancel(eNative)) return;
+          console.warn("[Media] share: Capacitor native share failed, falling back to web", eNative);
+          // Surface the actual failure to help diagnose on real devices where
+          // we can't attach chrome://inspect easily.
           try {
-            await _capSaveAndShare(blob, shareFileName);
+            alert("Native share failed: " + (eNative && (eNative.message || eNative.code || eNative)));
+          } catch (_) {}
+        }
+      } else if (isNative && !capShare) {
+        try {
+          alert(
+            "Native share plugin missing.\n" +
+            "Please reinstall the latest APK so the plugin is bundled in the native binary."
+          );
+        } catch (_) {}
+      }
+
+      const canDoFileShare =
+        typeof navigator !== "undefined"
+        && typeof navigator.share === "function";
+
+      if (canDoFileShare && fixedBlob) {
+        const file = new File([fixedBlob], fileName, { type: mimeFromExt });
+
+        let canShareFiles = true;
+        if (typeof navigator.canShare === "function") {
+          try { canShareFiles = !!navigator.canShare({ files: [file] }); }
+          catch (_) { canShareFiles = false; }
+        }
+        console.log("[Media] share: trying web file share", {
+          fileName, size: fixedBlob.size, mime: mimeFromExt, canShareFiles,
+        });
+
+        // First try with title+text+files; some Android targets reject the
+        // combination, so retry with files only.
+        try {
+          await navigator.share({ files: [file], title: shareTitle, text: shareText });
+          return;
+        } catch (e1) {
+          if (e1 && (e1.name === "AbortError" || e1.name === "NotAllowedError")) return;
+          console.warn("[Media] share: files+text rejected, retrying files-only", e1);
+          try {
+            await navigator.share({ files: [file] });
             return;
-          } catch (e) {
-            console.warn("[Media] Capacitor share failed", e);
+          } catch (e2) {
+            if (e2 && (e2.name === "AbortError" || e2.name === "NotAllowedError")) return;
+            console.warn("[Media] share: file share failed, falling back to URL", e2);
           }
         }
-        if (navigator.share && typeof navigator.canShare === "function") {
-          const file = new File([blob], shareFileName, { type: mimeType });
-          if (navigator.canShare({ files: [file] })) {
-            await navigator.share({ title: shareTitle, text: work.caption || "", files: [file] });
-            return;
-          }
+      } else if (!fixedBlob) {
+        console.warn("[Media] share: no blob available, falling back to URL");
+      }
+
+      // Fallback: share as URL via Web Share API (older devices / browsers without file support).
+      if (mediaUrl && typeof navigator !== "undefined" && typeof navigator.share === "function") {
+        try {
+          await navigator.share({ title: shareTitle, text: shareText, url: mediaUrl });
+          return;
+        } catch (e) {
+          if (e && (e.name === "AbortError" || e.name === "NotAllowedError")) return;
+          console.warn("[Media] share: URL share failed, will copy instead", e);
         }
       }
-      if (firstMedia?.mediaUrl && navigator.share) {
-        await navigator.share({ title: shareTitle, url: firstMedia.mediaUrl, text: work.caption || "" });
-      } else if (firstMedia?.mediaUrl) {
-        navigator.clipboard?.writeText(firstMedia.mediaUrl).then(() => alert("Link copied"));
+
+      // Last fallback: copy link to clipboard.
+      if (mediaUrl && navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(mediaUrl);
+          alert("Link copied");
+          return;
+        } catch (_) {}
       }
-    } catch (e) {
-      if (e.name !== "AbortError") alert("Share failed: " + (e.message || "Unknown error"));
+
+      alert("Share not supported on this device");
     } finally {
       shareBtn.disabled = false;
-      shareBtn.textContent = "Share";
+      shareBtn.textContent = origText;
     }
   };
   addActionBtn(shareBtn);
