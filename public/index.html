@@ -11390,8 +11390,14 @@ function ffApplyQueueViewGate() {
     var deferQueueChrome =
       typeof ffIsFullscreenModuleCoveringQueue === 'function' && ffIsFullscreenModuleCoveringQueue();
     if (!deferQueueChrome) {
-      if (joinBar) joinBar.style.display = 'flex';
-      if (wrapContent) wrapContent.style.display = 'block';
+      if (joinBar) {
+        joinBar.style.setProperty('display', 'flex', 'important');
+        joinBar.style.setProperty('visibility', 'visible', 'important');
+      }
+      if (wrapContent) {
+        wrapContent.style.setProperty('display', 'block', 'important');
+        wrapContent.style.setProperty('visibility', 'visible', 'important');
+      }
     } else {
       if (joinBar) joinBar.style.display = 'none';
       if (wrapContent) wrapContent.style.display = 'none';
@@ -14716,7 +14722,7 @@ window.openSettingsSecure = openSettingsSecure;
 function goToQueue() {
   try {
     document.body.classList.add('ff-queue-route-active', 'ff-queue-ui-visible', 'ff-ui-ready');
-    document.body.classList.remove('ff-auth-resolving');
+    document.body.classList.remove('ff-auth-resolving', 'ff-staff-members-open', 'ff-dashboard-open', 'ff-dashboard-analytics-open');
   } catch (e) {}
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
     try {
@@ -14906,15 +14912,23 @@ function goToQueue() {
       const ov = document.getElementById('owner-view');
       const jb = document.getElementById('joinBar');
       const wr = document.querySelector('.wrap');
+      const qc = document.getElementById('queueControls');
       if (ov) {
-        ov.style.display = 'block';
-        ov.style.visibility = 'visible';
+        ov.style.setProperty('display', 'block', 'important');
+        ov.style.setProperty('visibility', 'visible', 'important');
       }
-      if (jb) jb.style.display = 'flex';
+      if (jb) {
+        jb.style.setProperty('display', 'flex', 'important');
+        jb.style.setProperty('visibility', 'visible', 'important');
+      }
       if (wr) {
-        wr.style.display = 'block';
-        wr.style.visibility = 'visible';
+        wr.style.setProperty('display', 'block', 'important');
+        wr.style.setProperty('visibility', 'visible', 'important');
       }
+      if (qc) {
+        qc.style.setProperty('visibility', 'visible', 'important');
+      }
+      if (typeof updateQueueManagementUiVisibility === 'function') updateQueueManagementUiVisibility();
       if (typeof window.ffSyncJoinMoreToggle === 'function') window.ffSyncJoinMoreToggle();
       if (typeof renderQueue === 'function') renderQueue();
       if (typeof renderService === 'function') renderService();
