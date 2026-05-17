@@ -24134,14 +24134,184 @@ if (historyButton && !historyButton.__ffHistoryBound) {
 const historyExportBtn = document.getElementById('historyExportBtn');
 const historyClearBtn = document.getElementById('historyClearBtn');
 
-function exportHistory() {
+function ffHistoryIsMobileExportContext() {
+  try {
+    if (window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()) return true;
+  } catch (_) {}
+  try {
+    return window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
+  } catch (_) {
+    return false;
+  }
+}
+
+function ffHistoryGetCapacitor() {
+  return (typeof window !== 'undefined' && window.Capacitor) ? window.Capacitor : null;
+}
+
+function ffHistoryNativeBridge() {
+  const Cap = ffHistoryGetCapacitor();
+  return Cap && typeof Cap.nativePromise === 'function' ? Cap : null;
+}
+
+async function ffHistoryCallNative(pluginName, methodName, options) {
+  const Cap = ffHistoryNativeBridge();
+  if (!Cap) throw new Error('Capacitor native bridge unavailable');
+  return Promise.race([
+    Cap.nativePromise(pluginName, methodName, options || {}),
+    new Promise(function (_, reject) {
+      setTimeout(function () {
+        reject(new Error(pluginName + '.' + methodName + ' timed out'));
+      }, 4500);
+    })
+  ]);
+}
+
+function ffHistoryTextToBase64(text) {
+  const bytes = new TextEncoder().encode(String(text || ''));
+  let binary = '';
+  bytes.forEach(function (b) { binary += String.fromCharCode(b); });
+  return btoa(binary);
+}
+
+async function ffHistoryWriteTextExportToCache(text, fileName) {
+  const data = ffHistoryTextToBase64(text);
+  // Android fallback plugin is Java-only and avoids relying on Kotlin-based
+  // Filesystem registration. If it is unavailable (iOS), use Capacitor Filesystem.
+  try {
+    const custom = await ffHistoryCallNative('FfFileShare', 'writeAndGetUri', { fileName: fileName, data: data });
+    if (custom && custom.uri) return custom.uri;
+  } catch (_) {}
+  const fs = await ffHistoryCallNative('Filesystem', 'writeFile', {
+    path: fileName,
+    data: data,
+    directory: 'CACHE',
+    recursive: true
+  });
+  return fs && (fs.uri || fs.path);
+}
+
+function ffHistoryDownloadTextFile(text, fileName) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(function () {
+    try { URL.revokeObjectURL(url); } catch (_) {}
+  }, 1000);
+}
+
+function ffHistoryShowExportFallback(text, fileName) {
+  try {
+    var old = document.getElementById('ffHistoryExportFallbackModal');
+    if (old) old.remove();
+  } catch (_) {}
+  var overlay = document.createElement('div');
+  overlay.id = 'ffHistoryExportFallbackModal';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:calc(18px + env(safe-area-inset-top,0px)) 16px calc(18px + env(safe-area-inset-bottom,0px));box-sizing:border-box;';
+  overlay.innerHTML = ''
+    + '<div style="width:100%;max-width:460px;max-height:86vh;background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.28);display:flex;flex-direction:column;overflow:hidden;">'
+    + '<div style="padding:16px 18px 12px;border-bottom:1px solid #e5e7eb;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">'
+    + '<div><div style="font-size:16px;font-weight:800;color:#111827;">History Export</div><div style="font-size:12px;color:#6b7280;margin-top:4px;line-height:1.35;">Native download is not available on this device right now. You can copy or share the export text.</div></div>'
+    + '<button type="button" data-ff-history-export-close style="border:none;background:none;color:#6b7280;font-size:22px;line-height:1;cursor:pointer;">x</button>'
+    + '</div>'
+    + '<textarea readonly data-ff-history-export-text style="width:100%;min-height:220px;flex:1 1 auto;border:none;resize:none;padding:14px 18px;font-size:12px;line-height:1.45;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;box-sizing:border-box;color:#111827;background:#f9fafb;">' + escapeHtml(text || '') + '</textarea>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;padding:12px 18px;border-top:1px solid #e5e7eb;background:#fff;">'
+    + '<button type="button" data-ff-history-export-download style="padding:9px 13px;border:1px solid #ddd6fe;border-radius:10px;background:#fff;color:#6d28d9;font-size:12px;font-weight:800;cursor:pointer;">Try Download</button>'
+    + '<button type="button" data-ff-history-export-share style="padding:9px 13px;border:1px solid #ddd6fe;border-radius:10px;background:#faf5ff;color:#6d28d9;font-size:12px;font-weight:800;cursor:pointer;">Share Text</button>'
+    + '<button type="button" data-ff-history-export-copy style="padding:9px 15px;border:none;border-radius:10px;background:#7c3aed;color:#fff;font-size:12px;font-weight:800;cursor:pointer;">Copy</button>'
+    + '</div>'
+    + '</div>';
+  var close = function () {
+    try { overlay.remove(); } catch (_) {}
+  };
+  overlay.addEventListener('click', function (ev) {
+    if (ev.target === overlay) close();
+  });
+  var closeBtn = overlay.querySelector('[data-ff-history-export-close]');
+  if (closeBtn) closeBtn.addEventListener('click', close);
+  var copyBtn = overlay.querySelector('[data-ff-history-export-copy]');
+  if (copyBtn) copyBtn.addEventListener('click', async function () {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text || '');
+      else {
+        var ta = overlay.querySelector('[data-ff-history-export-text]');
+        if (ta) { ta.focus(); ta.select(); document.execCommand('copy'); }
+      }
+      if (typeof showToast === 'function') showToast('History export copied.', 'success');
+    } catch (_) {
+      if (typeof showToast === 'function') showToast('Copy failed. Select the text and copy manually.', 'error');
+    }
+  });
+  var shareBtn = overlay.querySelector('[data-ff-history-export-share]');
+  if (shareBtn) shareBtn.addEventListener('click', async function () {
+    try {
+      if (navigator.share) await navigator.share({ title: 'Fair Flow History', text: text || '' });
+      else throw new Error('Share unavailable');
+    } catch (err) {
+      if (!err || (err.name !== 'AbortError' && err.name !== 'NotAllowedError')) {
+        if (typeof showToast === 'function') showToast('Share is not available. Use Copy instead.', 'error');
+      }
+    }
+  });
+  var downloadBtn = overlay.querySelector('[data-ff-history-export-download]');
+  if (downloadBtn) downloadBtn.addEventListener('click', function () {
+    ffHistoryDownloadTextFile(text || '', fileName || 'fair-flow-history.txt');
+  });
+  document.body.appendChild(overlay);
+}
+
+async function ffHistoryExportTextFile(text, fileName) {
+  if (ffHistoryIsMobileExportContext()) {
+    if (typeof showToast === 'function') showToast('Preparing history export...', 'info');
+    try {
+      const fileUri = await ffHistoryWriteTextExportToCache(text, fileName);
+      if (fileUri) {
+        await ffHistoryCallNative('Share', 'share', {
+          title: 'Fair Flow History',
+          text: 'Fair Flow history export',
+          files: [fileUri],
+          dialogTitle: 'Export History'
+        });
+        return;
+      }
+    } catch (nativeErr) {
+      console.warn('[History] native export failed, trying web share/download', nativeErr);
+    }
+    try {
+      if (navigator.share) {
+        const file = new File([text], fileName, { type: 'text/plain' });
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+          await navigator.share({ title: 'Fair Flow History', text: 'Fair Flow history export', files: [file] });
+          return;
+        }
+        await navigator.share({ title: 'Fair Flow History', text: text });
+        return;
+      }
+    } catch (shareErr) {
+      if (shareErr && (shareErr.name === 'AbortError' || shareErr.name === 'NotAllowedError')) return;
+      console.warn('[History] web share export failed, trying download', shareErr);
+    }
+    ffHistoryShowExportFallback(text, fileName);
+    return;
+  }
+  ffHistoryDownloadTextFile(text, fileName);
+}
+
+async function exportHistory() {
   if (typeof ffCurrentUserHasHistoryExportPermission === 'function' && !ffCurrentUserHasHistoryExportPermission()) {
     if (typeof showToast === 'function') showToast('You do not have permission to export history.', 'error');
     return;
   }
   const entries = getFilteredHistoryEntries({ syncWorkerOptions: false });
   
-  const blob = new Blob([entries.map(entry => {
+  const text = entries.map(entry => {
     // Entries are already normalized at this point
     if (typeof entry === 'object' && entry !== null) {
       return `${entry.date || '-'},${entry.time || '-'},${entry.action || ''},${entry.role || '-'},${entry.performedBy || '-'},${entry.worker || ''}`;
@@ -24149,13 +24319,14 @@ function exportHistory() {
     
     // Skip invalid entries
     return '';
-  }).filter(line => line !== '').join('\n')], {type: 'text/plain'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'fair-flow-history.txt';
-  a.click();
-  URL.revokeObjectURL(url);
+  }).filter(line => line !== '').join('\n');
+  try {
+    await ffHistoryExportTextFile(text, 'fair-flow-history.txt');
+  } catch (err) {
+    console.warn('[History] export failed', err);
+    if (ffHistoryIsMobileExportContext()) ffHistoryShowExportFallback(text, 'fair-flow-history.txt');
+    else if (typeof showToast === 'function') showToast('Export failed. Please try again.', 'error');
+  }
 }
 
 function clearHistory() {
