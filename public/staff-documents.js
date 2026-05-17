@@ -868,6 +868,69 @@ function assignUrlToTabOrOpenFresh(url, tab) {
   return true;
 }
 
+function ffStaffDocsIsIosMobile() {
+  try {
+    if (document.documentElement.classList.contains("ff-ios-capacitor-safe")) return true;
+    const ua = navigator.userAgent || "";
+    const platform = navigator.platform || "";
+    return /iPhone|iPad|iPod/i.test(ua) || (platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  } catch (_) {
+    return false;
+  }
+}
+
+function ffStaffDocsIsImageDocument(url, fileName) {
+  const source = `${fileName || ""} ${url || ""}`.toLowerCase();
+  return /\.(png|jpe?g|webp|gif|bmp|heic|heif)(\?|#|$)/i.test(source);
+}
+
+function ffOpenStaffDocumentIosViewer(url, fileName) {
+  if (!url) return false;
+  const rid = `ffstaffdoc_view_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const safeTitle = escapeHtml(fileName || "Document");
+  const isImage = ffStaffDocsIsImageDocument(url, fileName);
+  const overlay = document.createElement("div");
+  overlay.id = rid;
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.style.cssText =
+    "position:fixed;left:0;top:0;right:0;bottom:0;width:100%;height:100vh;height:100dvh;background:#0f172a;z-index:2147483647;display:flex;flex-direction:column;box-sizing:border-box;padding:calc(10px + env(safe-area-inset-top,0px)) 10px calc(10px + env(safe-area-inset-bottom,0px));";
+  overlay.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 4px 12px;color:#fff;flex:0 0 auto;">
+      <div style="min-width:0;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${safeTitle}</div>
+      <button type="button" data-ff-doc-view-close style="border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;cursor:pointer;">Close</button>
+    </div>
+    <div style="flex:1 1 auto;min-height:0;background:#fff;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+      ${
+        isImage
+          ? `<img src="${escapeAttr(url)}" alt="${safeTitle}" style="display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;" />`
+          : `<iframe src="${escapeAttr(url)}" title="${safeTitle}" style="width:100%;height:100%;border:0;background:#fff;"></iframe>`
+      }
+    </div>
+  `;
+  const close = () => {
+    try {
+      overlay.remove();
+    } catch (_) {}
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (ev) => {
+    if (ev.key === "Escape") close();
+  };
+  overlay.querySelector("[data-ff-doc-view-close]").addEventListener("click", close);
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(overlay);
+  return true;
+}
+
+function openStaffDocumentResolvedUrl(url, tab, fileName) {
+  if (ffStaffDocsIsIosMobile()) {
+    closePopupIfOpen(tab);
+    return ffOpenStaffDocumentIosViewer(url, fileName);
+  }
+  return assignUrlToTabOrOpenFresh(url, tab);
+}
+
 /** Small modal: optional YYYY-MM-DD expiration + file picker. Resolves { file, expirationYmd } or null. */
 function ffOpenReplaceDocumentModal() {
   return new Promise((resolve) => {
@@ -1040,7 +1103,7 @@ async function ffHandleStaffDocumentActionClick(e) {
   const ref = doc(db, "salons", salonId, "staff", staffId, "documents", docId);
 
   if (action === "view") {
-    const tab = openBlankTabForLaterNavigation();
+    const tab = ffStaffDocsIsIosMobile() ? null : openBlankTabForLaterNavigation();
     try {
       const snap = await getDoc(ref);
       if (!snap.exists()) {
@@ -1054,7 +1117,7 @@ async function ffHandleStaffDocumentActionClick(e) {
       const fileNameHint = trimStr(d.fileName || "");
       // Inbox-approved docs usually have a Firebase download URL; open before Cloud Function path.
       if (fileUrl.startsWith("https://") || fileUrl.startsWith("http://")) {
-        assignUrlToTabOrOpenFresh(fileUrl, tab);
+        openStaffDocumentResolvedUrl(fileUrl, tab, fileNameHint);
         return;
       }
       if (storagePath) {
@@ -1079,7 +1142,7 @@ async function ffHandleStaffDocumentActionClick(e) {
           }
         }
         if (url) {
-          assignUrlToTabOrOpenFresh(url, tab);
+          openStaffDocumentResolvedUrl(url, tab, fileNameHint);
         } else {
           closePopupIfOpen(tab);
           ffToast("Could not open file.", "error");

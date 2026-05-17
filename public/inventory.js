@@ -7644,6 +7644,14 @@ function injectMockStylesOnce() {
 #inventoryScreen .ff-inv2-order-detail-extras-summary::-webkit-details-marker {
   display: none;
 }
+/* Mobile (iOS + Android): hide the "Source & details" summary label only.
+   The <details> element itself + its body stay in the DOM so any open/close
+   logic and spacing remain intact; we just suppress the visible label. */
+@media (max-width: 640px) {
+  #inventoryScreen .ff-inv2-order-detail-extras-summary {
+    display: none !important;
+  }
+}
 #inventoryScreen .ff-inv2-order-detail-extras-body {
   margin-top: 8px;
   padding-top: 8px;

@@ -682,12 +682,17 @@ function injectStyles() {
       #${SCREEN_ID} .ta-compare-row { grid-template-columns: 1fr; }
     }
     @media (max-width: 640px) {
+      /* Match the global mobile header behavior used by every other module:
+         respect the device safe-area-inset-top (iOS status bar) and use the
+         same z-index as the rest of the app so the purple top bar sits below
+         the time/battery row, not on top of it. */
       body.ff-dashboard-analytics-open .header {
         position: fixed !important;
-        top: 0 !important;
+        top: constant(safe-area-inset-top) !important;
+        top: env(safe-area-inset-top, 0px) !important;
         left: 0 !important;
         right: 0 !important;
-        z-index: 100340 !important;
+        z-index: 100450 !important;
       }
       #${SCREEN_ID} {
         top: var(--header-h, 60px) !important;
@@ -1596,17 +1601,38 @@ export function goToTimeAnalytics() {
   ensureInjected();
   hideOtherScreens();
 
-  const headerEl = document.querySelector(".header");
-  if (headerEl) {
-    document.documentElement.style.setProperty("--header-h", `${headerEl.offsetHeight}px`);
-  }
+  // IMPORTANT: add the body class FIRST so the mobile CSS that switches the
+  // header to `position: fixed; top: env(safe-area-inset-top)` is applied
+  // before we measure. Otherwise getComputedStyle still sees the desktop
+  // default (sticky, top:0), topOffset comes out as 0, and --header-h ends
+  // up too small. That pushes the "← Back / title" row behind the purple
+  // bar on iOS.
+  document.body.classList.add("ff-dashboard-analytics-open");
 
   const screen = document.getElementById(SCREEN_ID);
   if (screen) {
     screen.style.display = "flex";
     screen.style.setProperty("pointer-events", "auto", "important");
   }
-  document.body.classList.add("ff-dashboard-analytics-open");
+
+  const recomputeHeaderH = () => {
+    const headerEl = document.querySelector(".header");
+    if (!headerEl) return;
+    let topOffset = 0;
+    try {
+      const cs = getComputedStyle(headerEl);
+      if (cs && cs.position === "fixed") topOffset = parseFloat(cs.top) || 0;
+    } catch (_) {}
+    document.documentElement.style.setProperty("--header-h", `${headerEl.offsetHeight + topOffset}px`);
+  };
+  recomputeHeaderH();
+  // Re-measure after the browser has actually applied the body-class CSS
+  // (iOS Capacitor sometimes returns the pre-class computed style
+  // synchronously). Two rAFs is a well-known way to wait for a full paint.
+  requestAnimationFrame(function () {
+    recomputeHeaderH();
+    requestAnimationFrame(recomputeHeaderH);
+  });
   document.querySelectorAll(".btn-pill").forEach((b) => b.classList.remove("active"));
   refresh();
   if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();

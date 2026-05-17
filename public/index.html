@@ -90,7 +90,7 @@
       return window.goToInventory();
     }
     try {
-      await import('/inventory.js?v=20260505_inv_od_footer_one_row');
+      await import('/inventory.js?v=20260516_inv_hide_source_details_mobile');
     } catch (e) {
       console.error('[Inventory mock] load failed', e);
       return;
@@ -2815,6 +2815,30 @@ dialog footer button, .code-dialog footer button {
     grid-column: 2 !important;
   }
 
+  /* iOS only: make the Weekly Schedule Open/Close time inputs visually
+     clearer and more clearly separated. We bump font/height, center the
+     value, add a stronger contrast border + subtle shadow, and prevent
+     iOS native zoom on focus. Android keeps the existing look. */
+  html.ff-ios-capacitor-safe #userProfileScheduleCombinedBox > div:not(:first-child) > div:first-child > input[type="time"] {
+    height: 42px !important;
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    color: #111827 !important;
+    text-align: center !important;
+    padding: 0 12px !important;
+    border: 1.5px solid #c7d2fe !important;
+    border-radius: 10px !important;
+    background: #fff !important;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+  }
+  html.ff-ios-capacitor-safe #userProfileScheduleCombinedBox > div:not(:first-child) > div:first-child > input[type="time"]:focus {
+    border-color: #7c3aed !important;
+    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.18) !important;
+  }
+
   #userProfileScheduleCombinedBox [data-profile-shift-toggle] {
     padding: 10px 12px !important;
     font-size: 12px !important;
@@ -3852,10 +3876,37 @@ dialog footer button, .code-dialog footer button {
   #timeClockScreenContent .ff-tc-manage-root {
     max-width: 100% !important;
     min-width: 0 !important;
+    /* Inline style sets height:100% which locks the manage view to the viewport
+       and forces an inner scroll on .ff-tc-manage-table-card. On mobile we want
+       the whole page (#timeClockScreenContent) to scroll instead, so release
+       the height lock here and let children expand to their natural height. */
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  /* Release the nested flex/overflow that the inline styles create on the
+     table card + its scroll wrapper, so the content extends naturally and the
+     outer #timeClockScreenContent becomes the single mobile scroll container. */
+  #timeClockScreenContent .ff-tc-manage-table-card {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    overflow-y: visible !important;
   }
   #timeClockScreenContent #tcMTableScroll {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     overflow-x: hidden !important;
+    overflow-y: visible !important;
     -webkit-overflow-scrolling: touch;
+  }
+  /* Summary tab uses the same wrapper but receives a separate inline display
+     toggle (#tcMSummary). Make sure it also flows naturally on mobile. */
+  #timeClockScreenContent #tcMSummary {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
   #timeClockScreenContent #tcMTable.tc-manage-cards-mobile-layout {
     table-layout: fixed !important;
@@ -6637,8 +6688,25 @@ dialog footer button, .code-dialog footer button {
           .ff-points-mobile-metrics{display:none;}
           .ff-points-adjust-mobile{display:none;}
           @media (max-width: 640px){
-            #pointsSettingsModal{align-items:stretch!important;justify-content:center!important;padding:10px!important;overflow:hidden!important;}
-            .ff-points-settings-card{max-width:none!important;width:100%!important;max-height:calc(100vh - 20px)!important;border-radius:14px!important;}
+            /* Mobile (iOS + Android): push the Fair Flow Setup modal below the
+               device status bar (time/signal/battery) at the top, and lift it
+               above the Android system navigation bar / iOS home indicator at
+               the bottom. We add safe-area insets to the modal's top + bottom
+               padding so the card never sits under the status bar or under the
+               nav bar, and reduce max-height accordingly so it still fits. */
+            #pointsSettingsModal{
+              align-items:stretch!important;
+              justify-content:center!important;
+              padding:calc(10px + constant(safe-area-inset-top)) 10px calc(10px + constant(safe-area-inset-bottom))!important;
+              padding:calc(10px + env(safe-area-inset-top, 0px)) 10px calc(10px + env(safe-area-inset-bottom, 0px))!important;
+              overflow:hidden!important;
+            }
+            .ff-points-settings-card{
+              max-width:none!important;
+              width:100%!important;
+              max-height:calc(100vh - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))!important;
+              border-radius:14px!important;
+            }
             .ff-points-settings-body{padding:12px!important;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch;}
             #pointsSettingsFields{grid-template-columns:1fr!important;gap:10px!important;min-width:0!important;}
             #pointsSettingsFields label{min-width:0!important;width:100%!important;box-sizing:border-box!important;}
@@ -6657,6 +6725,18 @@ dialog footer button, .code-dialog footer button {
             #pointsAppScreen .ff-points-mobile-chip strong{color:#111827!important;font-weight:900!important;}
             #pointsAppScreen .ff-points-adjust-desktop{display:none!important;}
             #pointsAppScreen .ff-points-adjust-mobile{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:auto!important;min-width:0!important;max-width:none!important;overflow:visible!important;white-space:nowrap!important;padding:5px 10px!important;}
+            /* iOS only (mobile): keep the Shared Task Templates modal visually
+               separated from the fixed purple top bar by anchoring it from the
+               top and adding a small gap below the header. Android keeps its
+               default center alignment because the top bar there is part of
+               the WebView and already leaves visible space. */
+            html.ff-ios-capacitor-safe #sharedTaskTemplatesModal{
+              align-items:flex-start!important;
+              padding-top:calc(var(--header-h, 60px) + 12px)!important;
+            }
+            html.ff-ios-capacitor-safe #sharedTaskTemplatesModal > div{
+              max-height:calc(100vh - var(--header-h, 60px) - env(safe-area-inset-bottom, 0px) - 24px)!important;
+            }
           }
         </style>
         <div id="pointsSettingsModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:200002;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;" onclick="window.ffClosePointsSettings && window.ffClosePointsSettings()">
@@ -29117,6 +29197,19 @@ function handleTaskInfoEsc(e) {
  */
 window.ffCloseGlobalBlockingOverlays = function () {
   try {
+    ['dashboardScreen', 'queueAnalyticsScreen', 'ticketsAnalyticsScreen', 'timeAnalyticsScreen', 'tasksAnalyticsScreen']
+      .forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) {
+          el.style.display = 'none';
+          el.style.pointerEvents = 'none';
+        }
+      });
+    document.body.classList.remove('ff-dashboard-open', 'ff-dashboard-analytics-open');
+    var dashboardBtn = document.getElementById('dashboardBtn');
+    if (dashboardBtn) dashboardBtn.classList.remove('active');
+  } catch (e) {}
+  try {
     document.querySelectorAll('.chat-modal-overlay').forEach(function (el) {
       el.style.display = 'none';
     });
@@ -32655,6 +32748,26 @@ function initializeAppsPanel() {
       item.onclick = function(e) {
         e.stopPropagation();
         closeAppsPanel();
+
+        // When leaving Dashboard from the Apps Panel, close its injected
+        // full-screen screens explicitly. The bottom nav has capture handlers
+        // in dashboard.js, but Apps Panel routes call module functions directly,
+        // so Dashboard could remain above the next module.
+        if (appType !== 'dashboard') {
+          try {
+            ['dashboardScreen', 'queueAnalyticsScreen', 'ticketsAnalyticsScreen', 'timeAnalyticsScreen', 'tasksAnalyticsScreen']
+              .forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) {
+                  el.style.display = 'none';
+                  el.style.pointerEvents = 'none';
+                }
+              });
+            document.body.classList.remove('ff-dashboard-open', 'ff-dashboard-analytics-open');
+            var dashboardBtn = document.getElementById('dashboardBtn');
+            if (dashboardBtn) dashboardBtn.classList.remove('active');
+          } catch (_) {}
+        }
         
         // Check if this is the Staff Members button
         const isStaffMembers = item.getAttribute('data-staff') === 'true';
@@ -32772,7 +32885,7 @@ function initializeAppsPanel() {
             if (typeof window.goToDashboard === 'function') {
               window.goToDashboard();
             } else {
-              import('/dashboard.js?v=20260501_dashboard_perm')
+              import('/dashboard.js?v=20260516_dashboard_class_first_recompute')
                 .then((m) => {
                   if (m && typeof m.goToDashboard === 'function') {
                     window.goToDashboard = m.goToDashboard;
@@ -33320,9 +33433,28 @@ function initializeAppsPanel() {
     `;
     renderScheduleRows('staffScheduleRows', visibleSchedule, false);
     // Live refresh of the conflict banner on any change (toggle/time).
+    // Important (mobile): destroying a focused <input type="time"> while
+    // the user is still spinning the native iOS wheel picker closes the
+    // picker before they can pick minutes/AM-PM. So when the change comes
+    // from a time input we only capture state and defer the heavy section
+    // re-render until the picker is dismissed (blur). Toggle changes still
+    // trigger an immediate re-render so the time inputs show/hide correctly.
     const rowsContainer = document.getElementById('staffScheduleRows');
     if (rowsContainer) {
-      rowsContainer.addEventListener('change', function () {
+      rowsContainer.addEventListener('change', function (ev) {
+        const tgt = ev && ev.target;
+        const isTimeChange = tgt && tgt.tagName === 'INPUT' && tgt.getAttribute('type') === 'time';
+        if (isTimeChange) {
+          _ffStaffSchedCaptureCurrentTabRows();
+          if (!tgt.__ffSchedBlurBound) {
+            tgt.__ffSchedBlurBound = true;
+            tgt.addEventListener('blur', function () {
+              _ffStaffSchedCaptureCurrentTabRows();
+              _ffStaffSchedRerenderSection(staff);
+            }, { once: true });
+          }
+          return;
+        }
         _ffStaffSchedCaptureCurrentTabRows();
         _ffStaffSchedRerenderSection(staff);
       });
@@ -55641,22 +55773,22 @@ function hookSettingsGuard_DISABLED(){
         { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 2000 },
         { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
         { src: "/schedule-ui.js?v=20260514_schedule_nav_guard", type: "module", delay: 2300 },
-        { src: "/dashboard.js?v=20260514_mobile_analytics_ready", type: "module", delay: 2500 },
+        { src: "/dashboard.js?v=20260516_dashboard_class_first_recompute", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260505_inbox_btn_top_right_layout", type: "module", delay: 2700 },
         { src: "/media-upload.js?v=20260516_custom_java_plugin_fallback", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260512_training_reminder_v8", type: "module", delay: 2900 },
-        { src: "/staff-documents.js?v=20260505_full_specialist_doc_type", type: "module", delay: 3200 },
+        { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/settings-cloud.js?v=20260501_points", type: "module", delay: 3600 },
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },
-        { src: "/inventory.js?v=20260505_inv_od_footer_one_row", type: "module", delay: 4900 },
+        { src: "/inventory.js?v=20260516_inv_hide_source_details_mobile", type: "module", delay: 4900 },
         { src: "/locations-manage.js?v=20260501_points", type: "module", delay: 5400 },
-        { src: "/queue-analytics.js?v=20260514_mobile_analytics_ready", type: "module", delay: 5700 },
-        { src: "/tickets-analytics.js?v=20260514_mobile_analytics_ready", type: "module", delay: 6000 },
-        { src: "/time-analytics.js?v=20260514_mobile_analytics_ready", type: "module", delay: 6300 },
-        { src: "/tasks-analytics.js?v=20260514_mobile_analytics_ready", type: "module", delay: 6600 }
+        { src: "/queue-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 5700 },
+        { src: "/tickets-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 6000 },
+        { src: "/time-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 6300 },
+        { src: "/tasks-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 6600 }
       ];
       function wait(ms) {
         return new Promise(function (resolve) { setTimeout(resolve, ms); });
