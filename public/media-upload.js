@@ -1312,6 +1312,14 @@ function normalizeStoragePath(p) {
 function ffGetCapacitor() {
   return (typeof window !== "undefined" && window.Capacitor) ? window.Capacitor : null;
 }
+function ffTimeoutPromise(label, ms) {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+  });
+}
+function ffWithTimeout(promise, label, ms) {
+  return Promise.race([promise, ffTimeoutPromise(label, ms)]);
+}
 function ffIsNativeCapacitor() {
   const Cap = ffGetCapacitor();
   if (!Cap) return false;
@@ -1341,7 +1349,11 @@ function ffNativeBridge() {
 async function ffCallNative(pluginName, methodName, options) {
   const Cap = ffNativeBridge();
   if (!Cap) throw new Error("Capacitor native bridge unavailable");
-  return Cap.nativePromise(pluginName, methodName, options || {});
+  return ffWithTimeout(
+    Cap.nativePromise(pluginName, methodName, options || {}),
+    `${pluginName}.${methodName}`,
+    8000
+  );
 }
 function ffGetCapShare() {
   const Cap = ffGetCapacitor();
@@ -1417,6 +1429,37 @@ function ffIsShareCancel(err) {
   const msg = String(err.message || err.code || err || "").toLowerCase();
   return msg.includes("cancel") || msg.includes("dismiss") || msg.includes("user denied");
 }
+function ffMediaFastUrlMode() {
+  try {
+    // Technicians need the action sheet to open immediately. Managers/admins keep
+    // the heavier "share actual file" path because their flow already performs well.
+    return ffIsNativeCapacitor() && !canHandleMediaWork();
+  } catch (_) {
+    return false;
+  }
+}
+async function ffShareMediaUrlFast(mediaUrl, title, text, dialogTitle) {
+  if (!mediaUrl) throw new Error("No media URL");
+  const Share = ffGetCapShare();
+  if (ffIsNativeCapacitor() && Share) {
+    await ffWithTimeout(Share.share({
+      title: title || "Media",
+      text: text || "",
+      url: mediaUrl,
+      dialogTitle: dialogTitle || "Share"
+    }), "native media url share", 2500);
+    return true;
+  }
+  if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+    await ffWithTimeout(navigator.share({
+      title: title || "Media",
+      text: text || "",
+      url: mediaUrl
+    }), "web media url share", 2500);
+    return true;
+  }
+  return false;
+}
 /** Persist a blob to the user's device (Photos sheet on iOS, Save sheet on Android). */
 async function ffSaveBlobToDeviceViaShare(blob, fileName) {
   const Share = ffGetCapShare();
@@ -1450,7 +1493,14 @@ async function fetchBlobViaHttpProxy(storagePath) {
   const url = `/api/mediaDownloadFile?path=${encodeURIComponent(storagePath)}&token=${encodeURIComponent(idToken)}`;
   const urlForLog = `/api/mediaDownloadFile?path=${encodeURIComponent(storagePath)}&token=<redacted>`;
   console.log("[MediaDownload] fetch url", urlForLog);
-  const res = await fetch(url);
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), 10000) : null;
+  let res;
+  try {
+    res = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   console.log("[MediaDownload] res.status", res.status);
   if (!res.ok) {
     const errText = await res.text();
@@ -1686,12 +1736,30 @@ async function openWorkDetails(workId) {
   })();
 
   let shareBlobPromise = null;
-  const startShareBlobPrefetch = () => {
+  const startShareBlobPrefetch = (preferDirect = false) => {
     if (shareBlobPromise) return shareBlobPromise;
     const { storagePath } = shareMeta;
     const mediaUrl = firstMedia?.mediaUrl || "";
     shareBlobPromise = (async () => {
       let blob = null;
+      if (preferDirect && mediaUrl) {
+        let timer = null;
+        try {
+          const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+          timer = ctrl ? setTimeout(() => ctrl.abort(), 4500) : null;
+          const r = await fetch(mediaUrl, {
+            credentials: "omit",
+            mode: "cors",
+            ...(ctrl ? { signal: ctrl.signal } : {}),
+          });
+          if (r.ok) blob = await r.blob();
+        } catch (e) {
+          console.warn("[Media] share prefetch: fast direct fetch failed", e);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+        if (blob && blob.size > 0) return blob;
+      }
       try {
         if (storagePath && auth.currentUser) {
           blob = await fetchBlobViaHttpProxy(storagePath);
@@ -1700,20 +1768,26 @@ async function openWorkDetails(workId) {
         console.warn("[Media] share prefetch: proxy failed, trying direct", e);
       }
       if ((!blob || blob.size === 0) && mediaUrl) {
+        let timer = null;
         try {
-          const r = await fetch(mediaUrl, { credentials: "omit", mode: "cors" });
+          const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+          timer = ctrl ? setTimeout(() => ctrl.abort(), 9000) : null;
+          const r = await fetch(mediaUrl, {
+            credentials: "omit",
+            mode: "cors",
+            ...(ctrl ? { signal: ctrl.signal } : {}),
+          });
           if (r.ok) blob = await r.blob();
         } catch (e) {
           console.warn("[Media] share prefetch: direct fetch failed", e);
+        } finally {
+          if (timer) clearTimeout(timer);
         }
       }
       return blob;
     })();
     return shareBlobPromise;
   };
-  if (firstMedia?.mediaUrl || firstMedia?.storagePath) {
-    startShareBlobPrefetch();
-  }
 
   const downloadBtn = document.createElement("button");
   downloadBtn.type = "button";
@@ -1721,7 +1795,7 @@ async function openWorkDetails(workId) {
   downloadBtn.textContent = "Download";
   downloadBtn.style.cssText = btnStyle + "min-width:96px;white-space:nowrap;box-sizing:border-box;";
   // Warm the share-blob prefetch so the file is ready by tap time on native too.
-  const warmDownload = () => { try { startShareBlobPrefetch(); } catch (_) {} };
+  const warmDownload = () => { try { if (!ffMediaFastUrlMode()) startShareBlobPrefetch(true); } catch (_) {} };
   downloadBtn.addEventListener("pointerdown", warmDownload, { passive: true });
   downloadBtn.addEventListener("touchstart", warmDownload, { passive: true });
   downloadBtn.addEventListener("mouseenter", warmDownload);
@@ -1754,10 +1828,21 @@ async function openWorkDetails(workId) {
     const dlOpts = { iosTab: iosDownloadTab };
 
     try {
+      if (ffMediaFastUrlMode() && firstMedia?.mediaUrl) {
+        try {
+          downloadBtn.textContent = "Opening…";
+          await ffShareMediaUrlFast(firstMedia.mediaUrl, fileName, "", "Download image");
+          return;
+        } catch (fastErr) {
+          if (ffIsShareCancel(fastErr)) return;
+          console.warn("[Media] download: fast URL share failed, falling back to file", fastErr);
+        }
+      }
+
       // Get the blob (reuses the share prefetch if it's already in flight / done).
       let blob = null;
       try {
-        blob = await startShareBlobPrefetch();
+        blob = await ffWithTimeout(startShareBlobPrefetch(true), "media download prefetch", 8000);
       } catch (e2) {
         console.warn("[Media] download: prefetch promise rejected", e2);
       }
@@ -1772,7 +1857,11 @@ async function openWorkDetails(workId) {
       }
 
       if (!blob || blob.size === 0) {
-        showMediaMessage("Download failed");
+        if (firstMedia?.mediaUrl) {
+          showMediaMessage("Could not prepare file download. Use Share or try again.");
+        } else {
+          showMediaMessage("Download failed");
+        }
         return;
       }
 
@@ -1783,7 +1872,7 @@ async function openWorkDetails(workId) {
       // expected native UX in lieu of a hidden browser "download".
       if (isNative && ffGetCapShare() && ffNativeBridge()) {
         try {
-          await ffSaveBlobToDeviceViaShare(fixedBlob, fileName);
+          await ffWithTimeout(ffSaveBlobToDeviceViaShare(fixedBlob, fileName), "native media download share", 12000);
           return;
         } catch (e4) {
           if (ffIsShareCancel(e4)) return;
@@ -1821,7 +1910,7 @@ async function openWorkDetails(workId) {
 
   // Warm the prefetch the moment the user just touches/hovers the button — gives
   // us even more head-start before the actual click that triggers the share.
-  const warmShare = () => { try { startShareBlobPrefetch(); } catch (_) {} };
+  const warmShare = () => { try { if (!ffMediaFastUrlMode()) startShareBlobPrefetch(true); } catch (_) {} };
   shareBtn.addEventListener("pointerdown", warmShare, { passive: true });
   shareBtn.addEventListener("touchstart", warmShare, { passive: true });
   shareBtn.addEventListener("mouseenter", warmShare);
@@ -1841,15 +1930,26 @@ async function openWorkDetails(workId) {
 
     shareBtn.disabled = true;
     const origText = shareBtn.textContent;
-    shareBtn.textContent = "Preparing…";
+    shareBtn.textContent = ffMediaFastUrlMode() ? "Opening…" : "Preparing…";
 
     try {
+      if (ffMediaFastUrlMode() && mediaUrl) {
+        try {
+          await ffShareMediaUrlFast(mediaUrl, shareTitle, shareText, "Share media");
+          return;
+        } catch (fastErr) {
+          if (ffIsShareCancel(fastErr)) return;
+          console.warn("[Media] share: fast URL share failed, falling back to file", fastErr);
+          shareBtn.textContent = "Preparing…";
+        }
+      }
+
       // Get the pre-fetched blob. If it's already resolved by the time we await
       // here, the await completes in a microtask and preserves user-activation
       // — critical for navigator.share() to be allowed by Android Chrome.
       let blob = null;
       try {
-        blob = await startShareBlobPrefetch();
+        blob = await ffWithTimeout(startShareBlobPrefetch(true), "media share prefetch", 8000);
       } catch (e) {
         console.warn("[Media] share: prefetch promise rejected", e);
       }
@@ -1874,7 +1974,7 @@ async function openWorkDetails(workId) {
       });
       if (fixedBlob && isNative && capShare && hasBridge) {
         try {
-          await ffShareBlobNative(fixedBlob, fileName, shareTitle, shareText);
+          await ffWithTimeout(ffShareBlobNative(fixedBlob, fileName, shareTitle, shareText), "native media share", 12000);
           return;
         } catch (eNative) {
           if (ffIsShareCancel(eNative)) return;
@@ -2500,7 +2600,8 @@ function setupMediaWorkListSubscriptions() {
   mediaAllWorksHydrated = false;
 
   if (currentUserProfile?.staffId || currentUserProfile?.uid) {
-    unsubMyWorks = subscribeContentWorks({}, async (works) => {
+    const staffIdForQuery = String(currentUserProfile?.staffId || "").trim();
+    unsubMyWorks = subscribeContentWorks(staffIdForQuery ? { staffId: staffIdForQuery } : {}, async (works) => {
       const uid = String(currentUserProfile?.uid || "").trim();
       const staffId = String(currentUserProfile?.staffId || "").trim();
       const ownWorks = (Array.isArray(works) ? works : []).filter((work) => {
@@ -2512,7 +2613,7 @@ function setupMediaWorkListSubscriptions() {
       userWorks = ownWorks.slice();
       populateWorksDropdown();
       renderMediaList();
-      const toEnrich = ownWorks.slice(0, 20);
+      const toEnrich = ownWorks.slice(0, 8);
       const enriched = await Promise.all(toEnrich.map((w) => enrichWorkWithPreview({ ...w })));
       for (const w of enriched) {
         const url = w._firstMediaUrl != null ? String(w._firstMediaUrl).trim() : "";
@@ -2538,7 +2639,7 @@ function setupMediaWorkListSubscriptions() {
       allWorks = arr.slice();
       renderMediaFilters();
       renderMediaList();
-      const toEnrich = arr.slice(0, 20);
+      const toEnrich = arr.slice(0, 8);
       const enriched = await Promise.all(toEnrich.map((w) => enrichWorkWithPreview({ ...w })));
       for (const w of enriched) {
         const url = w._firstMediaUrl != null ? String(w._firstMediaUrl).trim() : "";

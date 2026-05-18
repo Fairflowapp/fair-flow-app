@@ -11356,6 +11356,66 @@ function ffIsFullscreenModuleCoveringQueue() {
 }
 window.ffIsFullscreenModuleCoveringQueue = ffIsFullscreenModuleCoveringQueue;
 
+function ffIsIosMobileShell() {
+  try {
+    if (!window.matchMedia || !window.matchMedia('(max-width: 640px)').matches) return false;
+    if (document.documentElement.classList.contains('ff-ios-capacitor-safe')) return true;
+    var ua = navigator.userAgent || '';
+    var platform = navigator.platform || '';
+    return /iPhone|iPad|iPod/i.test(ua) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  } catch (e) {
+    return false;
+  }
+}
+
+function ffResetMobileBottomNavViewportLock() {
+  try {
+    var nav = document.querySelector('.toolbar.toolbar-nav-main');
+    if (!nav) return;
+    nav.style.removeProperty('top');
+    nav.style.setProperty('bottom', '0', 'important');
+  } catch (e) {}
+}
+window.ffResetMobileBottomNavViewportLock = ffResetMobileBottomNavViewportLock;
+
+function ffSyncMobileBottomNavViewportLock() {
+  try {
+    if (!ffIsIosMobileShell()) return;
+    if (!document.body.classList.contains('ff-queue-route-active')) return;
+    var nav = document.querySelector('.toolbar.toolbar-nav-main');
+    if (!nav) return;
+    var vv = window.visualViewport;
+    var viewportTop = vv && Number.isFinite(vv.offsetTop) ? vv.offsetTop : 0;
+    var viewportHeight = vv && Number.isFinite(vv.height) ? vv.height : window.innerHeight;
+    var navHeight = nav.offsetHeight || 78;
+    var top = Math.max(0, Math.round(viewportTop + viewportHeight - navHeight));
+    nav.style.setProperty('position', 'fixed', 'important');
+    nav.style.setProperty('top', top + 'px', 'important');
+    nav.style.setProperty('bottom', 'auto', 'important');
+    nav.style.setProperty('left', '0', 'important');
+    nav.style.setProperty('right', '0', 'important');
+    nav.style.setProperty('z-index', '100350', 'important');
+  } catch (e) {}
+}
+window.ffSyncMobileBottomNavViewportLock = ffSyncMobileBottomNavViewportLock;
+
+try {
+  if (window.visualViewport && !window.__ffBottomNavViewportLockBound) {
+    window.__ffBottomNavViewportLockBound = true;
+    window.visualViewport.addEventListener('resize', function () {
+      if (typeof window.ffSyncMobileBottomNavViewportLock === 'function') window.ffSyncMobileBottomNavViewportLock();
+    });
+    window.visualViewport.addEventListener('scroll', function () {
+      if (typeof window.ffSyncMobileBottomNavViewportLock === 'function') window.ffSyncMobileBottomNavViewportLock();
+    });
+    window.addEventListener('orientationchange', function () {
+      setTimeout(function () {
+        if (typeof window.ffSyncMobileBottomNavViewportLock === 'function') window.ffSyncMobileBottomNavViewportLock();
+      }, 80);
+    });
+  }
+} catch (e) {}
+
 function ffApplyQueueViewGate() {
   const fullQueueView = ffCurrentUserHasQueueViewPermission();
   const joinOnlyPartial = ffCurrentUserIsQueueJoinOnlyPartialAccess();
@@ -14729,6 +14789,9 @@ function goToQueue() {
       window.ffCloseGlobalBlockingOverlays();
     } catch (e) {}
   }
+  try {
+    document.body.classList.add('ff-queue-route-active', 'ff-queue-ui-visible', 'ff-ui-ready');
+  } catch (e) {}
   // Close inbox screen if open
   const inboxScreen = document.getElementById('inboxScreen');
   if (inboxScreen) inboxScreen.style.display = 'none';
@@ -14930,13 +14993,18 @@ function goToQueue() {
       }
       if (typeof updateQueueManagementUiVisibility === 'function') updateQueueManagementUiVisibility();
       if (typeof window.ffSyncJoinMoreToggle === 'function') window.ffSyncJoinMoreToggle();
+      if (typeof window.ffSyncMobileBottomNavViewportLock === 'function') window.ffSyncMobileBottomNavViewportLock();
       if (typeof renderQueue === 'function') renderQueue();
       if (typeof renderService === 'function') renderService();
     } catch (e) {}
   };
   requestAnimationFrame(function() {
     restoreQueueChrome();
+    if (typeof window.ffSyncMobileBottomNavViewportLock === 'function') window.ffSyncMobileBottomNavViewportLock();
     setTimeout(restoreQueueChrome, 120);
+    setTimeout(function () {
+      if (typeof window.ffSyncMobileBottomNavViewportLock === 'function') window.ffSyncMobileBottomNavViewportLock();
+    }, 180);
   });
 
   try {
@@ -29381,6 +29449,10 @@ function handleTaskInfoEsc(e) {
  * Call when navigating to Inbox (and optionally from other main-nav targets).
  */
 window.ffCloseGlobalBlockingOverlays = function () {
+  try {
+    document.body.classList.remove('ff-queue-route-active');
+    if (typeof window.ffResetMobileBottomNavViewportLock === 'function') window.ffResetMobileBottomNavViewportLock();
+  } catch (e) {}
   try {
     ['dashboardScreen', 'queueAnalyticsScreen', 'ticketsAnalyticsScreen', 'timeAnalyticsScreen', 'tasksAnalyticsScreen']
       .forEach(function (id) {
@@ -55961,7 +56033,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/dashboard.js?v=20260516_dashboard_class_first_recompute", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260505_inbox_btn_top_right_layout", type: "module", delay: 2700 },
-        { src: "/media-upload.js?v=20260516_custom_java_plugin_fallback", type: "module", delay: 2780 },
+        { src: "/media-upload.js?v=20260517_media_tech_fast_url_actions", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260512_training_reminder_v8", type: "module", delay: 2900 },
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
