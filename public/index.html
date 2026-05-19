@@ -56099,7 +56099,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/settings-cloud.js?v=20260501_points", type: "module", delay: 3600 },
-        { src: "/billing-cloud.js?v=20260519_autosync_planlabel", type: "module", delay: 3650 }, // bumped: auto-sync stuck doc + Fair Flow plan label + hide Subscribe when active
+        { src: "/billing-cloud.js?v=20260519_unknownitemresync", type: "module", delay: 3650 }, // bumped: auto-sync when items have unknown_* keys (fixes blank Plan/Price after webhook env-var lag)
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },
         { src: "/inventory.js?v=20260516_inv_hide_source_details_mobile", type: "module", delay: 4900 },

@@ -9,14 +9,18 @@
 // All exports are registered from index.js via:
 //   Object.assign(exports, require("./stripe"));
 //
-// Required Secret Manager secrets:
-//   - STRIPE_SECRET_KEY      (already exists; sk_test_… for test mode)
-//   - STRIPE_WEBHOOK_SECRET  (set after creating the webhook endpoint)
+// Required Secret Manager secrets (per-project; NEVER in any .env file):
+//   - STRIPE_SECRET_KEY      sk_live_… in fairflowapp-db841 (production)
+//                            sk_test_… in fair-flow-staging (staging)
+//   - STRIPE_WEBHOOK_SECRET  whsec_… of THAT project's webhook endpoint
+//                            (live endpoint in production, test endpoint in staging)
 //
-// Required env vars (functions/.env or per-project .env.<projectId>):
+// Required env vars (per-project .env.<projectId>; never in shared .env):
 //   - STRIPE_PRICE_BASE      → price_…  ($99/mo Base Plan)
 //   - STRIPE_PRICE_LOCATION  → price_…  ($79/mo Additional Location, qty)
 //   - STRIPE_PRICE_STORAGE   → price_…  ($10/mo Extra Storage, qty per 10GB)
+//   See functions/.env.fair-flow-staging  (TEST values) and
+//       functions/.env.fairflowapp-db841 (LIVE values).
 //
 // Firestore writes (Admin SDK — bypasses rules):
 //   - salons/{salonId}/billing/stripe        latest subscription state
@@ -135,13 +139,93 @@ async function assertOwnerOfSalon(uid, salonId) {
   return salonData;
 }
 
-async function getOrCreateCustomer({ salonId, salonData, ownerUid, ownerEmail }) {
+/**
+ * Resolves a Stripe customer for the given salon, creating one in the current
+ * Stripe mode if needed.
+ *
+ * Cross-mode migration (test → live or live → test):
+ *   The Firestore doc may carry a `customerId` that was created in a different
+ *   Stripe mode than the secret key currently bound to this function (e.g. a
+ *   `cus_…` made in test mode while a live `sk_live_…` is now active). Stripe
+ *   responds to `customers.retrieve()` for such an ID with
+ *   `StripeInvalidRequestError code=resource_missing` and the message
+ *   "No such customer … a similar object exists in test mode but a live mode
+ *   key was used to make this request" (or vice-versa). When we detect that,
+ *   we transparently:
+ *     1. Create a fresh customer in the *current* Stripe mode.
+ *     2. Wipe the now-orphaned subscription/state fields on `billing/stripe`
+ *        (subscriptionId, status, items, latestInvoice, gracePeriod…) — those
+ *        belong to a Stripe mode that this function can no longer reach.
+ *     3. Stamp `previousCustomerId`, `migratedFromMode: true`, `migratedAt`
+ *        for audit/forensics.
+ *     4. Re-derive `accountStatus` on the salon root doc so the Billing Guard
+ *        immediately stops applying the old test-mode lock/at-risk state.
+ *   The previous Stripe customer (in the other mode) is left untouched —
+ *   harmless, and useful for audit if you ever switch the secret back.
+ *
+ * Returns: `{ customerId, migrated, created }`
+ *   - `created`  — no customerId existed in Firestore; freshly created.
+ *   - `migrated` — a customerId existed but pointed at the wrong Stripe mode
+ *                  (or was deleted) and has been replaced. Callers may want
+ *                  to surface a UX message in this case (the previous
+ *                  subscription is no longer reachable).
+ *
+ * Options:
+ *   - `allowCreateIfMissing` (default true) — when false, throw
+ *     `failed-precondition` if there's no existing customerId. Used by the
+ *     portal/sync callables which only make sense for an already-onboarded
+ *     salon.
+ */
+async function getOrCreateCustomer({
+  salonId,
+  salonData,
+  ownerUid,
+  ownerEmail,
+  allowCreateIfMissing = true,
+}) {
   const billingRef = admin.firestore().doc(`salons/${salonId}/billing/stripe`);
   const billingSnap = await billingRef.get();
-  const existing = billingSnap.exists ? String(billingSnap.data().customerId || "") : "";
-  if (existing) return existing;
+  const existing = billingSnap.exists
+    ? String(billingSnap.data().customerId || "")
+    : "";
 
   const stripe = getStripe();
+
+  if (existing) {
+    try {
+      const cust = await stripe.customers.retrieve(existing);
+      // Stripe returns soft-deleted customers as `{ deleted: true }` shells.
+      if (cust && cust.deleted !== true) {
+        return { customerId: existing, migrated: false, created: false };
+      }
+      logger.warn("[stripe] customer is soft-deleted — recreating", {
+        salonId,
+        oldCustomerId: existing,
+      });
+    } catch (e) {
+      const isCrossMode =
+        e?.type === "StripeInvalidRequestError" &&
+        e?.code === "resource_missing";
+      if (!isCrossMode) {
+        // Network errors / auth errors — re-throw, don't recreate blindly.
+        throw e;
+      }
+      logger.warn(
+        "[stripe] stale customerId — recreating in current Stripe mode",
+        {
+          salonId,
+          oldCustomerId: existing,
+          stripeMessage: e?.message || null,
+        }
+      );
+    }
+  } else if (!allowCreateIfMissing) {
+    throw new HttpsError(
+      "failed-precondition",
+      "No Stripe customer linked yet. Complete checkout first."
+    );
+  }
+
   const customer = await stripe.customers.create({
     email: ownerEmail || undefined,
     name: salonData?.name || undefined,
@@ -150,17 +234,65 @@ async function getOrCreateCustomer({ salonId, salonData, ownerUid, ownerEmail })
       ownerUid: ownerUid || "",
     },
   });
-  await billingRef.set(
+
+  const F = admin.firestore.FieldValue;
+  const update = {
+    salonId,
+    customerId: customer.id,
+    updatedAt: F.serverTimestamp(),
+  };
+
+  if (existing) {
+    // Cross-mode migration: stale subscription state would mislead the UI and
+    // the Billing Guard. Wipe everything that Stripe LIVE has never heard of.
+    Object.assign(update, {
+      previousCustomerId: existing,
+      migratedFromMode: true,
+      migratedAt: F.serverTimestamp(),
+      subscriptionId: F.delete(),
+      status: F.delete(),
+      currentPeriodEnd: F.delete(),
+      cancelAtPeriodEnd: F.delete(),
+      canceledAt: F.delete(),
+      items: F.delete(),
+      latestInvoice: F.delete(),
+      gracePeriodEndsAt: F.delete(),
+      gracePeriodStartedAt: F.delete(),
+    });
+  } else {
+    update.createdAt = F.serverTimestamp();
+  }
+
+  await billingRef.set(update, { merge: true });
+
+  if (existing) {
+    // Re-derive accountStatus from the (now-cleared) billing doc so the
+    // salon root doc stops broadcasting `locked` / `at_risk` based on the
+    // orphaned subscription. classifyAccountStatus(undefined) → "active".
+    try {
+      await recomputeAccountStatus(salonId);
+    } catch (e) {
+      logger.warn(
+        "[stripe] recomputeAccountStatus failed during migration",
+        { salonId, message: e?.message || null }
+      );
+    }
+  }
+
+  logger.info(
+    existing ? "[stripe] migrated stale customer" : "[stripe] created customer",
     {
       salonId,
       customerId: customer.id,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-    { merge: true }
+      previousCustomerId: existing || null,
+    }
   );
-  logger.info("[stripe] created customer", { salonId, customerId: customer.id });
-  return customer.id;
+
+  return {
+    customerId: customer.id,
+    migrated: !!existing,
+    created: !existing,
+  };
 }
 
 // ============================================================================
@@ -234,11 +366,12 @@ exports.createStripeCheckoutSession = onCall(
       }
 
       const ownerEmail = auth.token?.email || "";
-      const customerId = await getOrCreateCustomer({
+      const { customerId } = await getOrCreateCustomer({
         salonId,
         salonData,
         ownerUid: auth.uid,
         ownerEmail,
+        allowCreateIfMissing: true,
       });
 
       const stripe = getStripe();
@@ -311,19 +444,33 @@ exports.createStripePortalSession = onCall(
     if (!returnUrl) throw new HttpsError("invalid-argument", "returnUrl required");
 
     try {
-      await assertOwnerOfSalon(auth.uid, salonId);
+      const salonData = await assertOwnerOfSalon(auth.uid, salonId);
 
-      const billingSnap = await admin
-        .firestore()
-        .doc(`salons/${salonId}/billing/stripe`)
-        .get();
-      const customerId = billingSnap.exists
-        ? String(billingSnap.data().customerId || "")
-        : "";
-      if (!customerId) {
+      // Resolves the customerId, validates it against the *current* Stripe
+      // mode, and transparently migrates if the stored ID belonged to a
+      // different mode (e.g. test → live cutover). Throws failed-precondition
+      // if the salon has never started checkout.
+      const { customerId, migrated } = await getOrCreateCustomer({
+        salonId,
+        salonData,
+        ownerUid: auth.uid,
+        ownerEmail: auth.token?.email || "",
+        allowCreateIfMissing: false,
+      });
+
+      if (migrated) {
+        // The fresh customer has no subscriptions yet, so the billing portal
+        // would either error or render an empty surface. Tell the owner to
+        // resubscribe — the Subscribe button is already visible because
+        // getOrCreateCustomer just wiped the stale subscription state.
+        logger.info("[stripe portal] customer was migrated; redirecting to subscribe", {
+          salonId,
+          customerId,
+        });
         throw new HttpsError(
           "failed-precondition",
-          "No Stripe customer linked yet. Complete checkout first."
+          "Your previous subscription was set up in a different Stripe mode " +
+            "and is no longer active. Please subscribe again to manage billing."
         );
       }
 
@@ -391,20 +538,29 @@ exports.syncStripeSubscription = onCall(
     try {
       logger.info("[stripe sync] start", { uid: auth.uid, salonId });
 
-      await assertOwnerOfSalon(auth.uid, salonId);
+      const salonData = await assertOwnerOfSalon(auth.uid, salonId);
 
-      const billingRef = admin
-        .firestore()
-        .doc(`salons/${salonId}/billing/stripe`);
-      const billingSnap = await billingRef.get();
-      const customerId = billingSnap.exists
-        ? String(billingSnap.data().customerId || "")
-        : "";
-      if (!customerId) {
-        throw new HttpsError(
-          "failed-precondition",
-          "No Stripe customer linked yet. Complete checkout first."
-        );
+      // Validates the stored customer against the current Stripe mode, and
+      // transparently migrates on cross-mode mismatch. After migration the
+      // customer has no subscriptions, so we short-circuit instead of
+      // listing — the client will see `synced:false` and surface Subscribe.
+      const { customerId, migrated } = await getOrCreateCustomer({
+        salonId,
+        salonData,
+        ownerUid: auth.uid,
+        ownerEmail: auth.token?.email || "",
+        allowCreateIfMissing: false,
+      });
+      if (migrated) {
+        logger.info("[stripe sync] customer was migrated; subscription state cleared", {
+          salonId,
+          customerId,
+        });
+        return {
+          synced: false,
+          reason: "stripe_mode_migration",
+          customerId,
+        };
       }
 
       const stripe = getStripe();

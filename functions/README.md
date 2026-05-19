@@ -83,9 +83,20 @@ firebase deploy --only functions
 
 ---
 
-## Stripe Subscriptions (test mode)
+## Stripe Subscriptions
 
 Lives entirely in `functions/stripe.js` and is registered from `index.js` via a single `Object.assign(exports, require("./stripe"))` line.
+
+### Modes & strict per-project isolation
+
+Two Firebase projects, two Stripe modes, no shared values:
+
+| Firebase project        | Stripe mode | env file                              | Secret Manager values                                  |
+| ----------------------- | ----------- | ------------------------------------- | ------------------------------------------------------ |
+| `fair-flow-staging`     | TEST        | `functions/.env.fair-flow-staging`    | `STRIPE_SECRET_KEY=sk_test_…`, `STRIPE_WEBHOOK_SECRET=whsec_…` (test endpoint) |
+| `fairflowapp-db841`     | LIVE        | `functions/.env.fairflowapp-db841`    | `STRIPE_SECRET_KEY=sk_live_…`, `STRIPE_WEBHOOK_SECRET=whsec_…` (live endpoint) |
+
+The shared `functions/.env` MUST NOT contain any `STRIPE_PRICE_*` line — only project-agnostic vars (e.g. SMTP). This guarantees a deploy can never silently pick test prices in production or vice-versa.
 
 ### Products / Prices
 
@@ -95,49 +106,78 @@ Lives entirely in `functions/stripe.js` and is registered from `index.js` via a 
 | `location` | Fair Flow – Additional Location | $79 / month | number of extra locations    |
 | `storage`  | Fair Flow – Extra Storage     | $10 / month  | number of 10 GB blocks       |
 
-### One-time setup (production project: `fairflowapp-db841`)
+### One-time setup — PRODUCTION (`fairflowapp-db841`, Stripe LIVE mode)
 
-1. **Stripe Secret Key** — already set:
+1. **Stripe Secret Key (LIVE):**
 
    ```bash
-   firebase functions:secrets:access STRIPE_SECRET_KEY --project fairflowapp-db841
-   # → starts with sk_test_…
+   firebase functions:secrets:set STRIPE_SECRET_KEY --project fairflowapp-db841
+   # paste sk_live_… from Stripe Dashboard (LIVE mode) → Developers → API keys
    ```
 
-2. **Webhook Signing Secret** — create after deploying `stripeWebhook`:
+   Verify (does NOT print the value, only confirms it exists):
+
+   ```bash
+   firebase functions:secrets:access STRIPE_SECRET_KEY --project fairflowapp-db841 | head -c 8
+   # → sk_live_  (any other prefix is wrong; must be exactly `sk_live_`)
+   ```
+
+2. **Webhook endpoint in Stripe Dashboard (LIVE mode):**
+
+   - Toggle Stripe Dashboard from "Test mode" → "Live mode" (top-right).
+   - Developers → Webhooks → "Add endpoint":
+     - URL: `https://us-central1-fairflowapp-db841.cloudfunctions.net/stripeWebhook`
+     - Events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`
+   - After saving, click "Reveal" on the Signing Secret and copy the `whsec_…`.
+
+3. **Webhook Signing Secret (LIVE):**
 
    ```bash
    firebase functions:secrets:set STRIPE_WEBHOOK_SECRET --project fairflowapp-db841
-   # paste whsec_… from Stripe Dashboard → Developers → Webhooks → reveal signing secret
+   # paste whsec_… from the LIVE webhook endpoint created in step 2
    ```
 
-3. **Price IDs** — add to `functions/.env` (or `.env.fairflowapp-db841`):
+4. **Price IDs (LIVE)** — fill in `functions/.env.fairflowapp-db841` (the file already exists with placeholders):
 
    ```
-   STRIPE_PRICE_BASE=price_...
-   STRIPE_PRICE_LOCATION=price_...
-   STRIPE_PRICE_STORAGE=price_...
+   STRIPE_PRICE_BASE=price_...      ← LIVE Base Plan
+   STRIPE_PRICE_LOCATION=price_...  ← LIVE Additional Location
+   STRIPE_PRICE_STORAGE=price_...   ← LIVE Extra Storage
    ```
 
-4. **Deploy** (first time, all three new functions):
+   Find these in Stripe Dashboard (LIVE mode) → Products → each product's recurring price.
+
+5. **Deploy** the four Stripe functions to production:
 
    ```bash
    firebase deploy \
-     --only functions:createStripeCheckoutSession,functions:createStripePortalSession,functions:stripeWebhook \
+     --only functions:createStripeCheckoutSession,functions:createStripePortalSession,functions:syncStripeSubscription,functions:stripeWebhook \
      --project fairflowapp-db841
    ```
 
-5. **Register the webhook in Stripe** — Dashboard → Developers → Webhooks → "Add endpoint":
+### One-time setup — STAGING (`fair-flow-staging`, Stripe TEST mode)
 
-   - URL: `https://us-central1-fairflowapp-db841.cloudfunctions.net/stripeWebhook`
-   - Listen to events:
-     - `checkout.session.completed`
-     - `customer.subscription.created`
-     - `customer.subscription.updated`
-     - `customer.subscription.deleted`
-     - `invoice.paid`
-     - `invoice.payment_failed`
-   - After creating, copy the signing secret into `STRIPE_WEBHOOK_SECRET` (step 2) and redeploy `stripeWebhook` once.
+Mirror of the above using TEST-mode values:
+
+```bash
+firebase functions:secrets:set STRIPE_SECRET_KEY     --project fair-flow-staging   # sk_test_…
+firebase functions:secrets:set STRIPE_WEBHOOK_SECRET --project fair-flow-staging   # whsec_… of TEST webhook
+```
+
+`functions/.env.fair-flow-staging` already contains the existing TEST price IDs.
+
+### Switching production from TEST to LIVE — checklist
+
+When migrating an existing test-mode production deployment to live mode:
+
+- [ ] LIVE products + prices created in Stripe Dashboard (LIVE mode).
+- [ ] `functions/.env.fairflowapp-db841` updated with the three LIVE `price_…` values (no `REPLACE_WITH_LIVE_…` placeholders left).
+- [ ] `STRIPE_SECRET_KEY` in Secret Manager (project `fairflowapp-db841`) replaced with `sk_live_…`.
+- [ ] LIVE webhook endpoint created in Stripe Dashboard pointing to `https://us-central1-fairflowapp-db841.cloudfunctions.net/stripeWebhook`.
+- [ ] `STRIPE_WEBHOOK_SECRET` in Secret Manager (project `fairflowapp-db841`) replaced with the LIVE endpoint's `whsec_…`.
+- [ ] Old TEST webhook endpoint disabled or deleted from Stripe Dashboard (TEST mode) to avoid stale events.
+- [ ] `firebase deploy --only functions:createStripeCheckoutSession,functions:createStripePortalSession,functions:syncStripeSubscription,functions:stripeWebhook --project fairflowapp-db841`
+- [ ] First real $1 sanity charge on a real card → verify `salons/{salonId}/billing/stripe.status === "active"`.
 
 ### Functions
 
@@ -207,19 +247,22 @@ stripeWebhookEvents/{eventId}              ← idempotency markers (top-level)
 > Admin SDK, which bypasses rules. Add a manager-read rule for
 > `salons/{salonId}/billing/{docId}` when wiring up the UI.
 
-### Testing in test mode
+### Testing on staging (TEST mode, `fair-flow-staging`)
 
-1. Deploy `createStripeCheckoutSession` + `stripeWebhook`.
-2. From a signed-in owner session in your front-end, call
+1. Confirm the active project is staging: `firebase use fair-flow-staging`.
+2. Deploy `createStripeCheckoutSession` + `stripeWebhook` (and friends) to staging.
+3. From a signed-in owner session in your front-end, call
    `createStripeCheckoutSession` with a `base` item and any optional
    location/storage quantities. Open the returned `url` in the browser.
-3. Use Stripe's test card `4242 4242 4242 4242`, any future expiry, any CVC.
-4. After completion, check `salons/{salonId}/billing/stripe` in Firestore —
+4. Use Stripe's test card `4242 4242 4242 4242`, any future expiry, any CVC.
+5. After completion, check `salons/{salonId}/billing/stripe` in Firestore —
    `status` should be `active` and `items.base.quantity` should be `1`.
-5. To watch webhooks locally without deploying, use the Stripe CLI:
+6. To watch webhooks locally without deploying, use the Stripe CLI in test mode:
 
    ```bash
-   stripe listen --forward-to https://us-central1-fairflowapp-db841.cloudfunctions.net/stripeWebhook
+   stripe listen --forward-to https://us-central1-fair-flow-staging.cloudfunctions.net/stripeWebhook
    stripe trigger checkout.session.completed
    ```
+
+> **Never** use `4242 4242 4242 4242` against the production project. Live mode requires a real card; testing in production should be limited to a single $1 sanity charge that is then refunded from Stripe Dashboard.
 

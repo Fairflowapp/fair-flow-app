@@ -288,6 +288,26 @@ function isStuckBillingDoc(data) {
 }
 
 /**
+ * Detects an items map written by `stripeWebhook` while it was running with
+ * stale `STRIPE_PRICE_*` env vars. In that case `pickItemsFromSubscription`
+ * (functions/stripe.js) couldn't classify the priceIds and fell through to
+ * `unknown_${priceId}` keys, which the UI doesn't recognize as base/location/
+ * storage — so Current Plan and Monthly Price render as "—" even though the
+ * subscription is fully active in Stripe.
+ *
+ * `syncStripeSubscription` always runs with the latest deployed env vars, so a
+ * single sync rewrites items under the correct SKU keys without needing to
+ * redeploy the webhook function. The auto-trigger below is one-shot per salon
+ * per session (same `_syncAttemptedForSalon` gate as the stuck-doc path).
+ */
+function hasUnknownItemKeys(data) {
+  if (!data || !data.items || typeof data.items !== "object") return false;
+  const keys = Object.keys(data.items);
+  if (keys.length === 0) return false;
+  return keys.some((k) => k.startsWith("unknown_"));
+}
+
+/**
  * Fire-and-forget sync. Idempotent at the salon level (one attempt per salon
  * per session). Snapshot listener will pick up the new state automatically
  * once the callable writes to Firestore — no manual re-render needed.
@@ -641,7 +661,7 @@ function startListening(salonId) {
         // webhook hasn't delivered subscription state yet). One attempt per
         // salon per session — once the sync writes, this branch stops firing
         // because data.status / data.subscriptionId are now populated.
-        if (isStuckBillingDoc(data)) {
+        if (isStuckBillingDoc(data) || hasUnknownItemKeys(data)) {
           triggerSync().catch((e) =>
             console.warn("[BillingCloud] auto-sync raised", e)
           );
@@ -760,7 +780,10 @@ function updateBillingPanel() {
     // If reopened on a stuck doc (e.g. user closed Settings before the
     // webhook arrived and the auto-sync from startListening already ran
     // last time), retry once now.
-    if (isStuckBillingDoc(_lastBillingData)) {
+    if (
+      isStuckBillingDoc(_lastBillingData) ||
+      hasUnknownItemKeys(_lastBillingData)
+    ) {
       triggerSync().catch((e) =>
         console.warn("[BillingCloud] reopen sync raised", e)
       );
@@ -771,6 +794,44 @@ function updateBillingPanel() {
 }
 
 window.updateBillingPanel = updateBillingPanel;
+
+// ─── Self-bootstrap on late load ─────────────────────────────────────────────
+// SafeLoader defers this module by ~3.6s. If the user clicked Settings →
+// Billing before the script loaded, the router in initializeUserProfileMenu()
+// already rendered the (empty) #userProfileCardBilling card but had to skip
+// the call to updateBillingPanel() because window.updateBillingPanel was
+// still undefined. The user would see "blank Billing — works only after
+// switching tabs and back". Cover that race: if Billing is the visible card
+// at script-load time, run updateBillingPanel() now.
+//
+// Idempotent and cheap — just toggles a Firestore listener that's already
+// guarded by `_currentSalonId`.
+function bootstrapIfBillingCardVisible() {
+  try {
+    const card = document.getElementById(NEW_UI.card);
+    if (!card) return;
+    // Card is shown via inline `style.display = 'block'` from the router;
+    // hidden via 'none'. Treat anything non-'none' as visible.
+    const styleVisible = card.style.display !== "none";
+    // offsetParent === null means the element (or an ancestor) is display:none
+    // — required because parents like the userProfileScreen modal might be
+    // hidden even if this card has display:'block'.
+    const layoutVisible = card.offsetParent !== null;
+    if (styleVisible && layoutVisible) {
+      updateBillingPanel();
+    }
+  } catch (e) {
+    console.warn("[BillingCloud] bootstrapIfBillingCardVisible failed", e);
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", bootstrapIfBillingCardVisible, {
+    once: true,
+  });
+} else {
+  bootstrapIfBillingCardVisible();
+}
 
 // Stop listener on sign-out so we don't leak across sessions.
 onAuthStateChanged(auth, (user) => {
