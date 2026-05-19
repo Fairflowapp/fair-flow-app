@@ -17,7 +17,8 @@
     "bcryptjs": "^2.4.3",
     "firebase-admin": "^13.6.0",
     "firebase-functions": "^7.0.3",
-    "nodemailer": "^6.9.7"
+    "nodemailer": "^6.9.7",
+    "stripe": "^17.7.0"
   },
   "devDependencies": {
     "eslint": "^8.15.0",

@@ -7854,6 +7854,57 @@ dialog footer button, .code-dialog footer button {
           <div id="staffCallMessageTemplatesBox" style="display:flex;flex-direction:column;gap:14px;"></div>
         </div>
 
+        <!-- Billing & Subscription (Owner only). Wired by /billing-cloud.js -->
+        <div id="billingSettingsSection" style="display:none;margin-top:24px;">
+          <h4 style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Billing &amp; Subscription</h4>
+          <div class="row small" style="margin-bottom:12px;">Manage your Fair Flow subscription. Owner only.</div>
+
+          <div id="ffBillingStatusPanel" style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:14px;background:#f9fafb;font-size:13px;color:#374151;">
+            <div id="ffBillingStatusLine">Loading subscription status…</div>
+            <div id="ffBillingPeriodLine" style="margin-top:4px;color:#6b7280;font-size:12px;"></div>
+            <div id="ffBillingInvoiceLine" style="margin-top:6px;font-size:12px;"></div>
+          </div>
+
+          <div id="ffBillingSubscribeForm" style="display:none;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:14px;">
+            <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:10px;">Choose your plan</div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <div style="font-weight:600;color:#111827;">Base Plan</div>
+                  <div style="font-size:12px;color:#6b7280;">$99 / month — included</div>
+                </div>
+                <div style="font-weight:600;color:#111827;">$99</div>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <div style="font-weight:600;color:#111827;">Additional Locations</div>
+                  <div style="font-size:12px;color:#6b7280;">$79 / month each (extra branches beyond first)</div>
+                </div>
+                <input id="ffBillingLocationQty" type="number" min="0" max="50" step="1" value="0" style="width:64px;height:32px;padding:0 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;text-align:center;" />
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <div style="font-weight:600;color:#111827;">Extra Storage</div>
+                  <div style="font-size:12px;color:#6b7280;">$10 / month per 10 GB block</div>
+                </div>
+                <input id="ffBillingStorageQty" type="number" min="0" max="100" step="1" value="0" style="width:64px;height:32px;padding:0 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;text-align:center;" />
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #e5e7eb;padding-top:10px;margin-top:4px;">
+                <div style="font-weight:700;color:#111827;">Estimated total</div>
+                <div id="ffBillingTotalLine" style="font-weight:700;color:#111827;">$99 / month</div>
+              </div>
+            </div>
+            <button id="ffBillingCheckoutBtn" type="button" style="width:100%;margin-top:14px;padding:10px 16px;border:1px solid #7c3aed;border-radius:8px;background:#7c3aed;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">
+              Continue to Stripe Checkout
+            </button>
+            <div style="margin-top:8px;font-size:11px;color:#9ca3af;text-align:center;">Test mode — no real charges.</div>
+          </div>
+
+          <button id="ffBillingPortalBtn" type="button" style="display:none;padding:8px 16px;border:1px solid #a78bfa;border-radius:8px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:13px;font-weight:600;">
+            Manage subscription
+          </button>
+        </div>
+
         <div id="legacySettingsTechniciansBlock" style="display:none;">
           <!-- NEW STAFF MEMBER Form Container -->
           <div class="staffNewFormContainer" style="margin-top:32px;padding:20px;background:#fff;border:1px solid var(--border);border-radius:12px;">
@@ -14769,8 +14820,17 @@ async function openSettingsSecure(){
           : 'none';
     }
   }
-  
-  
+
+  // Show Billing & Subscription section for the salon owner.
+  // Defined in /billing-cloud.js — guards against missing module.
+  if (typeof window.ffInitBillingSection === 'function') {
+    try { window.ffInitBillingSection(); } catch (e) { console.warn('[Settings] ffInitBillingSection failed', e); }
+  } else {
+    const billingSection = document.getElementById('billingSettingsSection');
+    if (billingSection) billingSection.style.display = 'none';
+  }
+
+
   settingsDlg.showModal();
 
 }
@@ -56017,6 +56077,7 @@ function hookSettingsGuard_DISABLED(){
   <script>
     (function () {
       var scripts = [
+        { src: "/billing-guard.js?v=20260519_initial", type: "module", delay: 600 }, // global account-state enforcement (banner / lock overlay)
         { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module", delay: 700 },
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260501_points", delay: 1050 },
@@ -56038,6 +56099,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/settings-cloud.js?v=20260501_points", type: "module", delay: 3600 },
+        { src: "/billing-cloud.js?v=20260519_autosync_planlabel", type: "module", delay: 3650 }, // bumped: auto-sync stuck doc + Fair Flow plan label + hide Subscribe when active
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },
         { src: "/inventory.js?v=20260516_inv_hide_source_details_mobile", type: "module", delay: 4900 },

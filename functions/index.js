@@ -9,6 +9,11 @@ const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onRequest: onRequestV2 } = require("firebase-functions/v2/https");
 functions.region = functionsV1.region;
 
+// Stripe billing integration (createStripeCheckoutSession,
+// createStripePortalSession, stripeWebhook). Lives in its own file so this
+// module stays focused on existing concerns.
+Object.assign(exports, require("./stripe"));
+
 /**
  * Simple test callable – use to verify IAM/CORS/region work.
  * Call from console: httpsCallable(getFunctions(app,"us-central1"),"testCallable")({test:1})
