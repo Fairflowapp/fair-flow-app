@@ -990,9 +990,25 @@ This link expires in 1 hour.`;
     });
 
     try {
+      // Deliverability hardening (especially for Outlook/Hotmail):
+      //   - replyTo: gives recipients a real human address to reply to → strong
+      //     positive signal vs. silent no-reply senders.
+      //   - Auto-Submitted / X-Auto-Response-Suppress: tells receiving servers
+      //     this is a transactional auto-generated message, not marketing.
+      //   - X-Entity-Ref-ID: unique per send; prevents Outlook from collapsing
+      //     repeated password-reset tests into "suspicious duplicate" signal.
+      //   - Precedence: bulk-style header that mail filters use to bucket
+      //     transactional vs. personal mail correctly.
       await admin.firestore().collection("mail").add({
         to: email,
+        replyTo: "support@fairflowapp.com",
         message: { subject, text: textBody, html: htmlBody },
+        headers: {
+          "X-Entity-Ref-ID": `pwreset-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          "Auto-Submitted": "auto-generated",
+          "X-Auto-Response-Suppress": "All",
+          "Precedence": "transactional",
+        },
       });
     } catch (err) {
       console.error("[onPasswordResetRequestCreated] Failed to write mail doc", err);
