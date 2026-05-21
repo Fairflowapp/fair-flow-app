@@ -821,34 +821,86 @@ function classifyAccountStatus(subscriptionStatus) {
  *
  * Idempotent and safe to call multiple times in a single webhook.
  */
+/**
+ * Internal billing override (comped/free access — owner/family/partner/tester).
+ * Active when `enabled === true` AND (no `endsAt` OR `endsAt > now`).
+ * When active, forces `accountStatus = "active"` regardless of Stripe state and
+ * mirrors `billingOverrideActive`/`billingOverrideEndsAt`/`billingOverridePlanName`
+ * onto the salon root doc so all members see consistent state.
+ *
+ * The previous (Stripe-only) shape of this function is preserved for the
+ * common case where no override doc exists.
+ */
 async function recomputeAccountStatus(salonId) {
   if (!salonId) return;
   const fs = admin.firestore();
-  const billingSnap = await fs.doc(`salons/${salonId}/billing/stripe`).get();
+  const F = admin.firestore.FieldValue;
 
-  let accountStatus = "active";
+  const [overrideSnap, billingSnap] = await Promise.all([
+    fs.doc(`salons/${salonId}/billing/override`).get(),
+    fs.doc(`salons/${salonId}/billing/stripe`).get(),
+  ]);
+
+  // ── Override evaluation ────────────────────────────────────────────────
+  const overrideData = overrideSnap.exists ? overrideSnap.data() || {} : null;
+  const overrideEnabled = !!overrideData?.enabled;
+  const overrideEndsAtMs =
+    overrideData?.endsAt && typeof overrideData.endsAt.toMillis === "function"
+      ? overrideData.endsAt.toMillis()
+      : null;
+  const overrideExpired =
+    overrideEnabled && overrideEndsAtMs != null && overrideEndsAtMs <= Date.now();
+  const overrideActive = overrideEnabled && !overrideExpired;
+
+  // ── Status derivation ──────────────────────────────────────────────────
+  let accountStatus;
   let gracePeriodEndsAt = null;
-  if (billingSnap.exists) {
+  if (overrideActive) {
+    // Override wins. Don't carry over a stale grace period from Stripe state.
+    accountStatus = "active";
+  } else if (billingSnap.exists) {
     const data = billingSnap.data() || {};
     accountStatus = classifyAccountStatus(data.status);
     gracePeriodEndsAt = data.gracePeriodEndsAt || null;
+  } else {
+    // No override, no billing doc — fail-open. Matches the explicit product
+    // decision documented earlier: a salon with no billing record is treated
+    // as `active` (free access until billing is configured).
+    accountStatus = "active";
   }
 
-  await fs.doc(`salons/${salonId}`).set(
-    {
-      accountStatus,
-      gracePeriodEndsAt:
-        gracePeriodEndsAt || admin.firestore.FieldValue.delete(),
-      accountStatusUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
+  // ── Mirror to salon root ───────────────────────────────────────────────
+  // Always rewrite the override mirror fields so flipping the override doc
+  // off (or letting it expire via the daily scan) cleans up the root doc.
+  const update = {
+    accountStatus,
+    accountStatusUpdatedAt: F.serverTimestamp(),
+    gracePeriodEndsAt: gracePeriodEndsAt || F.delete(),
+    billingOverrideActive: overrideActive ? true : F.delete(),
+    billingOverrideEndsAt:
+      overrideActive && overrideData.endsAt ? overrideData.endsAt : F.delete(),
+    billingOverridePlanName:
+      overrideActive && overrideData.planName ? overrideData.planName : F.delete(),
+    billingOverrideReason:
+      overrideActive && overrideData.reason ? overrideData.reason : F.delete(),
+  };
+  await fs.doc(`salons/${salonId}`).set(update, { merge: true });
+
   logger.info("[billing guard] recomputed accountStatus", {
     salonId,
     accountStatus,
+    overrideActive,
+    overrideExpired,
     hasGrace: !!gracePeriodEndsAt,
   });
 }
+
+// Exposed for `functions/billing.js` (the Firestore trigger on
+// salons/{id}/billing/override calls this directly to keep the mirror in sync
+// no matter how the override doc was changed). Plain async function — Firebase
+// Functions deploy ignores non-trigger exports, so it isn't deployed as a
+// callable.
+module.exports.recomputeAccountStatus = recomputeAccountStatus;
 
 async function resolveSalonId(stripe, obj) {
   if (!obj) return null;

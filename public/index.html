@@ -112,8 +112,8 @@
 <meta name="apple-mobile-web-app-title" content="Fair Flow App"/>
 <meta name="theme-color" content="#7c3aed"/>
 <!-- Tab/address-bar icon size is chosen by the browser/OS (not enlargeable from HTML). Use a sharp square PNG. Bump ?v= when replacing the file. -->
-<link rel="icon" href="/fairflow-favicon-tab.png?v=3" type="image/png" sizes="64x64"/>
-<link rel="apple-touch-icon" sizes="180x180" href="/fairflow-logo.png?v=12"/>
+<link rel="icon" href="/fairflow-favicon-tab.png?v=6" type="image/png" sizes="64x64"/>
+<link rel="apple-touch-icon" sizes="180x180" href="/fairflow-logo.png?v=13"/>
 
 <script>
   (function(){
@@ -247,13 +247,33 @@ body:not(.ff-auth-splash-visible) #ff-auth-splash {
   display: block;
 }
 .ff-auth-splash__logo {
-  width: min(132px, 36vw);
+  width: min(200px, 48vw);
   height: auto;
   display: block;
-  filter: drop-shadow(0 12px 28px rgba(124, 58, 237, 0.25));
+  filter: drop-shadow(0 14px 32px rgba(124, 58, 237, 0.28));
+  animation: ff-auth-splash-logo-pulse 1.8s ease-in-out infinite;
+  will-change: transform, opacity, filter;
+  transform-origin: center center;
 }
 .ff-auth-splash__logo.ff-auth-splash__logo--hide {
   display: none;
+}
+@keyframes ff-auth-splash-logo-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.92;
+    filter: drop-shadow(0 12px 24px rgba(124, 58, 237, 0.22));
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+    filter: drop-shadow(0 18px 36px rgba(124, 58, 237, 0.34));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ff-auth-splash__logo {
+    animation: none;
+  }
 }
 .ff-auth-splash__spinner {
   width: 36px;
@@ -355,8 +375,8 @@ body.ff-logged-out #complete-setup-section {
 
 /* Header logo: no CSS color filter - brightness/invert turned the asset into a flat white block */
 .header #brandLogo {
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
   display: block;
   object-fit: contain;
   object-position: center;
@@ -3005,6 +3025,20 @@ dialog footer button, .code-dialog footer button {
   transform: translateX(-140px);
 }
 
+#ffStaffDetailsKebabBtn:hover {
+  background: rgba(124, 58, 237, 0.10) !important;
+}
+
+/* Mobile-only "back to staff list" button. Hidden by default at all widths.
+   The @media (max-width: 640px) block elsewhere in this file overrides this
+   to display:flex only when the modal is in mobile-detail / mobile-add /
+   mobile-tab state. Without this base rule the button leaked onto desktop
+   with browser-default styling (small empty gray pill near the top of the
+   staff details pane). */
+#staffMembersModal .ff-staff-mobile-back {
+  display: none !important;
+}
+
 /* Active staff nav tab - light purple + dark text (same as sidebar selection / Settings), not solid brand fill */
 .staff-nav-item.is-active,
 #staffDetailsNav .staff-nav-item.is-active {
@@ -5569,12 +5603,12 @@ dialog footer button, .code-dialog footer button {
   <!-- Boot splash: shown until first auth + profile gate complete (persisted login on phone). -->
   <div id="ff-auth-splash" class="ff-auth-splash" role="status" aria-live="polite" aria-busy="true" aria-label="Loading Fair Flow">
     <div class="ff-auth-splash__inner">
-      <video id="ffAuthSplashVideo" class="ff-auth-splash__video" muted playsinline loop preload="metadata" poster="fairflow-logo.png?v=12" aria-hidden="true">
+      <video id="ffAuthSplashVideo" class="ff-auth-splash__video" muted playsinline loop preload="metadata" poster="fairflow-logo-transparent.png?v=1" aria-hidden="true">
         <!-- Optional: add ff-splash.mp4 to /public and uncomment:
         <source src="/ff-splash.mp4" type="video/mp4" />
         -->
       </video>
-      <img class="ff-auth-splash__logo" src="fairflow-logo.png?v=12" alt="" width="132" height="132" decoding="async" />
+      <img class="ff-auth-splash__logo" src="fairflow-logo-transparent.png?v=1" alt="" width="200" height="200" decoding="async" />
       <div class="ff-auth-splash__spinner" aria-hidden="true"></div>
       <p class="ff-auth-splash__hint">Loading…</p>
     </div>
@@ -5892,7 +5926,7 @@ dialog footer button, .code-dialog footer button {
 
       <div class="brandbox">
 
-        <img id="brandLogo" class="logo" alt="Fair Flow App" src="fairflow-logo.png?v=12">
+        <img id="brandLogo" class="logo" alt="Fair Flow App" src="fairflow-logo-white.png?v=14">
 
         <div class="title">
 
@@ -10256,7 +10290,7 @@ function renderBrand(){
     salonName.innerHTML = displayName ? ("<strong>"+escapeHtml(displayName)+"</strong>") : "";
   }
   if (brandLogo) {
-    brandLogo.src = "fairflow-logo.png?v=12";
+    brandLogo.src = "fairflow-logo-white.png?v=14";
     brandLogo.style.visibility="visible";
   }
   if (typeof renderHeaderUserIdentity === 'function') renderHeaderUserIdentity();
@@ -34882,7 +34916,7 @@ function initializeAppsPanel() {
             </div>
             <div style="position:absolute;right:calc(100% - (180px + 20px + 400px));top:0;display:flex;align-items:center;height:20px;">
               <div style="position:relative;">
-                <button id="ffStaffDetailsKebabBtn" style="width:30px;height:30px;border:none;background:#f3f4f6;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;color:#6b7280;padding:0;flex-shrink:0;" title="More options">-</button>
+                <button id="ffStaffDetailsKebabBtn" type="button" style="width:30px;height:30px;border:none;background:#f3f4f6;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;transition:background 0.15s ease;" title="More options" aria-label="More options"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false"><circle cx="8" cy="3.5" r="1.6" fill="#7c3aed"/><circle cx="8" cy="8" r="1.6" fill="#7c3aed"/><circle cx="8" cy="12.5" r="1.6" fill="#7c3aed"/></svg></button>
                 <div id="ffStaffDetailsKebabMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:150px;z-index:1001;padding:4px 0;">
                   ${!salonOwnerRow && !isArchived ? '<button id="ffStaffDetailsArchiveBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#111827;display:block;">Archive</button>' : ''}
                   ${isArchived ? '<button id="ffStaffDetailsReactivateBtn" class="ff-kebab-item" style="width:100%;padding:8px 12px;border:none;background:none;text-align:left;cursor:pointer;font-size:12px;color:#16a34a;display:block;font-weight:500;">Re-Activate</button>' : ''}
@@ -56099,7 +56133,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/settings-cloud.js?v=20260501_points", type: "module", delay: 3600 },
-        { src: "/billing-cloud.js?v=20260519_unknownitemresync", type: "module", delay: 3650 }, // bumped: auto-sync when items have unknown_* keys (fixes blank Plan/Price after webhook env-var lag)
+        { src: "/billing-cloud.js?v=20260519_internaloverride", type: "module", delay: 3650 }, // bumped: internal billing override (comped/free accounts) — adds parallel billing/override listener + override-aware render path
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },
         { src: "/inventory.js?v=20260516_inv_hide_source_details_mobile", type: "module", delay: 4900 },

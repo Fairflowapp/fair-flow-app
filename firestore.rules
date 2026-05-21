@@ -135,6 +135,16 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/salons/$(salonId)).data.ownerUid == request.auth.uid;
     }
 
+    /**
+     * Platform admin = entry exists at platformAdmins/{uid}.
+     * Bootstrapped manually via Firebase Console / Admin SDK.
+     * Used to gate the internal billing override write paths only.
+     */
+    function isPlatformAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/platformAdmins/$(request.auth.uid));
+    }
+
     /** Training library create/edit/delete: managers + salon ownerUid + assistant / front-desk roles */
     function canManageTrainingContent(salonId) {
       return isFirestoreSalonOwnerUid(salonId)
@@ -613,13 +623,27 @@ service cloud.firestore {
 
     // Stripe billing state — written by Cloud Functions (Admin SDK) only.
     // Owner can read so the Settings UI can show subscription status.
+    //
+    // The `override` doc (internal billing override / comped accounts) is
+    // additionally writable by platform admins via the dedicated callables in
+    // functions/billing.js. The Stripe doc and any other docs in this
+    // subcollection remain Admin-SDK-only.
     match /salons/{salonId}/billing/{docId} {
       allow read: if isFirestoreSalonOwnerUid(salonId);
+      allow create, update, delete:
+        if docId == 'override' && isPlatformAdmin();
       allow write: if false;
     }
 
     // Stripe webhook idempotency markers — fully server-side.
     match /stripeWebhookEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    // Platform admin allowlist — bootstrapped manually (Firebase Console /
+    // Admin SDK). The app never reads or writes this collection from the
+    // client; security rules reference it via exists().
+    match /platformAdmins/{uid} {
       allow read, write: if false;
     }
 
@@ -1781,6 +1805,31 @@ service cloud.firestore {
         );
 
       allow delete: if false;
+    }
+
+    // Password reset requests — unauthenticated CREATE only.
+    //
+    // Anyone (including not-signed-in users on the login screen) may create a
+    // small doc here containing just { email, createdAt }. The
+    // onPasswordResetRequestCreated Cloud Function picks it up, generates a
+    // Firebase Auth reset link, sends a branded email via the Trigger Email
+    // extension, and then deletes the doc.
+    //
+    // We can't gate on request.auth because the user is asking to reset their
+    // password — they are by definition unauthenticated. To limit abuse the
+    // schema is locked down tightly:
+    //   - only two keys allowed
+    //   - email must be a string between 3 and 200 chars
+    //   - email must look like an email (very loose regex)
+    // Reads / updates / deletes are all denied to clients; only the Admin SDK
+    // (used by the trigger) can touch this collection.
+    match /passwordResetRequests/{requestId} {
+      allow create: if request.resource.data.keys().hasOnly(['email', 'createdAt'])
+        && request.resource.data.email is string
+        && request.resource.data.email.size() >= 3
+        && request.resource.data.email.size() <= 200
+        && request.resource.data.email.matches('.+@.+\\..+');
+      allow read, update, delete: if false;
     }
 
     // Default deny

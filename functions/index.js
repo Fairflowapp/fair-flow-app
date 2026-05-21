@@ -14,6 +14,10 @@ functions.region = functionsV1.region;
 // module stays focused on existing concerns.
 Object.assign(exports, require("./stripe"));
 
+// Internal billing override (owner-only comped/free access). Imports
+// recomputeAccountStatus from ./stripe — must be required AFTER ./stripe.
+Object.assign(exports, require("./billing"));
+
 /**
  * Simple test callable – use to verify IAM/CORS/region work.
  * Call from console: httpsCallable(getFunctions(app,"us-central1"),"testCallable")({test:1})
@@ -99,6 +103,133 @@ function escapeHtml(s) {
 
 // CRITICAL: Set the final public domain for the main application
 const APP_BASE_URL = 'https://app.fairflowapp.com';
+
+/**
+ * Build a branded, mobile-responsive HTML email body for Fair Flow transactional emails.
+ * Pure presentation – does not alter any subject, link, token, or dynamic value.
+ * All dynamic strings are HTML-escaped defensively.
+ *
+ * @param {object} opts
+ * @param {string} opts.heading           - Top heading on the white card (static).
+ * @param {string} opts.intro             - Intro paragraph below heading.
+ * @param {Array<{label:string,value:string}>} [opts.infoRows] - Key/value rows.
+ * @param {string} opts.ctaLabel          - Primary button label.
+ * @param {string} opts.ctaUrl            - Primary button URL (unchanged, passed through).
+ * @param {string} [opts.fallbackUrlNote] - Optional note above the raw URL fallback.
+ * @param {string} [opts.closingNote]     - Optional closing line at the bottom of the card.
+ */
+function buildFairFlowEmailHTML({
+  heading,
+  intro,
+  infoRows = [],
+  ctaLabel,
+  ctaUrl,
+  fallbackUrlNote,
+  closingNote,
+}) {
+  const LOGO_URL = 'https://app.fairflowapp.com/fairflow-logo-transparent.png?v=1';
+  const APP_URL = APP_BASE_URL;
+  const SUPPORT_EMAIL = 'support@fairflowapp.com';
+  const YEAR = new Date().getFullYear();
+
+  const fontStack = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif";
+
+  const rowsHTML = (infoRows || []).map((r) => `
+            <tr>
+              <td style="padding:6px 12px 6px 0;font:500 14px/1.5 ${fontStack};color:#6b6b80;width:90px;vertical-align:top;white-space:nowrap;">${escapeHtml(r.label)}</td>
+              <td style="padding:6px 0;font:600 14px/1.5 ${fontStack};color:#1f1f33;word-break:break-word;overflow-wrap:anywhere;">${escapeHtml(r.value)}</td>
+            </tr>`).join('');
+
+  const infoBlock = rowsHTML
+    ? `
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 28px 0;background:#faf9fc;border-radius:10px;">
+            <tr><td style="padding:14px 18px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">${rowsHTML}
+              </table>
+            </td></tr>
+          </table>`
+    : '';
+
+  const fallbackBlock = (fallbackUrlNote && ctaUrl)
+    ? `
+          <p style="margin:24px 0 6px 0;font:400 13px/1.6 ${fontStack};color:#6b6b80;">
+            ${escapeHtml(fallbackUrlNote)}
+          </p>
+          <p style="margin:0;word-break:break-all;overflow-wrap:anywhere;font:400 13px/1.6 ${fontStack};">
+            <a href="${escapeHtml(ctaUrl)}" style="color:#7c3aed;text-decoration:none;word-break:break-all;overflow-wrap:anywhere;">${escapeHtml(ctaUrl)}</a>
+          </p>`
+    : '';
+
+  const closingBlock = closingNote
+    ? `
+          <p style="margin:28px 0 0 0;padding-top:20px;border-top:1px solid #ececf2;font:400 14px/1.6 ${fontStack};color:#6b6b80;">
+            ${escapeHtml(closingNote)}
+          </p>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <meta name="color-scheme" content="light only" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>Fair Flow</title>
+  <style>
+    @media (max-width: 600px) {
+      .ff-card { padding: 24px !important; border-radius: 14px !important; }
+      .ff-h1   { font-size: 22px !important; }
+      .ff-btn  { padding: 13px 22px !important; font-size: 14px !important; }
+    }
+  </style>
+</head>
+<body style="margin:0;padding:0;background:#f5f3f7;-webkit-text-size-adjust:100%;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f5f3f7;table-layout:fixed;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" width="100%" style="max-width:560px;margin:0 auto;table-layout:fixed;">
+          <tr>
+            <td align="center" style="padding:8px 0 24px 0;">
+              <a href="${APP_URL}" style="text-decoration:none;">
+                <img src="${LOGO_URL}" alt="Fair Flow" width="110" style="display:block;border:0;outline:none;height:auto;max-width:110px;" />
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td class="ff-card" style="background:#ffffff;border-radius:16px;padding:40px;box-shadow:0 4px 16px rgba(31,31,51,0.06);">
+              <h1 class="ff-h1" style="margin:0 0 12px 0;font:700 26px/1.3 ${fontStack};color:#1f1f33;">
+                ${escapeHtml(heading)}
+              </h1>
+              <p style="margin:0 0 24px 0;font:400 16px/1.6 ${fontStack};color:#4b4b5f;">
+                ${escapeHtml(intro)}
+              </p>${infoBlock}
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 auto;">
+                <tr>
+                  <td align="center" style="padding:0;">
+                    <a class="ff-btn" href="${escapeHtml(ctaUrl)}" style="display:inline-block;background:#7c3aed;color:#ffffff;text-decoration:none;font:700 15px/1.25 ${fontStack};padding:14px 32px;border-radius:999px;mso-padding-alt:0;max-width:100%;box-sizing:border-box;word-break:break-word;overflow-wrap:break-word;">${escapeHtml(ctaLabel)}</a>
+                  </td>
+                </tr>
+              </table>${fallbackBlock}${closingBlock}
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:24px 16px 8px 16px;font:400 12px/1.6 ${fontStack};color:#8a8a9c;">
+              Need help? Contact
+              <a href="mailto:${SUPPORT_EMAIL}" style="color:#7c3aed;text-decoration:none;">${SUPPORT_EMAIL}</a>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 16px 16px 16px;font:400 12px/1.6 ${fontStack};color:#a0a0b0;">
+              &copy; ${YEAR} Fair Flow &middot; <a href="${APP_URL}" style="color:#a0a0b0;text-decoration:none;">fairflowapp.com</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
 
 function membershipDocRef(uid, salonId) {
   return admin.firestore().doc(`users/${uid}/memberships/${salonId}`);
@@ -696,11 +827,18 @@ Invite link: ${inviteUrl}
 Expires: ${expiresText}
 
 If you have questions, reply to this email.`;
-  const htmlBody = `<p>You have been invited to join ${escapeHtml(salonName)} on Fair Flow.</p>
-<p><strong>Role:</strong> ${escapeHtml(roleValue)}</p>
-<p><a href="${escapeHtml(inviteUrl)}">Click here to accept your invite</a></p>
-<p>Expires: ${escapeHtml(expiresText)}</p>
-<p>If you have questions, reply to this email.</p>`;
+  const htmlBody = buildFairFlowEmailHTML({
+    heading: "You're invited!",
+    intro: `You have been invited to join ${salonName} on Fair Flow.`,
+    infoRows: [
+      { label: 'Role', value: roleValue },
+      { label: 'Expires', value: expiresText },
+    ],
+    ctaLabel: 'Click here to accept your invite',
+    ctaUrl: inviteUrl,
+    fallbackUrlNote: "If the button above doesn't work, copy and paste this link into your browser:",
+    closingNote: 'If you have questions, reply to this email.',
+  });
 
   console.log("[sendStaffInvite] STEP 7: write to mail (Trigger Email) - start", { to: emailLower });
   await admin.firestore().collection('mail').add({
@@ -776,6 +914,92 @@ exports.sendStaffInviteCallable = functions
 
     const auth = { uid, token: { role: senderRole } };
     return await _sendStaffInviteInternal({ data: { ...requestData, email, role, salonId }, auth });
+  });
+
+/**
+ * Sends a Fair Flow-branded password reset email via a Firestore trigger.
+ *
+ * The "Forgot password" UI is shown to users who are NOT signed in, so we
+ * cannot use a callable Cloud Function (would require allUsers IAM, blocked
+ * by the org's Domain Restricted Sharing policy). Instead, the client writes
+ * a small document to `passwordResetRequests/{requestId}` with just the
+ * email address. This trigger:
+ *   1. reads the email,
+ *   2. uses admin.auth().generatePasswordResetLink to produce the SAME reset
+ *      link Firebase Auth would have sent, preserving token validation,
+ *      expiry (1 hour), and security behavior,
+ *   3. writes a branded email document to the `mail` collection (Trigger
+ *      Email extension handles SMTP delivery),
+ *   4. deletes the request document so it does not linger.
+ *
+ * Note: to avoid revealing whether an account exists, unknown-email errors
+ * are swallowed silently (the client always shows the same success UX).
+ */
+exports.onPasswordResetRequestCreated = functions
+  .region("us-central1")
+  .firestore.document("passwordResetRequests/{requestId}")
+  .onCreate(async (snap, _context) => {
+    const data = snap.data() || {};
+    const email = String(data.email || "").trim().toLowerCase();
+
+    const cleanup = async () => {
+      try { await snap.ref.delete(); } catch (_) { /* best-effort */ }
+    };
+
+    if (!email || !email.includes("@") || email.length > 200) {
+      console.warn("[onPasswordResetRequestCreated] Invalid email shape, dropping request.");
+      await cleanup();
+      return null;
+    }
+
+    let resetLink;
+    try {
+      resetLink = await admin.auth().generatePasswordResetLink(email);
+    } catch (err) {
+      if (err && err.code === "auth/user-not-found") {
+        console.log("[onPasswordResetRequestCreated] No account for this email (silent).");
+      } else {
+        console.error("[onPasswordResetRequestCreated] generatePasswordResetLink failed", {
+          code: err && err.code,
+          message: err && err.message,
+        });
+      }
+      await cleanup();
+      return null;
+    }
+
+    const subject = "Reset your Fair Flow password";
+    const textBody = `Hi,
+
+We received a request to reset your Fair Flow password.
+
+Click here to reset your password: ${resetLink}
+
+If you didn't request this, you can safely ignore this email — your password won't change.
+
+This link expires in 1 hour.`;
+
+    const htmlBody = buildFairFlowEmailHTML({
+      heading: "Reset your password",
+      intro: "We received a request to reset the password for your Fair Flow account.",
+      infoRows: [],
+      ctaLabel: "Reset your password",
+      ctaUrl: resetLink,
+      fallbackUrlNote: "If the button above doesn't work, copy and paste this link into your browser:",
+      closingNote: "If you didn't request this, you can safely ignore this email — your password won't change. This link expires in 1 hour.",
+    });
+
+    try {
+      await admin.firestore().collection("mail").add({
+        to: email,
+        message: { subject, text: textBody, html: htmlBody },
+      });
+    } catch (err) {
+      console.error("[onPasswordResetRequestCreated] Failed to write mail doc", err);
+    }
+
+    await cleanup();
+    return null;
   });
 
 /** Shared logic: resolve recipientStaffId -> uid and create inbox item. Used by trigger onInboxRequestDraftCreated. */

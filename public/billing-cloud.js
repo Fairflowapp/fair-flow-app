@@ -42,6 +42,7 @@ const PRICE_LOCATION = 79;
 const PRICE_STORAGE = 10;
 
 let _unsubBilling = null;
+let _unsubOverride = null;
 let _currentSalonId = null;
 let _wired = false;
 let _newCardWired = false;
@@ -49,6 +50,10 @@ let _newCardWired = false;
 // router reopens the Billing section (the listener doesn't re-fire on view
 // switches).
 let _lastBillingData = null;
+// Cache the most recent override snapshot. When the override is active it
+// short-circuits all Stripe-derived rendering — the comped/free Internal
+// Billing flow (see functions/billing.js).
+let _lastOverrideData = null;
 // Per-salon guards so we don't loop on a misbehaving sync. Once we've
 // attempted a sync for a given salonId we don't auto-retry until the user
 // reloads or switches salons.
@@ -437,12 +442,129 @@ function escapeHtml(s) {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Internal billing override (comped/free access).
+ *
+ * Mirror of the server-side check in functions/stripe.js → recomputeAccountStatus.
+ * When this returns true we ignore Stripe-derived state entirely and render
+ * the override view (Active — internal access, $0 / month, etc.).
+ */
+function isOverrideActive(o) {
+  if (!o || o.enabled !== true) return false;
+  try {
+    if (o.endsAt) {
+      const ms = o.endsAt.toMillis ? o.endsAt.toMillis() : Number(o.endsAt);
+      if (Number.isFinite(ms) && ms <= Date.now()) return false;
+    }
+  } catch (_) {
+    // If we can't parse endsAt, fail safe → not active.
+    return false;
+  }
+  return true;
+}
+
 function renderBilling(data) {
   // Cache so the new card can re-render on next router invocation without
   // waiting for another snapshot.
   _lastBillingData = data || null;
-  renderLegacyBillingSection(data);
-  renderNewBillingCard(data);
+  renderEffective();
+}
+
+/**
+ * Single source of truth for what the Billing UI should display. Routes to
+ * either the override view or the normal Stripe view based on the cached
+ * snapshots. Called by both the Stripe and override listeners and by the
+ * settings router on view re-entry.
+ */
+function renderEffective() {
+  if (isOverrideActive(_lastOverrideData)) {
+    renderLegacyOverrideSection(_lastOverrideData);
+    renderNewOverrideCard(_lastOverrideData);
+  } else {
+    renderLegacyBillingSection(_lastBillingData);
+    renderNewBillingCard(_lastBillingData);
+  }
+}
+
+/**
+ * Renders the override state on the new (#userProfileCardBilling) card:
+ *   - Status:        "Active — internal access"
+ *   - Current Plan:  override.planName
+ *   - Monthly Price: $X / month  (typically $0)
+ *   - Next Date:     "Until {endsAt}" or "—"
+ *   - Subscribe / Manage: hidden (no Stripe interaction needed)
+ *   - Invoices:      "—" (no Stripe invoices for comped accounts)
+ */
+function renderNewOverrideCard(override) {
+  const planEl = $(NEW_UI.currentPlan);
+  const priceEl = $(NEW_UI.monthlyPrice);
+  const statusEl = $(NEW_UI.status);
+  const nextDateEl = $(NEW_UI.nextDate);
+  const subscribeBtn = $(NEW_UI.subscribeBtn);
+  const manageBtn = $(NEW_UI.manageBtn);
+
+  if (!statusEl) return;
+
+  const planName = String(override?.planName || "Fair Flow Internal").trim();
+  const price = Number(override?.monthlyPrice ?? 0);
+
+  if (planEl) planEl.textContent = planName || "Fair Flow Internal";
+  if (priceEl) {
+    priceEl.textContent =
+      price === 0 ? "$0 / month" : `$${price} / month`;
+  }
+
+  statusEl.textContent = "Active — internal access";
+  statusEl.style.color = "#7c3aed"; // Fair Flow purple
+
+  if (nextDateEl) {
+    if (override?.endsAt) {
+      const dt = fmtPeriodEnd(override.endsAt);
+      nextDateEl.textContent = dt ? `Until ${dt}` : "—";
+    } else {
+      nextDateEl.textContent = "—";
+    }
+  }
+
+  // Hide payment-related buttons — comped accounts shouldn't go to Stripe.
+  if (subscribeBtn) subscribeBtn.style.display = "none";
+  if (manageBtn) manageBtn.style.display = "none";
+
+  // No Stripe invoices for an override; clear the table.
+  renderInvoicesRow(null);
+
+  hideSyncingIndicator();
+}
+
+/**
+ * Override variant of the legacy section so users still on the old layout
+ * see the comped state correctly. UI parity with the new card.
+ */
+function renderLegacyOverrideSection(override) {
+  const statusLine = $("ffBillingStatusLine");
+  const periodLine = $("ffBillingPeriodLine");
+  const invoiceLine = $("ffBillingInvoiceLine");
+  const subscribeForm = $("ffBillingSubscribeForm");
+  const portalBtn = $("ffBillingPortalBtn");
+  if (!statusLine || !subscribeForm || !portalBtn) return;
+
+  const planName = String(override?.planName || "Fair Flow Internal").trim();
+  statusLine.innerHTML =
+    `Status: <strong>Active — internal access</strong>` +
+    ` <span style="color:#9ca3af;">(${escapeHtml(planName)})</span>`;
+
+  if (periodLine) {
+    if (override?.endsAt) {
+      const dt = fmtPeriodEnd(override.endsAt);
+      periodLine.textContent = dt ? `Internal access until ${dt}` : "";
+    } else {
+      periodLine.textContent = "";
+    }
+  }
+  if (invoiceLine) invoiceLine.textContent = "";
+
+  subscribeForm.style.display = "none";
+  portalBtn.style.display = "none";
 }
 
 function renderLegacyBillingSection(data) {
@@ -651,9 +773,9 @@ function startListening(salonId) {
   stopListening();
   _currentSalonId = salonId;
   try {
-    const ref = doc(db, `salons/${salonId}/billing`, "stripe");
+    const stripeRef = doc(db, `salons/${salonId}/billing`, "stripe");
     _unsubBilling = onSnapshot(
-      ref,
+      stripeRef,
       (snap) => {
         const data = snap.exists() ? snap.data() : null;
         renderBilling(data);
@@ -661,7 +783,11 @@ function startListening(salonId) {
         // webhook hasn't delivered subscription state yet). One attempt per
         // salon per session — once the sync writes, this branch stops firing
         // because data.status / data.subscriptionId are now populated.
-        if (isStuckBillingDoc(data) || hasUnknownItemKeys(data)) {
+        // Skipped entirely when an override is active (no Stripe sub to sync).
+        if (
+          !isOverrideActive(_lastOverrideData) &&
+          (isStuckBillingDoc(data) || hasUnknownItemKeys(data))
+        ) {
           triggerSync().catch((e) =>
             console.warn("[BillingCloud] auto-sync raised", e)
           );
@@ -676,6 +802,34 @@ function startListening(salonId) {
   } catch (err) {
     console.warn("[BillingCloud] subscribe failed to start", err);
   }
+
+  // Parallel listener for the internal billing override (comped/free
+  // accounts). Same auth path as the Stripe doc — owner-only — and falls back
+  // to "no override" on permission errors so non-owners still render normally.
+  try {
+    const overrideRef = doc(db, `salons/${salonId}/billing`, "override");
+    _unsubOverride = onSnapshot(
+      overrideRef,
+      (snap) => {
+        _lastOverrideData = snap.exists() ? snap.data() : null;
+        // Re-render with whatever Stripe data we already have cached. If the
+        // Stripe listener hasn't fired yet, _lastBillingData is null which is
+        // fine — renderEffective handles both branches.
+        renderEffective();
+      },
+      (err) => {
+        console.warn(
+          "[BillingCloud] override subscribe error",
+          err && err.code,
+          err && err.message
+        );
+        _lastOverrideData = null;
+        renderEffective();
+      }
+    );
+  } catch (err) {
+    console.warn("[BillingCloud] override subscribe failed to start", err);
+  }
 }
 
 function stopListening() {
@@ -683,7 +837,12 @@ function stopListening() {
     try { _unsubBilling(); } catch (_) {}
     _unsubBilling = null;
   }
+  if (_unsubOverride) {
+    try { _unsubOverride(); } catch (_) {}
+    _unsubOverride = null;
+  }
   _currentSalonId = null;
+  _lastOverrideData = null;
 }
 
 function wireDom() {
@@ -768,28 +927,30 @@ function updateBillingPanel() {
   wireNewCardDom();
   const salonId = getSalonId();
   if (!salonId) {
-    renderNewBillingCard(null);
+    renderEffective();
     return;
   }
   if (salonId !== _currentSalonId) {
     startListening(salonId);
-  } else if (_lastBillingData !== null) {
-    // Already listening to the right salon — render last known data so the
-    // card shows correctly even if the snapshot doesn't refire on reopen.
-    renderNewBillingCard(_lastBillingData);
+  } else if (_lastBillingData !== null || _lastOverrideData !== null) {
+    // Already listening to the right salon — render last known state so the
+    // card shows correctly even if neither snapshot refires on reopen.
+    renderEffective();
     // If reopened on a stuck doc (e.g. user closed Settings before the
     // webhook arrived and the auto-sync from startListening already ran
-    // last time), retry once now.
+    // last time), retry once now. Skip when an override is active — there's
+    // no Stripe sub to sync.
     if (
-      isStuckBillingDoc(_lastBillingData) ||
-      hasUnknownItemKeys(_lastBillingData)
+      !isOverrideActive(_lastOverrideData) &&
+      _lastBillingData &&
+      (isStuckBillingDoc(_lastBillingData) || hasUnknownItemKeys(_lastBillingData))
     ) {
       triggerSync().catch((e) =>
         console.warn("[BillingCloud] reopen sync raised", e)
       );
     }
   } else {
-    renderNewBillingCard(null);
+    renderEffective();
   }
 }
 

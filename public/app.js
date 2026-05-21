@@ -2899,20 +2899,22 @@ function ffWireUiAfterDomReady() {
         }
 
         try {
-          console.log("[Forgot Password] Sending password reset email to", email);
-          await sendPasswordResetEmail(auth, email);
-          
+          console.log("[Forgot Password] Queueing branded password reset request for", email);
+          await addDoc(collection(db, "passwordResetRequests"), {
+            email: email.toLowerCase(),
+            createdAt: serverTimestamp(),
+          });
+
           if (passwordResetMessage) {
             passwordResetMessage.style.color = "green";
-            passwordResetMessage.textContent = "Password reset email sent. Please check your inbox.";
+            passwordResetMessage.textContent =
+              "If an account exists for that email, a password reset link is on its way. Please check your inbox.";
           }
         } catch (err) {
-          console.error("[Forgot Password] Failed to send reset email", err);
-          let message = "Could not send reset email. Please check the email address.";
-          
-          if (err.code === "auth/user-not-found") {
-            message = "No account found with this email address.";
-          } else if (err.code === "auth/invalid-email") {
+          console.error("[Forgot Password] Failed to queue reset request", err);
+          let message = "Could not request a reset email. Please check the email address and try again.";
+
+          if (err && (err.code === "permission-denied" || err.code === "auth/invalid-email")) {
             message = "Invalid email address.";
           }
 
