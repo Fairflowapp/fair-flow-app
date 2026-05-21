@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fair Flow Console</title>
+  <meta name="robots" content="noindex,nofollow" />
+  <link rel="stylesheet" href="./platform-admin.css" />
+</head>
+<body>
+  <!-- V1 Foundation Only: static UI shell. No Firebase reads/writes, no existing module integration. -->
+  <div class="ff-platform-shell" data-fair-flow-console-shell>
+    <aside class="ff-platform-sidebar" aria-label="Fair Flow Console navigation">
+      <div class="ff-platform-sidebar__top">
+        <div class="ff-platform-brand">
+          <div class="ff-platform-logo" aria-hidden="true">FF</div>
+          <div class="ff-platform-brand-copy">
+            <p class="ff-platform-eyebrow">Fair Flow</p>
+            <h1>Fair Flow Console</h1>
+          </div>
+        </div>
+        <button class="ff-platform-sidebar-toggle" type="button" aria-label="Collapse sidebar" aria-pressed="false" data-platform-sidebar-toggle>
+          <span aria-hidden="true">&lt;</span>
+        </button>
+      </div>
+
+      <div class="ff-platform-mobile-nav">
+        <button class="ff-platform-mobile-toggle" type="button" aria-expanded="false" data-platform-mobile-toggle>
+          <span data-platform-mobile-label>Dashboard</span>
+          <span aria-hidden="true">v</span>
+        </button>
+      </div>
+
+      <nav class="ff-platform-nav" aria-label="Fair Flow Console sections" data-platform-nav>
+        <button class="ff-platform-nav__item is-active" type="button" data-platform-section-target="dashboard"><span aria-hidden="true">D</span><strong>Dashboard</strong></button>
+        <button class="ff-platform-nav__item" type="button" data-platform-section-target="customers"><span aria-hidden="true">C</span><strong>Customers</strong></button>
+        <button class="ff-platform-nav__item" type="button" data-platform-section-target="support"><span aria-hidden="true">S</span><strong>Support</strong></button>
+        <button class="ff-platform-nav__item" type="button" data-platform-section-target="billing"><span aria-hidden="true">$</span><strong>Billing</strong></button>
+        <button class="ff-platform-nav__item" type="button" data-platform-section-target="tax-monitoring"><span aria-hidden="true">%</span><strong>Tax Monitoring</strong></button>
+        <button class="ff-platform-nav__item" type="button" data-platform-section-target="platform-health"><span aria-hidden="true">H</span><strong>Platform Health</strong></button>
+        <button class="ff-platform-nav__item" type="button" data-platform-section-target="fair-flow-team"><span aria-hidden="true">T</span><strong>Fair Flow Team</strong></button>
+        <button class="ff-platform-nav__item" type="button" data-platform-section-target="alerts"><span aria-hidden="true">!</span><strong>Alerts</strong></button>
+        <button class="ff-platform-nav__item" type="button" data-platform-section-target="settings"><span aria-hidden="true">*</span><strong>Settings</strong></button>
+      </nav>
+
+      <div class="ff-platform-sidebar-note">
+        <strong>V1 Foundation Only</strong>
+        <span>UI placeholders only. No customer data is loaded.</span>
+      </div>
+    </aside>
+
+    <main class="ff-platform-main">
+      <header class="ff-platform-topbar">
+        <div class="ff-platform-title-block">
+          <p class="ff-platform-eyebrow">Fair Flow</p>
+          <h2 data-platform-page-title>Dashboard</h2>
+          <p data-platform-page-subtitle>Company-wide operations overview for the internal SaaS console.</p>
+        </div>
+
+        <div class="ff-platform-topbar__actions">
+          <label class="ff-platform-search">
+            <span aria-hidden="true">/</span>
+            <input type="search" placeholder="Search customers, states, issues..." aria-label="Search placeholder" disabled />
+          </label>
+          <button class="ff-platform-icon-button" type="button" aria-label="Notifications placeholder">
+            <span aria-hidden="true">!</span>
+            <i aria-hidden="true"></i>
+          </button>
+          <div class="ff-platform-console-avatar" aria-label="Internal Fair Flow team placeholder">
+            <span>FF</span>
+            <div>
+              <strong>Fair Flow Team</strong>
+              <small>Internal</small>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="ff-platform-section is-active" id="dashboard" data-platform-section>
+        <div class="ff-platform-section-header">
+          <div>
+            <h3>Executive Snapshot</h3>
+            <p>Placeholder analytics for the future platform command center.</p>
+          </div>
+          <span class="ff-platform-status-pill">V1 UI Foundation Only</span>
+        </div>
+
+        <div class="ff-platform-grid ff-platform-grid--stats">
+          <article class="ff-platform-card ff-platform-stat" data-tone="purple">
+            <div class="ff-platform-stat__top"><span>Businesses</span><b>+--%</b></div>
+            <strong>--</strong>
+            <small>Growth placeholder</small>
+            <div class="ff-platform-sparkline" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          </article>
+          <article class="ff-platform-card ff-platform-stat" data-tone="pink">
+            <div class="ff-platform-stat__top"><span>Locations</span><b>+--%</b></div>
+            <strong>--</strong>
+            <small>Expansion placeholder</small>
+            <div class="ff-platform-sparkline" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          </article>
+          <article class="ff-platform-card ff-platform-stat" data-tone="blue">
+            <div class="ff-platform-stat__top"><span>Staff</span><b>+--%</b></div>
+            <strong>--</strong>
+            <small>Workforce placeholder</small>
+            <div class="ff-platform-sparkline" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          </article>
+          <article class="ff-platform-card ff-platform-stat" data-tone="green">
+            <div class="ff-platform-stat__top"><span>Revenue</span><b>+--%</b></div>
+            <strong>$--</strong>
+            <small>MRR placeholder</small>
+            <div class="ff-platform-sparkline" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          </article>
+          <article class="ff-platform-card ff-platform-stat" data-tone="amber">
+            <div class="ff-platform-stat__top"><span>Storage</span><b>--%</b></div>
+            <strong>-- GB</strong>
+            <small>Usage placeholder</small>
+            <div class="ff-platform-sparkline" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          </article>
+          <article class="ff-platform-card ff-platform-stat" data-tone="red">
+            <div class="ff-platform-stat__top"><span>Open Issues</span><b>--</b></div>
+            <strong>--</strong>
+            <small>Support placeholder</small>
+            <div class="ff-platform-sparkline" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          </article>
+        </div>
+
+        <div class="ff-platform-grid ff-platform-grid--wide">
+          <article class="ff-platform-card">
+            <div class="ff-platform-card__head">
+              <h3>Mini Analytics</h3>
+              <span>Placeholder trend panel</span>
+            </div>
+            <div class="ff-platform-bars" aria-hidden="true">
+              <i style="height:42%"></i><i style="height:68%"></i><i style="height:51%"></i><i style="height:78%"></i><i style="height:64%"></i><i style="height:88%"></i><i style="height:74%"></i>
+            </div>
+          </article>
+          <article class="ff-platform-card">
+            <div class="ff-platform-card__head">
+              <h3>Operational Focus</h3>
+              <span>No live data</span>
+            </div>
+            <div class="ff-platform-focus-list">
+              <div><span class="ff-platform-dot warning"></span><strong>Billing risk placeholder</strong><small>Grace-period review queue</small></div>
+              <div><span class="ff-platform-dot healthy"></span><strong>Growth placeholder</strong><small>Multi-location onboarding</small></div>
+              <div><span class="ff-platform-dot error"></span><strong>Support placeholder</strong><small>Escalation watchlist</small></div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="ff-platform-section" id="customers" data-platform-section>
+        <div class="ff-platform-card">
+          <div class="ff-platform-card__head">
+            <div>
+              <h3>Customers</h3>
+              <p>Professional placeholder table for future customer operations.</p>
+            </div>
+            <span>Static sample rows</span>
+          </div>
+          <div class="ff-platform-tools">
+            <label class="ff-platform-search ff-platform-search--table">
+              <span aria-hidden="true">/</span>
+              <input type="search" placeholder="Search businesses..." aria-label="Customer search placeholder" disabled />
+            </label>
+            <button type="button" disabled>Plan filter</button>
+            <button type="button" disabled>Health filter</button>
+            <button type="button" disabled>Billing filter</button>
+          </div>
+          <p class="ff-platform-readonly-status" data-customers-readonly-status>READ ONLY V1: Loading Firestore customers...</p>
+          <div class="ff-platform-table-wrap">
+            <table class="ff-platform-table">
+              <thead>
+                <tr>
+                  <th>Business Name</th>
+                  <th>Owner</th>
+                  <th>Locations</th>
+                  <th>Staff</th>
+                  <th>Plan</th>
+                  <th>Billing</th>
+                  <th>Health</th>
+                  <th>Last Activity</th>
+                </tr>
+              </thead>
+              <tbody data-customers-table-body>
+                <tr class="ff-platform-customer-row" tabindex="0" data-customer-360-open data-customer-name="Northstar Salon Group" data-customer-owner="Avery Lee" data-customer-plan="Scale" data-customer-health="Healthy" data-customer-billing="Current">
+                  <td><strong>Northstar Salon Group</strong><small>Placeholder account</small></td>
+                  <td>Avery Lee</td>
+                  <td>--</td>
+                  <td>--</td>
+                  <td><span class="ff-platform-badge purple">Scale</span></td>
+                  <td><span class="ff-platform-badge healthy">Current</span></td>
+                  <td><span class="ff-platform-health healthy">Healthy</span></td>
+                  <td>-- ago</td>
+                </tr>
+                <tr class="ff-platform-customer-row" tabindex="0" data-customer-360-open data-customer-name="Bloom Studio" data-customer-owner="Morgan Chen" data-customer-plan="Pro" data-customer-health="Medium Risk" data-customer-billing="Grace">
+                  <td><strong>Bloom Studio</strong><small>No live data connected</small></td>
+                  <td>Morgan Chen</td>
+                  <td>--</td>
+                  <td>--</td>
+                  <td><span class="ff-platform-badge">Pro</span></td>
+                  <td><span class="ff-platform-badge warning">Grace</span></td>
+                  <td><span class="ff-platform-health warning">Watch</span></td>
+                  <td>-- ago</td>
+                </tr>
+                <tr class="ff-platform-customer-row" tabindex="0" data-customer-360-open data-customer-name="Example Business" data-customer-owner="Jordan Smith" data-customer-plan="Starter" data-customer-health="High Risk" data-customer-billing="Failed">
+                  <td><strong>Example Business</strong><small>Foundation-only row</small></td>
+                  <td>Jordan Smith</td>
+                  <td>--</td>
+                  <td>--</td>
+                  <td><span class="ff-platform-badge">Starter</span></td>
+                  <td><span class="ff-platform-badge error">Failed</span></td>
+                  <td><span class="ff-platform-health error">Risk</span></td>
+                  <td>-- ago</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="ff-platform-section" id="customer-360" data-platform-section>
+        <div class="ff-platform-c360-hero">
+          <button type="button" class="ff-platform-link-button" data-customer-360-back>&lt; Back to Customers</button>
+          <div class="ff-platform-c360-title">
+            <div class="ff-platform-c360-avatar" data-customer-360-initials>NS</div>
+            <div>
+              <p class="ff-platform-eyebrow">Customer 360 View</p>
+              <h3 data-customer-360-name>Northstar Salon Group</h3>
+              <p>Complete internal placeholder profile for one business account.</p>
+            </div>
+          </div>
+          <div class="ff-platform-c360-actions">
+            <span class="ff-platform-health healthy" data-customer-360-health>Healthy</span>
+            <span class="ff-platform-badge" data-customer-360-plan>Scale</span>
+          </div>
+        </div>
+
+        <div class="ff-platform-c360-grid">
+          <article class="ff-platform-card ff-platform-c360-card ff-platform-c360-card--wide">
+            <div class="ff-platform-card__head">
+              <h3>Business Overview</h3>
+              <span data-customer-360-status>READ ONLY V1</span>
+            </div>
+            <dl class="ff-platform-detail-grid">
+              <div><dt>Business Name</dt><dd data-customer-360-name-copy>Northstar Salon Group</dd></div>
+              <div><dt>Owner</dt><dd data-customer-360-owner>Avery Lee</dd></div>
+              <div><dt>Email</dt><dd data-customer-360-email>owner@example.com</dd></div>
+              <div><dt>Phone</dt><dd data-customer-360-phone>(555) 000-0000</dd></div>
+              <div><dt>Locations Count</dt><dd data-customer-360-locations-count>--</dd></div>
+              <div><dt>Staff Count</dt><dd data-customer-360-staff-count>--</dd></div>
+              <div><dt>Plan</dt><dd data-customer-360-plan-copy>Scale</dd></div>
+              <div><dt>Billing Status</dt><dd data-customer-360-billing>Current</dd></div>
+              <div><dt>Customer Since</dt><dd data-customer-360-created-at>--</dd></div>
+              <div><dt>Last Activity</dt><dd data-customer-360-last-activity>-- ago</dd></div>
+            </dl>
+          </article>
+
+          <article class="ff-platform-card ff-platform-c360-card">
+            <div class="ff-platform-card__head">
+              <h3>Customer Health</h3>
+              <span>Placeholder score</span>
+            </div>
+            <div class="ff-platform-health-score">
+              <strong>--</strong>
+              <small>Health Score</small>
+            </div>
+            <div class="ff-platform-health-stack">
+              <span class="ff-platform-health healthy">Healthy</span>
+              <span class="ff-platform-health warning">Medium Risk</span>
+              <span class="ff-platform-health error">High Risk</span>
+            </div>
+          </article>
+
+          <article class="ff-platform-card ff-platform-c360-card ff-platform-c360-card--wide">
+            <div class="ff-platform-card__head">
+              <h3>Usage Overview</h3>
+              <span>Module activity placeholders</span>
+            </div>
+            <div class="ff-platform-module-grid">
+              <div><strong>Queue</strong><span class="ff-platform-badge healthy">Active</span><small>Last Activity: --</small></div>
+              <div><strong>Tasks</strong><span class="ff-platform-badge healthy">Active</span><small>Last Activity: --</small></div>
+              <div><strong>Media</strong><span class="ff-platform-badge">Not Used</span><small>Last Activity: --</small></div>
+              <div><strong>Inventory</strong><span class="ff-platform-badge warning">Active</span><small>Last Activity: --</small></div>
+              <div><strong>Training</strong><span class="ff-platform-badge">Not Used</span><small>Last Activity: --</small></div>
+              <div><strong>Schedule</strong><span class="ff-platform-badge healthy">Active</span><small>Last Activity: --</small></div>
+              <div><strong>Time Clock</strong><span class="ff-platform-badge healthy">Active</span><small>Last Activity: --</small></div>
+            </div>
+          </article>
+
+          <article class="ff-platform-card ff-platform-c360-card ff-platform-c360-card--wide">
+            <div class="ff-platform-card__head">
+              <div>
+                <h3>Customer Intelligence</h3>
+                <p>Placeholder intelligence layer for activity, adoption, risk, and growth opportunities.</p>
+              </div>
+              <span>No live data connected</span>
+            </div>
+            <div class="ff-platform-intel-grid">
+              <div>
+                <h4>Activity Summary</h4>
+                <dl class="ff-platform-detail-grid ff-platform-detail-grid--single">
+                  <div><dt>Last Login</dt><dd>--</dd></div>
+                  <div><dt>Active Today</dt><dd>--</dd></div>
+                  <div><dt>Last Queue Activity</dt><dd>--</dd></div>
+                  <div><dt>Last Media Upload</dt><dd>--</dd></div>
+                  <div><dt>Last Ticket Activity</dt><dd>--</dd></div>
+                  <div><dt>Last Staff Invite</dt><dd>--</dd></div>
+                </dl>
+              </div>
+              <div>
+                <h4>Usage Trends</h4>
+                <div class="ff-platform-intel-list">
+                  <div><strong>Queue Trend</strong><span class="ff-platform-badge healthy">Up</span></div>
+                  <div><strong>Media Trend</strong><span class="ff-platform-badge warning">Stable</span></div>
+                  <div><strong>Storage Trend</strong><span class="ff-platform-badge healthy">Up</span></div>
+                  <div><strong>Staff Growth</strong><span class="ff-platform-badge error">Down</span></div>
+                </div>
+              </div>
+              <div>
+                <h4>Adoption Tracking</h4>
+                <div class="ff-platform-intel-list">
+                  <div><strong>Queue</strong><span class="ff-platform-badge healthy">Active</span></div>
+                  <div><strong>Tasks</strong><span class="ff-platform-badge warning">Low Usage</span></div>
+                  <div><strong>Media</strong><span class="ff-platform-badge">Never Used</span></div>
+                  <div><strong>Inventory</strong><span class="ff-platform-badge warning">Low Usage</span></div>
+                  <div><strong>Training</strong><span class="ff-platform-badge">Never Used</span></div>
+                  <div><strong>Schedule</strong><span class="ff-platform-badge healthy">Active</span></div>
+                  <div><strong>Time Clock</strong><span class="ff-platform-badge healthy">Active</span></div>
+                </div>
+              </div>
+              <div>
+                <h4>Risk Signals</h4>
+                <div class="ff-platform-intel-list">
+                  <div><strong>Usage Dropped</strong><span class="ff-platform-badge warning">Review</span></div>
+                  <div><strong>Staff Inactive</strong><span class="ff-platform-badge warning">Watch</span></div>
+                  <div><strong>No Media Usage</strong><span class="ff-platform-badge">Placeholder</span></div>
+                  <div><strong>Billing Attention Needed</strong><span class="ff-platform-badge error">Attention</span></div>
+                </div>
+              </div>
+              <div class="ff-platform-intel-grid__wide">
+                <h4>Growth Opportunities</h4>
+                <div class="ff-platform-opportunity-list">
+                  <span>Recommend Storage Upgrade</span>
+                  <span>Recommend Training Setup</span>
+                  <span>Recommend Inventory Activation</span>
+                  <span>Recommend Additional Location Plan</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="ff-platform-card ff-platform-c360-card">
+            <div class="ff-platform-card__head">
+              <h3>Data Usage</h3>
+              <span data-customer-360-usage-status-line>READ ONLY V1</span>
+            </div>
+            <dl class="ff-platform-detail-grid ff-platform-detail-grid--single">
+              <div><dt>Storage Used</dt><dd data-customer-360-storage-used>Not available</dd></div>
+              <div><dt>Media Storage</dt><dd data-customer-360-media-storage>Not available</dd></div>
+              <div><dt>Training Storage</dt><dd data-customer-360-training-storage>Not available</dd></div>
+              <div><dt>Total Files</dt><dd data-customer-360-total-files>Not available</dd></div>
+              <div><dt>Monthly Uploads</dt><dd data-customer-360-monthly-uploads>Not available</dd></div>
+              <div><dt>Current Plan Limit</dt><dd data-customer-360-plan-limit>Not available</dd></div>
+              <div><dt>Usage Status</dt><dd data-customer-360-usage-status><span class="ff-platform-badge">Not available</span></dd></div>
+            </dl>
+          </article>
+
+          <article class="ff-platform-card ff-platform-c360-card">
+            <div class="ff-platform-card__head">
+              <h3>Staff Summary</h3>
+              <span>Placeholder</span>
+            </div>
+            <div class="ff-platform-c360-metrics">
+              <div><span>Total Staff</span><strong data-customer-360-total-staff>--</strong></div>
+              <div><span>Active Staff</span><strong data-customer-360-active-staff>--</strong></div>
+              <div><span>Archived Staff</span><strong data-customer-360-archived-staff>--</strong></div>
+              <div><span>Pending Invites</span><strong data-customer-360-pending-invites>--</strong></div>
+            </div>
+          </article>
+
+          <article class="ff-platform-card ff-platform-c360-card">
+            <div class="ff-platform-card__head">
+              <h3>Billing Summary</h3>
+              <span>No Stripe connected</span>
+            </div>
+            <dl class="ff-platform-detail-grid ff-platform-detail-grid--single">
+              <div><dt>Monthly Plan</dt><dd data-customer-360-plan-billing>Scale</dd></div>
+              <div><dt>Discounts</dt><dd>--</dd></div>
+              <div><dt>Grace Period</dt><dd data-customer-360-grace-period>--</dd></div>
+              <div><dt>Payment Status</dt><dd data-customer-360-payment>Current</dd></div>
+            </dl>
+          </article>
+
+          <article class="ff-platform-card ff-platform-c360-card ff-platform-c360-card--wide">
+            <div class="ff-platform-card__head">
+              <div>
+                <h3>Account Controls</h3>
+                <p>Future billing actions — not connected yet.</p>
+              </div>
+              <span>Disabled placeholders</span>
+            </div>
+            <div class="ff-platform-controls-grid">
+              <div>
+                <h4>Billing Actions</h4>
+                <div class="ff-platform-action-list">
+                  <button type="button" disabled>Give free month</button>
+                  <button type="button" disabled>Apply discount</button>
+                  <button type="button" disabled>Extend trial</button>
+                  <button type="button" disabled>Add grace period</button>
+                  <button type="button" disabled>Pause billing</button>
+                  <button type="button" disabled>Mark billing review needed</button>
+                </div>
+              </div>
+              <div>
+                <h4>Usage Actions</h4>
+                <div class="ff-platform-action-list">
+                  <button type="button" disabled>Add extra storage</button>
+                  <button type="button" disabled>Increase usage limit</button>
+                  <button type="button" disabled>Reset usage warning</button>
+                  <button type="button" disabled>Mark near-limit review</button>
+                </div>
+              </div>
+              <div>
+                <h4>Account Status</h4>
+                <div class="ff-platform-status-list">
+                  <span class="ff-platform-badge healthy">Active</span>
+                  <span class="ff-platform-badge">Trialing</span>
+                  <span class="ff-platform-badge warning">Past Due</span>
+                  <span class="ff-platform-badge warning">Grace Period</span>
+                  <span class="ff-platform-badge error">Suspended</span>
+                  <span class="ff-platform-badge error">Cancelled</span>
+                </div>
+              </div>
+              <div>
+                <h4>Internal Fair Flow Notes</h4>
+                <dl class="ff-platform-detail-grid ff-platform-detail-grid--single">
+                  <div><dt>Reason for override</dt><dd>--</dd></div>
+                  <div><dt>Approved by</dt><dd>--</dd></div>
+                  <div><dt>Date</dt><dd>--</dd></div>
+                  <div><dt>Expiration date</dt><dd>--</dd></div>
+                </dl>
+              </div>
+            </div>
+          </article>
+
+          <article class="ff-platform-card ff-platform-c360-card ff-platform-c360-card--wide">
+            <div class="ff-platform-card__head">
+              <h3>Locations</h3>
+              <span>Placeholder location table</span>
+            </div>
+            <div class="ff-platform-table-wrap">
+              <table class="ff-platform-table ff-platform-table--compact">
+                <thead>
+                  <tr><th>Location</th><th>Staff Count</th><th>Status</th></tr>
+                </thead>
+                <tbody data-customer-360-locations-body>
+                  <tr><td>Main Location</td><td>--</td><td><span class="ff-platform-badge healthy">Active</span></td></tr>
+                  <tr><td>Second Location</td><td>--</td><td><span class="ff-platform-badge">Placeholder</span></td></tr>
+                  <tr><td>Future Location</td><td>--</td><td><span class="ff-platform-badge warning">Setup</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="ff-platform-card ff-platform-c360-card">
+            <div class="ff-platform-card__head">
+              <h3>Internal Fair Flow Notes</h3>
+              <span>Private</span>
+            </div>
+            <div class="ff-platform-note-box ff-platform-note-box--tall">Internal notes placeholder for account context, onboarding risk, operational history, and follow-up ownership.</div>
+          </article>
+
+          <article class="ff-platform-card ff-platform-c360-card">
+            <div class="ff-platform-card__head">
+              <h3>Customer Support</h3>
+              <span>Placeholder</span>
+            </div>
+            <div class="ff-platform-support-summary">
+              <div><strong>Customer Chat</strong><p>Chat connection placeholder.</p></div>
+              <div><strong>Internal Team Notes</strong><p>Support coordination placeholder.</p></div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="ff-platform-section" id="support" data-platform-section>
+        <div class="ff-platform-support-layout">
+          <aside class="ff-platform-card ff-platform-conversations">
+            <div class="ff-platform-card__head"><h3>Conversations</h3><span>Placeholder</span></div>
+            <button type="button" class="is-selected"><strong>Northstar Salon Group</strong><small>Billing question placeholder</small></button>
+            <button type="button"><strong>Bloom Studio</strong><small>Setup help placeholder</small></button>
+            <button type="button"><strong>Example Business</strong><small>Storage alert placeholder</small></button>
+          </aside>
+          <section class="ff-platform-card ff-platform-thread">
+            <div class="ff-platform-card__head">
+              <div>
+                <h3>Selected Conversation</h3>
+                <p>Customer chat connection placeholder.</p>
+              </div>
+              <span class="ff-platform-badge warning">Open</span>
+            </div>
+            <div class="ff-platform-message is-customer">Customer message placeholder for future support chat.</div>
+            <div class="ff-platform-message is-admin">Internal admin response placeholder.</div>
+            <div class="ff-platform-compose">Reply composer placeholder</div>
+          </section>
+          <aside class="ff-platform-card ff-platform-notes">
+            <div class="ff-platform-card__head"><h3>Internal Notes</h3><span>Private</span></div>
+            <p>Account context, escalation owner, next action, and internal follow-up placeholders.</p>
+            <div class="ff-platform-note-box">No notes connected. V1 UI Foundation Only.</div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="ff-platform-section" id="billing" data-platform-section>
+        <div class="ff-platform-grid">
+          <article class="ff-platform-card"><h3>Subscriptions</h3><p>Placeholder overview.</p></article>
+          <article class="ff-platform-card"><h3>Failed Payments</h3><p>Placeholder overview.</p></article>
+          <article class="ff-platform-card"><h3>Grace Period</h3><p>Placeholder overview.</p></article>
+          <article class="ff-platform-card"><h3>Discounts</h3><p>Placeholder overview.</p></article>
+        </div>
+      </section>
+
+      <section class="ff-platform-section" id="tax-monitoring" data-platform-section>
+        <div class="ff-platform-grid ff-platform-grid--stats ff-platform-tax-summary">
+          <article class="ff-platform-card ff-platform-stat"><div class="ff-platform-stat__top"><span>Revenue By State</span><b>--</b></div><strong>$--</strong><small>Placeholder</small></article>
+          <article class="ff-platform-card ff-platform-stat"><div class="ff-platform-stat__top"><span>Customers By State</span><b>--</b></div><strong>--</strong><small>Placeholder</small></article>
+          <article class="ff-platform-card ff-platform-stat"><div class="ff-platform-stat__top"><span>Threshold Alerts</span><b>--</b></div><strong>--</strong><small>Placeholder</small></article>
+        </div>
+        <div class="ff-platform-card">
+          <div class="ff-platform-card__head">
+            <h3>US States Monitoring</h3>
+            <span>No tax data connected</span>
+          </div>
+          <div class="ff-platform-table-wrap">
+            <table class="ff-platform-table">
+              <thead>
+                <tr>
+                  <th>State</th>
+                  <th>Customers</th>
+                  <th>Revenue</th>
+                  <th>Tax Status</th>
+                  <th>Threshold</th>
+                  <th>Alerts</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>California</td><td>--</td><td>$--</td><td><span class="ff-platform-badge healthy">Monitoring</span></td><td>--%</td><td>--</td></tr>
+                <tr><td>New York</td><td>--</td><td>$--</td><td><span class="ff-platform-badge warning">Review</span></td><td>--%</td><td>Threshold placeholder</td></tr>
+                <tr><td>Florida</td><td>--</td><td>$--</td><td><span class="ff-platform-badge">Not connected</span></td><td>--%</td><td>--</td></tr>
+                <tr><td>Texas</td><td>--</td><td>$--</td><td><span class="ff-platform-badge error">Action</span></td><td>--%</td><td>Alert placeholder</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="ff-platform-section" id="platform-health" data-platform-section>
+        <div class="ff-platform-grid ff-platform-health-grid">
+          <article class="ff-platform-card ff-platform-service"><span class="ff-platform-dot healthy"></span><h3>Firebase</h3><strong>Healthy</strong><p>Placeholder status indicator.</p></article>
+          <article class="ff-platform-card ff-platform-service"><span class="ff-platform-dot healthy"></span><h3>Storage</h3><strong>Healthy</strong><p>Placeholder status indicator.</p></article>
+          <article class="ff-platform-card ff-platform-service"><span class="ff-platform-dot warning"></span><h3>Cloud Functions</h3><strong>Warning</strong><p>Placeholder status indicator.</p></article>
+          <article class="ff-platform-card ff-platform-service"><span class="ff-platform-dot healthy"></span><h3>Emails</h3><strong>Healthy</strong><p>Placeholder status indicator.</p></article>
+          <article class="ff-platform-card ff-platform-service"><span class="ff-platform-dot error"></span><h3>Stripe Webhooks</h3><strong>Error</strong><p>Placeholder status indicator.</p></article>
+        </div>
+      </section>
+
+      <section class="ff-platform-section" id="fair-flow-team" data-platform-section>
+        <div class="ff-platform-section-header">
+          <div>
+            <h3>Fair Flow Team Operations</h3>
+            <p>Placeholder workspace for managing internal Fair Flow team work.</p>
+          </div>
+          <span class="ff-platform-status-pill">UI placeholders only</span>
+        </div>
+
+        <div class="ff-platform-card">
+          <div class="ff-platform-card__head">
+            <h3>Team Members</h3>
+            <span>No team data connected</span>
+          </div>
+          <div class="ff-platform-table-wrap">
+            <table class="ff-platform-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Department</th>
+                  <th>Status</th>
+                  <th>Assigned Accounts</th>
+                  <th>Open Tasks</th>
+                  <th>Last Active</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td><strong>Fair Flow Teammate</strong><small>Placeholder</small></td><td>Support Lead</td><td>Support</td><td><span class="ff-platform-badge healthy">Available</span></td><td>--</td><td>--</td><td>--</td></tr>
+                <tr><td><strong>Customer Success Rep</strong><small>Placeholder</small></td><td>CS Manager</td><td>Customer Success</td><td><span class="ff-platform-badge warning">Busy</span></td><td>--</td><td>--</td><td>--</td></tr>
+                <tr><td><strong>Billing Specialist</strong><small>Placeholder</small></td><td>Billing Ops</td><td>Billing</td><td><span class="ff-platform-badge">Available</span></td><td>--</td><td>--</td><td>--</td></tr>
+                <tr><td><strong>Sales Owner</strong><small>Placeholder</small></td><td>Account Growth</td><td>Sales</td><td><span class="ff-platform-badge healthy">Available</span></td><td>--</td><td>--</td><td>--</td></tr>
+                <tr><td><strong>Operations Manager</strong><small>Placeholder</small></td><td>Operations</td><td>Operations</td><td><span class="ff-platform-badge warning">Busy</span></td><td>--</td><td>--</td><td>--</td></tr>
+                <tr><td><strong>Developer</strong><small>Placeholder</small></td><td>Technical Review</td><td>Development</td><td><span class="ff-platform-badge error">Overloaded</span></td><td>--</td><td>--</td><td>--</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="ff-platform-team-grid">
+          <article class="ff-platform-card">
+            <div class="ff-platform-card__head"><h3>Work Queue</h3><span>Placeholder counts</span></div>
+            <div class="ff-platform-team-list">
+              <div><strong>Open Customer Issues</strong><span>--</span></div>
+              <div><strong>Billing Reviews</strong><span>--</span></div>
+              <div><strong>Support Follow Ups</strong><span>--</span></div>
+              <div><strong>Tax Monitoring Reviews</strong><span>--</span></div>
+              <div><strong>Storage Reviews</strong><span>--</span></div>
+              <div><strong>Account Risk Reviews</strong><span>--</span></div>
+            </div>
+          </article>
+
+          <article class="ff-platform-card">
+            <div class="ff-platform-card__head"><h3>Assignment Panel</h3><span>Disabled placeholders</span></div>
+            <div class="ff-platform-action-list ff-platform-action-list--stacked">
+              <button type="button" disabled>Assign Customer</button>
+              <button type="button" disabled>Assign Follow Up</button>
+              <button type="button" disabled>Assign Billing Review</button>
+              <button type="button" disabled>Assign Technical Review</button>
+            </div>
+          </article>
+
+          <article class="ff-platform-card">
+            <div class="ff-platform-card__head"><h3>Team Capacity</h3><span>Placeholder status</span></div>
+            <div class="ff-platform-team-capacity">
+              <div><span>Current Workload</span><strong>--</strong></div>
+              <div><span>Available</span><strong>--</strong></div>
+              <div><span>Busy</span><strong>--</strong></div>
+              <div><span>Overloaded</span><strong>--</strong></div>
+            </div>
+          </article>
+
+          <article class="ff-platform-card">
+            <div class="ff-platform-card__head"><h3>Team Notifications</h3><span>Placeholder alerts</span></div>
+            <div class="ff-platform-team-list">
+              <div><strong>Customer Needs Follow Up</strong><span class="ff-platform-badge warning">Review</span></div>
+              <div><strong>Failed Payment Needs Review</strong><span class="ff-platform-badge error">Urgent</span></div>
+              <div><strong>Account Usage Alert</strong><span class="ff-platform-badge warning">Watch</span></div>
+              <div><strong>Storage Warning</strong><span class="ff-platform-badge">Placeholder</span></div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="ff-platform-section" id="alerts" data-platform-section>
+        <div class="ff-platform-card">
+          <h3>Alerts</h3>
+          <p>Placeholder area for platform alerts, incidents, account warnings, and operational follow-up.</p>
+        </div>
+      </section>
+
+      <section class="ff-platform-section" id="settings" data-platform-section>
+        <div class="ff-platform-card">
+          <h3>Settings</h3>
+          <p>Placeholder area for future Fair Flow Console preferences and access controls.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="./platform-admin.js"></script>
+</body>
+</html>
