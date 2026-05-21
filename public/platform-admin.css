@@ -1911,6 +1911,41 @@ body {
   font-weight: 650;
 }
 
+.ff-platform-request-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.ff-platform-request-summary div {
+  padding: 12px;
+  border: 1px solid #eef2f7;
+  border-radius: 12px;
+  background: #f9fafb;
+}
+
+.ff-platform-request-summary span,
+.ff-platform-request-summary strong {
+  display: block;
+}
+
+.ff-platform-request-summary span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ff-platform-request-summary strong {
+  margin-top: 6px;
+  color: #0f172a;
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.ff-platform-table--requests {
+  min-width: 980px;
+}
+
 @media (max-width: 1180px) {
   .ff-platform-c360-grid,
   .ff-platform-module-grid,
@@ -1918,6 +1953,10 @@ body {
   .ff-platform-intel-grid,
   .ff-platform-team-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ff-platform-request-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .ff-platform-intel-grid__wide {
@@ -1940,7 +1979,8 @@ body {
   }
 
   .ff-platform-detail-grid,
-  .ff-platform-c360-metrics {
+  .ff-platform-c360-metrics,
+  .ff-platform-request-summary {
     grid-template-columns: 1fr;
   }
 }

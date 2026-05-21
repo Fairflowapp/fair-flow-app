@@ -437,6 +437,87 @@ import {
     }
   }
 
+  function requestActivityMs(request) {
+    const last = timestampToDate(request?.lastActivityAt);
+    const created = timestampToDate(request?.createdAt);
+    return (last || created || new Date(0)).getTime();
+  }
+
+  function renderRequestsUnavailable(message = "READ ONLY V1 - Inbox / Requests: Not available.") {
+    setText("[data-customer-360-requests-status]", message);
+    setText("[data-customer-360-requests-open]", "--");
+    setText("[data-customer-360-requests-pending]", "--");
+    setText("[data-customer-360-requests-needs-info]", "--");
+    setText("[data-customer-360-requests-approved]", "--");
+    setText("[data-customer-360-requests-denied]", "--");
+    const body = shell.querySelector("[data-customer-360-requests-body]");
+    if (body) body.innerHTML = `<tr><td colspan="7">Not available</td></tr>`;
+  }
+
+  function renderRequestsLoading() {
+    setText("[data-customer-360-requests-status]", "READ ONLY V1 - Inbox / Requests: Loading...");
+    const body = shell.querySelector("[data-customer-360-requests-body]");
+    if (body) body.innerHTML = `<tr><td colspan="7">Loading...</td></tr>`;
+  }
+
+  function renderRequestsReadOnly(requests) {
+    const counts = requests.reduce((acc, request) => {
+      const status = String(request?.status || "").toLowerCase();
+      if (status === "open") acc.open += 1;
+      if (status === "pending") acc.pending += 1;
+      if (status === "needs_info") acc.needsInfo += 1;
+      if (status === "approved" || status === "done") acc.approvedDone += 1;
+      if (status === "denied") acc.denied += 1;
+      return acc;
+    }, { open: 0, pending: 0, needsInfo: 0, approvedDone: 0, denied: 0 });
+
+    setText("[data-customer-360-requests-open]", String(counts.open));
+    setText("[data-customer-360-requests-pending]", String(counts.pending));
+    setText("[data-customer-360-requests-needs-info]", String(counts.needsInfo));
+    setText("[data-customer-360-requests-approved]", String(counts.approvedDone));
+    setText("[data-customer-360-requests-denied]", String(counts.denied));
+
+    const body = shell.querySelector("[data-customer-360-requests-body]");
+    if (!body) return;
+    const latest = requests.slice().sort((a, b) => requestActivityMs(b) - requestActivityMs(a)).slice(0, 10);
+    if (!latest.length) {
+      body.innerHTML = `<tr><td colspan="7">No requests found</td></tr>`;
+      return;
+    }
+    body.innerHTML = latest.map((request) => {
+      const status = displayValue(request.status, "Not available");
+      const statusLc = status.toLowerCase();
+      const statusClass = statusLc === "denied" ? "error" : (statusLc === "pending" || statusLc === "needs_info" ? "warning" : "healthy");
+      return `
+        <tr>
+          <td>${escapeHtml(displayValue(request.type, "Not available"))}</td>
+          <td><span class="ff-platform-badge ${statusClass}">${escapeHtml(status)}</span></td>
+          <td>${escapeHtml(displayValue(request.priority, "Not available"))}</td>
+          <td>${escapeHtml(displayValue(request.createdByName || request.createdByStaffId || request.createdByUid, "Not available"))}</td>
+          <td>${escapeHtml(displayValue(request.forStaffName || request.assignedTo || request.forStaffId || request.forUid, "Not available"))}</td>
+          <td>${escapeHtml(displayDate(request.lastActivityAt || request.createdAt))}</td>
+          <td>${escapeHtml(displayDate(request.createdAt))}</td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  async function loadInboxRequestsReadOnly(salonId) {
+    // READ ONLY V1 - Inbox / Requests: bounded getDocs only. No approve/deny/notes/status updates.
+    renderRequestsLoading();
+    try {
+      const requestsLimit = 100;
+      const snap = await getDocs(query(collection(consoleDb, "salons", salonId, "inboxItems"), limit(requestsLimit)));
+      const requests = snap.docs.map((requestDoc) => ({ id: requestDoc.id, ...(requestDoc.data() || {}) }));
+      renderRequestsReadOnly(requests);
+      const suffix = snap.size >= requestsLimit ? ` Limited to first ${requestsLimit} docs.` : "";
+      setText("[data-customer-360-requests-status]", `READ ONLY V1 - Inbox / Requests: Loaded ${requests.length} requests.${suffix}`);
+    } catch (error) {
+      console.warn("[Fair Flow Console] READ ONLY V1 inbox requests load failed", error);
+      renderRequestsUnavailable(`READ ONLY V1 - Inbox / Requests: Could not load (${error?.code || "unknown"}).`);
+    }
+  }
+
   function setCustomer360Loading(row) {
     const name = row.dataset.customerName || "Customer";
     setText("[data-customer-360-status]", "READ ONLY V1: Loading customer...");
@@ -456,6 +537,7 @@ import {
     setText("[data-customer-360-last-activity]", displayValue(row.dataset.customerLastActivity, "Not available"));
     setText("[data-customer-360-initials]", getInitials(name));
     renderDataUsageLoading();
+    renderRequestsLoading();
   }
 
   async function loadCustomer360ReadOnly(salonId, row) {
@@ -511,12 +593,16 @@ import {
       setText("[data-customer-360-pending-invites]", String(staffCounts.pending));
       setText("[data-customer-360-initials]", getInitials(businessName));
       renderLocations(locations);
-      await loadDataUsageReadOnly(salonId, salon);
+      await Promise.all([
+        loadDataUsageReadOnly(salonId, salon),
+        loadInboxRequestsReadOnly(salonId),
+      ]);
     } catch (error) {
       console.warn("[Fair Flow Console] READ ONLY V1 customer detail load failed", error);
       setText("[data-customer-360-status]", `READ ONLY V1: Could not load details (${error?.code || "unknown"}).`);
       renderLocations([]);
       renderDataUsageUnavailable();
+      renderRequestsUnavailable();
     }
   }
 
