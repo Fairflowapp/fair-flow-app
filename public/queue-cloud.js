@@ -17,6 +17,7 @@ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/fi
 import { db, auth } from "/app.js?v=20260510_firestore_lp";
 
 const QUEUE_STATE_DEFAULT = "default";
+const RECENT_LOCAL_WRITE_GRACE_MS = 10000;
 let _salonId = null;
 let _locationId = null;
 let _unsubscribe = null;
@@ -74,17 +75,37 @@ function queueStateRef(salonId, locationId) {
 
 let _firstSnapshot = true;
 
-function subscribe(salonId, locationId) {
+function hasRecentLocalQueueWrite() {
+  if (typeof window === "undefined") return false;
+  const lastSave = Number(window.__ff_lastSaveTime || 0);
+  return lastSave > 0 && (Date.now() - lastSave) < RECENT_LOCAL_WRITE_GRACE_MS;
+}
+
+function queueStateHasData(state) {
+  return !!state &&
+    ((state.queue?.length || 0) + (state.service?.length || 0) + (state.log?.length || 0)) > 0;
+}
+
+function subscribe(salonId, locationId, opts = {}) {
   if (_unsubscribe) {
     _unsubscribe();
     _unsubscribe = null;
   }
   _firstSnapshot = true;
+  const preserveRecentLocalWrite =
+    opts.reason !== "manual" &&
+    hasRecentLocalQueueWrite() &&
+    queueStateHasData(_getState ? _getState() : null);
   // CRITICAL: clear the in-memory queue/service/log so the old location's
   // data doesn't flash on screen while we wait for the new snapshot.
   // Without this, switching branches shows the previous branch's queue for
   // a fraction of a second until Firestore responds.
-  if (typeof _applyState === "function") {
+  //
+  // Mobile boot can resolve the active branch a few seconds after a JOIN tap.
+  // In that case clearing immediately makes the just-added queue row disappear
+  // before the cloud write/snapshot catches up. Preserve very recent local queue
+  // writes unless this was an explicit manual branch switch.
+  if (!preserveRecentLocalWrite && typeof _applyState === "function") {
     try { _applyState([], [], [], null, { force: true, reason: "queue-cloud-resubscribe" }); } catch (_) {}
     if (typeof _onLogChange === "function") {
       try { _onLogChange(); } catch (_) {}
@@ -110,11 +131,11 @@ function subscribe(salonId, locationId) {
     // otherwise switching between locations would copy one branch's queue
     // into another branch's empty cloud doc.
     const isDefaultDoc = queueStateDocIdFor(locationId) === QUEUE_STATE_DEFAULT;
-    const localHasData = isDefaultDoc && localState &&
-      ((localState.queue?.length || 0) + (localState.service?.length || 0) + (localState.log?.length || 0)) > 0;
+    const localHasAnyData = queueStateHasData(localState);
+    const canSeedFromLocal = (isDefaultDoc || preserveRecentLocalWrite) && localHasAnyData;
 
     if (!snap.exists()) {
-      if (localHasData) {
+      if (canSeedFromLocal) {
         console.log("[QueueCloud] No cloud doc, pushing local state", logTag);
         setDoc(ref, {
           queue: localState.queue || [],
@@ -132,9 +153,10 @@ function subscribe(salonId, locationId) {
     const log = Array.isArray(data.log) ? data.log : [];
     const cloudHasData = (queue.length + service.length + log.length) > 0;
 
-    // On first snapshot: if cloud is empty but local has data, push local to
-    // cloud. Only allowed for the "default" doc — see comment above.
-    if (_firstSnapshot && !cloudHasData && localHasData) {
+    // On first snapshot for an existing but empty cloud doc, do not seed from
+    // localStorage unless this tab just performed a local queue write. Otherwise
+    // an old mobile cache can resurrect an employee after the 4 AM cloud reset.
+    if (_firstSnapshot && !cloudHasData && preserveRecentLocalWrite && localHasAnyData) {
       console.log("[QueueCloud] Cloud empty but local has data, pushing local", logTag);
       setDoc(ref, {
         queue: localState.queue || [],
@@ -211,7 +233,7 @@ export function initQueueCloud(opts) {
       if (sid && (sid !== _salonId || loc !== _locationId)) {
         _salonId = sid;
         _locationId = loc;
-        subscribe(sid, loc);
+        subscribe(sid, loc, { reason: "connect" });
         console.log("[QueueCloud] Subscribed to salon", sid, "location", loc || "(default)");
       } else if (!sid) {
         _salonId = null;
@@ -231,12 +253,13 @@ export function initQueueCloud(opts) {
   // don't flash on screen.
   if (typeof document !== "undefined" && !window.__ffQueueCloudLocListenerBound) {
     window.__ffQueueCloudLocListenerBound = true;
-    document.addEventListener("ff-active-location-changed", () => {
+    document.addEventListener("ff-active-location-changed", (event) => {
       const loc = readActiveLocationId();
       if (!_salonId) return;
       if (loc === _locationId) return;
       _locationId = loc;
-      subscribe(_salonId, loc);
+      const reason = event?.detail?.reason || "location-changed";
+      subscribe(_salonId, loc, { reason });
       console.log("[QueueCloud] Re-subscribed after location switch →", loc || "(default)");
     });
   }
@@ -258,7 +281,7 @@ export function queueCloudReconnect() {
     if (sid === _salonId && loc === _locationId) return;
     _salonId = sid;
     _locationId = loc;
-    if (sid) subscribe(sid, loc);
+    if (sid) subscribe(sid, loc, { reason: "reconnect" });
   });
 }
 

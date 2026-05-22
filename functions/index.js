@@ -1018,6 +1018,499 @@ This link expires in 1 hour.`;
     return null;
   });
 
+function _pushText(value, fallback = "") {
+  const s = String(value || "").replace(/\s+/g, " ").trim();
+  return (s || fallback).slice(0, 180);
+}
+
+async function _sendPushToTokenQuery({ tokensSnap, title, body, data, channelId, logTag }) {
+  const tokens = [];
+  const tokenDocsByToken = new Map();
+  tokensSnap.forEach((docSnap) => {
+    const tokenData = docSnap.data() || {};
+    const token = String(tokenData.token || "").trim();
+    if (!token || tokenDocsByToken.has(token)) return;
+    tokenDocsByToken.set(token, docSnap.ref);
+    tokens.push(token);
+  });
+
+  if (!tokens.length) {
+    console.log(`[${logTag}] No device tokens`, data);
+    return null;
+  }
+
+  const response = await admin.messaging().sendEachForMulticast({
+    tokens: tokens.slice(0, 500),
+    notification: { title, body },
+    data: Object.fromEntries(
+      Object.entries(data || {}).map(([k, v]) => [k, String(v == null ? "" : v)])
+    ),
+    android: {
+      priority: "high",
+      notification: {
+        channelId,
+        priority: "max",
+        defaultSound: true,
+        defaultVibrateTimings: true,
+      },
+    },
+    apns: {
+      headers: {
+        "apns-priority": "10",
+      },
+      payload: {
+        aps: {
+          sound: "default",
+          badge: 1,
+        },
+      },
+    },
+  });
+
+  const batch = admin.firestore().batch();
+  response.responses.forEach((result, index) => {
+    if (result.success) return;
+    const code = result.error && result.error.code;
+    if (code === "messaging/registration-token-not-registered" || code === "messaging/invalid-registration-token") {
+      const ref = tokenDocsByToken.get(tokens[index]);
+      if (ref) batch.set(ref, {
+        enabled: false,
+        disabledAt: admin.firestore.FieldValue.serverTimestamp(),
+        disabledReason: code,
+      }, { merge: true });
+    }
+  });
+  await batch.commit();
+
+  console.log(`[${logTag}] Push sent`, {
+    successCount: response.successCount,
+    failureCount: response.failureCount,
+    ...data,
+  });
+  return response;
+}
+
+async function _sendPushToUid({ salonId, uid, title, body, data, channelId, logTag }) {
+  const targetUid = String(uid || "").trim();
+  if (!salonId || !targetUid) return null;
+  const tokensSnap = await admin.firestore()
+    .collection(`salons/${salonId}/staffDeviceTokens`)
+    .where("uid", "==", targetUid)
+    .where("enabled", "==", true)
+    .get();
+  return _sendPushToTokenQuery({
+    tokensSnap,
+    title,
+    body,
+    data: { ...data, salonId, uid: targetUid },
+    channelId,
+    logTag,
+  });
+}
+
+function _roleCanHandleInbox(role) {
+  const r = String(role || "").toLowerCase().trim().replace(/\s+/g, "_");
+  return ["manager", "admin", "owner", "front_desk", "assistant_manager"].includes(r);
+}
+
+function _staffCanHandleInbox(staffData) {
+  const staff = staffData || {};
+  const perms = staff.permissions && typeof staff.permissions === "object" ? staff.permissions : {};
+  if (perms.inbox_manage === false) return false;
+  if (perms.inbox_manage === true) return true;
+  return staff.isAdmin === true || staff.isManager === true || _roleCanHandleInbox(staff.role);
+}
+
+function _staffCanHandleMedia(staffData) {
+  const staff = staffData || {};
+  const perms = staff.permissions && typeof staff.permissions === "object" ? staff.permissions : {};
+  if (perms.media_handle === false) return false;
+  if (perms.media_handle === true) return true;
+  return staff.isAdmin === true || staff.isManager === true || _roleCanHandleInbox(staff.role);
+}
+
+function _timestampMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (typeof value.seconds === "number") return value.seconds * 1000;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function _sendPushToInboxHandlers({ salonId, excludeUid, title, body, data, channelId, logTag }) {
+  if (!salonId) return null;
+  const excluded = String(excludeUid || "").trim();
+  const tokensSnap = await admin.firestore()
+    .collection(`salons/${salonId}/staffDeviceTokens`)
+    .where("enabled", "==", true)
+    .get();
+
+  if (tokensSnap.empty) {
+    console.log(`[${logTag}] No enabled device tokens`, data);
+    return null;
+  }
+
+  const staffCache = new Map();
+  const handlerTokenDocs = [];
+  for (const tokenDoc of tokensSnap.docs) {
+    const tokenData = tokenDoc.data() || {};
+    const uid = String(tokenData.uid || "").trim();
+    const staffId = String(tokenData.staffId || "").trim();
+    if (!uid || uid === excluded || !staffId) continue;
+
+    let staffData = staffCache.get(staffId);
+    if (staffData === undefined) {
+      const staffSnap = await admin.firestore().doc(`salons/${salonId}/staff/${staffId}`).get();
+      staffData = staffSnap.exists ? (staffSnap.data() || {}) : null;
+      staffCache.set(staffId, staffData);
+    }
+    if (_staffCanHandleInbox(staffData)) handlerTokenDocs.push(tokenDoc);
+  }
+
+  return _sendPushToTokenQuery({
+    tokensSnap: { forEach: (cb) => handlerTokenDocs.forEach(cb) },
+    title,
+    body,
+    data: { ...data, salonId, target: "inbox_handlers" },
+    channelId,
+    logTag,
+  });
+}
+
+async function _sendPushToMediaHandlers({ salonId, excludeUid, title, body, data, channelId, logTag }) {
+  if (!salonId) return null;
+  const excluded = String(excludeUid || "").trim();
+  const tokensSnap = await admin.firestore()
+    .collection(`salons/${salonId}/staffDeviceTokens`)
+    .where("enabled", "==", true)
+    .get();
+
+  if (tokensSnap.empty) {
+    console.log(`[${logTag}] No enabled device tokens`, data);
+    return null;
+  }
+
+  const staffCache = new Map();
+  const handlerTokenDocs = [];
+  for (const tokenDoc of tokensSnap.docs) {
+    const tokenData = tokenDoc.data() || {};
+    const uid = String(tokenData.uid || "").trim();
+    const staffId = String(tokenData.staffId || "").trim();
+    if (!uid || uid === excluded || !staffId) continue;
+
+    let staffData = staffCache.get(staffId);
+    if (staffData === undefined) {
+      const staffSnap = await admin.firestore().doc(`salons/${salonId}/staff/${staffId}`).get();
+      staffData = staffSnap.exists ? (staffSnap.data() || {}) : null;
+      staffCache.set(staffId, staffData);
+    }
+    if (_staffCanHandleMedia(staffData)) handlerTokenDocs.push(tokenDoc);
+  }
+
+  return _sendPushToTokenQuery({
+    tokensSnap: { forEach: (cb) => handlerTokenDocs.forEach(cb) },
+    title,
+    body,
+    data: { ...data, salonId, target: "media_handlers" },
+    channelId,
+    logTag,
+  });
+}
+
+/**
+ * Sends native push notifications when reception/owner calls a staff member
+ * from Queue. The client still writes currentCall to staffPresence; this
+ * trigger turns that same event into an OS-level phone notification.
+ */
+exports.onStaffPresenceCallSent = functions
+  .region("us-central1")
+  .firestore.document("salons/{salonId}/staffPresence/{staffId}")
+  .onWrite(async (change, context) => {
+    const before = change.before.exists ? (change.before.data() || {}) : {};
+    const after = change.after.exists ? (change.after.data() || {}) : {};
+    const beforeCall = before.currentCall || null;
+    const currentCall = after.currentCall || null;
+
+    if (!currentCall || currentCall.status !== "sent" || !currentCall.callId) return null;
+    if (beforeCall && beforeCall.callId === currentCall.callId && beforeCall.status === "sent") return null;
+
+    const { salonId, staffId } = context.params;
+    const tokensSnap = await admin.firestore()
+      .collection(`salons/${salonId}/staffDeviceTokens`)
+      .where("staffId", "==", staffId)
+      .where("enabled", "==", true)
+      .get();
+
+    const tokens = [];
+    const tokenDocsByToken = new Map();
+    tokensSnap.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      const token = String(data.token || "").trim();
+      if (!token || tokenDocsByToken.has(token)) return;
+      tokenDocsByToken.set(token, docSnap.ref);
+      tokens.push(token);
+    });
+
+    if (!tokens.length) {
+      console.log("[onStaffPresenceCallSent] No device tokens", { salonId, staffId, callId: currentCall.callId });
+      return null;
+    }
+
+    const title = String(currentCall.message || "Your client is waiting");
+    const body = String(currentCall.detail || "Please return to the queue.");
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens: tokens.slice(0, 500),
+      notification: { title, body },
+      data: {
+        type: "staff_call",
+        salonId: String(salonId),
+        staffId: String(staffId),
+        callId: String(currentCall.callId),
+        locationId: String(currentCall.locationId || ""),
+      },
+      android: {
+        priority: "high",
+        notification: {
+          channelId: "staff_calls",
+          priority: "max",
+          defaultSound: true,
+          defaultVibrateTimings: true,
+        },
+      },
+      apns: {
+        headers: {
+          "apns-priority": "10",
+        },
+        payload: {
+          aps: {
+            sound: "default",
+            badge: 1,
+          },
+        },
+      },
+    });
+
+    const batch = admin.firestore().batch();
+    response.responses.forEach((result, index) => {
+      if (result.success) return;
+      const code = result.error && result.error.code;
+      if (code === "messaging/registration-token-not-registered" || code === "messaging/invalid-registration-token") {
+        const ref = tokenDocsByToken.get(tokens[index]);
+        if (ref) batch.set(ref, {
+          enabled: false,
+          disabledAt: admin.firestore.FieldValue.serverTimestamp(),
+          disabledReason: code,
+        }, { merge: true });
+      }
+    });
+    await batch.commit();
+
+    console.log("[onStaffPresenceCallSent] Push sent", {
+      salonId,
+      staffId,
+      callId: currentCall.callId,
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+    });
+    return null;
+  });
+
+exports.onChatMessageCreated = functions
+  .region("us-central1")
+  .firestore.document("salons/{salonId}/conversations/{conversationId}/messages/{messageId}")
+  .onCreate(async (snap, context) => {
+    if (!snap) return null;
+    const { salonId, conversationId, messageId } = context.params;
+    const message = snap.data() || {};
+    const senderUid = String(message.senderUid || "").trim();
+    let recipientUid = String(message.recipientUid || "").trim();
+
+    if (!recipientUid) {
+      const convSnap = await admin.firestore()
+        .doc(`salons/${salonId}/conversations/${conversationId}`)
+        .get();
+      const participants = convSnap.exists && Array.isArray(convSnap.data().participants)
+        ? convSnap.data().participants.map((v) => String(v || "").trim()).filter(Boolean)
+        : [];
+      recipientUid = participants.find((uid) => uid && uid !== senderUid) || "";
+    }
+
+    if (!recipientUid || recipientUid === senderUid) return null;
+
+    const senderName = _pushText(message.senderName, "Someone");
+    const title = `New chat from ${senderName}`;
+    const body = _pushText(
+      message.message || message.renderedText || message.title,
+      "You have a new chat message."
+    );
+
+    return _sendPushToUid({
+      salonId,
+      uid: recipientUid,
+      title,
+      body,
+      channelId: "staff_calls",
+      logTag: "onChatMessageCreated",
+      data: {
+        type: "chat_message",
+        conversationId,
+        messageId,
+        senderUid,
+      },
+    });
+  });
+
+exports.onInboxItemCreated = functions
+  .region("us-central1")
+  .firestore.document("salons/{salonId}/inboxItems/{itemId}")
+  .onCreate(async (snap, context) => {
+    if (!snap) return null;
+    const { salonId, itemId } = context.params;
+    const item = snap.data() || {};
+    const forUid = String(item.forUid || "").trim();
+    const createdByUid = String(item.createdByUid || "").trim();
+    if (item.unreadForManagers !== true) return null;
+
+    const createdByName = _pushText(item.createdByName, "Fair Flow");
+    const itemLabel = _pushText(
+      item.title || item.subject || item.type || "inbox request",
+      "inbox request"
+    );
+    const title = "You have a new inbox item";
+    const body = `${createdByName}: ${itemLabel}`.slice(0, 180);
+
+    return _sendPushToInboxHandlers({
+      salonId,
+      excludeUid: createdByUid,
+      title,
+      body,
+      channelId: "staff_calls",
+      logTag: "onInboxItemCreated",
+      data: {
+        type: "inbox_item",
+        itemId,
+        forUid,
+        createdByUid,
+        status: item.status || "",
+      },
+    });
+  });
+
+exports.onSchedulePublished = functions
+  .region("us-central1")
+  .firestore.document("salons/{salonId}/schedulePublish/{publishDocId}")
+  .onWrite(async (change, context) => {
+    if (!change.after.exists) return null;
+    const before = change.before.exists ? (change.before.data() || {}) : {};
+    const after = change.after.data() || {};
+    const beforeBroadcastMs = _timestampMillis(before.lastBroadcastAt);
+    const afterBroadcastMs = _timestampMillis(after.lastBroadcastAt);
+    const weekStart = String(after.lastBroadcastWeekKey || "").trim();
+
+    if (!weekStart || !afterBroadcastMs || afterBroadcastMs <= beforeBroadcastMs) return null;
+    if (!after.published || after.published[weekStart] !== true) return null;
+
+    const { salonId, publishDocId } = context.params;
+    const tokensSnap = await admin.firestore()
+      .collection(`salons/${salonId}/staffDeviceTokens`)
+      .where("enabled", "==", true)
+      .get();
+
+    return _sendPushToTokenQuery({
+      tokensSnap,
+      title: "New schedule posted",
+      body: "A new schedule has been published. Please check your schedule.",
+      channelId: "staff_calls",
+      logTag: "onSchedulePublished",
+      data: {
+        type: "schedule_published",
+        salonId,
+        publishDocId,
+        weekStart,
+        locationId: after.locationId || "",
+      },
+    });
+  });
+
+exports.onMediaWorkCreated = functions
+  .region("us-central1")
+  .firestore.document("salons/{salonId}/contentWorks/{workId}")
+  .onCreate(async (snap, context) => {
+    if (!snap) return null;
+    const { salonId, workId } = context.params;
+    const work = snap.data() || {};
+    const createdByUid = String(work.createdByUid || "").trim();
+    const staffName = _pushText(work.staffName, "Someone");
+    const category = _pushText(
+      work.categoryName || (Array.isArray(work.categoryNames) ? work.categoryNames[0] : "") || work.serviceType,
+      "media"
+    );
+
+    return _sendPushToMediaHandlers({
+      salonId,
+      excludeUid: createdByUid,
+      title: "New media to handle",
+      body: `${staffName} uploaded new ${category}.`.slice(0, 180),
+      channelId: "staff_calls",
+      logTag: "onMediaWorkCreated",
+      data: {
+        type: "media_work",
+        workId,
+        createdByUid,
+        staffId: work.staffId || "",
+        locationId: work.locationId || "",
+      },
+    });
+  });
+
+exports.onTrainingNotificationWritten = functions
+  .region("us-central1")
+  .firestore.document("salons/{salonId}/staffNotifications/{notificationId}")
+  .onWrite(async (change, context) => {
+    if (!change.after.exists) return null;
+    const before = change.before.exists ? (change.before.data() || {}) : {};
+    const after = change.after.data() || {};
+    if (String(after.type || "") !== "training_assigned") return null;
+    if (after.read === true) return null;
+
+    const beforeMs = Math.max(_timestampMillis(before.updatedAt), _timestampMillis(before.createdAt));
+    const afterMs = Math.max(_timestampMillis(after.updatedAt), _timestampMillis(after.createdAt));
+    if (change.before.exists && afterMs && beforeMs && afterMs <= beforeMs) return null;
+
+    const { salonId, notificationId } = context.params;
+    const forStaffId = String(after.forStaffId || "").trim();
+    if (!forStaffId) return null;
+
+    const tokensSnap = await admin.firestore()
+      .collection(`salons/${salonId}/staffDeviceTokens`)
+      .where("staffId", "==", forStaffId)
+      .where("enabled", "==", true)
+      .get();
+
+    const title = after.required === true ? "Required training assigned" : "New training available";
+    const trainingTitle = _pushText(after.trainingTitle, "Training");
+    const body = after.required === true
+      ? `Please complete: ${trainingTitle}`.slice(0, 180)
+      : `New training: ${trainingTitle}`.slice(0, 180);
+
+    return _sendPushToTokenQuery({
+      tokensSnap,
+      title,
+      body,
+      channelId: "staff_calls",
+      logTag: "onTrainingNotificationWritten",
+      data: {
+        type: "training_assigned",
+        salonId,
+        notificationId,
+        trainingId: after.trainingId || "",
+        forStaffId,
+        required: after.required === true ? "true" : "false",
+      },
+    });
+  });
+
 /** Shared logic: resolve recipientStaffId -> uid and create inbox item. Used by trigger onInboxRequestDraftCreated. */
 async function _createInboxRequestFromDraft(creatorUid, salonId, recipientStaffId, recipientName, requestData) {
   const creatorDoc = await admin.firestore().doc(`users/${creatorUid}`).get();

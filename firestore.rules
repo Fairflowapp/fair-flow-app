@@ -1047,6 +1047,56 @@ service cloud.firestore {
         && isManager(salonId);
     }
 
+    // Native push notification device tokens for Queue staff calls.
+    // Staff can register/update/delete only their own device token docs.
+    // Managers can read tokens for diagnostics; actual push sending is Admin SDK only.
+    match /salons/{salonId}/staffDeviceTokens/{tokenDocId} {
+      allow read: if belongsToSalon(salonId) && isManager(salonId);
+      allow create: if belongsToSalon(salonId)
+        && request.resource.data.keys().hasOnly([
+          'token',
+          'uid',
+          'staffId',
+          'staffName',
+          'deviceId',
+          'platform',
+          'enabled',
+          'updatedAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.staffId is string
+        && matchesOwnStaffId(salonId, request.resource.data.staffId)
+        && request.resource.data.token is string
+        && request.resource.data.token.size() > 20
+        && request.resource.data.enabled is bool;
+      allow update: if belongsToSalon(salonId)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.staffId is string
+        && matchesOwnStaffId(salonId, request.resource.data.staffId)
+        && request.resource.data.token is string
+        && request.resource.data.token.size() > 20
+        && request.resource.data.enabled is bool
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'token',
+          'uid',
+          'staffId',
+          'staffName',
+          'deviceId',
+          'platform',
+          'enabled',
+          'updatedAt'
+        ]);
+      allow delete: if belongsToSalon(salonId)
+        && (
+          isManager(salonId)
+          || (
+            resource.data.uid == request.auth.uid
+            && resource.data.staffId is string
+            && matchesOwnStaffId(salonId, resource.data.staffId)
+          )
+        );
+    }
+
     // ===== CHAT / STRUCTURED MESSAGES SYSTEM =====
 
     // Chat Templates — Admin/Owner can CRUD; all salon members can read

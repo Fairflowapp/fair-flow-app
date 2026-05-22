@@ -1,5 +1,27 @@
 apply plugin: 'com.android.application'
 
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { stream ->
+        localProperties.load(stream)
+    }
+}
+
+def fairflowReleaseStorePassword = localProperties.getProperty('fairflow.release.storePassword') ?: System.getenv('FAIRFLOW_RELEASE_STORE_PASSWORD')
+def fairflowReleaseKeyPassword = localProperties.getProperty('fairflow.release.keyPassword') ?: System.getenv('FAIRFLOW_RELEASE_KEY_PASSWORD')
+def fairflowReleaseKeyAlias = localProperties.getProperty('fairflow.release.keyAlias') ?: System.getenv('FAIRFLOW_RELEASE_KEY_ALIAS') ?: 'fairflowapp'
+def fairflowReleaseStoreFile = rootProject.file('../keystore/fairflowapp.jks')
+def fairflowReleaseSigningReady = fairflowReleaseStoreFile.exists() && fairflowReleaseStorePassword && fairflowReleaseKeyPassword && fairflowReleaseKeyAlias
+def fairflowReleaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    def normalized = taskName.toLowerCase()
+    normalized.contains('release') && (
+        normalized.contains('assemble') ||
+        normalized.contains('bundle') ||
+        normalized.contains('package')
+    )
+}
+
 android {
     namespace = "com.fairflow.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +38,24 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (fairflowReleaseSigningReady) {
+                storeFile fairflowReleaseStoreFile
+                storePassword fairflowReleaseStorePassword
+                keyAlias fairflowReleaseKeyAlias
+                keyPassword fairflowReleaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (fairflowReleaseTaskRequested && !fairflowReleaseSigningReady) {
+                throw new GradleException("Release signing is not configured. Add fairflow.release.storePassword, fairflow.release.keyPassword, and fairflow.release.keyAlias to android/local.properties, or set FAIRFLOW_RELEASE_STORE_PASSWORD, FAIRFLOW_RELEASE_KEY_PASSWORD, and FAIRFLOW_RELEASE_KEY_ALIAS.")
+            }
+            signingConfig signingConfigs.release
         }
     }
 }

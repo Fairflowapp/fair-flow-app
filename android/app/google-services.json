@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "823186963319",
+    "project_id": "fairflowapp-db841",
+    "storage_bucket": "fairflowapp-db841.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:823186963319:android:f21a8acbc5103ab5643f72",
+        "android_client_info": {
+          "package_name": "com.fairflow.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "823186963319-3n8qoco5ltdq6nug5odmp30pe14upc6b.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDuy6kXZfydet8d5XvRSUtDgi2s02Ab1Ls"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "823186963319-3n8qoco5ltdq6nug5odmp30pe14upc6b.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

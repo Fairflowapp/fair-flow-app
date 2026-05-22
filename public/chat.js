@@ -1364,10 +1364,22 @@ window.openThreadReply = async function() {
 
 // ─── Mark Thread Read ──────────────────────────────────────────────────────────
 async function markThreadRead(convId) {
-  // Disabled client-side read receipts for now: Firestore rules can reject the
-  // unread/readBy commits on legacy chat rows, which floods the console with
-  // 403 errors. Reading and sending messages do not depend on this write.
-  return;
+  if (!chatUserProfile?.salonId || !chatUserProfile?.uid || !convId) return;
+  const conv = cachedConversationsById[convId] || allConversations.find(c => c.id === convId) || null;
+  if (conv && Array.isArray(conv.participants) && !conv.participants.includes(chatUserProfile.uid)) return;
+  const currentUnread = _unreadCountForUid(conv || {}, chatUserProfile.uid);
+  if (currentUnread <= 0) return;
+  try {
+    await updateDoc(doc(db, `salons/${chatUserProfile.salonId}/conversations`, convId), {
+      [`unreadFor.${chatUserProfile.uid}`]: 0
+    });
+    if (conv) {
+      conv.unreadFor = { ...(conv.unreadFor || {}), [chatUserProfile.uid]: 0 };
+      _paintChatNavBadge(_computeChatNavUnreadFromSnapDocs(allConversations.map(c => ({ data: () => c })), chatUserProfile.uid));
+    }
+  } catch (err) {
+    console.warn('[Chat] markThreadRead failed', err);
+  }
 }
 
 // ─── Send Modal (new message from main screen) ────────────────────────────────
@@ -2187,7 +2199,10 @@ function _subscribeToMessages(convId) {
     snap => {
       currentMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       chatMessagesLoading = false;
-      if (currentConvId === convId) renderConversation(convId);
+      if (currentConvId === convId) {
+        renderConversation(convId);
+        if (isChatScreenVisible()) markThreadRead(convId);
+      }
     },
     err => {
       chatMessagesLoading = false;
@@ -2204,6 +2219,7 @@ function _subscribeToMessages(convId) {
       currentMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       chatMessagesLoading = false;
       renderConversation(convId);
+      if (isChatScreenVisible()) markThreadRead(convId);
     } catch (e) {
       if (currentConvId !== convId) return;
       chatMessagesLoading = false;
