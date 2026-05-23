@@ -1084,6 +1084,33 @@ body {
   background: #ef4444;
 }
 
+.ff-platform-auth-status {
+  max-width: 260px;
+  padding: 7px 10px;
+  border: 1px solid var(--ff-admin-border);
+  border-radius: 999px;
+  color: #64748b;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ff-platform-auth-status[data-auth-state="signed-in"] {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.ff-platform-auth-status[data-auth-state="signed-out"] {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
 .ff-platform-console-avatar {
   padding: 6px 8px;
   border-color: var(--ff-admin-border);
@@ -1324,6 +1351,31 @@ body {
   margin-bottom: 14px;
 }
 
+.ff-platform-segmented {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--ff-admin-border);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.ff-platform-tools .ff-platform-segmented button {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 9px;
+  color: #64748b;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ff-platform-tools .ff-platform-segmented button.is-active {
+  color: #111827;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
 .ff-platform-readonly-status {
   margin: 0 0 12px;
   padding: 9px 11px;
@@ -1333,6 +1385,29 @@ body {
   background: #f9fafb;
   font-size: 12px;
   font-weight: 500;
+}
+
+.ff-platform-field {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.ff-platform-field span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.ff-platform-field select {
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 9px 11px;
+  color: #111827;
+  background: #ffffff;
+  font: inherit;
+  font-size: 13px;
 }
 
 .ff-platform-tools button {
@@ -1946,6 +2021,41 @@ body {
   min-width: 980px;
 }
 
+.ff-platform-support-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.ff-platform-support-metrics div {
+  padding: 12px;
+  border: 1px solid #eef2f7;
+  border-radius: 12px;
+  background: #f9fafb;
+}
+
+.ff-platform-support-metrics span,
+.ff-platform-support-metrics strong {
+  display: block;
+}
+
+.ff-platform-support-metrics span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ff-platform-support-metrics strong {
+  margin-top: 6px;
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.ff-platform-table--support {
+  min-width: 980px;
+}
+
 @media (max-width: 1180px) {
   .ff-platform-c360-grid,
   .ff-platform-module-grid,
@@ -1957,6 +2067,10 @@ body {
 
   .ff-platform-request-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ff-platform-support-metrics {
+    grid-template-columns: 1fr;
   }
 
   .ff-platform-intel-grid__wide {

@@ -66,6 +66,7 @@
             <span aria-hidden="true">!</span>
             <i aria-hidden="true"></i>
           </button>
+          <div class="ff-platform-auth-status" data-auth-state="checking" data-console-auth-status>Checking Fair Flow session...</div>
           <div class="ff-platform-console-avatar" aria-label="Internal Fair Flow team placeholder">
             <span>FF</span>
             <div>
@@ -165,8 +166,12 @@
             <button type="button" disabled>Plan filter</button>
             <button type="button" disabled>Health filter</button>
             <button type="button" disabled>Billing filter</button>
+            <div class="ff-platform-segmented" role="group" aria-label="Customer status filter">
+              <button class="is-active" type="button" data-customers-filter="active">Active only</button>
+              <button type="button" data-customers-filter="all">All</button>
+            </div>
           </div>
-          <p class="ff-platform-readonly-status" data-customers-readonly-status>READ ONLY V1: Loading Firestore customers...</p>
+          <p class="ff-platform-readonly-status" data-customers-readonly-status>Checking Fair Flow session...</p>
           <div class="ff-platform-table-wrap">
             <table class="ff-platform-table">
               <thead>
@@ -521,27 +526,57 @@
       <section class="ff-platform-section" id="support" data-platform-section>
         <div class="ff-platform-support-layout">
           <aside class="ff-platform-card ff-platform-conversations">
-            <div class="ff-platform-card__head"><h3>Conversations</h3><span>Placeholder</span></div>
-            <button type="button" class="is-selected"><strong>Northstar Salon Group</strong><small>Billing question placeholder</small></button>
-            <button type="button"><strong>Bloom Studio</strong><small>Setup help placeholder</small></button>
-            <button type="button"><strong>Example Business</strong><small>Storage alert placeholder</small></button>
+            <div class="ff-platform-card__head">
+              <div>
+                <h3>Customers</h3>
+                <p>Select a customer to load real conversations.</p>
+              </div>
+              <span>READ ONLY V1</span>
+            </div>
+            <label class="ff-platform-field">
+              <span>Customer / Salon</span>
+              <select data-support-salon-select>
+                <option value="">Loading customers...</option>
+              </select>
+            </label>
+            <p class="ff-platform-readonly-status" data-support-readonly-status>READ ONLY V1: Select a customer.</p>
           </aside>
           <section class="ff-platform-card ff-platform-thread">
             <div class="ff-platform-card__head">
               <div>
-                <h3>Selected Conversation</h3>
-                <p>Customer chat connection placeholder.</p>
+                <h3>Latest Conversations</h3>
+                <p>Real conversation summaries from Firestore. Messages are not loaded.</p>
               </div>
-              <span class="ff-platform-badge warning">Open</span>
+              <span class="ff-platform-badge">Read only</span>
             </div>
-            <div class="ff-platform-message is-customer">Customer message placeholder for future support chat.</div>
-            <div class="ff-platform-message is-admin">Internal admin response placeholder.</div>
-            <div class="ff-platform-compose">Reply composer placeholder</div>
+            <div class="ff-platform-support-metrics">
+              <div><span>Total conversations</span><strong data-support-total-conversations>--</strong></div>
+              <div><span>With unread</span><strong data-support-unread-conversations>--</strong></div>
+              <div><span>Last activity</span><strong data-support-last-activity>--</strong></div>
+            </div>
+            <div class="ff-platform-table-wrap">
+              <table class="ff-platform-table ff-platform-table--support">
+                <thead>
+                  <tr>
+                    <th>Last Sender</th>
+                    <th>Role</th>
+                    <th>Last Message</th>
+                    <th>Last Activity</th>
+                    <th>Participants</th>
+                    <th>Unread</th>
+                    <th>Location</th>
+                  </tr>
+                </thead>
+                <tbody data-support-conversations-body>
+                  <tr><td colspan="7">Select a customer</td></tr>
+                </tbody>
+              </table>
+            </div>
           </section>
           <aside class="ff-platform-card ff-platform-notes">
-            <div class="ff-platform-card__head"><h3>Internal Notes</h3><span>Private</span></div>
-            <p>Account context, escalation owner, next action, and internal follow-up placeholders.</p>
-            <div class="ff-platform-note-box">No notes connected. V1 UI Foundation Only.</div>
+            <div class="ff-platform-card__head"><h3>Support Scope</h3><span>READ ONLY V1</span></div>
+            <p>Conversation summaries only. Message subcollections, replies, composer, notes, and chat actions are intentionally not connected.</p>
+            <div class="ff-platform-note-box">No messages loaded. No writes. No reply composer.</div>
           </aside>
         </div>
       </section>

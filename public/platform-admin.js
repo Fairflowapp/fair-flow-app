@@ -2,6 +2,10 @@
 // READ ONLY V1: Firestore integration below uses getDoc/getDocs only. No writes, no Stripe, no app module imports.
 import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
 import {
+  getAuth,
+  onAuthStateChanged,
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+import {
   collection,
   doc,
   getFirestore,
@@ -24,9 +28,20 @@ import {
   const mobileLabel = shell.querySelector("[data-platform-mobile-label]");
   const customersTableBody = shell.querySelector("[data-customers-table-body]");
   const customersStatus = shell.querySelector("[data-customers-readonly-status]");
+  const customerFilterButtons = Array.from(shell.querySelectorAll("[data-customers-filter]"));
+  const authStatus = shell.querySelector("[data-console-auth-status]");
   const customerBack = shell.querySelector("[data-customer-360-back]");
+  const supportSalonSelect = shell.querySelector("[data-support-salon-select]");
+  const supportStatus = shell.querySelector("[data-support-readonly-status]");
+  const supportConversationsBody = shell.querySelector("[data-support-conversations-body]");
   let previousSectionId = "customers";
   let consoleDb = null;
+  let consoleAuth = null;
+  let authReady = false;
+  let currentAuthUser = null;
+  let customerRowsCache = [];
+  let allCustomerRowsCache = [];
+  let customersFilterMode = "active";
 
   // READ ONLY V1: Same project config used by the main app, initialized independently for this isolated console page.
   const firebaseConfig = {
@@ -209,6 +224,78 @@ import {
     return fallback;
   }
 
+  function normalizeStatusToken(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[_\s-]+/g, "_");
+  }
+
+  function classifyCustomerStatus(salon) {
+    const rawStatus = pickFirst(salon, ["accountStatus", "status", "subscriptionStatus", "planStatus", "billingStatus"], "");
+    const normalized = normalizeStatusToken(rawStatus);
+    const activeStatuses = new Set(["active", "trial", "trialing"]);
+    const hiddenStatuses = new Set(["inactive", "archived", "cancelled", "canceled", "deleted", "test", "demo"]);
+
+    if (activeStatuses.has(normalized)) {
+      return {
+        key: normalized,
+        group: "active",
+        label: normalized === "active" ? "Active" : "Trial",
+        raw: displayValue(rawStatus, "active"),
+      };
+    }
+
+    if (hiddenStatuses.has(normalized)) {
+      return {
+        key: normalized,
+        group: "hidden",
+        label: normalized === "canceled" ? "Cancelled" : displayValue(rawStatus, "Inactive"),
+        raw: displayValue(rawStatus, "Inactive"),
+      };
+    }
+
+    return {
+      key: normalized || "unknown",
+      group: "unknown",
+      label: "Unknown status",
+      raw: displayValue(rawStatus, "Not available"),
+    };
+  }
+
+  function getConsoleApp() {
+    return getApps().length ? getApp() : initializeApp(firebaseConfig);
+  }
+
+  function getConsoleDb() {
+    if (!consoleDb) {
+      consoleDb = getFirestore(getConsoleApp());
+    }
+    return consoleDb;
+  }
+
+  function setAuthStatus(message, state = "checking") {
+    if (!authStatus) return;
+    authStatus.textContent = message;
+    authStatus.dataset.authState = state;
+  }
+
+  function setReadOnlyBlocked(message) {
+    if (customersStatus) customersStatus.textContent = message;
+    if (customersTableBody) {
+      customersTableBody.innerHTML = `<tr><td colspan="8">${escapeHtml(message)}</td></tr>`;
+    }
+    allCustomerRowsCache = [];
+    customerRowsCache = [];
+    updateCustomerFilterButtons();
+    renderSupportCustomerOptions(customerRowsCache);
+    renderSupportUnavailable(message);
+  }
+
+  function canRunReadOnlyReads() {
+    return authReady && !!currentAuthUser;
+  }
+
   async function safeSubcollectionCount(db, salonId, subcollectionName) {
     // READ ONLY V1: Count by reading subcollection docs only. No writes or mutations.
     try {
@@ -219,10 +306,17 @@ import {
     }
   }
 
-  async function readOwnerProfile(db, salon) {
+  async function readOwnerProfile(db, salon, debugContext = null) {
     const ownerDirect = pickFirst(salon, ["ownerName", "owner", "createdByName", "contactName"], "");
     const ownerEmailDirect = pickFirst(salon, ["ownerEmail", "email", "contactEmail"], "");
     if (ownerDirect || ownerEmailDirect) {
+      if (debugContext?.customer360) {
+        console.log("[Fair Flow Console] Success owner", {
+          salonId: debugContext.salonId || salon.id || null,
+          ownerUid: salon.ownerUid || salon.ownerId || null,
+          source: "salon document fields",
+        });
+      }
       return {
         name: displayValue(ownerDirect, "Not available"),
         email: displayValue(ownerEmailDirect, "Not available"),
@@ -230,24 +324,59 @@ import {
     }
 
     const ownerUid = displayValue(salon.ownerUid || salon.ownerId || "", "");
-    if (!ownerUid) return { name: "Not available", email: "Not available" };
+    if (!ownerUid) {
+      if (debugContext?.customer360) {
+        console.log("[Fair Flow Console] Success owner", {
+          salonId: debugContext.salonId || salon.id || null,
+          ownerUid: null,
+          source: "no ownerUid on salon document",
+        });
+      }
+      return { name: "Not available", email: "Not available" };
+    }
 
     // READ ONLY V1: optional owner profile lookup from existing users/{uid}.
     try {
+      if (debugContext?.customer360) {
+        console.log("[Fair Flow Console] Loading owner user", {
+          path: `users/${ownerUid}`,
+          salonId: debugContext.salonId || salon.id || null,
+          ownerUid,
+        });
+      }
       const userSnap = await getDoc(doc(db, "users", ownerUid));
+      if (debugContext?.customer360) {
+        console.log("[Fair Flow Console] Success owner", {
+          path: `users/${ownerUid}`,
+          salonId: debugContext.salonId || salon.id || null,
+          ownerUid,
+          exists: userSnap.exists(),
+        });
+      }
       if (!userSnap.exists()) return { name: ownerUid, email: "Not available" };
       const user = userSnap.data() || {};
       return {
         name: displayValue(pickFirst(user, ["name", "displayName", "email"], ownerUid)),
         email: displayValue(pickFirst(user, ["email"], "Not available")),
       };
-    } catch (_) {
+    } catch (error) {
+      if (debugContext?.customer360) {
+        console.error("[Fair Flow Console] Failed owner", {
+          path: `users/${ownerUid}`,
+          salonId: debugContext.salonId || salon.id || null,
+          ownerUid,
+          errorCode: error?.code || null,
+          errorMessage: error?.message || String(error),
+          error,
+        });
+      }
       return { name: ownerUid, email: "Not available" };
     }
   }
 
   function mapSalonToCustomerRow(salon, ownerProfile, locationsCount, staffCount) {
     const businessName = displayValue(pickFirst(salon, ["name", "businessName", "salonName", "displayName"], salon.id));
+    const customerStatus = classifyCustomerStatus(salon);
     const plan = displayValue(pickFirst(salon, ["plan", "planName", "subscriptionPlan"], "Not available"));
     const billing = displayValue(pickFirst(salon, ["billingStatus", "accountStatus", "status", "subscriptionStatus"], "Not available"));
     const lastActivity = displayDate(pickFirst(salon, ["lastActivityAt", "lastActiveAt", "updatedAt", "createdAt"], null));
@@ -260,59 +389,183 @@ import {
       staffCount,
       plan,
       billing,
+      customerStatus,
       health: "Placeholder",
       lastActivity,
     };
   }
 
+  function logReadOnlyDebug(label, payload) {
+    try {
+      console.groupCollapsed(`[Fair Flow Console][READ ONLY V1] ${label}`);
+      console.log(payload);
+      if (Array.isArray(payload?.table)) console.table(payload.table);
+      console.groupEnd();
+    } catch (_) {}
+  }
+
+  async function readCustomer360Path(label, details, reader, successMeta = () => ({})) {
+    console.log(`[Fair Flow Console] Loading ${label}`, details);
+    try {
+      const result = await reader();
+      console.log(`[Fair Flow Console] Success ${label}`, {
+        ...details,
+        ...successMeta(result),
+      });
+      return result;
+    } catch (error) {
+      console.error(`[Fair Flow Console] Failed ${label}`, {
+        ...details,
+        errorCode: error?.code || null,
+        errorMessage: error?.message || String(error),
+        error,
+      });
+      throw error;
+    }
+  }
+
+  function getVisibleCustomerRows() {
+    if (customersFilterMode === "all") return allCustomerRowsCache.slice();
+    return allCustomerRowsCache.filter((row) => row.customerStatus?.group === "active");
+  }
+
+  function customerStatusBadgeClass(statusGroup) {
+    if (statusGroup === "active") return "healthy";
+    if (statusGroup === "unknown") return "warning";
+    return "error";
+  }
+
+  function updateCustomerFilterButtons() {
+    customerFilterButtons.forEach((button) => {
+      const isActive = button.dataset.customersFilter === customersFilterMode;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+  }
+
+  function updateCustomersSummary(totalCount, visibleCount) {
+    if (!customersStatus) return;
+    const activeCount = allCustomerRowsCache.filter((row) => row.customerStatus?.group === "active").length;
+    const hiddenCount = Math.max(totalCount - activeCount, 0);
+    if (customersFilterMode === "all") {
+      customersStatus.textContent = `READ ONLY V1: Showing all ${totalCount} customers. Active ${activeCount}; inactive/test/unknown ${hiddenCount}.`;
+      return;
+    }
+    customersStatus.textContent = `READ ONLY V1: Showing ${visibleCount} active customers. Hidden ${hiddenCount} inactive/test/unknown customers.`;
+  }
+
   function renderCustomerRows(rows) {
+    const incomingRows = Array.isArray(rows) ? rows.slice() : [];
+    if (rows) {
+      allCustomerRowsCache = incomingRows;
+    }
+    const visibleRows = getVisibleCustomerRows();
+    customerRowsCache = visibleRows.slice();
+    renderSupportCustomerOptions(customerRowsCache);
+    updateCustomerFilterButtons();
+    updateCustomersSummary(allCustomerRowsCache.length, visibleRows.length);
     if (!customersTableBody) return;
-    if (!rows.length) {
+    if (!visibleRows.length) {
+      const message = customersFilterMode === "active"
+        ? "No active customers found"
+        : "No customers found";
       customersTableBody.innerHTML = `
         <tr>
-          <td colspan="8"><strong>No customers found</strong><small>READ ONLY V1: salons collection returned no documents.</small></td>
+          <td colspan="8"><strong>${escapeHtml(message)}</strong><small>Use All to view inactive, test, demo, or unknown-status customers.</small></td>
         </tr>
       `;
       return;
     }
 
-    customersTableBody.innerHTML = rows.map((row) => `
+    customersTableBody.innerHTML = visibleRows.map((row) => `
       <tr class="ff-platform-customer-row" tabindex="0" data-customer-360-open data-customer-id="${escapeHtml(row.id)}" data-customer-name="${escapeHtml(row.businessName)}" data-customer-owner="${escapeHtml(row.owner)}" data-customer-email="${escapeHtml(row.ownerEmail)}" data-customer-plan="${escapeHtml(row.plan)}" data-customer-health="${escapeHtml(row.health)}" data-customer-billing="${escapeHtml(row.billing)}" data-customer-locations-count="${escapeHtml(row.locationsCount)}" data-customer-staff-count="${escapeHtml(row.staffCount)}" data-customer-last-activity="${escapeHtml(row.lastActivity)}">
-        <td><strong>${escapeHtml(row.businessName)}</strong><small>Firestore salon: ${escapeHtml(row.id)}</small></td>
+        <td><strong>${escapeHtml(row.businessName)}</strong><small>Firestore salon: ${escapeHtml(row.id)} - Status: ${escapeHtml(row.customerStatus?.label || "Unknown status")}</small></td>
         <td>${escapeHtml(row.owner)}</td>
         <td>${escapeHtml(row.locationsCount)}</td>
         <td>${escapeHtml(row.staffCount)}</td>
         <td><span class="ff-platform-badge">${escapeHtml(row.plan)}</span></td>
-        <td><span class="ff-platform-badge">${escapeHtml(row.billing)}</span></td>
+        <td><span class="ff-platform-badge ${customerStatusBadgeClass(row.customerStatus?.group)}">${escapeHtml(row.customerStatus?.label || row.billing)}</span></td>
         <td><span class="ff-platform-health">${escapeHtml(row.health)}</span></td>
         <td>${escapeHtml(row.lastActivity)}</td>
       </tr>
     `).join("");
   }
 
+  function renderSupportCustomerOptions(rows) {
+    if (!supportSalonSelect) return;
+    if (!rows.length) {
+      supportSalonSelect.innerHTML = `<option value="">No customers loaded</option>`;
+      return;
+    }
+    supportSalonSelect.innerHTML = [
+      `<option value="">Select a customer</option>`,
+      ...rows.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.businessName)} (${escapeHtml(row.id)})</option>`),
+    ].join("");
+  }
+
   async function loadFirestoreCustomersReadOnly() {
+    console.log("[Fair Flow Console] loadFirestoreCustomersReadOnly invoked", {
+      authReady,
+      hasUser: !!currentAuthUser,
+      uid: currentAuthUser?.uid || null,
+      email: currentAuthUser?.email || null,
+    });
     if (!customersTableBody) return;
+    if (!canRunReadOnlyReads()) {
+      setReadOnlyBlocked("Please log in to Fair Flow first, then reopen Fair Flow Console.");
+      return;
+    }
     try {
       if (customersStatus) {
         customersStatus.textContent = "READ ONLY V1: Loading customers from Firestore collection salons...";
       }
-      const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-      consoleDb = getFirestore(app);
-      const salonsSnap = await getDocs(query(collection(consoleDb, "salons"), limit(50)));
+      const db = getConsoleDb();
+      console.log("[Fair Flow Console] Customers query start", {
+        path: "salons",
+        limit: 50,
+        currentUid: currentAuthUser?.uid || null,
+        currentEmail: currentAuthUser?.email || null,
+      });
+      const salonsSnap = await getDocs(query(collection(db, "salons"), limit(50)));
+      console.log("[Fair Flow Console] Customers query success count", {
+        count: salonsSnap.size,
+        currentUid: currentAuthUser?.uid || null,
+        currentEmail: currentAuthUser?.email || null,
+      });
       const rows = await Promise.all(salonsSnap.docs.map(async (salonDoc) => {
         const salon = { id: salonDoc.id, ...(salonDoc.data() || {}) };
         const [ownerProfile, locationsCount, staffCount] = await Promise.all([
-          readOwnerProfile(consoleDb, salon),
-          safeSubcollectionCount(consoleDb, salonDoc.id, "locations"),
-          safeSubcollectionCount(consoleDb, salonDoc.id, "staff"),
+          readOwnerProfile(db, salon),
+          safeSubcollectionCount(db, salonDoc.id, "locations"),
+          safeSubcollectionCount(db, salonDoc.id, "staff"),
         ]);
         return mapSalonToCustomerRow(salon, ownerProfile, locationsCount, staffCount);
       }));
+      logReadOnlyDebug("Customers loaded from Firestore", {
+        path: "salons",
+        count: rows.length,
+        table: rows.map((row) => ({
+          salonId: row.id,
+          businessName: row.businessName,
+          owner: row.owner,
+          ownerLoaded: row.owner !== "Not available",
+          locationsCount: row.locationsCount,
+          staffCount: row.staffCount,
+          plan: row.plan,
+          billing: row.billing,
+          lastActivity: row.lastActivity,
+        })),
+      });
       renderCustomerRows(rows);
-      if (customersStatus) {
-        customersStatus.textContent = `READ ONLY V1: Loaded ${rows.length} customers from Firestore collection salons.`;
-      }
     } catch (error) {
+      console.error("[Fair Flow Console] Customers query failed", {
+        path: "salons",
+        errorCode: error?.code || null,
+        errorMessage: error?.message || String(error),
+        currentUid: currentAuthUser?.uid || null,
+        currentEmail: currentAuthUser?.email || null,
+        error,
+      });
       console.warn("[Fair Flow Console] READ ONLY V1 customers load failed", error);
       if (customersStatus) {
         customersStatus.textContent = `READ ONLY V1: Could not load Firestore customers (${error?.code || "unknown"}). Showing placeholder rows.`;
@@ -431,6 +684,25 @@ import {
       if (status) status.innerHTML = `<span class="ff-platform-badge healthy">Normal</span>`;
       const limited = worksSnap.size >= mediaWorkLimit ? ` Limited scan: first ${mediaWorkLimit} works, ${mediaItemsPerWorkLimit} media items each.` : "";
       setText("[data-customer-360-usage-status-line]", `READ ONLY V1: Loaded media usage metadata.${limited}`);
+      logReadOnlyDebug("Data Usage loaded", {
+        salonId,
+        paths: [
+          `salons/${salonId}/contentWorks`,
+          `salons/${salonId}/contentWorks/{workId}/mediaItems`,
+        ],
+        limits: {
+          contentWorks: mediaWorkLimit,
+          mediaItemsPerWork: mediaItemsPerWorkLimit,
+        },
+        totalFiles,
+        monthlyUploads,
+        sizeFieldsFound: hasAnySize,
+        mediaBytes: hasAnySize ? mediaBytes : "Not available",
+        mediaStorage: hasAnySize ? formatBytes(mediaBytes) : "Not available",
+        trainingStorage: "Not available",
+        currentPlanLimit: planLimit,
+        limitation: "No Firebase Storage metadata calls in READ ONLY V1; size requires Firestore size fields on mediaItems.",
+      });
     } catch (error) {
       console.warn("[Fair Flow Console] READ ONLY V1 data usage load failed", error);
       renderDataUsageUnavailable(`READ ONLY V1: Could not load usage metadata (${error?.code || "unknown"}).`);
@@ -512,9 +784,150 @@ import {
       renderRequestsReadOnly(requests);
       const suffix = snap.size >= requestsLimit ? ` Limited to first ${requestsLimit} docs.` : "";
       setText("[data-customer-360-requests-status]", `READ ONLY V1 - Inbox / Requests: Loaded ${requests.length} requests.${suffix}`);
+      const counts = requests.reduce((acc, request) => {
+        const status = String(request?.status || "").toLowerCase();
+        if (status === "open") acc.open += 1;
+        if (status === "pending") acc.pending += 1;
+        if (status === "needs_info") acc.needsInfo += 1;
+        if (status === "approved" || status === "done") acc.approvedDone += 1;
+        if (status === "denied") acc.denied += 1;
+        return acc;
+      }, { open: 0, pending: 0, needsInfo: 0, approvedDone: 0, denied: 0 });
+      logReadOnlyDebug("Inbox / Requests loaded", {
+        salonId,
+        path: `salons/${salonId}/inboxItems`,
+        limit: requestsLimit,
+        totalFound: requests.length,
+        counts,
+        latest5: requests
+          .slice()
+          .sort((a, b) => requestActivityMs(b) - requestActivityMs(a))
+          .slice(0, 5)
+          .map((request) => ({
+            id: request.id,
+            type: displayValue(request.type, "Not available"),
+            status: displayValue(request.status, "Not available"),
+            priority: displayValue(request.priority, "Not available"),
+            createdBy: displayValue(request.createdByName || request.createdByStaffId || request.createdByUid, "Not available"),
+            assignedTo: displayValue(request.forStaffName || request.assignedTo || request.forStaffId || request.forUid, "Not available"),
+            lastActivity: displayDate(request.lastActivityAt || request.createdAt),
+            createdAt: displayDate(request.createdAt),
+          })),
+      });
     } catch (error) {
       console.warn("[Fair Flow Console] READ ONLY V1 inbox requests load failed", error);
       renderRequestsUnavailable(`READ ONLY V1 - Inbox / Requests: Could not load (${error?.code || "unknown"}).`);
+    }
+  }
+
+  function conversationActivityMs(conversation) {
+    return Number(conversation?.lastMessageAtMs) ||
+      Number(conversation?.updatedAtMs) ||
+      (timestampToDate(conversation?.lastMessageAt)?.getTime() || 0) ||
+      (timestampToDate(conversation?.updatedAt)?.getTime() || 0) ||
+      (timestampToDate(conversation?.createdAt)?.getTime() || 0);
+  }
+
+  function unreadSummary(unreadFor) {
+    if (!unreadFor || typeof unreadFor !== "object") return "None";
+    const entries = Object.entries(unreadFor)
+      .filter(([, value]) => Number(value) > 0)
+      .map(([uid, value]) => `${uid}: ${value}`);
+    return entries.length ? entries.join(", ") : "None";
+  }
+
+  function renderSupportUnavailable(message = "READ ONLY V1: Not available.") {
+    if (supportStatus) supportStatus.textContent = message;
+    setText("[data-support-total-conversations]", "--");
+    setText("[data-support-unread-conversations]", "--");
+    setText("[data-support-last-activity]", "--");
+    if (supportConversationsBody) {
+      supportConversationsBody.innerHTML = `<tr><td colspan="7">Not available</td></tr>`;
+    }
+  }
+
+  function renderSupportLoading() {
+    if (supportStatus) supportStatus.textContent = "READ ONLY V1: Loading conversations...";
+    setText("[data-support-total-conversations]", "...");
+    setText("[data-support-unread-conversations]", "...");
+    setText("[data-support-last-activity]", "...");
+    if (supportConversationsBody) {
+      supportConversationsBody.innerHTML = `<tr><td colspan="7">Loading...</td></tr>`;
+    }
+  }
+
+  function renderSupportConversations(salonId, conversations) {
+    const sorted = conversations.slice().sort((a, b) => conversationActivityMs(b) - conversationActivityMs(a));
+    const unreadCount = conversations.filter((conversation) => {
+      const unreadFor = conversation?.unreadFor || {};
+      return unreadFor && typeof unreadFor === "object" && Object.values(unreadFor).some((value) => Number(value) > 0);
+    }).length;
+    const lastActivity = sorted.length ? displayDate(sorted[0].lastMessageAt || sorted[0].updatedAt || sorted[0].createdAt) : "Not available";
+
+    setText("[data-support-total-conversations]", String(conversations.length));
+    setText("[data-support-unread-conversations]", String(unreadCount));
+    setText("[data-support-last-activity]", lastActivity);
+    if (supportStatus) supportStatus.textContent = `READ ONLY V1: Loaded ${conversations.length} conversations from salons/${salonId}/conversations.`;
+
+    if (!supportConversationsBody) return;
+    const latest = sorted.slice(0, 10);
+    if (!latest.length) {
+      supportConversationsBody.innerHTML = `<tr><td colspan="7">No conversations found</td></tr>`;
+      return;
+    }
+    supportConversationsBody.innerHTML = latest.map((conversation) => `
+      <tr>
+        <td>${escapeHtml(displayValue(conversation.lastSenderName, "Not available"))}</td>
+        <td>${escapeHtml(displayValue(conversation.lastSenderRole, "Not available"))}</td>
+        <td>${escapeHtml(displayValue(conversation.lastMessage || conversation.lastTitle, "Not available"))}</td>
+        <td>${escapeHtml(displayDate(conversation.lastMessageAt || conversation.updatedAt || conversation.createdAt))}</td>
+        <td>${escapeHtml(Array.isArray(conversation.participants) ? String(conversation.participants.length) : "Not available")}</td>
+        <td>${escapeHtml(unreadSummary(conversation.unreadFor))}</td>
+        <td>${escapeHtml(displayValue(conversation.locationId, "Not available"))}</td>
+      </tr>
+    `).join("");
+  }
+
+  async function loadSupportConversationsReadOnly(salonId) {
+    // READ ONLY V1: Support conversations summary. No messages subcollection reads and no writes.
+    if (!canRunReadOnlyReads()) {
+      renderSupportUnavailable("Please log in to Fair Flow first, then reopen Fair Flow Console.");
+      return;
+    }
+    if (!salonId) {
+      renderSupportUnavailable("READ ONLY V1: Select a customer.");
+      return;
+    }
+    renderSupportLoading();
+    try {
+      const db = getConsoleDb();
+      const conversationsLimit = 100;
+      const snap = await getDocs(query(collection(db, "salons", salonId, "conversations"), limit(conversationsLimit)));
+      const conversations = snap.docs.map((conversationDoc) => ({ id: conversationDoc.id, ...(conversationDoc.data() || {}) }));
+      renderSupportConversations(salonId, conversations);
+      logReadOnlyDebug("Support conversations loaded", {
+        salonId,
+        path: `salons/${salonId}/conversations`,
+        limit: conversationsLimit,
+        totalFound: conversations.length,
+        latest5: conversations
+          .slice()
+          .sort((a, b) => conversationActivityMs(b) - conversationActivityMs(a))
+          .slice(0, 5)
+          .map((conversation) => ({
+            id: conversation.id,
+            lastSenderName: displayValue(conversation.lastSenderName, "Not available"),
+            lastSenderRole: displayValue(conversation.lastSenderRole, "Not available"),
+            lastMessage: displayValue(conversation.lastMessage || conversation.lastTitle, "Not available"),
+            lastActivity: displayDate(conversation.lastMessageAt || conversation.updatedAt || conversation.createdAt),
+            participantsCount: Array.isArray(conversation.participants) ? conversation.participants.length : "Not available",
+            unreadFor: unreadSummary(conversation.unreadFor),
+            locationId: displayValue(conversation.locationId, "Not available"),
+          })),
+      });
+    } catch (error) {
+      console.warn("[Fair Flow Console] READ ONLY V1 support conversations load failed", error);
+      renderSupportUnavailable(`READ ONLY V1: Could not load conversations (${error?.code || "unknown"}).`);
     }
   }
 
@@ -543,24 +956,49 @@ import {
   async function loadCustomer360ReadOnly(salonId, row) {
     // READ ONLY V1: Customer 360 detail load uses getDoc/getDocs only.
     setCustomer360Loading(row);
+    if (!canRunReadOnlyReads()) {
+      setText("[data-customer-360-status]", "Please log in to Fair Flow first, then reopen Fair Flow Console.");
+      renderLocations([]);
+      renderDataUsageUnavailable();
+      renderRequestsUnavailable();
+      return;
+    }
     if (!salonId) {
       setText("[data-customer-360-status]", "READ ONLY V1: Missing salonId for this row.");
       return;
     }
     try {
-      if (!consoleDb) {
-        const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-        consoleDb = getFirestore(app);
-      }
+      const db = getConsoleDb();
 
-      const [salonSnap, locationsSnap, staffSnap] = await Promise.all([
-        getDoc(doc(consoleDb, "salons", salonId)),
-        getDocs(collection(consoleDb, "salons", salonId, "locations")),
-        getDocs(collection(consoleDb, "salons", salonId, "staff")),
+      const [salonResult, locationsResult, staffResult] = await Promise.allSettled([
+        readCustomer360Path(
+          "salon doc",
+          { path: `salons/${salonId}`, salonId, ownerUid: null },
+          () => getDoc(doc(db, "salons", salonId)),
+          (snap) => ({ exists: snap.exists() }),
+        ),
+        readCustomer360Path(
+          "locations",
+          { path: `salons/${salonId}/locations`, salonId, ownerUid: null },
+          () => getDocs(collection(db, "salons", salonId, "locations")),
+          (snap) => ({ count: snap.size }),
+        ),
+        readCustomer360Path(
+          "staff",
+          { path: `salons/${salonId}/staff`, salonId, ownerUid: null },
+          () => getDocs(collection(db, "salons", salonId, "staff")),
+          (snap) => ({ count: snap.size }),
+        ),
       ]);
 
+      const failedRead = [salonResult, locationsResult, staffResult].find((result) => result.status === "rejected");
+      if (failedRead) throw failedRead.reason;
+
+      const salonSnap = salonResult.value;
+      const locationsSnap = locationsResult.value;
+      const staffSnap = staffResult.value;
       const salon = salonSnap.exists() ? { id: salonId, ...(salonSnap.data() || {}) } : { id: salonId };
-      const ownerProfile = await readOwnerProfile(consoleDb, salon);
+      const ownerProfile = await readOwnerProfile(db, salon, { customer360: true, salonId });
       const locations = locationsSnap.docs.map((locationDoc) => ({ id: locationDoc.id, ...(locationDoc.data() || {}) }));
       const staffRows = staffSnap.docs.map((staffDoc) => ({ id: staffDoc.id, ...(staffDoc.data() || {}) }));
       const staffCounts = countStaffRows(staffRows);
@@ -593,6 +1031,41 @@ import {
       setText("[data-customer-360-pending-invites]", String(staffCounts.pending));
       setText("[data-customer-360-initials]", getInitials(businessName));
       renderLocations(locations);
+      logReadOnlyDebug("Customer 360 loaded", {
+        salonId,
+        paths: [
+          `salons/${salonId}`,
+          `salons/${salonId}/locations`,
+          `salons/${salonId}/staff`,
+        ],
+        loaded: {
+          businessName,
+          ownerName: ownerProfile.name,
+          ownerEmail: ownerProfile.email,
+          locationsCount: locations.length,
+          staffCount: staffRows.length,
+          plan,
+          billingStatus: billing,
+          createdAt,
+          lastActivity,
+          gracePeriod,
+        },
+        notAvailable: Object.entries({
+          ownerName: ownerProfile.name,
+          ownerEmail: ownerProfile.email,
+          plan,
+          billingStatus: billing,
+          createdAt,
+          lastActivity,
+          gracePeriod,
+        }).filter(([, value]) => value === "Not available").map(([key]) => key),
+        locations: locations.map((location) => ({
+          id: location.id,
+          name: displayValue(pickFirst(location, ["name", "locationName", "displayName"], location.id)),
+          status: displayValue(pickFirst(location, ["status"], location?.isActive !== false ? "Active" : "Inactive")),
+        })),
+        staffSummary: staffCounts,
+      });
       await Promise.all([
         loadDataUsageReadOnly(salonId, salon),
         loadInboxRequestsReadOnly(salonId),
@@ -649,6 +1122,15 @@ import {
     });
   }
 
+  customerFilterButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextMode = button.dataset.customersFilter === "all" ? "all" : "active";
+      if (customersFilterMode === nextMode) return;
+      customersFilterMode = nextMode;
+      renderCustomerRows();
+    });
+  });
+
   if (customerBack) {
     customerBack.addEventListener("click", () => {
       activateSection(previousSectionId);
@@ -670,5 +1152,39 @@ import {
     });
   }
 
-  loadFirestoreCustomersReadOnly();
+  if (supportSalonSelect) {
+    supportSalonSelect.addEventListener("change", () => {
+      loadSupportConversationsReadOnly(supportSalonSelect.value);
+    });
+  }
+
+  function startAuthGate() {
+    console.log("[Fair Flow Console] Auth checking");
+    setAuthStatus("Checking Fair Flow session...", "checking");
+    if (customersStatus) customersStatus.textContent = "Checking Fair Flow session...";
+    if (customersTableBody) {
+      customersTableBody.innerHTML = `<tr><td colspan="8">Checking Fair Flow session...</td></tr>`;
+    }
+
+    const app = getConsoleApp();
+    consoleAuth = getAuth(app);
+    onAuthStateChanged(consoleAuth, (user) => {
+      authReady = true;
+      currentAuthUser = user || null;
+
+      if (!user) {
+        console.log("[Fair Flow Console] Auth signed out");
+        setAuthStatus("Please log in to Fair Flow first, then reopen Fair Flow Console.", "signed-out");
+        setReadOnlyBlocked("Please log in to Fair Flow first, then reopen Fair Flow Console.");
+        return;
+      }
+
+      console.log("[Fair Flow Console] Auth signed in:", user.uid, user.email || "");
+      setAuthStatus(`Signed in as: ${user.email || user.uid}`, "signed-in");
+      console.log("[Fair Flow Console] Starting read-only Firestore loading");
+      loadFirestoreCustomersReadOnly();
+    });
+  }
+
+  startAuthGate();
 })();
