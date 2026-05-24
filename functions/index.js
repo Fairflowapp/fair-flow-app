@@ -1445,6 +1445,27 @@ exports.onStaffPresenceCallSent = functions
       callId: currentCall.callId,
     });
 
+    console.log(`[onStaffPresenceCallSent] DIAG target staffId=${staffId} query returned ${tokensSnap.size} doc(s)`);
+    tokensSnap.forEach((docSnap) => {
+      const d = docSnap.data() || {};
+      const tok = String(d.token || "").trim();
+      console.log(`[onStaffPresenceCallSent] DIAG MATCHED doc id=${docSnap.id} stored.staffId=${d.staffId} matches=${d.staffId === staffId} staffName="${d.staffName || ""}" platform=${d.platform} deviceId=${d.deviceId} uid=${d.uid} enabled=${d.enabled} tokenLen=${tok.length} tokenSuffix=...${tok.slice(-12)}`);
+    });
+
+    try {
+      const allTokensSnap = await admin.firestore()
+        .collection(`salons/${salonId}/staffDeviceTokens`)
+        .get();
+      console.log(`[onStaffPresenceCallSent] DIAG ALL tokens in salon=${allTokensSnap.size}`);
+      allTokensSnap.forEach((docSnap) => {
+        const d = docSnap.data() || {};
+        const tok = String(d.token || "").trim();
+        console.log(`[onStaffPresenceCallSent] DIAG ALL doc id=${docSnap.id} stored.staffId=${d.staffId} staffName="${d.staffName || ""}" platform=${d.platform} deviceId=${d.deviceId} uid=${d.uid} enabled=${d.enabled} tokenLen=${tok.length} suffix=...${tok.slice(-10)}`);
+      });
+    } catch (e) {
+      console.warn("[onStaffPresenceCallSent] DIAG ALL failed", e?.message);
+    }
+
     const tokens = [];
     const tokenDocsByToken = new Map();
     tokensSnap.forEach((docSnap) => {
@@ -1535,6 +1556,71 @@ exports.onStaffPresenceCallSent = functions
       failureCount: response.failureCount,
     });
     return null;
+  });
+
+exports.onStaffDeviceTokenWritten = functions
+  .region("us-central1")
+  .firestore.document("salons/{salonId}/staffDeviceTokens/{tokenDocId}")
+  .onWrite(async (change, context) => {
+    if (!change.after.exists) return null;
+    const data = change.after.data() || {};
+    const token = String(data.token || "").trim();
+    console.log(`[onStaffDeviceTokenWritten] flat salonId=${context.params.salonId} tokenDocId=${context.params.tokenDocId} staffId=${data.staffId || ""} staffName="${data.staffName || ""}" uid=${data.uid || ""} platform=${data.platform || ""} enabled=${data.enabled} deviceId=${data.deviceId || ""} tokenLength=${token.length} tokenPrefix=${token.slice(0, 16)} tokenSuffix=${token.length > 12 ? `...${token.slice(-12)}` : token} isOnlyHex=${/^[0-9a-fA-F]+$/.test(token)} hasColon=${token.includes(":")}`);
+    console.log("[onStaffDeviceTokenWritten] token saved", {
+      salonId: context.params.salonId,
+      tokenDocId: context.params.tokenDocId,
+      staffId: data.staffId || "",
+      staffName: data.staffName || "",
+      uid: data.uid || "",
+      platform: data.platform || "",
+      enabled: data.enabled,
+      deviceId: data.deviceId || "",
+      tokenLength: token.length,
+      tokenPrefix: token.slice(0, 16),
+      tokenSuffix: token.length > 12 ? `...${token.slice(-12)}` : token,
+      isOnlyHex: /^[0-9a-fA-F]+$/.test(token),
+      hasColon: token.includes(":"),
+    });
+    return null;
+  });
+
+exports.inspectPushTokenFormats = functions
+  .region("us-central1")
+  .https.onRequest(async (req, res) => {
+    const secret = String(req.query.secret || "");
+    if (secret !== "inspect-ios-push-20260524") {
+      res.status(403).json({ ok: false });
+      return;
+    }
+    const salonId = String(req.query.salonId || "").trim();
+    if (!salonId) {
+      res.status(400).json({ ok: false, error: "missing salonId" });
+      return;
+    }
+    const snap = await admin.firestore()
+      .collection(`salons/${salonId}/staffDeviceTokens`)
+      .get();
+    const rows = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      const token = String(data.token || "").trim();
+      rows.push({
+        tokenDocId: docSnap.id,
+        staffId: String(data.staffId || ""),
+        staffName: String(data.staffName || ""),
+        uid: String(data.uid || ""),
+        platform: String(data.platform || ""),
+        enabled: data.enabled,
+        deviceId: String(data.deviceId || ""),
+        tokenLength: token.length,
+        tokenPrefix: token.slice(0, 16),
+        tokenSuffix: token.length > 12 ? `...${token.slice(-12)}` : token,
+        isOnlyHex: /^[0-9a-fA-F]+$/.test(token),
+        hasColon: token.includes(":"),
+        updatedAt: data.updatedAt && data.updatedAt.toDate ? data.updatedAt.toDate().toISOString() : null,
+      });
+    });
+    res.json({ ok: true, count: rows.length, rows });
   });
 
 exports.onChatMessageCreated = functions

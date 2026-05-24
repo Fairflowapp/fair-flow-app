@@ -66,6 +66,11 @@ function readPushContext() {
   return { salonId, staffId, staffName };
 }
 
+function looksLikeApnsRawToken(value) {
+  const str = String(value || "").trim();
+  return str.length === 64 && /^[0-9a-fA-F]+$/.test(str);
+}
+
 async function waitForPushContext(timeoutMs = 15000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -78,17 +83,23 @@ async function waitForPushContext(timeoutMs = 15000) {
 
 async function saveToken(tokenValue) {
   const user = auth.currentUser;
-  if (!user || !tokenValue) return;
+  if (!user || !tokenValue) return false;
+  const value = String(tokenValue || "").trim();
+  if (!value) return false;
+  if (getPlatform() === "ios" && looksLikeApnsRawToken(value)) {
+    console.warn(LOG, "ignored raw APNs token; waiting for FCM token", { tokenLength: value.length });
+    return false;
+  }
   const ctx = await waitForPushContext();
   if (!ctx.salonId || !ctx.staffId) {
     console.warn(LOG, "token not saved, missing salon/staff context", ctx);
-    return;
+    return false;
   }
 
   const deviceId = getDeviceId();
   const tokenDocId = `${cleanDocPart(ctx.staffId)}_${cleanDocPart(deviceId)}`;
   await setDoc(doc(db, `salons/${ctx.salonId}/staffDeviceTokens`, tokenDocId), {
-    token: tokenValue,
+    token: value,
     uid: user.uid,
     staffId: ctx.staffId,
     staffName: ctx.staffName,
@@ -98,6 +109,7 @@ async function saveToken(tokenValue) {
     updatedAt: serverTimestamp(),
   }, { merge: true });
   console.log(LOG, "registered device token", { salonId: ctx.salonId, staffId: ctx.staffId, platform: getPlatform() });
+  return true;
 }
 
 async function ensureAndroidChannel(PushNotifications) {
@@ -157,7 +169,12 @@ function bindPushListeners() {
   window.__ffPushListenersBound = true;
 
   PushNotifications.addListener("registration", (token) => {
-    saveToken(token?.value).catch((err) => console.warn(LOG, "save token failed", err));
+    const value = String(token?.value || "").trim();
+    if (getPlatform() === "ios" && looksLikeApnsRawToken(value)) {
+      console.log(LOG, "iOS registration returned APNs token; waiting for native FCM bridge");
+      return;
+    }
+    saveToken(value).catch((err) => console.warn(LOG, "save token failed", err));
   });
 
   PushNotifications.addListener("registrationError", (err) => {
@@ -184,12 +201,55 @@ function bindPushListeners() {
   });
 }
 
+function bindIosFcmBridge() {
+  if (!isNativeApp() || getPlatform() !== "ios" || window.__ffIosFcmBridgeBound) return;
+  window.__ffIosFcmBridgeBound = true;
+
+  let pendingToken = String(window.__ff_fcm_token || "").trim();
+  let retryTimer = null;
+
+  function persist(token) {
+    pendingToken = String(token || pendingToken || window.__ff_fcm_token || "").trim();
+    if (!pendingToken) return;
+    saveToken(pendingToken)
+      .then((saved) => {
+        if (saved) {
+          pendingToken = "";
+          if (retryTimer) clearInterval(retryTimer);
+          retryTimer = null;
+        }
+      })
+      .catch((err) => console.warn(LOG, "save iOS FCM token failed", err));
+  }
+
+  window.addEventListener("ff-fcm-token-received", (event) => {
+    const token = event?.detail?.token || window.__ff_fcm_token;
+    if (token) persist(token);
+  });
+
+  let attempts = 0;
+  retryTimer = setInterval(() => {
+    attempts += 1;
+    if (window.__ff_fcm_token || pendingToken) {
+      persist(window.__ff_fcm_token || pendingToken);
+    }
+    if (attempts >= 240) {
+      clearInterval(retryTimer);
+      retryTimer = null;
+    }
+  }, 500);
+}
+
 bindPushListeners();
+bindIosFcmBridge();
 
 onAuthStateChanged(auth, (user) => {
   if (!user) return;
   setTimeout(() => {
     initPushForSignedInUser().catch((err) => console.warn(LOG, "init failed", err));
+    if (getPlatform() === "ios" && window.__ff_fcm_token) {
+      saveToken(window.__ff_fcm_token).catch((err) => console.warn(LOG, "save iOS FCM token after auth failed", err));
+    }
   }, 2500);
 });
 
