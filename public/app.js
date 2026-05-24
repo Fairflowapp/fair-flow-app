@@ -1966,7 +1966,7 @@ async function ffLoadActiveMembershipsForUser(user) {
     }));
     return rows.filter((m) => {
       const status = String(m.status || "active").trim().toLowerCase();
-      return m.salonId && status !== "archived";
+      return m.salonId && status === "active";
     });
   } catch (err) {
     console.warn("[Membership] Failed loading memberships; falling back to legacy users.salonId", err);

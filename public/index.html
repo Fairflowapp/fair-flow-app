@@ -11917,9 +11917,13 @@ function renderSelect(){
 
   // Load staff from ff_staff_v1 (new primary source) - direct localStorage read
   let technicians = [];
+  let staffCloudHydrated = false;
+  let staffCloudStoreWasEmpty = false;
   try {
+    staffCloudHydrated = !!(sessionStorage.getItem('ff_staff_cloud_hydrated_v1') || '');
     const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
     const staffList = Array.isArray(store.staff) ? store.staff : [];
+    staffCloudStoreWasEmpty = staffCloudHydrated && staffList.length === 0;
     // Scope the Join dropdown STRICTLY to the active branch. The user
     // asked for "two separate businesses", so a staff member can only join
     // the queue at a branch where their allowedLocationIds explicitly
@@ -11963,13 +11967,15 @@ function renderSelect(){
     console.error('[renderSelect] Error loading from ff_staff_v1:', e);
   }
   const _activeLocForFallback = renderSelect._activeLocForFallback;
-  if (technicians.length === 0 && !_activeLocForFallback) {
+  if (technicians.length === 0 && !_activeLocForFallback && !staffCloudStoreWasEmpty) {
     try {
       technicians = loadTechniciansFromSettings();
       console.log('[renderSelect] Fallback: loadTechniciansFromSettings -', technicians.length);
     } catch (e2) {
       console.warn('[renderSelect] Fallback technicians failed:', e2);
     }
+  } else if (technicians.length === 0 && staffCloudStoreWasEmpty) {
+    console.log('[renderSelect] Cloud staff loaded empty - skipping legacy settings fallback on purpose.');
   } else if (technicians.length === 0 && _activeLocForFallback) {
     console.log('[renderSelect] No staff assigned to location', _activeLocForFallback, '- skipping legacy settings fallback on purpose.');
   }
@@ -51642,6 +51648,53 @@ document.addEventListener('visibilitychange', function() {
 });
 
 // Queue Cloud init callback - called automatically by queue-cloud.js when it loads
+function ffFilterQueueStateToCurrentStaff(q, s) {
+  try {
+    const staffCloudHydrated = !!(sessionStorage.getItem('ff_staff_cloud_hydrated_v1') || '');
+    if (!staffCloudHydrated) return { queue: q, service: s };
+    const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+    const staffList = Array.isArray(store.staff) ? store.staff : [];
+    const ids = new Set();
+    const names = new Set();
+    staffList.forEach(function (staff) {
+      if (!staff || staff.isArchived === true) return;
+      const id = String(staff.id || staff.staffId || '').trim();
+      const name = String(staff.name || '').trim().toLowerCase();
+      if (id) ids.add(id);
+      if (name) names.add(name);
+    });
+    const keep = function (item) {
+      if (!item) return false;
+      const staffId = String(item.staffId || '').trim();
+      const name = String(item.name || '').trim().toLowerCase();
+      return (!!staffId && ids.has(staffId)) || (!!name && names.has(name));
+    };
+    return {
+      queue: Array.isArray(q) ? q.filter(keep) : [],
+      service: Array.isArray(s) ? s.filter(keep) : []
+    };
+  } catch (_) {
+    return { queue: q, service: s };
+  }
+}
+
+function ffApplyCurrentStaffFilterToRenderedQueue() {
+  try {
+    const filteredQueueState = ffFilterQueueStateToCurrentStaff(queue, service);
+    const queueChanged = JSON.stringify(filteredQueueState.queue || []) !== JSON.stringify(queue || []);
+    const serviceChanged = JSON.stringify(filteredQueueState.service || []) !== JSON.stringify(service || []);
+    if (!queueChanged && !serviceChanged) return;
+    queue = filteredQueueState.queue;
+    service = filteredQueueState.service;
+    ls("ffv24_queue", queue);
+    ls("ffv24_service", service);
+    if (typeof renderQueue === 'function') renderQueue();
+    if (typeof renderService === 'function') renderService();
+  } catch (e) {
+    console.warn('[Queue] failed to apply staff isolation filter after staff cloud update', e);
+  }
+}
+
 window.__ffQueueCloudInit = function() {
   if (typeof window.initQueueCloud !== 'function') return;
   window.initQueueCloud({
@@ -51649,12 +51702,13 @@ window.__ffQueueCloudInit = function() {
       // After a local save, ignore Firestore updates briefly to avoid race with slow writes / snapshots
       const forceApply = meta && meta.force === true;
       if (!forceApply && Date.now() - window.__ff_lastSaveTime < 6000) return;
-      queue = q;
-      service = s;
+      const filteredQueueState = ffFilterQueueStateToCurrentStaff(q, s);
+      queue = filteredQueueState.queue;
+      service = filteredQueueState.service;
       log = l;
       // Keep localStorage in sync as cache
-      ls("ffv24_queue", q);
-      ls("ffv24_service", s);
+      ls("ffv24_queue", queue);
+      ls("ffv24_service", service);
       ls("ffv24_log", l);
       // Sync queue settings (auto-reset config) - skipCloudWrite=true to avoid loop
       if (qd && typeof qd === 'object' && Object.keys(qd).length > 0) {
@@ -51701,6 +51755,7 @@ if (!window.__ffQueueLocationListenerBound) {
     try {
       if (typeof renderSelect === 'function') renderSelect();
     } catch (_) {}
+    ffApplyCurrentStaffFilterToRenderedQueue();
   });
 }
 

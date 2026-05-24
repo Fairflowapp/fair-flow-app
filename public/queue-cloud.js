@@ -30,8 +30,13 @@ async function getSalonId() {
   // selected, or one explicitly picked from Choose Salon), that selection is
   // the source of truth. Reading users/{uid}.salonId first would leak data
   // from the legacy primary salon into whichever salon the user picked.
-  if (typeof window !== "undefined" && window.currentSalonId) {
-    return String(window.currentSalonId).trim() || null;
+  if (typeof window !== "undefined") {
+    if (window.currentSalonId) {
+      return String(window.currentSalonId).trim() || null;
+    }
+    if (window.__ff_waiting_for_salon_choice !== false) {
+      return null;
+    }
   }
   const user = auth.currentUser;
   if (!user) return null;
@@ -143,6 +148,9 @@ function subscribe(salonId, locationId, opts = {}) {
           log: localState.log || [],
           updatedAt: serverTimestamp()
         }).catch((e) => console.warn("[QueueCloud] Initial write failed", e));
+      } else {
+        _applyState([], [], [], null, { force: true, reason: "queue-cloud-missing-doc" });
+        if (typeof _onLogChange === "function") _onLogChange();
       }
       _firstSnapshot = false;
       return;
