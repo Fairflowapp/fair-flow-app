@@ -2193,6 +2193,12 @@ async function notifyStaffScheduleChanges() {
     weeksRef,
     {
       locationId: locId || null,
+      lastChangeNotifyAt: serverTimestamp(),
+      lastChangeNotifyWeekKey: key,
+      lastChangeNotifyLocationId: locId || null,
+      lastChangeNotifyStaffIds: changed.length
+        ? changed
+        : (staffList || []).map((staff) => getScheduleStaffKey(staff)).filter(Boolean),
       staffShiftFingerprints: { [key]: fpNew },
       weekDraftSnapshots: {
         [key]: {

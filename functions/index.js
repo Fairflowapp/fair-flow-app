@@ -1129,6 +1129,24 @@ function _staffCanHandleMedia(staffData) {
   return staff.isAdmin === true || staff.isManager === true || _roleCanHandleInbox(staff.role);
 }
 
+function _staffLinkedUid(staffData) {
+  const staff = staffData || {};
+  const candidates = [
+    staff.uid,
+    staff.firebaseUid,
+    staff.firebaseAuthUid,
+    staff.authUid,
+    staff.userUid,
+    staff.userId,
+    staff.memberId,
+  ];
+  for (const value of candidates) {
+    const uid = String(value || "").trim();
+    if (uid) return uid;
+  }
+  return "";
+}
+
 function _timestampMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === "function") return value.toMillis();
@@ -1136,6 +1154,136 @@ function _timestampMillis(value) {
   if (typeof value.seconds === "number") return value.seconds * 1000;
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function _staffIsActiveForPush(staffData) {
+  const staff = staffData || {};
+  if (!staff || staff.isArchived === true || staff.archived === true || staff.deleted === true) return false;
+  if (staff.isActive === false || staff.active === false || staff.enabled === false) return false;
+  const status = String(staff.status || staff.lifecycleStatus || "").trim().toLowerCase();
+  if (["archived", "inactive", "disabled", "deleted"].includes(status)) return false;
+  return true;
+}
+
+function _staffMatchesLocationForPush(staffData, locationId) {
+  const loc = String(locationId || "").trim();
+  if (!loc) return true;
+  const staff = staffData || {};
+  const values = new Set();
+  [
+    staff.locationId,
+    staff.primaryLocationId,
+    staff.homeLocationId,
+    staff.assignedLocationId,
+    staff.activeLocationId,
+  ].forEach((value) => {
+    const s = String(value || "").trim();
+    if (s) values.add(s);
+  });
+  [
+    staff.locationIds,
+    staff.locationIdList,
+    staff.assignedLocationIds,
+    staff.activeLocationIds,
+    staff.locations,
+  ].forEach((list) => {
+    if (!Array.isArray(list)) return;
+    list.forEach((value) => {
+      const s = typeof value === "object"
+        ? String(value?.id || value?.locationId || "").trim()
+        : String(value || "").trim();
+      if (s) values.add(s);
+    });
+  });
+  return values.size === 0 || values.has(loc);
+}
+
+async function _sendScheduleUpdatedPush({ salonId, publishDocId, weekStart, locationId, staffIds }) {
+  const requestedStaffIds = new Set(
+    (Array.isArray(staffIds) ? staffIds : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  const staffSnap = await admin.firestore().collection(`salons/${salonId}/staff`).get();
+  const activeStaffIds = new Set();
+  staffSnap.docs.forEach((docSnap) => {
+    const staffId = String(docSnap.id || "").trim();
+    const staffData = docSnap.data() || {};
+    if (!staffId) return;
+    if (requestedStaffIds.size && !requestedStaffIds.has(staffId)) return;
+    if (!_staffIsActiveForPush(staffData)) return;
+    if (!_staffMatchesLocationForPush(staffData, locationId)) return;
+    activeStaffIds.add(staffId);
+  });
+
+  const allTokensSnap = await admin.firestore()
+    .collection(`salons/${salonId}/staffDeviceTokens`)
+    .where("enabled", "==", true)
+    .get();
+  const latestTokenDocByDevice = new Map();
+  const latestTokenDocByToken = new Map();
+  allTokensSnap.docs.forEach((docSnap) => {
+    const tokenData = docSnap.data() || {};
+    const updatedMs = _timestampMillis(tokenData.updatedAt);
+    const deviceId = String(tokenData.deviceId || "").trim();
+    const token = String(tokenData.token || "").trim();
+    const currentByDevice = deviceId ? latestTokenDocByDevice.get(deviceId) : null;
+    if (deviceId && (!currentByDevice || updatedMs >= currentByDevice.updatedMs)) {
+      latestTokenDocByDevice.set(deviceId, { docId: docSnap.id, updatedMs });
+    }
+    const currentByToken = token ? latestTokenDocByToken.get(token) : null;
+    if (token && (!currentByToken || updatedMs >= currentByToken.updatedMs)) {
+      latestTokenDocByToken.set(token, { docId: docSnap.id, updatedMs });
+    }
+  });
+
+  let staleFilteredCount = 0;
+  const tokenDocs = allTokensSnap.docs.filter((docSnap) => {
+    const tokenData = docSnap.data() || {};
+    const staffId = String(tokenData.staffId || "").trim();
+    const token = String(tokenData.token || "").trim();
+    if (!staffId || !token || !activeStaffIds.has(staffId)) return false;
+    const deviceId = String(tokenData.deviceId || "").trim();
+    const latestForDevice = deviceId ? latestTokenDocByDevice.get(deviceId) : null;
+    const latestForToken = token ? latestTokenDocByToken.get(token) : null;
+    const isStale =
+      (latestForDevice && latestForDevice.docId !== docSnap.id) ||
+      (latestForToken && latestForToken.docId !== docSnap.id);
+    if (isStale) staleFilteredCount += 1;
+    return !isStale;
+  });
+  const tokenCount = new Set(
+    tokenDocs.map((docSnap) => String((docSnap.data() || {}).token || "").trim()).filter(Boolean)
+  ).size;
+
+  console.log("[onSchedulePublished] Schedule update target resolved", {
+    salonId,
+    locationId: locationId || "",
+    publishDocId,
+    weekStart,
+    staffCount: activeStaffIds.size,
+    tokenCount,
+    candidateTokenDocs: allTokensSnap.size,
+    matchingTokenDocs: tokenDocs.length,
+    staleFilteredTokenDocs: staleFilteredCount,
+  });
+
+  return _sendPushToTokenQuery({
+    tokensSnap: { forEach: (cb) => tokenDocs.forEach(cb) },
+    title: "Schedule updated",
+    body: "Your schedule has been updated. Please check your shifts.",
+    channelId: "staff_calls",
+    logTag: "onSchedulePublished",
+    data: {
+      type: "schedule_updated",
+      salonId,
+      publishDocId,
+      weekStart,
+      locationId: locationId || "",
+      staffCount: activeStaffIds.size,
+      tokenCount,
+    },
+  });
 }
 
 async function _sendPushToInboxHandlers({ salonId, excludeUid, title, body, data, channelId, logTag }) {
@@ -1236,11 +1384,66 @@ exports.onStaffPresenceCallSent = functions
     if (beforeCall && beforeCall.callId === currentCall.callId && beforeCall.status === "sent") return null;
 
     const { salonId, staffId } = context.params;
-    const tokensSnap = await admin.firestore()
+    const selectedStaffId = String(staffId || "").trim();
+    const staffSnap = await admin.firestore()
+      .doc(`salons/${salonId}/staff/${selectedStaffId}`)
+      .get();
+    const staffData = staffSnap.exists ? (staffSnap.data() || {}) : {};
+    const resolvedUid = String(currentCall.targetUid || "").trim() || _staffLinkedUid(staffData);
+    const rawTokensSnap = await admin.firestore()
       .collection(`salons/${salonId}/staffDeviceTokens`)
-      .where("staffId", "==", staffId)
+      .where("staffId", "==", selectedStaffId)
       .where("enabled", "==", true)
       .get();
+    const allEnabledTokensSnap = await admin.firestore()
+      .collection(`salons/${salonId}/staffDeviceTokens`)
+      .where("enabled", "==", true)
+      .get();
+    const latestTokenDocByDevice = new Map();
+    const latestTokenDocByToken = new Map();
+    allEnabledTokensSnap.docs.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      const updatedMs = _timestampMillis(data.updatedAt);
+      const deviceId = String(data.deviceId || "").trim();
+      const token = String(data.token || "").trim();
+      const currentByDevice = deviceId ? latestTokenDocByDevice.get(deviceId) : null;
+      if (deviceId && (!currentByDevice || updatedMs >= currentByDevice.updatedMs)) {
+        latestTokenDocByDevice.set(deviceId, { docId: docSnap.id, updatedMs });
+      }
+      const currentByToken = token ? latestTokenDocByToken.get(token) : null;
+      if (token && (!currentByToken || updatedMs >= currentByToken.updatedMs)) {
+        latestTokenDocByToken.set(token, { docId: docSnap.id, updatedMs });
+      }
+    });
+    let staleFilteredCount = 0;
+    const matchingTokenDocs = rawTokensSnap.docs.filter((docSnap) => {
+      const data = docSnap.data() || {};
+      if (resolvedUid && String(data.uid || "").trim() !== resolvedUid) return false;
+      const deviceId = String(data.deviceId || "").trim();
+      const token = String(data.token || "").trim();
+      const latestForDevice = deviceId ? latestTokenDocByDevice.get(deviceId) : null;
+      const latestForToken = token ? latestTokenDocByToken.get(token) : null;
+      const isStale =
+        (latestForDevice && latestForDevice.docId !== docSnap.id) ||
+        (latestForToken && latestForToken.docId !== docSnap.id);
+      if (isStale) staleFilteredCount += 1;
+      return !isStale;
+    });
+    const tokensSnap = {
+      size: matchingTokenDocs.length,
+      forEach: (cb) => matchingTokenDocs.forEach(cb),
+    };
+
+    console.log("[onStaffPresenceCallSent] Target resolved", {
+      salonId,
+      selectedStaffId,
+      resolvedUid: resolvedUid || null,
+      tokenLookup: resolvedUid ? "staffId+uid" : "staffId",
+      candidateTokenDocs: rawTokensSnap.size,
+      matchingTokenDocs: matchingTokenDocs.length,
+      staleFilteredTokenDocs: staleFilteredCount,
+      callId: currentCall.callId,
+    });
 
     const tokens = [];
     const tokenDocsByToken = new Map();
@@ -1253,9 +1456,24 @@ exports.onStaffPresenceCallSent = functions
     });
 
     if (!tokens.length) {
-      console.log("[onStaffPresenceCallSent] No device tokens", { salonId, staffId, callId: currentCall.callId });
+      console.log("[onStaffPresenceCallSent] No device tokens", {
+        salonId,
+        selectedStaffId,
+        resolvedUid: resolvedUid || null,
+        tokenLookup: resolvedUid ? "staffId+uid" : "staffId",
+        callId: currentCall.callId,
+      });
       return null;
     }
+
+    console.log("[onStaffPresenceCallSent] Sending to tokens", {
+      salonId,
+      selectedStaffId,
+      resolvedUid: resolvedUid || null,
+      tokenLookup: resolvedUid ? "staffId+uid" : "staffId",
+      tokenCount: tokens.length,
+      callId: currentCall.callId,
+    });
 
     const title = String(currentCall.message || "Your client is waiting");
     const body = String(currentCall.detail || "Please return to the queue.");
@@ -1265,7 +1483,8 @@ exports.onStaffPresenceCallSent = functions
       data: {
         type: "staff_call",
         salonId: String(salonId),
-        staffId: String(staffId),
+        staffId: String(selectedStaffId),
+        uid: String(resolvedUid || ""),
         callId: String(currentCall.callId),
         locationId: String(currentCall.locationId || ""),
       },
@@ -1308,7 +1527,9 @@ exports.onStaffPresenceCallSent = functions
 
     console.log("[onStaffPresenceCallSent] Push sent", {
       salonId,
-      staffId,
+      selectedStaffId,
+      resolvedUid: resolvedUid || null,
+      tokenCount: tokens.length,
       callId: currentCall.callId,
       successCount: response.successCount,
       failureCount: response.failureCount,
@@ -1407,29 +1628,32 @@ exports.onSchedulePublished = functions
     const beforeBroadcastMs = _timestampMillis(before.lastBroadcastAt);
     const afterBroadcastMs = _timestampMillis(after.lastBroadcastAt);
     const weekStart = String(after.lastBroadcastWeekKey || "").trim();
+    const beforeChangeNotifyMs = _timestampMillis(before.lastChangeNotifyAt);
+    const afterChangeNotifyMs = _timestampMillis(after.lastChangeNotifyAt);
+    const changeNotifyWeekStart = String(after.lastChangeNotifyWeekKey || "").trim();
+    const changeNotifyLocationId = String(after.lastChangeNotifyLocationId || after.locationId || "").trim();
+
+    if (changeNotifyWeekStart && afterChangeNotifyMs && afterChangeNotifyMs > beforeChangeNotifyMs) {
+      const { salonId, publishDocId } = context.params;
+      return _sendScheduleUpdatedPush({
+        salonId,
+        publishDocId,
+        weekStart: changeNotifyWeekStart,
+        locationId: changeNotifyLocationId,
+        staffIds: after.lastChangeNotifyStaffIds,
+      });
+    }
 
     if (!weekStart || !afterBroadcastMs || afterBroadcastMs <= beforeBroadcastMs) return null;
     if (!after.published || after.published[weekStart] !== true) return null;
 
     const { salonId, publishDocId } = context.params;
-    const tokensSnap = await admin.firestore()
-      .collection(`salons/${salonId}/staffDeviceTokens`)
-      .where("enabled", "==", true)
-      .get();
-
-    return _sendPushToTokenQuery({
-      tokensSnap,
-      title: "New schedule posted",
-      body: "A new schedule has been published. Please check your schedule.",
-      channelId: "staff_calls",
-      logTag: "onSchedulePublished",
-      data: {
-        type: "schedule_published",
-        salonId,
-        publishDocId,
-        weekStart,
-        locationId: after.locationId || "",
-      },
+    return _sendScheduleUpdatedPush({
+      salonId,
+      publishDocId,
+      weekStart,
+      locationId: after.locationId || "",
+      staffIds: null,
     });
   });
 

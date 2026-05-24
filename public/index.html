@@ -33192,7 +33192,7 @@ function initializeAppsPanel() {
             if (typeof window.goToSchedule === 'function') {
               window.goToSchedule();
             } else {
-              import('/schedule-ui.js?v=20260514_schedule_nav_guard')
+              import('/schedule-ui.js?v=20260524_schedule_push_notify')
                 .then(function (m) {
                   if (m && typeof m.goToSchedule === 'function') {
                     window.goToSchedule = m.goToSchedule;
@@ -56181,7 +56181,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 1900 },
         { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 2000 },
         { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
-        { src: "/schedule-ui.js?v=20260514_schedule_nav_guard", type: "module", delay: 2300 },
+        { src: "/schedule-ui.js?v=20260524_schedule_push_notify", type: "module", delay: 2300 },
         { src: "/dashboard.js?v=20260516_dashboard_class_first_recompute", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260505_inbox_btn_top_right_layout", type: "module", delay: 2700 },
@@ -56189,7 +56189,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/chat.js?v=20260522_chat_unread_push", type: "module", delay: 2900 },
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
-        { src: "/push-notifications.js?v=20260522_chat_inbox_push", type: "module", delay: 3500 },
+        { src: "/push-notifications.js?v=20260524_schedule_push_notify", type: "module", delay: 3500 },
         { src: "/settings-cloud.js?v=20260501_points", type: "module", delay: 3600 },
         { src: "/billing-cloud.js?v=20260519_internaloverride", type: "module", delay: 3650 }, // bumped: internal billing override (comped/free accounts) — adds parallel billing/override listener + override-aware render path
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },

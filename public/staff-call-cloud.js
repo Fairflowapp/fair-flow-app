@@ -176,6 +176,24 @@ function resolveStaffIdByName(name) {
   return staff ? staff.id : null;
 }
 
+function resolveStaffLinkedUid(staff) {
+  if (!staff || typeof staff !== "object") return "";
+  const candidates = [
+    staff.uid,
+    staff.firebaseUid,
+    staff.firebaseAuthUid,
+    staff.authUid,
+    staff.userUid,
+    staff.userId,
+    staff.memberId
+  ];
+  for (const value of candidates) {
+    const uid = String(value || "").trim();
+    if (uid) return uid;
+  }
+  return "";
+}
+
 function presenceRef(salonId, staffId) {
   return doc(db, `salons/${salonId}/staffPresence`, staffId);
 }
@@ -1085,6 +1103,7 @@ window.ffSendStaffCall = async function(staffIdOrName, options = {}) {
       }
     }
   } catch (_) { sendingLocationId = ""; }
+  const targetUid = resolveStaffLinkedUid(targetStaff);
   const currentCall = {
     callId,
     message: callMessage,
@@ -1095,8 +1114,17 @@ window.ffSendStaffCall = async function(staffIdOrName, options = {}) {
     expiresAt: new Date(sentAtMs + callTimeoutMs),
     expiresAtMs: sentAtMs + callTimeoutMs,
     sentBy: currentActorName(),
-    locationId: sendingLocationId || null
+    locationId: sendingLocationId || null,
+    targetStaffId,
+    targetUid: targetUid || null
   };
+
+  diagLog("ffSendStaffCall target resolved", {
+    salonId: _salonId,
+    selectedStaffId: targetStaffId,
+    resolvedUid: targetUid || null,
+    targetName: targetStaff?.name || presence?.name || ""
+  });
 
   await setDoc(
     presenceRef(_salonId, targetStaffId),

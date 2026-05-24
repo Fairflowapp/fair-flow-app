@@ -175,6 +175,8 @@ function bindPushListeners() {
         document.getElementById("chatBtn")?.click();
       } else if (data.type === "inbox_item") {
         document.getElementById("inboxBtn")?.click();
+      } else if (data.type === "schedule_updated" || data.type === "schedule_published") {
+        document.getElementById("scheduleBtn")?.click();
       } else {
         document.getElementById("queueBtn")?.click();
       }
