@@ -814,7 +814,8 @@ service cloud.firestore {
           || (isSignedIn() && inboxCreatorOwnsStaffRow(salonId))
         );
 
-      // READ: participant may always read own rows (multi-salon / staging); managers need salon + role
+      // READ: participant may always read own rows (multi-salon / staging); managers need salon + role.
+      // Fair Flow Console (platform admin): read-only access for internal customer 360 view.
       allow read: if inboxParticipantSelfRead()
         || (
           belongsToSalon(salonId)
@@ -825,7 +826,8 @@ service cloud.firestore {
               resource.data.forUid == request.auth.uid
             ))
           )
-        );
+        )
+        || isPlatformAdmin();
 
       // UPDATE
       allow update: if belongsToSalon(salonId)
@@ -931,13 +933,15 @@ service cloud.firestore {
 
     // ===== STAFF MEMBERS (cloud sync) =====
     // Manager/Admin/Owner: full CRUD. Salon members + PIN/staff linked via users.staffId: read (queue, schedule, etc.)
+    // Fair Flow Console (platform admin): read-only access for internal customer 360 view.
     match /salons/{salonId}/staff/{staffId} {
       allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId)
         || (
           memberExists(salonId)
           && memberStaffId(salonId) == staffId
         )
-        || staffDocUidMatches(salonId, staffId);
+        || staffDocUidMatches(salonId, staffId)
+        || isPlatformAdmin();
       allow create, delete: if belongsToSalon(salonId)
         && isManager(salonId);
       allow update: if (belongsToSalon(salonId) && isManager(salonId))
@@ -1069,10 +1073,13 @@ service cloud.firestore {
       }
     }
 
-    // Conversations (PRIVATE) — only participants can read
+    // Conversations (PRIVATE) — only participants can read.
+    // Fair Flow Console (platform admin): read-only access for internal customer 360 view.
     match /salons/{salonId}/conversations/{conversationId} {
-      allow read: if belongsToSalon(salonId)
-        && request.auth.uid in resource.data.participants;
+      allow read: if (
+        belongsToSalon(salonId)
+        && request.auth.uid in resource.data.participants
+      ) || isPlatformAdmin();
 
       // Participant can create a 1:1 conversation doc
       allow create: if belongsToSalon(salonId)
@@ -1383,8 +1390,9 @@ service cloud.firestore {
     // Physical salon branches / check-in points (name, address, lat/lng, allowed radius, active flag).
     // All salon members can read (needed for UI listings and check-in geofencing);
     // Manager/Admin/Owner can CRUD.
+    // Fair Flow Console (platform admin): read-only access for internal customer 360 view.
     match /salons/{salonId}/locations/{locationId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow create, update, delete: if isManager(salonId);
     }
 
@@ -1584,9 +1592,10 @@ service cloud.firestore {
         && (isManager(salonId) || permMediaHandleAllowed(salonId));
     }
 
-    // Legacy Media module (contentWorks, mediaItems, postedHistory)
+    // Legacy Media module (contentWorks, mediaItems, postedHistory).
+    // Fair Flow Console (platform admin): read-only access for internal customer 360 view (data usage metadata).
     match /salons/{salonId}/contentWorks/{workId} {
-      allow read: if canAccessMedia(salonId);
+      allow read: if canAccessMedia(salonId) || isPlatformAdmin();
       allow create: if canAccessMedia(salonId)
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.salonId == salonId
@@ -1597,7 +1606,7 @@ service cloud.firestore {
       allow update, delete: if canAccessMedia(salonId);
 
       match /mediaItems/{mediaId} {
-        allow read: if canAccessMedia(salonId);
+        allow read: if canAccessMedia(salonId) || isPlatformAdmin();
         allow create: if canAccessMedia(salonId)
           && request.resource.data.mediaType is string
           && request.resource.data.mediaUrl is string
