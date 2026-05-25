@@ -41,7 +41,10 @@ import {
   let currentAuthUser = null;
   let customerRowsCache = [];
   let allCustomerRowsCache = [];
-  let customersFilterMode = "active";
+  // CONSOLE FILTERING V2: filter by salon.consoleStatus field only. No heuristics. No dedupe.
+  // Allowed modes: "all" | "live" | "test" | "archived". Default: "live".
+  let customersFilterMode = "live";
+  const CONSOLE_STATUS_VALUES = new Set(["live", "test", "archived"]);
 
   // READ ONLY V1: Same project config used by the main app, initialized independently for this isolated console page.
   const firebaseConfig = {
@@ -224,135 +227,28 @@ import {
     return fallback;
   }
 
-  function normalizeStatusToken(value) {
-    return String(value || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[_\s-]+/g, "_");
+  // CONSOLE FILTERING V2: read-only classification by salon.consoleStatus field.
+  // No heuristics. No name detection. No dedupe. No inference from billing/activity/staff/locations.
+  function readConsoleStatus(salon) {
+    const raw = salon?.consoleStatus;
+    if (raw === null || raw === undefined) return null;
+    const normalized = String(raw).trim().toLowerCase();
+    if (!normalized) return null;
+    return CONSOLE_STATUS_VALUES.has(normalized) ? normalized : null;
   }
 
-  function classifyCustomerStatus(salon) {
-    const rawStatus = pickFirst(salon, ["status", "accountStatus", "billingStatus"], "");
-    const normalized = normalizeStatusToken(rawStatus);
-    const activeStatuses = new Set(["active", "trial", "trialing"]);
-    const hiddenStatuses = new Set(["inactive", "archived", "cancelled", "canceled", "deleted", "test", "demo"]);
-
-    if (activeStatuses.has(normalized)) {
-      return {
-        key: normalized,
-        group: "active",
-        label: normalized === "active" ? "Active" : "Trial",
-        raw: displayValue(rawStatus, "active"),
-      };
-    }
-
-    if (hiddenStatuses.has(normalized)) {
-      return {
-        key: normalized,
-        group: "hidden",
-        label: normalized === "canceled" ? "Cancelled" : displayValue(rawStatus, "Inactive"),
-        raw: displayValue(rawStatus, "Inactive"),
-      };
-    }
-
-    return {
-      key: normalized || "unknown",
-      group: "unknown",
-      label: "Unknown status",
-      raw: displayValue(rawStatus, "Not available"),
-    };
+  function consoleStatusLabel(consoleStatus) {
+    if (consoleStatus === "live") return "Live";
+    if (consoleStatus === "test") return "Test";
+    if (consoleStatus === "archived") return "Archived";
+    return "Unclassified";
   }
 
-  function countIsZero(value) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) && numeric === 0;
-  }
-
-  function numericCount(value) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
-  }
-
-  function normalizeCustomerNameForDedupe(name) {
-    return String(name || "")
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  function customerProductionScore(salon, locationsCount, staffCount) {
-    const staffScore = numericCount(staffCount) * 1000000;
-    const locationScore = numericCount(locationsCount) * 10000;
-    const activityDate = timestampToDate(pickFirst(salon, ["lastActivityAt", "lastActiveAt", "updatedAt", "createdAt"], null));
-    const activityScore = activityDate ? activityDate.getTime() : 0;
-    return staffScore + locationScore + activityScore;
-  }
-
-  function ownerIsMissing(salon, ownerProfile) {
-    const ownerSignal = pickFirst(salon, ["ownerName", "owner", "createdByName", "contactName", "ownerUid", "ownerId", "ownerEmail", "email", "contactEmail"], "");
-    const ownerName = displayValue(ownerProfile?.name, "");
-    const ownerEmail = displayValue(ownerProfile?.email, "");
-    return !ownerSignal && !ownerName && !ownerEmail;
-  }
-
-  function testNameReasons(name) {
-    const normalizedName = String(name || "").toLowerCase();
-    const testTerms = [
-      { term: "neo neo", reason: "name contains neo neo" },
-      { term: "apple", reason: "name contains apple" },
-      { term: "demo", reason: "name contains demo" },
-      { term: "test", reason: "name contains test" },
-    ];
-    return testTerms
-      .filter(({ term }) => normalizedName.includes(term))
-      .map(({ reason }) => reason);
-  }
-
-  function billingIsMissing(salon) {
-    return !pickFirst(salon, ["billingStatus", "accountStatus", "subscriptionStatus", "planStatus"], "");
-  }
-
-  function activityIsMissing(salon) {
-    return !pickFirst(salon, ["lastActivityAt", "lastActiveAt", "updatedAt"], "");
-  }
-
-  function buildCustomerHiddenReasons(salon, ownerProfile, locationsCount, staffCount) {
-    const reasons = [];
-    reasons.push(...testNameReasons(salon?.name));
-    if (ownerIsMissing(salon, ownerProfile)) reasons.push("owner missing");
-    if (!pickFirst(salon, ["createdAt"], null)) reasons.push("createdAt missing");
-    if (countIsZero(locationsCount) && countIsZero(staffCount)) reasons.push("locations count = 0 and staff count = 0");
-    if (billingIsMissing(salon) && activityIsMissing(salon)) reasons.push("billing missing and no activity");
-    return reasons;
-  }
-
-  function ownerUidForProductionGrouping(row) {
-    return String(row.ownerUid || "").trim();
-  }
-
-  function applyOwnerDuplicateHiddenReasons(rows) {
-    const groups = new Map();
-    rows.forEach((row) => {
-      if (!row.isProductionCustomer) return;
-      const key = ownerUidForProductionGrouping(row);
-      if (!key) return;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(row);
-    });
-
-    groups.forEach((group) => {
-      if (group.length < 2) return;
-      const keeper = group.slice().sort((a, b) => b.duplicateScore - a.duplicateScore)[0];
-      group.forEach((row) => {
-        if (row.id === keeper.id) return;
-        row.hiddenReasons = [
-          ...(row.hiddenReasons || []),
-          `same ownerUid as another salon (kept ${keeper.id})`,
-        ];
-        row.isProductionCustomer = false;
-      });
-    });
+  function consoleStatusBadgeClass(consoleStatus) {
+    if (consoleStatus === "live") return "healthy";
+    if (consoleStatus === "test") return "warning";
+    if (consoleStatus === "archived") return "error";
+    return "";
   }
 
   function getConsoleApp() {
@@ -468,9 +364,7 @@ import {
 
   function mapSalonToCustomerRow(salon, ownerProfile, locationsCount, staffCount) {
     const businessName = displayValue(salon?.name, "Missing salon name");
-    const customerStatus = classifyCustomerStatus(salon);
-    const hiddenReasons = buildCustomerHiddenReasons(salon, ownerProfile, locationsCount, staffCount);
-    const duplicateScore = customerProductionScore(salon, locationsCount, staffCount);
+    const consoleStatus = readConsoleStatus(salon);
     const plan = displayValue(pickFirst(salon, ["plan", "planName", "subscriptionPlan"], "Not available"));
     const billing = displayValue(pickFirst(salon, ["billingStatus", "accountStatus", "status", "subscriptionStatus"], "Not available"));
     const lastActivity = displayDate(pickFirst(salon, ["lastActivityAt", "lastActiveAt", "updatedAt", "createdAt"], null));
@@ -484,10 +378,7 @@ import {
       staffCount,
       plan,
       billing,
-      customerStatus,
-      hiddenReasons,
-      isProductionCustomer: hiddenReasons.length === 0,
-      duplicateScore,
+      consoleStatus,
       health: "Placeholder",
       lastActivity,
     };
@@ -524,106 +415,89 @@ import {
 
   function getVisibleCustomerRows() {
     if (customersFilterMode === "all") return allCustomerRowsCache.slice();
-    return allCustomerRowsCache.filter((row) => row.isProductionCustomer);
-  }
-
-  function customerStatusBadgeClass(statusGroup) {
-    if (statusGroup === "active") return "healthy";
-    if (statusGroup === "unknown") return "warning";
-    return "error";
+    return allCustomerRowsCache.filter((row) => row.consoleStatus === customersFilterMode);
   }
 
   function updateCustomerFilterButtons() {
     customerFilterButtons.forEach((button) => {
-      if (button.dataset.customersFilter === "active") {
-        button.textContent = "Production only";
-      }
       const isActive = button.dataset.customersFilter === customersFilterMode;
       button.classList.toggle("is-active", isActive);
       button.setAttribute("aria-pressed", String(isActive));
     });
   }
 
-  function updateCustomersSummary(totalCount, visibleCount) {
-    if (!customersStatus) return;
-    const productionCount = allCustomerRowsCache.filter((row) => row.isProductionCustomer).length;
-    const hiddenCount = Math.max(totalCount - productionCount, 0);
-    if (customersFilterMode === "all") {
-      customersStatus.textContent = `Showing all ${totalCount} customers. Showing ${visibleCount} total rows. Hidden ${hiddenCount} test / incomplete customers in Production only.`;
-      return;
-    }
-    customersStatus.textContent = `Showing ${productionCount} production customers. Hidden ${hiddenCount} test / incomplete customers.`;
-  }
-
-  function logCustomerHiddenReasons() {
-    const hiddenRows = allCustomerRowsCache.filter((row) => !row.isProductionCustomer);
-    const sameOwnerRows = hiddenRows.filter((row) => (row.hiddenReasons || []).some((reason) => reason.includes("same ownerUid")));
-    const reasonCounts = hiddenRows.reduce((acc, row) => {
-      (row.hiddenReasons || ["hidden"]).forEach((reason) => {
-        acc[reason] = (acc[reason] || 0) + 1;
-      });
+  function customersSummaryText() {
+    const total = allCustomerRowsCache.length;
+    const counts = allCustomerRowsCache.reduce((acc, row) => {
+      const key = row.consoleStatus || "unclassified";
+      acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {});
-    logReadOnlyDebug("Customer hidden reasons", {
-      totalCustomers: allCustomerRowsCache.length,
-      productionCustomers: allCustomerRowsCache.length - hiddenRows.length,
-      hiddenCustomers: hiddenRows.length,
-      reasonCounts,
-      sameOwnerHiddenCustomers: sameOwnerRows.length,
-      sameOwnerGroups: sameOwnerRows.reduce((acc, row) => {
-        const key = row.ownerUid || "missing ownerUid";
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-      }, {}),
-      table: hiddenRows.map((row) => ({
+    if (customersFilterMode === "live") return `Showing ${counts.live || 0} live customers`;
+    if (customersFilterMode === "test") return `Showing ${counts.test || 0} test customers`;
+    if (customersFilterMode === "archived") return `Showing ${counts.archived || 0} archived customers`;
+    return `Showing ${total} total customers`;
+  }
+
+  function updateCustomersSummary() {
+    if (!customersStatus) return;
+    customersStatus.textContent = customersSummaryText();
+  }
+
+  function logConsoleStatusBreakdown() {
+    const counts = allCustomerRowsCache.reduce((acc, row) => {
+      const key = row.consoleStatus || "unclassified";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    logReadOnlyDebug("Customers consoleStatus breakdown", {
+      total: allCustomerRowsCache.length,
+      counts,
+      table: allCustomerRowsCache.map((row) => ({
         salonId: row.id,
         name: row.businessName,
-        ownerUid: row.ownerUid || "Not available",
-        status: row.customerStatus?.raw || "Not available",
-        locationsCount: row.locationsCount,
-        staffCount: row.staffCount,
-        hiddenReasons: (row.hiddenReasons || []).join(", "),
+        consoleStatus: row.consoleStatus || "unclassified",
       })),
     });
   }
 
   function renderCustomerRows(rows) {
-    const incomingRows = Array.isArray(rows) ? rows.slice() : [];
     if (rows) {
-      allCustomerRowsCache = incomingRows;
-      applyOwnerDuplicateHiddenReasons(allCustomerRowsCache);
-      logCustomerHiddenReasons();
+      allCustomerRowsCache = Array.isArray(rows) ? rows.slice() : [];
+      logConsoleStatusBreakdown();
     }
     const visibleRows = getVisibleCustomerRows();
     customerRowsCache = visibleRows.slice();
     renderSupportCustomerOptions(customerRowsCache);
     updateCustomerFilterButtons();
-    updateCustomersSummary(allCustomerRowsCache.length, visibleRows.length);
+    updateCustomersSummary();
     if (!customersTableBody) return;
     if (!visibleRows.length) {
-      const message = customersFilterMode === "active"
-        ? "No production customers found"
-        : "No customers found";
+      const noun = customersFilterMode === "all" ? "customers" : `${customersFilterMode} customers`;
       customersTableBody.innerHTML = `
         <tr>
-          <td colspan="8"><strong>${escapeHtml(message)}</strong><small>Use All to view test or incomplete customers.</small></td>
+          <td colspan="8"><strong>No ${escapeHtml(noun)} found</strong><small>Switch filter to view other customers.</small></td>
         </tr>
       `;
       return;
     }
 
-    customersTableBody.innerHTML = visibleRows.map((row) => `
+    customersTableBody.innerHTML = visibleRows.map((row) => {
+      const statusLabel = consoleStatusLabel(row.consoleStatus);
+      const statusClass = consoleStatusBadgeClass(row.consoleStatus);
+      return `
       <tr class="ff-platform-customer-row" tabindex="0" data-customer-360-open data-customer-id="${escapeHtml(row.id)}" data-customer-name="${escapeHtml(row.businessName)}" data-customer-owner="${escapeHtml(row.owner)}" data-customer-email="${escapeHtml(row.ownerEmail)}" data-customer-plan="${escapeHtml(row.plan)}" data-customer-health="${escapeHtml(row.health)}" data-customer-billing="${escapeHtml(row.billing)}" data-customer-locations-count="${escapeHtml(row.locationsCount)}" data-customer-staff-count="${escapeHtml(row.staffCount)}" data-customer-last-activity="${escapeHtml(row.lastActivity)}">
-        <td><strong>${escapeHtml(row.businessName)}</strong><small>Firestore salon: ${escapeHtml(row.id)} - Status: ${escapeHtml(row.customerStatus?.label || "Unknown status")}${row.hiddenReasons?.length ? ` - Hidden: ${escapeHtml(row.hiddenReasons.join(", "))}` : ""}</small></td>
+        <td><strong>${escapeHtml(row.businessName)}</strong><small>Firestore salon: ${escapeHtml(row.id)} - consoleStatus: ${escapeHtml(statusLabel)}</small></td>
         <td>${escapeHtml(row.owner)}</td>
         <td>${escapeHtml(row.locationsCount)}</td>
         <td>${escapeHtml(row.staffCount)}</td>
         <td><span class="ff-platform-badge">${escapeHtml(row.plan)}</span></td>
-        <td><span class="ff-platform-badge ${customerStatusBadgeClass(row.customerStatus?.group)}">${escapeHtml(row.customerStatus?.label || row.billing)}</span></td>
+        <td><span class="ff-platform-badge ${statusClass}">${escapeHtml(statusLabel)}</span></td>
         <td><span class="ff-platform-health">${escapeHtml(row.health)}</span></td>
         <td>${escapeHtml(row.lastActivity)}</td>
       </tr>
-    `).join("");
+      `;
+    }).join("");
   }
 
   function renderSupportCustomerOptions(rows) {
@@ -1259,7 +1133,8 @@ import {
 
   customerFilterButtons.forEach((button) => {
     button.addEventListener("click", () => {
-      const nextMode = button.dataset.customersFilter === "all" ? "all" : "active";
+      const requested = String(button.dataset.customersFilter || "").trim().toLowerCase();
+      const nextMode = (requested === "all" || CONSOLE_STATUS_VALUES.has(requested)) ? requested : "live";
       if (customersFilterMode === nextMode) return;
       customersFilterMode = nextMode;
       renderCustomerRows();

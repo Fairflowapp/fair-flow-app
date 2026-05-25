@@ -167,8 +167,10 @@
             <button type="button" disabled>Health filter</button>
             <button type="button" disabled>Billing filter</button>
             <div class="ff-platform-segmented" role="group" aria-label="Customer status filter">
-              <button class="is-active" type="button" data-customers-filter="active">Active only</button>
               <button type="button" data-customers-filter="all">All</button>
+              <button class="is-active" type="button" data-customers-filter="live">Live</button>
+              <button type="button" data-customers-filter="test">Test</button>
+              <button type="button" data-customers-filter="archived">Archived</button>
             </div>
           </div>
           <p class="ff-platform-readonly-status" data-customers-readonly-status>Checking Fair Flow session...</p>
@@ -734,6 +736,6 @@
     </main>
   </div>
 
-  <script type="module" src="./platform-admin.js?v=console-filter-v1"></script>
+  <script type="module" src="./platform-admin.js?v=console-status-v1"></script>
 </body>
 </html>
