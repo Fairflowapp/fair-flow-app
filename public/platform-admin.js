@@ -232,7 +232,7 @@ import {
   }
 
   function classifyCustomerStatus(salon) {
-    const rawStatus = pickFirst(salon, ["accountStatus", "status", "subscriptionStatus", "planStatus", "billingStatus"], "");
+    const rawStatus = pickFirst(salon, ["status", "accountStatus", "billingStatus"], "");
     const normalized = normalizeStatusToken(rawStatus);
     const activeStatuses = new Set(["active", "trial", "trialing"]);
     const hiddenStatuses = new Set(["inactive", "archived", "cancelled", "canceled", "deleted", "test", "demo"]);
@@ -261,6 +261,98 @@ import {
       label: "Unknown status",
       raw: displayValue(rawStatus, "Not available"),
     };
+  }
+
+  function countIsZero(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric === 0;
+  }
+
+  function numericCount(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  }
+
+  function normalizeCustomerNameForDedupe(name) {
+    return String(name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function customerProductionScore(salon, locationsCount, staffCount) {
+    const staffScore = numericCount(staffCount) * 1000000;
+    const locationScore = numericCount(locationsCount) * 10000;
+    const activityDate = timestampToDate(pickFirst(salon, ["lastActivityAt", "lastActiveAt", "updatedAt", "createdAt"], null));
+    const activityScore = activityDate ? activityDate.getTime() : 0;
+    return staffScore + locationScore + activityScore;
+  }
+
+  function ownerIsMissing(salon, ownerProfile) {
+    const ownerSignal = pickFirst(salon, ["ownerName", "owner", "createdByName", "contactName", "ownerUid", "ownerId", "ownerEmail", "email", "contactEmail"], "");
+    const ownerName = displayValue(ownerProfile?.name, "");
+    const ownerEmail = displayValue(ownerProfile?.email, "");
+    return !ownerSignal && !ownerName && !ownerEmail;
+  }
+
+  function testNameReasons(name) {
+    const normalizedName = String(name || "").toLowerCase();
+    const testTerms = [
+      { term: "neo neo", reason: "name contains neo neo" },
+      { term: "apple", reason: "name contains apple" },
+      { term: "demo", reason: "name contains demo" },
+      { term: "test", reason: "name contains test" },
+    ];
+    return testTerms
+      .filter(({ term }) => normalizedName.includes(term))
+      .map(({ reason }) => reason);
+  }
+
+  function billingIsMissing(salon) {
+    return !pickFirst(salon, ["billingStatus", "accountStatus", "subscriptionStatus", "planStatus"], "");
+  }
+
+  function activityIsMissing(salon) {
+    return !pickFirst(salon, ["lastActivityAt", "lastActiveAt", "updatedAt"], "");
+  }
+
+  function buildCustomerHiddenReasons(salon, ownerProfile, locationsCount, staffCount) {
+    const reasons = [];
+    reasons.push(...testNameReasons(salon?.name));
+    if (ownerIsMissing(salon, ownerProfile)) reasons.push("owner missing");
+    if (!pickFirst(salon, ["createdAt"], null)) reasons.push("createdAt missing");
+    if (countIsZero(locationsCount) && countIsZero(staffCount)) reasons.push("locations count = 0 and staff count = 0");
+    if (billingIsMissing(salon) && activityIsMissing(salon)) reasons.push("billing missing and no activity");
+    return reasons;
+  }
+
+  function ownerUidForProductionGrouping(row) {
+    return String(row.ownerUid || "").trim();
+  }
+
+  function applyOwnerDuplicateHiddenReasons(rows) {
+    const groups = new Map();
+    rows.forEach((row) => {
+      if (!row.isProductionCustomer) return;
+      const key = ownerUidForProductionGrouping(row);
+      if (!key) return;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+
+    groups.forEach((group) => {
+      if (group.length < 2) return;
+      const keeper = group.slice().sort((a, b) => b.duplicateScore - a.duplicateScore)[0];
+      group.forEach((row) => {
+        if (row.id === keeper.id) return;
+        row.hiddenReasons = [
+          ...(row.hiddenReasons || []),
+          `same ownerUid as another salon (kept ${keeper.id})`,
+        ];
+        row.isProductionCustomer = false;
+      });
+    });
   }
 
   function getConsoleApp() {
@@ -375,8 +467,10 @@ import {
   }
 
   function mapSalonToCustomerRow(salon, ownerProfile, locationsCount, staffCount) {
-    const businessName = displayValue(pickFirst(salon, ["name", "businessName", "salonName", "displayName"], salon.id));
+    const businessName = displayValue(salon?.name, "Missing salon name");
     const customerStatus = classifyCustomerStatus(salon);
+    const hiddenReasons = buildCustomerHiddenReasons(salon, ownerProfile, locationsCount, staffCount);
+    const duplicateScore = customerProductionScore(salon, locationsCount, staffCount);
     const plan = displayValue(pickFirst(salon, ["plan", "planName", "subscriptionPlan"], "Not available"));
     const billing = displayValue(pickFirst(salon, ["billingStatus", "accountStatus", "status", "subscriptionStatus"], "Not available"));
     const lastActivity = displayDate(pickFirst(salon, ["lastActivityAt", "lastActiveAt", "updatedAt", "createdAt"], null));
@@ -385,11 +479,15 @@ import {
       businessName,
       owner: ownerProfile.name,
       ownerEmail: ownerProfile.email,
+      ownerUid: displayValue(salon.ownerUid || salon.ownerId || "", ""),
       locationsCount,
       staffCount,
       plan,
       billing,
       customerStatus,
+      hiddenReasons,
+      isProductionCustomer: hiddenReasons.length === 0,
+      duplicateScore,
       health: "Placeholder",
       lastActivity,
     };
@@ -426,7 +524,7 @@ import {
 
   function getVisibleCustomerRows() {
     if (customersFilterMode === "all") return allCustomerRowsCache.slice();
-    return allCustomerRowsCache.filter((row) => row.customerStatus?.group === "active");
+    return allCustomerRowsCache.filter((row) => row.isProductionCustomer);
   }
 
   function customerStatusBadgeClass(statusGroup) {
@@ -437,6 +535,9 @@ import {
 
   function updateCustomerFilterButtons() {
     customerFilterButtons.forEach((button) => {
+      if (button.dataset.customersFilter === "active") {
+        button.textContent = "Production only";
+      }
       const isActive = button.dataset.customersFilter === customersFilterMode;
       button.classList.toggle("is-active", isActive);
       button.setAttribute("aria-pressed", String(isActive));
@@ -445,19 +546,53 @@ import {
 
   function updateCustomersSummary(totalCount, visibleCount) {
     if (!customersStatus) return;
-    const activeCount = allCustomerRowsCache.filter((row) => row.customerStatus?.group === "active").length;
-    const hiddenCount = Math.max(totalCount - activeCount, 0);
+    const productionCount = allCustomerRowsCache.filter((row) => row.isProductionCustomer).length;
+    const hiddenCount = Math.max(totalCount - productionCount, 0);
     if (customersFilterMode === "all") {
-      customersStatus.textContent = `READ ONLY V1: Showing all ${totalCount} customers. Active ${activeCount}; inactive/test/unknown ${hiddenCount}.`;
+      customersStatus.textContent = `Showing all ${totalCount} customers. Showing ${visibleCount} total rows. Hidden ${hiddenCount} test / incomplete customers in Production only.`;
       return;
     }
-    customersStatus.textContent = `READ ONLY V1: Showing ${visibleCount} active customers. Hidden ${hiddenCount} inactive/test/unknown customers.`;
+    customersStatus.textContent = `Showing ${productionCount} production customers. Hidden ${hiddenCount} test / incomplete customers.`;
+  }
+
+  function logCustomerHiddenReasons() {
+    const hiddenRows = allCustomerRowsCache.filter((row) => !row.isProductionCustomer);
+    const sameOwnerRows = hiddenRows.filter((row) => (row.hiddenReasons || []).some((reason) => reason.includes("same ownerUid")));
+    const reasonCounts = hiddenRows.reduce((acc, row) => {
+      (row.hiddenReasons || ["hidden"]).forEach((reason) => {
+        acc[reason] = (acc[reason] || 0) + 1;
+      });
+      return acc;
+    }, {});
+    logReadOnlyDebug("Customer hidden reasons", {
+      totalCustomers: allCustomerRowsCache.length,
+      productionCustomers: allCustomerRowsCache.length - hiddenRows.length,
+      hiddenCustomers: hiddenRows.length,
+      reasonCounts,
+      sameOwnerHiddenCustomers: sameOwnerRows.length,
+      sameOwnerGroups: sameOwnerRows.reduce((acc, row) => {
+        const key = row.ownerUid || "missing ownerUid";
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {}),
+      table: hiddenRows.map((row) => ({
+        salonId: row.id,
+        name: row.businessName,
+        ownerUid: row.ownerUid || "Not available",
+        status: row.customerStatus?.raw || "Not available",
+        locationsCount: row.locationsCount,
+        staffCount: row.staffCount,
+        hiddenReasons: (row.hiddenReasons || []).join(", "),
+      })),
+    });
   }
 
   function renderCustomerRows(rows) {
     const incomingRows = Array.isArray(rows) ? rows.slice() : [];
     if (rows) {
       allCustomerRowsCache = incomingRows;
+      applyOwnerDuplicateHiddenReasons(allCustomerRowsCache);
+      logCustomerHiddenReasons();
     }
     const visibleRows = getVisibleCustomerRows();
     customerRowsCache = visibleRows.slice();
@@ -467,11 +602,11 @@ import {
     if (!customersTableBody) return;
     if (!visibleRows.length) {
       const message = customersFilterMode === "active"
-        ? "No active customers found"
+        ? "No production customers found"
         : "No customers found";
       customersTableBody.innerHTML = `
         <tr>
-          <td colspan="8"><strong>${escapeHtml(message)}</strong><small>Use All to view inactive, test, demo, or unknown-status customers.</small></td>
+          <td colspan="8"><strong>${escapeHtml(message)}</strong><small>Use All to view test or incomplete customers.</small></td>
         </tr>
       `;
       return;
@@ -479,7 +614,7 @@ import {
 
     customersTableBody.innerHTML = visibleRows.map((row) => `
       <tr class="ff-platform-customer-row" tabindex="0" data-customer-360-open data-customer-id="${escapeHtml(row.id)}" data-customer-name="${escapeHtml(row.businessName)}" data-customer-owner="${escapeHtml(row.owner)}" data-customer-email="${escapeHtml(row.ownerEmail)}" data-customer-plan="${escapeHtml(row.plan)}" data-customer-health="${escapeHtml(row.health)}" data-customer-billing="${escapeHtml(row.billing)}" data-customer-locations-count="${escapeHtml(row.locationsCount)}" data-customer-staff-count="${escapeHtml(row.staffCount)}" data-customer-last-activity="${escapeHtml(row.lastActivity)}">
-        <td><strong>${escapeHtml(row.businessName)}</strong><small>Firestore salon: ${escapeHtml(row.id)} - Status: ${escapeHtml(row.customerStatus?.label || "Unknown status")}</small></td>
+        <td><strong>${escapeHtml(row.businessName)}</strong><small>Firestore salon: ${escapeHtml(row.id)} - Status: ${escapeHtml(row.customerStatus?.label || "Unknown status")}${row.hiddenReasons?.length ? ` - Hidden: ${escapeHtml(row.hiddenReasons.join(", "))}` : ""}</small></td>
         <td>${escapeHtml(row.owner)}</td>
         <td>${escapeHtml(row.locationsCount)}</td>
         <td>${escapeHtml(row.staffCount)}</td>
