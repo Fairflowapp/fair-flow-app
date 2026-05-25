@@ -294,72 +294,84 @@ import {
     }
   }
 
+  // READ ONLY V1: Owner profile resolution.
+  // Always prefer users/{ownerUid} when ownerUid is known (returns displayName / name / email / phone).
+  // Falls back to salon document fields. Never returns a raw UID as a display name.
   async function readOwnerProfile(db, salon, debugContext = null) {
-    const ownerDirect = pickFirst(salon, ["ownerName", "owner", "createdByName", "contactName"], "");
-    const ownerEmailDirect = pickFirst(salon, ["ownerEmail", "email", "contactEmail"], "");
-    if (ownerDirect || ownerEmailDirect) {
-      if (debugContext?.customer360) {
-        console.log("[Fair Flow Console] Success owner", {
-          salonId: debugContext.salonId || salon.id || null,
-          ownerUid: salon.ownerUid || salon.ownerId || null,
-          source: "salon document fields",
-        });
-      }
-      return {
-        name: displayValue(ownerDirect, "Not available"),
-        email: displayValue(ownerEmailDirect, "Not available"),
-      };
-    }
-
     const ownerUid = displayValue(salon.ownerUid || salon.ownerId || "", "");
-    if (!ownerUid) {
-      if (debugContext?.customer360) {
-        console.log("[Fair Flow Console] Success owner", {
-          salonId: debugContext.salonId || salon.id || null,
-          ownerUid: null,
-          source: "no ownerUid on salon document",
-        });
+    const salonOwnerName = String(pickFirst(salon, ["ownerName", "owner", "createdByName", "contactName"], "") || "").trim();
+    const salonOwnerEmail = String(pickFirst(salon, ["ownerEmail", "email", "contactEmail"], "") || "").trim();
+    const salonOwnerPhone = String(pickFirst(salon, ["ownerPhone", "phone", "contactPhone"], "") || "").trim();
+
+    let userName = "";
+    let userEmail = "";
+    let userPhone = "";
+    let userLookupAttempted = false;
+    let userLookupExists = false;
+
+    if (ownerUid) {
+      userLookupAttempted = true;
+      try {
+        if (debugContext?.customer360) {
+          console.log("[Fair Flow Console] Loading owner user", {
+            path: `users/${ownerUid}`,
+            salonId: debugContext.salonId || salon.id || null,
+            ownerUid,
+          });
+        }
+        const userSnap = await getDoc(doc(db, "users", ownerUid));
+        userLookupExists = userSnap.exists();
+        if (userLookupExists) {
+          const user = userSnap.data() || {};
+          userName = String(pickFirst(user, ["displayName", "name"], "") || "").trim();
+          userEmail = String(pickFirst(user, ["email"], "") || "").trim();
+          userPhone = String(pickFirst(user, ["phone", "phoneNumber", "contactPhone"], "") || "").trim();
+        }
+        if (debugContext?.customer360) {
+          console.log("[Fair Flow Console] Success owner", {
+            path: `users/${ownerUid}`,
+            salonId: debugContext.salonId || salon.id || null,
+            ownerUid,
+            exists: userLookupExists,
+            userName: userName || null,
+            userEmail: userEmail || null,
+            userPhone: userPhone || null,
+          });
+        }
+      } catch (error) {
+        if (debugContext?.customer360) {
+          console.error("[Fair Flow Console] Failed owner", {
+            path: `users/${ownerUid}`,
+            salonId: debugContext.salonId || salon.id || null,
+            ownerUid,
+            errorCode: error?.code || null,
+            errorMessage: error?.message || String(error),
+            error,
+          });
+        }
       }
-      return { name: "Not available", email: "Not available" };
+    } else if (debugContext?.customer360) {
+      console.log("[Fair Flow Console] Success owner", {
+        salonId: debugContext.salonId || salon.id || null,
+        ownerUid: null,
+        source: "no ownerUid on salon document",
+      });
     }
 
-    // READ ONLY V1: optional owner profile lookup from existing users/{uid}.
-    try {
-      if (debugContext?.customer360) {
-        console.log("[Fair Flow Console] Loading owner user", {
-          path: `users/${ownerUid}`,
-          salonId: debugContext.salonId || salon.id || null,
-          ownerUid,
-        });
-      }
-      const userSnap = await getDoc(doc(db, "users", ownerUid));
-      if (debugContext?.customer360) {
-        console.log("[Fair Flow Console] Success owner", {
-          path: `users/${ownerUid}`,
-          salonId: debugContext.salonId || salon.id || null,
-          ownerUid,
-          exists: userSnap.exists(),
-        });
-      }
-      if (!userSnap.exists()) return { name: ownerUid, email: "Not available" };
-      const user = userSnap.data() || {};
-      return {
-        name: displayValue(pickFirst(user, ["name", "displayName", "email"], ownerUid)),
-        email: displayValue(pickFirst(user, ["email"], "Not available")),
-      };
-    } catch (error) {
-      if (debugContext?.customer360) {
-        console.error("[Fair Flow Console] Failed owner", {
-          path: `users/${ownerUid}`,
-          salonId: debugContext.salonId || salon.id || null,
-          ownerUid,
-          errorCode: error?.code || null,
-          errorMessage: error?.message || String(error),
-          error,
-        });
-      }
-      return { name: ownerUid, email: "Not available" };
-    }
+    // Display name: prefer real name from users doc, then salon, then email; never the raw UID.
+    const nameForDisplay = userName || salonOwnerName || userEmail || salonOwnerEmail || "";
+    const emailForDisplay = userEmail || salonOwnerEmail || "";
+    const phoneForDisplay = userPhone || salonOwnerPhone || "";
+
+    return {
+      name: nameForDisplay || "Not available",
+      email: emailForDisplay || "Not available",
+      phone: phoneForDisplay || "Not available",
+      ownerUid: ownerUid || "",
+      source: userLookupExists
+        ? "users doc"
+        : (userLookupAttempted ? "salon doc (users lookup missing or blocked)" : "salon doc"),
+    };
   }
 
   function mapSalonToCustomerRow(salon, ownerProfile, locationsCount, staffCount) {
@@ -625,6 +637,48 @@ import {
     }).join("");
   }
 
+  // READ ONLY V1: Usage Overview module status helpers.
+  // Each module defaults to "Not connected" until a real data source is wired in.
+  // Media flips to "Used" only when Data Usage finds totalFiles > 0 (Firestore-backed signal).
+  const USAGE_MODULE_KEYS = ["queue", "tasks", "media", "inventory", "training", "schedule", "timeclock"];
+
+  function resetUsageOverviewModules() {
+    USAGE_MODULE_KEYS.forEach((key) => {
+      const statusSelector = `[data-customer-360-module-${key}-status]`;
+      const detailSelector = `[data-customer-360-module-${key}-detail]`;
+      shell.querySelectorAll(statusSelector).forEach((node) => {
+        node.textContent = "Not connected";
+        node.classList.remove("healthy", "warning", "error");
+      });
+      shell.querySelectorAll(detailSelector).forEach((node) => {
+        node.textContent = "Last Activity: Not available";
+      });
+    });
+  }
+
+  function updateMediaModuleStatus(totalFiles, monthlyUploads, hasAnySize, mediaBytes) {
+    const statusNodes = shell.querySelectorAll("[data-customer-360-module-media-status]");
+    const detailNodes = shell.querySelectorAll("[data-customer-360-module-media-detail]");
+    const numericTotal = Number(totalFiles);
+    const used = Number.isFinite(numericTotal) && numericTotal > 0;
+    statusNodes.forEach((node) => {
+      node.textContent = used ? "Used" : "Not connected";
+      node.classList.remove("healthy", "warning", "error");
+      if (used) node.classList.add("healthy");
+    });
+    detailNodes.forEach((node) => {
+      if (!used) {
+        node.textContent = "Last Activity: Not available";
+        return;
+      }
+      const monthly = Number(monthlyUploads);
+      const parts = [`${numericTotal} files`];
+      if (Number.isFinite(monthly) && monthly > 0) parts.push(`${monthly} this month`);
+      if (hasAnySize && Number.isFinite(mediaBytes) && mediaBytes > 0) parts.push(formatBytes(mediaBytes));
+      node.textContent = parts.join(" / ");
+    });
+  }
+
   function renderDataUsageLoading() {
     setText("[data-customer-360-usage-status-line]", "READ ONLY V1: Loading usage metadata...");
     setText("[data-customer-360-storage-used]", "Loading...");
@@ -689,6 +743,7 @@ import {
       setText("[data-customer-360-total-files]", totalFiles ? String(totalFiles) : "Not available");
       setText("[data-customer-360-monthly-uploads]", totalFiles ? String(monthlyUploads) : "Not available");
       setText("[data-customer-360-plan-limit]", planLimit);
+      updateMediaModuleStatus(totalFiles, monthlyUploads, hasAnySize, mediaBytes);
       const status = shell.querySelector("[data-customer-360-usage-status]");
       if (status) status.innerHTML = `<span class="ff-platform-badge healthy">Normal</span>`;
       const limited = worksSnap.size >= mediaWorkLimit ? ` Limited scan: first ${mediaWorkLimit} works, ${mediaItemsPerWorkLimit} media items each.` : "";
@@ -715,6 +770,7 @@ import {
     } catch (error) {
       console.warn("[Fair Flow Console] READ ONLY V1 data usage load failed", error);
       renderDataUsageUnavailable(`READ ONLY V1: Could not load usage metadata (${error?.code || "unknown"}).`);
+      updateMediaModuleStatus(0, 0, false, 0);
     }
   }
 
@@ -948,6 +1004,7 @@ import {
     setText("[data-customer-360-owner]", displayValue(row.dataset.customerOwner, "Not available"));
     setText("[data-customer-360-email]", displayValue(row.dataset.customerEmail, "Not available"));
     setText("[data-customer-360-phone]", "Not available");
+    resetUsageOverviewModules();
     setText("[data-customer-360-locations-count]", displayValue(row.dataset.customerLocationsCount, "Not available"));
     setText("[data-customer-360-staff-count]", displayValue(row.dataset.customerStaffCount, "Not available"));
     setText("[data-customer-360-plan]", displayValue(row.dataset.customerPlan, "Not available"));
@@ -1023,7 +1080,7 @@ import {
       setText("[data-customer-360-name-copy]", businessName);
       setText("[data-customer-360-owner]", ownerProfile.name);
       setText("[data-customer-360-email]", ownerProfile.email);
-      setText("[data-customer-360-phone]", displayValue(pickFirst(salon, ["phone", "ownerPhone", "contactPhone"], "Not available")));
+      setText("[data-customer-360-phone]", ownerProfile.phone);
       setText("[data-customer-360-locations-count]", String(locations.length));
       setText("[data-customer-360-staff-count]", String(staffRows.length));
       setText("[data-customer-360-plan]", plan);

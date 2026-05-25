@@ -281,16 +281,17 @@
           <article class="ff-platform-card ff-platform-c360-card ff-platform-c360-card--wide">
             <div class="ff-platform-card__head">
               <h3>Usage Overview</h3>
-              <span>Module activity placeholders</span>
+              <span>READ ONLY V1 - module status</span>
             </div>
+            <p class="ff-platform-readonly-status">Module usage signals are not connected yet. Status defaults to Not connected until each module has a live data source. Media flips to Used only when Data Usage finds files for this customer.</p>
             <div class="ff-platform-module-grid">
-              <div><strong>Queue</strong><span class="ff-platform-badge healthy">Active</span><small>Last Activity: --</small></div>
-              <div><strong>Tasks</strong><span class="ff-platform-badge healthy">Active</span><small>Last Activity: --</small></div>
-              <div><strong>Media</strong><span class="ff-platform-badge">Not Used</span><small>Last Activity: --</small></div>
-              <div><strong>Inventory</strong><span class="ff-platform-badge warning">Active</span><small>Last Activity: --</small></div>
-              <div><strong>Training</strong><span class="ff-platform-badge">Not Used</span><small>Last Activity: --</small></div>
-              <div><strong>Schedule</strong><span class="ff-platform-badge healthy">Active</span><small>Last Activity: --</small></div>
-              <div><strong>Time Clock</strong><span class="ff-platform-badge healthy">Active</span><small>Last Activity: --</small></div>
+              <div><strong>Queue</strong><span class="ff-platform-badge" data-customer-360-module-queue-status>Not connected</span><small data-customer-360-module-queue-detail>Last Activity: Not available</small></div>
+              <div><strong>Tasks</strong><span class="ff-platform-badge" data-customer-360-module-tasks-status>Not connected</span><small data-customer-360-module-tasks-detail>Last Activity: Not available</small></div>
+              <div><strong>Media</strong><span class="ff-platform-badge" data-customer-360-module-media-status>Not connected</span><small data-customer-360-module-media-detail>Last Activity: Not available</small></div>
+              <div><strong>Inventory</strong><span class="ff-platform-badge" data-customer-360-module-inventory-status>Not connected</span><small data-customer-360-module-inventory-detail>Last Activity: Not available</small></div>
+              <div><strong>Training</strong><span class="ff-platform-badge" data-customer-360-module-training-status>Not connected</span><small data-customer-360-module-training-detail>Last Activity: Not available</small></div>
+              <div><strong>Schedule</strong><span class="ff-platform-badge" data-customer-360-module-schedule-status>Not connected</span><small data-customer-360-module-schedule-detail>Last Activity: Not available</small></div>
+              <div><strong>Time Clock</strong><span class="ff-platform-badge" data-customer-360-module-timeclock-status>Not connected</span><small data-customer-360-module-timeclock-detail>Last Activity: Not available</small></div>
             </div>
           </article>
 
@@ -298,62 +299,11 @@
             <div class="ff-platform-card__head">
               <div>
                 <h3>Customer Intelligence</h3>
-                <p>Placeholder intelligence layer for activity, adoption, risk, and growth opportunities.</p>
+                <p>Aggregated activity, adoption, and risk signals will land here once real telemetry is connected.</p>
               </div>
-              <span>No live data connected</span>
+              <span>Not connected</span>
             </div>
-            <div class="ff-platform-intel-grid">
-              <div>
-                <h4>Activity Summary</h4>
-                <dl class="ff-platform-detail-grid ff-platform-detail-grid--single">
-                  <div><dt>Last Login</dt><dd>--</dd></div>
-                  <div><dt>Active Today</dt><dd>--</dd></div>
-                  <div><dt>Last Queue Activity</dt><dd>--</dd></div>
-                  <div><dt>Last Media Upload</dt><dd>--</dd></div>
-                  <div><dt>Last Ticket Activity</dt><dd>--</dd></div>
-                  <div><dt>Last Staff Invite</dt><dd>--</dd></div>
-                </dl>
-              </div>
-              <div>
-                <h4>Usage Trends</h4>
-                <div class="ff-platform-intel-list">
-                  <div><strong>Queue Trend</strong><span class="ff-platform-badge healthy">Up</span></div>
-                  <div><strong>Media Trend</strong><span class="ff-platform-badge warning">Stable</span></div>
-                  <div><strong>Storage Trend</strong><span class="ff-platform-badge healthy">Up</span></div>
-                  <div><strong>Staff Growth</strong><span class="ff-platform-badge error">Down</span></div>
-                </div>
-              </div>
-              <div>
-                <h4>Adoption Tracking</h4>
-                <div class="ff-platform-intel-list">
-                  <div><strong>Queue</strong><span class="ff-platform-badge healthy">Active</span></div>
-                  <div><strong>Tasks</strong><span class="ff-platform-badge warning">Low Usage</span></div>
-                  <div><strong>Media</strong><span class="ff-platform-badge">Never Used</span></div>
-                  <div><strong>Inventory</strong><span class="ff-platform-badge warning">Low Usage</span></div>
-                  <div><strong>Training</strong><span class="ff-platform-badge">Never Used</span></div>
-                  <div><strong>Schedule</strong><span class="ff-platform-badge healthy">Active</span></div>
-                  <div><strong>Time Clock</strong><span class="ff-platform-badge healthy">Active</span></div>
-                </div>
-              </div>
-              <div>
-                <h4>Risk Signals</h4>
-                <div class="ff-platform-intel-list">
-                  <div><strong>Usage Dropped</strong><span class="ff-platform-badge warning">Review</span></div>
-                  <div><strong>Staff Inactive</strong><span class="ff-platform-badge warning">Watch</span></div>
-                  <div><strong>No Media Usage</strong><span class="ff-platform-badge">Placeholder</span></div>
-                  <div><strong>Billing Attention Needed</strong><span class="ff-platform-badge error">Attention</span></div>
-                </div>
-              </div>
-              <div class="ff-platform-intel-grid__wide">
-                <h4>Growth Opportunities</h4>
-                <div class="ff-platform-opportunity-list">
-                  <span>Recommend Storage Upgrade</span>
-                  <span>Recommend Training Setup</span>
-                  <span>Recommend Inventory Activation</span>
-                  <span>Recommend Additional Location Plan</span>
-                </div>
-              </div>
-            </div>
+            <p class="ff-platform-readonly-status">No live intelligence connected yet. This section intentionally hides demo trend indicators (queue/staff/risk/adoption) to avoid misleading internal decisions until backed by real signals.</p>
           </article>
 
           <article class="ff-platform-card ff-platform-c360-card ff-platform-c360-card--wide">
@@ -736,6 +686,6 @@
     </main>
   </div>
 
-  <script type="module" src="./platform-admin.js?v=console-status-v1"></script>
+  <script type="module" src="./platform-admin.js?v=c360-data-v1"></script>
 </body>
 </html>
