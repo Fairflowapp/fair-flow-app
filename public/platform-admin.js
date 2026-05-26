@@ -13,6 +13,7 @@ import {
   getDocs,
   limit,
   query,
+  where,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
 (function initFairFlowConsoleFoundation() {
@@ -150,18 +151,36 @@ import {
     });
   }
 
-  function setHealthBadge(value) {
-    const badge = shell.querySelector("[data-customer-360-health]");
-    if (!badge) return;
-    badge.textContent = value;
-    badge.classList.remove("healthy", "warning", "error");
-    if (value === "High Risk") {
-      badge.classList.add("error");
-    } else if (value === "Medium Risk") {
-      badge.classList.add("warning");
-    } else {
-      badge.classList.add("healthy");
-    }
+  function setHealthBadge(label = "Not enough data", state = "") {
+    shell.querySelectorAll("[data-customer-360-health]").forEach((badge) => {
+      badge.textContent = `Health: ${label}`;
+      badge.classList.remove("healthy", "warning", "error");
+      if (state) badge.classList.add(state);
+    });
+    shell.querySelectorAll("[data-customer-360-health-detail]").forEach((badge) => {
+      badge.textContent = label;
+      badge.classList.remove("healthy", "warning", "error");
+      if (state) badge.classList.add(state);
+    });
+  }
+
+  function setBadgeState(selector, label, state = "") {
+    shell.querySelectorAll(selector).forEach((badge) => {
+      badge.textContent = label;
+      badge.classList.remove("healthy", "warning", "error");
+      if (state) badge.classList.add(state);
+    });
+  }
+
+  function resetCustomerIntelligence() {
+    setText("[data-customer-360-intelligence-summary]", "Loading live customer signals...");
+    setBadgeState("[data-customer-360-intelligence-status]", "Loading");
+    setText("[data-customer-360-intelligence-health]", "Not available");
+    setText("[data-customer-360-intelligence-adoption]", "Not available");
+    setText("[data-customer-360-intelligence-activity]", "Not available");
+    setText("[data-customer-360-intelligence-requests]", "Not available");
+    setText("[data-customer-360-intelligence-staff]", "Not available");
+    setText("[data-customer-360-intelligence-notes]", "Read-only signals only");
   }
 
   function displayValue(value, fallback = "Not available") {
@@ -298,24 +317,49 @@ import {
   // Always prefer users/{ownerUid} when ownerUid is known (returns displayName / name / email / phone).
   // Falls back to salon document fields. Never returns a raw UID as a display name.
   async function readOwnerProfile(db, salon, debugContext = null) {
-    const ownerUid = displayValue(salon.ownerUid || salon.ownerId || "", "");
+    const debugOn = !!debugContext?.customer360;
+    const salonIdForLog = debugContext?.salonId || salon?.id || null;
+
+    const rawOwnerUid = salon?.ownerUid;
+    const rawOwnerId = salon?.ownerId;
+    const ownerUid = displayValue(rawOwnerUid || rawOwnerId || "", "");
     const salonOwnerName = String(pickFirst(salon, ["ownerName", "owner", "createdByName", "contactName"], "") || "").trim();
     const salonOwnerEmail = String(pickFirst(salon, ["ownerEmail", "email", "contactEmail"], "") || "").trim();
     const salonOwnerPhone = String(pickFirst(salon, ["ownerPhone", "phone", "contactPhone"], "") || "").trim();
+
+    if (debugOn) {
+      try {
+        const salonKeys = salon && typeof salon === "object" ? Object.keys(salon) : [];
+        console.groupCollapsed(`[Fair Flow Console][Owner Debug] readOwnerProfile start - salonId=${salonIdForLog || "?"}`);
+        console.log("[Fair Flow Console][Owner Debug] inputs", {
+          salonId: salonIdForLog,
+          salonName: salon?.name || null,
+          salonOwnerUidField: rawOwnerUid ?? null,
+          salonOwnerIdField: rawOwnerId ?? null,
+          resolvedOwnerUid: ownerUid || null,
+          salonKeys,
+          salonOwnerNameDirect: salonOwnerName || null,
+          salonOwnerEmailDirect: salonOwnerEmail || null,
+          salonOwnerPhoneDirect: salonOwnerPhone || null,
+        });
+      } catch (_) {}
+    }
 
     let userName = "";
     let userEmail = "";
     let userPhone = "";
     let userLookupAttempted = false;
     let userLookupExists = false;
+    let userKeys = [];
+    let userRawValues = null;
 
     if (ownerUid) {
       userLookupAttempted = true;
       try {
-        if (debugContext?.customer360) {
-          console.log("[Fair Flow Console] Loading owner user", {
+        if (debugOn) {
+          console.log("[Fair Flow Console][Owner Debug] Loading owner user", {
             path: `users/${ownerUid}`,
-            salonId: debugContext.salonId || salon.id || null,
+            salonId: salonIdForLog,
             ownerUid,
           });
         }
@@ -323,26 +367,39 @@ import {
         userLookupExists = userSnap.exists();
         if (userLookupExists) {
           const user = userSnap.data() || {};
+          userKeys = Object.keys(user);
+          userRawValues = {
+            displayName: user?.displayName ?? null,
+            name: user?.name ?? null,
+            email: user?.email ?? null,
+            phone: user?.phone ?? null,
+            phoneNumber: user?.phoneNumber ?? null,
+            contactPhone: user?.contactPhone ?? null,
+          };
           userName = String(pickFirst(user, ["displayName", "name"], "") || "").trim();
           userEmail = String(pickFirst(user, ["email"], "") || "").trim();
           userPhone = String(pickFirst(user, ["phone", "phoneNumber", "contactPhone"], "") || "").trim();
         }
-        if (debugContext?.customer360) {
-          console.log("[Fair Flow Console] Success owner", {
+        if (debugOn) {
+          console.log("[Fair Flow Console][Owner Debug] users doc read result", {
             path: `users/${ownerUid}`,
-            salonId: debugContext.salonId || salon.id || null,
+            salonId: salonIdForLog,
             ownerUid,
             exists: userLookupExists,
-            userName: userName || null,
-            userEmail: userEmail || null,
-            userPhone: userPhone || null,
+            userKeys,
+            userRawValues,
+            userExtracted: {
+              userName: userName || null,
+              userEmail: userEmail || null,
+              userPhone: userPhone || null,
+            },
           });
         }
       } catch (error) {
-        if (debugContext?.customer360) {
-          console.error("[Fair Flow Console] Failed owner", {
+        if (debugOn) {
+          console.error("[Fair Flow Console][Owner Debug] Failed users doc read", {
             path: `users/${ownerUid}`,
-            salonId: debugContext.salonId || salon.id || null,
+            salonId: salonIdForLog,
             ownerUid,
             errorCode: error?.code || null,
             errorMessage: error?.message || String(error),
@@ -350,11 +407,11 @@ import {
           });
         }
       }
-    } else if (debugContext?.customer360) {
-      console.log("[Fair Flow Console] Success owner", {
-        salonId: debugContext.salonId || salon.id || null,
-        ownerUid: null,
-        source: "no ownerUid on salon document",
+    } else if (debugOn) {
+      console.warn("[Fair Flow Console][Owner Debug] No ownerUid on salon document - skipping users lookup", {
+        salonId: salonIdForLog,
+        salonOwnerUidField: rawOwnerUid ?? null,
+        salonOwnerIdField: rawOwnerId ?? null,
       });
     }
 
@@ -363,7 +420,7 @@ import {
     const emailForDisplay = userEmail || salonOwnerEmail || "";
     const phoneForDisplay = userPhone || salonOwnerPhone || "";
 
-    return {
+    const result = {
       name: nameForDisplay || "Not available",
       email: emailForDisplay || "Not available",
       phone: phoneForDisplay || "Not available",
@@ -372,6 +429,34 @@ import {
         ? "users doc"
         : (userLookupAttempted ? "salon doc (users lookup missing or blocked)" : "salon doc"),
     };
+
+    if (debugOn) {
+      console.log("[Fair Flow Console][Owner Debug] decided owner profile", {
+        salonId: salonIdForLog,
+        ownerUid: result.ownerUid || null,
+        source: result.source,
+        decided: {
+          name: result.name,
+          email: result.email,
+          phone: result.phone,
+        },
+        fromUsersDoc: {
+          name: userName || null,
+          email: userEmail || null,
+          phone: userPhone || null,
+        },
+        fromSalonDoc: {
+          name: salonOwnerName || null,
+          email: salonOwnerEmail || null,
+          phone: salonOwnerPhone || null,
+        },
+        userLookupAttempted,
+        userLookupExists,
+      });
+      try { console.groupEnd(); } catch (_) {}
+    }
+
+    return result;
   }
 
   function mapSalonToCustomerRow(salon, ownerProfile, locationsCount, staffCount) {
@@ -379,7 +464,8 @@ import {
     const consoleStatus = readConsoleStatus(salon);
     const plan = displayValue(pickFirst(salon, ["plan", "planName", "subscriptionPlan"], "Not available"));
     const billing = displayValue(pickFirst(salon, ["billingStatus", "accountStatus", "status", "subscriptionStatus"], "Not available"));
-    const lastActivity = displayDate(pickFirst(salon, ["lastActivityAt", "lastActiveAt", "updatedAt", "createdAt"], null));
+    // Last Activity must come from an actual activity signal. Do not fall back to createdAt.
+    const lastActivity = displayDate(pickFirst(salon, ["lastActivityAt", "lastActiveAt"], null));
     return {
       id: salon.id,
       businessName,
@@ -614,6 +700,107 @@ import {
     return { total, active, archived, pending };
   }
 
+  function latestStaffLastActiveAt(staffRows) {
+    const dates = staffRows
+      .map((staff) => timestampToDate(staff?.lastActiveAt))
+      .filter(Boolean);
+    if (!dates.length) return null;
+    return dates.sort((a, b) => b.getTime() - a.getTime())[0];
+  }
+
+  function daysSince(date) {
+    if (!date) return null;
+    const elapsedMs = Date.now() - date.getTime();
+    if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return 0;
+    return Math.floor(elapsedMs / (1000 * 60 * 60 * 24));
+  }
+
+  function countRequestsByStatus(requests) {
+    return requests.reduce((acc, request) => {
+      const status = String(request?.status || "").toLowerCase();
+      if (status === "open") acc.open += 1;
+      if (status === "pending") acc.pending += 1;
+      if (status === "needs_info") acc.needsInfo += 1;
+      if (status === "approved" || status === "done") acc.approvedDone += 1;
+      if (status === "denied") acc.denied += 1;
+      return acc;
+    }, { open: 0, pending: 0, needsInfo: 0, approvedDone: 0, denied: 0 });
+  }
+
+  function computeCustomerHealthV1({ billing, lastActivityDate, inboxSummary }) {
+    const billingStatus = String(billing || "").trim().toLowerCase().replace(/[_\s-]+/g, "_");
+    const billingRiskStatuses = new Set(["failed", "past_due", "cancelled", "canceled", "suspended", "deleted"]);
+    const billingHealthyStatuses = new Set(["active", "trial", "trialing", "current"]);
+    const activityAgeDays = daysSince(lastActivityDate);
+    const inboxAvailable = inboxSummary?.available === true;
+    const counts = inboxSummary?.counts || { open: 0, pending: 0, needsInfo: 0 };
+    const openWorkCount = Number(counts.open || 0) + Number(counts.pending || 0) + Number(counts.needsInfo || 0);
+
+    if (billingRiskStatuses.has(billingStatus)) {
+      return { label: "At Risk", state: "error", reason: "billing risk" };
+    }
+    if (activityAgeDays !== null && activityAgeDays > 60) {
+      return { label: "At Risk", state: "error", reason: "no recent activity for 60+ days" };
+    }
+    if (openWorkCount >= 10) {
+      return { label: "At Risk", state: "error", reason: "high open request volume" };
+    }
+    if (activityAgeDays !== null && activityAgeDays > 30) {
+      return { label: "Needs Review", state: "warning", reason: "no recent activity for 30+ days" };
+    }
+    if (inboxAvailable && openWorkCount > 0) {
+      return { label: "Needs Review", state: "warning", reason: "open inbox requests" };
+    }
+    if (billingHealthyStatuses.has(billingStatus) && activityAgeDays !== null && inboxAvailable && openWorkCount === 0) {
+      return { label: "Healthy", state: "healthy", reason: "active billing, recent activity, no open requests" };
+    }
+    return { label: "Not enough data", state: "", reason: "missing live health signals" };
+  }
+
+  function applyCustomerIntelligence({ health, lastActivity, lastActivityDate, inboxSummary, usageSummary, dataUsageSummary, staffCounts }) {
+    const moduleRows = Object.values(usageSummary?.modules || {});
+    const usedModuleCount = moduleRows.filter((module) => module?.count > 0).length + (dataUsageSummary?.media?.used ? 1 : 0);
+    const totalModuleCount = USAGE_MODULE_KEYS.length;
+    const counts = inboxSummary?.counts || {};
+    const openWorkCount = Number(counts.open || 0) + Number(counts.pending || 0) + Number(counts.needsInfo || 0);
+    const activityAgeDays = daysSince(lastActivityDate);
+    const availableSignals = [
+      health?.label && health.label !== "Not enough data",
+      lastActivityDate,
+      inboxSummary?.available === true,
+      moduleRows.some((module) => module?.available === true),
+      dataUsageSummary?.available === true,
+      staffCounts?.total > 0,
+    ].filter(Boolean).length;
+    const healthState = health?.state || "";
+    const statusState = healthState === "error" ? "error" : healthState === "warning" ? "warning" : availableSignals ? "healthy" : "";
+    const statusLabel = availableSignals ? "Connected" : "Limited";
+    const activityText = lastActivityDate
+      ? `${lastActivity}${activityAgeDays !== null ? ` (${activityAgeDays} days ago)` : ""}`
+      : "Not available";
+    const requestText = inboxSummary?.available
+      ? `${openWorkCount} open / ${inboxSummary.total || 0} total`
+      : "Not available";
+    const staffText = staffCounts
+      ? `${staffCounts.active} active / ${staffCounts.total} total`
+      : "Not available";
+    const summaryParts = [];
+
+    if (health?.label) summaryParts.push(`Health: ${health.label}`);
+    if (usedModuleCount > 0) summaryParts.push(`${usedModuleCount}/${totalModuleCount} modules active`);
+    if (openWorkCount > 0) summaryParts.push(`${openWorkCount} open requests`);
+    if (!summaryParts.length) summaryParts.push("Live signals are limited for this customer");
+
+    setText("[data-customer-360-intelligence-summary]", summaryParts.join(" · "));
+    setBadgeState("[data-customer-360-intelligence-status]", statusLabel, statusState);
+    setText("[data-customer-360-intelligence-health]", health?.reason ? `${health.label} - ${health.reason}` : displayValue(health?.label));
+    setText("[data-customer-360-intelligence-adoption]", `${usedModuleCount}/${totalModuleCount} modules show data`);
+    setText("[data-customer-360-intelligence-activity]", activityText);
+    setText("[data-customer-360-intelligence-requests]", requestText);
+    setText("[data-customer-360-intelligence-staff]", staffText);
+    setText("[data-customer-360-intelligence-notes]", "Based on read-only Firestore signals loaded for this customer.");
+  }
+
   function renderLocations(locations) {
     const body = shell.querySelector("[data-customer-360-locations-body]");
     if (!body) return;
@@ -654,6 +841,189 @@ import {
         node.textContent = "Last Activity: Not available";
       });
     });
+  }
+
+  function updateUsageModuleStatus(key, label, detail = "Last Activity: Not available", state = "") {
+    const statusSelector = `[data-customer-360-module-${key}-status]`;
+    const detailSelector = `[data-customer-360-module-${key}-detail]`;
+    shell.querySelectorAll(statusSelector).forEach((node) => {
+      node.textContent = label;
+      node.classList.remove("healthy", "warning", "error");
+      if (state) node.classList.add(state);
+    });
+    shell.querySelectorAll(detailSelector).forEach((node) => {
+      node.textContent = detail;
+    });
+  }
+
+  function moduleActivityDate(source) {
+    if (!source || typeof source !== "object") return null;
+    const timestamp = pickFirst(source, [
+      "lastActivityAt",
+      "lastActiveAt",
+      "lastSeenAt",
+      "lastHeartbeatAt",
+      "updatedAt",
+      "createdAt",
+      "lastMessageAt",
+      "publishedAt",
+      "lastBroadcastAt",
+      "clockOutAt",
+      "clockInAt",
+      "seenAt",
+      "pingAt",
+      "uploadedAt",
+      "completedAt",
+      "doneAt",
+    ], null);
+    const timestampDate = timestampToDate(timestamp);
+    if (timestampDate) return timestampDate;
+    const ms = Number(pickFirst(source, ["lastActivityMs", "lastHeartbeatMs", "updatedAtMs", "lastMessageAtMs"], ""));
+    return Number.isFinite(ms) && ms > 0 ? new Date(ms) : null;
+  }
+
+  function latestModuleActivityDate(rows) {
+    const dates = rows
+      .map(moduleActivityDate)
+      .filter(Boolean);
+    if (!dates.length) return null;
+    return dates.sort((a, b) => b.getTime() - a.getTime())[0];
+  }
+
+  function moduleDetail(rowCount, latestDate) {
+    const activity = latestDate ? displayDate(latestDate) : "Not available";
+    return `${rowCount} docs / Last Activity: ${activity}`;
+  }
+
+  async function readModuleDocs(label, moduleQuery, maxDocs = 50) {
+    try {
+      const snap = await getDocs(moduleQuery);
+      return {
+        available: true,
+        label,
+        rows: snap.docs.map((itemDoc) => ({ id: itemDoc.id, ...(itemDoc.data() || {}) })),
+        limited: snap.size >= maxDocs,
+      };
+    } catch (error) {
+      console.warn(`[Fair Flow Console] READ ONLY V1 ${label} module load failed`, error);
+      return {
+        available: false,
+        label,
+        rows: [],
+        errorCode: error?.code || "unknown",
+      };
+    }
+  }
+
+  function applyModuleRowsToUsageOverview(key, result, usedLabel = "Used") {
+    if (!result.available) {
+      updateUsageModuleStatus(key, "Not available", `Read failed: ${result.errorCode || "unknown"}`, "warning");
+      return;
+    }
+    const latestDate = latestModuleActivityDate(result.rows);
+    const label = result.rows.length ? usedLabel : "No data";
+    updateUsageModuleStatus(
+      key,
+      label,
+      moduleDetail(result.rows.length, latestDate),
+      result.rows.length ? "healthy" : "",
+    );
+  }
+
+  function summarizeModuleResult(result, rowsOverride = null) {
+    const rows = rowsOverride || result.rows || [];
+    return {
+      available: result.available === true,
+      count: rows.length,
+      latestDate: latestModuleActivityDate(rows),
+      errorCode: result.errorCode || null,
+    };
+  }
+
+  async function loadUsageOverviewModulesReadOnly(salonId) {
+    // READ ONLY V1: bounded module checks only. No writes and no module actions.
+    const db = getConsoleDb();
+    const [
+      queueResult,
+      tasksResult,
+      inventoryItemsResult,
+      inventoryCategoriesResult,
+      trainingItemsResult,
+      trainingProgressResult,
+      scheduleResult,
+      timeClockResult,
+    ] = await Promise.all([
+      readModuleDocs("Queue", query(collection(db, "salons", salonId, "queueState"), limit(50))),
+      readModuleDocs("Tasks", query(collection(db, "salons", salonId, "tasksState"), limit(50))),
+      readModuleDocs("Inventory items", query(collection(db, "salons", salonId, "inventoryItems"), limit(50))),
+      readModuleDocs("Inventory categories", query(collection(db, "salons", salonId, "inventoryCategories"), limit(50))),
+      readModuleDocs("Training items", query(collection(db, "trainingItems"), where("salonId", "==", salonId), limit(50))),
+      readModuleDocs("Training progress", query(collection(db, "trainingProgress"), where("salonId", "==", salonId), limit(50))),
+      readModuleDocs("Schedule", query(collection(db, "salons", salonId, "schedulePublish"), limit(50))),
+      readModuleDocs("Time Clock", query(collection(db, "salons", salonId, "timeEntries"), limit(50))),
+    ]);
+
+    applyModuleRowsToUsageOverview("queue", queueResult);
+    applyModuleRowsToUsageOverview("tasks", tasksResult);
+
+    const inventoryRows = [
+      ...inventoryItemsResult.rows,
+      ...inventoryCategoriesResult.rows,
+    ];
+    applyModuleRowsToUsageOverview("inventory", {
+      available: inventoryItemsResult.available || inventoryCategoriesResult.available,
+      rows: inventoryRows,
+      errorCode: inventoryItemsResult.errorCode || inventoryCategoriesResult.errorCode,
+    });
+
+    const trainingRows = [
+      ...trainingItemsResult.rows,
+      ...trainingProgressResult.rows,
+    ];
+    applyModuleRowsToUsageOverview("training", {
+      available: trainingItemsResult.available || trainingProgressResult.available,
+      rows: trainingRows,
+      errorCode: trainingItemsResult.errorCode || trainingProgressResult.errorCode,
+    });
+
+    applyModuleRowsToUsageOverview("schedule", scheduleResult);
+    applyModuleRowsToUsageOverview("timeclock", timeClockResult);
+
+    logReadOnlyDebug("Usage Overview modules loaded", {
+      salonId,
+      queue: { available: queueResult.available, count: queueResult.rows.length, errorCode: queueResult.errorCode || null },
+      tasks: { available: tasksResult.available, count: tasksResult.rows.length, errorCode: tasksResult.errorCode || null },
+      inventory: {
+        itemsAvailable: inventoryItemsResult.available,
+        categoriesAvailable: inventoryCategoriesResult.available,
+        count: inventoryRows.length,
+        errorCode: inventoryItemsResult.errorCode || inventoryCategoriesResult.errorCode || null,
+      },
+      training: {
+        itemsAvailable: trainingItemsResult.available,
+        progressAvailable: trainingProgressResult.available,
+        count: trainingRows.length,
+        errorCode: trainingItemsResult.errorCode || trainingProgressResult.errorCode || null,
+      },
+      schedule: { available: scheduleResult.available, count: scheduleResult.rows.length, errorCode: scheduleResult.errorCode || null },
+      timeClock: { available: timeClockResult.available, count: timeClockResult.rows.length, errorCode: timeClockResult.errorCode || null },
+    });
+    return {
+      modules: {
+        queue: summarizeModuleResult(queueResult),
+        tasks: summarizeModuleResult(tasksResult),
+        inventory: summarizeModuleResult({
+          available: inventoryItemsResult.available || inventoryCategoriesResult.available,
+          errorCode: inventoryItemsResult.errorCode || inventoryCategoriesResult.errorCode,
+        }, inventoryRows),
+        training: summarizeModuleResult({
+          available: trainingItemsResult.available || trainingProgressResult.available,
+          errorCode: trainingItemsResult.errorCode || trainingProgressResult.errorCode,
+        }, trainingRows),
+        schedule: summarizeModuleResult(scheduleResult),
+        timeclock: summarizeModuleResult(timeClockResult),
+      },
+    };
   }
 
   function updateMediaModuleStatus(totalFiles, monthlyUploads, hasAnySize, mediaBytes) {
@@ -767,10 +1137,24 @@ import {
         currentPlanLimit: planLimit,
         limitation: "No Firebase Storage metadata calls in READ ONLY V1; size requires Firestore size fields on mediaItems.",
       });
+      return {
+        available: true,
+        media: {
+          used: totalFiles > 0,
+          totalFiles,
+          monthlyUploads,
+          mediaBytes,
+        },
+      };
     } catch (error) {
       console.warn("[Fair Flow Console] READ ONLY V1 data usage load failed", error);
       renderDataUsageUnavailable(`READ ONLY V1: Could not load usage metadata (${error?.code || "unknown"}).`);
       updateMediaModuleStatus(0, 0, false, 0);
+      return {
+        available: false,
+        media: { used: false, totalFiles: 0, monthlyUploads: 0, mediaBytes: 0 },
+        errorCode: error?.code || "unknown",
+      };
     }
   }
 
@@ -798,15 +1182,7 @@ import {
   }
 
   function renderRequestsReadOnly(requests) {
-    const counts = requests.reduce((acc, request) => {
-      const status = String(request?.status || "").toLowerCase();
-      if (status === "open") acc.open += 1;
-      if (status === "pending") acc.pending += 1;
-      if (status === "needs_info") acc.needsInfo += 1;
-      if (status === "approved" || status === "done") acc.approvedDone += 1;
-      if (status === "denied") acc.denied += 1;
-      return acc;
-    }, { open: 0, pending: 0, needsInfo: 0, approvedDone: 0, denied: 0 });
+    const counts = countRequestsByStatus(requests);
 
     setText("[data-customer-360-requests-open]", String(counts.open));
     setText("[data-customer-360-requests-pending]", String(counts.pending));
@@ -849,15 +1225,7 @@ import {
       renderRequestsReadOnly(requests);
       const suffix = snap.size >= requestsLimit ? ` Limited to first ${requestsLimit} docs.` : "";
       setText("[data-customer-360-requests-status]", `READ ONLY V1 - Inbox / Requests: Loaded ${requests.length} requests.${suffix}`);
-      const counts = requests.reduce((acc, request) => {
-        const status = String(request?.status || "").toLowerCase();
-        if (status === "open") acc.open += 1;
-        if (status === "pending") acc.pending += 1;
-        if (status === "needs_info") acc.needsInfo += 1;
-        if (status === "approved" || status === "done") acc.approvedDone += 1;
-        if (status === "denied") acc.denied += 1;
-        return acc;
-      }, { open: 0, pending: 0, needsInfo: 0, approvedDone: 0, denied: 0 });
+      const counts = countRequestsByStatus(requests);
       logReadOnlyDebug("Inbox / Requests loaded", {
         salonId,
         path: `salons/${salonId}/inboxItems`,
@@ -879,9 +1247,11 @@ import {
             createdAt: displayDate(request.createdAt),
           })),
       });
+      return { available: true, counts, total: requests.length };
     } catch (error) {
       console.warn("[Fair Flow Console] READ ONLY V1 inbox requests load failed", error);
       renderRequestsUnavailable(`READ ONLY V1 - Inbox / Requests: Could not load (${error?.code || "unknown"}).`);
+      return { available: false, counts: null, total: null, errorCode: error?.code || "unknown" };
     }
   }
 
@@ -1005,6 +1375,7 @@ import {
     setText("[data-customer-360-email]", displayValue(row.dataset.customerEmail, "Not available"));
     setText("[data-customer-360-phone]", "Not available");
     resetUsageOverviewModules();
+    resetCustomerIntelligence();
     setText("[data-customer-360-locations-count]", displayValue(row.dataset.customerLocationsCount, "Not available"));
     setText("[data-customer-360-staff-count]", displayValue(row.dataset.customerStaffCount, "Not available"));
     setText("[data-customer-360-plan]", displayValue(row.dataset.customerPlan, "Not available"));
@@ -1024,6 +1395,8 @@ import {
     setCustomer360Loading(row);
     if (!canRunReadOnlyReads()) {
       setText("[data-customer-360-status]", "Please log in to Fair Flow first, then reopen Fair Flow Console.");
+      setText("[data-customer-360-intelligence-summary]", "Login is required to load customer intelligence.");
+      setBadgeState("[data-customer-360-intelligence-status]", "Not available", "warning");
       renderLocations([]);
       renderDataUsageUnavailable();
       renderRequestsUnavailable();
@@ -1031,6 +1404,8 @@ import {
     }
     if (!salonId) {
       setText("[data-customer-360-status]", "READ ONLY V1: Missing salonId for this row.");
+      setText("[data-customer-360-intelligence-summary]", "Missing salon id.");
+      setBadgeState("[data-customer-360-intelligence-status]", "Not available", "warning");
       return;
     }
     try {
@@ -1072,15 +1447,28 @@ import {
       const plan = displayValue(pickFirst(salon, ["plan", "planName", "subscriptionPlan"], "Not available"));
       const billing = displayValue(pickFirst(salon, ["billingStatus", "accountStatus", "status", "subscriptionStatus"], "Not available"));
       const createdAt = displayDate(pickFirst(salon, ["createdAt"], null));
-      const lastActivity = displayDate(pickFirst(salon, ["lastActivityAt", "lastActiveAt", "updatedAt", "createdAt"], null));
+      // Last Activity must come from an actual activity signal. Customer Since already shows createdAt.
+      const lastActivityDate = timestampToDate(pickFirst(salon, ["lastActivityAt", "lastActiveAt"], null)) ||
+        latestStaffLastActiveAt(staffRows);
+      const lastActivity = displayDate(
+        lastActivityDate,
+      );
       const gracePeriod = displayDate(pickFirst(salon, ["gracePeriodEndsAt"], null));
+      const ownerName = displayValue(ownerProfile.name, "Not available");
+      const ownerEmail = displayValue(ownerProfile.email, "Not available");
+      const ownerPhone = displayValue(ownerProfile.phone, "Not available");
 
       setText("[data-customer-360-status]", `READ ONLY V1: Loaded salon ${salonId}.`);
       setText("[data-customer-360-name]", businessName);
       setText("[data-customer-360-name-copy]", businessName);
-      setText("[data-customer-360-owner]", ownerProfile.name);
-      setText("[data-customer-360-email]", ownerProfile.email);
-      setText("[data-customer-360-phone]", ownerProfile.phone);
+      setText("[data-customer-360-owner]", ownerName);
+      setText("[data-customer-360-email]", ownerEmail);
+      setText("[data-customer-360-phone]", ownerPhone);
+      console.log("[Fair Flow Console] Owner profile applied to UI", {
+        name: ownerName,
+        email: ownerEmail,
+        phone: ownerPhone,
+      });
       setText("[data-customer-360-locations-count]", String(locations.length));
       setText("[data-customer-360-staff-count]", String(staffRows.length));
       setText("[data-customer-360-plan]", plan);
@@ -1106,8 +1494,8 @@ import {
         ],
         loaded: {
           businessName,
-          ownerName: ownerProfile.name,
-          ownerEmail: ownerProfile.email,
+          ownerName,
+          ownerEmail,
           locationsCount: locations.length,
           staffCount: staffRows.length,
           plan,
@@ -1117,8 +1505,8 @@ import {
           gracePeriod,
         },
         notAvailable: Object.entries({
-          ownerName: ownerProfile.name,
-          ownerEmail: ownerProfile.email,
+          ownerName,
+          ownerEmail,
           plan,
           billingStatus: billing,
           createdAt,
@@ -1132,13 +1520,35 @@ import {
         })),
         staffSummary: staffCounts,
       });
-      await Promise.all([
+      const [dataUsageSummary, inboxSummary, usageSummary] = await Promise.all([
         loadDataUsageReadOnly(salonId, salon),
         loadInboxRequestsReadOnly(salonId),
+        loadUsageOverviewModulesReadOnly(salonId),
       ]);
+      const health = computeCustomerHealthV1({ billing, lastActivityDate, inboxSummary });
+      setHealthBadge(health.label, health.state);
+      applyCustomerIntelligence({
+        health,
+        lastActivity,
+        lastActivityDate,
+        inboxSummary,
+        usageSummary,
+        dataUsageSummary,
+        staffCounts,
+      });
+      console.log("[Fair Flow Console] Customer Health V1 applied", {
+        salonId,
+        label: health.label,
+        reason: health.reason,
+        billing,
+        lastActivity,
+        inboxSummary,
+      });
     } catch (error) {
       console.warn("[Fair Flow Console] READ ONLY V1 customer detail load failed", error);
       setText("[data-customer-360-status]", `READ ONLY V1: Could not load details (${error?.code || "unknown"}).`);
+      setText("[data-customer-360-intelligence-summary]", `Could not load customer intelligence (${error?.code || "unknown"}).`);
+      setBadgeState("[data-customer-360-intelligence-status]", "Not available", "warning");
       renderLocations([]);
       renderDataUsageUnavailable();
       renderRequestsUnavailable();
@@ -1152,7 +1562,6 @@ import {
     const owner = data.customerOwner || "--";
     const plan = data.customerPlan || "--";
     const billing = data.customerBilling || "--";
-    const health = data.customerHealth || "Healthy";
 
     setText("[data-customer-360-name]", name);
     setText("[data-customer-360-name-copy]", name);
@@ -1163,7 +1572,7 @@ import {
     setText("[data-customer-360-billing]", billing);
     setText("[data-customer-360-payment]", billing);
     setText("[data-customer-360-initials]", getInitials(name));
-    setHealthBadge(health);
+    setHealthBadge();
     activateSection("customer-360");
     loadCustomer360ReadOnly(data.customerId || "", row);
   }

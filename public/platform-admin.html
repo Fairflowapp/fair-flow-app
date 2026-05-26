@@ -237,7 +237,7 @@
             </div>
           </div>
           <div class="ff-platform-c360-actions">
-            <span class="ff-platform-health healthy" data-customer-360-health>Healthy</span>
+            <span class="ff-platform-badge" data-customer-360-health>Health: Not connected</span>
             <span class="ff-platform-badge" data-customer-360-plan>Scale</span>
           </div>
         </div>
@@ -257,25 +257,10 @@
               <div><dt>Staff Count</dt><dd data-customer-360-staff-count>--</dd></div>
               <div><dt>Plan</dt><dd data-customer-360-plan-copy>Scale</dd></div>
               <div><dt>Billing Status</dt><dd data-customer-360-billing>Current</dd></div>
-              <div><dt>Customer Since</dt><dd data-customer-360-created-at>--</dd></div>
               <div><dt>Last Activity</dt><dd data-customer-360-last-activity>-- ago</dd></div>
+              <div><dt>Customer Since</dt><dd data-customer-360-created-at>--</dd></div>
+              <div><dt>Health</dt><dd><span class="ff-platform-badge" data-customer-360-health-detail>Not connected</span></dd></div>
             </dl>
-          </article>
-
-          <article class="ff-platform-card ff-platform-c360-card">
-            <div class="ff-platform-card__head">
-              <h3>Customer Health</h3>
-              <span>Placeholder score</span>
-            </div>
-            <div class="ff-platform-health-score">
-              <strong>--</strong>
-              <small>Health Score</small>
-            </div>
-            <div class="ff-platform-health-stack">
-              <span class="ff-platform-health healthy">Healthy</span>
-              <span class="ff-platform-health warning">Medium Risk</span>
-              <span class="ff-platform-health error">High Risk</span>
-            </div>
           </article>
 
           <article class="ff-platform-card ff-platform-c360-card ff-platform-c360-card--wide">
@@ -283,7 +268,7 @@
               <h3>Usage Overview</h3>
               <span>READ ONLY V1 - module status</span>
             </div>
-            <p class="ff-platform-readonly-status">Module usage signals are not connected yet. Status defaults to Not connected until each module has a live data source. Media flips to Used only when Data Usage finds files for this customer.</p>
+            <p class="ff-platform-readonly-status">Module usage signals load from read-only Firestore data. Empty modules show No data; unavailable modules show read status without making changes.</p>
             <div class="ff-platform-module-grid">
               <div><strong>Queue</strong><span class="ff-platform-badge" data-customer-360-module-queue-status>Not connected</span><small data-customer-360-module-queue-detail>Last Activity: Not available</small></div>
               <div><strong>Tasks</strong><span class="ff-platform-badge" data-customer-360-module-tasks-status>Not connected</span><small data-customer-360-module-tasks-detail>Last Activity: Not available</small></div>
@@ -295,15 +280,25 @@
             </div>
           </article>
 
-          <article class="ff-platform-card ff-platform-c360-card ff-platform-c360-card--wide">
+          <article class="ff-platform-card ff-platform-c360-card ff-platform-c360-card--wide ff-platform-intelligence-card">
             <div class="ff-platform-card__head">
               <div>
                 <h3>Customer Intelligence</h3>
-                <p>Aggregated activity, adoption, and risk signals will land here once real telemetry is connected.</p>
+                <p data-customer-360-intelligence-summary>Loading live customer signals...</p>
               </div>
-              <span>Not connected</span>
+              <span class="ff-platform-badge" data-customer-360-intelligence-status>Loading</span>
             </div>
-            <p class="ff-platform-readonly-status">No live intelligence connected yet. This section intentionally hides demo trend indicators (queue/staff/risk/adoption) to avoid misleading internal decisions until backed by real signals.</p>
+            <details class="ff-platform-intelligence-details">
+              <summary>View signal details</summary>
+              <dl class="ff-platform-detail-grid">
+                <div><dt>Health</dt><dd data-customer-360-intelligence-health>Not available</dd></div>
+                <div><dt>Module Adoption</dt><dd data-customer-360-intelligence-adoption>Not available</dd></div>
+                <div><dt>Last Activity</dt><dd data-customer-360-intelligence-activity>Not available</dd></div>
+                <div><dt>Requests</dt><dd data-customer-360-intelligence-requests>Not available</dd></div>
+                <div><dt>Staff</dt><dd data-customer-360-intelligence-staff>Not available</dd></div>
+                <div><dt>Notes</dt><dd data-customer-360-intelligence-notes>Read-only signals only</dd></div>
+              </dl>
+            </details>
           </article>
 
           <article class="ff-platform-card ff-platform-c360-card ff-platform-c360-card--wide">
@@ -686,6 +681,6 @@
     </main>
   </div>
 
-  <script type="module" src="./platform-admin.js?v=c360-data-v1"></script>
+  <script type="module" src="./platform-admin.js?v=c360-owner-debug-v1"></script>
 </body>
 </html>

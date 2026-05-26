@@ -1651,6 +1651,55 @@ body {
   grid-column: span 1;
 }
 
+.ff-platform-intelligence-card {
+  align-self: start;
+}
+
+.ff-platform-intelligence-card > .ff-platform-card__head {
+  align-items: center;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.ff-platform-intelligence-card > .ff-platform-card__head p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ff-platform-intelligence-details {
+  margin-top: 12px;
+}
+
+.ff-platform-intelligence-details summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ff-admin-purple);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ff-platform-intelligence-details summary::after {
+  content: "Open";
+  padding: 3px 8px;
+  border: 1px solid var(--ff-admin-border);
+  border-radius: 999px;
+  color: #64748b;
+  background: #ffffff;
+  font-size: 11px;
+}
+
+.ff-platform-intelligence-details[open] summary {
+  margin-bottom: 12px;
+}
+
+.ff-platform-intelligence-details[open] summary::after {
+  content: "Close";
+}
+
 .ff-platform-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

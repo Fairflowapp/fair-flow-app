@@ -513,9 +513,11 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
-    // User profile doc: each signed-in user can read/write ONLY their own doc
+    // User profile doc: users can read/write ONLY their own doc.
+    // Fair Flow Console (platform admin): read-only owner profile lookup for Customer 360.
     match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read: if (request.auth != null && request.auth.uid == uid) || isPlatformAdmin();
+      allow write: if request.auth != null && request.auth.uid == uid;
 
       // Phase 1 memberships: additive, backward-compatible mirror of users/{uid}.salonId/staffId.
       // The app does not read this for routing yet. Client writes are limited
@@ -969,6 +971,7 @@ service cloud.firestore {
     }
 
     // Staff presence (heartbeat + reception call popup via currentCall) — public/staff-call-cloud.js
+    // Fair Flow Console (platform admin): read-only realtime activity signal.
     match /salons/{salonId}/staffPresence/{staffId} {
       allow read: if (
         belongsToSalon(salonId)
@@ -982,7 +985,7 @@ service cloud.firestore {
           effectiveSalonMembership(salonId)
           || staffDocUidMatches(salonId, staffId)
         )
-      );
+      ) || isPlatformAdmin();
       allow create: if (
         belongsToSalon(salonId) && isManager(salonId)
       ) || (
@@ -1398,12 +1401,12 @@ service cloud.firestore {
 
     // Inventory (categories, subcategories, flat inventoryItems master list)
     match /salons/{salonId}/inventoryCategories/{catId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow create, update, delete: if isManager(salonId);
     }
 
     match /salons/{salonId}/inventoryCategories/{catId}/inventorySubcategories/{subId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow create, update, delete: if isManager(salonId);
     }
 
@@ -1425,7 +1428,7 @@ service cloud.firestore {
     }
 
     match /salons/{salonId}/inventoryItems/{itemId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow create, update, delete: if isManager(salonId);
     }
 
@@ -1442,7 +1445,7 @@ service cloud.firestore {
 
     // Weekly schedule publish flags (which ISO week-start dates are visible to all staff)
     match /salons/{salonId}/schedulePublish/{docId} {
-      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isPlatformAdmin();
       allow create, update: if belongsToSalon(salonId) && isManager(salonId);
       allow delete: if false;
     }
@@ -1683,13 +1686,13 @@ service cloud.firestore {
     // any branch they navigate to, but writes are gated by userCanWriteAtLocation
     // so a technician at branch A cannot tamper with branch B's state.
     match /salons/{salonId}/queueState/{docId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow write: if belongsToSalon(salonId)
         && userCanWriteAtLocation(salonId, docId);
     }
 
     match /salons/{salonId}/tasksState/{docId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow write: if belongsToSalon(salonId)
         && userCanWriteAtLocation(salonId, docId);
     }
@@ -1698,7 +1701,7 @@ service cloud.firestore {
     match /trainingItems/{itemId} {
       allow read: if isSignedIn()
         && resource.data.salonId is string
-        && canAccessSalon(resource.data.salonId);
+        && (canAccessSalon(resource.data.salonId) || isPlatformAdmin());
       allow create: if userExists()
         && canAccessSalon(request.resource.data.salonId)
         && request.resource.data.salonId is string
@@ -1717,8 +1720,10 @@ service cloud.firestore {
     match /trainingProgress/{progressId} {
       allow read: if isSignedIn()
         && resource.data.salonId is string
-        && canAccessSalon(resource.data.salonId)
+        && (canAccessSalon(resource.data.salonId) || isPlatformAdmin())
         && (
+          isPlatformAdmin()
+          ||
           canManageTrainingContent(resource.data.salonId)
           || (activeStaffIdForSalon(resource.data.salonId) != ''
             && resource.data.staffId == activeStaffIdForSalon(resource.data.salonId))
@@ -1771,7 +1776,7 @@ service cloud.firestore {
           isManager(salonId)
           || permTimeClockManageAllowed(salonId)
           || matchesOwnStaffId(salonId, resource.data.staffId)
-        );
+        ) || isPlatformAdmin();
 
       allow create: if belongsToSalon(salonId)
         && request.resource.data.salonId == salonId
