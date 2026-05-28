@@ -627,11 +627,11 @@ service cloud.firestore {
     // Owner can read so the Settings UI can show subscription status.
     //
     // The `override` doc (internal billing override / comped accounts) is
-    // additionally writable by platform admins via the dedicated callables in
-    // functions/billing.js. The Stripe doc and any other docs in this
+    // additionally writable by platform admins from the Fair Flow Console.
+    // The Stripe doc and any other docs in this
     // subcollection remain Admin-SDK-only.
     match /salons/{salonId}/billing/{docId} {
-      allow read: if isFirestoreSalonOwnerUid(salonId);
+      allow read: if isFirestoreSalonOwnerUid(salonId) || isPlatformAdmin();
       allow create, update, delete:
         if docId == 'override' && isPlatformAdmin();
       allow write: if false;
@@ -646,7 +646,10 @@ service cloud.firestore {
     // Admin SDK). The app never reads or writes this collection from the
     // client; security rules reference it via exists().
     match /platformAdmins/{uid} {
-      allow read, write: if false;
+      allow get: if isSignedIn() && request.auth.uid == uid;
+      allow list: if isPlatformAdmin()
+        && get(/databases/$(database)/documents/platformAdmins/$(request.auth.uid)).data.role == 'owner';
+      allow write: if false;
     }
 
     match /settings/{docId} {
@@ -1167,8 +1170,9 @@ service cloud.firestore {
     // ===== TICKETS =====
     // Technicians: create + read their own
     // Manager/Admin/Owner: full read + update (close/archive) + delete
+    // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
     match /salons/{salonId}/tickets/{ticketId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow create: if belongsToSalon(salonId)
         && request.resource.data.createdByUid == request.auth.uid;
       allow update: if belongsToSalon(salonId)
@@ -1181,8 +1185,9 @@ service cloud.firestore {
     }
 
     // Historical rows when a ticket is closed (Summary layer; not deleted when live ticket is removed)
+    // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
     match /salons/{salonId}/ticketSummaries/{summaryId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow create: if canCreateTicketSummary(salonId);
       // Admin/owner may set source-deleted markers when permanently deleting the live ticket (same role as ticket delete)
       allow update: if belongsToSalon(salonId) && isAdminOrOwner(salonId);
@@ -1288,10 +1293,12 @@ service cloud.firestore {
     }
 
     match /accounts/{accountId}/pointsEvents/{eventId} {
-      allow get: if permPointsAllAllowed(accountId)
+      allow get: if isPlatformAdmin()
+        || permPointsAllAllowed(accountId)
         || isOwner(accountId)
         || canSignedInReadOwnPointsEvent(accountId);
-      allow list: if permPointsAllAllowed(accountId)
+      allow list: if isPlatformAdmin()
+        || permPointsAllAllowed(accountId)
         || isOwner(accountId)
         || (
           isSignedIn()

@@ -223,6 +223,10 @@ onAuthStateChanged(auth, async user => {
     __ffChatBadgeEarlyGen++;
     return;
   }
+  if (typeof window !== "undefined" && window.__ff_owner_signup_in_progress) {
+    console.log("[app.js] early auth flow paused during owner signup");
+    return;
+  }
   // Pre-emptively flip the wait flag synchronously. The flag will be cleared by
   // ffApplyActiveMembership once a single membership is auto-selected or the
   // user picks one via Choose Salon. This stops module auth listeners from
@@ -305,6 +309,10 @@ onAuthStateChanged(auth, async user => {
         storedMembership ||
         (memberships.length === 1 ? memberships[0] : null);
       if (typeof loadUserRoleAndShowView === 'function') {
+        if (typeof window !== "undefined" && window.__ff_owner_signup_in_progress) {
+          console.log("[app.js] skipping early loadUserRoleAndShowView during owner signup");
+          return;
+        }
         loadUserRoleAndShowView(user, { selectedMembership, legacyUserData: data })
           .catch((err) => console.warn('[Auth] early loadUserRoleAndShowView failed', err));
       }
@@ -1032,14 +1040,25 @@ function hideAuthScreens() {
   const signupSection = document.getElementById("signup-section");
   const resetSection = document.getElementById("reset-password-section");
   const completeSetupSection = document.getElementById("complete-setup-section");
+  const billingRequiredSection = document.getElementById("billing-required-section");
   if (loginSection) loginSection.style.display = "none";
   if (signupSection) signupSection.style.display = "none";
   if (resetSection) resetSection.style.display = "none";
   if (completeSetupSection) completeSetupSection.style.display = "none";
+  if (billingRequiredSection) billingRequiredSection.style.display = "none";
 }
 
 /** Full-screen routes (outside #main-app-content). Hidden on logout; inline pointer-events must not stay "none" after login. */
 const FF_FULLSCREEN_MODULE_IDS = [
+  "appsOverlayBackdrop",
+  "appsPanel",
+  "myProfileScreen",
+  "userProfileScreen",
+  "manageQueueScreen",
+  "historyScreen",
+  "owner-view",
+  "reception-view",
+  "staff-view",
   "inboxScreen",
   "tasksScreen",
   "ticketsScreen",
@@ -1048,6 +1067,40 @@ const FF_FULLSCREEN_MODULE_IDS = [
   "trainingScreen",
   "scheduleScreen",
   "timeClockScreen",
+  "inventoryScreen",
+  "pointsAppScreen",
+  "ff-onboarding-wizard",
+  "settingsDlg",
+  "staffMembersModal",
+  "pointsSettingsModal",
+  "sharedTaskTemplatesModal",
+  "sharedTaskTemplateEditorModal",
+  "sharedChatTemplatesModal",
+  "sharedChatTemplateEditorModal",
+  "sharedChatFlowEditorModal",
+  "sharedInventoryCatalogModal",
+  "sharedInventoryItemEditorModal",
+  "sharedInventoryNameEditorModal",
+  "sharedInventoryBulkModal",
+  "userProfilePasswordModal",
+  "staffArchiveConfirmModal",
+  "staffDeleteConfirmModal",
+  "addTechnicianTypeModal",
+  "tasksResetConfirmModal",
+  "resetPinModal",
+  "tasksSettingsModal",
+  "taskInstructionsModal",
+  "pinModal",
+  "ticketModal",
+  "ticketDetailsModal",
+  "servicesModal",
+  "servicesCatalogEditorModal",
+  "chatSendModal",
+  "chatTemplatesModal",
+  "uploadWorkModal",
+  "workDetailsModal",
+  "markPostedModal",
+  "createTrainingModal",
 ];
 
 function showLoginScreen() {
@@ -1055,13 +1108,15 @@ function showLoginScreen() {
   const signupSection = document.getElementById("signup-section");
   const resetSection = document.getElementById("reset-password-section");
   const completeSetupSection = document.getElementById("complete-setup-section");
+  const billingRequiredSection = document.getElementById("billing-required-section");
   const mainApp = document.getElementById("main-app-content");
   if (loginSection) loginSection.style.display = "block";
   if (signupSection) signupSection.style.display = "none";
   if (resetSection) resetSection.style.display = "none";
   if (completeSetupSection) completeSetupSection.style.display = "none";
+  if (billingRequiredSection) billingRequiredSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
-  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving", "ff-billing-required");
   document.body.classList.add("ff-logged-out");
 
   /* Full-screen modules live OUTSIDE #main-app-content; hiding only main-app leaves them visible. */
@@ -1091,7 +1146,7 @@ function showResetPasswordScreen() {
   if (signupSection) signupSection.style.display = "none";
   if (completeSetupSection) completeSetupSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
-  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving", "ff-billing-required");
   document.body.classList.add("ff-logged-out");
   if (resetSection) resetSection.style.display = "block";
 
@@ -1115,7 +1170,7 @@ function showMainAppForRole(role) {
     return;
   }
 
-  document.body.classList.remove("ff-logged-out");
+  document.body.classList.remove("ff-logged-out", "ff-billing-required");
   if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
 
   // hide auth
@@ -1163,6 +1218,216 @@ function showMainAppForRole(role) {
     console.warn("[UI] Unknown role, falling back to owner view:", role);
     showOwnerView();
   }
+}
+
+function ffHideAppForBillingRequired() {
+  hideAuthScreens();
+  const mainApp = document.getElementById("main-app-content");
+  if (mainApp) mainApp.style.display = "none";
+  FF_FULLSCREEN_MODULE_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.display = "none";
+      el.style.pointerEvents = "none";
+    }
+  });
+  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.add("ff-logged-out", "ff-billing-required");
+}
+
+function ffEnsureBillingRequiredScreen() {
+  let screen = document.getElementById("billing-required-section");
+  if (screen) return screen;
+  screen = document.createElement("section");
+  screen.id = "billing-required-section";
+  screen.style.cssText = "display:none;position:relative;z-index:2;max-width:460px;margin:40px auto;padding:32px;background:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.08);text-align:center;";
+  screen.innerHTML = `
+    <h2 style="font-size:24px;margin:0 0 8px;">Billing required</h2>
+    <p style="font-size:14px;color:#666;line-height:1.5;margin:0 0 20px;">
+      Complete secure billing before entering Fair Flow. Your account is created, but dashboard access starts only after an active subscription or trial is confirmed.
+    </p>
+    <button id="billing-required-checkout-button" type="button" style="width:100%;padding:12px 16px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px;">Continue to secure checkout</button>
+    <button id="billing-required-refresh-button" type="button" style="width:100%;padding:10px 16px;border:1px solid #ddd;border-radius:999px;background:#fff;color:#333;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;">I completed billing, refresh</button>
+    <button id="billing-required-logout-button" type="button" style="background:none;border:none;color:#7b3fe4;cursor:pointer;text-decoration:underline;font-size:13px;">Use a different account</button>
+    <div id="billing-required-status" style="margin-top:12px;font-size:13px;color:#666;line-height:1.4;"></div>
+  `;
+  const loginSection = document.getElementById("login-section");
+  if (loginSection && loginSection.parentNode) {
+    loginSection.parentNode.insertBefore(screen, loginSection.nextSibling);
+  } else {
+    document.body.appendChild(screen);
+  }
+  return screen;
+}
+
+function ffSetBillingRequiredStatus(message, isError = false) {
+  const el = document.getElementById("billing-required-status");
+  if (!el) return;
+  el.textContent = message || "";
+  el.style.color = isError ? "#b91c1c" : "#666";
+}
+
+function ffSetBillingRequiredButtonsDisabled(disabled) {
+  ["billing-required-checkout-button", "billing-required-refresh-button", "billing-required-logout-button"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !!disabled;
+  });
+}
+
+async function ffStartRequiredBillingCheckout(salonId) {
+  if (!salonId) throw new Error("No salon selected.");
+  ffSetBillingRequiredButtonsDisabled(true);
+  ffSetBillingRequiredStatus("Opening secure Stripe checkout...");
+  try {
+    const fn = httpsCallable(getFunctions(undefined, "us-central1"), "createStripeCheckoutSession");
+    const origin = window.location.origin;
+    const { data } = await fn({
+      salonId,
+      items: [{ sku: "base", quantity: 1 }],
+      successUrl: `${origin}/?billing=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${origin}/?billing=cancel`,
+    });
+    if (!data?.url) throw new Error("No checkout URL returned.");
+    window.location.href = data.url;
+  } catch (err) {
+    console.error("[BillingRequired] checkout failed", err);
+    ffSetBillingRequiredStatus(`Could not start checkout: ${err?.message || err}`, true);
+    ffSetBillingRequiredButtonsDisabled(false);
+  }
+}
+
+async function ffRefreshRequiredBilling(user, salonId) {
+  if (!user || !salonId) return;
+  ffSetBillingRequiredButtonsDisabled(true);
+  ffSetBillingRequiredStatus("Checking billing status...");
+  try {
+    const fn = httpsCallable(getFunctions(undefined, "us-central1"), "syncStripeSubscription");
+    await fn({ salonId });
+  } catch (err) {
+    console.warn("[BillingRequired] sync failed", err);
+  }
+  ffSetBillingRequiredButtonsDisabled(false);
+  await loadUserRoleAndShowView(user);
+}
+
+function ffIsStripeCheckoutSuccessReturn() {
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    return params.get("billing") === "success" && !!params.get("session_id");
+  } catch (_) {
+    return false;
+  }
+}
+
+async function ffSyncBillingAfterCheckoutSuccess(user, salonId) {
+  if (!user || !salonId || !ffIsStripeCheckoutSuccessReturn()) return false;
+  const key = `ff_billing_success_synced_${salonId}_${window.location.search}`;
+  try {
+    if (sessionStorage.getItem(key) === "1") return false;
+    sessionStorage.setItem(key, "1");
+  } catch (_) {}
+  try {
+    console.log("[BillingRequired] syncing Stripe after checkout success", { salonId });
+    const fn = httpsCallable(getFunctions(undefined, "us-central1"), "syncStripeSubscription");
+    await fn({ salonId });
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("billing");
+      url.searchParams.delete("session_id");
+      window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+    } catch (_) {}
+    return true;
+  } catch (err) {
+    console.warn("[BillingRequired] checkout success sync failed", err);
+    try { sessionStorage.removeItem(key); } catch (_) {}
+    return false;
+  }
+}
+
+function ffShowBillingRequiredScreen({ user, salonId, autoStartCheckout = false, canManageBilling = true } = {}) {
+  ffHideAppForBillingRequired();
+  const screen = ffEnsureBillingRequiredScreen();
+  const loginSection = document.getElementById("login-section");
+  const signupSection = document.getElementById("signup-section");
+  const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
+  if (loginSection) loginSection.style.display = "none";
+  if (signupSection) signupSection.style.display = "none";
+  if (resetSection) resetSection.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "none";
+  screen.style.setProperty("display", "block", "important");
+  screen.style.setProperty("visibility", "visible", "important");
+  screen.style.setProperty("pointer-events", "auto", "important");
+
+  const checkoutBtn = document.getElementById("billing-required-checkout-button");
+  const refreshBtn = document.getElementById("billing-required-refresh-button");
+  const logoutBtn = document.getElementById("billing-required-logout-button");
+  if (checkoutBtn) {
+    checkoutBtn.style.display = canManageBilling ? "block" : "none";
+    checkoutBtn.onclick = () => ffStartRequiredBillingCheckout(salonId);
+  }
+  if (refreshBtn) refreshBtn.onclick = () => ffRefreshRequiredBilling(user || auth.currentUser, salonId);
+  if (logoutBtn) {
+    logoutBtn.onclick = async () => {
+      try { await signOut(auth); } catch (_) {}
+      showLoginScreen();
+    };
+  }
+
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
+  ffSetBillingRequiredStatus(canManageBilling ? (autoStartCheckout ? "Preparing checkout..." : "") : "Please ask the salon owner to complete billing.");
+  if (autoStartCheckout && canManageBilling) {
+    setTimeout(() => ffStartRequiredBillingCheckout(salonId), 100);
+  }
+}
+
+function ffMaybeRenderPrepaintBillingRequired() {
+  try {
+    const pending = window.__ff_billing_required_before_paint;
+    if (!pending || !pending.salonId) return;
+    ffShowBillingRequiredScreen({
+      user: auth.currentUser,
+      salonId: pending.salonId,
+      canManageBilling: true,
+    });
+  } catch (err) {
+    console.warn("[BillingRequired] prepaint handoff failed", err);
+  }
+}
+
+function ffIsActiveBillingStatus(status) {
+  const s = String(status || "").toLowerCase();
+  return s === "active" || s === "trialing" || s === "past_due";
+}
+
+function ffOverrideIsActive(override) {
+  if (!override || override.enabled !== true) return false;
+  try {
+    const endsAt = override.endsAt;
+    if (!endsAt) return true;
+    const ms = typeof endsAt.toMillis === "function" ? endsAt.toMillis() : Number(endsAt);
+    return !Number.isFinite(ms) || ms > Date.now();
+  } catch (_) {
+    return false;
+  }
+}
+
+async function ffRequiresBillingBeforeAccess(salonId) {
+  if (!salonId) return false;
+  const [salonSnap, stripeSnap, overrideSnap] = await Promise.all([
+    getDoc(doc(db, "salons", salonId)),
+    getDoc(doc(db, `salons/${salonId}/billing`, "stripe")),
+    getDoc(doc(db, `salons/${salonId}/billing`, "override")).catch(() => null),
+  ]);
+  const salon = salonSnap.exists() ? salonSnap.data() || {} : {};
+  const accountStatus = String(salon.accountStatus || "").toLowerCase();
+  const billingRequired = accountStatus === "billing_required" || salon.billingRequired === true;
+  if (!billingRequired) return false;
+  const stripe = stripeSnap.exists() ? stripeSnap.data() || {} : {};
+  if (ffIsActiveBillingStatus(stripe.status) && stripe.subscriptionId) return false;
+  const override = overrideSnap && overrideSnap.exists() ? overrideSnap.data() || {} : null;
+  if (ffOverrideIsActive(override)) return false;
+  return true;
 }
 
 // =====================
@@ -1268,7 +1533,10 @@ async function handleCompleteSetup() {
       adminPin: generatedPin,
       createdAt: serverTimestamp(),
       plan: "trial",
-      status: "active"
+      status: "billing_required",
+      accountStatus: "billing_required",
+      billingRequired: true,
+      billingRequiredAt: serverTimestamp()
     });
 
     console.log("[CompleteSetup] Salon doc created:", salonDocRef.id);
@@ -1296,12 +1564,12 @@ async function handleCompleteSetup() {
       console.warn("[CompleteSetup] Owner staff bootstrap failed:", bootstrapErr);
     }
 
-    // Clear stored user and proceed
+    // Clear stored user and require Stripe billing before app access.
     window.__ff_completeSetupUser = null;
     if (businessNameEl) businessNameEl.value = "";
     if (ownerNameEl) ownerNameEl.value = "";
 
-    await loadUserRoleAndShowView(user);
+    ffShowBillingRequiredScreen({ user, salonId: salonDocRef.id, autoStartCheckout: true });
   } catch (err) {
     console.error("[CompleteSetup] Failed", err);
     showCompleteSetupError(err?.message || "Setup failed. Please try again.");
@@ -1636,7 +1904,10 @@ async function handleOwnerSignup() {
       adminPin: generatedPin,
       createdAt: serverTimestamp(),
       plan: "trial",
-      status: "active"
+      status: "billing_required",
+      accountStatus: "billing_required",
+      billingRequired: true,
+      billingRequiredAt: serverTimestamp()
     });
 
     console.log("[SignUp] Salon doc created:", salonDocRef.id);
@@ -1665,8 +1936,8 @@ async function handleOwnerSignup() {
       console.warn("[SignUp] Owner staff bootstrap failed:", bootstrapErr);
     }
 
-    // After sign up, automatically navigate to owner view
-    await loadUserRoleAndShowView(user);
+    // After sign up, billing must be completed before the app loads.
+    ffShowBillingRequiredScreen({ user, salonId: salonDocRef.id, autoStartCheckout: true });
   } catch (err) {
     console.error("[SignUp] Failed to create owner", err);
     showSignupError(err.message || "Sign up failed.");
@@ -2519,6 +2790,22 @@ async function loadUserRoleAndShowView(user, options = {}) {
       }
     }
 
+    await ffSyncBillingAfterCheckoutSuccess(user, currentSalonId);
+
+    if (await ffRequiresBillingBeforeAccess(currentSalonId)) {
+      console.warn("[Auth] Billing required before app access", {
+        authUid: user.uid,
+        salonId: currentSalonId,
+        role,
+      });
+      ffShowBillingRequiredScreen({
+        user,
+        salonId: currentSalonId,
+        canManageBilling: role === "owner",
+      });
+      return;
+    }
+
     showMainAppForRole(role);
 
     setTimeout(() => {
@@ -2670,6 +2957,7 @@ if (typeof window !== "undefined") {
 // Auth state listener
 // =====================
 onAuthStateChanged(auth, async (user) => {
+  ffMaybeRenderPrepaintBillingRequired();
   if (window.__ffInviteModeActive && !window.__ffInviteFinalized) {
     console.log("[Invite] Invite mode active, suppressing normal auth flow");
     return;
@@ -2699,6 +2987,10 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   console.log("[Auth] User is signed in, loading role");
+  if (typeof window !== "undefined" && window.__ff_owner_signup_in_progress) {
+    console.log("[Auth] Signup in progress, waiting for billing-required handoff");
+    return;
+  }
   // If the early auth listener already detected multi-memberships and surfaced
   // the Choose Salon screen, skip duplicating the same Firestore round-trips here.
   // loadUserRoleAndShowView will run again (with selectedMembership) when the

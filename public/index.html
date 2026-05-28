@@ -185,6 +185,70 @@ body.ff-logged-out #ff-onboarding-wizard {
   visibility: hidden !important;
   pointer-events: none !important;
 }
+/* Billing required: hard-block every customer-app surface until Stripe billing is complete. */
+body.ff-billing-required #main-app-content,
+body.ff-billing-required .header,
+body.ff-billing-required #authBanner,
+body.ff-billing-required #appsOverlayBackdrop,
+body.ff-billing-required #appsPanel,
+body.ff-billing-required #myProfileScreen,
+body.ff-billing-required #userProfileScreen,
+body.ff-billing-required #owner-view,
+body.ff-billing-required #reception-view,
+body.ff-billing-required #staff-view,
+body.ff-billing-required #manageQueueScreen,
+body.ff-billing-required #historyScreen,
+body.ff-billing-required #ticketsScreen,
+body.ff-billing-required #mediaScreen,
+body.ff-billing-required #chatScreen,
+body.ff-billing-required #inboxScreen,
+body.ff-billing-required #tasksScreen,
+body.ff-billing-required #trainingScreen,
+body.ff-billing-required #scheduleScreen,
+body.ff-billing-required #timeClockScreen,
+body.ff-billing-required #inventoryScreen,
+body.ff-billing-required #pointsAppScreen,
+body.ff-billing-required #ff-onboarding-wizard,
+body.ff-billing-required #settingsDlg,
+body.ff-billing-required #staffMembersModal,
+body.ff-billing-required #pointsSettingsModal,
+body.ff-billing-required #sharedTaskTemplatesModal,
+body.ff-billing-required #sharedTaskTemplateEditorModal,
+body.ff-billing-required #sharedChatTemplatesModal,
+body.ff-billing-required #sharedChatTemplateEditorModal,
+body.ff-billing-required #sharedChatFlowEditorModal,
+body.ff-billing-required #sharedInventoryCatalogModal,
+body.ff-billing-required #sharedInventoryItemEditorModal,
+body.ff-billing-required #sharedInventoryNameEditorModal,
+body.ff-billing-required #sharedInventoryBulkModal,
+body.ff-billing-required #userProfilePasswordModal,
+body.ff-billing-required #staffArchiveConfirmModal,
+body.ff-billing-required #staffDeleteConfirmModal,
+body.ff-billing-required #addTechnicianTypeModal,
+body.ff-billing-required #tasksResetConfirmModal,
+body.ff-billing-required #resetPinModal,
+body.ff-billing-required #tasksSettingsModal,
+body.ff-billing-required #taskInstructionsModal,
+body.ff-billing-required #pinModal,
+body.ff-billing-required #ticketModal,
+body.ff-billing-required #ticketDetailsModal,
+body.ff-billing-required #servicesModal,
+body.ff-billing-required #servicesCatalogEditorModal,
+body.ff-billing-required #chatSendModal,
+body.ff-billing-required #chatTemplatesModal,
+body.ff-billing-required #uploadWorkModal,
+body.ff-billing-required #workDetailsModal,
+body.ff-billing-required #markPostedModal,
+body.ff-billing-required #createTrainingModal {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+body.ff-billing-required #billing-required-section {
+  display: block !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
 /* Signed out: gray backdrop + centered card; no extra vertical margin (40px top+bottom was causing ~1px overflow scroll). */
 body.ff-logged-out {
   min-height: 100vh;
@@ -320,7 +384,8 @@ body.ff-queue-route-active .wrap {
 body.ff-logged-out #login-section,
 body.ff-logged-out #signup-section,
 body.ff-logged-out #reset-password-section,
-body.ff-logged-out #complete-setup-section {
+body.ff-logged-out #complete-setup-section,
+body.ff-logged-out #billing-required-section {
   position: relative;
   z-index: 200000 !important;
   margin: 0 auto !important;
@@ -5709,6 +5774,66 @@ dialog footer button, .code-dialog footer button {
     </div>
   </section>
 
+  <!-- BILLING REQUIRED SECTION (shown when account exists but Stripe billing is not active yet) -->
+  <section id="billing-required-section" style="display:none;position:relative;z-index:2;max-width:460px;margin:40px auto;padding:32px;background:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.08);text-align:center;">
+    <h2 style="font-size:24px;margin:0 0 8px;">Billing required</h2>
+    <p style="font-size:14px;color:#666;line-height:1.5;margin:0 0 20px;">
+      Complete secure billing before entering Fair Flow. Your account is created, but app access starts only after active billing is confirmed.
+    </p>
+    <button id="billing-required-checkout-button" type="button" style="width:100%;padding:12px 16px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px;">
+      Continue to secure checkout
+    </button>
+    <button id="billing-required-refresh-button" type="button" style="width:100%;padding:10px 16px;border:1px solid #ddd;border-radius:999px;background:#fff;color:#333;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;">
+      I completed billing, refresh
+    </button>
+    <button id="billing-required-logout-button" type="button" style="background:none;border:none;color:#7b3fe4;cursor:pointer;text-decoration:underline;font-size:13px;">
+      Use a different account
+    </button>
+    <div id="billing-required-status" style="margin-top:12px;font-size:13px;color:#666;line-height:1.4;"></div>
+  </section>
+  <script>
+    (function ffBillingRequiredStaticFallback(){
+      function shouldShow() {
+        try {
+          var p = new URLSearchParams(window.location.search || '');
+          return p.get('billing') === 'cancel' || document.body.classList.contains('ff-billing-required');
+        } catch (_) {
+          return document.body.classList.contains('ff-billing-required');
+        }
+      }
+      function show(message) {
+        try {
+          var section = document.getElementById('billing-required-section');
+          var status = document.getElementById('billing-required-status');
+          var main = document.getElementById('main-app-content');
+          if (!section || !shouldShow()) return;
+          document.body.classList.add('ff-logged-out', 'ff-billing-required');
+          document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
+          if (main) main.style.display = 'none';
+          ['login-section','signup-section','reset-password-section','complete-setup-section'].forEach(function(id){
+            var el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+          });
+          section.style.setProperty('display', 'block', 'important');
+          section.style.setProperty('visibility', 'visible', 'important');
+          section.style.setProperty('pointer-events', 'auto', 'important');
+          if (status && message) status.textContent = message;
+          if (typeof window.ffRemoveAuthSplash === 'function') window.ffRemoveAuthSplash();
+        } catch (_) {}
+      }
+      window.ffShowStaticBillingRequired = show;
+      document.addEventListener('DOMContentLoaded', function(){
+        show('Billing is still required. Continue checkout to enter the app.');
+      });
+      window.addEventListener('pageshow', function(){
+        show('Billing is still required. Continue checkout to enter the app.');
+      });
+      window.addEventListener('focus', function(){
+        show('Billing is still required. Continue checkout to enter the app.');
+      });
+    })();
+  </script>
+
   <!-- COMPLETE SETUP SECTION (shown when authed user has no users/{uid} doc) -->
   <section id="complete-setup-section" style="display:none;max-width:440px;margin:40px auto;padding:32px;background:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.08);">
     <h2 style="text-align:center;font-size:24px;margin-bottom:8px;">Complete your setup</h2>
@@ -8186,6 +8311,20 @@ async function initFirebaseAuth() {
       if (user) {
         // Signed in - check if user is archived
         console.log('[AUTH] signed in:', user.email, user.uid);
+        if (window.__ff_owner_signup_in_progress) {
+          console.log('[AUTH] Owner signup in progress - keeping app shell hidden until billing handoff');
+          try {
+            document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
+            document.body.classList.add('ff-logged-out');
+          } catch (_) {}
+          if (mainContent) mainContent.style.display = 'none';
+          if (authBanner) authBanner.style.display = 'none';
+          if (loginSection) loginSection.style.display = 'none';
+          if (signupSection) signupSection.style.display = 'none';
+          if (resetPasswordSection) resetPasswordSection.style.display = 'none';
+          ffRemoveAuthSplash();
+          return;
+        }
 
         // Archived-user access guard runs asynchronously against Firestore so it
         // can no longer be fooled by stale cross-tenant localStorage. While the
@@ -8228,12 +8367,44 @@ async function initFirebaseAuth() {
         // We check Firestore synchronously-ish (await) before painting anything.
         (async function ffHandleSignedInUser() {
           let hasProfile = true; // safe default: if we can't check, proceed with normal paint
+          let billingRequiredBeforePaint = false;
+          let billingRequiredSalonId = '';
           try {
             const firestoreDb = window.db || window.ffDb;
             if (firestoreDb && typeof getTrainingFirestoreApi === 'function') {
               const { doc, getDoc } = await getTrainingFirestoreApi();
               const snap = await getDoc(doc(firestoreDb, 'users', user.uid));
               hasProfile = snap.exists();
+              if (hasProfile) {
+                const profile = snap.data() || {};
+                let salonId = String(profile.salonId || '').trim();
+                if (!salonId) {
+                  try {
+                    var storedSalonId = sessionStorage.getItem('ff_active_salon_id') || localStorage.getItem('ff_active_salon_id') || '';
+                    salonId = String(storedSalonId || '').trim();
+                  } catch (_) {}
+                }
+                if (salonId) {
+                  billingRequiredSalonId = salonId;
+                  const salonSnap = await getDoc(doc(firestoreDb, 'salons', salonId));
+                  const salon = salonSnap.exists() ? salonSnap.data() || {} : {};
+                  const accountStatus = String(salon.accountStatus || '').toLowerCase();
+                  billingRequiredBeforePaint =
+                    accountStatus === 'billing_required' ||
+                    accountStatus === 'locked' ||
+                    String(salon.accountStatus || '').toLowerCase() === 'billing_required' ||
+                    salon.billingRequired === true;
+                  if (billingRequiredBeforePaint) {
+                    const stripeSnap = await getDoc(doc(firestoreDb, 'salons', salonId, 'billing', 'stripe'));
+                    const stripe = stripeSnap.exists() ? stripeSnap.data() || {} : {};
+                    const stripeStatus = String(stripe.status || '').toLowerCase();
+                    billingRequiredBeforePaint = !(
+                      stripe.subscriptionId &&
+                      (stripeStatus === 'active' || stripeStatus === 'trialing' || stripeStatus === 'past_due')
+                    );
+                  }
+                }
+              }
             }
           } catch (e) {
             console.warn('[AUTH] Pre-paint profile check failed (treating as has-profile):', e?.code, e?.message);
@@ -8248,6 +8419,36 @@ async function initFirebaseAuth() {
             if (mainContent) mainContent.style.display = 'none';
             if (authBanner) authBanner.style.display = 'none';
             // app.js will call showCompleteSetupScreen(user) which flips on complete-setup-section.
+            ffRemoveAuthSplash();
+            return;
+          }
+
+          if (billingRequiredBeforePaint) {
+            console.log('[AUTH] Billing required - keeping app shell hidden until app.js renders Billing Required');
+            window.__ff_billing_required_before_paint = {
+              salonId: billingRequiredSalonId || '',
+              uid: user.uid,
+            };
+            try {
+              document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
+              document.body.classList.add('ff-logged-out', 'ff-billing-required');
+            } catch (_) {}
+            if (mainContent) mainContent.style.display = 'none';
+            if (authBanner) authBanner.style.display = 'none';
+            if (loginSection) loginSection.style.display = 'none';
+            if (signupSection) signupSection.style.display = 'none';
+            if (resetPasswordSection) resetPasswordSection.style.display = 'none';
+            var billingRequiredSection = document.getElementById('billing-required-section');
+            var billingRequiredStatus = document.getElementById('billing-required-status');
+            if (billingRequiredSection) {
+              billingRequiredSection.style.setProperty('display', 'block', 'important');
+              billingRequiredSection.style.setProperty('visibility', 'visible', 'important');
+              billingRequiredSection.style.setProperty('pointer-events', 'auto', 'important');
+            }
+            if (billingRequiredStatus) billingRequiredStatus.textContent = 'Billing is still required. Continue checkout to enter the app.';
+            if (typeof window.ffShowStaticBillingRequired === 'function') {
+              window.ffShowStaticBillingRequired('Billing is still required. Continue checkout to enter the app.');
+            }
             ffRemoveAuthSplash();
             return;
           }
@@ -56109,11 +56310,11 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260510_firestore_lp"></script>
+  <script type="module" src="/app.js?v=20260526_billing_required_signup_v6"></script>
   <script>
     (function () {
       var scripts = [
-        { src: "/billing-guard.js?v=20260519_initial", type: "module", delay: 600 }, // global account-state enforcement (banner / lock overlay)
+        { src: "/billing-guard.js?v=20260526_billing_required_v4", type: "module", delay: 600 }, // global account-state enforcement (banner / lock overlay)
         { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module", delay: 700 },
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260501_points", delay: 1050 },

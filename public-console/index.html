@@ -5,17 +5,39 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Fair Flow Console</title>
   <meta name="robots" content="noindex,nofollow" />
-  <link rel="stylesheet" href="./platform-admin.css" />
+  <link rel="icon" type="image/png" href="./assets/fairflow-console-favicon.png?v=console-logo-v3" />
+  <link rel="shortcut icon" type="image/png" href="./assets/fairflow-console-favicon.png?v=console-logo-v3" />
+  <link rel="apple-touch-icon" href="./assets/fairflow-console-favicon.png?v=console-logo-v3" />
+  <link rel="stylesheet" href="./platform-admin.css?v=console-logo-v3" />
 </head>
-<body>
+<body class="ff-console-auth-loading">
+  <main class="ff-console-auth-screen" data-console-auth-screen>
+    <section class="ff-console-auth-card" data-console-auth-card>
+      <div class="ff-platform-logo" aria-hidden="true">
+        <img src="./assets/fairflow-console-logo.png?v=console-logo-v3" alt="">
+      </div>
+      <h1>Console Sign In</h1>
+      <p data-console-auth-copy>Checking secure session...</p>
+      <div class="ff-console-auth-loader" data-console-auth-loader>Loading...</div>
+      <form class="ff-console-auth-form" data-console-login-form hidden>
+        <input name="email" type="email" autocomplete="email" placeholder="Email" required>
+        <input name="password" type="password" autocomplete="current-password" placeholder="Password" required>
+        <button type="submit">Sign in</button>
+        <button type="button" data-console-google-login>Sign in with Google</button>
+      </form>
+      <button class="ff-console-auth-reset" type="button" data-console-auth-reset hidden>Try another account</button>
+      <small data-console-login-message>Only active internal platform admins can access this console.</small>
+    </section>
+  </main>
   <!-- V1 Foundation Only: static UI shell. No Firebase reads/writes, no existing module integration. -->
   <div class="ff-platform-shell" data-fair-flow-console-shell>
     <aside class="ff-platform-sidebar" aria-label="Fair Flow Console navigation">
       <div class="ff-platform-sidebar__top">
         <div class="ff-platform-brand">
-          <div class="ff-platform-logo" aria-hidden="true">FF</div>
+          <div class="ff-platform-logo" aria-hidden="true">
+            <img src="./assets/fairflow-console-logo.png?v=console-logo-v3" alt="">
+          </div>
           <div class="ff-platform-brand-copy">
-            <p class="ff-platform-eyebrow">Fair Flow</p>
             <h1>Fair Flow Console</h1>
           </div>
         </div>
@@ -664,13 +686,73 @@
 
       <section class="ff-platform-section" id="settings" data-platform-section>
         <div class="ff-platform-card">
-          <h3>Settings</h3>
-          <p>Placeholder area for future Fair Flow Console preferences and access controls.</p>
+          <div class="ff-platform-card__head">
+            <div>
+              <h3>Console Team Management</h3>
+              <p>Owner-controlled internal console permissions.</p>
+            </div>
+            <span data-console-team-status>Owner only</span>
+          </div>
+          <form class="ff-platform-admin-form" data-console-admin-form>
+            <label>
+              <span>Name</span>
+              <input name="name" type="text" placeholder="Team member name">
+            </label>
+            <label>
+              <span>Email</span>
+              <input name="email" type="email" placeholder="teammate@fairflowapp.com" required>
+            </label>
+            <label>
+              <span>Role</span>
+              <select name="role" data-console-admin-role>
+                <option value="admin">Admin</option>
+                <option value="support">Support</option>
+                <option value="billing">Billing</option>
+                <option value="readonly">Readonly</option>
+                <option value="owner">Owner</option>
+              </select>
+            </label>
+            <fieldset class="ff-platform-permissions">
+              <legend>Permissions</legend>
+              <label><input type="checkbox" name="perm_customers" checked> Customers</label>
+              <label><input type="checkbox" name="perm_customer360" checked> Customer 360</label>
+              <label><input type="checkbox" name="perm_support"> Support</label>
+              <label><input type="checkbox" name="perm_billing"> Billing</label>
+              <label><input type="checkbox" name="perm_taxMonitoring"> Tax Monitoring</label>
+              <label><input type="checkbox" name="perm_platformHealth"> Platform Health</label>
+              <label><input type="checkbox" name="perm_team"> Fair Flow Team</label>
+              <label><input type="checkbox" name="perm_alerts"> Alerts</label>
+              <label><input type="checkbox" name="perm_settings"> Settings</label>
+              <label><input type="checkbox" name="perm_admins"> Admin Management</label>
+              <label><input type="checkbox" name="perm_manageAdmins"> Manage Admins</label>
+              <label><input type="checkbox" name="perm_manageRoles"> Manage Roles</label>
+            </fieldset>
+            <button type="submit" class="ff-platform-primary-action">Invite / Save Admin</button>
+            <small data-console-admin-message></small>
+          </form>
+          <div class="ff-platform-table-wrap">
+            <table class="ff-platform-table ff-platform-table--admins">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th>Last login</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody data-console-admins-body>
+                <tr><td colspan="7">Sign in as console owner to manage admins.</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
     </main>
   </div>
 
-  <script type="module" src="./platform-admin.js?v=console-live-query-v1"></script>
+  <script type="module" src="./platform-admin.js?v=console-firestore-auth-v1"></script>
 </body>
 </html>

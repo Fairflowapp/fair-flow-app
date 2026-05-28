@@ -83,6 +83,13 @@ body {
   box-shadow: 0 12px 28px rgba(124, 58, 237, 0.28);
 }
 
+.ff-platform-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .ff-platform-eyebrow {
   margin: 0 0 4px;
   color: var(--ff-admin-purple);
@@ -906,6 +913,101 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+body:not(.ff-console-authorized) .ff-platform-shell {
+  display: none !important;
+}
+
+body.ff-console-authorized .ff-console-auth-screen {
+  display: none !important;
+}
+
+.ff-console-auth-screen {
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+  place-items: center;
+  background: radial-gradient(circle at top left, rgba(124, 58, 237, 0.12), transparent 32%), #f8fafc;
+}
+
+.ff-console-auth-card {
+  display: grid;
+  width: min(430px, 100%);
+  gap: 12px;
+  padding: 28px;
+  border: 1px solid #e5e7eb;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+}
+
+.ff-console-auth-card .ff-platform-logo {
+  width: 68px;
+  height: 68px;
+  border-radius: 18px;
+}
+
+.ff-console-auth-card h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+}
+
+.ff-console-auth-card p,
+.ff-console-auth-card small {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.ff-console-auth-loader {
+  padding: 11px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  color: #475569;
+  background: #f8fafc;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ff-console-auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.ff-console-auth-form input {
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+  color: #111827;
+  background: #ffffff;
+  font: inherit;
+}
+
+.ff-console-auth-form button,
+.ff-console-auth-reset {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 11px 12px;
+  color: #334155;
+  background: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.ff-console-auth-form button[type="submit"] {
+  color: #ffffff;
+  border-color: #475569;
+  background: #475569;
+}
+
+body.ff-console-auth-denied .ff-console-auth-card,
+body.ff-console-auth-disabled .ff-console-auth-card {
+  border-color: #fecaca;
+}
+
 .ff-platform-sidebar {
   border-right: 1px solid var(--ff-admin-border);
   background: #ffffff;
@@ -913,15 +1015,16 @@ body {
 }
 
 .ff-platform-logo {
-  width: 38px;
-  height: 38px;
+  width: 50px;
+  height: 50px;
   border: 1px solid #e2e8f0;
-  border-radius: 11px;
+  border-radius: 14px;
   color: #334155;
-  background: #f8fafc;
+  background: #ffffff;
   box-shadow: none;
   font-size: 13px;
   font-weight: 700;
+  overflow: hidden;
 }
 
 .ff-platform-eyebrow {
@@ -1109,6 +1212,18 @@ body {
   color: #92400e;
   background: #fffbeb;
   border-color: #fde68a;
+}
+
+.ff-platform-sign-out {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .ff-platform-console-avatar {
@@ -2236,6 +2351,98 @@ body {
   min-width: 980px;
 }
 
+.ff-platform-admin-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) minmax(160px, 0.6fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ff-platform-admin-form label {
+  display: grid;
+  gap: 6px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ff-platform-admin-form input,
+.ff-platform-admin-form select {
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 11px;
+  color: #111827;
+  background: #ffffff;
+  font: inherit;
+  font-size: 13px;
+}
+
+.ff-platform-permissions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  border: 1px solid #eef2f7;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f9fafb;
+}
+
+.ff-platform-permissions legend {
+  padding: 0 6px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ff-platform-permissions label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.ff-platform-admin-form .ff-platform-primary-action,
+.ff-platform-admin-form small {
+  grid-column: 1 / -1;
+}
+
+.ff-platform-admin-form small {
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.ff-platform-table--admins {
+  min-width: 980px;
+}
+
+.ff-platform-admin-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ff-platform-admin-actions button {
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: #334155;
+  background: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.ff-platform-admin-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 @media (max-width: 1180px) {
   .ff-platform-c360-grid,
   .ff-platform-module-grid,
@@ -2247,6 +2454,11 @@ body {
 
   .ff-platform-request-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ff-platform-admin-form,
+  .ff-platform-permissions {
+    grid-template-columns: 1fr;
   }
 
   .ff-platform-support-metrics {

@@ -4,6 +4,12 @@ import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebase
 import {
   getAuth,
   onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import {
   getFunctions,
@@ -40,6 +46,18 @@ import {
   const supportStatus = shell.querySelector("[data-support-readonly-status]");
   const supportConversationsBody = shell.querySelector("[data-support-conversations-body]");
   const billingOverrideForm = shell.querySelector("[data-billing-override-form]");
+  const topbarActions = shell.querySelector(".ff-platform-topbar__actions");
+  const consoleAuthScreen = document.querySelector("[data-console-auth-screen]");
+  const consoleAuthCopy = document.querySelector("[data-console-auth-copy]");
+  const consoleAuthLoader = document.querySelector("[data-console-auth-loader]");
+  const consoleLoginForm = document.querySelector("[data-console-login-form]");
+  const consoleGoogleLogin = document.querySelector("[data-console-google-login]");
+  const consoleAuthReset = document.querySelector("[data-console-auth-reset]");
+  const consoleLoginMessage = document.querySelector("[data-console-login-message]");
+  const consoleAdminForm = shell.querySelector("[data-console-admin-form]");
+  const consoleAdminsBody = shell.querySelector("[data-console-admins-body]");
+  const consoleAdminMessage = shell.querySelector("[data-console-admin-message]");
+  const consoleTeamStatus = shell.querySelector("[data-console-team-status]");
   let previousSectionId = "customers";
   let consoleDb = null;
   let consoleAuth = null;
@@ -47,6 +65,7 @@ import {
   let activeCustomer360SalonId = "";
   let authReady = false;
   let currentAuthUser = null;
+  let currentConsoleAdmin = null;
   let customerRowsCache = [];
   let allCustomerRowsCache = [];
   // CONSOLE FILTERING V2: filter by salon.consoleStatus field only. No heuristics. No dedupe.
@@ -54,6 +73,46 @@ import {
   let customersFilterMode = "live";
   const CONSOLE_STATUS_VALUES = new Set(["live", "test", "archived"]);
   const CUSTOMERS_QUERY_LIMIT = 200;
+  const CONSOLE_SESSION_TIMEOUT_MS = 10000;
+  const ROLE_DEFAULT_PERMISSIONS = {
+    owner: {
+      customers: true, customer360: true, support: true, billing: true, taxMonitoring: true,
+      platformHealth: true, team: true, alerts: true, settings: true, admins: true,
+      manageAdmins: true, manageRoles: true,
+    },
+    admin: {
+      customers: true, customer360: true, support: true, billing: true, taxMonitoring: true,
+      platformHealth: true, team: true, alerts: true, settings: true, admins: false,
+      manageAdmins: false, manageRoles: false,
+    },
+    support: {
+      customers: true, customer360: true, support: true, billing: false, taxMonitoring: false,
+      platformHealth: true, team: false, alerts: true, settings: false, admins: false,
+      manageAdmins: false, manageRoles: false,
+    },
+    billing: {
+      customers: true, customer360: true, support: false, billing: true, taxMonitoring: true,
+      platformHealth: false, team: false, alerts: true, settings: false, admins: false,
+      manageAdmins: false, manageRoles: false,
+    },
+    readonly: {
+      customers: true, customer360: true, support: true, billing: true, taxMonitoring: true,
+      platformHealth: true, team: true, alerts: true, settings: false, admins: false,
+      manageAdmins: false, manageRoles: false,
+    },
+  };
+  const SECTION_PERMISSIONS = {
+    dashboard: "customers",
+    customers: "customers",
+    "customer-360": "customer360",
+    support: "support",
+    billing: "billing",
+    "tax-monitoring": "taxMonitoring",
+    "platform-health": "platformHealth",
+    "fair-flow-team": "team",
+    alerts: "alerts",
+    settings: "admins",
+  };
 
   // READ ONLY V1: Same project config used by the main app, initialized independently for this isolated console page.
   const firebaseConfig = {
@@ -118,6 +177,9 @@ import {
   }
 
   function activateSection(sectionId) {
+    if (currentConsoleAdmin && !canAccessSection(sectionId)) {
+      sectionId = "customers";
+    }
     navItems.forEach((item) => {
       item.classList.toggle("is-active", item.dataset.platformSectionTarget === sectionId);
     });
@@ -296,6 +358,31 @@ import {
     return consoleFunctions;
   }
 
+  function hasConsolePermission(permission) {
+    if (!currentConsoleAdmin || currentConsoleAdmin.active !== true) return false;
+    if (currentConsoleAdmin.role === "owner") return true;
+    return currentConsoleAdmin.permissions && currentConsoleAdmin.permissions[permission] === true;
+  }
+
+  function canAccessSection(sectionId) {
+    const permission = SECTION_PERMISSIONS[sectionId];
+    return !permission || hasConsolePermission(permission);
+  }
+
+  function applyConsolePermissionGuards() {
+    navItems.forEach((item) => {
+      const sectionId = item.dataset.platformSectionTarget;
+      const allowed = canAccessSection(sectionId);
+      item.hidden = !allowed;
+      item.disabled = !allowed;
+    });
+    if (!canAccessSection("settings") && consoleAdminForm) {
+      consoleAdminForm.hidden = true;
+    } else if (consoleAdminForm) {
+      consoleAdminForm.hidden = false;
+    }
+  }
+
   function setAuthStatus(message, state = "checking") {
     if (!authStatus) return;
     authStatus.textContent = message;
@@ -312,6 +399,179 @@ import {
     updateCustomerFilterButtons();
     renderSupportCustomerOptions(customerRowsCache);
     renderSupportUnavailable(message);
+  }
+
+  function clearOperationalData(message) {
+    setReadOnlyBlocked(message);
+    if (consoleAdminsBody) {
+      consoleAdminsBody.innerHTML = `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`;
+    }
+    if (consoleTeamStatus) consoleTeamStatus.textContent = message;
+  }
+
+  function applyRoleDefaults(role) {
+    if (!consoleAdminForm) return;
+    const defaults = ROLE_DEFAULT_PERMISSIONS[role] || ROLE_DEFAULT_PERMISSIONS.readonly;
+    Object.entries(defaults).forEach(([key, value]) => {
+      const input = consoleAdminForm.querySelector(`[name="perm_${key}"]`);
+      if (input) input.checked = value === true;
+    });
+  }
+
+  function readPermissionForm(formData) {
+    return Object.keys(ROLE_DEFAULT_PERMISSIONS.owner).reduce((acc, key) => {
+      acc[key] = formData.get(`perm_${key}`) === "on";
+      return acc;
+    }, {});
+  }
+
+  function formatAdminDate(value) {
+    return displayDate(value);
+  }
+
+  function renderConsoleAdmins(admins = []) {
+    if (!consoleAdminsBody) return;
+    if (!admins.length) {
+      consoleAdminsBody.innerHTML = `<tr><td colspan="7">No console admins found.</td></tr>`;
+      return;
+    }
+    const currentUid = currentAuthUser?.uid || "";
+    consoleAdminsBody.innerHTML = admins.map((adminRow) => {
+      const statusClass = adminRow.active ? "healthy" : "error";
+      const statusLabel = adminRow.active ? "Active" : "Inactive";
+      const isSelfOwner = adminRow.uid === currentUid && adminRow.role === "owner";
+      const permissionsJson = escapeHtml(JSON.stringify(adminRow.permissions || {}));
+      return `
+        <tr data-console-admin-row data-admin-uid="${escapeHtml(adminRow.uid)}" data-admin-email="${escapeHtml(adminRow.email)}" data-admin-name="${escapeHtml(adminRow.name)}" data-admin-role="${escapeHtml(adminRow.role)}" data-admin-permissions="${permissionsJson}">
+          <td>${escapeHtml(displayValue(adminRow.name, "Not available"))}</td>
+          <td>${escapeHtml(displayValue(adminRow.email, "Not available"))}</td>
+          <td><span class="ff-platform-badge">${escapeHtml(adminRow.role)}</span></td>
+          <td><span class="ff-platform-badge ${statusClass}">${statusLabel}</span></td>
+          <td>${escapeHtml(formatAdminDate(adminRow.createdAt))}</td>
+          <td>${escapeHtml(formatAdminDate(adminRow.lastLoginAt))}</td>
+          <td>
+            <div class="ff-platform-admin-actions">
+              <button type="button" data-console-admin-edit>Edit permissions</button>
+              <button type="button" data-console-admin-active="${adminRow.active ? "false" : "true"}" ${isSelfOwner ? "disabled" : ""}>${adminRow.active ? "Deactivate" : "Reactivate"}</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  async function loadConsoleAdmins() {
+    if (!hasConsolePermission("admins")) {
+      if (consoleTeamStatus) consoleTeamStatus.textContent = "Owner only";
+      if (consoleAdminsBody) consoleAdminsBody.innerHTML = `<tr><td colspan="7">Owner role required.</td></tr>`;
+      return;
+    }
+    try {
+      if (consoleTeamStatus) consoleTeamStatus.textContent = "Loading console admins...";
+      const snap = await getDocs(collection(getConsoleDb(), "platformAdmins"));
+      const admins = snap.docs.map((adminDoc) => ({
+        uid: adminDoc.id,
+        ...(adminDoc.data() || {}),
+      })).sort((a, b) => String(a.email || "").localeCompare(String(b.email || "")));
+      renderConsoleAdmins(admins);
+      if (consoleTeamStatus) consoleTeamStatus.textContent = "Console admins loaded";
+    } catch (error) {
+      console.warn("[Fair Flow Console] platform admins load failed", error);
+      if (consoleTeamStatus) consoleTeamStatus.textContent = `Could not load admins (${error?.code || "unknown"})`;
+      if (consoleAdminsBody) consoleAdminsBody.innerHTML = `<tr><td colspan="7">Could not load admins.</td></tr>`;
+    }
+  }
+
+  function setConsoleAuthView(state, message = "") {
+    document.body.classList.remove(
+      "ff-console-auth-loading",
+      "ff-console-auth-login",
+      "ff-console-auth-denied",
+      "ff-console-auth-disabled",
+      "ff-console-authorized",
+    );
+    document.body.classList.add(`ff-console-auth-${state}`);
+    if (state === "authorized") {
+      document.body.classList.add("ff-console-authorized");
+    }
+    if (consoleAuthScreen) consoleAuthScreen.hidden = state === "authorized";
+    if (consoleLoginForm) consoleLoginForm.hidden = state !== "login";
+    if (consoleAuthLoader) consoleAuthLoader.hidden = state !== "loading";
+    if (consoleAuthReset) consoleAuthReset.hidden = state !== "denied" && state !== "disabled";
+    if (consoleAuthCopy) {
+      const copy = {
+        loading: "Checking secure session...",
+        login: "Sign in with your internal Fair Flow admin account.",
+        denied: "Access denied. This account is not registered as a console admin.",
+        disabled: "Access disabled. This console admin account is inactive.",
+        authorized: "",
+      };
+      consoleAuthCopy.textContent = message || copy[state] || "";
+    }
+    if (consoleLoginMessage && message) consoleLoginMessage.textContent = message;
+  }
+
+  function logConsoleAuthStep(step, details = {}) {
+    console.log(`[Fair Flow Console] ${step}`, details);
+  }
+
+  async function signInConsoleWithEmail(event) {
+    event.preventDefault();
+    const email = String(new FormData(consoleLoginForm).get("email") || "").trim();
+    const password = String(new FormData(consoleLoginForm).get("password") || "");
+    if (!email || !password || !consoleAuth) return;
+    if (consoleLoginMessage) consoleLoginMessage.textContent = "Signing in...";
+    try {
+      await signInWithEmailAndPassword(consoleAuth, email, password);
+      setConsoleAuthView("loading", "Checking console permissions...");
+    } catch (error) {
+      console.warn("[Fair Flow Console] email sign-in failed", error);
+      setConsoleAuthView("login", `Sign in failed: ${error?.message || error?.code || "unknown"}`);
+    }
+  }
+
+  async function signInConsoleWithGoogle() {
+    if (!consoleAuth) return;
+    if (consoleLoginMessage) consoleLoginMessage.textContent = "Opening Google sign in...";
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      await signInWithPopup(consoleAuth, provider);
+      setConsoleAuthView("loading", "Checking console permissions...");
+    } catch (error) {
+      console.warn("[Fair Flow Console] Google sign-in failed", error);
+      setConsoleAuthView("login", `Google sign in failed: ${error?.message || error?.code || "unknown"}`);
+    }
+  }
+
+  function withTimeout(promise, timeoutMs, label) {
+    let timeoutId = null;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = window.setTimeout(() => {
+        reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`));
+      }, timeoutMs);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+    });
+  }
+
+  function ensureConsoleSignOutButton() {
+    if (!topbarActions || topbarActions.querySelector("[data-console-sign-out]")) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ff-platform-sign-out";
+    button.dataset.consoleSignOut = "true";
+    button.textContent = "Sign out";
+    button.addEventListener("click", async () => {
+      if (!consoleAuth) return;
+      try {
+        await signOut(consoleAuth);
+      } catch (error) {
+        console.warn("[Fair Flow Console] sign out failed", error);
+      }
+    });
+    topbarActions.appendChild(button);
   }
 
   function canRunReadOnlyReads() {
@@ -1962,8 +2222,99 @@ import {
     billingOverrideForm.addEventListener("submit", saveBillingOverride);
   }
 
+  if (consoleLoginForm) {
+    consoleLoginForm.addEventListener("submit", signInConsoleWithEmail);
+  }
+
+  if (consoleGoogleLogin) {
+    consoleGoogleLogin.addEventListener("click", signInConsoleWithGoogle);
+  }
+
+  if (consoleAuthReset) {
+    consoleAuthReset.addEventListener("click", async () => {
+      try {
+        if (consoleAuth) await signOut(consoleAuth);
+      } catch (_) {}
+      setConsoleAuthView("login");
+    });
+  }
+
+  if (consoleAdminForm) {
+    const roleSelect = consoleAdminForm.querySelector("[data-console-admin-role]");
+    if (roleSelect) {
+      roleSelect.addEventListener("change", () => applyRoleDefaults(roleSelect.value));
+      applyRoleDefaults(roleSelect.value || "admin");
+    }
+    consoleAdminForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!hasConsolePermission("admins")) return;
+      const formData = new FormData(consoleAdminForm);
+      const email = String(formData.get("email") || "").trim();
+      const name = String(formData.get("name") || "").trim();
+      const role = String(formData.get("role") || "readonly").trim();
+      const permissions = readPermissionForm(formData);
+      if (consoleAdminMessage) consoleAdminMessage.textContent = "Saving console admin...";
+      try {
+        const savePlatformAdmin = httpsCallable(getConsoleFunctions(), "savePlatformAdminV1");
+        const { data } = await savePlatformAdmin({ email, name, role, active: true, permissions });
+        consoleAdminForm.reset();
+        applyRoleDefaults("admin");
+        if (consoleAdminMessage) {
+          consoleAdminMessage.textContent = data?.resetLink
+            ? `Saved. New Auth user created. Password setup link: ${data.resetLink}`
+            : "Saved.";
+        }
+        await loadConsoleAdmins();
+      } catch (error) {
+        console.warn("[Fair Flow Console] platform admin save failed", error);
+        if (consoleAdminMessage) consoleAdminMessage.textContent = `Save failed: ${error?.message || error?.code || "unknown"}`;
+      }
+    });
+  }
+
+  if (consoleAdminsBody) {
+    consoleAdminsBody.addEventListener("click", async (event) => {
+      const activeButton = event.target.closest("[data-console-admin-active]");
+      const editButton = event.target.closest("[data-console-admin-edit]");
+      const row = event.target.closest("[data-console-admin-row]");
+      if (!row || !hasConsolePermission("admins")) return;
+
+      if (editButton && consoleAdminForm) {
+        consoleAdminForm.elements.name.value = row.dataset.adminName || "";
+        consoleAdminForm.elements.email.value = row.dataset.adminEmail || "";
+        consoleAdminForm.elements.role.value = row.dataset.adminRole || "readonly";
+        let permissions = {};
+        try {
+          permissions = JSON.parse(row.dataset.adminPermissions || "{}");
+        } catch (_) {}
+        Object.keys(ROLE_DEFAULT_PERMISSIONS.owner).forEach((key) => {
+          const input = consoleAdminForm.querySelector(`[name="perm_${key}"]`);
+          if (input) input.checked = permissions[key] === true;
+        });
+        if (consoleAdminMessage) consoleAdminMessage.textContent = "Editing selected admin. Save to apply changes.";
+        return;
+      }
+
+      if (activeButton) {
+        const uid = row.dataset.adminUid || "";
+        const active = activeButton.dataset.consoleAdminActive === "true";
+        try {
+          activeButton.disabled = true;
+          const setPlatformAdminActive = httpsCallable(getConsoleFunctions(), "setPlatformAdminActiveV1");
+          await setPlatformAdminActive({ uid, active });
+          await loadConsoleAdmins();
+        } catch (error) {
+          console.warn("[Fair Flow Console] platform admin active toggle failed", error);
+          if (consoleAdminMessage) consoleAdminMessage.textContent = `Update failed: ${error?.message || error?.code || "unknown"}`;
+          activeButton.disabled = false;
+        }
+      }
+    });
+  }
+
   function startAuthGate() {
-    console.log("[Fair Flow Console] Auth checking");
+    logConsoleAuthStep("AUTH START");
+    setConsoleAuthView("loading");
     setAuthStatus("Checking Fair Flow session...", "checking");
     if (customersStatus) customersStatus.textContent = "Checking Fair Flow session...";
     if (customersTableBody) {
@@ -1972,21 +2323,85 @@ import {
 
     const app = getConsoleApp();
     consoleAuth = getAuth(app);
-    onAuthStateChanged(consoleAuth, (user) => {
+    setPersistence(consoleAuth, browserLocalPersistence).catch((error) => {
+      console.warn("[Fair Flow Console] Auth persistence setup failed", error);
+    });
+    ensureConsoleSignOutButton();
+    const authGateTimeout = window.setTimeout(() => {
+      const stillLoading = document.body.classList.contains("ff-console-auth-loading");
+      if (!stillLoading || currentConsoleAdmin) return;
+      const message = "Console auth timed out after 10 seconds before a session response. Check Network for the platformAdmins Firestore request.";
+      logConsoleAuthStep("AUTH TIMEOUT", { message });
+      setConsoleAuthView("denied", message);
+      setAuthStatus("Console auth timed out.", "signed-out");
+      clearOperationalData(message);
+    }, CONSOLE_SESSION_TIMEOUT_MS);
+    onAuthStateChanged(consoleAuth, async (user) => {
+      window.clearTimeout(authGateTimeout);
       authReady = true;
       currentAuthUser = user || null;
+      currentConsoleAdmin = null;
 
       if (!user) {
         console.log("[Fair Flow Console] Auth signed out");
-        setAuthStatus("Please log in to Fair Flow first, then reopen Fair Flow Console.", "signed-out");
-        setReadOnlyBlocked("Please log in to Fair Flow first, then reopen Fair Flow Console.");
+        setConsoleAuthView("login");
+        setAuthStatus("Sign in with your internal Fair Flow admin account.", "signed-out");
+        clearOperationalData("Sign in to the internal Fair Flow Console to load operational data.");
         return;
       }
 
-      console.log("[Fair Flow Console] Auth signed in:", user.uid, user.email || "");
-      setAuthStatus(`Signed in as: ${user.email || user.uid}`, "signed-in");
-      console.log("[Fair Flow Console] Starting read-only Firestore loading");
-      loadFirestoreCustomersReadOnly();
+      logConsoleAuthStep("AUTH USER UID", { uid: user.uid, email: user.email || "" });
+      try {
+        logConsoleAuthStep("CALLING getPlatformAdminSession", { source: "firestore:platformAdmins", uid: user.uid, email: user.email || "" });
+        const adminSnap = await withTimeout(
+          getDoc(doc(getConsoleDb(), "platformAdmins", user.uid)),
+          CONSOLE_SESSION_TIMEOUT_MS,
+          "Console permission check",
+        );
+        const data = {
+          ok: adminSnap.exists(),
+          admin: adminSnap.exists() ? { uid: adminSnap.id, ...(adminSnap.data() || {}) } : null,
+        };
+        logConsoleAuthStep("SESSION RESPONSE", {
+          ok: data?.ok === true,
+          uid: data?.admin?.uid || "",
+          email: data?.admin?.email || "",
+          role: data?.admin?.role || "",
+          active: data?.admin?.active === true,
+          primaryOwner: data?.admin?.primaryOwner === true,
+        });
+        if (data?.ok !== true) {
+          throw new Error("Console permission check returned an invalid response.");
+        }
+        currentConsoleAdmin = data?.admin || null;
+        if (!currentConsoleAdmin || currentConsoleAdmin.active !== true) {
+          throw new Error("Console admin access denied.");
+        }
+        setConsoleAuthView("authorized");
+        setAuthStatus(`Signed in as: ${currentConsoleAdmin.email || user.email || user.uid} (${currentConsoleAdmin.role})`, "signed-in");
+        applyConsolePermissionGuards();
+        console.log("[Fair Flow Console] Starting read-only Firestore loading");
+        loadFirestoreCustomersReadOnly();
+        loadConsoleAdmins();
+      } catch (error) {
+        console.warn("[Fair Flow Console] platform admin session denied", error);
+        const code = String(error?.code || "");
+        const message = String(error?.message || "");
+        const disabled = code.includes("failed-precondition") || /disabled|inactive/i.test(message);
+        const timedOut = /timed out/i.test(message);
+        const displayMessage = timedOut
+          ? `Console permission check timed out after ${Math.round(CONSOLE_SESSION_TIMEOUT_MS / 1000)} seconds. Check Network for the platformAdmins Firestore request.`
+          : message || "Console admin access denied.";
+        logConsoleAuthStep("SESSION ERROR", {
+          code,
+          message,
+          displayMessage,
+          stack: error?.stack || "",
+        });
+        setConsoleAuthView(disabled ? "disabled" : "denied", displayMessage);
+        setAuthStatus(timedOut ? "Console permission check timed out." : "Console admin access denied.", "signed-out");
+        clearOperationalData(disabled ? "Access disabled." : displayMessage);
+      }
     });
   }
 

@@ -18,6 +18,9 @@ Object.assign(exports, require("./stripe"));
 // recomputeAccountStatus from ./stripe — must be required AFTER ./stripe.
 Object.assign(exports, require("./billing"));
 
+// Internal console admin management (platformAdmins/{uid}).
+Object.assign(exports, require("./platform-admins"));
+
 /**
  * Simple test callable – use to verify IAM/CORS/region work.
  * Call from console: httpsCallable(getFunctions(app,"us-central1"),"testCallable")({test:1})

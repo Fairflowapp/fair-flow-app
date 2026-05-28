@@ -131,6 +131,7 @@ function tsToMillis(ts) {
  */
 function deriveState(accountStatus, gracePeriodEndsAt) {
   const base = String(accountStatus || STATE_ACTIVE).toLowerCase();
+  if (base === "billing_required") return STATE_LOCKED;
   if (base === STATE_LOCKED) return STATE_LOCKED;
   if (base === STATE_AT_RISK) {
     const deadline = tsToMillis(gracePeriodEndsAt);

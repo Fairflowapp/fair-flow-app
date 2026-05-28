@@ -89,6 +89,95 @@ function skuForPriceId(priceId) {
   return null;
 }
 
+async function assertPlatformAdmin(uid) {
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Sign in first.");
+  }
+  const snap = await admin.firestore().doc(`platformAdmins/${uid}`).get();
+  if (!snap.exists) {
+    throw new HttpsError(
+      "permission-denied",
+      "Platform admin access required."
+    );
+  }
+}
+
+function sanitizeSalonIdForStripeAdmin(raw) {
+  const salonId = String(raw || "").trim();
+  if (!salonId) {
+    throw new HttpsError("invalid-argument", "salonId required.");
+  }
+  if (/[\/\.\#\$\[\]]/.test(salonId)) {
+    throw new HttpsError("invalid-argument", "Invalid salonId.");
+  }
+  return salonId;
+}
+
+function validateStripeOverrideInput(data) {
+  const type = String(data?.type || "").trim();
+  const value = String(data?.value || "").trim();
+  const endsAtMs = Number(data?.endsAt);
+  const supportedTypes = new Set([
+    "free_time",
+    "trial_extension",
+    "discount_percent",
+    "discount_amount",
+  ]);
+
+  if (!supportedTypes.has(type)) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Only free time, trial extension, percent discount, and amount discount can be applied to Stripe."
+    );
+  }
+  if (!Number.isFinite(endsAtMs) || endsAtMs <= Date.now()) {
+    throw new HttpsError(
+      "invalid-argument",
+      "endsAt must be a future timestamp (ms since epoch)."
+    );
+  }
+
+  let percentOff = null;
+  let amountOff = null;
+  if (type === "free_time" || type === "trial_extension") {
+    percentOff = 100;
+  } else if (type === "discount_percent") {
+    const parsed = Number(value.replace(/[^0-9.]/g, ""));
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 100) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Percent discount must be greater than 0 and no more than 100."
+      );
+    }
+    percentOff = parsed;
+  } else if (type === "discount_amount") {
+    const parsed = Number(value.replace(/[^0-9.]/g, ""));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Amount discount must be greater than 0."
+      );
+    }
+    amountOff = Math.round(parsed * 100);
+  }
+
+  const durationMonths = Math.max(
+    1,
+    Math.min(36, Math.ceil((endsAtMs - Date.now()) / (30 * 24 * 60 * 60 * 1000)))
+  );
+
+  return {
+    type,
+    value,
+    endsAtMs,
+    percentOff,
+    amountOff,
+    durationMonths,
+    reason: String(data?.reason || "internal").trim().toLowerCase(),
+    notes: String(data?.notes || "").trim().slice(0, 500),
+  };
+}
+
 /**
  * The app stores the canonical salon-owner uid on `salons/{id}/settings/main.ownerUid`
  * (per the comment in public/app.js:179 and the bootstrap at app.js:2436), but
@@ -384,8 +473,10 @@ exports.createStripeCheckoutSession = onCall(
         client_reference_id: salonId,
         metadata: { salonId, ownerUid: auth.uid },
         subscription_data: {
+          trial_period_days: 14,
           metadata: { salonId, ownerUid: auth.uid },
         },
+        payment_method_collection: "always",
         allow_promotion_codes: true,
       });
 
@@ -634,6 +725,156 @@ exports.syncStripeSubscription = onCall(
 );
 
 // ============================================================================
+// applyStripeBillingOverride — callable
+// ============================================================================
+// Platform-admin only. Applies the console billing override to the customer's
+// existing Stripe subscription by attaching a coupon. This is intentionally
+// separate from setBillingOverride: Firestore/Billing Guard stays internal,
+// this callable performs the real Stripe mutation and records an audit trail.
+//
+// data: { salonId, type, value, endsAt, reason?, notes? }
+// ============================================================================
+exports.applyStripeBillingOverride = onCall(
+  { region: REGION, secrets: [STRIPE_SECRET_KEY], invoker: "public" },
+  async (req) => {
+    const auth = req.auth;
+    if (!auth) throw new HttpsError("unauthenticated", "Sign in first.");
+
+    const salonId = sanitizeSalonIdForStripeAdmin(req.data?.salonId);
+    const input = validateStripeOverrideInput(req.data || {});
+
+    try {
+      await assertPlatformAdmin(auth.uid);
+
+      const fs = admin.firestore();
+      const billingRef = fs.doc(`salons/${salonId}/billing/stripe`);
+      const billingSnap = await billingRef.get();
+      const billing = billingSnap.exists ? billingSnap.data() || {} : {};
+      const stripe = getStripe();
+
+      let subscriptionId = String(billing.subscriptionId || "");
+      const customerId = String(billing.customerId || "");
+      if (!subscriptionId && customerId) {
+        const subs = await stripe.subscriptions.list({
+          customer: customerId,
+          status: "all",
+          limit: 5,
+        });
+        const ACTIVE = new Set(["active", "trialing", "past_due", "incomplete"]);
+        const sub = subs.data.find((row) => ACTIVE.has(row.status)) || subs.data[0] || null;
+        subscriptionId = sub?.id || "";
+      }
+      if (!subscriptionId) {
+        throw new HttpsError(
+          "failed-precondition",
+          "No Stripe subscription linked for this customer yet."
+        );
+      }
+
+      const couponPayload = {
+        duration: "repeating",
+        duration_in_months: input.durationMonths,
+        name: `Fair Flow ${input.type} - ${salonId}`,
+        metadata: {
+          salonId,
+          appliedByUid: auth.uid,
+          source: "fair_flow_console",
+          reason: input.reason,
+          type: input.type,
+          endsAtMs: String(input.endsAtMs),
+        },
+      };
+      if (input.percentOff != null) {
+        couponPayload.percent_off = input.percentOff;
+      } else {
+        couponPayload.amount_off = input.amountOff;
+        couponPayload.currency = "usd";
+      }
+
+      const coupon = await stripe.coupons.create(couponPayload);
+      const updatedSub = await stripe.subscriptions.update(subscriptionId, {
+        discounts: [{ coupon: coupon.id }],
+        proration_behavior: "none",
+        metadata: {
+          ...(billing.subscriptionMetadata || {}),
+          salonId,
+          latestFairFlowOverrideCouponId: coupon.id,
+          latestFairFlowOverrideType: input.type,
+        },
+      });
+
+      await persistSubscriptionState(salonId, updatedSub);
+      await fs.doc(`salons/${salonId}/billing/override`).set(
+        {
+          stripeApplied: true,
+          stripeAppliedAt: admin.firestore.FieldValue.serverTimestamp(),
+          stripeAppliedBy: auth.uid,
+          stripeSubscriptionId: subscriptionId,
+          stripeCouponId: coupon.id,
+          stripeCouponDurationMonths: input.durationMonths,
+          stripeCouponPercentOff: input.percentOff,
+          stripeCouponAmountOff: input.amountOff,
+          stripeCouponCurrency: input.amountOff != null ? "usd" : null,
+          stripeOverrideType: input.type,
+        },
+        { merge: true }
+      );
+      await fs.collection(`salons/${salonId}/billing/stripeOverrideAudit`).add({
+        salonId,
+        action: "apply",
+        type: input.type,
+        value: input.value,
+        reason: input.reason,
+        notes: input.notes || null,
+        endsAt: admin.firestore.Timestamp.fromMillis(input.endsAtMs),
+        subscriptionId,
+        couponId: coupon.id,
+        percentOff: input.percentOff,
+        amountOff: input.amountOff,
+        currency: input.amountOff != null ? "usd" : null,
+        durationMonths: input.durationMonths,
+        createdBy: auth.uid,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await recomputeAccountStatus(salonId);
+
+      logger.info("[stripe override] applied", {
+        adminUid: auth.uid,
+        salonId,
+        subscriptionId,
+        couponId: coupon.id,
+        type: input.type,
+        durationMonths: input.durationMonths,
+      });
+
+      return {
+        ok: true,
+        salonId,
+        subscriptionId,
+        couponId: coupon.id,
+        durationMonths: input.durationMonths,
+      };
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      const msg = err?.message || String(err);
+      logger.error("[stripe override] apply failed", {
+        adminUid: auth?.uid || null,
+        salonId,
+        message: msg,
+        stripeType: err?.type || null,
+        stripeCode: err?.code || null,
+        stack: err?.stack,
+      });
+      throw new HttpsError(
+        "internal",
+        err?.type ? `Stripe ${err.type}: ${msg}` : `Stripe override failed: ${msg}`
+      );
+    }
+  }
+);
+
+// ============================================================================
 // stripeWebhook — onRequest (raw body, Stripe-signed)
 // ============================================================================
 function pickItemsFromSubscription(sub) {
@@ -836,7 +1077,9 @@ async function recomputeAccountStatus(salonId) {
   const fs = admin.firestore();
   const F = admin.firestore.FieldValue;
 
-  const [overrideSnap, billingSnap] = await Promise.all([
+  const salonRef = fs.doc(`salons/${salonId}`);
+  const [salonSnap, overrideSnap, billingSnap] = await Promise.all([
+    salonRef.get(),
     fs.doc(`salons/${salonId}/billing/override`).get(),
     fs.doc(`salons/${salonId}/billing/stripe`).get(),
   ]);
@@ -855,11 +1098,13 @@ async function recomputeAccountStatus(salonId) {
   // ── Status derivation ──────────────────────────────────────────────────
   let accountStatus;
   let gracePeriodEndsAt = null;
+  let subscriptionStatus = "";
   if (overrideActive) {
     // Override wins. Don't carry over a stale grace period from Stripe state.
     accountStatus = "active";
   } else if (billingSnap.exists) {
     const data = billingSnap.data() || {};
+    subscriptionStatus = String(data.status || "").toLowerCase();
     accountStatus = classifyAccountStatus(data.status);
     gracePeriodEndsAt = data.gracePeriodEndsAt || null;
   } else {
@@ -884,7 +1129,18 @@ async function recomputeAccountStatus(salonId) {
     billingOverrideReason:
       overrideActive && overrideData.reason ? overrideData.reason : F.delete(),
   };
-  await fs.doc(`salons/${salonId}`).set(update, { merge: true });
+  const salonData = salonSnap.exists ? salonSnap.data() || {} : {};
+  const existingConsoleStatus = String(salonData.consoleStatus || "").trim().toLowerCase();
+  if (
+    !existingConsoleStatus &&
+    (subscriptionStatus === "active" || subscriptionStatus === "trialing")
+  ) {
+    update.consoleStatus = "live";
+    update.consoleStatusUpdatedAt = F.serverTimestamp();
+    update.consoleStatusSource = "stripe_subscription";
+  }
+
+  await salonRef.set(update, { merge: true });
 
   logger.info("[billing guard] recomputed accountStatus", {
     salonId,

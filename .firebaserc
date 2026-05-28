@@ -3,6 +3,17 @@
     "default": "fairflowapp-db841",
     "staging": "fair-flow-staging"
   },
-  "targets": {},
+  "targets": {
+    "fairflowapp-db841": {
+      "hosting": {
+        "app": [
+          "fairflowapp-db841"
+        ],
+        "console": [
+          "fairflowapp-db841-console"
+        ]
+      }
+    }
+  },
   "etags": {}
 }
