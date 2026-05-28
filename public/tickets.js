@@ -328,7 +328,10 @@ async function loadSharedServiceOverrides(accountId, locationId) {
     snap.docs.forEach((d) => {
       const data = d.data() || {};
       const price = Number(data.price);
-      if (Number.isFinite(price)) _rawServiceOverrides[d.id] = { price };
+      const override = {};
+      if (Number.isFinite(price)) override.price = price;
+      if (typeof data.enabled === 'boolean') override.enabled = data.enabled;
+      if (Object.keys(override).length) _rawServiceOverrides[d.id] = override;
     });
   } catch (e) {
     console.warn('[SharedServices] overrides load failed', e);
@@ -359,6 +362,7 @@ function applySharedServiceCatalog() {
         categoryMap.set(categoryId, { id: categoryId, name: categoryName, sortOrder: categoryMap.size, isSharedCategory: true });
       }
       const override = _rawServiceOverrides[s.id];
+      if (override && override.enabled === false) return null;
       const defaultPrice = Number(s.defaultPrice) || 0;
       const finalPrice = override && Number.isFinite(Number(override.price))
         ? Number(override.price)
@@ -376,7 +380,7 @@ function applySharedServiceCatalog() {
         isSharedService: true
       };
     })
-    .filter((s) => s.name)
+    .filter((s) => s && s.name)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
 
   const localCategories = _rawCategories
@@ -423,6 +427,7 @@ function getSharedServicesForCatalogManager() {
       const override = _rawServiceOverrides[s.id];
       const defaultPrice = Number(s.defaultPrice) || 0;
       const hasOverride = override && Number.isFinite(Number(override.price));
+      const locationEnabled = !(override && override.enabled === false);
       return {
         id: s.id,
         name: String(s.name || '').trim(),
@@ -431,6 +436,7 @@ function getSharedServicesForCatalogManager() {
         category: categoryName,
         categoryId,
         active: s.active !== false,
+        locationEnabled,
         sortOrder: Number.isFinite(Number(s.sortOrder)) ? Number(s.sortOrder) : idx,
         isSharedService: true,
         hasOverride,
@@ -551,6 +557,59 @@ async function removeSharedServiceOverride(serviceId) {
   if (!accountId || !locationId || !serviceId) return;
   await deleteDoc(doc(db, `accounts/${accountId}/locations/${locationId}/serviceOverrides`, serviceId));
   console.log('[SharedServicesUI] removed override', { serviceId, locationId });
+}
+
+async function loadSharedServiceLocationOverridesForService(serviceId) {
+  const accountId = getTicketsAccountId();
+  const locations = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
+    ? (window.ffGetActiveLocations() || [])
+    : [];
+  const result = {};
+  if (!accountId || !serviceId || locations.length === 0) return result;
+  await Promise.all(locations.map(async (loc) => {
+    if (!loc || !loc.id) return;
+    try {
+      const snap = await getDoc(doc(db, `accounts/${accountId}/locations/${loc.id}/serviceOverrides`, serviceId));
+      if (!snap.exists()) return;
+      const data = snap.data() || {};
+      const price = Number(data.price);
+      const override = {};
+      if (Number.isFinite(price)) override.price = price;
+      if (typeof data.enabled === 'boolean') override.enabled = data.enabled;
+      if (Object.keys(override).length) result[loc.id] = override;
+    } catch (e) {
+      console.warn('[SharedServicesUI] location override load failed', loc.id, e);
+    }
+  }));
+  _ffServicesLocationOverridesByService[serviceId] = result;
+  return result;
+}
+
+async function saveSharedServiceLocationOverride(serviceId, locationId, patch) {
+  const accountId = getTicketsAccountId();
+  if (!accountId || !locationId || !serviceId) throw new Error('No location');
+  const existingByService = _ffServicesLocationOverridesByService[serviceId] || {};
+  const existing = existingByService[locationId] || {};
+  const next = { ...existing, ...(patch || {}) };
+  if (next.price == null || next.price === '') delete next.price;
+  if (next.enabled === true) delete next.enabled;
+  const ref = doc(db, `accounts/${accountId}/locations/${locationId}/serviceOverrides`, serviceId);
+  if (!Object.keys(next).length) {
+    await deleteDoc(ref);
+    delete existingByService[locationId];
+  } else {
+    await setDoc(ref, {
+      ...next,
+      updatedAt: serverTimestamp()
+    });
+    existingByService[locationId] = next;
+  }
+  _ffServicesLocationOverridesByService[serviceId] = existingByService;
+  const activeLocationId = getActiveLocationIdForTickets();
+  if (String(activeLocationId || '') === String(locationId || '')) {
+    await loadSharedServiceOverrides(accountId, activeLocationId);
+    applySharedServiceCatalog();
+  }
 }
 
 async function tryLoadSharedServiceCatalog() {
@@ -3451,10 +3510,39 @@ const _ffOpenCats = new Set();
 /** True after the first render of the modal in the current opening. Used to
  *  auto-expand the first category so the user sees services immediately. */
 let _ffCatalogRenderedOnce = false;
+let _ffCatalogRenderRootId = 'servicesModal';
+let _ffSelectedServiceId = null;
+let _ffSelectedCategoryId = null;
+let _ffServicesInlineEditServiceId = null;
+let _ffServicesDetailTab = 'details';
+let _ffServicesLocationOverridesByService = {};
+let _ffServicesLocationOverridesLoading = {};
+
+function _ffCatalogRenderRoot() {
+  return document.getElementById(_ffCatalogRenderRootId || 'servicesModal') || document;
+}
+
+function _ffCatalogEl(id) {
+  const root = _ffCatalogRenderRoot();
+  return (root && root.querySelector ? root.querySelector('#' + id) : null) || document.getElementById(id);
+}
+
+function _ffEnsureCatalogEditorPortal() {
+  const editor = document.getElementById('servicesCatalogEditorModal');
+  if (editor && editor.parentElement && editor.parentElement.id === 'servicesModalInner') {
+    document.body.appendChild(editor);
+  }
+}
+
+function _ffIsServicesScreenRoot() {
+  return _ffCatalogRenderRootId === 'servicesScreen';
+}
 
 async function openServicesModal(opts = {}) {
   const modal = document.getElementById('servicesModal');
   if (!modal) return;
+  _ffEnsureCatalogEditorPortal();
+  _ffCatalogRenderRootId = 'servicesModal';
   _ffCatalogModalMode = opts && opts.mode === 'shared' ? 'shared' : 'location';
   _ffOpenCats.clear();
   _ffCatalogRenderedOnce = false;
@@ -3475,12 +3563,12 @@ function closeServicesModal() {
 
 /** Render the unified catalog. Keeps currently-open categories open. */
 function renderServicesCatalogV2() {
-  const list = document.getElementById('servicesCatalogV2List');
+  const list = _ffCatalogEl('servicesCatalogV2List');
   if (!list) return;
-  const sourceBadge = document.getElementById('servicesCatalogSourceBadge');
-  const sourceHelp = document.getElementById('servicesCatalogSourceHelp');
-  const addSharedBtn = document.getElementById('servicesCatalogAddSharedBtn');
-  const addCategoryBtn = document.getElementById('servicesCatalogAddCategoryBtn');
+  const sourceBadge = _ffCatalogEl('servicesCatalogSourceBadge');
+  const sourceHelp = _ffCatalogEl('servicesCatalogSourceHelp');
+  const addSharedBtn = _ffCatalogEl('servicesCatalogAddSharedBtn');
+  const addCategoryBtn = _ffCatalogEl('servicesCatalogAddCategoryBtn');
   const isSharedCatalog = _ffCatalogModalMode === 'shared';
   const catalogData = isSharedCatalog
     ? getSharedServicesForCatalogManager()
@@ -3508,7 +3596,11 @@ function renderServicesCatalogV2() {
   }
 
   if (!_ffCatalogRenderedOnce && _ffOpenCats.size === 0 && catalogCategories.length > 0) {
-    _ffOpenCats.add(catalogCategories[0].id);
+    if (_ffIsServicesScreenRoot()) {
+      catalogCategories.forEach((cat) => _ffOpenCats.add(cat.id));
+    } else {
+      _ffOpenCats.add(catalogCategories[0].id);
+    }
   }
   _ffCatalogRenderedOnce = true;
 
@@ -3524,6 +3616,12 @@ function renderServicesCatalogV2() {
     else orphans.push(s);
   });
   if (orphans.length) grouped.set('__other__', { id: '__other__', name: 'Other', services: orphans });
+
+  if (_ffIsServicesScreenRoot()) {
+    renderServicesScreenCatalogList(list, grouped, isSharedCatalog);
+    renderServicesScreenDetail(catalogServices, catalogCategories);
+    return;
+  }
 
   if (grouped.size === 0) {
     const emptyTitle = isSharedCatalog ? 'No shared categories yet' : 'No categories yet';
@@ -3639,6 +3737,605 @@ function renderServicesCatalogV2() {
   });
 }
 
+function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
+  if (!grouped || grouped.size === 0) {
+    list.innerHTML = '<div style="padding:0 20px 20px;color:#6b7280;font-size:12px;line-height:1.5;">No categories yet. Use + Add Category above.</div>';
+    return;
+  }
+
+  let html = '';
+  for (const cat of grouped.values()) {
+    const isOther = cat.id === '__other__';
+    const canEditCategory = !isOther;
+    const isOpen = _ffOpenCats.has(cat.id);
+    const arrow = isOpen ? '▾' : '▸';
+    const isCategorySelected = String(cat.id) === String(_ffSelectedCategoryId || '');
+    html += `<div class="staff-sidebar-section" style="padding:0 16px 12px 16px;border-top:1px solid var(--border);padding-top:12px;">`;
+    html += `<div style="display:flex;align-items:center;gap:6px;margin:0 0 6px 0;">`;
+    html += `<button type="button" class="ff-services-cat-toggle" data-cat-id="${escapeHtml(cat.id)}" aria-expanded="${isOpen ? 'true' : 'false'}" style="border:none;background:none;color:#6b7280;cursor:pointer;font-size:14px;line-height:1;padding:2px;width:16px;flex-shrink:0;">${arrow}</button>`;
+    html += `<button type="button" class="ff-services-category-title${isCategorySelected ? ' is-selected' : ''}" data-cat-id="${escapeHtml(cat.id)}" ${canEditCategory ? '' : 'disabled'} style="margin:0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;flex:1;text-align:left;border:none;background:${isCategorySelected ? '#ede9fe' : 'transparent'};border-radius:6px;padding:4px 6px;cursor:${canEditCategory ? 'pointer' : 'default'};">${escapeHtml(cat.name)}</button>`;
+    html += `</div>`;
+    html += `<div class="ff-services-cat-services" data-cat-id="${escapeHtml(cat.id)}" style="display:${isOpen ? 'flex' : 'none'};flex-direction:column;gap:4px;">`;
+    if (cat.services.length === 0) {
+      html += `<div style="padding:6px 8px;color:#9ca3af;font-size:12px;">No services yet.</div>`;
+    } else {
+      cat.services.forEach((s) => {
+        const isSelected = String(s.id) === String(_ffSelectedServiceId || '');
+        const serviceOpacity = s.active === false ? 'opacity:0.62;' : '';
+        html += `<div class="staff-sidebar-item ff-services-sidebar-service${isSelected ? ' is-selected' : ''}" data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" style="width:100%;display:flex;align-items:center;gap:6px;padding:8px 8px;border:none;border-radius:6px;background:${isSelected ? '#ede9fe' : 'transparent'};cursor:pointer;text-align:left;${serviceOpacity}">`;
+        html += `<span class="ff-services-drag-handle" draggable="true" data-drag-kind="service" data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" title="Drag to reorder" style="color:#9ca3af;font-size:12px;line-height:1;cursor:grab;user-select:none;flex-shrink:0;">⋮⋮</span>`;
+        html += `<span style="font-size:12px;color:#111827;line-height:1.25;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name || '')}</span>`;
+        html += `</div>`;
+      });
+    }
+    if (!isOther) {
+      const addMode = isSharedCatalog ? 'shared' : 'location';
+      const addLabel = isSharedCatalog ? '+ Add Shared Service' : '+ Add Service';
+      html += `<button type="button" class="ffcat-addsvc-btn" data-cat-id="${escapeHtml(cat.id)}" data-add-mode="${addMode}" style="width:100%;background:none;border:none;color:#7c3aed;font-weight:600;font-size:12px;padding:6px 8px;cursor:pointer;text-align:left;border-radius:6px;">${addLabel}</button>`;
+    }
+    html += `</div></div>`;
+  }
+
+  list.innerHTML = html;
+
+  list.querySelectorAll('.ff-services-cat-toggle').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const catId = btn.getAttribute('data-cat-id');
+      if (!catId) return;
+      if (_ffOpenCats.has(catId)) _ffOpenCats.delete(catId); else _ffOpenCats.add(catId);
+      renderServicesCatalogV2();
+    });
+  });
+  list.querySelectorAll('.ff-services-category-title').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const catId = btn.getAttribute('data-cat-id');
+      if (!catId) return;
+      _ffSelectedCategoryId = catId;
+      _ffSelectedServiceId = null;
+      _ffServicesInlineEditServiceId = null;
+      renderServicesCatalogV2();
+    });
+  });
+  list.querySelectorAll('.ffcat-addsvc-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const catId = btn.getAttribute('data-cat-id');
+      _ffOpenCats.add(catId);
+      if (btn.getAttribute('data-add-mode') === 'shared') {
+        const cat = getSharedServicesForCatalogManager().categories.find((c) => c.id === catId);
+        _ffCatalogEditorOpen({ mode: 'shared-service-add', categoryName: cat?.name || '' });
+      } else {
+        _ffCatalogEditorOpen({ mode: 'service-add', categoryId: catId });
+      }
+    });
+  });
+  list.querySelectorAll('.ff-services-sidebar-service').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      if (e.target.closest('.ffsvc-menu-btn')) return;
+      _ffSelectedServiceId = btn.getAttribute('data-svc-id');
+      _ffSelectedCategoryId = null;
+      if (String(_ffServicesInlineEditServiceId || '') !== String(_ffSelectedServiceId || '')) {
+        _ffServicesInlineEditServiceId = null;
+      }
+      renderServicesCatalogV2();
+    });
+  });
+  _ffWireServicesScreenDragDrop(list);
+}
+
+function _ffWireServicesScreenDragDrop(listEl) {
+  listEl.addEventListener('dragstart', (e) => {
+    const handle = e.target.closest('.ff-services-drag-handle[data-drag-kind="service"]');
+    if (!handle) return;
+    const row = handle.closest('.ff-services-sidebar-service');
+    _ffDragSrc = {
+      kind: 'service',
+      catId: handle.getAttribute('data-cat-id') || null,
+      svcId: handle.getAttribute('data-svc-id') || null,
+    };
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', _ffDragSrc.svcId || '');
+    } catch (_) {}
+    if (row) row.style.opacity = '0.4';
+  });
+
+  listEl.addEventListener('dragend', (e) => {
+    const row = e.target.closest('.ff-services-sidebar-service');
+    if (row) row.style.opacity = '';
+    _ffClearDragHover();
+    _ffDragSrc = null;
+  });
+
+  listEl.addEventListener('dragover', (e) => {
+    if (!_ffDragSrc || _ffDragSrc.kind !== 'service') return;
+    const targetSvc = e.target.closest('.ff-services-sidebar-service');
+    if (
+      !targetSvc ||
+      targetSvc.getAttribute('data-svc-id') === _ffDragSrc.svcId ||
+      targetSvc.getAttribute('data-cat-id') !== _ffDragSrc.catId
+    ) {
+      if (_ffDragHoverEl) _ffClearDragHover();
+      return;
+    }
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    if (targetSvc !== _ffDragHoverEl) {
+      _ffClearDragHover();
+      _ffDragHoverEl = targetSvc;
+    }
+    const rect = targetSvc.getBoundingClientRect();
+    const placeAfter = e.clientY > rect.top + rect.height / 2;
+    targetSvc.dataset.dropPosition = placeAfter ? 'after' : 'before';
+    targetSvc.style.boxShadow = placeAfter
+      ? 'inset 0 -2px 0 0 #7c3aed'
+      : 'inset 0 2px 0 0 #7c3aed';
+  });
+
+  listEl.addEventListener('drop', async (e) => {
+    if (!_ffDragSrc || _ffDragSrc.kind !== 'service') return;
+    const targetSvc = e.target.closest('.ff-services-sidebar-service');
+    const src = _ffDragSrc;
+    _ffClearDragHover();
+    _ffDragSrc = null;
+    if (
+      !targetSvc ||
+      targetSvc.getAttribute('data-svc-id') === src.svcId ||
+      targetSvc.getAttribute('data-cat-id') !== src.catId
+    ) {
+      return;
+    }
+    e.preventDefault();
+    try {
+      await _ffReorderServiceWithinCategory(
+        src.svcId,
+        targetSvc.getAttribute('data-svc-id'),
+        src.catId,
+        targetSvc.dataset.dropPosition === 'after'
+      );
+      await loadServices();
+      renderServicesCatalogV2();
+    } catch (err) {
+      console.error('[Services] Reorder failed', err);
+      showToast(err?.message || 'Reorder failed', 'error');
+    }
+  });
+}
+
+async function _ffReorderServiceWithinCategory(srcId, targetSvcId, categoryId, placeAfter) {
+  if (!categoryId || categoryId === '__other__') return;
+  const src = salonServices.find(s => s.id === srcId);
+  if (!src || src.categoryId !== categoryId) return;
+  const siblings = salonServices
+    .filter(s => s.categoryId === categoryId && s.id !== srcId)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  const targetIdx = siblings.findIndex(s => s.id === targetSvcId);
+  if (targetIdx < 0) return;
+  siblings.splice(targetIdx + (placeAfter ? 1 : 0), 0, src);
+  await Promise.all(siblings.map((s, idx) => saveService({
+    id: s.id,
+    name: s.name,
+    categoryId,
+    defaultPrice: s.defaultPrice || 0,
+    sortOrder: idx,
+  })));
+}
+
+function renderServicesScreenDetail(catalogServices, catalogCategories) {
+  const root = document.getElementById('servicesScreen');
+  if (!root) return;
+  const placeholder = root.querySelector('#servicesDetailPlaceholder');
+  const container = root.querySelector('#servicesDetailContainer');
+  const header = root.querySelector('#servicesDetailHeader');
+  const nav = root.querySelector('#servicesDetailNav');
+  const content = root.querySelector('#servicesDetailTabContent');
+  if (!placeholder || !container || !header || !nav || !content) return;
+
+  const services = Array.isArray(catalogServices) ? catalogServices : [];
+  const categories = Array.isArray(catalogCategories) ? catalogCategories : [];
+  let selectedService = services.find((s) => String(s.id) === String(_ffSelectedServiceId || ''));
+  if (!selectedService && _ffSelectedServiceId) _ffSelectedServiceId = null;
+  let selectedCategory = categories.find((c) => String(c.id) === String(_ffSelectedCategoryId || ''));
+  if (!selectedCategory && _ffSelectedCategoryId) _ffSelectedCategoryId = null;
+  if (!selectedService && !selectedCategory) {
+    placeholder.style.display = 'flex';
+    container.style.display = 'none';
+    return;
+  }
+
+  placeholder.style.display = 'none';
+  container.style.display = 'block';
+
+  if (selectedCategory && !selectedService) {
+    const categoryMode = _ffCatalogModalMode === 'shared' ? 'shared-category-edit' : 'category-edit';
+    nav.innerHTML = `
+      <button type="button" class="staff-nav-item is-active" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Details</button>
+    `;
+    header.innerHTML = `
+      <div style="padding:8px 0 4px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+        <div style="min-width:0;">
+          <div style="font-size:22px;font-weight:800;color:#111827;line-height:1.2;">${escapeHtml(selectedCategory.name || 'Category')}</div>
+        </div>
+        <button type="button" id="servicesCategoryActionsBtn" title="Category actions" style="width:32px;height:32px;border:1px solid var(--border);background:#fff;border-radius:999px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b7280;font-weight:800;line-height:1;flex-shrink:0;">...</button>
+      </div>
+    `;
+    content.innerHTML = `
+      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
+          <div style="font-size:14px;font-weight:700;color:#111827;">Details</div>
+          <button type="button" id="servicesCategoryEditBtn" style="padding:7px 12px;background:#fff;color:#7c3aed;border:1px solid #e9d5ff;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Edit</button>
+        </div>
+        <div style="display:flex;flex-direction:column;border-top:1px solid #f3f4f6;">
+          <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+            <div style="font-size:12px;color:#6b7280;">Category name</div>
+            <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(selectedCategory.name || '')}</div>
+          </div>
+        </div>
+      </div>
+    `;
+    const categoryActionsBtn = root.querySelector('#servicesCategoryActionsBtn');
+    if (categoryActionsBtn) {
+      categoryActionsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _ffShowServicesCategoryDetailMenu(categoryActionsBtn, String(selectedCategory.id));
+      });
+    }
+    const categoryEditBtn = root.querySelector('#servicesCategoryEditBtn');
+    if (categoryEditBtn) {
+      categoryEditBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _ffCatalogEditorOpen({ mode: categoryMode, categoryId: selectedCategory.id });
+      });
+    }
+    return;
+  }
+
+  const selected = selectedService;
+  const rawDuration = selected.durationMinutes ?? selected.duration ?? selected.defaultDuration ?? selected.minutes;
+  const durationText = rawDuration == null || rawDuration === ''
+    ? ''
+    : (Number.isFinite(Number(rawDuration)) ? `${Number(rawDuration)} min` : String(rawDuration));
+  const isInlineEditingService = String(_ffServicesInlineEditServiceId || '') === String(selected.id || '');
+  const activeServiceTab = _ffServicesDetailTab || 'details';
+  const basePrice = Number(selected.sharedDefaultPrice ?? selected.defaultPrice) || 0;
+  const categoryOptions = categories
+    .filter((cat) => cat.id !== '__other__')
+    .map((cat) => `<option value="${escapeHtml(cat.name || cat.id)}" ${String(cat.id) === String(selected.categoryId || '') ? 'selected' : ''}>${escapeHtml(cat.name || '')}</option>`)
+    .join('');
+  nav.innerHTML = `
+    <button type="button" class="staff-nav-item${activeServiceTab === 'details' ? ' is-active' : ''}" data-services-tab="details" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Details</button>
+    <button type="button" class="staff-nav-item${activeServiceTab === 'locations' ? ' is-active' : ''}" data-services-tab="locations" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Locations</button>
+    <button type="button" class="staff-nav-item${activeServiceTab === 'staff' ? ' is-active' : ''}" data-services-tab="staff" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Staff</button>
+  `;
+  header.innerHTML = `
+    <div style="padding:8px 0 4px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+      <div style="min-width:0;">
+        <div style="font-size:22px;font-weight:800;color:#111827;line-height:1.2;">${escapeHtml(selected.name || 'Service')}</div>
+        <div style="margin-top:6px;font-size:14px;color:#6b7280;font-weight:600;">${ffTicketMoney(basePrice)}</div>
+      </div>
+      <button type="button" id="servicesDetailActionsBtn" title="Service actions" style="width:32px;height:32px;border:1px solid var(--border);background:#fff;border-radius:999px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b7280;font-weight:800;line-height:1;flex-shrink:0;">...</button>
+    </div>
+  `;
+  if (activeServiceTab === 'locations') {
+    content.innerHTML = renderServicesLocationsTabHtml(selected);
+    wireServicesLocationsTab(root, selected);
+  } else if (activeServiceTab === 'staff') {
+    content.innerHTML = `
+      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Staff</div>
+        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">Staff assignment will be managed here in a later phase.</p>
+      </div>
+    `;
+  } else {
+    content.innerHTML = isInlineEditingService ? `
+    <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;">Details</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button type="button" id="servicesInlineEditCancelBtn" style="padding:7px 12px;background:#fff;color:#374151;border:1px solid #e5e7eb;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Cancel</button>
+          <button type="button" id="servicesInlineEditSaveBtn" style="padding:7px 12px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Save</button>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;border-top:1px solid #f3f4f6;">
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:16px;align-items:center;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:12px;color:#6b7280;">Service Name</span>
+          <input id="servicesInlineEditName" type="text" value="${escapeHtml(selected.name || '')}" style="width:100%;max-width:420px;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
+        </label>
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:16px;align-items:center;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:12px;color:#6b7280;">Category</span>
+          <select id="servicesInlineEditCategory" style="width:100%;max-width:420px;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;background:#fff;box-sizing:border-box;">
+            <option value="">No category</option>
+            ${categoryOptions}
+          </select>
+        </label>
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:16px;align-items:center;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:12px;color:#6b7280;">Price</span>
+          <input id="servicesInlineEditPrice" type="number" min="0" step="0.01" value="${escapeHtml(String(basePrice))}" style="width:100%;max-width:180px;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
+        </label>
+      </div>
+    </div>
+  ` : `
+    <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;">Details</div>
+        <button type="button" id="servicesDetailEditBtn" style="padding:7px 12px;background:#fff;color:#7c3aed;border:1px solid #e9d5ff;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Edit</button>
+      </div>
+      <div style="display:flex;flex-direction:column;border-top:1px solid #f3f4f6;">
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:12px;color:#6b7280;">Service name</div>
+          <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(selected.name || '')}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:12px;color:#6b7280;">Price</div>
+          <div style="font-size:13px;color:#111827;font-weight:600;">${ffTicketMoney(basePrice)}</div>
+        </div>
+        ${durationText ? `
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:12px;color:#6b7280;">Duration</div>
+          <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(durationText)}</div>
+        </div>` : ''}
+      </div>
+    </div>
+  `;
+  }
+  root.querySelectorAll('#servicesDetailNav [data-services-tab]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _ffServicesDetailTab = btn.getAttribute('data-services-tab') || 'details';
+      _ffServicesInlineEditServiceId = null;
+      renderServicesCatalogV2();
+    });
+  });
+  const actionsBtn = root.querySelector('#servicesDetailActionsBtn');
+  if (actionsBtn) {
+    actionsBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _ffShowServiceMenu(actionsBtn, String(selected.id));
+    });
+  }
+  const editBtn = root.querySelector('#servicesDetailEditBtn');
+  if (editBtn) {
+    editBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _ffServicesInlineEditServiceId = selected.id;
+      renderServicesCatalogV2();
+    });
+  }
+  const cancelBtn = root.querySelector('#servicesInlineEditCancelBtn');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _ffServicesInlineEditServiceId = null;
+      renderServicesCatalogV2();
+    });
+  }
+  const saveBtn = root.querySelector('#servicesInlineEditSaveBtn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const nameInput = root.querySelector('#servicesInlineEditName');
+      const categoryInput = root.querySelector('#servicesInlineEditCategory');
+      const priceInput = root.querySelector('#servicesInlineEditPrice');
+      const name = String(nameInput?.value || '').trim();
+      if (!name) {
+        if (nameInput) nameInput.focus();
+        showToast('Service name is required', 'error');
+        return;
+      }
+      const categoryId = categoryInput?.value || null;
+      const defaultPrice = parseFloat(priceInput?.value) || 0;
+      saveBtn.disabled = true;
+      saveBtn.style.opacity = '0.7';
+      try {
+        if (selected.isSharedService || _ffCatalogModalMode === 'shared') {
+          await saveSharedService({
+            id: selected.id,
+            name,
+            category: categoryId || selected.category || '',
+            defaultPrice,
+            active: selected.active !== false,
+          });
+          await loadSharedCatalogForManager();
+        } else {
+          await saveService({
+            id: selected.id,
+            name,
+            categoryId,
+            defaultPrice,
+            sortOrder: selected.sortOrder || 0,
+          });
+          await Promise.all([loadServiceCategories(), loadServices()]);
+        }
+        selected.name = name;
+        selected.categoryId = categoryId;
+        selected.defaultPrice = defaultPrice;
+        _ffServicesInlineEditServiceId = null;
+        if (categoryId) _ffOpenCats.add(categoryId);
+        renderServicesCatalogV2();
+        if (typeof setupTicketsUI === 'function') setupTicketsUI();
+        showToast('Updated', 'success');
+      } catch (err) {
+        showToast(err?.message || 'Failed', 'error');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.style.opacity = '1';
+      }
+    });
+  }
+}
+
+function renderServicesLocationsTabHtml(service) {
+  const locations = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
+    ? (window.ffGetActiveLocations() || [])
+    : [];
+  if (!service || !service.id) return '';
+  if (_ffCatalogModalMode !== 'shared' && !service.isSharedService) {
+    return `
+      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Locations</div>
+        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">Location availability is managed for shared services.</p>
+      </div>
+    `;
+  }
+  if (!Array.isArray(locations) || locations.length === 0) {
+    return `
+      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Locations</div>
+        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">No active locations found.</p>
+      </div>
+    `;
+  }
+  if (!_ffServicesLocationOverridesByService[service.id] && !_ffServicesLocationOverridesLoading[service.id]) {
+    _ffServicesLocationOverridesLoading[service.id] = true;
+    loadSharedServiceLocationOverridesForService(service.id)
+      .catch((e) => console.warn('[Services] failed loading location overrides', e))
+      .finally(() => {
+        _ffServicesLocationOverridesLoading[service.id] = false;
+        if (_ffSelectedServiceId === service.id && _ffServicesDetailTab === 'locations') renderServicesCatalogV2();
+      });
+  }
+  const overrides = _ffServicesLocationOverridesByService[service.id] || {};
+  const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  const loading = _ffServicesLocationOverridesLoading[service.id] === true;
+  const cards = locations.map((loc) => {
+    const override = overrides[loc.id] || {};
+    const enabled = override.enabled !== false;
+    const hasPriceOverride = Number.isFinite(Number(override.price));
+    const shownPrice = hasPriceOverride ? Number(override.price) : basePrice;
+    return `
+      <div class="ff-services-location-card" data-location-id="${escapeHtml(loc.id)}" style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:#111827;line-height:1.25;">${escapeHtml(loc.name || loc.label || 'Location')}</div>
+            <div style="margin-top:3px;font-size:12px;color:#6b7280;">${enabled ? 'Available at this location' : 'Not available at this location'}</div>
+          </div>
+          <label class="staff-permission-toggle" style="flex:0 0 auto;">
+            <input type="checkbox" class="ff-services-location-enabled" ${enabled ? 'checked' : ''}>
+            <span class="staff-permission-toggle-slider"></span>
+          </label>
+        </div>
+        <div style="display:grid;grid-template-columns:120px minmax(120px,180px) auto;gap:10px;align-items:center;">
+          <div style="font-size:12px;color:#6b7280;">Price</div>
+          <input type="number" min="0" step="0.01" class="ff-services-location-price" value="${escapeHtml(String(shownPrice))}" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="ff-services-location-save" style="padding:7px 12px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Save</button>
+            ${hasPriceOverride ? `<button type="button" class="ff-services-location-reset" style="padding:7px 12px;background:#fff;color:#6b7280;border:1px solid #e5e7eb;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Reset to default</button>` : ''}
+            <span style="font-size:11px;color:${hasPriceOverride ? '#7c3aed' : '#9ca3af'};">${hasPriceOverride ? 'Override' : `Default ${ffTicketMoney(basePrice)}`}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  return `
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:4px;">Locations</div>
+        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">Manage availability and location-specific pricing for this service.</p>
+        ${loading ? '<div style="margin-top:10px;font-size:12px;color:#9ca3af;">Loading location overrides...</div>' : ''}
+      </div>
+      ${cards}
+    </div>
+  `;
+}
+
+function wireServicesLocationsTab(root, service) {
+  if (!root || !service || !service.id) return;
+  const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  root.querySelectorAll('.ff-services-location-card').forEach((card) => {
+    const locationId = card.getAttribute('data-location-id');
+    const enabledInput = card.querySelector('.ff-services-location-enabled');
+    const priceInput = card.querySelector('.ff-services-location-price');
+    const saveBtn = card.querySelector('.ff-services-location-save');
+    const resetBtn = card.querySelector('.ff-services-location-reset');
+    const saveLocation = async (priceMode) => {
+      if (!locationId) return;
+      const enabled = enabledInput ? enabledInput.checked : true;
+      const rawPrice = parseFloat(priceInput?.value);
+      const patch = { enabled };
+      if (priceMode === 'reset') {
+        patch.price = null;
+        if (priceInput) priceInput.value = String(basePrice);
+      } else if (Number.isFinite(rawPrice) && rawPrice !== basePrice) {
+        patch.price = rawPrice;
+      } else {
+        patch.price = null;
+      }
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.7'; }
+      try {
+        await saveSharedServiceLocationOverride(service.id, locationId, patch);
+        renderServicesCatalogV2();
+        if (typeof setupTicketsUI === 'function') setupTicketsUI();
+        showToast(priceMode === 'reset' ? 'Price reset to default' : 'Location updated', 'success');
+      } catch (e) {
+        showToast(e?.message || 'Failed', 'error');
+      } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+      }
+    };
+    if (enabledInput) {
+      enabledInput.addEventListener('change', () => { saveLocation('save'); });
+    }
+    if (saveBtn) {
+      saveBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        saveLocation('save');
+      });
+    }
+    if (resetBtn) {
+      resetBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        saveLocation('reset');
+      });
+    }
+  });
+}
+
+function _ffShowServicesCategoryDetailMenu(anchorBtn, catId) {
+  _ffCloseAllPopovers();
+  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const catalogData = isSharedCatalog ? getSharedServicesForCatalogManager() : getLocationServicesForCatalogManager();
+  const cat = catalogData.categories.find((c) => String(c.id) === String(catId));
+  if (!cat) return;
+  const pop = _ffBuildPopover(anchorBtn, [
+    { label: 'Delete Category', danger: true, onClick: async () => {
+      const count = (catalogData.services || []).filter((s) => String(s.categoryId) === String(catId)).length;
+      if (count > 0) {
+        showToast(`Cannot delete: ${count} service(s) use this category.`, 'error');
+        return;
+      }
+      const ok = await ticketConfirm(`Delete "${cat.name}"?`, 'Delete category');
+      if (!ok) return;
+      try {
+        if (isSharedCatalog) {
+          await deleteSharedServiceCategory(cat.docId || catId);
+          await loadSharedCatalogForManager();
+        } else {
+          await deleteServiceCategory(catId);
+          await Promise.all([loadServiceCategories(), loadServices()]);
+        }
+        _ffSelectedCategoryId = null;
+        _ffOpenCats.delete(catId);
+        renderServicesCatalogV2();
+        showToast('Category deleted', 'success');
+      } catch (e) {
+        showToast(e?.message || 'Failed', 'error');
+      }
+    }},
+  ]);
+  document.body.appendChild(pop);
+}
+
 /** Small popover menu for a category row. */
 function _ffShowCategoryMenu(anchorBtn, catId) {
   _ffCloseAllPopovers();
@@ -3696,7 +4393,16 @@ function _ffShowServiceMenu(anchorBtn, svcId) {
     : salonServices.find((s) => s.id === svcId);
   if (!svc) return;
   const items = [
-    { label: 'Edit service', onClick: () => _ffCatalogEditorOpen({ mode: isSharedCatalog ? 'shared-service-edit' : 'service-edit', serviceId: svcId }) },
+    { label: 'Edit service', onClick: () => {
+      if (_ffIsServicesScreenRoot()) {
+        _ffSelectedServiceId = svcId;
+        _ffSelectedCategoryId = null;
+        _ffServicesInlineEditServiceId = svcId;
+        renderServicesCatalogV2();
+      } else {
+        _ffCatalogEditorOpen({ mode: isSharedCatalog ? 'shared-service-edit' : 'service-edit', serviceId: svcId });
+      }
+    } },
   ];
   if (isSharedCatalog) {
     const pop = _ffBuildPopover(anchorBtn, items);
@@ -4231,9 +4937,10 @@ export function goToTickets() {
   const scheduleScreen = document.getElementById('scheduleScreen');
   const timeClockScreenTk = document.getElementById('timeClockScreen');
   const ticketsScreen = document.getElementById('ticketsScreen');
+  const servicesScreen = document.getElementById('servicesScreen');
 
   const manageQueueScreen = document.getElementById('manageQueueScreen');
-  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen, trainingScreen, scheduleScreen, timeClockScreenTk, manageQueueScreen].forEach(el => {
+  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen, trainingScreen, scheduleScreen, timeClockScreenTk, servicesScreen, manageQueueScreen].forEach(el => {
     if (el) el.style.display = 'none';
   });
   if (wrap) wrap.style.display = 'none';
@@ -4313,6 +5020,80 @@ export function goToTickets() {
       .catch((err) => {
         console.error('[Tickets] goToTickets init failed', err);
       });
+  }
+}
+
+export async function goToServices() {
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try { window.ffCloseGlobalBlockingOverlays(); } catch (e) {}
+  }
+  if (typeof window.closeStaffMembersModal === 'function') {
+    try { window.closeStaffMembersModal(); } catch (e) {}
+  }
+
+  const servicesScreen = document.getElementById('servicesScreen');
+  if (!servicesScreen) return;
+
+  [
+    'owner-view',
+    'ticketsScreen',
+    'tasksScreen',
+    'chatScreen',
+    'inboxScreen',
+    'mediaScreen',
+    'inventoryScreen',
+    'trainingScreen',
+    'scheduleScreen',
+    'timeClockScreen',
+    'pointsAppScreen',
+    'userProfileScreen',
+    'myProfileScreen',
+    'manageQueueScreen',
+    'dashboardScreen',
+    'queueAnalyticsScreen',
+    'ticketsAnalyticsScreen',
+    'timeAnalyticsScreen',
+    'tasksAnalyticsScreen',
+    'historyScreen'
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.display = 'none';
+      el.style.pointerEvents = 'none';
+    }
+  });
+  const joinBar = document.querySelector('.joinBar');
+  const wrap = document.querySelector('.wrap');
+  const queueControls = document.getElementById('queueControls');
+  [joinBar, wrap, queueControls].forEach((el) => {
+    if (el) el.style.display = 'none';
+  });
+
+  document.querySelectorAll('.btn-pill').forEach((b) => b.classList.remove('active'));
+  servicesScreen.style.display = 'block';
+  servicesScreen.style.pointerEvents = 'auto';
+  _ffEnsureCatalogEditorPortal();
+  _ffCatalogRenderRootId = 'servicesScreen';
+  _ffCatalogModalMode = 'shared';
+  _ffOpenCats.clear();
+  _ffCatalogRenderedOnce = false;
+
+  try {
+    if (typeof window.ffSyncShellHeaderInset === 'function') window.ffSyncShellHeaderInset();
+  } catch (e) {}
+
+  try {
+    await loadCurrentUserProfile();
+    await enrichTicketsProfileFromMemberDoc();
+    const sharedCatalog = await loadSharedCatalogForManager();
+    if (!sharedCatalog || ((sharedCatalog.services || []).length === 0 && (sharedCatalog.categories || []).length === 0)) {
+      _ffCatalogModalMode = 'location';
+      await loadLocationCatalogForManager();
+    }
+    renderServicesCatalogV2();
+  } catch (err) {
+    console.error('[Services] Failed opening Services screen', err);
+    if (typeof showToast === 'function') showToast('Service Catalog is still loading. Try again in a moment.', 'error');
   }
 }
 
@@ -4410,11 +5191,13 @@ export function initTickets() {
   const newBtn = document.getElementById('ticketsNewBtn');
   if (newBtn) newBtn.onclick = () => openTicketModal();
   window.goToTickets = goToTickets;
+  window.goToServices = goToServices;
   window.closeTicketModal = closeTicketModal;
   window.closeTicketDetailsModal = closeTicketDetailsModal;
   window.saveTicket = saveTicket;
   window.closeServicesModal = closeServicesModal;
   window.openServicesModal = openServicesModal;
+  window.renderServicesCatalogV2 = renderServicesCatalogV2;
   window.addServiceCategoryV2 = addServiceCategoryV2;
   window.addSharedServiceV2 = addSharedServiceV2;
   window.ffCloseCatalogEditor = _ffCatalogEditorClose;
@@ -4465,7 +5248,9 @@ export function initTickets() {
             await loadSharedCatalogForManager();
           }
           const modal = document.getElementById('servicesModal');
-          if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
+          const servicesScreen = document.getElementById('servicesScreen');
+          if ((modal && modal.style.display !== 'none' && modal.style.display !== '') ||
+              (servicesScreen && servicesScreen.style.display !== 'none' && servicesScreen.style.display !== '')) {
             _ffOpenCats.clear();
             _ffCatalogRenderedOnce = false;
             renderServicesCatalogV2();

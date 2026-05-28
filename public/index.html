@@ -171,6 +171,7 @@ body.ff-logged-out .header {
   display: none !important;
 }
 body.ff-logged-out #ticketsScreen,
+body.ff-logged-out #servicesScreen,
 body.ff-logged-out #mediaScreen,
 body.ff-logged-out #chatScreen,
 body.ff-logged-out #inboxScreen,
@@ -6152,7 +6153,7 @@ dialog footer button, .code-dialog footer button {
       if(h) new ResizeObserver(setHeaderH).observe(h);
     }
     if(typeof MutationObserver!=='undefined'){
-      var targets = ['queueBtn','ticketsBtn','tasksBtn','chatBtn','mediaBtn','inventoryNavBtn','inboxBtn','trainingBtn','scheduleBtn','timeClockBtn','settingsBtn','dashboardBtn','appsPanel','staffMembersModal','owner-view','ticketsScreen','tasksScreen','chatScreen','mediaScreen','inventoryScreen','inboxScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen','queueAnalyticsScreen','ticketsAnalyticsScreen','timeAnalyticsScreen','tasksAnalyticsScreen','historyScreen'];
+      var targets = ['queueBtn','ticketsBtn','tasksBtn','chatBtn','mediaBtn','inventoryNavBtn','inboxBtn','trainingBtn','scheduleBtn','timeClockBtn','settingsBtn','dashboardBtn','appsPanel','staffMembersModal','owner-view','ticketsScreen','servicesScreen','tasksScreen','chatScreen','mediaScreen','inventoryScreen','inboxScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen','queueAnalyticsScreen','ticketsAnalyticsScreen','timeAnalyticsScreen','tasksAnalyticsScreen','historyScreen'];
       var observer = new MutationObserver(function () {
         setMobileHeaderTitle();
         setHeaderH();
@@ -6453,6 +6454,16 @@ dialog footer button, .code-dialog footer button {
                 </div>
               </div>
             </div>
+            <div class="apps-panel-item" data-app="services" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"></path><path d="M4 12h16"></path><path d="M4 17h10"></path><circle cx="18" cy="17" r="2"></circle></svg>
+                </div>
+                <div>
+                  <div>Services</div>
+                </div>
+              </div>
+            </div>
             <div class="apps-panel-item" data-app="settings" data-staff="true" style="cursor:pointer;">
               <div class="apps-panel-item__content">
                 <div>
@@ -6701,7 +6712,6 @@ dialog footer button, .code-dialog footer button {
             }
           </style>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
-            <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedSetupServiceCatalog && window.ffOpenSharedSetupServiceCatalog()">Manage Service Catalog</button>
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedTaskTemplates && window.ffOpenSharedTaskTemplates()">Manage Task Templates</button>
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedInventoryCatalog && window.ffOpenSharedInventoryCatalog()">Manage Inventory Catalog</button>
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedChatTemplates && window.ffOpenSharedChatTemplates()">Manage Chat Templates</button>
@@ -11358,6 +11368,7 @@ function ffUpdateAppsPanelPermissionVisibility() {
   setAppsTileVisible('.apps-panel-item[data-app="queue"]', (typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="tasks"]', (typeof ffCurrentUserHasTasksViewPermission === 'function' && ffCurrentUserHasTasksViewPermission()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="tickets"]', (typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission()) || trustLoadingApps);
+  setAppsTileVisible('.apps-panel-item[data-app="services"]', (typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="inbox"]', (typeof ffCurrentUserHasInboxViewPermission === 'function' && ffCurrentUserHasInboxViewPermission()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="chat"]', tabUnlessExplicitOff('chat_view') || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="media"]', tabUnlessExplicitOff('media_view') || trustLoadingApps);
@@ -11419,6 +11430,7 @@ function ffIsFullscreenModuleCoveringQueue() {
     'inboxScreen',
     'mediaScreen',
     'ticketsScreen',
+    'servicesScreen',
     'trainingScreen',
     'scheduleScreen',
     'timeClockScreen',
@@ -11665,6 +11677,7 @@ function ffHasActiveNonQueueScreen() {
   try {
     var ids = [
       'ticketsScreen',
+      'servicesScreen',
       'tasksScreen',
       'chatScreen',
       'mediaScreen',
@@ -14977,6 +14990,8 @@ function goToQueue() {
   // otherwise ffApplyQueueViewGate() defers restoring #joinBar + .wrap and the queue stays blank.
   const ticketsScreenQueue = document.getElementById('ticketsScreen');
   if (ticketsScreenQueue) ticketsScreenQueue.style.display = 'none';
+  const servicesScreenQueue = document.getElementById('servicesScreen');
+  if (servicesScreenQueue) servicesScreenQueue.style.display = 'none';
   const scheduleScreenQueue = document.getElementById('scheduleScreen');
   if (scheduleScreenQueue) scheduleScreenQueue.style.display = 'none';
   const timeClockScreenQueue = document.getElementById('timeClockScreen');
@@ -15155,7 +15170,7 @@ function goToTimeClock() {
     window.__ffTCState.confirmOpenEntry = null;
   }
   const screenIds = [
-    'tasksScreen', 'inboxScreen', 'chatScreen', 'mediaScreen', 'ticketsScreen', 'trainingScreen',
+    'tasksScreen', 'inboxScreen', 'chatScreen', 'mediaScreen', 'ticketsScreen', 'servicesScreen', 'trainingScreen',
     'userProfileScreen', 'myProfileScreen', 'manageQueueScreen', 'scheduleScreen', 'inventoryScreen', 'pointsAppScreen',
     'historyScreen'
   ];
@@ -18960,6 +18975,7 @@ async function goToTraining() {
   const chatScreen = document.getElementById('chatScreen');
   const mediaScreen = document.getElementById('mediaScreen');
   const ticketsScreen = document.getElementById('ticketsScreen');
+  const servicesScreen = document.getElementById('servicesScreen');
   const scheduleScreen = document.getElementById('scheduleScreen');
   const timeClockScreenTc = document.getElementById('timeClockScreen');
   const inventoryScreenTc = document.getElementById('inventoryScreen');
@@ -18977,6 +18993,7 @@ async function goToTraining() {
   if (chatScreen) chatScreen.style.display = 'none';
   if (mediaScreen) mediaScreen.style.display = 'none';
   if (ticketsScreen) ticketsScreen.style.display = 'none';
+  if (servicesScreen) servicesScreen.style.display = 'none';
   if (scheduleScreen) scheduleScreen.style.display = 'none';
   if (timeClockScreenTc) timeClockScreenTc.style.display = 'none';
   if (inventoryScreenTc) inventoryScreenTc.style.display = 'none';
@@ -19805,6 +19822,7 @@ function goToUserProfile(section) {
   const mediaScreenEl = document.getElementById('mediaScreen');
   const inboxScreenEl = document.getElementById('inboxScreen');
   const ticketsScreenEl = document.getElementById('ticketsScreen');
+  const servicesScreenEl = document.getElementById('servicesScreen');
   const scheduleScreenEl = document.getElementById('scheduleScreen');
   const timeClockScreenEl = document.getElementById('timeClockScreen');
   const inventoryScreenEl = document.getElementById('inventoryScreen');
@@ -19824,6 +19842,8 @@ function goToUserProfile(section) {
     previousView = 'inbox';
   } else if (ticketsScreenEl && ticketsScreenEl.style.display !== 'none') {
     previousView = 'tickets';
+  } else if (servicesScreenEl && servicesScreenEl.style.display !== 'none') {
+    previousView = 'services';
   } else if (timeClockScreenEl && timeClockScreenEl.style.display !== 'none') {
     previousView = 'timeClock';
   } else if (scheduleScreenEl && scheduleScreenEl.style.display !== 'none') {
@@ -19850,6 +19870,7 @@ function goToUserProfile(section) {
   if (inboxScreenEl) inboxScreenEl.style.display = 'none';
   if (mediaScreenEl) mediaScreenEl.style.display = 'none';
   if (ticketsScreenEl) ticketsScreenEl.style.display = 'none';
+  if (servicesScreenEl) servicesScreenEl.style.display = 'none';
   if (inventoryScreenEl) inventoryScreenEl.style.display = 'none';
   if (pointsAppScreenEl) pointsAppScreenEl.style.display = 'none';
   if (dashboardScreenEl) dashboardScreenEl.style.display = 'none';
@@ -20008,6 +20029,7 @@ function goToMyProfile() {
   const mediaScreenEl = document.getElementById('mediaScreen');
   const inboxScreenEl = document.getElementById('inboxScreen');
   const ticketsScreenEl = document.getElementById('ticketsScreen');
+  const servicesScreenEl = document.getElementById('servicesScreen');
   const scheduleScreenEl = document.getElementById('scheduleScreen');
   const timeClockScreenElMyProf = document.getElementById('timeClockScreen');
   const inventoryScreenElMyProf = document.getElementById('inventoryScreen');
@@ -20027,6 +20049,8 @@ function goToMyProfile() {
     previousView = 'inbox';
   } else if (ticketsScreenEl && ticketsScreenEl.style.display !== 'none') {
     previousView = 'tickets';
+  } else if (servicesScreenEl && servicesScreenEl.style.display !== 'none') {
+    previousView = 'services';
   } else if (timeClockScreenElMyProf && timeClockScreenElMyProf.style.display !== 'none') {
     previousView = 'timeClock';
   } else if (scheduleScreenEl && scheduleScreenEl.style.display !== 'none') {
@@ -20049,6 +20073,7 @@ function goToMyProfile() {
   if (inboxScreenEl) inboxScreenEl.style.display = 'none';
   if (mediaScreenEl) mediaScreenEl.style.display = 'none';
   if (ticketsScreenEl) ticketsScreenEl.style.display = 'none';
+  if (servicesScreenEl) servicesScreenEl.style.display = 'none';
   if (timeClockScreenElMyProf) timeClockScreenElMyProf.style.display = 'none';
   if (scheduleScreenEl) scheduleScreenEl.style.display = 'none';
   if (inventoryScreenElMyProf) inventoryScreenElMyProf.style.display = 'none';
@@ -20537,6 +20562,8 @@ function goBackFromUserProfile() {
     }
   } else if (previousView === 'tickets' && typeof window.goToTickets === 'function') {
     window.goToTickets();
+  } else if (previousView === 'services' && typeof window.goToServices === 'function') {
+    window.goToServices();
   } else if (previousView === 'schedule' && typeof window.goToSchedule === 'function') {
     window.goToSchedule();
   } else if (previousView === 'timeClock' && typeof window.goToTimeClock === 'function') {
@@ -23817,7 +23844,7 @@ function removeBlockingOverlays() {
     
     // Full-screen app panels - never force pointer-events:none (breaks Tickets/Tasks/Inbox when hidden then shown).
     const APP_SCREEN_IDS = new Set([
-      'ticketsScreen', 'tasksScreen', 'inboxScreen', 'mediaScreen', 'chatScreen',
+      'ticketsScreen', 'servicesScreen', 'tasksScreen', 'inboxScreen', 'mediaScreen', 'chatScreen',
       'scheduleScreen', 'timeClockScreen', 'trainingScreen', 'pointsAppScreen', 'historyScreen'
     ]);
     const SKIP_POINTER_EVENTS_FIX_IDS = new Set(['appsOverlayBackdrop', 'appsPanel']);
@@ -24206,7 +24233,7 @@ function openHistoryModal() {
     return;
   }
   const screenIds = [
-    'tasksScreen', 'inboxScreen', 'chatScreen', 'mediaScreen', 'ticketsScreen', 'trainingScreen',
+    'tasksScreen', 'inboxScreen', 'chatScreen', 'mediaScreen', 'ticketsScreen', 'servicesScreen', 'trainingScreen',
     'userProfileScreen', 'myProfileScreen', 'manageQueueScreen', 'scheduleScreen', 'inventoryScreen', 'pointsAppScreen',
     'timeClockScreen'
   ];
@@ -25089,17 +25116,34 @@ function renderSettingsTaskList(tabKey) {
         // Get assignTo info for display
         const assignTo = task.assignTo || 'all';
         const technicianTypes = Array.isArray(task.technicianTypes) ? task.technicianTypes : [];
-        let assignToDisplay = 'Everyone';
-        if (assignTo === 'manager') {
-          assignToDisplay = 'Managers Only';
-        } else if (assignTo === 'technicians') {
-          if (technicianTypes.length > 0) {
-            // We'll show the types in the edit UI
-            assignToDisplay = 'Service Provider (Selected Types)';
-          } else {
-            assignToDisplay = 'All Service Providers';
-          }
-        }
+        const taskIdAttr = escapeHtmlAttr(String(resolvedTaskId || ''));
+        const assignToRadioName = `taskEditAssignTo-${taskIdAttr}`;
+        const editAssignmentHtml = `
+                <div style="margin-top:6px;padding:6px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;">
+                  <div style="font-size:10px;color:#6b7280;margin-bottom:6px;">Assign To:</div>
+                  <div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+                    <div class="tasks-edit-assign-radios" data-task-id="${taskIdAttr}" style="display:flex;flex-direction:column;gap:4px;flex:0 0 160px;">
+                      <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer;padding:4px 6px;border-radius:4px;">
+                        <input type="radio" name="${assignToRadioName}" value="all" class="tasks-edit-assign-radio" data-task-id="${taskIdAttr}" ${assignTo === 'all' ? 'checked' : ''} style="cursor:pointer;accent-color:#7c3aed;">
+                        <span>Everyone</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer;padding:4px 6px;border-radius:4px;">
+                        <input type="radio" name="${assignToRadioName}" value="manager" class="tasks-edit-assign-radio" data-task-id="${taskIdAttr}" ${assignTo === 'manager' ? 'checked' : ''} style="cursor:pointer;accent-color:#7c3aed;">
+                        <span>Managers Only</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer;padding:4px 6px;border-radius:4px;">
+                        <input type="radio" name="${assignToRadioName}" value="technicians" class="tasks-edit-assign-radio" data-task-id="${taskIdAttr}" ${assignTo === 'technicians' ? 'checked' : ''} style="cursor:pointer;accent-color:#7c3aed;">
+                        <span>Service Provider</span>
+                      </label>
+                    </div>
+                    <div class="tasks-edit-assign-technician-types" data-task-id="${taskIdAttr}" data-selected-types="${escapeHtmlAttr(JSON.stringify(technicianTypes))}" style="${assignTo === 'technicians' ? '' : 'display:none;'}flex:1 1 240px;min-width:220px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;">
+                      <div style="font-size:10px;color:#6b7280;margin-bottom:6px;">Select service provider type:</div>
+                      <div class="tasks-edit-assign-technician-types-checkboxes" data-task-id="${taskIdAttr}" style="display:flex;flex-direction:column;gap:4px;max-height:120px;overflow-y:auto;">
+                        <div style="text-align:center;padding:8px;color:#9ca3af;font-size:10px;">Loading...</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>`;
         
         let oneTimeEditHtml = '';
         if (tab === 'opening' || tab === 'closing') {
@@ -25120,15 +25164,12 @@ function renderSettingsTaskList(tabKey) {
         }
         
         return `
-            <div class="tasks-modal-draft-item" style="display:flex;flex-direction:column;padding:10px;margin-bottom:6px;background:#f9fafb;border:1px solid #7b3fe4;border-radius:6px;">
+            <div class="tasks-modal-draft-item" data-edit-task-id="${taskIdAttr}" style="display:flex;flex-direction:column;padding:10px;margin-bottom:6px;background:#f9fafb;border:1px solid #7b3fe4;border-radius:6px;">
               <div style="flex:1;margin-bottom:6px;">
-                <input type="text" class="tasks-edit-title" data-task-id="${resolvedTaskId}" value="${escapeHtmlDraft(task.title || '')}" placeholder="Task title" style="width:100%;padding:6px;margin-bottom:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-weight:600;font-family:inherit;color:#111827;" />
-                <textarea class="tasks-edit-instructions" data-task-id="${resolvedTaskId}" placeholder="Instructions..." rows="3" style="width:100%;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;resize:vertical;font-family:inherit;color:#111827;">${escapeHtmlDraft(task.instructions || '')}</textarea>
+                <input type="text" class="tasks-edit-title" data-task-id="${taskIdAttr}" value="${escapeHtmlDraft(task.title || '')}" placeholder="Task title" style="width:100%;padding:6px;margin-bottom:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-weight:600;font-family:inherit;color:#111827;" />
+                <textarea class="tasks-edit-instructions" data-task-id="${taskIdAttr}" placeholder="Instructions..." rows="3" style="width:100%;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;resize:vertical;font-family:inherit;color:#111827;">${escapeHtmlDraft(task.instructions || '')}</textarea>
                 ${oneTimeEditHtml}
-                <div style="margin-top:6px;padding:6px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;">
-                  <div style="font-size:10px;color:#6b7280;margin-bottom:4px;">Assign To:</div>
-                  <div style="font-size:10px;color:#111827;font-weight:500;">${escapeHtmlDraft(assignToDisplay)}</div>
-                </div>
+                ${editAssignmentHtml}
               </div>
               <div style="display:flex;flex-direction:column;gap:6px;">
                 <div style="display:flex;gap:6px;justify-content:flex-end;">
@@ -25153,20 +25194,9 @@ function renderSettingsTaskList(tabKey) {
             assignToDisplay = 'Managers Only';
           } else if (assignTo === 'technicians') {
             if (technicianTypes.length > 0) {
-              // Load technician type names for display
-              let typeNames = [];
-              if (typeof window.ffGetTechnicianTypes === 'function') {
-                try {
-                  const allTypes = window.ffGetTechnicianTypes();
-                  const activeTypes = allTypes.filter(t => t.active !== false);
-                  typeNames = technicianTypes.map(id => {
-                    const type = activeTypes.find(t => t.id === id);
-                    return type ? type.name : id;
-                  });
-                } catch (e) {
-                  typeNames = technicianTypes;
-                }
-              }
+              const typeNames = technicianTypes
+                .map(id => typeof ffQueueTechTypeDisplayLabel === 'function' ? ffQueueTechTypeDisplayLabel(id) : String(id || '').trim())
+                .filter(Boolean);
               assignToDisplay = 'Service Provider: ' + (typeNames.length > 0 ? typeNames.join(', ') : 'Selected Types');
             } else {
               assignToDisplay = 'All Service Providers';
@@ -25360,6 +25390,22 @@ function renderSettingsTaskList(tabKey) {
           e.stopPropagation();
           cancelEditTask();
         });
+      });
+      
+      // Edit assignment controls
+      modalListContainer.querySelectorAll('.tasks-edit-assign-radio').forEach(radio => {
+        radio.addEventListener('change', () => {
+          handleTaskEditAssignToChange(radio.dataset.taskId);
+        });
+      });
+      modalListContainer.querySelectorAll('.tasks-edit-assign-technician-types').forEach(wrap => {
+        let selectedTypes = [];
+        try {
+          selectedTypes = JSON.parse(wrap.dataset.selectedTypes || '[]');
+        } catch (e) {
+          selectedTypes = [];
+        }
+        loadTaskEditTechnicianTypes(wrap.dataset.taskId, selectedTypes);
       });
       
       // Copy IDs buttons
@@ -26487,7 +26533,7 @@ function openTasks() {
     }
 
     // Hide any other fullscreen peer modules so Tasks isn't rendered over another screen.
-    ['chatScreen','inboxScreen','mediaScreen','ticketsScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','pointsAppScreen','myProfileScreen','manageQueueScreen','historyScreen']
+    ['chatScreen','inboxScreen','mediaScreen','ticketsScreen','servicesScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','pointsAppScreen','myProfileScreen','manageQueueScreen','historyScreen']
       .forEach(function(id){ var el = document.getElementById(id); if (el) el.style.display = 'none'; });
     
     // Hide main content and Queue-specific controls (joinBar and queueControls)
@@ -28667,6 +28713,9 @@ function renderTasksList(tab, opts) {
       window.ffGetTechnicianTypes().then(types => {
         if (types && types.length > 0) {
           window.__ff_technician_types_cache = types.filter(t => t.active !== false);
+          if (isTasksSettingsOpen && typeof renderSettingsTaskList === 'function') {
+            renderSettingsTaskList(window.currentTasksTab || currentTab || 'opening');
+          }
           if (typeof window.renderTasksList === 'function') window.renderTasksList(currentTab || 'opening', { force: true });
         }
       }).catch(() => {});
@@ -29949,6 +29998,52 @@ function handleTaskAssignToChange() {
   if (typeof ffCloseTaskAssignToMobilePanelIfMobile === 'function') ffCloseTaskAssignToMobilePanelIfMobile();
 }
 
+function handleTaskEditAssignToChange(taskId) {
+  try {
+    const item = document.querySelector(`.tasks-modal-draft-item[data-edit-task-id="${taskId}"]`);
+    if (!item) return;
+    const techniciansRadio = item.querySelector(`input[name="taskEditAssignTo-${taskId}"][value="technicians"]`);
+    const typesWrap = item.querySelector(`.tasks-edit-assign-technician-types[data-task-id="${taskId}"]`);
+    if (!typesWrap) return;
+    typesWrap.style.display = techniciansRadio && techniciansRadio.checked ? 'block' : 'none';
+  } catch (e) {}
+}
+
+async function loadTaskEditTechnicianTypes(taskId, selectedTypeIds) {
+  const container = document.querySelector(`.tasks-edit-assign-technician-types-checkboxes[data-task-id="${taskId}"]`);
+  if (!container) return;
+  
+  let technicianTypes = [];
+  if (typeof window.ffGetTechnicianTypes === 'function') {
+    try {
+      technicianTypes = await window.ffGetTechnicianTypes();
+    } catch (e) {
+      console.error('[loadTaskEditTechnicianTypes] Error loading technician types:', e);
+      container.innerHTML = '<div style="text-align:center;padding:8px;color:#dc2626;font-size:10px;">Error loading technician types</div>';
+      return;
+    }
+  }
+  
+  technicianTypes = technicianTypes.filter(t => t.active !== false);
+  const selected = new Set((Array.isArray(selectedTypeIds) ? selectedTypeIds : []).map(String));
+  
+  if (technicianTypes.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:8px;color:#9ca3af;font-size:10px;">No technician types available</div>';
+    return;
+  }
+  
+  technicianTypes.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  container.innerHTML = technicianTypes.map(type => {
+    const typeId = String(type.id || '');
+    return `
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 6px;border-radius:4px;transition:background 0.2s;" onmouseover="this.style.background='#fff'" onmouseout="this.style.background='transparent'">
+        <input type="checkbox" value="${escapeHtmlAttr(typeId)}" ${selected.has(typeId) ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;accent-color:#7c3aed;">
+        <span style="font-size:10px;color:#111827;">${escapeHtmlDraft(type.name || '')}</span>
+      </label>
+    `;
+  }).join('');
+}
+
 function ffToggleTaskAssignToMobilePanel() {
   try {
     if (typeof window !== 'undefined' && window.innerWidth > 768) return;
@@ -30434,6 +30529,24 @@ function saveEditTask(taskId) {
     const task = tasks[taskIndex];
     task.title = newTitle;
     task.instructions = newInstructions;
+    
+    const editItem = titleInput.closest('.tasks-modal-draft-item');
+    const assignToRadio = editItem ? editItem.querySelector('.tasks-edit-assign-radio:checked') : null;
+    const assignToValue = assignToRadio ? assignToRadio.value : (task.assignTo || 'all');
+    task.assignTo = assignToValue;
+    if (assignToValue === 'technicians') {
+      const typesContainer = editItem ? editItem.querySelector('.tasks-edit-assign-technician-types-checkboxes') : null;
+      const selectedTypes = typesContainer
+        ? Array.from(typesContainer.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value)
+        : [];
+      if (selectedTypes.length > 0) {
+        task.technicianTypes = selectedTypes;
+      } else {
+        delete task.technicianTypes;
+      }
+    } else {
+      delete task.technicianTypes;
+    }
     
     if (tab === 'opening' || tab === 'closing') {
       const otEdit = document.querySelector('.tasks-edit-onetime[data-task-id="' + String(taskId) + '"]');
@@ -33178,6 +33291,11 @@ function initializeAppsPanel() {
               window.goToTickets();
             }
             break;
+          case 'services':
+            if (typeof window.goToServices === 'function') {
+              window.goToServices();
+            }
+            break;
           case 'media':
             if (typeof window.goToMedia === 'function') {
               window.goToMedia();
@@ -34568,6 +34686,7 @@ function initializeAppsPanel() {
       [
         'owner-view',
         'ticketsScreen',
+      'servicesScreen',
         'tasksScreen',
         'chatScreen',
         'mediaScreen',
@@ -42464,7 +42583,7 @@ function initializeUserProfileMenu() {
     if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
       try { window.ffCloseGlobalBlockingOverlays(); } catch (_) {}
     }
-    ['owner-view','tasksScreen','inboxScreen','chatScreen','mediaScreen','ticketsScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','userProfileScreen','myProfileScreen','manageQueueScreen','historyScreen'].forEach(function(id) {
+    ['owner-view','tasksScreen','inboxScreen','chatScreen','mediaScreen','ticketsScreen','servicesScreen','trainingScreen','scheduleScreen','timeClockScreen','inventoryScreen','userProfileScreen','myProfileScreen','manageQueueScreen','historyScreen'].forEach(function(id) {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
@@ -57151,6 +57270,38 @@ function hookSettingsGuard_DISABLED(){
     </div>
     <div id="ticketDetailsContent"></div>
     <div id="ticketDetailsActions" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:16px;"></div>
+  </div>
+</div>
+
+<!-- Services Screen (phase 1: standalone shell reusing the existing catalog data/actions) -->
+<div id="servicesScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#fff;z-index:9850;overflow:hidden;pointer-events:auto;">
+  <div class="staff-modal-content" style="height:100%;overflow:hidden;display:flex;min-height:0;pointer-events:auto;">
+    <div class="staff-sidebar" style="width:220px;flex-shrink:0;background:var(--muted);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;position:relative;">
+      <div style="padding:20px 20px 16px 20px;">
+        <button type="button" id="servicesCatalogAddCategoryBtn" onclick="window.addServiceCategoryV2 && window.addServiceCategoryV2()" class="btn-primary" style="width:100%;border:0;background:#7c3aed;background-image:none;color:#fff;border-radius:999px;padding:5px 10px;font-weight:800;cursor:pointer;box-shadow:0 4px 10px rgba(124,58,237,.2);font-size:11px;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;line-height:1.2;">
+          <span style="font-size:13px;line-height:1;flex-shrink:0;">+</span>
+          <span style="flex-shrink:0;">Add Category</span>
+        </button>
+      </div>
+      <div id="servicesCatalogSourceBadge" style="display:none;">Location Service Catalog</div>
+      <div id="servicesCatalogSourceHelp" style="display:none;">Categories and services are saved for the active location only.</div>
+      <button type="button" id="servicesCatalogAddSharedBtn" onclick="window.addSharedServiceV2 && window.addSharedServiceV2()" style="display:none;">+ Add Shared Service</button>
+      <div id="servicesCatalogV2List" style="display:flex;flex-direction:column;gap:0;padding-bottom:20px;"></div>
+    </div>
+    <div class="staff-content-area" style="flex:1;overflow-y:auto;padding:12px 20px;">
+      <p id="servicesDetailPlaceholder" style="margin:0;font-size:14px;color:#6b7280;text-align:center;display:flex;align-items:center;justify-content:center;height:100%;">Select a service to view details</p>
+      <div id="servicesDetailContainer" style="display:none;width:100%;">
+        <div id="servicesDetailHeader"></div>
+        <div style="display:flex;gap:20px;align-items:flex-start;margin-top:20px;">
+          <div id="servicesDetailNav" style="width:180px;flex-shrink:0;background:#f9fafb;border:1px solid var(--border);border-radius:12px;padding:6px;display:flex;flex-direction:column;gap:2px;max-height:min(420px,70vh);overflow-y:auto;">
+            <button type="button" class="staff-nav-item is-active" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Details</button>
+            <button type="button" class="staff-nav-item" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Locations</button>
+            <button type="button" class="staff-nav-item" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Staff</button>
+          </div>
+          <div id="servicesDetailTabContent" style="flex:1;min-width:0;"></div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 

@@ -1043,6 +1043,7 @@ const FF_FULLSCREEN_MODULE_IDS = [
   "inboxScreen",
   "tasksScreen",
   "ticketsScreen",
+  "servicesScreen",
   "mediaScreen",
   "chatScreen",
   "trainingScreen",
@@ -2252,7 +2253,7 @@ function ffShowChooseSalonScreen(user, userData, memberships) {
   // and module subscription errors that fired pre-selection don't paint placeholder UI behind it.
   const idsToHide = [
     "owner-view","joinBar","queueViewBlocked","tasksScreen","inboxScreen","chatScreen",
-    "mediaScreen","ticketsScreen","trainingScreen","scheduleScreen","timeClockScreen",
+    "mediaScreen","ticketsScreen","servicesScreen","trainingScreen","scheduleScreen","timeClockScreen",
     "inventoryScreen","userProfileScreen","myProfileScreen","manageQueueScreen",
     "pointsAppScreen","dashboardScreen","queueAnalyticsScreen","ticketsAnalyticsScreen",
     "timeAnalyticsScreen","tasksAnalyticsScreen","appsPanel","userAvatarDropdown"
@@ -5927,6 +5928,7 @@ function ffUpdateHomeTasksBadge() {
       const tabConfig = alertWindows[tab];
       const showOnHome = !tabConfig || tabConfig.showOnHome !== false;
       if (!showOnHome) return;
+      if (!ffIsAlertsActiveForTab(tab, new Date())) return;
       total += ffGetUncompletedCountForTab(tab);
     });
 
