@@ -1241,6 +1241,18 @@ service cloud.firestore {
       allow create, update, delete: if isManager(salonId);
     }
 
+    // ===== PRODUCT CATALOG =====
+    // Phase 1: standalone product catalog, separate from inventory/tickets.
+    match /salons/{salonId}/products/{productId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isManager(salonId);
+    }
+
+    match /salons/{salonId}/productCategories/{catId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isManager(salonId);
+    }
+
     // Account-level shared setup used by multi-location ticket service catalog.
     // accountId currently resolves to the salonId for this app, so reuse the
     // same salon membership helpers while keeping these paths account-scoped.

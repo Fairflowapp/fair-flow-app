@@ -1044,6 +1044,7 @@ const FF_FULLSCREEN_MODULE_IDS = [
   "tasksScreen",
   "ticketsScreen",
   "servicesScreen",
+  "productsScreen",
   "mediaScreen",
   "chatScreen",
   "trainingScreen",
@@ -2253,7 +2254,7 @@ function ffShowChooseSalonScreen(user, userData, memberships) {
   // and module subscription errors that fired pre-selection don't paint placeholder UI behind it.
   const idsToHide = [
     "owner-view","joinBar","queueViewBlocked","tasksScreen","inboxScreen","chatScreen",
-    "mediaScreen","ticketsScreen","servicesScreen","trainingScreen","scheduleScreen","timeClockScreen",
+    "mediaScreen","ticketsScreen","servicesScreen","productsScreen","trainingScreen","scheduleScreen","timeClockScreen",
     "inventoryScreen","userProfileScreen","myProfileScreen","manageQueueScreen",
     "pointsAppScreen","dashboardScreen","queueAnalyticsScreen","ticketsAnalyticsScreen",
     "timeAnalyticsScreen","tasksAnalyticsScreen","appsPanel","userAvatarDropdown"

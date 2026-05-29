@@ -9,7 +9,7 @@
 
 import {
   collection, query, where, orderBy, limit, startAfter,
-  addDoc, updateDoc, setDoc, doc, getDoc, getDocFromServer, getDocs, deleteDoc, onSnapshot,
+  addDoc, updateDoc, setDoc, doc, getDoc, getDocFromServer, getDocs, deleteDoc, deleteField, onSnapshot,
   serverTimestamp, Timestamp
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
@@ -294,6 +294,14 @@ function sharedCategoryId(category) {
   return `shared:${normalizeSharedCategoryName(category).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'other'}`;
 }
 
+function serviceCatalogStableKey(name, category) {
+  return `${normalizeSharedCategoryName(category).toLowerCase()}::${String(name || '').trim().toLowerCase()}`;
+}
+
+function serviceCategoryDisplayId(categoryName) {
+  return sharedCategoryId(normalizeSharedCategoryName(categoryName));
+}
+
 function sharedServiceCatalogDocRef(accountId) {
   return doc(db, `accounts/${accountId}/shared/serviceCatalog`);
 }
@@ -377,7 +385,8 @@ function applySharedServiceCatalog() {
         categoryId,
         active: s.active !== false,
         sortOrder: Number.isFinite(Number(s.sortOrder)) ? Number(s.sortOrder) : idx,
-        isSharedService: true
+        isSharedService: true,
+        staffOverrides: s.staffOverrides && typeof s.staffOverrides === 'object' ? s.staffOverrides : {}
       };
     })
     .filter((s) => s && s.name)
@@ -387,15 +396,49 @@ function applySharedServiceCatalog() {
     .filter(_ffServiceMatchesActiveLocation)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
   localCategories.forEach((c) => {
-    if (c?.id && !categoryMap.has(c.id)) categoryMap.set(c.id, c);
+    const name = normalizeSharedCategoryName(c?.name);
+    const id = serviceCategoryDisplayId(name);
+    if (!categoryMap.has(id)) {
+      categoryMap.set(id, {
+        ...c,
+        id,
+        sourceCategoryId: c?.id || id,
+        name,
+        sortOrder: Number.isFinite(Number(c?.sortOrder)) ? Number(c.sortOrder) : categoryMap.size
+      });
+    }
   });
 
+  const sharedKeys = new Set(sharedServices.map((s) => serviceCatalogStableKey(s.name, s.category)));
   const localServices = _rawServices
     .filter(_ffServiceMatchesActiveLocation)
-    .map((s) => ({ ...s, isSharedService: false }))
+    .map((s) => {
+      const cat = localCategories.find((c) => c.id === s.categoryId);
+      const categoryName = normalizeSharedCategoryName(cat?.name || s.category || 'Other');
+      return {
+        ...s,
+        category: categoryName,
+        categoryId: serviceCategoryDisplayId(categoryName),
+        sourceCategoryId: s.categoryId,
+        isSharedService: false
+      };
+    })
+    .filter((s) => {
+      if (_rawSharedServices.length === 0) return true;
+      return !sharedKeys.has(serviceCatalogStableKey(s.name, s.category || 'Other'));
+    })
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
 
-  salonServices = [...sharedServices, ...localServices];
+  const mergedServices = [];
+  const seenServices = new Set();
+  [...sharedServices, ...localServices].forEach((svc) => {
+    const key = serviceCatalogStableKey(svc.name, svc.category || 'Other');
+    if (seenServices.has(key)) return;
+    seenServices.add(key);
+    mergedServices.push(svc);
+  });
+
+  salonServices = mergedServices;
   serviceCategories = Array.from(categoryMap.values()).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
   console.log('[SharedServices] merged catalog for picker', {
     sharedServices: sharedServices.length,
@@ -440,13 +483,54 @@ function getSharedServicesForCatalogManager() {
         sortOrder: Number.isFinite(Number(s.sortOrder)) ? Number(s.sortOrder) : idx,
         isSharedService: true,
         hasOverride,
-        overridePrice: hasOverride ? Number(override.price) : null
+        overridePrice: hasOverride ? Number(override.price) : null,
+        staffOverrides: s.staffOverrides && typeof s.staffOverrides === 'object' ? s.staffOverrides : {}
       };
     })
     .filter((s) => s.name)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  const sharedKeys = new Set(services.map((s) => serviceCatalogStableKey(s.name, s.category)));
+  const localCategories = _rawCategories
+    .filter(_ffServiceMatchesActiveLocation)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  localCategories.forEach((c) => {
+    const name = normalizeSharedCategoryName(c?.name);
+    const id = serviceCategoryDisplayId(name);
+    if (!categoryMap.has(id)) {
+      categoryMap.set(id, {
+        ...c,
+        id,
+        sourceCategoryId: c?.id || id,
+        name,
+        sortOrder: Number.isFinite(Number(c?.sortOrder)) ? Number(c.sortOrder) : categoryMap.size
+      });
+    }
+  });
+  const localServices = _rawServices
+    .filter(_ffServiceMatchesActiveLocation)
+    .map((s) => {
+      const cat = localCategories.find((c) => c.id === s.categoryId);
+      const categoryName = normalizeSharedCategoryName(cat?.name || s.category || 'Other');
+      return {
+        ...s,
+        category: categoryName,
+        categoryId: serviceCategoryDisplayId(categoryName),
+        sourceCategoryId: s.categoryId,
+        isSharedService: false
+      };
+    })
+    .filter((s) => !sharedKeys.has(serviceCatalogStableKey(s.name, s.category || 'Other')))
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  const mergedServices = [];
+  const seenServices = new Set();
+  [...services, ...localServices].forEach((svc) => {
+    const key = serviceCatalogStableKey(svc.name, svc.category || 'Other');
+    if (seenServices.has(key)) return;
+    seenServices.add(key);
+    mergedServices.push(svc);
+  });
   return {
-    services,
+    services: mergedServices,
     categories: Array.from(categoryMap.values()).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
   };
 }
@@ -498,6 +582,7 @@ async function saveSharedService(service) {
     active: service.active !== false,
     updatedAt: serverTimestamp()
   };
+  if (Number.isFinite(Number(service.sortOrder))) payload.sortOrder = Number(service.sortOrder);
   if (service.id) {
     await ensureSharedServiceCatalogDoc(accountId);
     await setDoc(doc(sharedServiceCatalogItemsRef(accountId), service.id), payload, { merge: true });
@@ -598,18 +683,104 @@ async function saveSharedServiceLocationOverride(serviceId, locationId, patch) {
     await deleteDoc(ref);
     delete existingByService[locationId];
   } else {
-    await setDoc(ref, {
+    const write = {
       ...next,
       updatedAt: serverTimestamp()
-    });
+    };
+    if ('price' in existing && !('price' in next)) write.price = deleteField();
+    if ('enabled' in existing && !('enabled' in next)) write.enabled = deleteField();
+    await setDoc(ref, write, { merge: true });
     existingByService[locationId] = next;
   }
   _ffServicesLocationOverridesByService[serviceId] = existingByService;
   const activeLocationId = getActiveLocationIdForTickets();
   if (String(activeLocationId || '') === String(locationId || '')) {
-    await loadSharedServiceOverrides(accountId, activeLocationId);
+    if (!Object.keys(next).length) delete _rawServiceOverrides[serviceId];
+    else _rawServiceOverrides[serviceId] = { ...next };
     applySharedServiceCatalog();
   }
+}
+
+async function seedSharedServiceCatalogFromLocationCatalogIfEmpty() {
+  const accountId = getTicketsAccountId();
+  if (!accountId) return { seeded: false, reason: 'no-account' };
+  if (_ffServicesSharedBackfillChecked) return { seeded: false, reason: 'already-checked' };
+  _ffServicesSharedBackfillChecked = true;
+  await loadLocationCatalogForManager();
+  const localServices = Array.isArray(_rawServices) ? _rawServices.filter((s) => s && String(s.name || '').trim()) : [];
+  if (localServices.length === 0) return { seeded: false, reason: 'no-local-services' };
+  const existingSharedKeys = new Set(
+    (_rawSharedServices || []).map((s) => serviceCatalogStableKey(s.name, s.category || 'Other'))
+  );
+  const existingCategoryNames = new Set(
+    (_rawSharedCategories || []).map((c) => normalizeSharedCategoryName(c?.name).toLowerCase())
+  );
+
+  const locations = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
+    ? (window.ffGetActiveLocations() || [])
+    : [];
+  const categoryById = new Map((_rawCategories || []).map((cat) => [cat.id, cat]));
+  const categorySeed = new Map();
+  localServices.forEach((svc) => {
+    const cat = categoryById.get(svc.categoryId);
+    const categoryName = normalizeSharedCategoryName(cat?.name || svc.category || 'Other');
+    if (existingCategoryNames.has(categoryName.toLowerCase())) return;
+    if (!categorySeed.has(categoryName)) {
+      categorySeed.set(categoryName, {
+        name: categoryName,
+        sortOrder: Number.isFinite(Number(cat?.sortOrder)) ? Number(cat.sortOrder) : categorySeed.size
+      });
+    }
+  });
+  await Promise.all(Array.from(categorySeed.values()).map((cat) => saveSharedServiceCategory(cat)));
+
+  const groups = new Map();
+  localServices
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
+    .forEach((svc) => {
+      const cat = categoryById.get(svc.categoryId);
+      const categoryName = normalizeSharedCategoryName(cat?.name || svc.category || 'Other');
+      const key = serviceCatalogStableKey(svc.name, categoryName);
+      if (existingSharedKeys.has(key)) return;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          name: String(svc.name || '').trim(),
+          category: categoryName,
+          defaultPrice: Number(svc.defaultPrice) || 0,
+          active: svc.active !== false,
+          sortOrder: Number.isFinite(Number(svc.sortOrder)) ? Number(svc.sortOrder) : groups.size,
+          localByLocation: new Map()
+        });
+      }
+      const group = groups.get(key);
+      const locId = typeof svc.locationId === 'string' && svc.locationId.trim() ? svc.locationId.trim() : getActiveLocationIdForTickets();
+      if (locId && !group.localByLocation.has(locId)) group.localByLocation.set(locId, svc);
+    });
+  if (groups.size === 0) return { seeded: false, reason: 'no-missing-local-services' };
+
+  for (const group of groups.values()) {
+    const serviceId = await saveSharedService(group);
+    if (Array.isArray(locations) && locations.length > 0) {
+      for (const loc of locations) {
+        if (!loc || !loc.id) continue;
+        const localSvc = group.localByLocation.get(loc.id);
+        if (!localSvc) {
+          await saveSharedServiceLocationOverride(serviceId, loc.id, { enabled: false, price: null });
+          continue;
+        }
+        const localPrice = Number(localSvc.defaultPrice) || 0;
+        if (localSvc.active === false || localPrice !== group.defaultPrice) {
+          await saveSharedServiceLocationOverride(serviceId, loc.id, {
+            enabled: localSvc.active !== false,
+            price: localPrice !== group.defaultPrice ? localPrice : null
+          });
+        }
+      }
+    }
+  }
+  await loadSharedCatalogForManager();
+  return { seeded: true, count: groups.size };
 }
 
 async function tryLoadSharedServiceCatalog() {
@@ -871,7 +1042,133 @@ async function deleteServiceCategory(categoryId) {
   await deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/serviceCategories`, categoryId));
 }
 
+function normalizeServiceProviderTypeText(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '').replace(/s$/, '');
+}
+
+function getStaffQueueProviderTypeIdsForTickets(staff) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetStaffQueueProviderTypeIds === 'function') {
+      return window.ffGetStaffQueueProviderTypeIds(staff);
+    }
+  } catch (_) {}
+  const role = String(staff?.role || '').toLowerCase().trim();
+  const controlledRole = role === 'manager' || role === 'admin' || role === 'owner' || staff?.isManager === true || staff?.isAdmin === true;
+  const source = controlledRole ? staff?.queueJoinAsTechnicianTypes : staff?.technicianTypes;
+  return (Array.isArray(source) ? source : []).map((typeId) => String(typeId || '').trim()).filter(Boolean);
+}
+
+function staffUsesQueueJoinAsProviderTypes(staff) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffStaffRoleCanJoinQueueAsProviderType === 'function') {
+      return window.ffStaffRoleCanJoinQueueAsProviderType(staff);
+    }
+  } catch (_) {}
+  const role = String(staff?.role || '').toLowerCase().trim();
+  return role === 'manager' || role === 'admin' || role === 'owner' || staff?.isManager === true || staff?.isAdmin === true;
+}
+
+function getServiceCategoryLabel(service) {
+  const categoryId = String(service?.categoryId || '').trim();
+  const cat = categoryId ? serviceCategories.find((c) => String(c.id || '').trim() === categoryId) : null;
+  return String(cat?.name || service?.category || '').trim();
+}
+
+function serviceMatchesProviderTypeIds(service, typeIds) {
+  const ids = Array.isArray(typeIds) ? typeIds.map((id) => String(id || '').trim()).filter(Boolean) : [];
+  if (!ids.length) return false;
+  const serviceTokens = [
+    normalizeServiceProviderTypeText(getServiceCategoryLabel(service)),
+    normalizeServiceProviderTypeText(service?.name)
+  ].filter(Boolean);
+  if (!serviceTokens.length) return true;
+  const cachedTypes = (typeof window !== 'undefined' && Array.isArray(window.__ff_technician_types_cache))
+    ? window.__ff_technician_types_cache
+    : [];
+  return ids.some((typeId) => {
+    const type = cachedTypes.find((t) => t && String(t.id || '').trim() === typeId);
+    const typeTokens = [
+      normalizeServiceProviderTypeText(typeId),
+      normalizeServiceProviderTypeText(type?.name)
+    ].filter(Boolean);
+    return typeTokens.some((typeToken) => serviceTokens.some((serviceToken) => (
+      typeToken === serviceToken || typeToken.indexOf(serviceToken) !== -1 || serviceToken.indexOf(typeToken) !== -1
+    )));
+  });
+}
+
+function controlledStaffCanProvideService(staff, service) {
+  if (!staffUsesQueueJoinAsProviderTypes(staff)) return true;
+  const permissions = staff?.permissions && typeof staff.permissions === 'object' ? staff.permissions : {};
+  const joinOn = typeof window !== 'undefined' && typeof window.ffStaffHasQueueJoinPermission === 'function'
+    ? window.ffStaffHasQueueJoinPermission(staff)
+    : ffServiceStaffPermissionTrue(permissions.queue_join);
+  if (!joinOn) return false;
+  return serviceMatchesProviderTypeIds(service, getStaffQueueProviderTypeIdsForTickets(staff));
+}
+
 /** Group services by category for MangoMint-style picker. Uses managed categories; Other for uncategorized. */
+function isTicketPickerServiceAvailableForActiveLocation(service) {
+  if (!service || !String(service.name || '').trim()) return false;
+  if (service.active === false || service.locationEnabled === false) return false;
+  const staffOverride = getServiceStaffOverrideForCurrentTicketUser(service);
+  if (staffOverride && staffOverride.enabled === false) return false;
+  try {
+    const currentStaff = typeof window !== 'undefined' && typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+      ? window.ffResolveCurrentStaffRowFromFfStaffV1()
+      : null;
+    if (currentStaff && !controlledStaffCanProvideService(currentStaff, service)) return false;
+  } catch (_) {}
+  const activeLoc = getActiveLocationIdForTickets();
+  if (!activeLoc) return true;
+  const serviceLoc = typeof service.locationId === 'string' ? service.locationId.trim() : '';
+  if (serviceLoc && serviceLoc !== activeLoc) return false;
+  return true;
+}
+
+function getServiceStaffOverrides(service) {
+  return service && service.staffOverrides && typeof service.staffOverrides === 'object'
+    ? service.staffOverrides
+    : {};
+}
+
+function getCurrentTicketStaffIdCandidates() {
+  const out = [];
+  const add = (v) => {
+    const s = v == null ? '' : String(v).trim();
+    if (s && out.indexOf(s) === -1) out.push(s);
+  };
+  try { add(window.__ff_authedStaffId); } catch (_) {}
+  add(currentUserProfile?.staffId);
+  add(currentUserProfile?.uid);
+  try {
+    const staff = typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+      ? window.ffResolveCurrentStaffRowFromFfStaffV1()
+      : null;
+    add(staff?.id);
+    add(staff?.staffId);
+    add(staff?.uid);
+    add(staff?.firebaseUid);
+  } catch (_) {}
+  return out;
+}
+
+function getServiceStaffOverrideForCurrentTicketUser(service) {
+  const overrides = getServiceStaffOverrides(service);
+  const ids = getCurrentTicketStaffIdCandidates();
+  for (const id of ids) {
+    if (overrides[id] && typeof overrides[id] === 'object') return overrides[id];
+  }
+  return null;
+}
+
+function getTicketPriceForServiceAndCurrentStaff(service) {
+  const base = Number(service?.defaultPrice) || 0;
+  const override = getServiceStaffOverrideForCurrentTicketUser(service);
+  const price = override && Number.isFinite(Number(override.price)) ? Number(override.price) : base;
+  return Number.isFinite(price) ? price : base;
+}
+
 function getServicesGroupedByCategory() {
   const grouped = {};
   if (serviceCategories.length > 0) {
@@ -880,17 +1177,20 @@ function getServicesGroupedByCategory() {
   } else {
     grouped['__other__'] = { label: 'Other', services: [] };
   }
-  salonServices.forEach((s) => {
+  salonServices.filter(isTicketPickerServiceAvailableForActiveLocation).forEach((s) => {
     const catId = s.categoryId || null;
     const key = (catId && grouped[catId]) ? catId : '__other__';
     grouped[key].services.push(s);
   });
   const ordered = {};
   if (serviceCategories.length > 0) {
-    serviceCategories.forEach((c) => { ordered[c.id] = grouped[c.id] || { label: c.name, services: [] }; });
-    ordered['__other__'] = grouped['__other__'];
+    serviceCategories.forEach((c) => {
+      const bucket = grouped[c.id] || { label: c.name, services: [] };
+      if ((bucket.services || []).length > 0) ordered[c.id] = bucket;
+    });
+    if ((grouped['__other__']?.services || []).length > 0) ordered['__other__'] = grouped['__other__'];
   } else {
-    ordered['__other__'] = grouped['__other__'];
+    if ((grouped['__other__']?.services || []).length > 0) ordered['__other__'] = grouped['__other__'];
   }
   return ordered;
 }
@@ -1975,6 +2275,122 @@ function formatSummaryInt(n) {
   return String(Math.round(x));
 }
 
+function getSummaryStaffList() {
+  try {
+    const store = typeof window !== 'undefined' && typeof window.ffGetStaffStore === 'function'
+      ? window.ffGetStaffStore()
+      : null;
+    return Array.isArray(store?.staff) ? store.staff : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function summaryStaffMatchesTicket(staff, ticket) {
+  if (!staff || !ticket) return false;
+  const staffIds = [
+    staff.id,
+    staff.staffId,
+    staff.uid,
+    staff.firebaseUid,
+    staff.firebaseAuthUid,
+    staff.authUid,
+    staff.userUid
+  ].map((v) => String(v || '').trim()).filter(Boolean);
+  const ticketStaffId = String(ticket.technicianStaffId || '').trim();
+  if (ticketStaffId && staffIds.indexOf(ticketStaffId) !== -1) return true;
+  const tn = normalizeTicketTechName(ticket.technicianName || '');
+  const names = [staff.name, staff.displayName, staff.fullName, staff.email]
+    .map((v) => normalizeTicketTechName(v || ''))
+    .filter(Boolean);
+  return !!tn && names.some((name) => name === tn);
+}
+
+function resolveSummaryStaffForTicket(ticket, staffList) {
+  const list = Array.isArray(staffList) ? staffList : [];
+  return list.find((staff) => summaryStaffMatchesTicket(staff, ticket)) || null;
+}
+
+function getSummaryStaffIdCandidates(staff, ticket) {
+  const out = [];
+  const add = (v) => {
+    const s = String(v || '').trim();
+    if (s && out.indexOf(s) === -1) out.push(s);
+  };
+  add(ticket?.technicianStaffId);
+  if (staff) {
+    add(staff.id);
+    add(staff.staffId);
+    add(staff.uid);
+    add(staff.firebaseUid);
+    add(staff.firebaseAuthUid);
+    add(staff.authUid);
+    add(staff.userUid);
+  }
+  return out;
+}
+
+function findSummaryServiceForLine(line) {
+  const serviceId = String(line?.serviceId || '').trim();
+  if (serviceId) {
+    const byId = salonServices.find((service) => String(service?.id || '').trim() === serviceId);
+    if (byId) return byId;
+  }
+  const lineName = normalizeTicketTechName(line?.serviceName || '');
+  if (!lineName) return null;
+  return salonServices.find((service) => normalizeTicketTechName(service?.name || '') === lineName) || null;
+}
+
+function getSummaryStaffOverride(service, staff, ticket) {
+  const overrides = getServiceStaffOverrides(service);
+  const ids = getSummaryStaffIdCandidates(staff, ticket);
+  for (const id of ids) {
+    if (overrides[id] && typeof overrides[id] === 'object') return overrides[id];
+  }
+  return null;
+}
+
+function getSummaryCommissionRule(service, staff, ticket) {
+  const override = getSummaryStaffOverride(service, staff, ticket);
+  if (override?.commission && Number.isFinite(Number(override.commission.value))) {
+    return {
+      type: override.commission.type === 'fixed' ? 'fixed' : 'percentage',
+      value: Number(override.commission.value)
+    };
+  }
+  return getStaffDefaultServiceCommission(staff, staff?.id || staff?.staffId || '');
+}
+
+function getSummarySupplyDeductionRule(service, staff, ticket) {
+  const override = getSummaryStaffOverride(service, staff, ticket);
+  if (override?.supplyDeduction && override.supplyDeduction.enabled === false) return null;
+  if (override?.supplyDeduction?.enabled === true && Number.isFinite(Number(override.supplyDeduction.value))) {
+    return {
+      type: override.supplyDeduction.type === 'percentage' ? 'percentage' : 'fixed',
+      value: Number(override.supplyDeduction.value)
+    };
+  }
+  return getStaffDefaultSupplyDeduction(staff);
+}
+
+function computeSummaryDeductionAmount(servicePrice, deductionRule) {
+  const price = Number(servicePrice) || 0;
+  if (!deductionRule || !Number.isFinite(Number(deductionRule.value))) return 0;
+  const raw = deductionRule.type === 'percentage'
+    ? price * (Number(deductionRule.value) / 100)
+    : Number(deductionRule.value);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+function computeSummaryCommissionAmount(commissionable, commissionRule) {
+  const base = Number(commissionable) || 0;
+  if (!commissionRule || !Number.isFinite(Number(commissionRule.value))) return 0;
+  const raw = commissionRule.type === 'fixed'
+    ? Number(commissionRule.value)
+    : base * (Number(commissionRule.value) / 100);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
 function getSummaryFilterDateRangeFromDom() {
   const periodSel = document.getElementById('ticketsTimePeriodSelect');
   if (periodSel && periodSel.value === 'all') {
@@ -2018,6 +2434,7 @@ function summaryDocMatchesLocation(d) {
 function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employeeId) {
   const techSelfOnly =
     isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin();
+  const staffList = getSummaryStaffList();
   const filtered = (ticketList || []).filter((t) => {
     if (!canSeeTicket(t)) return false;
     if (String(t.status || '').toUpperCase() !== 'CLOSED') return false;
@@ -2027,54 +2444,93 @@ function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employ
   });
   const groups = new Map();
   for (const t of filtered) {
+    const staff = resolveSummaryStaffForTicket(t, staffList);
     const idPart =
       t.technicianStaffId != null && String(t.technicianStaffId).trim() !== ''
         ? String(t.technicianStaffId).trim()
-        : '';
+        : (staff?.id ? String(staff.id).trim() : '');
     const nk = normalizeTicketTechName(t.technicianName || '');
     const gkey = idPart ? `id:${idPart}` : `name:${nk || 'unknown'}`;
     if (!groups.has(gkey)) {
-      groups.set(gkey, { name: 'Unknown', tickets: 0, services: 0, total: 0 });
+      groups.set(gkey, {
+        name: 'Unknown',
+        tickets: 0,
+        services: 0,
+        serviceSales: 0,
+        supplyDeductions: 0,
+        serviceCommission: 0,
+        productSales: 0,
+        productCommission: 0,
+        totalEarned: 0
+      });
     }
     const g = groups.get(gkey);
     const nm =
       t.technicianName != null && String(t.technicianName).trim() !== ''
         ? String(t.technicianName).trim()
-        : '';
+        : String(staff?.name || staff?.displayName || staff?.email || '').trim();
     if (nm && g.name === 'Unknown') g.name = nm;
     g.tickets += 1;
     const lines = Array.isArray(t.performedLines) ? t.performedLines : [];
     g.services += lines.length;
-    const raw = Number(t.total);
-    g.total += Number.isFinite(raw)
-      ? raw
-      : lines.reduce((s, l) => s + (Number(l?.ticketPrice) || 0), 0);
+    for (const line of lines) {
+      const servicePrice = Number(line?.ticketPrice) || 0;
+      const service = findSummaryServiceForLine(line);
+      const deductionRule = getSummarySupplyDeductionRule(service, staff, t);
+      const deductionAmount = computeSummaryDeductionAmount(servicePrice, deductionRule);
+      const commissionable = Math.max(0, servicePrice - deductionAmount);
+      const commissionRule = getSummaryCommissionRule(service, staff, t);
+      const commissionAmount = computeSummaryCommissionAmount(commissionable, commissionRule);
+      g.serviceSales += servicePrice;
+      g.supplyDeductions += deductionAmount;
+      g.serviceCommission += commissionAmount;
+    }
+    g.productSales += 0;
+    g.productCommission += 0;
   }
   const sorted = [...groups.values()].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
   );
-  let totalTickets = 0;
-  let totalServices = 0;
-  let totalRevenue = 0;
+  const totals = {
+    tickets: 0,
+    services: 0,
+    serviceSales: 0,
+    supplyDeductions: 0,
+    serviceCommission: 0,
+    productSales: 0,
+    productCommission: 0,
+    totalEarned: 0
+  };
   sorted.forEach((r) => {
-    totalTickets += r.tickets;
-    totalServices += r.services;
-    totalRevenue += r.total;
+    r.totalEarned = r.serviceCommission + r.productCommission;
+    totals.tickets += r.tickets;
+    totals.services += r.services;
+    totals.serviceSales += r.serviceSales;
+    totals.supplyDeductions += r.supplyDeductions;
+    totals.serviceCommission += r.serviceCommission;
+    totals.productSales += r.productSales;
+    totals.productCommission += r.productCommission;
+    totals.totalEarned += r.totalEarned;
   });
   const summaryRows = sorted.map((r) => ({
     name: !r.name || !String(r.name).trim() ? 'Unknown' : r.name.trim(),
     tickets: r.tickets,
     services: r.services,
-    total: r.total
+    serviceSales: r.serviceSales,
+    supplyDeductions: r.supplyDeductions,
+    serviceCommission: r.serviceCommission,
+    productSales: r.productSales,
+    productCommission: r.productCommission,
+    totalEarned: r.totalEarned
   }));
-  return { summaryRows, totalTickets, totalServices, totalRevenue };
+  return { summaryRows, totals };
 }
 
 function buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId) {
   return buildSummaryRowsFromClosedTicketList(currentTickets, fromStr, toStr, employeeId);
 }
 
-function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totalTickets, totalServices, totalRevenue) {
+function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totals) {
   if (!summaryRows || summaryRows.length === 0) {
     wrap.style.display = 'none';
     if (emptyMsg) {
@@ -2090,15 +2546,25 @@ function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, tot
       <td>${escapeHtml(r.name)}</td>
       <td class="tickets-summary-col-num">${formatSummaryInt(r.tickets)}</td>
       <td class="tickets-summary-col-num">${formatSummaryInt(r.services)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(r.total)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(r.serviceSales)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(r.supplyDeductions)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(r.serviceCommission)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(r.productSales)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(r.productCommission)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(r.totalEarned)}</td>
     </tr>`
     )
     .join('');
   tfoot.innerHTML = `<tr class="tickets-summary-total-row">
       <td>Total</td>
-      <td class="tickets-summary-col-num">${formatSummaryInt(totalTickets)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryInt(totalServices)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(totalRevenue)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryInt(totals?.tickets)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryInt(totals?.services)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.serviceSales)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.supplyDeductions)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.serviceCommission)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.productSales)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.productCommission)}</td>
+      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.totalEarned)}</td>
     </tr>`;
   if (emptyMsg) {
     emptyMsg.style.display = 'none';
@@ -2163,6 +2629,9 @@ async function loadAndRenderTicketsSummary() {
   });
 
   try {
+    if (!salonServices.length) {
+      try { await loadServices(); } catch (catalogErr) { console.warn('[Tickets] Summary catalog load failed', catalogErr); }
+    }
     const closedTickets = await fetchClosedTicketsForSummary(salonId, fromStr, toStr);
     if (seq !== _ticketsSummaryFetchSeq) return;
 
@@ -2178,9 +2647,7 @@ async function loadAndRenderTicketsSummary() {
       tfoot,
       emptyMsg,
       fb.summaryRows,
-      fb.totalTickets,
-      fb.totalServices,
-      fb.totalRevenue
+      fb.totals
     );
   } catch (e) {
     console.error('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: catch', {
@@ -2201,9 +2668,7 @@ async function loadAndRenderTicketsSummary() {
           tfoot,
           emptyMsg,
           fb.summaryRows,
-          fb.totalTickets,
-          fb.totalServices,
-          fb.totalRevenue
+          fb.totals
         )
       ) {
         return;
@@ -3277,13 +3742,14 @@ function renderDiff(diff, total, hasLines) {
 
 function addServiceToTicket(service) {
   const lines = JSON.parse(document.getElementById('ticketLinesData').value || '[]');
-  const price = Number(service.defaultPrice) || 0;
+  const price = getTicketPriceForServiceAndCurrentStaff(service);
+  const catalogPrice = Number(service.defaultPrice) || price;
   lines.push({
     serviceId: service.id,
     serviceName: service.name,
-    catalogPrice: price,
+    catalogPrice,
     ticketPrice: price,
-    isOverride: false,
+    isOverride: price !== catalogPrice,
     note: null
   });
   document.getElementById('ticketLinesData').value = JSON.stringify(lines);
@@ -3517,6 +3983,7 @@ let _ffServicesInlineEditServiceId = null;
 let _ffServicesDetailTab = 'details';
 let _ffServicesLocationOverridesByService = {};
 let _ffServicesLocationOverridesLoading = {};
+let _ffServicesSharedBackfillChecked = false;
 
 function _ffCatalogRenderRoot() {
   return document.getElementById(_ffCatalogRenderRootId || 'servicesModal') || document;
@@ -3577,22 +4044,22 @@ function renderServicesCatalogV2() {
   const catalogCategories = catalogData.categories || [];
 
   if (sourceBadge) {
-    sourceBadge.textContent = isSharedCatalog ? 'Shared Service Catalog' : 'Location Service Catalog';
+    sourceBadge.textContent = isSharedCatalog ? 'Service Catalog' : 'Location Service Catalog';
     sourceBadge.style.background = isSharedCatalog ? '#ede9fe' : '#eef2ff';
     sourceBadge.style.color = isSharedCatalog ? '#5b21b6' : '#3730a3';
   }
   if (sourceHelp) {
     sourceHelp.textContent = isSharedCatalog
-      ? 'Services are shared for the account. Prices can be overridden for the active location.'
+      ? 'Services can be managed with availability and pricing by location.'
       : 'Categories and services are saved for the active location only.';
   }
   if (addSharedBtn) {
     addSharedBtn.style.display = 'none';
-    addSharedBtn.textContent = '+ Add Shared Service';
+    addSharedBtn.textContent = '+ Add Service';
   }
   if (addCategoryBtn) {
     addCategoryBtn.style.display = 'inline-block';
-    addCategoryBtn.textContent = isSharedCatalog ? '+ Add Shared Category' : '+ Add Category';
+    addCategoryBtn.textContent = '+ Add Category';
   }
 
   if (!_ffCatalogRenderedOnce && _ffOpenCats.size === 0 && catalogCategories.length > 0) {
@@ -3624,9 +4091,9 @@ function renderServicesCatalogV2() {
   }
 
   if (grouped.size === 0) {
-    const emptyTitle = isSharedCatalog ? 'No shared categories yet' : 'No categories yet';
+    const emptyTitle = 'No categories yet';
     const emptyBody = isSharedCatalog
-      ? 'Start by adding a shared category, then add shared services under it.'
+      ? 'Start by adding a category, then add services under it.'
       : 'Start by adding a category (e.g. <em>Manicure</em>, <em>Pedicure</em>, <em>Massage</em>), then add services under it with their prices.';
     list.innerHTML = `
       <div style="padding:36px 20px;color:#6b7280;text-align:center;font-size:14px;line-height:1.5;">
@@ -3686,7 +4153,7 @@ function renderServicesCatalogV2() {
     }
     if (!isOther) {
       const addMode = isSharedCatalog ? 'shared' : 'location';
-      const addLabel = isSharedCatalog ? '+ Add Shared Service' : '+ Add service';
+      const addLabel = isSharedCatalog ? '+ Add Service' : '+ Add service';
       html += `<div style="padding:4px 6px;"><button type="button" class="ffcat-addsvc-btn" data-cat-id="${escapeHtml(cat.id)}" data-add-mode="${addMode}" style="background:none;border:none;color:#7c3aed;font-weight:600;font-size:12px;padding:4px 6px;cursor:pointer;text-align:left;">${addLabel}</button></div>`;
     }
     html += `</div></div>`;
@@ -3770,7 +4237,7 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
     }
     if (!isOther) {
       const addMode = isSharedCatalog ? 'shared' : 'location';
-      const addLabel = isSharedCatalog ? '+ Add Shared Service' : '+ Add Service';
+      const addLabel = '+ Add Service';
       html += `<button type="button" class="ffcat-addsvc-btn" data-cat-id="${escapeHtml(cat.id)}" data-add-mode="${addMode}" style="width:100%;background:none;border:none;color:#7c3aed;font-weight:600;font-size:12px;padding:6px 8px;cursor:pointer;text-align:left;border-radius:6px;">${addLabel}</button>`;
     }
     html += `</div></div>`;
@@ -4024,12 +4491,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
     content.innerHTML = renderServicesLocationsTabHtml(selected);
     wireServicesLocationsTab(root, selected);
   } else if (activeServiceTab === 'staff') {
-    content.innerHTML = `
-      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Staff</div>
-        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">Staff assignment will be managed here in a later phase.</p>
-      </div>
-    `;
+    content.innerHTML = renderServicesStaffTabHtml(selected);
+    wireServicesStaffTab(root, selected);
   } else {
     content.innerHTML = isInlineEditingService ? `
     <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
@@ -4143,6 +4606,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
             category: categoryId || selected.category || '',
             defaultPrice,
             active: selected.active !== false,
+          sortOrder: selected.sortOrder,
           });
           await loadSharedCatalogForManager();
         } else {
@@ -4151,7 +4615,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
             name,
             categoryId,
             defaultPrice,
-            sortOrder: selected.sortOrder || 0,
+          sortOrder: Number.isFinite(Number(selected.sortOrder)) ? Number(selected.sortOrder) : 0,
           });
           await Promise.all([loadServiceCategories(), loadServices()]);
         }
@@ -4182,7 +4646,7 @@ function renderServicesLocationsTabHtml(service) {
     return `
       <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
         <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Locations</div>
-        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">Location availability is managed for shared services.</p>
+        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">This service is still using the older location catalog. Open Services after the catalog migration completes to manage locations here.</p>
       </div>
     `;
   }
@@ -4272,7 +4736,10 @@ function wireServicesLocationsTab(root, service) {
       if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.7'; }
       try {
         await saveSharedServiceLocationOverride(service.id, locationId, patch);
-        renderServicesCatalogV2();
+        const catalogData = _ffCatalogModalMode === 'shared'
+          ? getSharedServicesForCatalogManager()
+          : getLocationServicesForCatalogManager();
+        renderServicesScreenDetail(catalogData.services || [], catalogData.categories || []);
         if (typeof setupTicketsUI === 'function') setupTicketsUI();
         showToast(priceMode === 'reset' ? 'Price reset to default' : 'Location updated', 'success');
       } catch (e) {
@@ -4296,6 +4763,353 @@ function wireServicesLocationsTab(root, service) {
         e.preventDefault();
         e.stopPropagation();
         saveLocation('reset');
+      });
+    }
+  });
+}
+
+function ffServiceStaffPermissionTrue(value) {
+  return value === true || value === 'true' || value === 1 || value === '1' || value === 'yes' || value === 'on';
+}
+
+function isServiceProviderStaffForServices(staff, service) {
+  if (!staff || typeof staff !== 'object' || staff.isArchived === true || staff.archived === true) return false;
+  if (service && !controlledStaffCanProvideService(staff, service)) return false;
+  const role = String(staff.role || staff.type || '').toLowerCase().trim();
+  const permissions = staff.permissions && typeof staff.permissions === 'object' ? staff.permissions : {};
+  const hasTicketsPermission =
+    ffServiceStaffPermissionTrue(permissions.tickets_view) ||
+    ffServiceStaffPermissionTrue(permissions.tickets_use) ||
+    ffServiceStaffPermissionTrue(permissions.tickets_create);
+  const hasProviderRole = [
+    'technician',
+    'tech',
+    'service_provider',
+    'service provider',
+    'provider',
+    'staff'
+  ].indexOf(role) !== -1;
+  const hasProviderTypes = Array.isArray(staff.technicianTypes) && staff.technicianTypes.length > 0;
+  return hasProviderRole || hasProviderTypes || hasTicketsPermission;
+}
+
+function getServicesEligibleStaffRows(service) {
+  try {
+    const store = typeof window !== 'undefined' && typeof window.ffGetStaffStore === 'function'
+      ? window.ffGetStaffStore()
+      : null;
+    const staff = Array.isArray(store?.staff) ? store.staff : [];
+    return staff
+      .filter((row) => isServiceProviderStaffForServices(row, service))
+      .sort((a, b) => String(a.name || a.displayName || '').localeCompare(String(b.name || b.displayName || '')));
+  } catch (_) {
+    return [];
+  }
+}
+
+function getServiceStaffId(staff) {
+  return String(staff?.id || staff?.staffId || staff?.uid || staff?.firebaseUid || '').trim();
+}
+
+function getServiceStaffName(staff) {
+  return String(staff?.name || staff?.displayName || staff?.fullName || staff?.email || 'Staff').trim();
+}
+
+function getStaffDefaultServiceCommission(staff, staffId) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetStaffServiceCommissionPct === 'function') {
+      const pct = Number(window.ffGetStaffServiceCommissionPct(staffId));
+      if (Number.isFinite(pct) && pct > 0) return { type: 'percentage', value: pct };
+    }
+  } catch (_) {}
+  const rules = staff && staff.earningsRules && typeof staff.earningsRules === 'object' ? staff.earningsRules : {};
+  const serviceCommission = rules.serviceCommission && typeof rules.serviceCommission === 'object' ? rules.serviceCommission : {};
+  const pct = Number(serviceCommission.basicPercent);
+  if (serviceCommission.enabled === true && Number.isFinite(pct) && pct > 0) {
+    return { type: 'percentage', value: pct };
+  }
+  return null;
+}
+
+function formatServiceStaffDefaultCommission(defaultCommission) {
+  if (!defaultCommission || !Number.isFinite(Number(defaultCommission.value))) return 'Default';
+  const value = Number(defaultCommission.value);
+  return defaultCommission.type === 'fixed'
+    ? `Default ${ffTicketMoney(value)}`
+    : `Default ${value}%`;
+}
+
+function getStaffDefaultSupplyDeduction(staff) {
+  const rules = staff && staff.earningsRules && typeof staff.earningsRules === 'object' ? staff.earningsRules : {};
+  const serviceCommission = rules.serviceCommission && typeof rules.serviceCommission === 'object' ? rules.serviceCommission : {};
+  const supply = serviceCommission.supplyDeduction && typeof serviceCommission.supplyDeduction === 'object'
+    ? serviceCommission.supplyDeduction
+    : {};
+  const value = Number(supply.value);
+  if (supply.enabled === true && Number.isFinite(value) && value > 0) {
+    return {
+      type: supply.type === 'percentage' ? 'percentage' : 'fixed',
+      value
+    };
+  }
+  return null;
+}
+
+function formatServiceStaffSupplyDeductionLabel(deduction) {
+  if (!deduction || !Number.isFinite(Number(deduction.value))) return 'Default OFF';
+  const value = Number(deduction.value);
+  return deduction.type === 'percentage' ? `Default ${value}%` : `Default ${ffTicketMoney(value)}`;
+}
+
+function renderServicesStaffTabHtml(service) {
+  const staffRows = getServicesEligibleStaffRows(service);
+  if (!service || !service.id) return '';
+  if (!staffRows.length) {
+    return `
+      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Staff</div>
+        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">No eligible service providers found.</p>
+      </div>
+    `;
+  }
+  const overrides = getServiceStaffOverrides(service);
+  const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  const cards = staffRows.map((staff) => {
+    const staffId = getServiceStaffId(staff);
+    if (!staffId) return '';
+    const override = overrides[staffId] && typeof overrides[staffId] === 'object' ? overrides[staffId] : {};
+    const enabled = override.enabled !== false;
+    const price = Number.isFinite(Number(override.price)) ? Number(override.price) : basePrice;
+    const commission = override.commission && typeof override.commission === 'object' ? override.commission : {};
+    const defaultCommission = getStaffDefaultServiceCommission(staff, staffId);
+    const hasCommissionOverride = Number.isFinite(Number(commission.value));
+    const commissionType = hasCommissionOverride
+      ? (commission.type === 'fixed' ? 'fixed' : 'percentage')
+      : (defaultCommission?.type === 'fixed' ? 'fixed' : 'percentage');
+    const commissionValue = hasCommissionOverride ? String(Number(commission.value)) : '';
+    const commissionDefaultLabel = formatServiceStaffDefaultCommission(defaultCommission);
+    const defaultSupplyDeduction = getStaffDefaultSupplyDeduction(staff);
+    const supplyDeduction = override.supplyDeduction && typeof override.supplyDeduction === 'object' ? override.supplyDeduction : {};
+    const hasSupplyDeductionOverride = Object.prototype.hasOwnProperty.call(override, 'supplyDeduction');
+    const hasSupplyDeductionValueOverride = supplyDeduction.enabled === true && Number.isFinite(Number(supplyDeduction.value));
+    const effectiveSupplyDeduction = hasSupplyDeductionOverride
+      ? (hasSupplyDeductionValueOverride ? supplyDeduction : null)
+      : defaultSupplyDeduction;
+    const supplyDeductionEnabled = !!effectiveSupplyDeduction;
+    const supplyDeductionType = effectiveSupplyDeduction?.type === 'percentage' ? 'percentage' : 'fixed';
+    const supplyDeductionValue = hasSupplyDeductionValueOverride ? String(Number(supplyDeduction.value)) : '';
+    const supplyDeductionDefaultLabel = formatServiceStaffSupplyDeductionLabel(defaultSupplyDeduction);
+    const supplyDeductionStatusLabel = hasSupplyDeductionOverride
+      ? (hasSupplyDeductionValueOverride ? 'Override' : 'Override OFF')
+      : supplyDeductionDefaultLabel;
+    return `
+      <div class="ff-services-staff-card" data-staff-id="${escapeHtml(staffId)}" style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:#111827;line-height:1.25;">${escapeHtml(getServiceStaffName(staff))}</div>
+            <div style="margin-top:3px;font-size:12px;color:#6b7280;">${enabled ? 'Available for this service' : 'Not available for this service'}</div>
+          </div>
+          <label class="staff-permission-toggle" style="flex:0 0 auto;">
+            <input type="checkbox" class="ff-services-staff-enabled" ${enabled ? 'checked' : ''}>
+            <span class="staff-permission-toggle-slider"></span>
+          </label>
+        </div>
+        <div style="display:grid;grid-template-columns:120px minmax(120px,180px) auto;gap:10px;align-items:center;margin-bottom:10px;">
+          <div style="font-size:12px;color:#6b7280;">Price</div>
+          <input type="number" min="0" step="0.01" class="ff-services-staff-price" value="${escapeHtml(String(price))}" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
+          <span style="font-size:11px;color:#9ca3af;">Default ${ffTicketMoney(basePrice)}</span>
+        </div>
+        <div style="margin-bottom:12px;padding:12px 0;border-top:1px solid #f3f4f6;border-bottom:1px solid #f3f4f6;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+            <div>
+              <div style="font-size:12px;font-weight:700;color:#374151;">Supply Deduction</div>
+              <div style="font-size:11px;color:#9ca3af;margin-top:2px;">Deduct supplies before commission. No payroll calculation is applied yet.</div>
+            </div>
+            <label class="staff-permission-toggle" style="flex:0 0 auto;">
+              <input type="checkbox" class="ff-services-staff-supply-enabled" ${supplyDeductionEnabled ? 'checked' : ''}>
+              <span class="staff-permission-toggle-slider"></span>
+            </label>
+          </div>
+          <div class="ff-services-staff-supply-fields" style="display:${supplyDeductionEnabled ? 'grid' : 'none'};grid-template-columns:120px minmax(120px,180px) minmax(120px,180px) auto;gap:10px;align-items:center;">
+            <div style="font-size:12px;color:#6b7280;">Deduction</div>
+            <select class="ff-services-staff-supply-type" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;background:#fff;box-sizing:border-box;">
+              <option value="fixed" ${supplyDeductionType === 'fixed' ? 'selected' : ''}>Fixed Amount ($)</option>
+              <option value="percentage" ${supplyDeductionType === 'percentage' ? 'selected' : ''}>Percentage (%)</option>
+            </select>
+            <input type="number" min="0" step="0.01" class="ff-services-staff-supply-value" value="${escapeHtml(supplyDeductionValue)}" placeholder="${hasSupplyDeductionValueOverride ? '' : escapeHtml(supplyDeductionDefaultLabel)}" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
+            <span style="font-size:11px;color:${hasSupplyDeductionOverride ? '#7c3aed' : '#9ca3af'};">${escapeHtml(supplyDeductionStatusLabel)}</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:120px minmax(120px,180px) minmax(90px,130px) auto;gap:10px;align-items:center;">
+          <div style="font-size:12px;color:#6b7280;">Commission</div>
+          <input type="number" min="0" step="0.01" class="ff-services-staff-commission-value" value="${escapeHtml(commissionValue)}" placeholder="${escapeHtml(commissionDefaultLabel)}" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
+          <select class="ff-services-staff-commission-type" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;background:#fff;box-sizing:border-box;">
+            <option value="percentage" ${commissionType === 'percentage' ? 'selected' : ''}>%</option>
+            <option value="fixed" ${commissionType === 'fixed' ? 'selected' : ''}>$</option>
+          </select>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="ff-services-staff-save" style="width:auto;min-width:0;justify-self:start;padding:5px 10px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:999px;cursor:pointer;font-size:11px;font-weight:700;line-height:1.2;">Save</button>
+            <span style="font-size:11px;color:${hasCommissionOverride ? '#7c3aed' : '#9ca3af'};">${hasCommissionOverride ? 'Override' : escapeHtml(commissionDefaultLabel)}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  return `
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:4px;">Staff</div>
+        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">Manage staff availability, staff-specific price, and commission for this service.</p>
+      </div>
+      ${cards}
+    </div>
+  `;
+}
+
+async function saveServiceStaffOverride(service, staffId, patch) {
+  if (!service || !service.id || !staffId) throw new Error('Missing service or staff');
+  const current = getServiceStaffOverrides(service);
+  const existing = current[staffId] && typeof current[staffId] === 'object' ? current[staffId] : {};
+  const next = { ...existing, ...(patch || {}) };
+  const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  if (next.enabled === true) delete next.enabled;
+  if (next.price == null || next.price === '' || Number(next.price) === basePrice) delete next.price;
+  if (!next.commission || !Number.isFinite(Number(next.commission.value))) delete next.commission;
+  if (
+    !next.supplyDeduction ||
+    (next.supplyDeduction.enabled !== true && next.supplyDeduction.enabled !== false)
+  ) {
+    delete next.supplyDeduction;
+  } else if (next.supplyDeduction.enabled === false) {
+    next.supplyDeduction = { enabled: false };
+  } else if (!Number.isFinite(Number(next.supplyDeduction.value))) {
+    delete next.supplyDeduction;
+  } else {
+    next.supplyDeduction = {
+      enabled: true,
+      type: next.supplyDeduction.type === 'percentage' ? 'percentage' : 'fixed',
+      value: Number(next.supplyDeduction.value)
+    };
+  }
+  const nextOverrides = { ...current };
+  if (Object.keys(next).length) nextOverrides[staffId] = next;
+  else delete nextOverrides[staffId];
+
+  if (service.isSharedService || _ffCatalogModalMode === 'shared') {
+    const accountId = getTicketsAccountId();
+    if (!accountId) throw new Error('No account');
+    await setDoc(doc(sharedServiceCatalogItemsRef(accountId), service.id), {
+      staffOverrides: nextOverrides,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    const raw = _rawSharedServices.find((s) => String(s.id) === String(service.id));
+    if (raw) raw.staffOverrides = nextOverrides;
+  } else {
+    if (!currentUserProfile?.salonId) throw new Error('No salon');
+    await setDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, service.id), {
+      staffOverrides: nextOverrides,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    const raw = _rawServices.find((s) => String(s.id) === String(service.id));
+    if (raw) raw.staffOverrides = nextOverrides;
+  }
+  service.staffOverrides = nextOverrides;
+  const live = salonServices.find((s) => String(s.id) === String(service.id));
+  if (live) live.staffOverrides = nextOverrides;
+}
+
+function wireServicesStaffTab(root, service) {
+  if (!root || !service || !service.id) return;
+  const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  root.querySelectorAll('.ff-services-staff-card').forEach((card) => {
+    const staffId = card.getAttribute('data-staff-id');
+    const enabledInput = card.querySelector('.ff-services-staff-enabled');
+    const priceInput = card.querySelector('.ff-services-staff-price');
+    const commissionValueInput = card.querySelector('.ff-services-staff-commission-value');
+    const commissionTypeInput = card.querySelector('.ff-services-staff-commission-type');
+    const supplyEnabledInput = card.querySelector('.ff-services-staff-supply-enabled');
+    const supplyFields = card.querySelector('.ff-services-staff-supply-fields');
+    const supplyTypeInput = card.querySelector('.ff-services-staff-supply-type');
+    const supplyValueInput = card.querySelector('.ff-services-staff-supply-value');
+    const saveBtn = card.querySelector('.ff-services-staff-save');
+    const staff = getServicesEligibleStaffRows(service).find((row) => getServiceStaffId(row) === staffId);
+    const defaultCommission = getStaffDefaultServiceCommission(staff, staffId);
+    const defaultSupplyDeduction = getStaffDefaultSupplyDeduction(staff);
+    const saveStaff = async () => {
+      if (!staffId) return;
+      const enabled = enabledInput ? enabledInput.checked : true;
+      const rawPrice = parseFloat(priceInput?.value);
+      const commissionValue = parseFloat(commissionValueInput?.value);
+      const supplyEnabled = supplyEnabledInput ? supplyEnabledInput.checked : false;
+      const supplyValue = parseFloat(supplyValueInput?.value);
+      const patch = {
+        enabled,
+        price: Number.isFinite(rawPrice) ? rawPrice : basePrice
+      };
+      if (Number.isFinite(commissionValue)) {
+        const commissionType = commissionTypeInput?.value === 'fixed' ? 'fixed' : 'percentage';
+        patch.commission = {
+          type: commissionType,
+          value: commissionValue
+        };
+        if (
+          defaultCommission &&
+          defaultCommission.type === commissionType &&
+          Number(defaultCommission.value) === commissionValue
+        ) {
+          patch.commission = null;
+        }
+      } else {
+        patch.commission = null;
+      }
+      if (supplyEnabled && Number.isFinite(supplyValue)) {
+        const supplyType = supplyTypeInput?.value === 'percentage' ? 'percentage' : 'fixed';
+        patch.supplyDeduction = {
+          enabled: true,
+          type: supplyType,
+          value: supplyValue
+        };
+        if (
+          defaultSupplyDeduction &&
+          defaultSupplyDeduction.type === supplyType &&
+          Number(defaultSupplyDeduction.value) === supplyValue
+        ) {
+          patch.supplyDeduction = null;
+        }
+      } else {
+        patch.supplyDeduction = defaultSupplyDeduction ? { enabled: false } : null;
+      }
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.7'; }
+      try {
+        await saveServiceStaffOverride(service, staffId, patch);
+        const catalogData = _ffCatalogModalMode === 'shared'
+          ? getSharedServicesForCatalogManager()
+          : getLocationServicesForCatalogManager();
+        renderServicesScreenDetail(catalogData.services || [], catalogData.categories || []);
+        if (typeof setupTicketsUI === 'function') setupTicketsUI();
+        showToast('Staff settings updated', 'success');
+      } catch (e) {
+        showToast(e?.message || 'Failed', 'error');
+      } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+      }
+    };
+    if (supplyEnabledInput) {
+      supplyEnabledInput.addEventListener('change', () => {
+        if (supplyFields) supplyFields.style.display = supplyEnabledInput.checked ? 'grid' : 'none';
+      });
+    }
+    if (supplyTypeInput && supplyValueInput) {
+      supplyTypeInput.addEventListener('change', () => {
+        supplyValueInput.placeholder = supplyTypeInput.value === 'percentage' ? '15' : '30';
+      });
+    }
+    if (enabledInput) enabledInput.addEventListener('change', saveStaff);
+    if (saveBtn) {
+      saveBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        saveStaff();
       });
     }
   });
@@ -4345,21 +5159,21 @@ function _ffShowCategoryMenu(anchorBtn, catId) {
   if (!cat) return;
   if (isSharedCatalog) {
     const pop = _ffBuildPopover(anchorBtn, [
-      { label: 'Rename shared category', onClick: () => _ffCatalogEditorOpen({ mode: 'shared-category-edit', categoryId: catId }) },
-      { label: 'Delete shared category', danger: true, onClick: async () => {
+      { label: 'Rename category', onClick: () => _ffCatalogEditorOpen({ mode: 'shared-category-edit', categoryId: catId }) },
+      { label: 'Delete category', danger: true, onClick: async () => {
         const count = catalogData.services.filter((s) => s.categoryId === catId).length;
         if (count > 0) {
-          showToast(`Cannot delete: ${count} shared service(s) use this category.`, 'error');
+          showToast(`Cannot delete: ${count} service(s) use this category.`, 'error');
           return;
         }
-        const ok = await ticketConfirm(`Delete "${cat.name}"?`, 'Delete shared category');
+        const ok = await ticketConfirm(`Delete "${cat.name}"?`, 'Delete category');
         if (!ok) return;
         try {
           await deleteSharedServiceCategory(cat.docId || catId);
           await loadSharedCatalogForManager();
           _ffOpenCats.delete(catId);
           renderServicesCatalogV2();
-          showToast('Shared category deleted', 'success');
+          showToast('Category deleted', 'success');
         } catch (e) { showToast(e?.message || 'Failed', 'error'); }
       }},
     ]);
@@ -4701,14 +5515,14 @@ function _ffCatalogEditorOpen(opts) {
   const ctx = { ...opts };
 
   if (opts.mode === 'category-add' || opts.mode === 'shared-category-add') {
-    title.textContent = opts.mode === 'shared-category-add' ? 'New shared category' : 'New category';
+    title.textContent = 'New category';
     nameInp.placeholder = 'Category name (e.g. Manicure)';
   } else if (opts.mode === 'category-edit' || opts.mode === 'shared-category-edit') {
     const c = opts.mode === 'shared-category-edit'
       ? getSharedServicesForCatalogManager().categories.find((x) => x.id === opts.categoryId)
       : serviceCategories.find((x) => x.id === opts.categoryId);
     if (!c) return;
-    title.textContent = opts.mode === 'shared-category-edit' ? 'Rename shared category' : 'Rename category';
+    title.textContent = 'Rename category';
     nameInp.placeholder = 'Category name';
     nameInp.value = c.name || '';
     ctx.existing = c;
@@ -4819,7 +5633,7 @@ async function _ffCatalogEditorSubmit(ctx) {
       const categoryId = await saveSharedServiceCategory({ name, sortOrder: data.categories.length });
       await loadSharedCatalogForManager();
       _ffOpenCats.add(categoryId);
-      showToast('Shared category added', 'success');
+      showToast('Category added', 'success');
     } else if (ctx.mode === 'shared-category-edit') {
       const c = ctx.existing;
       const oldName = normalizeSharedCategoryName(c.name);
@@ -4832,12 +5646,13 @@ async function _ffCatalogEditorSubmit(ctx) {
           name: s.name,
           category: newName,
           defaultPrice: s.defaultPrice,
-          active: s.active !== false
+          active: s.active !== false,
+          sortOrder: s.sortOrder
         })));
       }
       await loadSharedCatalogForManager();
       _ffOpenCats.add(sharedCategoryId(newName));
-      showToast('Shared category updated', 'success');
+      showToast('Category updated', 'success');
     } else if (ctx.mode === 'service-add') {
       const categoryId = catSel?.value || null;
       const defaultPrice = parseFloat(priceInp?.value) || 0;
@@ -4849,7 +5664,7 @@ async function _ffCatalogEditorSubmit(ctx) {
       const s = ctx.existing;
       const categoryId = catSel?.value || null;
       const defaultPrice = parseFloat(priceInp?.value) || 0;
-      await saveService({ id: s.id, name, categoryId, defaultPrice });
+      await saveService({ id: s.id, name, categoryId, defaultPrice, sortOrder: s.sortOrder });
       await Promise.all([loadServiceCategories(), loadServices()]);
       if (categoryId) _ffOpenCats.add(categoryId);
       showToast('Updated', 'success');
@@ -4867,7 +5682,8 @@ async function _ffCatalogEditorSubmit(ctx) {
         name,
         category,
         defaultPrice,
-        active: activeInp ? activeInp.checked : true
+        active: activeInp ? activeInp.checked : true,
+        sortOrder: s.sortOrder
       });
       if (ctx.mode === 'shared-service-edit') {
         if (overrideCustom?.checked) {
@@ -4878,7 +5694,7 @@ async function _ffCatalogEditorSubmit(ctx) {
       }
       await loadSharedCatalogForManager();
       _ffOpenCats.add(sharedCategoryId(category));
-      showToast(ctx.mode === 'shared-service-add' ? 'Shared service added' : 'Shared service updated', 'success');
+      showToast(ctx.mode === 'shared-service-add' ? 'Service added' : 'Service updated', 'success');
     }
     _ffCatalogEditorClose();
     renderServicesCatalogV2();
@@ -4895,7 +5711,7 @@ function addServiceCategoryV2() {
   _ffCatalogEditorOpen({ mode: _ffCatalogModalMode === 'shared' ? 'shared-category-add' : 'category-add' });
 }
 
-/** Entry from header "+ Add Shared Service" button. */
+/** Entry from header "+ Add Service" button. */
 function addSharedServiceV2() {
   _ffCatalogEditorOpen({ mode: 'shared-service-add' });
 }
@@ -5085,7 +5901,12 @@ export async function goToServices() {
   try {
     await loadCurrentUserProfile();
     await enrichTicketsProfileFromMemberDoc();
-    const sharedCatalog = await loadSharedCatalogForManager();
+    let sharedCatalog = await loadSharedCatalogForManager();
+    const backfillResult = await seedSharedServiceCatalogFromLocationCatalogIfEmpty();
+    if (backfillResult && backfillResult.seeded) {
+      sharedCatalog = await loadSharedCatalogForManager();
+      _ffCatalogModalMode = 'shared';
+    }
     if (!sharedCatalog || ((sharedCatalog.services || []).length === 0 && (sharedCatalog.categories || []).length === 0)) {
       _ffCatalogModalMode = 'location';
       await loadLocationCatalogForManager();
@@ -5136,6 +5957,10 @@ async function setupTicketsUI() {
   if (!container) return;
   const grouped = getServicesGroupedByCategory();
   let html = '';
+  if (Object.keys(grouped).length === 0) {
+    container.innerHTML = '<div style="padding:10px 8px;color:#6b7280;font-size:12px;">No services available for this location.</div>';
+    return;
+  }
   Object.entries(grouped).forEach(([key, data], idx) => {
     const label = escapeHtml(data.label || 'Other');
     html += `<div class="ticket-category-section" data-cat-idx="${idx}" style="border-bottom:1px solid #e5e7eb;">`;
