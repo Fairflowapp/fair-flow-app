@@ -1600,6 +1600,8 @@ function ffShowInventorySuggestionModal(request) {
   const rateStr = ffSuggestionFmtRate(rd.dailyUsage);
   const current = rd.current != null ? String(rd.current) : '—';
   const suggestedQty = rd.suggestedQty != null ? String(rd.suggestedQty) : '—';
+  const isReorder = rd.kind === 'reorder_point';
+  const reorderPointStr = rd.reorderPoint != null ? String(rd.reorderPoint) : '—';
   const statusStr = String(request.status || 'open');
   const isOpen = statusStr === 'open';
 
@@ -1633,31 +1635,42 @@ function ffShowInventorySuggestionModal(request) {
         ${isOpen ? `<span style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:600;background:#f1f5f9;color:#475569;flex-shrink:0;">Open</span>` : ''}
       </div>
       <div style="padding:12px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;font-size:14px;font-weight:600;color:#b91c1c;margin:12px 0 16px;">
-        Running low — may run out in ${escapeHtml(daysLeftStr)} day${daysLeftStr === '1' ? '' : 's'}
+        ${isReorder
+          ? `Low stock — at or below reorder point (${escapeHtml(reorderPointStr)})`
+          : `Running low — may run out in ${escapeHtml(daysLeftStr)} day${daysLeftStr === '1' ? '' : 's'}`}
       </div>
       <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13px;color:#374151;align-items:center;">
         <span style="color:#9ca3af;">Current:</span><span style="font-weight:600;">${escapeHtml(current)}</span>
-        <span style="color:#9ca3af;">Avg use:</span><span style="font-weight:600;">${escapeHtml(rateStr)}</span>
-        <span style="color:#9ca3af;">Order qty:</span>
-        <div style="display:flex;align-items:center;gap:6px;">
+        ${isReorder
+          ? `<span style="color:#9ca3af;">Reorder point:</span><span style="font-weight:600;">${escapeHtml(reorderPointStr)}</span>`
+          : `<span style="color:#9ca3af;">Avg use:</span><span style="font-weight:600;">${escapeHtml(rateStr)}</span>`}
+        <span style="color:#9ca3af;">${isReorder ? 'Suggested order:' : 'Order qty:'}</span>
+        ${isReorder
+          ? `<span style="font-weight:700;color:#7c3aed;">${escapeHtml(suggestedQty)}</span>`
+          : `<div style="display:flex;align-items:center;gap:6px;">
           <input type="number" min="1" step="1"
             data-ff-suggestion-qty-input
             value="${escapeHtml(suggestedQty)}"
             style="width:90px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;font-weight:700;color:#0f172a;text-align:center;font-variant-numeric:tabular-nums;"
           />
           <span style="font-size:11px;color:#9ca3af;">Suggested: <strong style="color:#7c3aed;">${escapeHtml(suggestedQty)}</strong></span>
-        </div>
+        </div>`}
       </div>
     </div>
     <div style="display:flex;gap:8px;padding:14px 22px 20px;border-top:1px solid #f1f5f9;">
-      <button type="button" data-ff-suggestion-dismiss="${escapeHtml(request.id)}"
-        style="flex:1;padding:10px 14px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-weight:600;font-size:13px;cursor:pointer;">
-        Dismiss
-      </button>
-      <button type="button" data-ff-suggestion-add-to-order="${escapeHtml(request.id)}"
-        style="flex:1;padding:10px 14px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:700;font-size:13px;cursor:pointer;">
-        Add to Order
-      </button>
+      ${statusStr === 'archived'
+        ? `<button type="button" data-ff-suggestion-delete="${escapeHtml(request.id)}"
+            style="flex:1;padding:10px 14px;border-radius:10px;border:1px solid #ef4444;background:#fef2f2;color:#dc2626;font-weight:700;font-size:13px;cursor:pointer;">
+            🗑 Delete permanently
+          </button>`
+        : `<button type="button" data-ff-suggestion-dismiss="${escapeHtml(request.id)}"
+            style="flex:1;padding:10px 14px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-weight:600;font-size:13px;cursor:pointer;">
+            Dismiss
+          </button>
+          ${isReorder ? '' : `<button type="button" data-ff-suggestion-add-to-order="${escapeHtml(request.id)}"
+            style="flex:1;padding:10px 14px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:700;font-size:13px;cursor:pointer;">
+            Add to Order
+          </button>`}`}
     </div>
   `;
   modal.appendChild(content);
@@ -1665,6 +1678,14 @@ function ffShowInventorySuggestionModal(request) {
   modal.addEventListener('click', (ev) => {
     if (ev.target === modal) modal.remove();
   });
+  const deleteBtn = content.querySelector('[data-ff-suggestion-delete]');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => {
+      if (typeof window.deleteArchivedRequest === 'function') {
+        window.deleteArchivedRequest(request.id);
+      }
+    });
+  }
   const dismissBtn = content.querySelector('[data-ff-suggestion-dismiss]');
   if (dismissBtn) {
     dismissBtn.addEventListener('click', async () => {
@@ -1789,6 +1810,8 @@ function ffRenderInventorySuggestionCard(request, card, dateStr, statusStr) {
   const rateStr = ffSuggestionFmtRate(rd.dailyUsage);
   const current = rd.current != null ? String(rd.current) : '—';
   const suggestedQty = rd.suggestedQty != null ? String(rd.suggestedQty) : '—';
+  const isReorder = rd.kind === 'reorder_point';
+  const reorderPointStr = rd.reorderPoint != null ? String(rd.reorderPoint) : '—';
   const isOpen = statusStr === 'open';
   const statusBadge = isOpen
     ? `<span style="display:inline-block;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:600;background:#f1f5f9;color:#475569;letter-spacing:0.02em;">Open</span>`
@@ -1816,11 +1839,15 @@ function ffRenderInventorySuggestionCard(request, card, dateStr, statusStr) {
         </div>
         ${pathLine ? `<div style="font-size:11px;color:#9ca3af;margin-bottom:8px;">${escapeHtml(pathLine)}</div>` : ''}
         <div style="font-size:13px;font-weight:600;color:#b91c1c;margin-bottom:8px;">
-          Running low — may run out in ${escapeHtml(daysLeftStr)} day${daysLeftStr === '1' ? '' : 's'}
+          ${isReorder
+            ? `Low stock — at or below reorder point (${escapeHtml(reorderPointStr)})`
+            : `Running low — may run out in ${escapeHtml(daysLeftStr)} day${daysLeftStr === '1' ? '' : 's'}`}
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:#374151;">
           <span><span style="color:#9ca3af;">Current:</span> <strong>${escapeHtml(current)}</strong></span>
-          <span><span style="color:#9ca3af;">Avg use:</span> <strong>${escapeHtml(rateStr)}</strong></span>
+          ${isReorder
+            ? `<span><span style="color:#9ca3af;">Reorder point:</span> <strong>${escapeHtml(reorderPointStr)}</strong></span>`
+            : `<span><span style="color:#9ca3af;">Avg use:</span> <strong>${escapeHtml(rateStr)}</strong></span>`}
           <span><span style="color:#9ca3af;">Suggested order:</span> <strong>${escapeHtml(suggestedQty)}</strong></span>
         </div>
         <div style="margin-top:8px;font-size:11px;color:#9ca3af;">${escapeHtml(dateStr)}</div>

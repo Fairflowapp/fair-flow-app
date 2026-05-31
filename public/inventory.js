@@ -39,6 +39,17 @@ const SALON_ID_CACHE_KEY = "ff_salonId_v1";
  * full refresh the helper module may not have wired yet, but the selection
  * from the previous session is already available in storage.
  */
+// Permission gate for editing inventory (add/edit/remove items). Defaults to
+// allow when the helper isn't available yet so the owner is never hard-blocked.
+function ffCanManageInventory() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffCurrentUserHasInventoryManagePermission === "function") {
+      return window.ffCurrentUserHasInventoryManagePermission();
+    }
+  } catch (e) {}
+  return true;
+}
+
 function _ffInvActiveLocId() {
   try {
     if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
@@ -115,6 +126,11 @@ let _invUsingSharedCatalog = false;
 let _invCategoriesLoading = false;
 let _invCatLoadError = null;
 let _catSaveBusy = false;
+/** Products mirrored in Inventory (from salons/.../products). */
+let _invProductsList = [];
+/** catId -> [{ id, name }] of valid product subcategories (for grouping/general detection). */
+let _invProductCatSubs = new Map();
+const INV_PRODUCTS_SUB_SUFFIX = "::products::";
 
 /** Table groups for the selected subcategory (`label` in UI maps to `name` in Firestore). */
 /** @type {{ id: string, label: string }[] | null} */
@@ -438,21 +454,244 @@ async function tryLoadSharedInventoryCategories(accountId) {
   }
 }
 
-async function loadInventoryCategoriesFromFirestore() {
-  const salonId = await getSalonId();
-  if (!salonId) {
-    _invCatLoadError = "No salon — sign in or select a salon.";
-    _categoryTree = [];
-    _persistedCategoryTree = [];
-    return;
+const INV_PRODUCTS_GENERAL_SUB = "__general__";
+
+function productsInventorySubId(categoryId, productSubId) {
+  return `${String(categoryId)}${INV_PRODUCTS_SUB_SUFFIX}${String(productSubId || INV_PRODUCTS_GENERAL_SUB)}`;
+}
+
+function isProductsInventorySub(sub) {
+  return !!(sub && sub.isProductsSub);
+}
+
+function isProductsInventorySubId(subId) {
+  return typeof subId === "string" && subId.includes(INV_PRODUCTS_SUB_SUFFIX);
+}
+
+function productCategoryIdFromProductsSub(sub) {
+  if (sub && sub.productCategoryId) return String(sub.productCategoryId);
+  const id = sub && sub.id ? String(sub.id) : "";
+  const idx = id.indexOf(INV_PRODUCTS_SUB_SUFFIX);
+  return idx >= 0 ? id.slice(0, idx) : "";
+}
+
+function productSubcategoryIdFromProductsSub(sub) {
+  if (sub && sub.productSubcategoryId != null) return String(sub.productSubcategoryId);
+  const id = sub && sub.id ? String(sub.id) : "";
+  const idx = id.indexOf(INV_PRODUCTS_SUB_SUFFIX);
+  return idx >= 0 ? id.slice(idx + INV_PRODUCTS_SUB_SUFFIX.length) : INV_PRODUCTS_GENERAL_SUB;
+}
+
+function getProductStockForInventoryRow(product, activeLoc) {
+  const inv = product.inventory && typeof product.inventory === "object" ? product.inventory : {};
+  const locO =
+    activeLoc && product.locationOverrides && product.locationOverrides[activeLoc]
+      ? product.locationOverrides[activeLoc]
+      : null;
+  if (locO && Number.isFinite(Number(locO.stock))) return Number(locO.stock);
+  if (Number.isFinite(Number(inv.stock))) return Number(inv.stock);
+  return 0;
+}
+
+// Target / par level (how many the salon wants to keep). Drives the "Stock"
+// column and the Order calculation (Order = Stock - Current).
+function getProductTargetStockForInventoryRow(product, activeLoc) {
+  const inv = product.inventory && typeof product.inventory === "object" ? product.inventory : {};
+  const locO =
+    activeLoc && product.locationOverrides && product.locationOverrides[activeLoc]
+      ? product.locationOverrides[activeLoc]
+      : null;
+  if (locO && Number.isFinite(Number(locO.targetStock))) return Number(locO.targetStock);
+  if (Number.isFinite(Number(inv.targetStock))) return Number(inv.targetStock);
+  // No target set yet → fall back to on-hand so Order shows 0 (no false demand).
+  return getProductStockForInventoryRow(product, activeLoc);
+}
+
+function getProductPriceForInventoryRow(product, activeLoc) {
+  const locO =
+    activeLoc && product.locationOverrides && product.locationOverrides[activeLoc]
+      ? product.locationOverrides[activeLoc]
+      : null;
+  if (locO && Number.isFinite(Number(locO.price))) return Number(locO.price);
+  return Number.isFinite(Number(product.retailPrice)) ? Number(product.retailPrice) : 0;
+}
+
+function productToInvRow(product, activeLoc, rowNo) {
+  const onHand = getProductStockForInventoryRow(product, activeLoc);
+  const target = getProductTargetStockForInventoryRow(product, activeLoc);
+  const price = getProductPriceForInventoryRow(product, activeLoc);
+  const inv = product.inventory && typeof product.inventory === "object" ? product.inventory : {};
+  const supplier = String(product.vendor || inv.vendor || product.brand || "").trim();
+  return {
+    id: product.id,
+    rowNo: String(rowNo + 1),
+    code: "",
+    name: String(product.name || "").trim(),
+    supplier,
+    url: "",
+    _isProductRow: true,
+    _productId: product.id,
+    byGroup: {
+      [SHARED_INV_DEFAULT_GROUP_ID]: {
+        stock: target,
+        current: onHand,
+        price: price > 0 ? String(price) : "",
+        approved: 0,
+        approvedRequests: [],
+      },
+    },
+  };
+}
+
+function getProductCatSubsList(cat) {
+  const arr = cat && Array.isArray(cat.subcategories) ? cat.subcategories : [];
+  return arr
+    .slice()
+    .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0))
+    .map((s) => ({ id: String(s.id), name: s.name || "Subcategory" }));
+}
+
+function buildProductsInventorySubsForCat(cat, catProducts) {
+  const catId = String(cat.id);
+  const subs = getProductCatSubsList(cat);
+  const subIds = new Set(subs.map((s) => s.id));
+  const result = subs.map((s) => ({
+    id: productsInventorySubId(catId, s.id),
+    name: s.name,
+    isProductsSub: true,
+    productCategoryId: catId,
+    productSubcategoryId: s.id,
+  }));
+  const hasGeneral = catProducts.some((p) => !p.subcategoryId || !subIds.has(String(p.subcategoryId)));
+  if (hasGeneral || !subs.length) {
+    result.push({
+      id: productsInventorySubId(catId, INV_PRODUCTS_GENERAL_SUB),
+      name: subs.length ? "General" : "Products",
+      isProductsSub: true,
+      productCategoryId: catId,
+      productSubcategoryId: INV_PRODUCTS_GENERAL_SUB,
+    });
   }
-  _invCatLoadError = null;
-  _invUsingSharedCatalog = false;
+  return { subs: result, subIds };
+}
+
+async function loadProductsForInventory(salonId) {
+  _invProductsList = [];
+  _invProductCatSubs = new Map();
+  try {
+    const [catSnap, prodSnap] = await Promise.all([
+      getDocs(collection(db, `salons/${salonId}/productCategories`)),
+      getDocs(collection(db, `salons/${salonId}/products`)),
+    ]);
+    const cats = catSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
+    _invProductsList = prodSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
+    const catIds = new Set(cats.map((c) => c.id));
+    const tree = cats.map((c) => {
+      const catId = String(c.id);
+      const catProducts = _invProductsList.filter((p) => String(p.categoryId || "") === catId);
+      const { subs, subIds } = buildProductsInventorySubsForCat(c, catProducts);
+      _invProductCatSubs.set(catId, getProductCatSubsList(c));
+      return {
+        id: catId,
+        name: c.name || "Category",
+        isProductCategory: true,
+        _validSubIds: subIds,
+        subcategories: subs,
+      };
+    });
+    const uncategorized = _invProductsList.filter((p) => !p.categoryId || !catIds.has(String(p.categoryId)));
+    if (uncategorized.length) {
+      tree.push({
+        id: "__uncategorized__",
+        name: "Uncategorized",
+        isProductCategory: true,
+        _validSubIds: new Set(),
+        subcategories: [
+          {
+            id: productsInventorySubId("__uncategorized__", INV_PRODUCTS_GENERAL_SUB),
+            name: "Products",
+            isProductsSub: true,
+            productCategoryId: "__uncategorized__",
+            productSubcategoryId: INV_PRODUCTS_GENERAL_SUB,
+          },
+        ],
+      });
+    }
+    return tree;
+  } catch (e) {
+    console.warn("[Inventory] products catalog load failed", e);
+    return [];
+  }
+}
+
+function productsForInventorySub(productCategoryId, productSubId) {
+  const catId = String(productCategoryId || "");
+  const subId = String(productSubId || INV_PRODUCTS_GENERAL_SUB);
+  let pool;
+  if (catId === "__uncategorized__") {
+    const known = new Set(
+      getCategoryTree()
+        .filter((c) => c.isProductCategory && c.id !== "__uncategorized__")
+        .map((c) => c.id)
+    );
+    pool = _invProductsList.filter((p) => !p.categoryId || !known.has(String(p.categoryId)));
+  } else {
+    pool = _invProductsList.filter((p) => String(p.categoryId || "") === catId);
+  }
+  const validSubs = _invProductCatSubs.get(catId) || [];
+  const validSubIds = new Set(validSubs.map((s) => String(s.id)));
+  if (subId === INV_PRODUCTS_GENERAL_SUB) {
+    return pool.filter((p) => !p.subcategoryId || !validSubIds.has(String(p.subcategoryId)));
+  }
+  return pool.filter((p) => String(p.subcategoryId || "") === subId);
+}
+
+async function flushProductsInventoryTableToFirestore(meta) {
+  const salonId = await getSalonId();
+  if (!salonId || !meta) return;
+  const activeLoc = _ffInvActiveLocId();
+  const productCategoryId = productCategoryIdFromProductsSub(meta.sub);
+  const productSubId = productSubcategoryIdFromProductsSub(meta.sub);
+  const allowedIds = new Set(productsForInventorySub(productCategoryId, productSubId).map((p) => p.id));
+  for (const row of _rows || []) {
+    const productId = row._productId || row.id;
+    if (!allowedIds.has(productId)) continue;
+    const cell = (row.byGroup || {})[SHARED_INV_DEFAULT_GROUP_ID] || {};
+    // "Stock" column = target/par; "Current" column = on-hand.
+    const targetVal = typeof cell.stock === "number" ? cell.stock : parseNum(cell.stock);
+    const onHandVal = typeof cell.current === "number" ? cell.current : parseNum(cell.current);
+    const target = Number.isFinite(targetVal) ? targetVal : 0;
+    const onHand = Number.isFinite(onHandVal) ? onHandVal : 0;
+    /** @type {Record<string, unknown>} */
+    const updates = { updatedAt: serverTimestamp() };
+    if (activeLoc) {
+      updates[`locationOverrides.${activeLoc}.stock`] = onHand;
+      updates[`locationOverrides.${activeLoc}.targetStock`] = target;
+    } else {
+      updates["inventory.stock"] = onHand;
+      updates["inventory.targetStock"] = target;
+    }
+    await updateDoc(doc(db, `salons/${salonId}/products`, productId), updates);
+    const prod = _invProductsList.find((p) => p.id === productId);
+    if (prod) {
+      if (activeLoc) {
+        prod.locationOverrides = prod.locationOverrides || {};
+        prod.locationOverrides[activeLoc] = { ...(prod.locationOverrides[activeLoc] || {}), stock: onHand, targetStock: target };
+      } else {
+        prod.inventory = { ...(prod.inventory || {}), stock: onHand, targetStock: target };
+      }
+    }
+  }
+}
+
+async function loadLegacyInventoryCategoryTree(salonId) {
   const catSnap = await getDocs(collection(db, `salons/${salonId}/inventoryCategories`));
   const rawCatsAll = catSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
   const rawCats = rawCatsAll.filter(_ffInvDocInActiveLoc);
-  // Optional diagnostic log — only prints when the user explicitly opts in via
-  //   localStorage.setItem('ff_inv_debug', 'true')
   try {
     if (typeof localStorage !== "undefined" && localStorage.getItem("ff_inv_debug") === "true") {
       console.log(
@@ -460,12 +699,12 @@ async function loadInventoryCategoriesFromFirestore() {
         _ffInvActiveLocId() || "(none)",
         rawCatsAll.length,
         rawCats.length,
-        rawCatsAll.map((c) => ({ id: c.id, name: c.name, locationId: c.locationId ?? null })),
+        rawCatsAll.map((c) => ({ id: c.id, name: c.name, locationId: c.locationId ?? null }))
       );
     }
   } catch (_) {}
   rawCats.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  const tree = await Promise.all(
+  return Promise.all(
     rawCats.map(async (c) => {
       const subCol = collection(db, `salons/${salonId}/inventoryCategories/${c.id}/inventorySubcategories`);
       const subSnap = await getDocs(subCol);
@@ -483,9 +722,26 @@ async function loadInventoryCategoriesFromFirestore() {
       };
     })
   );
-  _categoryTree = tree;
-  _persistedCategoryTree = cloneCategoryTree(tree);
-  _expandedCategoryIds = new Set(tree.map((c) => c.id));
+}
+
+async function loadInventoryCategoriesFromFirestore() {
+  const salonId = await getSalonId();
+  if (!salonId) {
+    _invCatLoadError = "No salon — sign in or select a salon.";
+    _categoryTree = [];
+    _persistedCategoryTree = [];
+    _invProductsList = [];
+    return;
+  }
+  _invCatLoadError = null;
+  _invUsingSharedCatalog = false;
+  const [productTree, legacyTree] = await Promise.all([
+    loadProductsForInventory(salonId),
+    loadLegacyInventoryCategoryTree(salonId),
+  ]);
+  _categoryTree = [...legacyTree, ...productTree];
+  _persistedCategoryTree = cloneCategoryTree(legacyTree);
+  _expandedCategoryIds = new Set(_categoryTree.map((c) => c.id));
   ensureValidSubcategorySelection();
 }
 
@@ -494,6 +750,7 @@ async function loadInventoryCategoriesFromFirestore() {
  * @param {ReturnType<typeof cloneCategoryTree>} desiredTree
  */
 async function persistInventoryCategoryTree(desiredTree) {
+  if (!ffCanManageInventory()) return;
   const salonId = await getSalonId();
   if (!salonId) throw new Error("No salon");
 
@@ -654,18 +911,29 @@ function cloneCategoryTree(tree) {
   return tree.map((c) => ({
     id: c.id,
     name: c.name,
-    subcategories: (c.subcategories || []).map((s) => ({ id: s.id, name: s.name })),
+    ...(c.isProductCategory ? { isProductCategory: true } : {}),
+    subcategories: (c.subcategories || []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      ...(s.isProductsSub ? { isProductsSub: true, productCategoryId: s.productCategoryId } : {}),
+    })),
   }));
+}
+
+function getLegacyCategoryTreeForManage() {
+  return (_persistedCategoryTree && _persistedCategoryTree.length
+    ? _persistedCategoryTree
+    : getCategoryTree().filter((c) => !c.isProductCategory));
 }
 
 function getManageCategoryTree() {
   if (_manageCategoriesOpen && _catManageDraftTree) return _catManageDraftTree;
-  return getCategoryTree();
+  return getLegacyCategoryTreeForManage();
 }
 
 function ensureCatManageDraft() {
   if (!_catManageDraftTree) {
-    _catManageDraftTree = cloneCategoryTree(_categoryTree || []);
+    _catManageDraftTree = cloneCategoryTree(getLegacyCategoryTreeForManage());
   }
 }
 
@@ -1051,6 +1319,7 @@ async function buildSharedInventoryTableData(accountId, catId, subId) {
 }
 
 async function importSharedItemsIntoCurrentInventorySub() {
+  if (!ffCanManageInventory()) return;
   if (!ensureTableReadyForEdits()) return;
   const meta = findSubMeta(_selectedSubcategoryId);
   if (!meta || !_rows || !_groups) return;
@@ -1139,6 +1408,7 @@ async function importSharedItemsIntoCurrentInventorySub() {
 }
 
 async function importSharedCatalogIntoCurrentBranch() {
+  if (!ffCanManageInventory()) return;
   const salonId = await getSalonId();
   if (!salonId) return;
   const activeLocId = _ffInvActiveLocId();
@@ -1537,6 +1807,14 @@ async function flushInventoryTableToFirestore() {
     clearInventoryUndoAfterSuccess();
     return;
   }
+  if (isProductsInventorySub(meta.sub)) {
+    await flushProductsInventoryTableToFirestore(meta);
+    clearInventoryUndoAfterSuccess();
+    // Stock changed from the Inventory side too — re-run the reorder-point scan
+    // so a Low-Stock alert fires immediately, just like editing via the Product.
+    void scanProductReorderAlertsOnce(true);
+    return;
+  }
   const ref = doc(db, `salons/${salonId}/inventoryCategories/${meta.category.id}/inventorySubcategories/${meta.sub.id}`);
   await updateDoc(ref, {
     groups: buildFirestoreGroupsFromUi(),
@@ -1563,6 +1841,23 @@ async function loadInventoryTableForSub(catId, subId, seq, key) {
   try {
     const salonId = await getSalonId();
     if (!salonId) throw new Error("No salon");
+    if (isProductsInventorySubId(subId)) {
+      const meta = findSubMeta(subId);
+      if (seq !== _invTableLoadSeq) return;
+      _groups = [{ id: SHARED_INV_DEFAULT_GROUP_ID, label: "Inventory" }];
+      const activeLoc = _ffInvActiveLocId();
+      const prods = meta
+        ? productsForInventorySub(
+            productCategoryIdFromProductsSub(meta.sub),
+            productSubcategoryIdFromProductsSub(meta.sub)
+          )
+        : [];
+      _rows = prods.map((p, i) => productToInvRow(p, activeLoc, i));
+      _invColWidths = null;
+      _invTableLoadedForSubId = key;
+      ensureGroupCellsForRows();
+      return;
+    }
     if (_invUsingSharedCatalog) {
       const data = await buildSharedInventoryTableData(salonId, catId, subId);
       if (seq !== _invTableLoadSeq) return;
@@ -3620,15 +3915,23 @@ function renderInventoryTableCardHtml() {
     narrow
       ? `<button type="button" class="ff-inv2-btn ff-inv2-btn--toolbar-cols" id="ff-inv2-mobile-cols-reset" title="Bring back #, Code, Supplier, URL, or drag column after hiding them (double-tap a header to hide).">Columns</button>`
       : "";
-  return `<div class="ff-inv2-table-card">
-      <div class="ff-inv2-toolbar">
+  const meta = getSelectedSubMeta();
+  const productsMode = meta && isProductsInventorySub(meta.sub);
+  const toolbar = productsMode
+    ? `<div class="ff-inv2-toolbar">
+        <span class="ff-inv2-products-hint" style="font-size:12px;color:#6b7280;line-height:1.45;padding:2px 0;">Stock saves to Products. Add or edit products in the Products app.</span>
+        ${colsBtn}
+      </div>`
+    : `<div class="ff-inv2-toolbar">
         <button type="button" class="ff-inv2-btn" id="ff-inv2-add-row">+ Add Row</button>
         <button type="button" class="ff-inv2-btn" id="ff-inv2-add-group">+ Add Group</button>
         ${colsBtn}
         <button type="button" class="ff-inv2-btn ff-inv2-btn--toolbar-shared" id="ff-inv2-add-from-shared">${escapeHtml(
           sharedBtnLabel
         )}</button>
-      </div>
+      </div>`;
+  return `<div class="ff-inv2-table-card">
+      ${toolbar}
       <div class="ff-inv2-table-scroll">
         <table class="ff-inv2-table">
           ${renderTableHeaderHtml()}
@@ -3639,12 +3942,17 @@ function renderInventoryTableCardHtml() {
 }
 
 function renderInvMainTabsHtml() {
-  const tabs = [
+  let tabs = [
     { id: "inventory", label: "Inventory" },
     { id: "orderBuilder", label: "Create Order" },
     { id: "orders", label: "Orders" },
     { id: "insights", label: "Insights" },
   ];
+  // View-only users only get the read-only Inventory tab. Create Order, Orders
+  // and Insights are management surfaces and stay hidden for them.
+  if (!ffCanManageInventory()) {
+    tabs = tabs.filter((x) => x.id === "inventory");
+  }
   return `<div class="ff-inv2-main-tabs" role="tablist" aria-label="Inventory workspace">
 ${tabs
   .map((x) => {
@@ -4919,6 +5227,193 @@ async function scanInventorySuggestionsOnce() {
     console.warn("[Inventory] suggestion scan failed", e);
   }
 }
+
+/** One-shot guard so the product reorder-point scan runs only once per session. */
+let _invReorderScannedThisSession = false;
+
+/**
+ * Product Reorder-Point Alerts — scans the Products catalog and creates an Inbox
+ * alert (type="inventory_suggestion", data.kind="reorder_point") whenever a
+ * product's current stock is at or below its Reorder Point.
+ *
+ * Rules:
+ *   - Only products with a Reorder Point > 0 are considered.
+ *   - Current stock & reorder point honor the active location override.
+ *   - Fire when current <= reorderPoint.
+ *   - suggestedQty = (target - current) when a target is set above current,
+ *     otherwise the reorder point. Always >= 1.
+ *   - Skip if any reorder-point alert (any status) already exists for the product.
+ */
+async function scanProductReorderAlertsOnce(force) {
+  if (!force && _invReorderScannedThisSession) return;
+  _invReorderScannedThisSession = true;
+  try {
+    const salonId = await getSalonId();
+    if (!salonId) return;
+    const user = auth.currentUser;
+    if (!user) return;
+
+    let userData = {};
+    try {
+      const snap = await getDoc(doc(db, "users", user.uid));
+      if (snap.exists()) userData = snap.data() || {};
+    } catch (e) {
+      console.warn("[Inventory] reorder scan: user doc read failed", e);
+      return;
+    }
+    const role = userData.role != null ? String(userData.role) : "";
+    if (!["manager", "admin", "owner"].includes(role.toLowerCase())) return;
+
+    const uid = user.uid;
+    const staffId = userData.staffId != null ? String(userData.staffId) : "";
+    const displayName = userData.displayName || userData.name || "System";
+
+    // Active location — alerts surface per-branch only.
+    let activeLoc = null;
+    try {
+      if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
+        const v = window.ffGetActiveLocationId();
+        if (typeof v === "string" && v.trim()) activeLoc = v.trim();
+      }
+      if (!activeLoc && typeof window !== "undefined"
+          && typeof window.__ff_active_location_id === "string"
+          && window.__ff_active_location_id.trim()) {
+        activeLoc = window.__ff_active_location_id.trim();
+      }
+    } catch (_) {}
+
+    // Dedup against existing reorder-point alerts (any status) by product id.
+    const existingKeys = new Set();
+    try {
+      const existingSnap = await getDocs(
+        query(
+          collection(db, `salons/${salonId}/inboxItems`),
+          where("type", "==", "inventory_suggestion")
+        )
+      );
+      existingSnap.forEach((d) => {
+        const data = d.data() || {};
+        const nested = (data.data && typeof data.data === "object") ? data.data : {};
+        if (nested.kind !== "reorder_point") return;
+        const rowId = nested.rowId != null ? String(nested.rowId) : "";
+        if (rowId) existingKeys.add(rowId);
+      });
+    } catch (e) {
+      console.warn("[Inventory] reorder scan: existing alerts query failed", e);
+      return;
+    }
+
+    const [catSnap, prodSnap] = await Promise.all([
+      getDocs(collection(db, `salons/${salonId}/productCategories`)),
+      getDocs(collection(db, `salons/${salonId}/products`)),
+    ]);
+
+    // Category/subcategory name lookup for nicer alert text.
+    const catMap = new Map();
+    catSnap.forEach((d) => {
+      const c = { id: d.id, ...d.data() };
+      const subs = Array.isArray(c.subcategories) ? c.subcategories : [];
+      const subMap = new Map();
+      subs.forEach((s) => { if (s && s.id != null) subMap.set(String(s.id), s.name || ""); });
+      catMap.set(String(d.id), { name: c.name || "", subs: subMap });
+    });
+
+    let createdCount = 0;
+    for (const d of prodSnap.docs) {
+      const product = { id: d.id, ...d.data() };
+      const productId = String(product.id);
+      if (existingKeys.has(productId)) continue;
+
+      const inv = product.inventory && typeof product.inventory === "object" ? product.inventory : {};
+      const locO = activeLoc && product.locationOverrides && product.locationOverrides[activeLoc]
+        ? product.locationOverrides[activeLoc]
+        : null;
+
+      let reorderPoint = NaN;
+      if (locO && Number.isFinite(Number(locO.reorderPoint))) reorderPoint = Number(locO.reorderPoint);
+      else if (Number.isFinite(Number(inv.reorderPoint))) reorderPoint = Number(inv.reorderPoint);
+      if (!Number.isFinite(reorderPoint) || reorderPoint <= 0) continue;
+
+      const current = getProductStockForInventoryRow(product, activeLoc);
+      if (!Number.isFinite(current)) continue;
+      if (!(current <= reorderPoint)) continue;
+
+      const target = getProductTargetStockForInventoryRow(product, activeLoc);
+      let suggestedQty = Number.isFinite(target) && target > current ? target - current : reorderPoint;
+      suggestedQty = Math.max(1, Math.ceil(suggestedQty));
+
+      const catInfo = catMap.get(String(product.categoryId || "")) || { name: "", subs: new Map() };
+      const subName = product.subcategoryId != null
+        ? (catInfo.subs.get(String(product.subcategoryId)) || "")
+        : "";
+
+      const payload = {
+        tenantId: salonId,
+        locationId: activeLoc,
+        type: "inventory_suggestion",
+        status: "open",
+        priority: "high",
+        assignedTo: null,
+        sentToStaffIds: [],
+        sentToNames: [],
+        managerNotes: null,
+        responseNote: null,
+        decidedBy: null,
+        decidedAt: null,
+        needsInfoQuestion: null,
+        staffReply: null,
+        visibility: "managers_only",
+        unreadForManagers: true,
+        createdByUid: uid,
+        createdByStaffId: staffId,
+        createdByName: displayName,
+        createdByRole: role,
+        forUid: uid,
+        forStaffId: staffId,
+        forStaffName: displayName,
+        createdAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp(),
+        updatedAt: null,
+        data: {
+          kind: "reorder_point",
+          itemName: String(product.name || "").trim(),
+          groupName: "",
+          categoryId: String(product.categoryId || ""),
+          categoryName: catInfo.name || "",
+          subcategoryId: product.subcategoryId != null ? String(product.subcategoryId) : "",
+          subcategoryName: subName,
+          rowId: productId,
+          groupId: "default",
+          current: Math.round(current * 100) / 100,
+          reorderPoint: Math.round(reorderPoint * 100) / 100,
+          suggestedQty,
+        },
+      };
+      try {
+        await addDoc(collection(db, `salons/${salonId}/inboxItems`), payload);
+        existingKeys.add(productId);
+        createdCount += 1;
+      } catch (e) {
+        console.warn("[Inventory] reorder scan: create failed", productId, e);
+      }
+    }
+    if (createdCount > 0) {
+      console.log(`[Inventory] Reorder-point scan — created ${createdCount} alert(s)`);
+    } else {
+      console.log("[Inventory] Reorder-point scan — no new alerts");
+    }
+  } catch (e) {
+    console.warn("[Inventory] reorder scan failed", e);
+  }
+}
+
+// Exposed so the Products app can trigger an immediate reorder-point re-scan
+// right after a stock edit (force=true bypasses the once-per-session guard).
+try {
+  if (typeof window !== "undefined") {
+    window.ffScanProductReorderAlerts = (force) => { void scanProductReorderAlertsOnce(force !== false); };
+  }
+} catch (_) {}
 
 async function refreshInventoryInsightsAsync() {
   if (_invMainTab !== "insights") return;
@@ -6642,6 +7137,7 @@ function ensureGroupCellsForRows() {
 }
 
 function addInventoryRow() {
+  if (!ffCanManageInventory()) return;
   if (!ensureTableReadyForEdits()) return;
   _manageCategoriesOpen = false;
   _catManageDraftTree = null;
@@ -6665,6 +7161,7 @@ function addInventoryRow() {
 }
 
 function duplicateInventoryRow(rowId) {
+  if (!ffCanManageInventory()) return;
   if (!ensureTableReadyForEdits()) return;
   const idx = _rows.findIndex((r) => r.id === rowId);
   if (idx < 0) return;
@@ -6692,10 +7189,12 @@ function duplicateInventoryRow(rowId) {
 }
 
 function deleteInventoryRow(rowId) {
+  if (!ffCanManageInventory()) return;
   void (async () => {
     if (!_rows) return;
     const idx = _rows.findIndex((r) => r.id === rowId);
     if (idx < 0) return;
+    if (_rows[idx]._isProductRow) return;
     try {
       await commitPendingInventoryDeleteIfAny();
     } catch (e) {
@@ -6711,6 +7210,7 @@ function deleteInventoryRow(rowId) {
 
 /** Reorder _rows only; does not touch rowNo. */
 function reorderInventoryRowsInPlace(dragRowId, targetRowId, placeBefore) {
+  if (!ffCanManageInventory()) return;
   if (dragRowId === targetRowId || !_rows) return;
   const fi = _rows.findIndex((r) => r.id === dragRowId);
   const ti = _rows.findIndex((r) => r.id === targetRowId);
@@ -6797,6 +7297,7 @@ function bindInvRowDnDOnce(root) {
 }
 
 function addInventoryGroup() {
+  if (!ffCanManageInventory()) return;
   if (!ensureTableReadyForEdits()) return;
   _manageCategoriesOpen = false;
   _catManageDraftTree = null;
@@ -6812,6 +7313,7 @@ function addInventoryGroup() {
 }
 
 function removeInventoryGroup(groupId) {
+  if (!ffCanManageInventory()) return;
   void (async () => {
     if (!ensureTableReadyForEdits() || !groupId) return;
     const gi = _groups.findIndex((g) => g.id === groupId);
@@ -7021,6 +7523,7 @@ function handleInventoryInput(ev) {
   }
   const inv = t.getAttribute("data-inv");
   if (!inv) return;
+  if (!ffCanManageInventory()) return;
   if (!ensureTableReadyForEdits()) return;
 
   if (inv === "group-label") {
@@ -12200,7 +12703,7 @@ function renderSidebarHtml() {
   if (_invCatLoadError) {
     return `<p class="ff-inv2-aside-error">${escapeHtml(_invCatLoadError)}</p>`;
   }
-  return getCategoryTree().map((cat) => {
+  function renderCatBlock(cat) {
     const open = _expandedCategoryIds.has(cat.id);
     const subs = cat.subcategories
       .map((sub) => {
@@ -12208,15 +12711,33 @@ function renderSidebarHtml() {
         return `<div class="ff-inv2-sub${active ? " is-active" : ""}" data-sub-id="${escapeHtml(sub.id)}" role="button" tabindex="0">${escapeHtml(sub.name)}</div>`;
       })
       .join("");
+    const productBadge = cat.isProductCategory
+      ? `<span class="ff-inv2-cat-product-badge" style="font-size:10px;color:#7c3aed;margin-left:4px;">Products</span>`
+      : "";
     return `
 <div class="ff-inv2-cat${open ? " is-open" : ""}" data-cat-id="${escapeHtml(cat.id)}">
   <div class="ff-inv2-cat-row" data-cat-toggle="${escapeHtml(cat.id)}">
     <span class="ff-inv2-chevron" aria-hidden="true">&#8250;</span>
-    <span>${escapeHtml(cat.name)}</span>
+    <span>${escapeHtml(cat.name)}${productBadge}</span>
   </div>
   <div class="ff-inv2-sub-list" style="display:${open ? "block" : "none"}">${subs}</div>
 </div>`;
-  }).join("");
+  }
+  const tree = getCategoryTree();
+  const productCats = tree.filter((c) => c.isProductCategory);
+  const legacyCats = tree.filter((c) => !c.isProductCategory);
+  const labelCss = "font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.04em;padding:0 10px 6px;margin:0;";
+  const labelCssTop = "font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.04em;padding:10px 10px 6px;margin:0;";
+  let html = "";
+  if (legacyCats.length) {
+    html += `<p class="ff-inv2-aside-section-label" style="${labelCss}">Inventory lists</p>`;
+    html += legacyCats.map(renderCatBlock).join("");
+  }
+  if (productCats.length) {
+    html += `<p class="ff-inv2-aside-section-label" style="${legacyCats.length ? labelCssTop : labelCss}">From Products</p>`;
+    html += productCats.map(renderCatBlock).join("");
+  }
+  return html || `<p class="ff-inv2-aside-empty" style="padding:10px;font-size:12px;color:#9ca3af;">No categories yet. Add products or use + Add for inventory lists.</p>`;
 }
 
 function renderGroupHeaderTh(g) {
@@ -12359,7 +12880,7 @@ function renderManageCategoriesFooter() {
 function renderManageCategoriesModal() {
   if (!_manageCategoriesOpen) return "";
   ensureCatManageDraft();
-  const tree = _catManageDraftTree || getCategoryTree();
+  const tree = _catManageDraftTree || getLegacyCategoryTreeForManage();
   const blocks = tree.map((c) => renderManageCategoryBlock(c)).join("");
   return `<div class="ff-inv2-modal-backdrop ff-inv2-cat-manage-backdrop" id="ff-inv2-cat-manage-backdrop" role="dialog" aria-modal="true" aria-labelledby="ff-inv2-cat-manage-title">
   <div class="ff-inv2-modal-card ff-inv2-cat-manage-card">
@@ -12618,11 +13139,19 @@ function renderInvRowMenu() {
   if (!_invRowMenu) return "";
   const m = _invRowMenu;
   const rid = escapeHtml(m.rowId);
+  const row = Array.isArray(_rows) ? _rows.find((r) => r.id === m.rowId) : null;
+  const isProduct = !!(row && row._isProductRow);
+  const duplicateBtn = isProduct
+    ? ""
+    : `<button type="button" class="ff-inv2-row-menu-item" role="menuitem" data-inv-row-action="duplicate" data-row-id="${rid}">Duplicate row</button>`;
+  const deleteBtn = isProduct
+    ? ""
+    : `<button type="button" class="ff-inv2-row-menu-item ff-inv2-row-menu-item--danger" role="menuitem" data-inv-row-action="delete" data-row-id="${rid}">Delete row</button>`;
   return `<div class="ff-inv2-row-menu-backdrop" data-inv-row-menu-dismiss="1" aria-hidden="true"></div>
 <div class="ff-inv2-row-menu" role="menu" style="left:${m.left}px;top:${m.top}px">
   <button type="button" class="ff-inv2-row-menu-item" role="menuitem" data-inv-row-action="edit" data-row-id="${rid}">Edit row</button>
-  <button type="button" class="ff-inv2-row-menu-item" role="menuitem" data-inv-row-action="duplicate" data-row-id="${rid}">Duplicate row</button>
-  <button type="button" class="ff-inv2-row-menu-item ff-inv2-row-menu-item--danger" role="menuitem" data-inv-row-action="delete" data-row-id="${rid}">Delete row</button>
+  ${duplicateBtn}
+  ${deleteBtn}
 </div>`;
 }
 
@@ -13107,6 +13636,31 @@ function ensureInventoryScreenDelegates(root) {
   root.addEventListener("click", (ev) => {
     const t = ev.target;
     if (!(t instanceof HTMLElement)) return;
+
+    // View-only access: block every add/edit/remove interaction. Navigation,
+    // tab switching, and order viewing remain available.
+    if (!ffCanManageInventory()) {
+      if (
+        t.closest("[data-inv-cell]") ||
+        t.closest("[data-inv-url-edit]") ||
+        t.closest("[data-inv-row-menu-trigger]") ||
+        t.closest("[data-inv-row-action]") ||
+        t.closest("[data-inv-row-dnd]") ||
+        t.closest("[data-inv-row-delete-commit]") ||
+        t.closest("#ff-inv2-add-row") ||
+        t.closest("#ff-inv2-add-group") ||
+        t.closest("#ff-inv2-add-from-shared") ||
+        t.closest("[data-inv-import-shared-catalog]") ||
+        t.closest("[data-cat-manage-open]")
+      ) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (typeof window !== "undefined" && typeof window.showToast === "function") {
+          window.showToast("You have view-only access to Inventory.", "info");
+        }
+        return;
+      }
+    }
 
     const mobileCatStrip = t.closest("[data-inv-mobile-cat-strip]");
     if (mobileCatStrip && root.contains(mobileCatStrip)) {
@@ -13698,7 +14252,9 @@ function ensureInventoryScreenDelegates(root) {
     if (t.closest("[data-cat-manage-save]")) {
       ev.preventDefault();
       if (_catSaveBusy) return;
-      const draft = _catManageDraftTree ? cloneCategoryTree(_catManageDraftTree) : cloneCategoryTree(getCategoryTree());
+      const draft = _catManageDraftTree
+        ? cloneCategoryTree(_catManageDraftTree)
+        : cloneCategoryTree(getLegacyCategoryTreeForManage());
       const runSave = async () => {
         _catSaveBusy = true;
         mountOrRefreshMockUi();
@@ -14242,6 +14798,7 @@ if (typeof window !== "undefined") {
       _invOrderDraftSaveStatus = "idle";
       _invOrderDraftResumeToastShown = false;
       _invSuggestionsScannedThisSession = false;
+      _invReorderScannedThisSession = false;
       _invObPickPanelOpen = false;
       _invTableLoadedForSubId = null;
       _selectedSubcategoryId = null;
@@ -14268,6 +14825,7 @@ if (typeof window !== "undefined") {
             void refreshInventoryInsightsAsync();
           }
           void scanInventorySuggestionsOnce();
+          void scanProductReorderAlertsOnce();
         });
     } catch (e) {
       console.warn("[Inventory] location change handler failed", e);
@@ -14322,6 +14880,13 @@ function mountOrRefreshMockUi() {
   }
   injectMockStylesOnce();
   root.classList.add("ff-inv2-screen");
+
+  // View-only users can never land on a management tab (Create Order / Orders /
+  // Insights); snap them back to the read-only Inventory tab.
+  if (!ffCanManageInventory() && _invMainTab !== "inventory") {
+    _invMainTab = "inventory";
+    _invOrdersDetailOrderId = null;
+  }
 
   const meta = getSelectedSubMeta();
   const crumb =
@@ -14440,6 +15005,7 @@ ${renderInventoryDraftsPickerModal()}`;
   applyInvMobileColumnClasses();
   scheduleSyncInvColWidthsAfterLayout();
   syncOrderBuilderCategoryCheckboxIndeterminate(root);
+  _ffApplyInventoryReadonlyState(root);
 
   const asideBody = root.querySelector("#ff-inv2-aside-body");
   if (asideBody) {
@@ -14500,6 +15066,42 @@ ${renderInventoryDraftsPickerModal()}`;
   }
 }
 
+// When the current user lacks "Manage inventory" permission, lock the screen to
+// read-only: hide all add/edit/remove affordances and make every table cell
+// input non-editable. Write paths are also guarded individually, so this is a
+// UI affordance layer on top of those hard guards.
+function _ffApplyInventoryReadonlyState(root) {
+  try {
+    if (!root) return;
+    if (typeof document !== "undefined" && !document.getElementById("ff-inv2-readonly-style")) {
+      const st = document.createElement("style");
+      st.id = "ff-inv2-readonly-style";
+      st.textContent =
+        "#inventoryScreen.ff-inv2-readonly #ff-inv2-add-row," +
+        "#inventoryScreen.ff-inv2-readonly #ff-inv2-add-group," +
+        "#inventoryScreen.ff-inv2-readonly #ff-inv2-add-from-shared," +
+        "#inventoryScreen.ff-inv2-readonly [data-inv-import-shared-catalog]," +
+        "#inventoryScreen.ff-inv2-readonly [data-cat-manage-open]," +
+        "#inventoryScreen.ff-inv2-readonly [data-inv-row-menu-trigger]," +
+        "#inventoryScreen.ff-inv2-readonly .ff-inv2-row-kebab," +
+        "#inventoryScreen.ff-inv2-readonly [data-inv-row-dnd]," +
+        "#inventoryScreen.ff-inv2-readonly .ff-inv2-row-dnd-handle," +
+        "#inventoryScreen.ff-inv2-readonly [data-inv-url-edit]{display:none !important;}";
+      (document.head || document.documentElement).appendChild(st);
+    }
+    const canManage = ffCanManageInventory();
+    root.classList.toggle("ff-inv2-readonly", !canManage);
+    if (!canManage) {
+      root.querySelectorAll("input[data-inv], textarea[data-inv]").forEach((el) => {
+        try {
+          el.readOnly = true;
+          el.setAttribute("aria-readonly", "true");
+        } catch (_) {}
+      });
+    }
+  } catch (_) {}
+}
+
 function hideFullscreenPeersForInventory() {
   const ids = [
     "tasksScreen",
@@ -14507,6 +15109,8 @@ function hideFullscreenPeersForInventory() {
     "chatScreen",
     "mediaScreen",
     "ticketsScreen",
+    "servicesScreen",
+    "productsScreen",
     "trainingScreen",
     "scheduleScreen",
     "timeClockScreen",
@@ -14552,6 +15156,9 @@ export async function goToInventory() {
 
   screen.style.display = "flex";
   screen.style.flexDirection = "column";
+  // Other screens (e.g. Products) set pointer-events:none on inventoryScreen
+  // when they hide peers; restore it so the inventory UI stays clickable.
+  screen.style.pointerEvents = "auto";
 
   document.querySelectorAll(".btn-pill").forEach((b) => b.classList.remove("active"));
   const invBtn = document.getElementById("inventoryNavBtn");
@@ -14560,6 +15167,8 @@ export async function goToInventory() {
   // Smart Inventory Suggestions — run once per session, fire-and-forget.
   // Silently creates Inbox alerts for items forecast to run out within 3 days.
   void scanInventorySuggestionsOnce();
+  // Product reorder-point alerts — once per session, fire-and-forget.
+  void scanProductReorderAlertsOnce();
 
   void (async () => {
     try {
@@ -14571,6 +15180,15 @@ export async function goToInventory() {
       _persistedCategoryTree = [];
     } finally {
       _invCategoriesLoading = false;
+      // Drop the cached table so it rebuilds from freshly-loaded data. This is
+      // essential for product-backed subcategories: stock edited in the
+      // Products app must be re-read here instead of showing stale rows.
+      // Also clear the in-flight load flag (and bump the load sequence) so the
+      // post-load mount can start a clean reload instead of being blocked by a
+      // stale load that ran before the catalog refresh.
+      _invTableLoadedForSubId = null;
+      _invTableLoading = false;
+      _invTableLoadSeq++;
       mountOrRefreshMockUi();
     }
 

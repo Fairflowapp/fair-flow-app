@@ -90,7 +90,7 @@
       return window.goToInventory();
     }
     try {
-      await import('/inventory.js?v=20260516_inv_hide_source_details_mobile');
+      await import('/inventory.js?v=20260530_inv_readonly_tabs');
     } catch (e) {
       console.error('[Inventory mock] load failed', e);
       return;
@@ -5991,6 +5991,10 @@ dialog footer button, .code-dialog footer button {
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
               My Profile
             </button>
+            <button id="settingsBtn" type="button" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#111827;display:flex;align-items:center;gap:8px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              Settings
+            </button>
             <button id="userDropdownTestPingBtn" class="user-dropdown-item" style="display:none;">Test Ping (debug)</button>
             <div style="height:1px;background:var(--border);margin:4px 0;"></div>
             <button id="userDropdownLogoutBtn" class="user-dropdown-item" style="width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px;color:#ef4444;display:flex;align-items:center;gap:8px;">
@@ -7338,6 +7342,42 @@ dialog footer button, .code-dialog footer button {
                   <option value="NZD">NZD - New Zealand Dollar (NZ$)</option>
                 </optgroup>
               </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:16px;">
+              <div>
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+                  <div style="min-width:0;">
+                    <label for="userProfileProductTaxEnabled" style="display:block;font-size:12px;font-weight:600;color:#374151;">Product Tax</label>
+                    <div style="font-size:11px;color:#6b7280;margin-top:2px;line-height:1.4;">Sales tax applied to products on tickets.</div>
+                  </div>
+                  <label class="ff-toggle-switch" style="margin:0;"><input id="userProfileProductTaxEnabled" type="checkbox"><span class="ff-toggle-slider"></span></label>
+                </div>
+                <div id="userProfileProductTaxMsg" style="display:none;margin-top:6px;font-size:11px;color:#dc2626;line-height:1.4;">Enter a Product Tax Rate before enabling Product Tax.</div>
+                <div id="userProfileProductTaxRateRow" style="margin-top:8px;">
+                  <label for="userProfileProductTaxRate" style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">Product Tax Rate (%)</label>
+                  <div style="display:flex;align-items:center;gap:6px;max-width:160px;">
+                    <input id="userProfileProductTaxRate" type="number" min="0" max="100" step="0.01" placeholder="0" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:#fff;" />
+                    <span style="font-size:13px;color:#6b7280;font-weight:600;">%</span>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+                  <div style="min-width:0;">
+                    <label for="userProfileServiceTaxEnabled" style="display:block;font-size:12px;font-weight:600;color:#374151;">Service Tax</label>
+                    <div style="font-size:11px;color:#6b7280;margin-top:2px;line-height:1.4;">Sales tax applied to services on tickets.</div>
+                  </div>
+                  <label class="ff-toggle-switch" style="margin:0;"><input id="userProfileServiceTaxEnabled" type="checkbox"><span class="ff-toggle-slider"></span></label>
+                </div>
+                <div id="userProfileServiceTaxMsg" style="display:none;margin-top:6px;font-size:11px;color:#dc2626;line-height:1.4;">Enter a Service Tax Rate before enabling Service Tax.</div>
+                <div id="userProfileServiceTaxRateRow" style="margin-top:8px;">
+                  <label for="userProfileServiceTaxRate" style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">Service Tax Rate (%)</label>
+                  <div style="display:flex;align-items:center;gap:6px;max-width:160px;">
+                    <input id="userProfileServiceTaxRate" type="number" min="0" max="100" step="0.01" placeholder="0" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:#fff;" />
+                    <span style="font-size:13px;color:#6b7280;font-weight:600;">%</span>
+                  </div>
+                </div>
+              </div>
             </div>
             <div style="border-top:1px solid var(--border);padding-top:14px;">
               <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Default screen</label>
@@ -10942,6 +10982,62 @@ function ffCurrentUserHasTicketsViewPermission() {
 }
 window.ffCurrentUserHasTicketsViewPermission = ffCurrentUserHasTicketsViewPermission;
 
+// ===== Services / Products view + manage permissions =====
+// View defaults ON (only explicit false denies); when the key is unset we fall
+// back to the legacy tickets_view gate so existing staff keep their access.
+function ffStaffHasModuleViewPermission(staff, viewKey) {
+  if (!staff || typeof staff !== 'object') return true;
+  const p = staff.permissions;
+  if (!p || typeof p !== 'object') return true;
+  if (p[viewKey] === false) return false;
+  if (p[viewKey] === undefined || p[viewKey] === null) {
+    return !(p.tickets_view === false);
+  }
+  return ffStaffPermissionValueIsTrue(p[viewKey]);
+}
+// Manage defaults to the legacy behaviour (manager/admin/owner could edit) when
+// the key is unset; an explicit true/false on the staff doc always wins.
+function ffStaffHasModuleManagePermission(staff, manageKey) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = (staff.permissions && typeof staff.permissions === 'object') ? staff.permissions : {};
+  if (p[manageKey] === true) return true;
+  if (p[manageKey] === false) return false;
+  const r = String(staff.role || '').toLowerCase();
+  return r === 'manager' || r === 'admin' || r === 'owner' || r === 'assistant_manager';
+}
+
+function ffCurrentUserHasServicesViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasModuleViewPermission(ffResolveCurrentStaffRowFromFfStaffV1(), 'services_view');
+}
+function ffCurrentUserHasServicesManagePermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasModuleManagePermission(ffResolveCurrentStaffRowFromFfStaffV1(), 'services_manage');
+}
+function ffCurrentUserHasProductsViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasModuleViewPermission(ffResolveCurrentStaffRowFromFfStaffV1(), 'products_view');
+}
+function ffCurrentUserHasProductsManagePermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasModuleManagePermission(ffResolveCurrentStaffRowFromFfStaffV1(), 'products_manage');
+}
+window.ffCurrentUserHasServicesViewPermission = ffCurrentUserHasServicesViewPermission;
+window.ffCurrentUserHasServicesManagePermission = ffCurrentUserHasServicesManagePermission;
+window.ffCurrentUserHasProductsViewPermission = ffCurrentUserHasProductsViewPermission;
+window.ffCurrentUserHasProductsManagePermission = ffCurrentUserHasProductsManagePermission;
+
+function ffCurrentUserHasInventoryViewPermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasModuleViewPermission(ffResolveCurrentStaffRowFromFfStaffV1(), 'inventory_view');
+}
+function ffCurrentUserHasInventoryManagePermission() {
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  return ffStaffHasModuleManagePermission(ffResolveCurrentStaffRowFromFfStaffV1(), 'inventory_manage');
+}
+window.ffCurrentUserHasInventoryViewPermission = ffCurrentUserHasInventoryViewPermission;
+window.ffCurrentUserHasInventoryManagePermission = ffCurrentUserHasInventoryManagePermission;
+
 /** Chat templates & flows (gear + settings modal): chat_manage === true, or admin session (ffHasAdminAccess). */
 function ffStaffHasChatManagePermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
@@ -11407,8 +11503,8 @@ function ffUpdateAppsPanelPermissionVisibility() {
   setAppsTileVisible('.apps-panel-item[data-app="queue"]', (typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="tasks"]', (typeof ffCurrentUserHasTasksViewPermission === 'function' && ffCurrentUserHasTasksViewPermission()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="tickets"]', (typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission()) || trustLoadingApps);
-  setAppsTileVisible('.apps-panel-item[data-app="services"]', (typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission()) || trustLoadingApps);
-  setAppsTileVisible('.apps-panel-item[data-app="products"]', (typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission()) || trustLoadingApps);
+  setAppsTileVisible('.apps-panel-item[data-app="services"]', (typeof ffCurrentUserHasServicesViewPermission === 'function' && ffCurrentUserHasServicesViewPermission()) || trustLoadingApps);
+  setAppsTileVisible('.apps-panel-item[data-app="products"]', (typeof ffCurrentUserHasProductsViewPermission === 'function' && ffCurrentUserHasProductsViewPermission()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="inbox"]', (typeof ffCurrentUserHasInboxViewPermission === 'function' && ffCurrentUserHasInboxViewPermission()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="chat"]', tabUnlessExplicitOff('chat_view') || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="media"]', tabUnlessExplicitOff('media_view') || trustLoadingApps);
@@ -19975,6 +20071,19 @@ function goToUserProfile(section) {
     userProfileScreen.classList.remove('ff-overlay-from-schedule');
   }
   userProfileScreen.style.display = 'block';
+  userProfileScreen.style.pointerEvents = 'auto';
+
+  try {
+    document.body.style.overflow = '';
+    document.body.classList.remove('ff-avatar-dropdown-open');
+    var appsBd = document.getElementById('appsOverlayBackdrop');
+    var appsPn = document.getElementById('appsPanel');
+    if (appsBd) {
+      appsBd.style.display = 'none';
+      appsBd.style.pointerEvents = '';
+    }
+    if (appsPn) appsPn.style.display = 'none';
+  } catch (_) {}
 
   document.querySelectorAll('.btn-pill').forEach(function (b) { b.classList.remove('active'); });
   const settingsNavBtn = document.getElementById('settingsBtn');
@@ -20028,8 +20137,12 @@ function goToUserProfile(section) {
     // Wait a bit for DOM to be ready, then switch to the requested section
     setTimeout(() => {
       const handleMenuClick = window.__ff_handleMenuClick;
+      var openMobileDetail = false;
+      try {
+        openMobileDetail = !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
+      } catch (_) {}
       if (handleMenuClick) {
-        handleMenuClick(targetSection);
+        handleMenuClick(targetSection, { mobileDetail: openMobileDetail });
       } else {
         // Fallback: try to find and click the menu item
         const menuItem = document.querySelector(`.user-profile-menu-item[data-section="${targetSection}"]`);
@@ -32644,14 +32757,16 @@ if (document.readyState === 'loading') {
     if (clickX >= rect.left && clickX <= rect.right && 
         clickY >= rect.top && clickY <= rect.bottom) {
       
-      // Stop all event propagation immediately (capture phase)
+      const clickedItem = e.target && e.target.closest
+        ? e.target.closest('#userDropdownProfileBtn, #settingsBtn, #userDropdownLogoutBtn')
+        : null;
+
+      if (!clickedItem) return;
+
+      // Stop all event propagation immediately (capture phase) — only for known menu items
       e.preventDefault();
       e.stopPropagation();
       if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-      
-      const clickedItem = e.target && e.target.closest
-        ? e.target.closest('#userDropdownProfileBtn, #userDropdownLogoutBtn')
-        : null;
 
       // Close dropdown and remove body class
       dropdown.style.display = 'none';
@@ -32665,16 +32780,20 @@ if (document.readyState === 'loading') {
         });
       }
 
-      if (!clickedItem) {
-        return;
-      }
-
       if (clickedItem.id === 'userDropdownProfileBtn') {
         if (typeof goToMyProfile === 'function') {
           goToMyProfile();
         } else if (typeof window.goToMyProfile === 'function') {
           window.goToMyProfile();
         }
+      } else if (clickedItem.id === 'settingsBtn') {
+        setTimeout(function () {
+          if (typeof goToUserProfile === 'function') {
+            goToUserProfile('preferences');
+          } else if (typeof window.goToUserProfile === 'function') {
+            window.goToUserProfile('preferences');
+          }
+        }, 50);
       } else if (clickedItem.id === 'userDropdownLogoutBtn') {
         // Logout: trigger existing logout logic
         triggerLogout();
@@ -32992,7 +33111,12 @@ function initializeNavigationButtons() {
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
-                console.log("Settings clicked (onclick) -", target.id);
+                if (userAvatarDropdown) userAvatarDropdown.style.display = 'none';
+                document.body.classList.remove('ff-avatar-dropdown-open');
+                setTimeout(function () {
+                  if (typeof goToUserProfile === 'function') goToUserProfile('preferences');
+                  else if (typeof window.goToUserProfile === 'function') window.goToUserProfile('preferences');
+                }, 50);
                 return false;
               };
               
@@ -33365,7 +33489,7 @@ function initializeAppsPanel() {
             if (typeof window.goToInbox === 'function') {
               window.goToInbox();
             } else {
-              import('/inbox.js?v=20260505_inbox_btn_top_right_layout')
+              import('/inbox.js?v=20260530_reorder_delete')
                 .then(function (m) {
                   if (m && typeof m.goToInbox === 'function') {
                     window.goToInbox = m.goToInbox;
@@ -33395,7 +33519,7 @@ function initializeAppsPanel() {
                 console.error('[Apps Panel] Failed to open Products', err);
               });
             } else {
-              import('/products.js?v=20260529_products_cost_price')
+              import('/products.js?v=20260530_perms')
                 .then(function (m) {
                   if (m && typeof m.goToProducts === 'function') {
                     window.goToProducts = m.goToProducts;
@@ -35661,6 +35785,18 @@ function initializeAppsPanel() {
         childKeys: ['tickets_summary', 'tickets_archived']
       },
       {
+        groupTitle: 'Services',
+        parentKey: 'services_view',
+        parentMode: 'notFalse',
+        childKeys: ['services_manage']
+      },
+      {
+        groupTitle: 'Products',
+        parentKey: 'products_view',
+        parentMode: 'notFalse',
+        childKeys: ['products_manage']
+      },
+      {
         groupTitle: 'Tasks',
         parentKey: 'tasks_view',
         parentMode: 'strictTrue',
@@ -36063,6 +36199,34 @@ function initializeAppsPanel() {
           { key: 'history_export', label: 'Export history', desc: 'Export history data to a file' },
           { key: 'history_clear', label: 'Clear history', desc: 'Clear all history entries' }
         ]
+      },
+      {
+        title: 'Services',
+        permissions: [
+          {
+            key: 'services_view',
+            label: 'View Services',
+            desc: 'Open the Services catalog (Apps → Services). When off, the Services tile is hidden for this staff member.',
+            getValue: function (st) {
+              return (st.permissions || {}).services_view !== false;
+            }
+          },
+          { key: 'services_manage', label: 'Manage Services', desc: 'Add, edit, reorder, and delete services and service categories.' }
+        ]
+      },
+      {
+        title: 'Products',
+        permissions: [
+          {
+            key: 'products_view',
+            label: 'View Products',
+            desc: 'Open the Products catalog (Apps → Products). When off, the Products tile is hidden for this staff member.',
+            getValue: function (st) {
+              return (st.permissions || {}).products_view !== false;
+            }
+          },
+          { key: 'products_manage', label: 'Manage Products', desc: 'Add, edit, reorder, and delete products and product categories.' }
+        ]
       }
     ];
 
@@ -36331,6 +36495,7 @@ function initializeAppsPanel() {
     const r = (raw && typeof raw === 'object') ? raw : {};
     const svc = (r.serviceCommission && typeof r.serviceCommission === 'object') ? r.serviceCommission : {};
     const supply = (svc.supplyDeduction && typeof svc.supplyDeduction === 'object') ? svc.supplyDeduction : {};
+    const prod = (r.productCommission && typeof r.productCommission === 'object') ? r.productCommission : {};
     const hr = (r.hourly && typeof r.hourly === 'object') ? r.hourly : {};
     const clampPct = function(v) {
       const n = Number(v);
@@ -36351,6 +36516,12 @@ function initializeAppsPanel() {
           type: supply.type === 'percentage' ? 'percentage' : 'fixed',
           value: clampPay(supply.value),
         },
+      },
+      productCommission: {
+        enabled: prod.enabled === true,
+        type: prod.type === 'fixed' ? 'fixed' : 'percentage',
+        // Accept the new `value` field, falling back to legacy `basicPercent`.
+        value: clampPay(prod.value != null ? prod.value : prod.basicPercent),
       },
       hourly: {
         enabled: hr.enabled === true,
@@ -36414,6 +36585,8 @@ function initializeAppsPanel() {
     const svcOn = rules.serviceCommission.enabled;
     const supplyOn = rules.serviceCommission.supplyDeduction.enabled;
     const supplyType = rules.serviceCommission.supplyDeduction.type === 'percentage' ? 'percentage' : 'fixed';
+    const productOn = rules.productCommission.enabled;
+    const productType = rules.productCommission.type === 'fixed' ? 'fixed' : 'percentage';
     const hourlyOn = rules.hourly.enabled;
     const pointsGoal = ffNormalizeStaffMonthlyPointsGoal(staff);
 
@@ -36487,6 +36660,32 @@ function initializeAppsPanel() {
       </div>
     `;
 
+    const productCard = `
+      <div style="${cardStyle}">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          ${toggleHtml('ffEarningsProductCommissionToggle', productOn)}
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14px;font-weight:600;color:#111827;margin-bottom:2px;">Product Commission</div>
+            <div style="${subtle}">Default commission this staff member earns on product (retail) sales. Used as the default in Products &rarr; Staff. No payroll calculation is applied yet.</div>
+          </div>
+        </div>
+        <div id="ffEarningsProductCommissionBody" style="display:${productOn ? 'grid' : 'none'};grid-template-columns:minmax(150px,200px) minmax(120px,160px) auto;gap:10px;align-items:end;margin-top:16px;padding-top:16px;border-top:1px solid #f3f4f6;">
+          <div>
+            <label for="ffEarningsProductCommissionType" style="display:block;font-size:12px;color:#374151;font-weight:500;margin-bottom:6px;">Commission Type</label>
+            <select id="ffEarningsProductCommissionType" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;outline:none;font-size:13px;font-family:inherit;background:#fff;box-sizing:border-box;">
+              <option value="percentage" ${productType === 'percentage' ? 'selected' : ''}>Percentage (%)</option>
+              <option value="fixed" ${productType === 'fixed' ? 'selected' : ''}>Fixed Amount (${escapeHtml(currencySym)})</option>
+            </select>
+          </div>
+          <div>
+            <label for="ffEarningsProductCommissionValue" style="display:block;font-size:12px;color:#374151;font-weight:500;margin-bottom:6px;">Commission Value</label>
+            <input type="number" id="ffEarningsProductCommissionValue" value="${rules.productCommission.value || ''}" min="0" step="0.01" inputmode="decimal" placeholder="${productType === 'percentage' ? '10' : '5'}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;outline:none;font-size:13px;font-family:inherit;background:#fff;box-sizing:border-box;"/>
+          </div>
+          <span id="ffEarningsProductCommissionUnit" style="font-size:12px;color:#6b7280;padding-bottom:9px;">${productType === 'percentage' ? '%' : escapeHtml(currencySym)}</span>
+        </div>
+      </div>
+    `;
+
     const hourlyCard = `
       <div style="${cardStyle}">
         <div style="display:flex;align-items:flex-start;gap:12px;">
@@ -36538,6 +36737,7 @@ function initializeAppsPanel() {
           <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.45;">Define how this staff member is paid. These values will feed into Time Block and future payroll reports. All amounts are in <strong>${escapeHtml(currencyCode)}</strong> (set in business preferences).</p>
         </div>
         ${serviceCard}
+        ${productCard}
         ${hourlyCard}
         ${monthlyPointsGoalCard}
         <div id="ffEarningsSavedHint" aria-live="polite" style="font-size:11px;color:#10b981;font-weight:600;height:14px;margin-top:6px;opacity:0;transition:opacity 0.2s ease;">Saved</div>
@@ -36559,6 +36759,9 @@ function initializeAppsPanel() {
       const supplyToggle = container.querySelector('#ffEarningsSupplyDeductionToggle');
       const supplyTypeEl = container.querySelector('#ffEarningsSupplyDeductionType');
       const supplyValueEl = container.querySelector('#ffEarningsSupplyDeductionValue');
+      const productToggle = container.querySelector('#ffEarningsProductCommissionToggle');
+      const productTypeEl = container.querySelector('#ffEarningsProductCommissionType');
+      const productValueEl = container.querySelector('#ffEarningsProductCommissionValue');
       const hrToggle = container.querySelector('#ffEarningsHourlyToggle');
       const hrRate = container.querySelector('#ffEarningsHourlyRate');
       const greater = container.querySelector('#ffEarningsGreaterOfToggle');
@@ -36571,6 +36774,11 @@ function initializeAppsPanel() {
             type: supplyTypeEl && supplyTypeEl.value === 'percentage' ? 'percentage' : 'fixed',
             value: Number(supplyValueEl && supplyValueEl.value) || 0,
           },
+        },
+        productCommission: {
+          enabled: !!(productToggle && productToggle.checked),
+          type: productTypeEl && productTypeEl.value === 'fixed' ? 'fixed' : 'percentage',
+          value: Number(productValueEl && productValueEl.value) || 0,
         },
         hourly: {
           enabled: !!(hrToggle && hrToggle.checked),
@@ -36605,6 +36813,7 @@ function initializeAppsPanel() {
     };
     wireToggleVisual('ffEarningsServiceToggle');
     wireToggleVisual('ffEarningsSupplyDeductionToggle');
+    wireToggleVisual('ffEarningsProductCommissionToggle');
     wireToggleVisual('ffEarningsHourlyToggle');
     wireToggleVisual('ffEarningsGreaterOfToggle');
     wireToggleVisual('ffMonthlyPointsGoalToggle');
@@ -36634,6 +36843,34 @@ function initializeAppsPanel() {
         const isPct = supplyTypeEl.value === 'percentage';
         if (supplyValueEl) supplyValueEl.placeholder = isPct ? '15' : '30';
         if (supplyUnitEl) supplyUnitEl.textContent = isPct ? '%' : ffGetSalonCurrencySymbol();
+        persist();
+      });
+    }
+    const productToggleEl = container.querySelector('#ffEarningsProductCommissionToggle');
+    const productBody = container.querySelector('#ffEarningsProductCommissionBody');
+    if (productToggleEl && productBody) {
+      productToggleEl.addEventListener('change', function() {
+        productBody.style.display = productToggleEl.checked ? 'grid' : 'none';
+        persist();
+      });
+    }
+    const productTypeEl = container.querySelector('#ffEarningsProductCommissionType');
+    const productValueEl = container.querySelector('#ffEarningsProductCommissionValue');
+    const productUnitEl = container.querySelector('#ffEarningsProductCommissionUnit');
+    if (productTypeEl) {
+      productTypeEl.addEventListener('change', function() {
+        const isPct = productTypeEl.value === 'percentage';
+        if (productValueEl) productValueEl.placeholder = isPct ? '10' : '5';
+        if (productUnitEl) productUnitEl.textContent = isPct ? '%' : ffGetSalonCurrencySymbol();
+        persist();
+      });
+    }
+    if (productValueEl) {
+      productValueEl.addEventListener('blur', function() {
+        let n = Number(productValueEl.value);
+        if (!Number.isFinite(n) || n < 0) n = 0;
+        n = Math.round(n * 100) / 100;
+        productValueEl.value = n > 0 ? String(n) : '';
         persist();
       });
     }
@@ -36757,6 +36994,17 @@ function initializeAppsPanel() {
   window.ffGetStaffServiceCommissionPct = function(staffId) {
     const r = window.ffStaffEarningsRulesFor(staffId);
     return r.serviceCommission.enabled ? Number(r.serviceCommission.basicPercent) || 0 : 0;
+  };
+  // Default product commission for a staff member. Returns null when disabled.
+  // Shape: { type: 'percentage' | 'fixed', value: Number }. Not wired to
+  // payroll yet - exposed for the Products module + future calculations.
+  window.ffGetStaffProductCommission = function(staffId) {
+    const r = window.ffStaffEarningsRulesFor(staffId);
+    const pc = r.productCommission || {};
+    if (pc.enabled !== true) return null;
+    const value = Number(pc.value) || 0;
+    if (value <= 0) return null;
+    return { type: pc.type === 'fixed' ? 'fixed' : 'percentage', value: value };
   };
   window.ffGetStaffGreaterOfEnabled = function(staffId) {
     const r = window.ffStaffEarningsRulesFor(staffId);
@@ -37946,6 +38194,10 @@ function initializeAppsPanel() {
       tickets_view: d.tickets.view,
       tickets_summary: d.tickets.summary,
       tickets_archived: false,
+      services_view: true,
+      services_manage: false,
+      products_view: true,
+      products_manage: false,
       tasks_view: d.tasks.view,
       tasks_use: d.tasks.use,
       tasks_manage: d.tasks.manage,
@@ -38081,6 +38333,10 @@ function initializeAppsPanel() {
       tickets_view: d.tickets.view,
       tickets_summary: d.tickets.summary,
       tickets_archived: false,
+      services_view: true,
+      services_manage: true,
+      products_view: true,
+      products_manage: true,
       tasks_view: d.tasks.view,
       tasks_use: d.tasks.use,
       tasks_manage: d.tasks.manage,
@@ -38256,6 +38512,10 @@ function initializeAppsPanel() {
       tickets_view: d.tickets.view,
       tickets_summary: d.tickets.summary,
       tickets_archived: d.tickets.archived === true,
+      services_view: true,
+      services_manage: true,
+      products_view: true,
+      products_manage: true,
       tasks_view: d.tasks.view,
       tasks_use: d.tasks.use,
       tasks_manage: d.tasks.manage,
@@ -47310,6 +47570,43 @@ function initializeUserProfileMenu() {
   const defaultScreenSelect = document.getElementById('userProfileDefaultScreen');
   const salonTimeZoneSelect = document.getElementById('userProfileSalonTimeZone');
   const salonCurrencySelect = document.getElementById('userProfileSalonCurrency');
+  const productTaxEnabledInput = document.getElementById('userProfileProductTaxEnabled');
+  const productTaxRateInput = document.getElementById('userProfileProductTaxRate');
+  const productTaxRateRow = document.getElementById('userProfileProductTaxRateRow');
+  const productTaxMsg = document.getElementById('userProfileProductTaxMsg');
+  const serviceTaxEnabledInput = document.getElementById('userProfileServiceTaxEnabled');
+  const serviceTaxRateInput = document.getElementById('userProfileServiceTaxRate');
+  const serviceTaxRateRow = document.getElementById('userProfileServiceTaxRateRow');
+  const serviceTaxMsg = document.getElementById('userProfileServiceTaxMsg');
+
+  // A tax rate is valid only when it parses to a number > 0.
+  function ffTaxRateValue(inp) {
+    if (!inp) return 0;
+    const parsed = parseFloat(String(inp.value || '').replace(/[^0-9.]/g, ''));
+    return Number.isFinite(parsed) && parsed > 0 ? Math.min(100, parsed) : 0;
+  }
+
+  // Rate inputs are always visible so a rate can be entered before enabling.
+  function updateTaxRowVisibility() {
+    if (productTaxRateRow) productTaxRateRow.style.display = '';
+    if (serviceTaxRateRow) serviceTaxRateRow.style.display = '';
+  }
+
+  // The tax toggle and rate are independent. The toggle can be turned on/off
+  // freely; tax simply won't apply until a rate > 0 is entered. When a tax is
+  // ON but its rate is still 0/empty, we show a soft (non-blocking) hint.
+  function updateTaxHints() {
+    if (productTaxMsg) {
+      const show = !!(productTaxEnabledInput && productTaxEnabledInput.checked) && !(ffTaxRateValue(productTaxRateInput) > 0);
+      productTaxMsg.textContent = 'Set a Product Tax Rate above 0 for it to apply.';
+      productTaxMsg.style.display = show ? '' : 'none';
+    }
+    if (serviceTaxMsg) {
+      const show = !!(serviceTaxEnabledInput && serviceTaxEnabledInput.checked) && !(ffTaxRateValue(serviceTaxRateInput) > 0);
+      serviceTaxMsg.textContent = 'Set a Service Tax Rate above 0 for it to apply.';
+      serviceTaxMsg.style.display = show ? '' : 'none';
+    }
+  }
   
   function loadPreferences() {
     const prefs = getProfilePrefs();
@@ -47350,6 +47647,32 @@ function initializeUserProfileMenu() {
       const hasOpt = Array.from(salonCurrencySelect.options).some(function(o) { return o.value === cur; });
       salonCurrencySelect.value = hasOpt && cur ? cur : 'USD';
     }
+    {
+      const prefsObj = (window.settings && window.settings.preferences && typeof window.settings.preferences === 'object')
+        ? window.settings.preferences : {};
+      const legacyTax = Number(prefsObj.taxRate);
+      const legacyTaxValid = Number.isFinite(legacyTax) && legacyTax > 0;
+      // Product Tax — falls back to the legacy salesTax/taxRate value.
+      if (productTaxRateInput) {
+        const pr = (prefsObj.productTaxRate != null) ? Number(prefsObj.productTaxRate)
+                 : (legacyTaxValid ? legacyTax : NaN);
+        productTaxRateInput.value = (Number.isFinite(pr) && pr > 0) ? String(pr) : '';
+      }
+      if (productTaxEnabledInput) {
+        // Toggle reflects the saved choice independently of the rate.
+        productTaxEnabledInput.checked = (prefsObj.productTaxEnabled != null) ? !!prefsObj.productTaxEnabled : legacyTaxValid;
+      }
+      // Service Tax — defaults off / 0.
+      if (serviceTaxRateInput) {
+        const sr = (prefsObj.serviceTaxRate != null) ? Number(prefsObj.serviceTaxRate) : 0;
+        serviceTaxRateInput.value = (Number.isFinite(sr) && sr > 0) ? String(sr) : '';
+      }
+      if (serviceTaxEnabledInput) {
+        serviceTaxEnabledInput.checked = (prefsObj.serviceTaxEnabled != null) ? !!prefsObj.serviceTaxEnabled : false;
+      }
+      updateTaxRowVisibility();
+      updateTaxHints();
+    }
     renderUserProfileStaffCallMessageSettings();
   }
   
@@ -47358,6 +47681,19 @@ function initializeUserProfileMenu() {
     const nextWeekStartsOn = weekStartsOnSunday && weekStartsOnSunday.checked ? 'sunday' : 'monday';
     const salonTz = salonTimeZoneSelect ? String(salonTimeZoneSelect.value || '').trim() : '';
     const salonCur = salonCurrencySelect ? String(salonCurrencySelect.value || '').trim().toUpperCase() : '';
+    const parseTaxRate = (inp) => {
+      if (!inp) return 0;
+      const parsed = parseFloat(String(inp.value || '').replace(/[^0-9.]/g, ''));
+      return Number.isFinite(parsed) && parsed > 0 ? Math.min(100, parsed) : 0;
+    };
+    const productTaxRate = parseTaxRate(productTaxRateInput);
+    const serviceTaxRate = parseTaxRate(serviceTaxRateInput);
+    // Toggle and rate are independent — the toggle reflects the user's choice.
+    // Tax only applies when BOTH enabled and rate > 0 (enforced in the tax calc).
+    const productTaxEnabled = !!(productTaxEnabledInput && productTaxEnabledInput.checked);
+    const serviceTaxEnabled = !!(serviceTaxEnabledInput && serviceTaxEnabledInput.checked);
+    // Legacy salesTax/taxRate mirrors Product Tax so existing ticket logic stays unchanged.
+    const salonTaxRate = (productTaxEnabled && productTaxRate > 0) ? productTaxRate : NaN;
     prefs.preferences = {
       timeFormat: timeFormat24h && timeFormat24h.checked ? '24h' : '12h',
       defaultScreen: defaultScreenSelect ? defaultScreenSelect.value : 'queue'
@@ -47379,6 +47715,15 @@ function initializeUserProfileMenu() {
       } else {
         delete currentSettings.preferences.currency;
       }
+      if (Number.isFinite(salonTaxRate)) {
+        currentSettings.preferences.taxRate = salonTaxRate;
+      } else {
+        delete currentSettings.preferences.taxRate;
+      }
+      currentSettings.preferences.productTaxEnabled = productTaxEnabled;
+      currentSettings.preferences.productTaxRate = productTaxRate;
+      currentSettings.preferences.serviceTaxEnabled = serviceTaxEnabled;
+      currentSettings.preferences.serviceTaxRate = serviceTaxRate;
       localStorage.setItem('ffv24_settings', JSON.stringify(currentSettings));
       settings.preferences = {
         ...(settings.preferences && typeof settings.preferences === 'object' ? settings.preferences : {}),
@@ -47394,6 +47739,15 @@ function initializeUserProfileMenu() {
       } else {
         delete settings.preferences.currency;
       }
+      if (Number.isFinite(salonTaxRate)) {
+        settings.preferences.taxRate = salonTaxRate;
+      } else {
+        delete settings.preferences.taxRate;
+      }
+      settings.preferences.productTaxEnabled = productTaxEnabled;
+      settings.preferences.productTaxRate = productTaxRate;
+      settings.preferences.serviceTaxEnabled = serviceTaxEnabled;
+      settings.preferences.serviceTaxRate = serviceTaxRate;
       window.settings = settings;
       try {
         sessionStorage.removeItem('ff_birthday_today_parts_v1');
@@ -47423,7 +47777,12 @@ function initializeUserProfileMenu() {
       window.ffSavePreferencesSettings({
         weekStartsOn: nextWeekStartsOn,
         salonTimeZone: salonTz,
-        currency: salonCur
+        currency: salonCur,
+        taxRate: Number.isFinite(salonTaxRate) ? salonTaxRate : 0,
+        productTaxEnabled: productTaxEnabled,
+        productTaxRate: productTaxRate,
+        serviceTaxEnabled: serviceTaxEnabled,
+        serviceTaxRate: serviceTaxRate
       });
     }
     // Notify listening screens (Inventory, Tickets) to refresh money displays.
@@ -47464,6 +47823,28 @@ function initializeUserProfileMenu() {
   if (salonCurrencySelect && !salonCurrencySelect.__ffBound) {
     salonCurrencySelect.__ffBound = true;
     salonCurrencySelect.addEventListener('change', savePreferences);
+  }
+  if (productTaxEnabledInput && !productTaxEnabledInput.__ffBound) {
+    productTaxEnabledInput.__ffBound = true;
+    productTaxEnabledInput.addEventListener('change', function() { updateTaxHints(); savePreferences(); });
+  }
+  if (productTaxRateInput && !productTaxRateInput.__ffBound) {
+    productTaxRateInput.__ffBound = true;
+    const onProductRate = function() { updateTaxHints(); savePreferences(); };
+    productTaxRateInput.addEventListener('input', updateTaxHints);
+    productTaxRateInput.addEventListener('change', onProductRate);
+    productTaxRateInput.addEventListener('blur', onProductRate);
+  }
+  if (serviceTaxEnabledInput && !serviceTaxEnabledInput.__ffBound) {
+    serviceTaxEnabledInput.__ffBound = true;
+    serviceTaxEnabledInput.addEventListener('change', function() { updateTaxHints(); savePreferences(); });
+  }
+  if (serviceTaxRateInput && !serviceTaxRateInput.__ffBound) {
+    serviceTaxRateInput.__ffBound = true;
+    const onServiceRate = function() { updateTaxHints(); savePreferences(); };
+    serviceTaxRateInput.addEventListener('input', updateTaxHints);
+    serviceTaxRateInput.addEventListener('change', onServiceRate);
+    serviceTaxRateInput.addEventListener('blur', onServiceRate);
   }
   
   // Load preferences on initialization
@@ -56572,7 +56953,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/location-helpers.js?v=20260501_points", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
         { src: "/queue-cloud.js?v=20260522_reset_stale_mobile_fix", type: "module", delay: 1350 },
-        { src: "/tickets.js?v=20260515_tickets_badge_upgrade_edit_fix_2", type: "module", delay: 1400 },
+        { src: "/tickets.js?v=20260530_perms", type: "module", delay: 1400 },
         { src: "/tasks-cloud.js?v=20260505_unified_app", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
         { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
@@ -56582,21 +56963,17 @@ function hookSettingsGuard_DISABLED(){
         { src: "/schedule-ui.js?v=20260524_schedule_push_notify", type: "module", delay: 2300 },
         { src: "/dashboard.js?v=20260516_dashboard_class_first_recompute", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
-        { src: "/inbox.js?v=20260505_inbox_btn_top_right_layout", type: "module", delay: 2700 },
+        { src: "/inbox.js?v=20260530_reorder_delete", type: "module", delay: 2700 },
         { src: "/media-upload.js?v=20260517_media_tech_fast_url_actions", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260522_chat_unread_push", type: "module", delay: 2900 },
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
-<<<<<<< HEAD
-        { src: "/push-notifications.js?v=20260524_schedule_push_notify", type: "module", delay: 3500 },
-=======
         { src: "/push-notifications.js?v=20260524_ios_fcm_bridge_retry", type: "module", delay: 3500 },
->>>>>>> 1c03843 (Backup Mac before syncing PC)
-        { src: "/settings-cloud.js?v=20260501_points", type: "module", delay: 3600 },
+        { src: "/settings-cloud.js?v=20260530_tax_split", type: "module", delay: 3600 },
         { src: "/billing-cloud.js?v=20260519_internaloverride", type: "module", delay: 3650 }, // bumped: internal billing override (comped/free accounts) — adds parallel billing/override listener + override-aware render path
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },
-        { src: "/inventory.js?v=20260516_inv_hide_source_details_mobile", type: "module", delay: 4900 },
+        { src: "/inventory.js?v=20260530_inv_readonly_tabs", type: "module", delay: 4900 },
         { src: "/locations-manage.js?v=20260501_points", type: "module", delay: 5400 },
         { src: "/queue-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 5700 },
         { src: "/tickets-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 6000 },
@@ -57149,6 +57526,13 @@ function hookSettingsGuard_DISABLED(){
       text-align: right;
       font-variant-numeric: tabular-nums;
     }
+    /* Hide each tax column independently when its toggle is off. */
+    #ticketsScreen .tickets-summary-table-wrap.ff-hide-product-tax-col .tickets-summary-col-product-tax {
+      display: none;
+    }
+    #ticketsScreen .tickets-summary-table-wrap.ff-hide-service-tax-col .tickets-summary-col-service-tax {
+      display: none;
+    }
     #ticketsScreen .tickets-tab {
       padding:8px 14px; border:none; background:none; cursor:pointer;
       font-size:13px; font-weight:500; color:#374151;
@@ -57488,6 +57872,8 @@ function hookSettingsGuard_DISABLED(){
               <th scope="col" class="tickets-summary-col-num">Service Commission</th>
               <th scope="col" class="tickets-summary-col-num">Product Sales</th>
               <th scope="col" class="tickets-summary-col-num">Product Commission</th>
+              <th scope="col" class="tickets-summary-col-num tickets-summary-col-product-tax">Product Tax</th>
+              <th scope="col" class="tickets-summary-col-num tickets-summary-col-service-tax">Service Tax</th>
               <th scope="col" class="tickets-summary-col-num">Total Earned</th>
             </tr>
           </thead>
@@ -57531,8 +57917,10 @@ function hookSettingsGuard_DISABLED(){
     <!-- Diff -->
     <div id="ticketDiff" style="margin-bottom:12px;"></div>
     <!-- Total -->
-    <div id="ticketTotalBlock" style="display:none;margin-bottom:16px;padding:12px 16px;background:#166534;color:#fff;border-radius:8px;font-size:16px;font-weight:700;text-align:center;">
-      Total: <span id="ticketTotalAmount">$0.00</span>
+    <div id="ticketTotalBlock" style="display:none;margin-bottom:16px;padding:12px 16px;background:#166534;color:#fff;border-radius:8px;font-size:15px;font-weight:600;text-align:center;">
+      <div id="ticketSubtotalRow" style="display:none;font-size:13px;font-weight:500;margin-bottom:4px;opacity:0.92;">Subtotal: <span id="ticketSubtotalAmount">$0.00</span></div>
+      <div id="ticketSalesTaxRow" style="display:none;font-size:13px;font-weight:500;margin-bottom:6px;opacity:0.92;">Sales tax: <span id="ticketSalesTaxAmount">$0.00</span></div>
+      <div style="font-size:16px;font-weight:700;">Total: <span id="ticketTotalAmount">$0.00</span></div>
     </div>
     <div id="ticketCustomerPriceApprovedWrap" style="display:none;margin-bottom:14px;padding:10px 12px;background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;">
       <label style="display:flex;align-items:center;gap:10px;font-size:14px;color:#374151;cursor:pointer;margin:0;">
@@ -57608,7 +57996,7 @@ function hookSettingsGuard_DISABLED(){
   <div class="staff-modal-content" style="height:100%;overflow:hidden;display:flex;min-height:0;pointer-events:auto;">
     <div class="staff-sidebar" style="width:220px;flex-shrink:0;background:var(--muted);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;position:relative;">
       <div style="padding:20px 20px 16px 20px;display:flex;flex-direction:column;gap:8px;">
-        <button type="button" onclick="window.ffProductsAddCategory && window.ffProductsAddCategory()" class="btn-primary" style="width:100%;border:0;background:#7c3aed;background-image:none;color:#fff;border-radius:999px;padding:5px 10px;font-weight:800;cursor:pointer;box-shadow:0 4px 10px rgba(124,58,237,.2);font-size:11px;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;line-height:1.2;">
+        <button type="button" id="productsAddCategoryBtn" onclick="window.ffProductsAddCategory && window.ffProductsAddCategory()" class="btn-primary" style="width:100%;border:0;background:#7c3aed;background-image:none;color:#fff;border-radius:999px;padding:5px 10px;font-weight:800;cursor:pointer;box-shadow:0 4px 10px rgba(124,58,237,.2);font-size:11px;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;line-height:1.2;">
           <span style="font-size:13px;line-height:1;flex-shrink:0;">+</span>
           <span style="flex-shrink:0;">Add Category</span>
         </button>

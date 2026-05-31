@@ -381,6 +381,27 @@ service cloud.firestore {
       );
     }
 
+    /**
+     * Manage Services / Products: manager/admin/owner role (legacy) OR an
+     * explicit per-staff permission flag (services_manage / products_manage).
+     * Mirrors the client gates so a non-manager granted the flag can write.
+     */
+    function permModuleManageAllowed(salonId, manageKey) {
+      return isManager(salonId)
+        || (
+          mySalonStaffDocData(salonId) != null
+          && mySalonStaffDocData(salonId).permissions is map
+          && mySalonStaffDocData(salonId).permissions.keys().hasAny([manageKey])
+          && mySalonStaffDocData(salonId).permissions[manageKey] == true
+        );
+    }
+    function permServicesManageAllowed(salonId) {
+      return permModuleManageAllowed(salonId, 'services_manage');
+    }
+    function permProductsManageAllowed(salonId) {
+      return permModuleManageAllowed(salonId, 'products_manage');
+    }
+
     /** Default is allow (mirrors UI `points_view_own !== false`); only explicit false denies. */
     function permPointsOwnAllowed(salonId) {
       return mySalonStaffDocData(salonId) != null && (
@@ -1233,24 +1254,24 @@ service cloud.firestore {
     // All salon members can read; Manager/Admin/Owner can CRUD
     match /salons/{salonId}/services/{serviceId} {
       allow read: if belongsToSalon(salonId);
-      allow create, update, delete: if isManager(salonId);
+      allow create, update, delete: if permServicesManageAllowed(salonId);
     }
 
     match /salons/{salonId}/serviceCategories/{catId} {
       allow read: if belongsToSalon(salonId);
-      allow create, update, delete: if isManager(salonId);
+      allow create, update, delete: if permServicesManageAllowed(salonId);
     }
 
     // ===== PRODUCT CATALOG =====
     // Phase 1: standalone product catalog, separate from inventory/tickets.
     match /salons/{salonId}/products/{productId} {
       allow read: if belongsToSalon(salonId);
-      allow create, update, delete: if isManager(salonId);
+      allow create, update, delete: if permProductsManageAllowed(salonId);
     }
 
     match /salons/{salonId}/productCategories/{catId} {
       allow read: if belongsToSalon(salonId);
-      allow create, update, delete: if isManager(salonId);
+      allow create, update, delete: if permProductsManageAllowed(salonId);
     }
 
     // Account-level shared setup used by multi-location ticket service catalog.
@@ -1258,23 +1279,23 @@ service cloud.firestore {
     // same salon membership helpers while keeping these paths account-scoped.
     match /accounts/{accountId}/shared/serviceCatalog {
       allow read: if belongsToSalon(accountId);
-      allow create, update: if isManager(accountId);
+      allow create, update: if permServicesManageAllowed(accountId);
       allow delete: if false;
 
       match /items/{serviceId} {
         allow read: if belongsToSalon(accountId);
-        allow create, update, delete: if isManager(accountId);
+        allow create, update, delete: if permServicesManageAllowed(accountId);
       }
     }
 
     match /accounts/{accountId}/shared/serviceCategories {
       allow read: if belongsToSalon(accountId);
-      allow create, update: if isManager(accountId);
+      allow create, update: if permServicesManageAllowed(accountId);
       allow delete: if false;
 
       match /items/{categoryId} {
         allow read: if belongsToSalon(accountId);
-        allow create, update, delete: if isManager(accountId);
+        allow create, update, delete: if permServicesManageAllowed(accountId);
       }
     }
 
@@ -1426,7 +1447,7 @@ service cloud.firestore {
 
     match /accounts/{accountId}/locations/{locationId}/serviceOverrides/{serviceId} {
       allow read: if belongsToSalon(accountId);
-      allow create, update, delete: if isManager(accountId);
+      allow create, update, delete: if permServicesManageAllowed(accountId);
     }
 
     match /accounts/{accountId}/locations/{locationId}/settings/{settingId} {

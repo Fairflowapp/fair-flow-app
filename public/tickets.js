@@ -21,6 +21,12 @@ import { db, auth } from "/app.js?v=20260510_firestore_lp";
 let currentUserProfile = null;
 let salonServices = [];
 let serviceCategories = [];
+// Retail products (salon-wide, with per-location + per-staff overrides) shown in the ticket picker.
+let salonProducts = [];
+let productCategories = [];
+let _productsUnsub = null;
+let _productCatsUnsub = null;
+let _productsSubSalonId = null;
 let currentTickets = [];
 /** Real-time first page (newest). Older pages appended via Load more (not live-updated). */
 const TICKETS_PAGE_SIZE = 200;
@@ -268,6 +274,25 @@ let _ffCatalogModalMode = 'location'; // 'location' | 'shared'
 let _servicesUnsub = null;
 let _serviceCatsUnsub = null;
 let _catalogSubSalonId = null;
+
+// Permission gates for the Services catalog. Default to allow when the helper
+// isn't available yet (e.g. very early load) so we never hard-block the owner.
+function ffCanViewServices() {
+  try {
+    if (typeof window.ffCurrentUserHasServicesViewPermission === 'function') {
+      return window.ffCurrentUserHasServicesViewPermission();
+    }
+  } catch (_) {}
+  return true;
+}
+function ffCanManageServices() {
+  try {
+    if (typeof window.ffCurrentUserHasServicesManagePermission === 'function') {
+      return window.ffCurrentUserHasServicesManagePermission();
+    }
+  } catch (_) {}
+  return true;
+}
 
 function getTicketsAccountId() {
   const candidates = [
@@ -573,6 +598,7 @@ async function loadLocationCatalogForManager() {
 }
 
 async function saveSharedService(service) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   const accountId = getTicketsAccountId();
   if (!accountId) throw new Error('No account');
   const payload = {
@@ -583,6 +609,8 @@ async function saveSharedService(service) {
     updatedAt: serverTimestamp()
   };
   if (Number.isFinite(Number(service.sortOrder))) payload.sortOrder = Number(service.sortOrder);
+  // "Charge Tax" — only write when explicitly provided (merge-safe).
+  if (typeof service.taxable === 'boolean') payload.taxable = service.taxable;
   if (service.id) {
     await ensureSharedServiceCatalogDoc(accountId);
     await setDoc(doc(sharedServiceCatalogItemsRef(accountId), service.id), payload, { merge: true });
@@ -599,6 +627,7 @@ async function saveSharedService(service) {
 }
 
 async function saveSharedServiceCategory(cat) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   const accountId = getTicketsAccountId();
   if (!accountId) throw new Error('No account');
   const payload = {
@@ -620,9 +649,18 @@ async function saveSharedServiceCategory(cat) {
 }
 
 async function deleteSharedServiceCategory(categoryId) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   const accountId = getTicketsAccountId();
   if (!accountId || !categoryId) return;
   await deleteDoc(doc(sharedServiceCategoryItemsRef(accountId), categoryId));
+}
+
+async function deleteSharedService(serviceId) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
+  const accountId = getTicketsAccountId();
+  if (!accountId || !serviceId) return;
+  await deleteDoc(doc(sharedServiceCatalogItemsRef(accountId), serviceId));
+  console.log('[SharedServicesUI] deleted shared service', { serviceId });
 }
 
 async function saveSharedServiceOverride(serviceId, price) {
@@ -914,6 +952,43 @@ function subscribeServiceCatalog() {
   });
 }
 
+/** Live subscribe to products + productCategories for the current salon so the
+ *  ticket picker can offer retail products. Products are salon-wide; per-location
+ *  availability/price and per-staff availability are resolved at render time.
+ *  Idempotent; switching salon auto-rebinds. */
+function subscribeProductsCatalog() {
+  const salonId = currentUserProfile?.salonId;
+  if (!salonId) return;
+  if (_productsSubSalonId === salonId && (_productsUnsub || _productCatsUnsub)) return;
+  if (_productsUnsub) { try { _productsUnsub(); } catch (_) {} _productsUnsub = null; }
+  if (_productCatsUnsub) { try { _productCatsUnsub(); } catch (_) {} _productCatsUnsub = null; }
+  _productsSubSalonId = salonId;
+  try {
+    _productsUnsub = onSnapshot(
+      collection(db, `salons/${salonId}/products`),
+      (snap) => {
+        salonProducts = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+        try { setupTicketsUI(); } catch (_) {}
+      },
+      (err) => console.warn('[Tickets] products subscription error', err)
+    );
+  } catch (e) { console.warn('[Tickets] products subscription failed', e); }
+  try {
+    _productCatsUnsub = onSnapshot(
+      collection(db, `salons/${salonId}/productCategories`),
+      (snap) => {
+        productCategories = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+        try { setupTicketsUI(); } catch (_) {}
+      },
+      (err) => console.warn('[Tickets] product categories subscription error', err)
+    );
+  } catch (e) { console.warn('[Tickets] product categories subscription failed', e); }
+}
+
 async function loadServices() {
   if (!currentUserProfile?.salonId) return [];
   if (_catalogSource !== 'location') {
@@ -958,6 +1033,7 @@ async function loadServices() {
 }
 
 async function saveService(service) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   if (!currentUserProfile?.salonId) throw new Error('No salon');
   const payload = {
     name: String(service.name || '').trim(),
@@ -966,6 +1042,9 @@ async function saveService(service) {
     sortOrder: Number(service.sortOrder) || 0,
     updatedAt: serverTimestamp()
   };
+  // "Charge Tax" — only write when explicitly provided so reorder/other saves
+  // (which omit it) preserve the existing value.
+  if (typeof service.taxable === 'boolean') payload.taxable = service.taxable;
   if (service.id) {
     await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, service.id), payload);
     return service.id;
@@ -982,6 +1061,7 @@ async function saveService(service) {
 }
 
 async function deleteService(serviceId) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   if (!currentUserProfile?.salonId || !serviceId) return;
   await deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, serviceId));
 }
@@ -1015,6 +1095,7 @@ async function loadServiceCategories() {
 }
 
 async function saveServiceCategory(cat) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   if (!currentUserProfile?.salonId) throw new Error('No salon');
   const payload = {
     name: String(cat.name || '').trim(),
@@ -1036,6 +1117,7 @@ async function saveServiceCategory(cat) {
 }
 
 async function deleteServiceCategory(categoryId) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   if (!currentUserProfile?.salonId || !categoryId) return;
   const count = salonServices.filter(s => s.categoryId === categoryId).length;
   if (count > 0) throw new Error(`Cannot delete: ${count} service(s) use this category. Move them first.`);
@@ -1193,6 +1275,214 @@ function getServicesGroupedByCategory() {
     if ((grouped['__other__']?.services || []).length > 0) ordered['__other__'] = grouped['__other__'];
   }
   return ordered;
+}
+
+// =====================
+// Products in the ticket picker
+// A product appears only when (a) it is active, (b) it is enabled for the active
+// location, and (c) the current staff member is allowed to sell it (per-product
+// Staff "Available" override). Price is pulled from the product (per-location
+// override if present, otherwise retailPrice).
+// =====================
+function getProductStaffOverrides(product) {
+  return product && product.staffOverrides && typeof product.staffOverrides === 'object'
+    ? product.staffOverrides
+    : {};
+}
+
+function getProductStaffOverrideForCurrentTicketUser(product) {
+  const overrides = getProductStaffOverrides(product);
+  const ids = getCurrentTicketStaffIdCandidates();
+  for (const id of ids) {
+    if (overrides[id] && typeof overrides[id] === 'object') return overrides[id];
+  }
+  return null;
+}
+
+function getProductLocationOverrideForActiveLocation(product) {
+  const activeLoc = getActiveLocationIdForTickets();
+  if (!activeLoc) return null;
+  const lo = product && product.locationOverrides && typeof product.locationOverrides === 'object'
+    ? product.locationOverrides
+    : {};
+  const o = lo[activeLoc];
+  return (o && typeof o === 'object') ? o : null;
+}
+
+function isTicketPickerProductAvailableForActiveLocation(product) {
+  if (!product || !String(product.name || '').trim()) return false;
+  if (product.active === false) return false;
+  const locOverride = getProductLocationOverrideForActiveLocation(product);
+  if (locOverride && locOverride.enabled === false) return false;
+  const staffOverride = getProductStaffOverrideForCurrentTicketUser(product);
+  if (staffOverride && staffOverride.enabled === false) return false;
+  return true;
+}
+
+function getTicketPriceForProductAndActiveLocation(product) {
+  const base = Number(product?.retailPrice) || 0;
+  const locOverride = getProductLocationOverrideForActiveLocation(product);
+  const price = locOverride && Number.isFinite(Number(locOverride.price)) ? Number(locOverride.price) : base;
+  return Number.isFinite(price) ? price : base;
+}
+
+function getProductsGroupedByCategory() {
+  const grouped = {};
+  if (productCategories.length > 0) {
+    productCategories.forEach((c) => { grouped[c.id] = { label: c.name, products: [] }; });
+  }
+  grouped['__other__'] = { label: 'Other', products: [] };
+  salonProducts.filter(isTicketPickerProductAvailableForActiveLocation).forEach((p) => {
+    const catId = p.categoryId || null;
+    const key = (catId && grouped[catId]) ? catId : '__other__';
+    grouped[key].products.push(p);
+  });
+  const ordered = {};
+  if (productCategories.length > 0) {
+    productCategories.forEach((c) => {
+      const bucket = grouped[c.id];
+      if (bucket && (bucket.products || []).length > 0) ordered[c.id] = bucket;
+    });
+  }
+  if ((grouped['__other__']?.products || []).length > 0) ordered['__other__'] = grouped['__other__'];
+  return ordered;
+}
+
+// Sales tax — Product Tax and Service Tax are configured in Settings → Business Format.
+//   • Product Tax applies when productTaxEnabled && productTaxRate>0, on taxable product lines.
+//   • Service Tax applies when serviceTaxEnabled && serviceTaxRate>0, AND the service's own
+//     Charge Tax flag (service.taxable===true) is set.
+function getSalonTaxRateForTickets() {
+  try {
+    if (typeof window.ffGetSalonTaxRate === 'function') {
+      const n = Number(window.ffGetSalonTaxRate());
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+  } catch (_) {}
+  return 0;
+}
+
+// Resolve Product/Service tax config from Settings. Each is { enabled, rate }.
+function getTicketTaxConfig() {
+  let product = { enabled: false, rate: 0 };
+  let service = { enabled: false, rate: 0 };
+  try {
+    if (typeof window.ffGetProductTaxSettings === 'function') {
+      const p = window.ffGetProductTaxSettings();
+      if (p && typeof p === 'object') product = { enabled: p.enabled === true, rate: Number(p.rate) || 0 };
+    }
+  } catch (_) {}
+  try {
+    if (typeof window.ffGetServiceTaxSettings === 'function') {
+      const s = window.ffGetServiceTaxSettings();
+      if (s && typeof s === 'object') service = { enabled: s.enabled === true, rate: Number(s.rate) || 0 };
+    }
+  } catch (_) {}
+  return { product, service };
+}
+
+// True when at least one tax type is active — drives the Summary "Sales Tax" column visibility.
+function ffAnyTicketTaxActive() {
+  const cfg = getTicketTaxConfig();
+  return (cfg.product.enabled && cfg.product.rate > 0) || (cfg.service.enabled && cfg.service.rate > 0);
+}
+
+function isTicketProductLine(line) {
+  return !!(line && line.lineType === 'product');
+}
+
+// Service lines are the default (legacy lines have no lineType).
+function isTicketServiceLine(line) {
+  return !!line && line.lineType !== 'product';
+}
+
+// Tax for one line → { amount, rate } (rate is the % applied, 0 when none).
+function computeLineSalesTax(line, taxConfig) {
+  const cfg = taxConfig || getTicketTaxConfig();
+  const price = Number(line && line.ticketPrice) || 0;
+  if (price <= 0) return { amount: 0, rate: 0 };
+  if (isTicketProductLine(line)) {
+    if (!cfg.product.enabled || !(cfg.product.rate > 0) || line.taxable !== true) return { amount: 0, rate: 0 };
+    return { amount: Math.round(price * cfg.product.rate) / 100, rate: cfg.product.rate };
+  }
+  // Service line — requires the service's own Charge Tax flag.
+  if (!cfg.service.enabled || !(cfg.service.rate > 0) || line.taxable !== true) return { amount: 0, rate: 0 };
+  return { amount: Math.round(price * cfg.service.rate) / 100, rate: cfg.service.rate };
+}
+
+// Back-compat wrapper (amount only). Second arg may be a taxConfig object.
+function computeLineSalesTaxAmount(line, taxConfig) {
+  return computeLineSalesTax(line, taxConfig).amount;
+}
+
+function computeTicketTotalsFromLines(lines) {
+  const arr = Array.isArray(lines) ? lines : [];
+  const cfg = getTicketTaxConfig();
+  let subtotal = 0;
+  let productTax = 0;
+  let serviceTax = 0;
+  const ratesUsed = new Set();
+  arr.forEach((line) => {
+    const price = Number(line.ticketPrice) || 0;
+    subtotal += price;
+    const t = computeLineSalesTax(line, cfg);
+    if (isTicketProductLine(line)) productTax += t.amount;
+    else serviceTax += t.amount;
+    if (t.amount > 0 && t.rate > 0) ratesUsed.add(t.rate);
+  });
+  subtotal = Math.round(subtotal * 100) / 100;
+  productTax = Math.round(productTax * 100) / 100;
+  serviceTax = Math.round(serviceTax * 100) / 100;
+  const salesTax = Math.round((productTax + serviceTax) * 100) / 100;
+  // Show a single "(X%)" label only when one rate applied; otherwise hide it.
+  const taxRate = ratesUsed.size === 1 ? Array.from(ratesUsed)[0] : 0;
+  return {
+    subtotal,
+    salesTax,
+    productTax,
+    serviceTax,
+    total: Math.round((subtotal + salesTax) * 100) / 100,
+    taxRate
+  };
+}
+
+function getTicketSalesTaxAmount(ticket, lines) {
+  const stored = Number(ticket?.salesTax);
+  if (Number.isFinite(stored) && stored >= 0 && ticket != null && ticket.salesTax != null) {
+    return Math.round(stored * 100) / 100;
+  }
+  const arr = Array.isArray(lines) ? lines : [];
+  const cfg = getTicketTaxConfig();
+  const sum = arr.reduce((acc, line) => acc + computeLineSalesTax(line, cfg).amount, 0);
+  return Math.round(sum * 100) / 100;
+}
+
+// Split a ticket's tax into product vs service → { productTax, serviceTax }.
+// Prefers stored per-type values; falls back to recomputing from lines.
+function getTicketTaxBreakdown(ticket, lines) {
+  const storedProduct = Number(ticket?.productTax);
+  const storedService = Number(ticket?.serviceTax);
+  const hasStoredProduct = ticket != null && ticket.productTax != null && Number.isFinite(storedProduct) && storedProduct >= 0;
+  const hasStoredService = ticket != null && ticket.serviceTax != null && Number.isFinite(storedService) && storedService >= 0;
+  if (hasStoredProduct || hasStoredService) {
+    return {
+      productTax: hasStoredProduct ? Math.round(storedProduct * 100) / 100 : 0,
+      serviceTax: hasStoredService ? Math.round(storedService * 100) / 100 : 0
+    };
+  }
+  const arr = Array.isArray(lines) ? lines : [];
+  const cfg = getTicketTaxConfig();
+  let productTax = 0;
+  let serviceTax = 0;
+  arr.forEach((line) => {
+    const t = computeLineSalesTax(line, cfg);
+    if (isTicketProductLine(line)) productTax += t.amount;
+    else serviceTax += t.amount;
+  });
+  return {
+    productTax: Math.round(productTax * 100) / 100,
+    serviceTax: Math.round(serviceTax * 100) / 100
+  };
 }
 
 // =====================
@@ -1673,6 +1963,10 @@ async function createTicket(payload) {
     technicianStaffId: currentUserProfile.staffId || currentUserProfile.uid,
     technicianName: currentUserProfile.name || currentUserProfile.email || 'Technician',
     performedLines: Array.isArray(payload.performedLines) ? payload.performedLines : [],
+    subtotal: Number(payload.subtotal) || Number(payload.total) || 0,
+    salesTax: Number(payload.salesTax) || 0,
+    productTax: Number(payload.productTax) || 0,
+    serviceTax: Number(payload.serviceTax) || 0,
     total: Number(payload.total) || 0,
     forUids: Array.isArray(payload.forUids) ? payload.forUids : [],
     forNames: Array.isArray(payload.forNames) ? payload.forNames : [],
@@ -2341,6 +2635,44 @@ function findSummaryServiceForLine(line) {
   return salonServices.find((service) => normalizeTicketTechName(service?.name || '') === lineName) || null;
 }
 
+function findSummaryProductForLine(line) {
+  const productId = String(line?.productId || '').trim();
+  if (productId) {
+    const byId = salonProducts.find((product) => String(product?.id || '').trim() === productId);
+    if (byId) return byId;
+  }
+  const lineName = normalizeTicketTechName(line?.serviceName || '');
+  if (!lineName) return null;
+  return salonProducts.find((product) => normalizeTicketTechName(product?.name || '') === lineName) || null;
+}
+
+function getSummaryProductStaffOverride(product, staff, ticket) {
+  const overrides = getProductStaffOverrides(product);
+  const ids = getSummaryStaffIdCandidates(staff, ticket);
+  for (const id of ids) {
+    if (overrides[id] && typeof overrides[id] === 'object') return overrides[id];
+  }
+  return null;
+}
+
+function getSummaryProductCommissionRule(product, staff, ticket) {
+  const override = getSummaryProductStaffOverride(product, staff, ticket);
+  if (override?.commission && Number.isFinite(Number(override.commission.value))) {
+    return {
+      type: override.commission.type === 'fixed' ? 'fixed' : 'percentage',
+      value: Number(override.commission.value)
+    };
+  }
+  const staffId = staff?.id || staff?.staffId || ticket?.technicianStaffId || '';
+  try {
+    if (typeof window.ffGetStaffProductCommission === 'function') {
+      const def = window.ffGetStaffProductCommission(staffId);
+      if (def && Number.isFinite(Number(def.value))) return def;
+    }
+  } catch (_) {}
+  return null;
+}
+
 function getSummaryStaffOverride(service, staff, ticket) {
   const overrides = getServiceStaffOverrides(service);
   const ids = getSummaryStaffIdCandidates(staff, ticket);
@@ -2461,6 +2793,9 @@ function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employ
         serviceCommission: 0,
         productSales: 0,
         productCommission: 0,
+        salesTax: 0,
+        productTax: 0,
+        serviceTax: 0,
         totalEarned: 0
       });
     }
@@ -2472,8 +2807,29 @@ function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employ
     if (nm && g.name === 'Unknown') g.name = nm;
     g.tickets += 1;
     const lines = Array.isArray(t.performedLines) ? t.performedLines : [];
-    g.services += lines.length;
+    // Use the stored per-type tax when present (locks historical financials);
+    // otherwise recompute live from the CURRENT catalog Charge Tax flags.
+    const storedProductTax = (t && t.productTax != null && Number.isFinite(Number(t.productTax))) ? Number(t.productTax) : null;
+    const storedServiceTax = (t && t.serviceTax != null && Number.isFinite(Number(t.serviceTax))) ? Number(t.serviceTax) : null;
+    const hasStoredTax = storedProductTax != null || storedServiceTax != null;
+    const taxCfg = getTicketTaxConfig();
+    let liveProductTax = 0;
+    let liveServiceTax = 0;
     for (const line of lines) {
+      if (isTicketProductLine(line)) {
+        const productPrice = Number(line?.ticketPrice) || 0;
+        const product = findSummaryProductForLine(line);
+        const commissionRule = getSummaryProductCommissionRule(product, staff, t);
+        const commissionAmount = computeSummaryCommissionAmount(productPrice, commissionRule);
+        g.productSales += productPrice;
+        g.productCommission += commissionAmount;
+        const productTaxable = product ? (product.taxable === true) : (line.taxable === true);
+        if (taxCfg.product.enabled && taxCfg.product.rate > 0 && productTaxable && productPrice > 0) {
+          liveProductTax += Math.round(productPrice * taxCfg.product.rate) / 100;
+        }
+        continue;
+      }
+      g.services += 1;
       const servicePrice = Number(line?.ticketPrice) || 0;
       const service = findSummaryServiceForLine(line);
       const deductionRule = getSummarySupplyDeductionRule(service, staff, t);
@@ -2484,9 +2840,16 @@ function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employ
       g.serviceSales += servicePrice;
       g.supplyDeductions += deductionAmount;
       g.serviceCommission += commissionAmount;
+      const serviceTaxable = service ? (service.taxable === true) : (line.taxable === true);
+      if (taxCfg.service.enabled && taxCfg.service.rate > 0 && serviceTaxable && servicePrice > 0) {
+        liveServiceTax += Math.round(servicePrice * taxCfg.service.rate) / 100;
+      }
     }
-    g.productSales += 0;
-    g.productCommission += 0;
+    const pTax = hasStoredTax ? (storedProductTax || 0) : Math.round(liveProductTax * 100) / 100;
+    const sTax = hasStoredTax ? (storedServiceTax || 0) : Math.round(liveServiceTax * 100) / 100;
+    g.productTax += pTax;
+    g.serviceTax += sTax;
+    g.salesTax += Math.round((pTax + sTax) * 100) / 100;
   }
   const sorted = [...groups.values()].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
@@ -2499,6 +2862,9 @@ function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employ
     serviceCommission: 0,
     productSales: 0,
     productCommission: 0,
+    salesTax: 0,
+    productTax: 0,
+    serviceTax: 0,
     totalEarned: 0
   };
   sorted.forEach((r) => {
@@ -2510,6 +2876,9 @@ function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employ
     totals.serviceCommission += r.serviceCommission;
     totals.productSales += r.productSales;
     totals.productCommission += r.productCommission;
+    totals.salesTax += r.salesTax;
+    totals.productTax += r.productTax;
+    totals.serviceTax += r.serviceTax;
     totals.totalEarned += r.totalEarned;
   });
   const summaryRows = sorted.map((r) => ({
@@ -2521,6 +2890,9 @@ function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employ
     serviceCommission: r.serviceCommission,
     productSales: r.productSales,
     productCommission: r.productCommission,
+    salesTax: r.salesTax,
+    productTax: r.productTax,
+    serviceTax: r.serviceTax,
     totalEarned: r.totalEarned
   }));
   return { summaryRows, totals };
@@ -2531,6 +2903,14 @@ function buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId) {
 }
 
 function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totals) {
+  // Each tax column shows only when its own toggle is active (enabled + rate > 0).
+  if (wrap && wrap.classList) {
+    const cfg = getTicketTaxConfig();
+    const productActive = cfg.product.enabled && cfg.product.rate > 0;
+    const serviceActive = cfg.service.enabled && cfg.service.rate > 0;
+    wrap.classList.toggle('ff-hide-product-tax-col', !productActive);
+    wrap.classList.toggle('ff-hide-service-tax-col', !serviceActive);
+  }
   if (!summaryRows || summaryRows.length === 0) {
     wrap.style.display = 'none';
     if (emptyMsg) {
@@ -2551,6 +2931,8 @@ function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, tot
       <td class="tickets-summary-col-num">${formatSummaryMoney(r.serviceCommission)}</td>
       <td class="tickets-summary-col-num">${formatSummaryMoney(r.productSales)}</td>
       <td class="tickets-summary-col-num">${formatSummaryMoney(r.productCommission)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-product-tax">${formatSummaryMoney(r.productTax)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-service-tax">${formatSummaryMoney(r.serviceTax)}</td>
       <td class="tickets-summary-col-num">${formatSummaryMoney(r.totalEarned)}</td>
     </tr>`
     )
@@ -2564,6 +2946,8 @@ function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, tot
       <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.serviceCommission)}</td>
       <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.productSales)}</td>
       <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.productCommission)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-product-tax">${formatSummaryMoney(totals?.productTax)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-service-tax">${formatSummaryMoney(totals?.serviceTax)}</td>
       <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.totalEarned)}</td>
     </tr>`;
   if (emptyMsg) {
@@ -2631,6 +3015,17 @@ async function loadAndRenderTicketsSummary() {
   try {
     if (!salonServices.length) {
       try { await loadServices(); } catch (catalogErr) { console.warn('[Tickets] Summary catalog load failed', catalogErr); }
+    }
+    if (!salonProducts.length) {
+      try {
+        subscribeProductsCatalog();
+        const prodSnap = await getDocs(collection(db, `salons/${salonId}/products`));
+        salonProducts = prodSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+      } catch (catalogErr) {
+        console.warn('[Tickets] Summary products catalog load failed', catalogErr);
+      }
     }
     const closedTickets = await fetchClosedTicketsForSummary(salonId, fromStr, toStr);
     if (seq !== _ticketsSummaryFetchSeq) return;
@@ -3662,7 +4057,8 @@ function renderPerformedLines(lines, readOnly = false) {
       const hasOverride = basePrice > 0 && basePrice !== tickPrice;
       const priceText = hasOverride ? `base ${ffTicketMoney(basePrice)} → ${ffTicketMoney(tickPrice)}` : ffTicketMoney(tickPrice);
       const notePart = l.note ? ` <span style="color:#6b7280;font-size:11px;">— ${escapeHtml(l.note)}</span>` : '';
-      return `<div style="padding:6px 10px;background:#f9fafb;border-radius:6px;margin-bottom:4px;font-size:12px;">${escapeHtml(l.serviceName)} — ${priceText}${notePart}</div>`;
+      const prodTag = l.lineType === 'product' ? ' <span style="font-size:9px;color:#7c3aed;background:#ede9fe;padding:1px 5px;border-radius:4px;vertical-align:middle;">Product</span>' : '';
+      return `<div style="padding:6px 10px;background:#f9fafb;border-radius:6px;margin-bottom:4px;font-size:12px;">${escapeHtml(l.serviceName)}${prodTag} — ${priceText}${notePart}</div>`;
     }).join('');
     return;
   }
@@ -3673,7 +4069,7 @@ function renderPerformedLines(lines, readOnly = false) {
     const isOverride = tickPrice !== catPrice;
     return `
     <div class="ticket-line" data-idx="${i}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 8px;background:#f9fafb;border-radius:6px;margin-bottom:4px;">
-      <span style="flex:1;min-width:100px;font-size:12px;font-weight:500;">${escapeHtml(l.serviceName)}</span>
+      <span style="flex:1;min-width:100px;font-size:12px;font-weight:500;">${escapeHtml(l.serviceName)}${l.lineType === 'product' ? ' <span style="font-size:9px;color:#7c3aed;background:#ede9fe;padding:1px 5px;border-radius:4px;vertical-align:middle;">Product</span>' : ''}</span>
       <span style="font-size:10px;color:#9ca3af;">base ${ffTicketMoney(catPrice)}</span>
       <label style="display:flex;align-items:center;gap:4px;font-size:12px;">
         <span style="color:#6b7280;">${ffTicketCurSym()}</span>
@@ -3750,6 +4146,27 @@ function addServiceToTicket(service) {
     catalogPrice,
     ticketPrice: price,
     isOverride: price !== catalogPrice,
+    taxable: service.taxable === true,
+    note: null
+  });
+  document.getElementById('ticketLinesData').value = JSON.stringify(lines);
+  renderPerformedLines(lines);
+  updateTicketDiff();
+  updateTicketTotal(lines);
+}
+
+function addProductToTicket(product) {
+  const lines = JSON.parse(document.getElementById('ticketLinesData').value || '[]');
+  const price = getTicketPriceForProductAndActiveLocation(product);
+  const catalogPrice = Number(product.retailPrice) || price;
+  lines.push({
+    lineType: 'product',
+    productId: product.id,
+    serviceName: product.name,
+    catalogPrice,
+    ticketPrice: price,
+    isOverride: price !== catalogPrice,
+    taxable: product.taxable === true,
     note: null
   });
   document.getElementById('ticketLinesData').value = JSON.stringify(lines);
@@ -3787,10 +4204,22 @@ function updateTicketDiff() {
 function updateTicketTotal(lines) {
   const el = Array.isArray(lines) ? null : document.getElementById('ticketLinesData');
   const arr = Array.isArray(lines) ? lines : (el ? JSON.parse(el.value || '[]') : []);
-  const total = arr.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
+  const { subtotal, salesTax, total, taxRate } = computeTicketTotalsFromLines(arr);
   const block = document.getElementById('ticketTotalBlock');
   const amountEl = document.getElementById('ticketTotalAmount');
+  const subRow = document.getElementById('ticketSubtotalRow');
+  const subEl = document.getElementById('ticketSubtotalAmount');
+  const taxRow = document.getElementById('ticketSalesTaxRow');
+  const taxEl = document.getElementById('ticketSalesTaxAmount');
   if (block) block.style.display = arr.length > 0 ? 'block' : 'none';
+  const showTax = salesTax > 0;
+  if (subRow) subRow.style.display = showTax ? 'block' : 'none';
+  if (taxRow) taxRow.style.display = showTax ? 'block' : 'none';
+  if (subEl) subEl.textContent = ffTicketMoney(subtotal);
+  if (taxEl) {
+    const pctLabel = taxRate > 0 ? ` (${taxRate}%)` : '';
+    taxEl.textContent = ffTicketMoney(salesTax) + pctLabel;
+  }
   if (amountEl) amountEl.textContent = ffTicketMoney(total);
   const sendNewBtn = document.getElementById('ticketSendNewBtn');
   const priceWrap = document.getElementById('ticketCustomerPriceApprovedWrap');
@@ -3854,14 +4283,18 @@ async function saveTicket() {
   const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
   const linesEl = document.getElementById('ticketLinesData');
   const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
-  const total = lines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
+  const totals = computeTicketTotalsFromLines(lines);
 
   try {
     if (editingTicketId) {
       await updateTicket(editingTicketId, {
         customerName,
         performedLines: lines,
-        total,
+        subtotal: totals.subtotal,
+        salesTax: totals.salesTax,
+        productTax: totals.productTax,
+        serviceTax: totals.serviceTax,
+        total: totals.total,
         forUids,
         forNames,
         _action: 'edited_after_send'
@@ -3879,7 +4312,11 @@ async function saveTicket() {
       await createTicket({
         customerName,
         performedLines: lines,
-        total,
+        subtotal: totals.subtotal,
+        salesTax: totals.salesTax,
+        productTax: totals.productTax,
+        serviceTax: totals.serviceTax,
+        total: totals.total,
         forUids,
         forNames
       });
@@ -3898,15 +4335,19 @@ async function doSendNewTicket() {
   const linesEl = document.getElementById('ticketLinesData');
   const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
   if (lines.length === 0) {
-    showToast('Add at least one service to send a ticket.', 'error');
+    showToast('Add at least one service or product to send a ticket.', 'error');
     return;
   }
-  const total = lines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
+  const total = computeTicketTotalsFromLines(lines);
   try {
     await createTicket({
       customerName,
       performedLines: lines,
-      total,
+      subtotal: total.subtotal,
+      salesTax: total.salesTax,
+      productTax: total.productTax,
+      serviceTax: total.serviceTax,
+      total: total.total,
       forUids,
       forNames,
       status: 'READY_FOR_CHECKOUT',
@@ -3943,11 +4384,15 @@ async function doCloseTicket(ticketId) {
     const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
     const linesEl = document.getElementById('ticketLinesData');
     const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
-    const total = lines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
+    const totals = computeTicketTotalsFromLines(lines);
     await closeTicket(ticketId, {
       customerName,
       performedLines: lines,
-      total,
+      subtotal: totals.subtotal,
+      salesTax: totals.salesTax,
+      productTax: totals.productTax,
+      serviceTax: totals.serviceTax,
+      total: totals.total,
       forUids,
       forNames
     });
@@ -4053,12 +4498,13 @@ function renderServicesCatalogV2() {
       ? 'Services can be managed with availability and pricing by location.'
       : 'Categories and services are saved for the active location only.';
   }
+  const canManageServices = ffCanManageServices();
   if (addSharedBtn) {
     addSharedBtn.style.display = 'none';
     addSharedBtn.textContent = '+ Add Service';
   }
   if (addCategoryBtn) {
-    addCategoryBtn.style.display = 'inline-block';
+    addCategoryBtn.style.display = canManageServices ? 'inline-block' : 'none';
     addCategoryBtn.textContent = '+ Add Category';
   }
 
@@ -4159,6 +4605,10 @@ function renderServicesCatalogV2() {
     html += `</div></div>`;
   }
   list.innerHTML = html;
+  if (!ffCanManageServices()) {
+    list.querySelectorAll('.ffcat-addsvc-btn, .ffcat-menu-btn, .ffsvc-menu-btn').forEach((el) => { el.style.display = 'none'; });
+    list.querySelectorAll('[data-drag-kind], .ff-services-drag-handle, .ff-catalog-drag-handle').forEach((el) => { el.style.display = 'none'; el.removeAttribute('draggable'); });
+  }
   _ffWireCatalogDragDrop(list);
 
   // Wire: expand/collapse on header click (but not when clicking the menu).
@@ -4244,6 +4694,10 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
   }
 
   list.innerHTML = html;
+  if (!ffCanManageServices()) {
+    list.querySelectorAll('.ffcat-addsvc-btn, .ffcat-menu-btn, .ffsvc-menu-btn').forEach((el) => { el.style.display = 'none'; });
+    list.querySelectorAll('[data-drag-kind], .ff-services-drag-handle, .ff-catalog-drag-handle').forEach((el) => { el.style.display = 'none'; el.removeAttribute('draggable'); });
+  }
 
   list.querySelectorAll('.ff-services-cat-toggle').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -4429,13 +4883,13 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
       </div>
     `;
     content.innerHTML = `
-      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
+      <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
           <div style="font-size:14px;font-weight:700;color:#111827;">Details</div>
           <button type="button" id="servicesCategoryEditBtn" style="padding:7px 12px;background:#fff;color:#7c3aed;border:1px solid #e9d5ff;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Edit</button>
         </div>
         <div style="display:flex;flex-direction:column;border-top:1px solid #f3f4f6;">
-          <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+          <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
             <div style="font-size:12px;color:#6b7280;">Category name</div>
             <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(selectedCategory.name || '')}</div>
           </div>
@@ -4495,8 +4949,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
     wireServicesStaffTab(root, selected);
   } else {
     content.innerHTML = isInlineEditingService ? `
-    <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
+    <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
         <div style="font-size:14px;font-weight:700;color:#111827;">Details</div>
         <div style="display:flex;align-items:center;gap:8px;">
           <button type="button" id="servicesInlineEditCancelBtn" style="padding:7px 12px;background:#fff;color:#374151;border:1px solid #e5e7eb;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Cancel</button>
@@ -4504,40 +4958,51 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
         </div>
       </div>
       <div style="display:flex;flex-direction:column;border-top:1px solid #f3f4f6;">
-        <label style="display:grid;grid-template-columns:160px 1fr;gap:16px;align-items:center;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <span style="font-size:12px;color:#6b7280;">Service Name</span>
-          <input id="servicesInlineEditName" type="text" value="${escapeHtml(selected.name || '')}" style="width:100%;max-width:420px;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
+          <input id="servicesInlineEditName" type="text" value="${escapeHtml(selected.name || '')}" style="width:100%;max-width:420px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
         </label>
-        <label style="display:grid;grid-template-columns:160px 1fr;gap:16px;align-items:center;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <span style="font-size:12px;color:#6b7280;">Category</span>
-          <select id="servicesInlineEditCategory" style="width:100%;max-width:420px;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;background:#fff;box-sizing:border-box;">
+          <select id="servicesInlineEditCategory" style="width:100%;max-width:420px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
             <option value="">No category</option>
             ${categoryOptions}
           </select>
         </label>
-        <label style="display:grid;grid-template-columns:160px 1fr;gap:16px;align-items:center;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <span style="font-size:12px;color:#6b7280;">Price</span>
-          <input id="servicesInlineEditPrice" type="number" min="0" step="0.01" value="${escapeHtml(String(basePrice))}" style="width:100%;max-width:180px;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
+          <input id="servicesInlineEditPrice" type="number" min="0" step="0.01" value="${escapeHtml(String(basePrice))}" style="width:100%;max-width:180px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+        </label>
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:12px;color:#6b7280;">Charge Tax</span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <span class="ff-toggle-switch"><input id="servicesInlineEditTaxable" type="checkbox" ${selected.taxable === true ? 'checked' : ''}><span class="ff-toggle-slider"></span></span>
+            <span style="font-size:11px;color:#9ca3af;line-height:1.35;">Apply Service Tax to this service (only when Service Tax is enabled in Settings).</span>
+          </span>
         </label>
       </div>
     </div>
   ` : `
-    <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
+    <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
         <div style="font-size:14px;font-weight:700;color:#111827;">Details</div>
         <button type="button" id="servicesDetailEditBtn" style="padding:7px 12px;background:#fff;color:#7c3aed;border:1px solid #e9d5ff;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Edit</button>
       </div>
       <div style="display:flex;flex-direction:column;border-top:1px solid #f3f4f6;">
-        <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <div style="font-size:12px;color:#6b7280;">Service name</div>
           <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(selected.name || '')}</div>
         </div>
-        <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <div style="font-size:12px;color:#6b7280;">Price</div>
           <div style="font-size:13px;color:#111827;font-weight:600;">${ffTicketMoney(basePrice)}</div>
         </div>
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:12px;color:#6b7280;">Charge Tax</div>
+          <div style="font-size:13px;color:#111827;font-weight:600;">${selected.taxable === true ? 'On' : 'Off'}</div>
+        </div>
         ${durationText ? `
-        <div style="display:grid;grid-template-columns:160px 1fr;gap:16px;padding:12px 0;border-bottom:1px solid #f3f4f6;">
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <div style="font-size:12px;color:#6b7280;">Duration</div>
           <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(durationText)}</div>
         </div>` : ''}
@@ -4554,22 +5019,31 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
       renderServicesCatalogV2();
     });
   });
+  const canManageServicesDetail = ffCanManageServices();
   const actionsBtn = root.querySelector('#servicesDetailActionsBtn');
   if (actionsBtn) {
-    actionsBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      _ffShowServiceMenu(actionsBtn, String(selected.id));
-    });
+    if (!canManageServicesDetail) {
+      actionsBtn.style.display = 'none';
+    } else {
+      actionsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _ffShowServiceMenu(actionsBtn, String(selected.id));
+      });
+    }
   }
   const editBtn = root.querySelector('#servicesDetailEditBtn');
   if (editBtn) {
-    editBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      _ffServicesInlineEditServiceId = selected.id;
-      renderServicesCatalogV2();
-    });
+    if (!canManageServicesDetail) {
+      editBtn.style.display = 'none';
+    } else {
+      editBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _ffServicesInlineEditServiceId = selected.id;
+        renderServicesCatalogV2();
+      });
+    }
   }
   const cancelBtn = root.querySelector('#servicesInlineEditCancelBtn');
   if (cancelBtn) {
@@ -4596,6 +5070,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
       }
       const categoryId = categoryInput?.value || null;
       const defaultPrice = parseFloat(priceInput?.value) || 0;
+      const taxableInput = root.querySelector('#servicesInlineEditTaxable');
+      const taxable = !!(taxableInput && taxableInput.checked);
       saveBtn.disabled = true;
       saveBtn.style.opacity = '0.7';
       try {
@@ -4607,6 +5083,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
             defaultPrice,
             active: selected.active !== false,
           sortOrder: selected.sortOrder,
+            taxable,
           });
           await loadSharedCatalogForManager();
         } else {
@@ -4616,12 +5093,14 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
             categoryId,
             defaultPrice,
           sortOrder: Number.isFinite(Number(selected.sortOrder)) ? Number(selected.sortOrder) : 0,
+            taxable,
           });
           await Promise.all([loadServiceCategories(), loadServices()]);
         }
         selected.name = name;
         selected.categoryId = categoryId;
         selected.defaultPrice = defaultPrice;
+        selected.taxable = taxable;
         _ffServicesInlineEditServiceId = null;
         if (categoryId) _ffOpenCats.add(categoryId);
         renderServicesCatalogV2();
@@ -4644,7 +5123,7 @@ function renderServicesLocationsTabHtml(service) {
   if (!service || !service.id) return '';
   if (_ffCatalogModalMode !== 'shared' && !service.isSharedService) {
     return `
-      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+      <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
         <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Locations</div>
         <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">This service is still using the older location catalog. Open Services after the catalog migration completes to manage locations here.</p>
       </div>
@@ -4652,7 +5131,7 @@ function renderServicesLocationsTabHtml(service) {
   }
   if (!Array.isArray(locations) || locations.length === 0) {
     return `
-      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+      <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
         <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Locations</div>
         <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">No active locations found.</p>
       </div>
@@ -4676,20 +5155,20 @@ function renderServicesLocationsTabHtml(service) {
     const hasPriceOverride = Number.isFinite(Number(override.price));
     const shownPrice = hasPriceOverride ? Number(override.price) : basePrice;
     return `
-      <div class="ff-services-location-card" data-location-id="${escapeHtml(loc.id)}" style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;">
+      <div class="ff-services-location-card" data-location-id="${escapeHtml(loc.id)}" style="padding:10px 12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;">
           <div>
-            <div style="font-size:14px;font-weight:700;color:#111827;line-height:1.25;">${escapeHtml(loc.name || loc.label || 'Location')}</div>
-            <div style="margin-top:3px;font-size:12px;color:#6b7280;">${enabled ? 'Available at this location' : 'Not available at this location'}</div>
+            <div style="font-size:13px;font-weight:700;color:#111827;line-height:1.25;">${escapeHtml(loc.name || loc.label || 'Location')}</div>
+            <div style="margin-top:2px;font-size:11px;color:#6b7280;">${enabled ? 'Available at this location' : 'Not available at this location'}</div>
           </div>
           <label class="staff-permission-toggle" style="flex:0 0 auto;">
             <input type="checkbox" class="ff-services-location-enabled" ${enabled ? 'checked' : ''}>
             <span class="staff-permission-toggle-slider"></span>
           </label>
         </div>
-        <div style="display:grid;grid-template-columns:120px minmax(120px,180px) auto;gap:10px;align-items:center;">
+        <div style="display:grid;grid-template-columns:100px minmax(110px,170px) auto;gap:8px;align-items:center;">
           <div style="font-size:12px;color:#6b7280;">Price</div>
-          <input type="number" min="0" step="0.01" class="ff-services-location-price" value="${escapeHtml(String(shownPrice))}" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
+          <input type="number" min="0" step="0.01" class="ff-services-location-price" value="${escapeHtml(String(shownPrice))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <button type="button" class="ff-services-location-save" style="padding:7px 12px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Save</button>
             ${hasPriceOverride ? `<button type="button" class="ff-services-location-reset" style="padding:7px 12px;background:#fff;color:#6b7280;border:1px solid #e5e7eb;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Reset to default</button>` : ''}
@@ -4700,11 +5179,11 @@ function renderServicesLocationsTabHtml(service) {
     `;
   }).join('');
   return `
-    <div style="display:flex;flex-direction:column;gap:12px;">
-      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:4px;">Locations</div>
-        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">Manage availability and location-specific pricing for this service.</p>
-        ${loading ? '<div style="margin-top:10px;font-size:12px;color:#9ca3af;">Loading location overrides...</div>' : ''}
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <div style="padding:12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:3px;">Locations</div>
+        <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.4;">Manage availability and location-specific pricing for this service.</p>
+        ${loading ? '<div style="margin-top:8px;font-size:12px;color:#9ca3af;">Loading location overrides...</div>' : ''}
       </div>
       ${cards}
     </div>
@@ -4866,7 +5345,7 @@ function renderServicesStaffTabHtml(service) {
   if (!service || !service.id) return '';
   if (!staffRows.length) {
     return `
-      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+      <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
         <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Staff</div>
         <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">No eligible service providers found.</p>
       </div>
@@ -4903,24 +5382,24 @@ function renderServicesStaffTabHtml(service) {
       ? (hasSupplyDeductionValueOverride ? 'Override' : 'Override OFF')
       : supplyDeductionDefaultLabel;
     return `
-      <div class="ff-services-staff-card" data-staff-id="${escapeHtml(staffId)}" style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;">
+      <div class="ff-services-staff-card" data-staff-id="${escapeHtml(staffId)}" style="padding:10px 12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;">
           <div>
-            <div style="font-size:14px;font-weight:700;color:#111827;line-height:1.25;">${escapeHtml(getServiceStaffName(staff))}</div>
-            <div style="margin-top:3px;font-size:12px;color:#6b7280;">${enabled ? 'Available for this service' : 'Not available for this service'}</div>
+            <div style="font-size:13px;font-weight:700;color:#111827;line-height:1.25;">${escapeHtml(getServiceStaffName(staff))}</div>
+            <div style="margin-top:2px;font-size:11px;color:#6b7280;">${enabled ? 'Available for this service' : 'Not available for this service'}</div>
           </div>
           <label class="staff-permission-toggle" style="flex:0 0 auto;">
             <input type="checkbox" class="ff-services-staff-enabled" ${enabled ? 'checked' : ''}>
             <span class="staff-permission-toggle-slider"></span>
           </label>
         </div>
-        <div style="display:grid;grid-template-columns:120px minmax(120px,180px) auto;gap:10px;align-items:center;margin-bottom:10px;">
+        <div style="display:grid;grid-template-columns:100px minmax(110px,170px) auto;gap:8px;align-items:center;margin-bottom:8px;">
           <div style="font-size:12px;color:#6b7280;">Price</div>
-          <input type="number" min="0" step="0.01" class="ff-services-staff-price" value="${escapeHtml(String(price))}" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
+          <input type="number" min="0" step="0.01" class="ff-services-staff-price" value="${escapeHtml(String(price))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
           <span style="font-size:11px;color:#9ca3af;">Default ${ffTicketMoney(basePrice)}</span>
         </div>
-        <div style="margin-bottom:12px;padding:12px 0;border-top:1px solid #f3f4f6;border-bottom:1px solid #f3f4f6;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+        <div style="margin-bottom:8px;padding:8px 0;border-top:1px solid #f3f4f6;border-bottom:1px solid #f3f4f6;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
             <div>
               <div style="font-size:12px;font-weight:700;color:#374151;">Supply Deduction</div>
               <div style="font-size:11px;color:#9ca3af;margin-top:2px;">Deduct supplies before commission. No payroll calculation is applied yet.</div>
@@ -4930,20 +5409,20 @@ function renderServicesStaffTabHtml(service) {
               <span class="staff-permission-toggle-slider"></span>
             </label>
           </div>
-          <div class="ff-services-staff-supply-fields" style="display:${supplyDeductionEnabled ? 'grid' : 'none'};grid-template-columns:120px minmax(120px,180px) minmax(120px,180px) auto;gap:10px;align-items:center;">
+          <div class="ff-services-staff-supply-fields" style="display:${supplyDeductionEnabled ? 'grid' : 'none'};grid-template-columns:100px minmax(110px,170px) minmax(110px,170px) auto;gap:8px;align-items:center;">
             <div style="font-size:12px;color:#6b7280;">Deduction</div>
-            <select class="ff-services-staff-supply-type" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;background:#fff;box-sizing:border-box;">
+            <select class="ff-services-staff-supply-type" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
               <option value="fixed" ${supplyDeductionType === 'fixed' ? 'selected' : ''}>Fixed Amount ($)</option>
               <option value="percentage" ${supplyDeductionType === 'percentage' ? 'selected' : ''}>Percentage (%)</option>
             </select>
-            <input type="number" min="0" step="0.01" class="ff-services-staff-supply-value" value="${escapeHtml(supplyDeductionValue)}" placeholder="${hasSupplyDeductionValueOverride ? '' : escapeHtml(supplyDeductionDefaultLabel)}" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
+            <input type="number" min="0" step="0.01" class="ff-services-staff-supply-value" value="${escapeHtml(supplyDeductionValue)}" placeholder="${hasSupplyDeductionValueOverride ? '' : escapeHtml(supplyDeductionDefaultLabel)}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
             <span style="font-size:11px;color:${hasSupplyDeductionOverride ? '#7c3aed' : '#9ca3af'};">${escapeHtml(supplyDeductionStatusLabel)}</span>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:120px minmax(120px,180px) minmax(90px,130px) auto;gap:10px;align-items:center;">
+        <div style="display:grid;grid-template-columns:100px minmax(110px,170px) minmax(70px,100px) auto;gap:8px;align-items:center;">
           <div style="font-size:12px;color:#6b7280;">Commission</div>
-          <input type="number" min="0" step="0.01" class="ff-services-staff-commission-value" value="${escapeHtml(commissionValue)}" placeholder="${escapeHtml(commissionDefaultLabel)}" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;box-sizing:border-box;">
-          <select class="ff-services-staff-commission-type" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;background:#fff;box-sizing:border-box;">
+          <input type="number" min="0" step="0.01" class="ff-services-staff-commission-value" value="${escapeHtml(commissionValue)}" placeholder="${escapeHtml(commissionDefaultLabel)}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+          <select class="ff-services-staff-commission-type" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
             <option value="percentage" ${commissionType === 'percentage' ? 'selected' : ''}>%</option>
             <option value="fixed" ${commissionType === 'fixed' ? 'selected' : ''}>$</option>
           </select>
@@ -4956,10 +5435,10 @@ function renderServicesStaffTabHtml(service) {
     `;
   }).join('');
   return `
-    <div style="display:flex;flex-direction:column;gap:12px;">
-      <div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
-        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:4px;">Staff</div>
-        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">Manage staff availability, staff-specific price, and commission for this service.</p>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <div style="padding:12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:3px;">Staff</div>
+        <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.4;">Manage staff availability, staff-specific price, and commission for this service.</p>
       </div>
       ${cards}
     </div>
@@ -5153,6 +5632,7 @@ function _ffShowServicesCategoryDetailMenu(anchorBtn, catId) {
 /** Small popover menu for a category row. */
 function _ffShowCategoryMenu(anchorBtn, catId) {
   _ffCloseAllPopovers();
+  if (!ffCanManageServices()) return;
   const isSharedCatalog = _ffCatalogModalMode === 'shared';
   const catalogData = isSharedCatalog ? getSharedServicesForCatalogManager() : getLocationServicesForCatalogManager();
   const cat = catalogData.categories.find((c) => c.id === catId);
@@ -5201,6 +5681,7 @@ function _ffShowCategoryMenu(anchorBtn, catId) {
 /** Small popover menu for a service row. */
 function _ffShowServiceMenu(anchorBtn, svcId) {
   _ffCloseAllPopovers();
+  if (!ffCanManageServices()) return;
   const isSharedCatalog = _ffCatalogModalMode === 'shared';
   const svc = isSharedCatalog
     ? getSharedServicesForCatalogManager().services.find((s) => s.id === svcId)
@@ -5219,6 +5700,18 @@ function _ffShowServiceMenu(anchorBtn, svcId) {
     } },
   ];
   if (isSharedCatalog) {
+    items.push({ label: 'Delete service', danger: true, onClick: async () => {
+      const ok = await ticketConfirm('Are you sure you want to delete this service?', 'Delete service');
+      if (!ok) return;
+      try {
+        await deleteSharedService(svcId);
+        if (_ffSelectedServiceId === svcId) _ffSelectedServiceId = null;
+        await loadSharedCatalogForManager();
+        renderServicesCatalogV2();
+        setupTicketsUI();
+        showToast('Service deleted', 'success');
+      } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+    }});
     const pop = _ffBuildPopover(anchorBtn, items);
     document.body.appendChild(pop);
     return;
@@ -5231,7 +5724,7 @@ function _ffShowServiceMenu(anchorBtn, svcId) {
     items.push({ label: 'Move to category…', onClick: () => _ffShowMoveServicePicker(anchorBtn, svcId) });
   }
   items.push({ label: 'Delete service', danger: true, onClick: async () => {
-    const ok = await ticketConfirm(`Delete "${svc.name}"?`, 'Delete service');
+    const ok = await ticketConfirm('Are you sure you want to delete this service?', 'Delete service');
     if (!ok) return;
     try {
       await deleteService(svcId);
@@ -5708,11 +6201,13 @@ async function _ffCatalogEditorSubmit(ctx) {
 
 /** Entry from header "+ Add Category" button. */
 function addServiceCategoryV2() {
+  if (!ffCanManageServices()) { if (typeof showToast === 'function') showToast('You do not have permission to manage services.', 'error'); return; }
   _ffCatalogEditorOpen({ mode: _ffCatalogModalMode === 'shared' ? 'shared-category-add' : 'category-add' });
 }
 
 /** Entry from header "+ Add Service" button. */
 function addSharedServiceV2() {
+  if (!ffCanManageServices()) { if (typeof showToast === 'function') showToast('You do not have permission to manage services.', 'error'); return; }
   _ffCatalogEditorOpen({ mode: 'shared-service-add' });
 }
 
@@ -5840,6 +6335,10 @@ export function goToTickets() {
 }
 
 export async function goToServices() {
+  if (!ffCanViewServices()) {
+    if (typeof showToast === 'function') showToast('You do not have permission to view Services.', 'error');
+    return;
+  }
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
     try { window.ffCloseGlobalBlockingOverlays(); } catch (e) {}
   }
@@ -5955,10 +6454,14 @@ function ensureTicketsBackgroundSubscription(attempt = 0) {
 async function setupTicketsUI() {
   const container = document.getElementById('ticketServicePickerContainer');
   if (!container) return;
+  try { subscribeProductsCatalog(); } catch (_) {}
   const grouped = getServicesGroupedByCategory();
+  const groupedProducts = getProductsGroupedByCategory();
+  const hasServices = Object.keys(grouped).length > 0;
+  const hasProducts = Object.keys(groupedProducts).length > 0;
   let html = '';
-  if (Object.keys(grouped).length === 0) {
-    container.innerHTML = '<div style="padding:10px 8px;color:#6b7280;font-size:12px;">No services available for this location.</div>';
+  if (!hasServices && !hasProducts) {
+    container.innerHTML = '<div style="padding:10px 8px;color:#6b7280;font-size:12px;">No services or products available for this location.</div>';
     return;
   }
   Object.entries(grouped).forEach(([key, data], idx) => {
@@ -5971,12 +6474,32 @@ async function setupTicketsUI() {
     });
     html += '</div></div>';
   });
+  if (hasProducts) {
+    html += `<div style="padding:6px 8px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#9ca3af;background:#f3f4f6;border-bottom:1px solid #e5e7eb;">Products</div>`;
+    Object.entries(groupedProducts).forEach(([key, data], idx) => {
+      const label = escapeHtml(data.label || 'Other');
+      html += `<div class="ticket-category-section" data-prod-cat-idx="${idx}" style="border-bottom:1px solid #e5e7eb;">`;
+      html += `<div class="ticket-category-header" role="button" tabindex="0" style="display:flex;align-items:center;gap:4px;padding:6px 8px;cursor:pointer;user-select:none;font-size:11px;font-weight:600;color:#374151;background:#f9fafb;"><span class="ticket-cat-arrow" style="font-size:9px;color:#6b7280;">▶</span><span>${label}</span></div>`;
+      html += `<div class="ticket-category-body" style="display:none;padding:4px 8px 8px 16px;background:#fff;">`;
+      (data.products || []).forEach((p) => {
+        html += `<button type="button" class="ticket-product-btn" data-id="${p.id}" style="display:block;width:100%;text-align:left;padding:5px 8px;margin-bottom:3px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;transition:background 0.15s;">${escapeHtml(p.name)} <span style="color:#6b7280;font-size:11px;">${ffTicketMoney(getTicketPriceForProductAndActiveLocation(p))}</span></button>`;
+      });
+      html += '</div></div>';
+    });
+  }
   container.innerHTML = html;
   container.querySelectorAll('.ticket-service-btn').forEach((btn) => {
     btn.onclick = () => {
       const id = btn.getAttribute('data-id');
       const svc = salonServices.find((x) => x.id === id);
       doServiceSelect(svc);
+    };
+  });
+  container.querySelectorAll('.ticket-product-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const id = btn.getAttribute('data-id');
+      const prod = salonProducts.find((x) => x.id === id);
+      if (prod) addProductToTicket(prod);
     };
   });
   container.querySelectorAll('.ticket-category-header').forEach((header) => {
@@ -5992,14 +6515,10 @@ async function setupTicketsUI() {
   });
   const manageServicesBtn = document.getElementById('ticketsManageServicesBtn');
   if (manageServicesBtn) {
-    const profileRole = (currentUserProfile?.role || '').toLowerCase();
-    const canManage = ['admin', 'owner', 'manager'].includes(profileRole);
-    manageServicesBtn.style.display = canManage ? 'flex' : 'none';
-    manageServicesBtn.onclick = openServicesModal;
-    if (canManage) {
-      // Align gear precisely under user avatar on any screen/DPI
-      requestAnimationFrame(() => _alignGearToAvatar());
-    }
+    // Services are now managed from the dedicated Services module (Apps → Services).
+    // Hide the legacy gear shortcut on the Tickets screen to avoid two entry points.
+    manageServicesBtn.style.display = 'none';
+    manageServicesBtn.onclick = null;
   }
   updateTicketsTabsVisibility();
   updateNewTicketButtonVisibility();

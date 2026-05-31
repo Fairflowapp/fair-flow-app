@@ -254,6 +254,53 @@ function _applyMainSnapshot(data) {
       }
     }
 
+    // taxRate — sales tax % applied to taxable products, per-location first.
+    {
+      const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'taxRate');
+      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'taxRate');
+      const raw = hasLoc ? _locPrefs.taxRate : (hasLegacy ? data.preferences.taxRate : undefined);
+      const n = normalizeSalonTaxRate(raw);
+      if (n != null) {
+        nextPreferences.taxRate = n;
+      } else {
+        delete nextPreferences.taxRate;
+      }
+    }
+
+    // Product / Service tax — per-location first, fallback to legacy top-level.
+    // Backward compatible with the old single `taxRate` (salesTax) setting.
+    {
+      const readPref = (key) => {
+        const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, key);
+        const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, key);
+        return hasLoc ? _locPrefs[key] : (hasLegacy ? data.preferences[key] : undefined);
+      };
+      const legacyTax = (nextPreferences.taxRate != null) ? Number(nextPreferences.taxRate) : NaN;
+      const legacyTaxValid = Number.isFinite(legacyTax) && legacyTax > 0;
+
+      // productTaxRate falls back to the legacy salesTax/taxRate value.
+      const ptNorm = normalizeSalonTaxRate(readPref('productTaxRate'));
+      if (ptNorm != null) {
+        nextPreferences.productTaxRate = ptNorm;
+      } else if (legacyTaxValid) {
+        nextPreferences.productTaxRate = legacyTax;
+      } else {
+        delete nextPreferences.productTaxRate;
+      }
+
+      // serviceTaxRate defaults to 0 when not set.
+      const stNorm = normalizeSalonTaxRate(readPref('serviceTaxRate'));
+      nextPreferences.serviceTaxRate = (stNorm != null) ? stNorm : 0;
+
+      // productTaxEnabled defaults ON when a legacy salesTax > 0 existed.
+      const ptEnabled = readPref('productTaxEnabled');
+      nextPreferences.productTaxEnabled = (typeof ptEnabled === 'boolean') ? ptEnabled : legacyTaxValid;
+
+      // serviceTaxEnabled defaults OFF.
+      const stEnabled = readPref('serviceTaxEnabled');
+      nextPreferences.serviceTaxEnabled = (typeof stEnabled === 'boolean') ? stEnabled : false;
+    }
+
     // timeFormat — '12h' or '24h', per-location first, fallback to legacy.
     {
       const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'timeFormat');
@@ -545,6 +592,13 @@ function normalizeSalonCurrency(value) {
   return FF_SUPPORTED_CURRENCIES.includes(s) ? s : "";
 }
 
+/** Sales tax rate as a percentage (0–100). Returns null when not set / invalid. */
+function normalizeSalonTaxRate(value) {
+  const n = typeof value === "string" ? parseFloat(value.replace(/[^0-9.]/g, "")) : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(Math.min(100, n) * 1000) / 1000;
+}
+
 function ffSavePreferencesSettings(preferences) {
   if (!_salonId) return;
   const nextPreferences = preferences && typeof preferences === "object" ? preferences : {};
@@ -576,6 +630,28 @@ function ffSavePreferencesSettings(preferences) {
     } else {
       payload[`${basePath}.currency`] = deleteField();
     }
+  }
+  if (Object.prototype.hasOwnProperty.call(nextPreferences, "taxRate")) {
+    const n = normalizeSalonTaxRate(nextPreferences.taxRate);
+    if (n != null) {
+      payload[`${basePath}.taxRate`] = n;
+    } else {
+      payload[`${basePath}.taxRate`] = deleteField();
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(nextPreferences, "productTaxEnabled")) {
+    payload[`${basePath}.productTaxEnabled`] = !!nextPreferences.productTaxEnabled;
+  }
+  if (Object.prototype.hasOwnProperty.call(nextPreferences, "productTaxRate")) {
+    const n = normalizeSalonTaxRate(nextPreferences.productTaxRate);
+    payload[`${basePath}.productTaxRate`] = (n != null) ? n : 0;
+  }
+  if (Object.prototype.hasOwnProperty.call(nextPreferences, "serviceTaxEnabled")) {
+    payload[`${basePath}.serviceTaxEnabled`] = !!nextPreferences.serviceTaxEnabled;
+  }
+  if (Object.prototype.hasOwnProperty.call(nextPreferences, "serviceTaxRate")) {
+    const n = normalizeSalonTaxRate(nextPreferences.serviceTaxRate);
+    payload[`${basePath}.serviceTaxRate`] = (n != null) ? n : 0;
   }
   if (Object.prototype.hasOwnProperty.call(nextPreferences, "timeFormat")) {
     const raw = nextPreferences.timeFormat;
@@ -621,6 +697,54 @@ function ffGetSalonCurrencyCode() {
     return norm || "USD";
   } catch (e) {
     return "USD";
+  }
+}
+
+/** Resolve the current salon sales tax rate as a percentage (0 when not set).
+ *  Applied to taxable products in tickets. Reads window.settings.preferences.taxRate. */
+function ffGetSalonTaxRate() {
+  try {
+    const raw =
+      (typeof window !== "undefined" &&
+        window.settings &&
+        window.settings.preferences &&
+        window.settings.preferences.taxRate) ||
+      0;
+    const n = normalizeSalonTaxRate(raw);
+    return n == null ? 0 : n;
+  } catch (e) {
+    return 0;
+  }
+}
+
+/** Product Tax config — { enabled, rate }. Tax applies only when enabled && rate > 0.
+ *  Backward compatible: falls back to legacy taxRate (salesTax) when productTaxRate is unset. */
+function ffGetProductTaxSettings() {
+  try {
+    const p = (typeof window !== "undefined" && window.settings && window.settings.preferences) || {};
+    let rate = normalizeSalonTaxRate(p.productTaxRate);
+    if (rate == null) rate = normalizeSalonTaxRate(p.taxRate); // legacy fallback
+    rate = rate == null ? 0 : rate;
+    const enabled = (p.productTaxEnabled != null)
+      ? (p.productTaxEnabled === true && rate > 0)
+      : (rate > 0); // legacy: any positive salesTax means product tax on
+    return { enabled, rate };
+  } catch (e) {
+    return { enabled: false, rate: 0 };
+  }
+}
+
+/** Service Tax config — { enabled, rate }. Tax applies only when enabled && rate > 0
+ *  AND the individual service has taxable === true. Defaults off. */
+function ffGetServiceTaxSettings() {
+  try {
+    const p = (typeof window !== "undefined" && window.settings && window.settings.preferences) || {};
+    let rate = normalizeSalonTaxRate(p.serviceTaxRate);
+    rate = rate == null ? 0 : rate;
+    const enabled = p.serviceTaxEnabled === true && rate > 0;
+    return { enabled, rate };
+  } catch (e) {
+    return { enabled: false, rate: 0 };
   }
 }
 
@@ -1170,6 +1294,9 @@ if (typeof window !== "undefined") {
   window.ffCheckTechnicianTypeExists = ffCheckTechnicianTypeExists;
   window.ffDeleteTechnicianType = ffDeleteTechnicianType;
   window.ffGetSalonCurrencyCode = ffGetSalonCurrencyCode;
+  window.ffGetSalonTaxRate = ffGetSalonTaxRate;
+  window.ffGetProductTaxSettings = ffGetProductTaxSettings;
+  window.ffGetServiceTaxSettings = ffGetServiceTaxSettings;
   window.ffGetCurrencySymbol = ffGetCurrencySymbol;
   window.ffFormatCurrency = ffFormatCurrency;
   window.ffSupportedCurrencies = FF_SUPPORTED_CURRENCIES.slice();
