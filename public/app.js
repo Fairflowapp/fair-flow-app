@@ -318,37 +318,13 @@ onAuthStateChanged(auth, async user => {
 // =====================
 // Apple Sign-In redirect result
 // =====================
-// handleAppleLogin uses signInWithRedirect, so when the user returns from Apple
-// the credential is delivered here. We don't navigate manually: a successful
-// result also triggers onAuthStateChanged, which already drives the login flow
-// (loadUserRoleAndShowView) the same way Google/email do. This call only logs
-// success and surfaces redirect-specific errors to the login screen. It is
-// wrapped so it can never break app startup.
-// [APPLE-DEBUG] TEMPORARY diagnostic logging — remove after Apple sign-in is fixed.
-try {
-  console.log("[APPLE-DEBUG] module eval — location.href:", window.location.href);
-  console.log("[APPLE-DEBUG] document.referrer:", document.referrer);
-  console.log("[APPLE-DEBUG] auth.currentUser at eval:", auth.currentUser ? auth.currentUser.uid : null);
-} catch (_) {}
+// Apple sign-in uses signInWithPopup (see handleAppleLogin), but we keep a
+// getRedirectResult call here as a safe fallback: if a redirect-based result is
+// ever pending, it is consumed and the onAuthStateChanged listeners drive the
+// login flow (loadUserRoleAndShowView) the same way Google/email do. Wrapped so
+// it can never break app startup.
 getRedirectResult(auth)
   .then((result) => {
-    // [APPLE-DEBUG] log the FULL result object and explicitly handle the null case.
-    console.log("[APPLE-DEBUG] getRedirectResult resolved. result =", result);
-    if (result) {
-      try {
-        const cred = OAuthProvider.credentialFromResult(result);
-        console.log("[APPLE-DEBUG] credentialFromResult =", cred);
-        console.log("[APPLE-DEBUG] result.providerId =", result.providerId);
-        console.log("[APPLE-DEBUG] result.operationType =", result.operationType);
-        if (result.user) {
-          console.log("[APPLE-DEBUG] result.user.uid =", result.user.uid);
-          console.log("[APPLE-DEBUG] result.user.email =", result.user.email);
-          console.log("[APPLE-DEBUG] result.user.providerData =", JSON.stringify(result.user.providerData));
-        }
-      } catch (e) { console.log("[APPLE-DEBUG] error reading result fields", e); }
-    } else {
-      console.warn("[APPLE-DEBUG] getRedirectResult returned NULL — no redirect operation was completed/persisted.");
-    }
     if (result && result.user) {
       console.log("[Login] Apple redirect signed in:", result.user.uid);
       try { showLoginError(""); } catch (_) {}
@@ -356,7 +332,6 @@ getRedirectResult(auth)
   })
   .catch((err) => {
     console.error("[Login] Apple getRedirectResult error", err);
-    console.log("[APPLE-DEBUG] getRedirectResult ERROR code =", err && err.code, "message =", err && err.message, "customData =", err && err.customData);
     let message = "Apple sign-in failed. Please try again.";
     if (err && err.code === "auth/network-request-failed") {
       message = "Network error. Please check your connection and try again.";
@@ -369,26 +344,6 @@ getRedirectResult(auth)
     }
     try { showLoginError(message); } catch (_) {}
   });
-
-// [APPLE-DEBUG] TEMPORARY — log EVERY auth-state event with full provider detail.
-// Remove after Apple sign-in is fixed. This is read-only; it does not change flow.
-onAuthStateChanged(auth, (user) => {
-  try {
-    if (!user) {
-      console.log("[APPLE-DEBUG] onAuthStateChanged -> NULL (no user)");
-      return;
-    }
-    console.log("[APPLE-DEBUG] onAuthStateChanged -> user.uid =", user.uid);
-    console.log("[APPLE-DEBUG]   user.email =", user.email);
-    console.log("[APPLE-DEBUG]   user.displayName =", user.displayName);
-    console.log("[APPLE-DEBUG]   user.providerData =", JSON.stringify(user.providerData));
-    const providerIds = (user.providerData || []).map((p) => p && p.providerId);
-    console.log("[APPLE-DEBUG]   providerIds =", JSON.stringify(providerIds));
-    console.log("[APPLE-DEBUG]   isAnonymous =", user.isAnonymous, "emailVerified =", user.emailVerified);
-  } catch (e) {
-    console.log("[APPLE-DEBUG] onAuthStateChanged logging error", e);
-  }
-});
 
 console.log("[CLIENT] Firebase functions SDK available:", typeof firebase !== "undefined");
 const functions = getFunctions(app, "us-central1");
@@ -1869,11 +1824,6 @@ async function handleAppleLogin() {
     const cred = await signInWithPopup(auth, provider);
     const user = cred.user;
     console.log("[Login] Apple signed in:", user.uid);
-    // [APPLE-DEBUG] TEMPORARY — confirm popup credential. Remove after fixed.
-    try {
-      console.log("[APPLE-DEBUG] popup result user.uid =", user.uid, "email =", user.email);
-      console.log("[APPLE-DEBUG] popup result providerData =", JSON.stringify(user.providerData));
-    } catch (_) {}
 
     // Clear any previous error
     showLoginError("");
@@ -1882,8 +1832,6 @@ async function handleAppleLogin() {
     // same way Google and email logins do. No direct navigation call here.
   } catch (err) {
     console.error("[Login] Apple error", err);
-    // [APPLE-DEBUG] TEMPORARY — surface popup error code. Remove after fixed.
-    try { console.log("[APPLE-DEBUG] popup error code =", err && err.code, "message =", err && err.message); } catch (_) {}
 
     // Map Firebase error codes to user-friendly messages for Apple login
     let message = "Apple sign-in failed. Please try again.";
