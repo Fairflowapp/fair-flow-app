@@ -20551,13 +20551,25 @@ window.ffInitMyProfileHandlers = function ffInitMyProfileHandlers() {
       avatarInput.click();
     };
     avatarInput.onchange = async function (ev) {
-      const file = ev.target.files && ev.target.files[0];
-      ev.target.value = '';
-      if (!file || !file.type.startsWith('image/')) return;
-      const staffId = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '';
-      const salonId = window.currentSalonId || '';
-      if (!staffId || !salonId) return;
+      // Wrap the whole handler: on iOS the OS-level camera/library cancel or a
+      // denied permission can yield no file (or a partial event). Reading files
+      // defensively here avoids an unhandled rejection breaking the profile UI.
       try {
+        const file = ev.target && ev.target.files && ev.target.files[0];
+        // Always reset so re-selecting the same image fires change again.
+        if (ev.target) ev.target.value = '';
+        // User cancelled "Take Photo"/"Choose from Library", or picked a non-image.
+        if (!file) return;
+        if (!file.type || !file.type.startsWith('image/')) {
+          if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast('Please choose an image file.', 'error');
+          return;
+        }
+        const staffId = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '';
+        const salonId = window.currentSalonId || '';
+        if (!staffId || !salonId) {
+          if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast('Could not update photo: missing profile info. Please sign in again.', 'error');
+          return;
+        }
         if (!window.ffUploadStaffAvatar) throw new Error('Upload not available');
         const { url, path } = await window.ffUploadStaffAvatar({ salonId: salonId, staffId: staffId, file: file });
         if (typeof window.ffSaveStaffAvatarMeta === 'function') {
@@ -20596,9 +20608,12 @@ window.ffInitMyProfileHandlers = function ffInitMyProfileHandlers() {
         }
         if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast('Profile photo updated.', 'success');
       } catch (err) {
-        console.error(err);
-        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast(err.message || 'Upload failed', 'error');
-        else alert(err.message || 'Upload failed');
+        // Log the raw error for debugging, but show the user a friendly message
+        // instead of a technical Firebase/network string.
+        console.error('[Profile] Avatar upload failed', err);
+        const friendly = "Couldn't update your profile photo. Please try again.";
+        if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast(friendly, 'error');
+        else alert(friendly);
       }
     };
   }
