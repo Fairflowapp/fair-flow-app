@@ -18,6 +18,63 @@ let activeTab = "details";
 let editorState = null;
 let productsCatalogError = "";
 let openProductCats = new Set();
+
+// ===== Products screen mobile drill-down (list -> product menu -> section) =====
+// Mirrors the Services screen pattern. On phones (<=640px) the two-pane desktop
+// layout is shown one level at a time via classes on the #productsScreen root.
+// No effect on desktop.
+function _ffProductsScreenIsMobile() {
+  try {
+    return !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches);
+  } catch (_) {
+    return false;
+  }
+}
+
+function _ffProductsMobileShowList() {
+  const el = document.getElementById("productsScreen");
+  if (!el) return;
+  el.classList.remove("ff-products-mobile-detail");
+  el.classList.remove("ff-products-mobile-tab");
+}
+
+// mode: 'detail' (item selected -> show the tab menu)
+//       'tab'    (a section was chosen -> show that section's content)
+function _ffProductsMobileShowDetail(mode) {
+  if (!_ffProductsScreenIsMobile()) return;
+  const el = document.getElementById("productsScreen");
+  if (!el) return;
+  el.classList.remove("ff-products-mobile-detail");
+  el.classList.remove("ff-products-mobile-tab");
+  el.classList.add(mode === "tab" ? "ff-products-mobile-tab" : "ff-products-mobile-detail");
+  try {
+    const content = el.querySelector(".staff-content-area");
+    if (content) content.scrollTop = 0;
+  } catch (_) {}
+}
+
+if (typeof document !== "undefined" && !document.__ffProductsMobileBackDelegated) {
+  document.__ffProductsMobileBackDelegated = true;
+  document.addEventListener("click", (event) => {
+    const target = event.target && event.target.closest
+      ? event.target.closest("#productsScreen .ff-products-mobile-back")
+      : null;
+    if (!target) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const el = document.getElementById("productsScreen");
+    if (el && el.classList.contains("ff-products-mobile-tab")) {
+      el.classList.remove("ff-products-mobile-tab");
+      el.classList.add("ff-products-mobile-detail");
+      try {
+        const content = el.querySelector(".staff-content-area");
+        if (content) content.scrollTop = 0;
+      } catch (_) {}
+      return;
+    }
+    _ffProductsMobileShowList();
+  }, true);
+}
 let productsSidebarRenderedOnce = false;
 let _ffProdDragSrc = null;
 let _ffProdDragHoverEl = null;
@@ -300,6 +357,7 @@ function renderProductsSidebar() {
       selectedProductId = null;
       activeTab = "details";
       renderProducts();
+      _ffProductsMobileShowDetail("detail");
     });
   });
   list.querySelectorAll(".ff-products-sidebar-product").forEach((row) => {
@@ -309,6 +367,7 @@ function renderProductsSidebar() {
       selectedCategoryId = null;
       activeTab = "details";
       renderProducts();
+      _ffProductsMobileShowDetail("detail");
     });
   });
   list.querySelectorAll(".ffcat-addproduct-btn").forEach((btn) => {
@@ -1244,6 +1303,7 @@ function renderProductsDetail() {
     btn.addEventListener("click", () => {
       activeTab = btn.getAttribute("data-products-tab") || "details";
       renderProductsDetail();
+      _ffProductsMobileShowDetail("tab");
     });
   });
   if (category && !product) {
@@ -1632,6 +1692,8 @@ export async function goToProducts() {
     selectedCategoryId = selectedProductId ? null : (productCategories[0]?.id || null);
   }
   renderProducts();
+  // Mobile: always open at the top level (the products list).
+  _ffProductsMobileShowList();
 }
 
 window.goToProducts = goToProducts;

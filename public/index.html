@@ -3072,6 +3072,278 @@ dialog footer button, .code-dialog footer button {
   background-image: none !important;
 }
 
+/* Services screen mobile drill-down: hidden helpers on desktop (base rules). */
+#servicesScreen .ff-services-mobile-back { display: none !important; }
+#servicesScreen .ff-services-mobile-title { display: none !important; }
+#productsScreen .ff-products-mobile-back { display: none !important; }
+#productsScreen .ff-products-mobile-title { display: none !important; }
+
+@media (max-width: 640px) {
+  /* ===== Services screen: single-column drill-down (list -> menu -> section) ===== */
+  #servicesScreen .staff-modal-content {
+    display: block !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  #servicesScreen .staff-sidebar {
+    width: 100% !important;
+    min-height: 100% !important;
+    border-right: none !important;
+    background: #fff !important;
+    box-sizing: border-box !important;
+    padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  #servicesScreen .staff-content-area {
+    display: none !important;
+    width: 100% !important;
+    min-height: 100% !important;
+    padding: 58px 18px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+    box-sizing: border-box !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Level 1 list: show "Services" title at the top of the list pane. */
+  #servicesScreen .ff-services-mobile-title { display: block !important; }
+  /* Level 2 (menu) / Level 3 (section): hide the list, show the detail pane. */
+  #servicesScreen.ff-services-mobile-detail .staff-sidebar,
+  #servicesScreen.ff-services-mobile-tab .staff-sidebar {
+    display: none !important;
+  }
+  #servicesScreen.ff-services-mobile-detail .staff-content-area,
+  #servicesScreen.ff-services-mobile-tab .staff-content-area {
+    display: block !important;
+  }
+  /* Level 2 (menu): show service header + the Details/Locations/Staff menu,
+     but NOT the section content yet. */
+  #servicesScreen.ff-services-mobile-detail #servicesDetailTabContent {
+    display: none !important;
+  }
+  /* Level 3 (section): hide the header + menu, show only the chosen section. */
+  #servicesScreen.ff-services-mobile-tab #servicesDetailHeader,
+  #servicesScreen.ff-services-mobile-tab #servicesDetailNav {
+    display: none !important;
+  }
+  /* Back button (chevron) shown in menu/section levels. */
+  #servicesScreen .ff-services-mobile-back {
+    display: none !important;
+    align-items: center !important;
+    justify-content: center !important;
+    position: absolute !important;
+    top: 16px !important;
+    left: 18px !important;
+    width: 28px !important;
+    height: 28px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 999px !important;
+    background: #fff !important;
+    color: #7c3aed !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    font-size: 0 !important;
+    cursor: pointer !important;
+    box-sizing: border-box !important;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08) !important;
+    z-index: 100004 !important;
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+  }
+  #servicesScreen.ff-services-mobile-detail .ff-services-mobile-back,
+  #servicesScreen.ff-services-mobile-tab .ff-services-mobile-back {
+    display: flex !important;
+  }
+  #servicesScreen .ff-services-mobile-back::before {
+    content: "\2039" !important;
+    color: #7c3aed;
+    font-size: 20px;
+    line-height: 1;
+  }
+  /* Stack the detail container (menu + section content) vertically, full width. */
+  #servicesScreen #servicesDetailContainer > div[style*="display:flex"][style*="gap:20px"] {
+    flex-direction: column !important;
+    gap: 12px !important;
+    margin-top: 12px !important;
+  }
+  #servicesScreen #servicesDetailNav {
+    width: 100% !important;
+    max-height: none !important;
+    border-radius: 14px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #fff !important;
+    border: 1px solid var(--border) !important;
+  }
+  #servicesScreen #servicesDetailNav .staff-nav-item {
+    position: relative !important;
+    width: 100% !important;
+    min-height: 46px !important;
+    padding: 13px 44px 13px 14px !important;
+    border-radius: 0 !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    background: #fff !important;
+  }
+  #servicesScreen.ff-services-mobile-detail #servicesDetailNav .staff-nav-item::after {
+    content: "\203A";
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9ca3af;
+    font-size: 18px;
+    line-height: 1;
+  }
+  /* Prevent any sideways scroll inside the section content on phones. */
+  #servicesScreen .staff-content-area { overflow-x: hidden !important; }
+  #servicesScreen #servicesDetailTabContent {
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+  /* Staff section: the desktop multi-column grids (fixed 100px/110px columns)
+     are wider than a phone. Stack each field vertically so nothing overflows. */
+  #servicesScreen .ff-services-staff-card {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  #servicesScreen .ff-services-staff-card div[style*="grid-template-columns"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 4px 8px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  /* ===== Products screen: single-column drill-down (mirror of Services) ===== */
+  #productsScreen .staff-modal-content {
+    display: block !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  #productsScreen .staff-sidebar {
+    width: 100% !important;
+    min-height: 100% !important;
+    border-right: none !important;
+    background: #fff !important;
+    box-sizing: border-box !important;
+    padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  #productsScreen .staff-content-area {
+    display: none !important;
+    width: 100% !important;
+    min-height: 100% !important;
+    padding: 58px 18px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+    box-sizing: border-box !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  #productsScreen .ff-products-mobile-title { display: block !important; }
+  #productsScreen.ff-products-mobile-detail .staff-sidebar,
+  #productsScreen.ff-products-mobile-tab .staff-sidebar {
+    display: none !important;
+  }
+  #productsScreen.ff-products-mobile-detail .staff-content-area,
+  #productsScreen.ff-products-mobile-tab .staff-content-area {
+    display: block !important;
+  }
+  #productsScreen.ff-products-mobile-detail #productsDetailTabContent {
+    display: none !important;
+  }
+  #productsScreen.ff-products-mobile-tab #productsDetailHeader,
+  #productsScreen.ff-products-mobile-tab #productsDetailNav {
+    display: none !important;
+  }
+  #productsScreen .ff-products-mobile-back {
+    display: none !important;
+    align-items: center !important;
+    justify-content: center !important;
+    position: absolute !important;
+    top: 16px !important;
+    left: 18px !important;
+    width: 28px !important;
+    height: 28px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 999px !important;
+    background: #fff !important;
+    color: #7c3aed !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    font-size: 0 !important;
+    cursor: pointer !important;
+    box-sizing: border-box !important;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08) !important;
+    z-index: 100004 !important;
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+  }
+  #productsScreen.ff-products-mobile-detail .ff-products-mobile-back,
+  #productsScreen.ff-products-mobile-tab .ff-products-mobile-back {
+    display: flex !important;
+  }
+  #productsScreen .ff-products-mobile-back::before {
+    content: "\2039" !important;
+    color: #7c3aed;
+    font-size: 20px;
+    line-height: 1;
+  }
+  #productsScreen #productsDetailTabContent {
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+  #productsScreen #productsDetailContainer > div[style*="display:flex"][style*="gap:20px"] {
+    flex-direction: column !important;
+    gap: 12px !important;
+    margin-top: 12px !important;
+  }
+  #productsScreen #productsDetailNav {
+    width: 100% !important;
+    max-height: none !important;
+    border-radius: 14px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #fff !important;
+    border: 1px solid var(--border) !important;
+  }
+  #productsScreen #productsDetailNav .staff-nav-item {
+    position: relative !important;
+    width: 100% !important;
+    min-height: 46px !important;
+    padding: 13px 44px 13px 14px !important;
+    border-radius: 0 !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    background: #fff !important;
+  }
+  #productsScreen.ff-products-mobile-detail #productsDetailNav .staff-nav-item::after {
+    content: "\203A";
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9ca3af;
+    font-size: 18px;
+    line-height: 1;
+  }
+  /* Stack any multi-column field grids inside product cards so nothing scrolls sideways. */
+  #productsScreen .ff-products-staff-card div[style*="grid-template-columns"],
+  #productsScreen .ff-products-location-card div[style*="grid-template-columns"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 4px 8px !important;
+  }
+  /* Locations: keep Retail Price + Current Stock side by side on a single row
+     (Android wrapped them onto two lines because of the 140px/120px min-widths). */
+  #productsScreen .ff-products-location-card .ff-products-card-body > div[style*="flex-wrap:wrap"] {
+    flex-wrap: nowrap !important;
+  }
+  #productsScreen .ff-products-location-card .ff-products-card-body > div[style*="flex-wrap:wrap"] > label {
+    min-width: 0 !important;
+  }
+}
+
 @media (max-width: 640px) {
   #staffMembersModal .staff-modal-content {
     display: block !important;
@@ -57982,8 +58254,10 @@ function hookSettingsGuard_DISABLED(){
 
 <!-- Services Screen (phase 1: standalone shell reusing the existing catalog data/actions) -->
 <div id="servicesScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#fff;z-index:9850;overflow:hidden;pointer-events:auto;">
+  <button type="button" class="ff-services-mobile-back" aria-label="Back">Back</button>
   <div class="staff-modal-content" style="height:100%;overflow:hidden;display:flex;min-height:0;pointer-events:auto;">
     <div class="staff-sidebar" style="width:220px;flex-shrink:0;background:var(--muted);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;position:relative;">
+      <div class="ff-services-mobile-title" style="display:none;font-size:20px;font-weight:800;color:#111827;padding:16px 20px 0 20px;">Services</div>
       <div style="padding:20px 20px 16px 20px;">
         <button type="button" id="servicesCatalogAddCategoryBtn" onclick="window.addServiceCategoryV2 && window.addServiceCategoryV2()" class="btn-primary" style="width:100%;border:0;background:#7c3aed;background-image:none;color:#fff;border-radius:999px;padding:5px 10px;font-weight:800;cursor:pointer;box-shadow:0 4px 10px rgba(124,58,237,.2);font-size:11px;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;line-height:1.2;">
           <span style="font-size:13px;line-height:1;flex-shrink:0;">+</span>
@@ -58014,8 +58288,10 @@ function hookSettingsGuard_DISABLED(){
 
 <!-- Products Screen (phase 1: standalone catalog shell) -->
 <div id="productsScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#fff;z-index:9850;overflow:hidden;pointer-events:auto;">
+  <button type="button" class="ff-products-mobile-back" aria-label="Back">Back</button>
   <div class="staff-modal-content" style="height:100%;overflow:hidden;display:flex;min-height:0;pointer-events:auto;">
     <div class="staff-sidebar" style="width:220px;flex-shrink:0;background:var(--muted);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;position:relative;">
+      <div class="ff-products-mobile-title" style="display:none;font-size:20px;font-weight:800;color:#111827;padding:16px 20px 0 20px;">Products</div>
       <div style="padding:20px 20px 16px 20px;display:flex;flex-direction:column;gap:8px;">
         <button type="button" id="productsAddCategoryBtn" onclick="window.ffProductsAddCategory && window.ffProductsAddCategory()" class="btn-primary" style="width:100%;border:0;background:#7c3aed;background-image:none;color:#fff;border-radius:999px;padding:5px 10px;font-weight:800;cursor:pointer;box-shadow:0 4px 10px rgba(124,58,237,.2);font-size:11px;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;line-height:1.2;">
           <span style="font-size:13px;line-height:1;flex-shrink:0;">+</span>

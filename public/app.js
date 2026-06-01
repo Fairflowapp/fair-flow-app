@@ -4,6 +4,7 @@ import {
   getAuth,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithCredential,
   signInWithRedirect,
   getRedirectResult,
   GoogleAuthProvider,
@@ -1808,20 +1809,67 @@ async function handleGoogleLogin() {
 // =====================
 // Apple login flow
 // =====================
+// Random URL-safe string used as the Apple Sign-In nonce. Apple receives the
+// SHA-256 hash of this value; Firebase needs the original (raw) value back.
+function ffGenerateAppleNonce(length) {
+  const charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-._";
+  const size = length || 32;
+  const random = new Uint8Array(size);
+  (window.crypto || window.msCrypto).getRandomValues(random);
+  let result = "";
+  for (let i = 0; i < size; i++) {
+    result += charset[random[i] % charset.length];
+  }
+  return result;
+}
+
 async function handleAppleLogin() {
   showLoginError("");
   const provider = new OAuthProvider("apple.com");
   provider.addScope("email");
   provider.addScope("name");
 
+  // On the native iOS app (Capacitor) the Firebase web popup opens an external
+  // browser and never returns into the app. There we use the native Apple
+  // Sign-In sheet and exchange the identity token for a Firebase credential.
+  const cap = window.Capacitor;
+  const isNativeIOS = !!(cap
+    && typeof cap.isNativePlatform === "function"
+    && cap.isNativePlatform()
+    && typeof cap.getPlatform === "function"
+    && cap.getPlatform() === "ios");
+
+
   try {
-    // Reverted from signInWithRedirect back to signInWithPopup. With redirect,
-    // getRedirectResult returned NULL after returning from Apple (the auth
-    // session did not persist across the web.app <-> firebaseapp.com domain
-    // boundary), so the user bounced back to the login screen even though the
-    // Firebase Auth user was created. Popup keeps the whole flow in one window
-    // so onAuthStateChanged fires with the user in this same session.
-    const cred = await signInWithPopup(auth, provider);
+    let cred;
+    if (isNativeIOS) {
+      const SignInWithApple = cap.Plugins && cap.Plugins.SignInWithApple;
+      if (!SignInWithApple || typeof SignInWithApple.authorize !== "function") {
+        throw new Error("apple-native-plugin-missing");
+      }
+      const rawNonce = ffGenerateAppleNonce(32);
+      const hashedNonce = await ffSha256Hex(rawNonce);
+      console.log("[Login] Apple native authorize starting");
+      const result = await SignInWithApple.authorize({
+        scopes: "email name",
+        nonce: hashedNonce,
+      });
+      const identityToken = result && result.response && result.response.identityToken;
+      if (!identityToken) {
+        throw new Error("apple-native-no-identity-token");
+      }
+      const credential = provider.credential({ idToken: identityToken, rawNonce });
+      cred = await signInWithCredential(auth, credential);
+    } else {
+      // Web/browser flow. Reverted from signInWithRedirect back to
+      // signInWithPopup. With redirect, getRedirectResult returned NULL after
+      // returning from Apple (the auth session did not persist across the
+      // web.app <-> firebaseapp.com domain boundary), so the user bounced back
+      // to the login screen even though the Firebase Auth user was created.
+      // Popup keeps the whole flow in one window so onAuthStateChanged fires
+      // with the user in this same session.
+      cred = await signInWithPopup(auth, provider);
+    }
     const user = cred.user;
     console.log("[Login] Apple signed in:", user.uid);
 
@@ -1832,6 +1880,16 @@ async function handleAppleLogin() {
     // same way Google and email logins do. No direct navigation call here.
   } catch (err) {
     console.error("[Login] Apple error", err);
+
+    // Native Apple sheet cancellation (ASAuthorizationError.canceled = 1001).
+    // Treat like a user-cancelled popup: do not show a scary error.
+    const nativeCancel = err && (err.code === "1001"
+      || /\b1001\b/.test(String(err.code || ""))
+      || /cancel/i.test(String(err.message || "")));
+    if (nativeCancel) {
+      showLoginError("");
+      return;
+    }
 
     // Map Firebase error codes to user-friendly messages for Apple login
     let message = "Apple sign-in failed. Please try again.";

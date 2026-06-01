@@ -4450,6 +4450,64 @@ function _ffIsServicesScreenRoot() {
   return _ffCatalogRenderRootId === 'servicesScreen';
 }
 
+// ===== Services screen mobile drill-down (list -> service menu -> section) =====
+// Mirrors the proven Staff Members modal pattern. On phones (<=640px) the
+// two-pane desktop layout is shown one level at a time, driven by classes on
+// the #servicesScreen root. No effect on desktop.
+function _ffServicesScreenIsMobile() {
+  try {
+    return !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
+  } catch (_) {
+    return false;
+  }
+}
+
+function _ffServicesMobileShowList() {
+  const el = document.getElementById('servicesScreen');
+  if (!el) return;
+  el.classList.remove('ff-services-mobile-detail');
+  el.classList.remove('ff-services-mobile-tab');
+}
+
+// mode: 'detail' (service selected -> show the Details/Locations/Staff menu)
+//       'tab'    (a section was chosen -> show that section's content)
+function _ffServicesMobileShowDetail(mode) {
+  if (!_ffServicesScreenIsMobile()) return;
+  const el = document.getElementById('servicesScreen');
+  if (!el) return;
+  el.classList.remove('ff-services-mobile-detail');
+  el.classList.remove('ff-services-mobile-tab');
+  el.classList.add(mode === 'tab' ? 'ff-services-mobile-tab' : 'ff-services-mobile-detail');
+  try {
+    const content = el.querySelector('.staff-content-area');
+    if (content) content.scrollTop = 0;
+  } catch (_) {}
+}
+
+// Back button: section -> menu, menu -> list. Delegated once.
+if (typeof document !== 'undefined' && !document.__ffServicesMobileBackDelegated) {
+  document.__ffServicesMobileBackDelegated = true;
+  document.addEventListener('click', function (event) {
+    const target = event.target && event.target.closest
+      ? event.target.closest('#servicesScreen .ff-services-mobile-back')
+      : null;
+    if (!target) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const el = document.getElementById('servicesScreen');
+    if (el && el.classList.contains('ff-services-mobile-tab')) {
+      el.classList.remove('ff-services-mobile-tab');
+      el.classList.add('ff-services-mobile-detail');
+      try {
+        const content = el.querySelector('.staff-content-area');
+        if (content) content.scrollTop = 0;
+      } catch (_) {}
+      return;
+    }
+    _ffServicesMobileShowList();
+  }, true);
+}
+
 async function openServicesModal(opts = {}) {
   const modal = document.getElementById('servicesModal');
   if (!modal) return;
@@ -4717,6 +4775,8 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
       _ffSelectedServiceId = null;
       _ffServicesInlineEditServiceId = null;
       renderServicesCatalogV2();
+      // Mobile: open the category detail full-screen.
+      _ffServicesMobileShowDetail('detail');
     });
   });
   list.querySelectorAll('.ffcat-addsvc-btn').forEach((btn) => {
@@ -4741,6 +4801,8 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
         _ffServicesInlineEditServiceId = null;
       }
       renderServicesCatalogV2();
+      // Mobile: open the service menu (Details/Locations/Staff) full-screen.
+      _ffServicesMobileShowDetail('detail');
     });
   });
   _ffWireServicesScreenDragDrop(list);
@@ -5017,6 +5079,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
       _ffServicesDetailTab = btn.getAttribute('data-services-tab') || 'details';
       _ffServicesInlineEditServiceId = null;
       renderServicesCatalogV2();
+      // Mobile: drill into the chosen section (Details/Locations/Staff).
+      _ffServicesMobileShowDetail('tab');
     });
   });
   const canManageServicesDetail = ffCanManageServices();
@@ -6392,6 +6456,10 @@ export async function goToServices() {
   _ffCatalogModalMode = 'shared';
   _ffOpenCats.clear();
   _ffCatalogRenderedOnce = false;
+  // Mobile: always open at the top level (the services list).
+  _ffSelectedServiceId = null;
+  _ffSelectedCategoryId = null;
+  _ffServicesMobileShowList();
 
   try {
     if (typeof window.ffSyncShellHeaderInset === 'function') window.ffSyncShellHeaderInset();
