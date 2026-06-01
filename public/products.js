@@ -848,7 +848,7 @@ function renderProductLocationsTab(product) {
           ${ffProductToggle("ff-products-location-enabled", enabled)}
         </div>
         <div class="ff-products-card-body" style="display:flex;flex-direction:column;gap:8px;opacity:${enabled ? "1" : "0.45"};pointer-events:${enabled ? "auto" : "none"};transition:opacity .18s ease;">
-          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
             <label style="flex:1;min-width:140px;display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:#374151;">Retail Price${hasPriceOverride ? " (Override)" : ` (Default ${escapeHtml(formatMoney(basePrice))})`}
               <input type="number" min="0" step="0.01" class="ff-products-location-price" value="${escapeHtml(String(shownPrice))}" style="padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;">
             </label>

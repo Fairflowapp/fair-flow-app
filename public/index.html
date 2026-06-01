@@ -12344,6 +12344,24 @@ function renderSelect(){
     return;
   }
 
+  // Don't rebuild the dropdown while the user is interacting with it (esp. the
+  // native iOS wheel picker). Background staff-cloud snapshots fire while a
+  // staff member joins/leaves, and wiping the options mid-selection made the
+  // list "jump". Defer the rebuild until the control loses focus.
+  if (document.activeElement === selectEl) {
+    selectEl.dataset.ffRenderPending = '1';
+    if (selectEl.dataset.ffBlurBound !== '1') {
+      selectEl.dataset.ffBlurBound = '1';
+      selectEl.addEventListener('blur', function () {
+        if (selectEl.dataset.ffRenderPending === '1') {
+          selectEl.dataset.ffRenderPending = '';
+          try { renderSelect(); } catch (_) {}
+        }
+      });
+    }
+    return;
+  }
+
   // Load staff from ff_staff_v1 (new primary source) - direct localStorage read
   let technicians = [];
   let staffCloudHydrated = false;
@@ -12411,7 +12429,17 @@ function renderSelect(){
 
   const techniciansDeduped = ffDeduplicateTechniciansByName(technicians);
   console.log('[renderSelect] Rendering dropdown with', techniciansDeduped.length, 'deduped technicians from', technicians.length, 'records');
-  
+
+  // Skip the DOM wipe entirely when the option set is unchanged. Rebuilding
+  // identical options on every staff-cloud snapshot is what made the JOIN
+  // list flicker/jump while selecting in the native app.
+  const _ffSelSig = techniciansDeduped.length
+    ? techniciansDeduped.map(function (t) { return (t && (t.id || t.name)) || ''; }).sort().join('|')
+    : 'EMPTY';
+  if (selectEl.dataset.ffSig === _ffSelSig && selectEl.childElementCount > 0) {
+    return;
+  }
+
   selectEl.innerHTML="";
 
   // Ensure dropdown is enabled and interactive
@@ -12434,6 +12462,7 @@ function renderSelect(){
     selectEl.appendChild(placeholder);
     selectEl.disabled = false;
     selectEl.title = "Lists service providers from Staff Members. Add or fix role under APPS - Staff Members.";
+    selectEl.dataset.ffSig = _ffSelSig;
     return;
   }
 
@@ -12469,7 +12498,9 @@ function renderSelect(){
   });
   
   console.log('[renderSelect] Added', addedCount, 'technicians to dropdown');
-  
+
+  selectEl.dataset.ffSig = _ffSelSig;
+
   // Update global reference
   if (typeof window !== 'undefined') {
     window.nameSelect = selectEl;
@@ -33812,7 +33843,7 @@ function initializeAppsPanel() {
                 console.error('[Apps Panel] Failed to open Products', err);
               });
             } else {
-              import('/products.js?v=20260530_perms')
+              import('/products.js?v=20260601_loc_align')
                 .then(function (m) {
                   if (m && typeof m.goToProducts === 'function') {
                     window.goToProducts = m.goToProducts;
@@ -56390,9 +56421,13 @@ function hookSettingsGuard_DISABLED(){
       }
     }
 
-    /* iPhone/Capacitor only: keep Tasks Settings below the app top bar and above the home indicator. */
+    /* Mobile (iOS + Android): keep Tasks Settings below the app top bar and above
+       the home indicator so the close (X) in the header stays reachable. This used
+       to be gated to iOS via @supports(-webkit-touch-callout), which left Android
+       (and any non-matching engine) with the modal starting at the very top - so the
+       header with the X was hidden behind the app top bar. env(safe-area-*) is a no-op
+       (resolves to 0) on devices without insets, so it is safe for all mobile. */
     @media (max-width: 640px) {
-      @supports (-webkit-touch-callout: none) {
         #tasksScreen #tasksSettingsModal.tasks-modal-overlay {
           top: var(--header-h, 92px) !important;
           bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important;
@@ -56440,7 +56475,6 @@ function hookSettingsGuard_DISABLED(){
           padding: 12px 14px calc(14px + env(safe-area-inset-bottom, 0px)) !important;
           overflow: hidden !important;
         }
-      }
     }
     
     #tasksScreen .tasks-modal-footer {
@@ -57819,12 +57853,131 @@ function hookSettingsGuard_DISABLED(){
       text-align: right;
       font-variant-numeric: tabular-nums;
     }
-    /* Hide each tax column independently when its toggle is off. */
+    /* Hide each tax column independently when its toggle is off.
+       !important so the mobile accordion (which reveals detail cells) cannot
+       override the hide and surface a tax column that should stay off. */
     #ticketsScreen .tickets-summary-table-wrap.ff-hide-product-tax-col .tickets-summary-col-product-tax {
-      display: none;
+      display: none !important;
     }
     #ticketsScreen .tickets-summary-table-wrap.ff-hide-service-tax-col .tickets-summary-col-service-tax {
-      display: none;
+      display: none !important;
+    }
+
+    /* ===== Mobile drill-down for the Tickets Summary table (<=640px) =====
+       Desktop keeps the wide multi-column table (with horizontal scroll).
+       On mobile each row collapses to a card showing Name + Total Earned, and
+       tapping it reveals the full per-row breakdown as label:value pairs, so
+       nothing overflows sideways. Driven by .ff-summary-row-open toggled in JS. */
+    @media (max-width: 640px) {
+      #ticketsScreen .tickets-summary-table-wrap {
+        overflow-x: hidden !important;
+      }
+      #ticketsScreen .tickets-summary-table {
+        min-width: 0 !important;
+        font-size: 14px;
+      }
+      #ticketsScreen .tickets-summary-table thead {
+        display: none !important;
+      }
+      #ticketsScreen .tickets-summary-table,
+      #ticketsScreen .tickets-summary-table tbody,
+      #ticketsScreen .tickets-summary-table tfoot {
+        display: block !important;
+        width: 100% !important;
+      }
+      #ticketsScreen .tickets-summary-table tr.tickets-summary-row {
+        display: block !important;
+        position: relative !important;
+        border: 1px solid #e5e7eb !important;
+        border-radius: 12px !important;
+        margin: 0 0 10px 0 !important;
+        padding: 14px 42px 14px 16px !important;
+        background: #fff !important;
+        cursor: pointer;
+      }
+      /* Hide every cell by default; reveal Name + Total below. */
+      #ticketsScreen .tickets-summary-table tbody td,
+      #ticketsScreen .tickets-summary-table tfoot td {
+        display: none !important;
+        text-align: left !important;
+        border: none !important;
+        padding: 0 !important;
+        background: transparent !important;
+        font-size: 13px !important;
+      }
+      /* Collapsed header: Name (left) + Total (right). */
+      #ticketsScreen .tickets-summary-table tbody td.ff-sum-name,
+      #ticketsScreen .tickets-summary-table tfoot td.ff-sum-name {
+        display: block !important;
+        font-weight: 700 !important;
+        font-size: 15px !important;
+        color: #111827 !important;
+        padding-right: 92px !important;
+        min-height: 20px !important;
+      }
+      #ticketsScreen .tickets-summary-table tbody td.ff-sum-total,
+      #ticketsScreen .tickets-summary-table tfoot td.ff-sum-total {
+        display: block !important;
+        position: absolute !important;
+        top: 13px !important;
+        right: 38px !important;
+        font-weight: 800 !important;
+        font-size: 15px !important;
+        color: #5b21b6 !important;
+      }
+      /* Chevron affordance. */
+      #ticketsScreen .tickets-summary-table tr.tickets-summary-row::after {
+        content: '' !important;
+        position: absolute !important;
+        top: 17px !important;
+        right: 16px !important;
+        width: 8px !important;
+        height: 8px !important;
+        border-right: 2px solid #9ca3af !important;
+        border-bottom: 2px solid #9ca3af !important;
+        transform: rotate(45deg);
+        transition: transform .18s ease;
+      }
+      #ticketsScreen .tickets-summary-table tr.tickets-summary-row.ff-summary-row-open::after {
+        transform: rotate(-135deg);
+      }
+      /* Expanded: reveal the breakdown cells as label:value rows. */
+      #ticketsScreen .tickets-summary-table tr.ff-summary-row-open td {
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: baseline !important;
+        gap: 12px !important;
+        padding: 8px 0 !important;
+        border-top: 1px solid #f3f4f6 !important;
+        color: #111827 !important;
+      }
+      #ticketsScreen .tickets-summary-table tr.ff-summary-row-open td.ff-sum-name {
+        display: block !important;
+        border-top: none !important;
+        margin-bottom: 4px !important;
+      }
+      #ticketsScreen .tickets-summary-table tr.ff-summary-row-open td.ff-sum-total {
+        display: block !important;
+        border-top: none !important;
+      }
+      #ticketsScreen .tickets-summary-table tr.ff-summary-row-open td::before {
+        content: attr(data-label);
+        color: #6b7280;
+        font-weight: 600;
+        font-size: 12px;
+      }
+      #ticketsScreen .tickets-summary-table tr.ff-summary-row-open td.ff-sum-name::before,
+      #ticketsScreen .tickets-summary-table tr.ff-summary-row-open td.ff-sum-total::before {
+        content: none;
+      }
+      /* Footer total card: tint it so it reads as the grand total. */
+      #ticketsScreen .tickets-summary-table tfoot tr.tickets-summary-total-row {
+        background: #f9fafb !important;
+        border: 2px solid #d1d5db !important;
+      }
+      #ticketsScreen .tickets-summary-table tfoot tr.tickets-summary-total-row td.ff-sum-name {
+        color: #5b21b6 !important;
+      }
     }
     #ticketsScreen .tickets-tab {
       padding:8px 14px; border:none; background:none; cursor:pointer;

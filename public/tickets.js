@@ -2903,6 +2903,20 @@ function buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId) {
 }
 
 function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totals) {
+  // Mobile drill-down: tapping a summary row toggles its detail breakdown.
+  // Bound once at document level so it survives every repaint of the table.
+  if (typeof document !== 'undefined' && !document.__ffSummaryRowDelegated) {
+    document.__ffSummaryRowDelegated = true;
+    document.addEventListener('click', function (event) {
+      const row = event.target && event.target.closest
+        ? event.target.closest('#ticketsScreen .tickets-summary-table tr.tickets-summary-row')
+        : null;
+      if (!row) return;
+      // Only act as an accordion on mobile widths; desktop keeps the full table.
+      if (window.matchMedia && !window.matchMedia('(max-width: 640px)').matches) return;
+      row.classList.toggle('ff-summary-row-open');
+    });
+  }
   // Each tax column shows only when its own toggle is active (enabled + rate > 0).
   if (wrap && wrap.classList) {
     const cfg = getTicketTaxConfig();
@@ -2922,33 +2936,33 @@ function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, tot
   }
   tbody.innerHTML = summaryRows
     .map(
-      (r) => `<tr>
-      <td>${escapeHtml(r.name)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryInt(r.tickets)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryInt(r.services)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(r.serviceSales)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(r.supplyDeductions)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(r.serviceCommission)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(r.productSales)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(r.productCommission)}</td>
-      <td class="tickets-summary-col-num tickets-summary-col-product-tax">${formatSummaryMoney(r.productTax)}</td>
-      <td class="tickets-summary-col-num tickets-summary-col-service-tax">${formatSummaryMoney(r.serviceTax)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(r.totalEarned)}</td>
+      (r) => `<tr class="tickets-summary-row">
+      <td class="ff-sum-name" data-label="Name">${escapeHtml(r.name)}</td>
+      <td class="tickets-summary-col-num" data-label="Tickets">${formatSummaryInt(r.tickets)}</td>
+      <td class="tickets-summary-col-num" data-label="Services">${formatSummaryInt(r.services)}</td>
+      <td class="tickets-summary-col-num" data-label="Service Sales">${formatSummaryMoney(r.serviceSales)}</td>
+      <td class="tickets-summary-col-num" data-label="Supply Deductions">${formatSummaryMoney(r.supplyDeductions)}</td>
+      <td class="tickets-summary-col-num" data-label="Service Commission">${formatSummaryMoney(r.serviceCommission)}</td>
+      <td class="tickets-summary-col-num" data-label="Product Sales">${formatSummaryMoney(r.productSales)}</td>
+      <td class="tickets-summary-col-num" data-label="Product Commission">${formatSummaryMoney(r.productCommission)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-product-tax" data-label="Product Tax">${formatSummaryMoney(r.productTax)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-service-tax" data-label="Service Tax">${formatSummaryMoney(r.serviceTax)}</td>
+      <td class="tickets-summary-col-num ff-sum-total" data-label="Total Earned">${formatSummaryMoney(r.totalEarned)}</td>
     </tr>`
     )
     .join('');
-  tfoot.innerHTML = `<tr class="tickets-summary-total-row">
-      <td>Total</td>
-      <td class="tickets-summary-col-num">${formatSummaryInt(totals?.tickets)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryInt(totals?.services)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.serviceSales)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.supplyDeductions)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.serviceCommission)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.productSales)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.productCommission)}</td>
-      <td class="tickets-summary-col-num tickets-summary-col-product-tax">${formatSummaryMoney(totals?.productTax)}</td>
-      <td class="tickets-summary-col-num tickets-summary-col-service-tax">${formatSummaryMoney(totals?.serviceTax)}</td>
-      <td class="tickets-summary-col-num">${formatSummaryMoney(totals?.totalEarned)}</td>
+  tfoot.innerHTML = `<tr class="tickets-summary-total-row tickets-summary-row">
+      <td class="ff-sum-name" data-label="Name">Total</td>
+      <td class="tickets-summary-col-num" data-label="Tickets">${formatSummaryInt(totals?.tickets)}</td>
+      <td class="tickets-summary-col-num" data-label="Services">${formatSummaryInt(totals?.services)}</td>
+      <td class="tickets-summary-col-num" data-label="Service Sales">${formatSummaryMoney(totals?.serviceSales)}</td>
+      <td class="tickets-summary-col-num" data-label="Supply Deductions">${formatSummaryMoney(totals?.supplyDeductions)}</td>
+      <td class="tickets-summary-col-num" data-label="Service Commission">${formatSummaryMoney(totals?.serviceCommission)}</td>
+      <td class="tickets-summary-col-num" data-label="Product Sales">${formatSummaryMoney(totals?.productSales)}</td>
+      <td class="tickets-summary-col-num" data-label="Product Commission">${formatSummaryMoney(totals?.productCommission)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-product-tax" data-label="Product Tax">${formatSummaryMoney(totals?.productTax)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-service-tax" data-label="Service Tax">${formatSummaryMoney(totals?.serviceTax)}</td>
+      <td class="tickets-summary-col-num ff-sum-total" data-label="Total Earned">${formatSummaryMoney(totals?.totalEarned)}</td>
     </tr>`;
   if (emptyMsg) {
     emptyMsg.style.display = 'none';
