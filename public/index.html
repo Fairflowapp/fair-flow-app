@@ -1791,6 +1791,8 @@ ul{list-style:none;padding:0;margin:0}
 
 .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;min-width:0}
 
+.ff-queue-call-near-name{flex:0 0 auto}
+
 /* Buttons in rows */
 
 /* Shared neutral button style - used by START and SELECT buttons */
@@ -2046,7 +2048,7 @@ dialog footer button, .code-dialog footer button {
     max-height: 30px !important;
     margin: 0 !important;
     padding: 0 26px 0 8px !important;
-    font-size: 13px !important;
+    font-size: 12px !important;
     line-height: 1.2 !important;
     font-family: inherit !important;
     color: #111827;
@@ -3345,6 +3347,53 @@ dialog footer button, .code-dialog footer button {
 }
 
 @media (max-width: 640px) {
+  /* Mobile staff header: keep the avatar/name in their normal position and pin
+     the actions button to the far right of the header. Long names are truncated
+     before the button so the two never overlap. */
+  #staffDetailsHeader .ff-staff-details-header-row {
+    position: relative !important;
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  #staffDetailsHeader .ff-staff-details-main {
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    padding-right: 64px !important;
+    box-sizing: border-box !important;
+  }
+  #staffDetailsHeader .ff-staff-details-text {
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    margin-left: 0 !important;
+  }
+  #staffDetailsHeader .ff-staff-details-name {
+    max-width: calc(100vw - 205px) !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+  #staffMembersModal .ff-staff-kebab-wrap,
+  #staffDetailsHeader .ff-staff-kebab-wrap {
+    position: absolute !important;
+    right: -130px !important;
+    left: auto !important;
+    top: 0 !important;
+    height: 30px !important;
+    margin: 0 !important;
+    z-index: 2 !important;
+  }
+  #staffDetailsHeader #ffStaffDetailsKebabMenu {
+    right: 0 !important;
+    left: auto !important;
+    transform: translateX(-130px) !important;
+  }
+
   #staffMembersModal .staff-modal-content {
     display: block !important;
     overflow-y: auto !important;
@@ -4979,12 +5028,16 @@ dialog footer button, .code-dialog footer button {
 
   .available-list .item .badge + div {
     min-width: 0;
+    overflow: hidden;
   }
 
   /* Allow name pill to shrink so START stays on same row (inline flexShrink:0 from JS) */
   .available-list .item .name-pill {
+    max-width: min(180px, 46vw) !important;
+    font-size: 12px !important;
+    padding: 6px 10px !important;
     flex-shrink: 1 !important;
-    min-width: 0;
+    min-width: 0 !important;
   }
 
   .controls {
@@ -5132,6 +5185,10 @@ dialog footer button, .code-dialog footer button {
 
   .available-list .item .ff-queue-more-panel > button {
     justify-content: center;
+  }
+
+  .available-list .item .ff-queue-more-panel .hold-btn {
+    color: #111827 !important;
   }
 
   .available-list .item.ff-queue-row-more-open .ff-queue-more-panel {
@@ -6579,9 +6636,9 @@ dialog footer button, .code-dialog footer button {
     <!-- Content (scrollable) -->
     <div style="overflow-y:auto;padding:18px 20px;flex:1;">
       <div class="apps-launcher-grid">
-        <!-- Column 1: CORE APPS -->
+        <!-- Column 1: WORKFLOWS -->
         <div class="apps-col">
-          <div class="apps-section-title">CORE APPS</div>
+          <div class="apps-section-title">WORKFLOWS</div>
           <div class="apps-section-grid">
             <div class="apps-panel-item" data-app="queue" style="cursor:pointer;">
               <div class="apps-panel-item__content">
@@ -6600,6 +6657,16 @@ dialog footer button, .code-dialog footer button {
                 </div>
                 <div>
                   <div>Tasks</div>
+                </div>
+              </div>
+            </div>
+            <div class="apps-panel-item" data-app="tickets" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                </div>
+                <div>
+                  <div>Tickets</div>
                 </div>
               </div>
             </div>
@@ -6627,16 +6694,6 @@ dialog footer button, .code-dialog footer button {
                 </div>
                 <div>
                   <div>Inbox</div>
-                </div>
-              </div>
-            </div>
-            <div class="apps-panel-item" data-app="tickets" style="cursor:pointer;">
-              <div class="apps-panel-item__content">
-                <div>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                </div>
-                <div>
-                  <div>Tickets</div>
                 </div>
               </div>
             </div>
@@ -13471,6 +13528,7 @@ function renderQueue(){
     console.log('[StaffCallDiag] queue row presence', diagEligibility);
     if (canCall && canManageCalls && !queueLocked && !reorderMode) {
       const callWrap = document.createElement("div");
+      callWrap.className = "ff-queue-call-near-name";
       callWrap.style.cssText = "display:flex;align-items:center;gap:4px;white-space:nowrap;";
 
       const callBtn = document.createElement("button");
@@ -35592,11 +35650,11 @@ function initializeAppsPanel() {
         }
         
         headerEl.innerHTML = `
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);position:relative;">
-            <div style="display:flex;align-items:flex-start;gap:12px;flex:1;">
+          <div class="ff-staff-details-header-row" style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);position:relative;">
+            <div class="ff-staff-details-main" style="display:flex;align-items:flex-start;gap:12px;flex:1;">
               ${avatarHtml}
-              <div style="flex:1;">
-                <h2 style="margin:0 0 4px 0;font-size:16px;font-weight:600;color:#111827;">${escapeHtml(staff.name)}</h2>
+              <div class="ff-staff-details-text" style="flex:1;">
+                <h2 class="ff-staff-details-name" style="margin:0 0 4px 0;font-size:16px;font-weight:600;color:#111827;">${escapeHtml(staff.name)}</h2>
                 <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">${escapeHtml(roleLabel)}</p>
                 <div style="display:flex;align-items:center;flex-wrap:wrap;margin-top:4px;">
                   ${statusLineHtml}
@@ -35604,7 +35662,7 @@ function initializeAppsPanel() {
                 </div>
               </div>
             </div>
-            <div style="position:absolute;right:calc(100% - (180px + 20px + 400px));top:0;display:flex;align-items:center;height:20px;">
+            <div class="ff-staff-kebab-wrap" style="position:absolute;right:calc(100% - (180px + 20px + 400px));top:0;display:flex;align-items:center;height:20px;">
               <div style="position:relative;">
                 <button id="ffStaffDetailsKebabBtn" type="button" style="width:30px;height:30px;border:none;background:#f3f4f6;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;transition:background 0.15s ease;" title="More options" aria-label="More options"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false"><circle cx="8" cy="3.5" r="1.6" fill="#7c3aed"/><circle cx="8" cy="8" r="1.6" fill="#7c3aed"/><circle cx="8" cy="12.5" r="1.6" fill="#7c3aed"/></svg></button>
                 <div id="ffStaffDetailsKebabMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:150px;z-index:1001;padding:4px 0;">
