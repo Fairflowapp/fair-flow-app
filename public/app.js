@@ -37,6 +37,7 @@ import {
   collectionGroup,
   query,
   where,
+  increment,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import {
@@ -893,6 +894,136 @@ function ffAssertTrainingVideoFile(file) {
   }
 }
 
+const FF_INCLUDED_STORAGE_BYTES = 5 * 1024 * 1024 * 1024;
+const FF_STORAGE_BLOCK_BYTES = 10 * 1024 * 1024 * 1024;
+const FF_FUNCTIONS_REGION = "us-central1";
+
+function ffStorageBlockQuantityForBytes(bytes) {
+  const billableBytes = Number(bytes || 0) - FF_INCLUDED_STORAGE_BYTES;
+  if (!Number.isFinite(billableBytes) || billableBytes <= 0) return 0;
+  return Math.ceil(billableBytes / FF_STORAGE_BLOCK_BYTES);
+}
+
+function ffFormatStorageGb(bytes) {
+  const gb = Number(bytes || 0) / (1024 * 1024 * 1024);
+  if (!Number.isFinite(gb) || gb <= 0) return "0GB";
+  return `${gb >= 10 ? Math.ceil(gb) : Math.ceil(gb * 10) / 10}GB`;
+}
+
+function ffFormatStorageSize(bytes) {
+  const n = Number(bytes || 0);
+  if (!Number.isFinite(n) || n <= 0) return "0MB";
+  if (n < 1024 * 1024 * 1024) return `${Math.ceil(n / (1024 * 1024))}MB`;
+  return ffFormatStorageGb(n);
+}
+
+async function ffGetStorageBillingState(salonId) {
+  const [usageSnap, billingSnap] = await Promise.all([
+    getDoc(doc(db, `salons/${salonId}/usage/storage`)).catch((e) => {
+      console.warn("[StorageBilling] usage read failed; assuming 0 bytes", e?.code, e?.message);
+      return null;
+    }),
+    getDoc(doc(db, `salons/${salonId}/billing/stripe`)),
+  ]);
+  const usageData = usageSnap?.exists?.() ? usageSnap.data() || {} : {};
+  const billingData = billingSnap.exists() ? billingSnap.data() || {} : {};
+  const paidBlockQuantity = Number(billingData.items?.storage?.quantity || 0);
+  const bytesUsed = Math.max(0, Number(usageData.bytesUsed || 0));
+  return {
+    bytesUsed: Number.isFinite(bytesUsed) ? bytesUsed : 0,
+    paidBlockQuantity: Number.isFinite(paidBlockQuantity) ? paidBlockQuantity : 0,
+  };
+}
+
+function ffShowPaidStorageConfirm({ currentBlocks, requiredBlocks, projectedBytes, includedBytes }) {
+  return new Promise((resolve) => {
+    document.getElementById("ffPaidStorageConfirm")?.remove();
+    const additionalBlocks = Math.max(requiredBlocks - currentBlocks, 0);
+    const overlay = document.createElement("div");
+    overlay.id = "ffPaidStorageConfirm";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483500;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;";
+    overlay.innerHTML = `
+      <div role="dialog" aria-modal="true" aria-labelledby="ffPaidStorageConfirmTitle" style="width:min(480px,100%);background:#fff;border-radius:18px;padding:24px;box-shadow:0 24px 70px rgba(15,23,42,.28);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+        <div id="ffPaidStorageConfirmTitle" style="font-size:18px;font-weight:800;margin-bottom:10px;">Add paid storage?</div>
+        <div style="font-size:14px;line-height:1.55;color:#4b5563;margin-bottom:22px;">
+          Your base plan includes ${ffFormatStorageSize(includedBytes)} of storage for Media and Training together. Additional storage is billed in 10GB blocks. Each 10GB costs $10/month.
+          This upload will bring your salon storage to about ${ffFormatStorageGb(projectedBytes)}.
+          If you continue, ${additionalBlocks} additional storage ${additionalBlocks === 1 ? "block" : "blocks"} will be added to your subscription automatically.
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+          <button type="button" data-ff-paid-storage-cancel style="padding:10px 16px;border-radius:999px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-size:13px;font-weight:800;cursor:pointer;">Cancel</button>
+          <button type="button" data-ff-paid-storage-confirm style="padding:10px 16px;border-radius:999px;border:0;background:#7c3aed;color:#fff;font-size:13px;font-weight:800;cursor:pointer;">Confirm &amp; Add Storage</button>
+        </div>
+      </div>
+    `;
+    const finish = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) finish(false);
+    });
+    overlay.querySelector("[data-ff-paid-storage-cancel]")?.addEventListener("click", () => finish(false));
+    overlay.querySelector("[data-ff-paid-storage-confirm]")?.addEventListener("click", () => finish(true));
+    document.body.appendChild(overlay);
+    setTimeout(() => {
+      try { overlay.querySelector("[data-ff-paid-storage-confirm]")?.focus(); } catch (_) {}
+    }, 0);
+  });
+}
+
+async function ffSyncPaidStorageQuantityOrThrow(salonId, desiredStorageBlockQuantity) {
+  const fn = httpsCallable(
+    getFunctions(undefined, FF_FUNCTIONS_REGION),
+    "syncStripeStorageQuantity"
+  );
+  await fn({ salonId, desiredStorageBlockQuantity });
+}
+
+async function ffCheckStorageUploadAllowance(salonId, uploadBytes) {
+  const fn = httpsCallable(
+    getFunctions(undefined, FF_FUNCTIONS_REGION),
+    "checkStorageUploadAllowance"
+  );
+  const res = await fn({ salonId, uploadBytes });
+  return res?.data || {};
+}
+
+async function ffEnsureStorageCapacityForUpload(salonId, file) {
+  const uploadBytesCount = Number(file?.size || 0);
+  if (!Number.isFinite(uploadBytesCount) || uploadBytesCount <= 0) return;
+  const allowance = await ffCheckStorageUploadAllowance(salonId, uploadBytesCount);
+  if (allowance.allowed) return;
+  if (!allowance.isOwner) {
+    throw new Error("This upload needs more storage. Please ask the salon owner to approve the storage upgrade.");
+  }
+  const confirmed = await ffShowPaidStorageConfirm({
+    currentBlocks: Number(allowance.paidBlockQuantity || 0),
+    requiredBlocks: Number(allowance.requiredStorageBlockQuantity || 0),
+    projectedBytes: Number(allowance.projectedBytes || uploadBytesCount),
+    includedBytes: Number(allowance.includedBytes || FF_INCLUDED_STORAGE_BYTES),
+  });
+  if (!confirmed) throw new Error("Storage upgrade was canceled.");
+  await ffSyncPaidStorageQuantityOrThrow(
+    salonId,
+    Number(allowance.requiredStorageBlockQuantity || 0)
+  );
+}
+
+async function ffRecordStorageUsageDelta(salonId, deltaBytes) {
+  const n = Number(deltaBytes || 0);
+  if (!Number.isFinite(n) || n === 0) return;
+  await setDoc(
+    doc(db, `salons/${salonId}/usage/storage`),
+    {
+      bytesUsed: increment(n),
+      updatedAt: serverTimestamp(),
+      source: "media",
+    },
+    { merge: true }
+  );
+}
+
 async function ffUploadSalonBrandLogo({ salonId, file }) {
   if (!salonId) throw new Error("Missing salonId");
   ffAssertImageFile(file);
@@ -929,9 +1060,13 @@ async function ffUploadTrainingImage({ salonId, trainingIdOrTempId, file }) {
   const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${ext}`;
   const path = `salons/${salonId}/training/images/${safeId}/${fileName}`;
   const fileRef = storageRef(storage, path);
+  await ffEnsureStorageCapacityForUpload(salonId, file);
   await uploadBytes(fileRef, file);
   const url = await getDownloadURL(fileRef);
-  return { url, path };
+  await ffRecordStorageUsageDelta(salonId, Number(file?.size || 0)).catch((e) => {
+    console.warn("[StorageBilling] training image usage increment failed", e?.code, e?.message);
+  });
+  return { url, path, sizeBytes: Number(file?.size || 0) };
 }
 
 function ffVideoExtensionFromMime(file) {
@@ -952,9 +1087,13 @@ async function ffUploadTrainingVideo({ salonId, trainingIdOrTempId, file }) {
   const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${ext}`;
   const path = `salons/${salonId}/training/videos/${safeId}/${fileName}`;
   const fileRef = storageRef(storage, path);
+  await ffEnsureStorageCapacityForUpload(salonId, file);
   await uploadBytes(fileRef, file);
   const url = await getDownloadURL(fileRef);
-  return { url, path };
+  await ffRecordStorageUsageDelta(salonId, Number(file?.size || 0)).catch((e) => {
+    console.warn("[StorageBilling] training video usage increment failed", e?.code, e?.message);
+  });
+  return { url, path, sizeBytes: Number(file?.size || 0) };
 }
 
 async function ffSaveSalonLogoMeta({ salonId, url, path }) {
@@ -1139,7 +1278,124 @@ function showResetPasswordScreen() {
   if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
 }
 
+function ffIsBillingRequiredSalonData(salonData) {
+  const status = String(salonData?.accountStatus || "").toLowerCase();
+  const reason = String(salonData?.accountStatusReason || "").toLowerCase();
+  return status === "locked" && reason === "billing_required";
+}
+
+function ffHideInitialBillingGate() {
+  const existing = document.getElementById("ff-initial-billing-gate");
+  if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+  document.body.style.overflow = "";
+}
+
+async function ffStartInitialBillingCheckout(salonId, btn) {
+  let originalText = "";
+  if (btn) {
+    originalText = btn.textContent || "";
+    btn.disabled = true;
+    btn.textContent = "Opening checkout...";
+  }
+  try {
+    if (!salonId) throw new Error("No salon selected");
+    const startCheckout = httpsCallable(functions, "createStripeCheckoutSession");
+    const origin = window.location.origin;
+    const { data } = await startCheckout({
+      salonId,
+      items: [{ sku: "base", quantity: 1 }],
+      successUrl: `${origin}/?billing=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${origin}/?billing=cancel`,
+    });
+    if (data && data.url) {
+      window.location.href = data.url;
+      return;
+    }
+    throw new Error("No checkout URL returned by server");
+  } catch (err) {
+    console.warn("[BillingGate] checkout failed", err);
+    if (btn) {
+      btn.disabled = false;
+      if (originalText) btn.textContent = originalText;
+    }
+    const errorEl = document.getElementById("ff-initial-billing-gate-error");
+    if (errorEl) {
+      errorEl.textContent = `Could not start checkout: ${err?.message || err}`;
+      errorEl.style.display = "block";
+    }
+  }
+}
+
+function ffShowInitialBillingRequiredGate({ salonId }) {
+  ffHideInitialBillingGate();
+  hideAuthScreens();
+
+  const mainApp = document.getElementById("main-app-content");
+  if (mainApp) mainApp.style.display = "none";
+  FF_FULLSCREEN_MODULE_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = "none";
+  });
+
+  document.body.classList.remove("ff-logged-out", "ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
+
+  const gate = document.createElement("div");
+  gate.id = "ff-initial-billing-gate";
+  gate.setAttribute("role", "dialog");
+  gate.setAttribute("aria-modal", "true");
+  gate.style.cssText = "position:fixed;inset:0;z-index:2147483600;background:rgba(15,23,42,.92);display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;";
+
+  const card = document.createElement("div");
+  card.style.cssText = "width:min(440px,100%);background:#fff;border-radius:22px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.35);text-align:center;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;";
+
+  const title = document.createElement("h2");
+  title.textContent = "Complete Billing Setup";
+  title.style.cssText = "margin:0 0 10px;font-size:24px;line-height:1.2;font-weight:800;";
+  card.appendChild(title);
+
+  const msg = document.createElement("p");
+  msg.textContent = "Add a payment method to start your 14-day trial and continue using Fair Flow.";
+  msg.style.cssText = "margin:0 0 22px;color:#4b5563;font-size:15px;line-height:1.5;";
+  card.appendChild(msg);
+
+  const checkoutBtn = document.createElement("button");
+  checkoutBtn.type = "button";
+  checkoutBtn.textContent = "Complete Billing Setup";
+  checkoutBtn.style.cssText = "width:100%;border:0;border-radius:999px;background:#7c3aed;color:#fff;font-size:16px;font-weight:700;padding:13px 18px;cursor:pointer;";
+  checkoutBtn.addEventListener("click", () => ffStartInitialBillingCheckout(salonId, checkoutBtn));
+  card.appendChild(checkoutBtn);
+
+  const logoutBtn = document.createElement("button");
+  logoutBtn.type = "button";
+  logoutBtn.textContent = "Log Out";
+  logoutBtn.style.cssText = "width:100%;margin-top:10px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:14px;font-weight:700;padding:11px 18px;cursor:pointer;";
+  logoutBtn.addEventListener("click", async () => {
+    logoutBtn.disabled = true;
+    logoutBtn.textContent = "Logging out...";
+    try {
+      await signOut(auth);
+      window.location.reload();
+    } catch (err) {
+      console.warn("[BillingGate] logout failed", err);
+      logoutBtn.disabled = false;
+      logoutBtn.textContent = "Log Out";
+    }
+  });
+  card.appendChild(logoutBtn);
+
+  const errorEl = document.createElement("div");
+  errorEl.id = "ff-initial-billing-gate-error";
+  errorEl.style.cssText = "display:none;margin-top:14px;padding:10px 12px;border-radius:12px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;font-size:13px;line-height:1.4;text-align:left;";
+  card.appendChild(errorEl);
+
+  gate.appendChild(card);
+  document.body.appendChild(gate);
+  document.body.style.overflow = "hidden";
+}
+
 function showMainAppForRole(role) {
+  ffHideInitialBillingGate();
   const mainApp = document.getElementById("main-app-content");
   const ownerView = document.getElementById("owner-view");
   const receptionView = document.getElementById("reception-view");
@@ -1223,6 +1479,29 @@ function showCompleteSetupError(msg) {
   if (errEl) errEl.textContent = msg || "";
 }
 
+function ffFormatNameFromEmail(email) {
+  const local = String(email || "").split("@")[0] || "";
+  const cleaned = local
+    .replace(/[+].*$/, "")
+    .replace(/[._-]+/g, " ")
+    .replace(/[^a-zA-Z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  return cleaned
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function ffDeriveOwnerName(user, emailFallback) {
+  const displayName = String(user?.displayName || "").trim();
+  if (displayName) return displayName;
+  const email = String(user?.email || emailFallback || "").trim();
+  return ffFormatNameFromEmail(email) || "Owner";
+}
+
 function showCompleteSetupScreen(user) {
   const loginSection = document.getElementById("login-section");
   const signupSection = document.getElementById("signup-section");
@@ -1245,11 +1524,6 @@ function showCompleteSetupScreen(user) {
     emailDisplay.textContent = user?.email ? `Signed in as ${user.email}` : "";
   }
 
-  const ownerNameEl = document.getElementById("complete-setup-owner-name");
-  if (ownerNameEl && !ownerNameEl.value && user?.displayName) {
-    ownerNameEl.value = user.displayName;
-  }
-
   showCompleteSetupError("");
 
   // Store the user we're completing setup for
@@ -1268,14 +1542,13 @@ async function handleCompleteSetup() {
   }
 
   const businessNameEl = document.getElementById("complete-setup-business-name");
-  const ownerNameEl = document.getElementById("complete-setup-owner-name");
   const btnEl = document.getElementById("complete-setup-button");
 
   const businessName = businessNameEl?.value.trim();
-  const ownerName = ownerNameEl?.value.trim();
+  const ownerName = ffDeriveOwnerName(user);
 
-  if (!businessName || !ownerName) {
-    showCompleteSetupError("Please fill in both fields.");
+  if (!businessName) {
+    showCompleteSetupError("Please enter your business name.");
     return;
   }
 
@@ -1304,7 +1577,10 @@ async function handleCompleteSetup() {
       adminPin: generatedPin,
       createdAt: serverTimestamp(),
       plan: "trial",
-      status: "active"
+      status: "active",
+      accountStatus: "locked",
+      accountStatusReason: "billing_required",
+      accountStatusUpdatedAt: serverTimestamp()
     });
 
     console.log("[CompleteSetup] Salon doc created:", salonDocRef.id);
@@ -1335,7 +1611,6 @@ async function handleCompleteSetup() {
     // Clear stored user and proceed
     window.__ff_completeSetupUser = null;
     if (businessNameEl) businessNameEl.value = "";
-    if (ownerNameEl) ownerNameEl.value = "";
 
     await loadUserRoleAndShowView(user);
   } catch (err) {
@@ -1630,18 +1905,16 @@ async function handleOwnerSignup() {
   showSignupError("");
 
   const businessNameEl = document.getElementById("signup-business-name");
-  const ownerNameEl = document.getElementById("signup-owner-name");
   const emailEl = document.getElementById("signup-email");
   const passEl = document.getElementById("signup-password");
   const pass2El = document.getElementById("signup-password-confirm");
 
   const businessName = businessNameEl?.value.trim();
-  const ownerName = ownerNameEl?.value.trim();
   const email = ffNormalizeOwnerEmail(emailEl?.value);
   const password = passEl?.value;
   const passwordConfirm = pass2El?.value;
 
-  if (!businessName || !ownerName || !email || !password || !passwordConfirm) {
+  if (!businessName || !email || !password || !passwordConfirm) {
     showSignupError("Please fill all fields.");
     return;
   }
@@ -1659,6 +1932,7 @@ async function handleOwnerSignup() {
     if (typeof window !== "undefined") window.__ff_owner_signup_in_progress = true;
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     const user = cred.user;
+    const ownerName = ffDeriveOwnerName(user, email);
     if (typeof window !== "undefined") window.__ff_owner_signup_in_progress = { uid: user.uid };
 
     console.log("[SignUp] Auth user created:", user.uid);
@@ -1672,7 +1946,10 @@ async function handleOwnerSignup() {
       adminPin: generatedPin,
       createdAt: serverTimestamp(),
       plan: "trial",
-      status: "active"
+      status: "active",
+      accountStatus: "locked",
+      accountStatusReason: "billing_required",
+      accountStatusUpdatedAt: serverTimestamp()
     });
 
     console.log("[SignUp] Salon doc created:", salonDocRef.id);
@@ -2660,6 +2937,22 @@ async function loadUserRoleAndShowView(user, options = {}) {
       }
     }
 
+    if (currentSalonId) {
+      try {
+        const billingGateSnap = await getDoc(doc(db, "salons", currentSalonId));
+        const billingGateData = billingGateSnap.exists() ? billingGateSnap.data() || {} : {};
+        if (ffIsBillingRequiredSalonData(billingGateData)) {
+          console.warn("[BillingGate] Blocking app access until billing setup is complete", {
+            salonId: currentSalonId,
+          });
+          ffShowInitialBillingRequiredGate({ salonId: currentSalonId });
+          return;
+        }
+      } catch (billingGateErr) {
+        console.warn("[BillingGate] Could not read salon billing status; allowing app load", billingGateErr);
+      }
+    }
+
     showMainAppForRole(role);
 
     setTimeout(() => {
@@ -2998,7 +3291,7 @@ function ffWireUiAfterDomReady() {
     }
 
     // Submit on Enter inside complete-setup fields
-    ["complete-setup-business-name", "complete-setup-owner-name"].forEach((id) => {
+    ["complete-setup-business-name"].forEach((id) => {
       const el = document.getElementById(id);
       if (el) {
         el.addEventListener("keydown", (ev) => {

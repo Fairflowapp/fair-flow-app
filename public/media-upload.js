@@ -27,7 +27,7 @@ import {
   createMediaCategory,
   updateMediaCategory,
   deleteMediaCategory,
-} from "./media-cloud.js?v=20260513_no_staging_banner";
+} from "./media-cloud.js?v=20260602_storage_5gb_restore_final";
 
 let currentUserProfile = null;
 let userWorks = [];
@@ -1047,6 +1047,14 @@ function populateMediaCategoriesDropdown() {
   if (!dropdown || !trigger) return;
   const active = mediaCategories.filter((c) => c.active !== false).sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
   dropdown.innerHTML = "";
+  if (!active.length) {
+    const empty = document.createElement("div");
+    empty.style.cssText = "font-size:10px;color:#6b7280;padding:12px 14px;line-height:1.35;background:#fff;";
+    empty.textContent = "No media categories yet. Add categories in Settings > Media Categories.";
+    dropdown.appendChild(empty);
+    updateUploadCategoryTriggerText();
+    return;
+  }
   active.forEach((c) => {
     const label = document.createElement("label");
     label.style.cssText = "display:flex;align-items:center;gap:8px;cursor:pointer;font-size:10px;padding:10px 14px;border-bottom:1px solid #f3f4f6;";
@@ -1070,14 +1078,70 @@ function populateMediaCategoriesDropdown() {
 
 function toggleUploadCategoryDropdown() {
   const dropdown = document.getElementById("uploadWorkCategoryDropdown");
+  const trigger = document.getElementById("uploadWorkCategoryTrigger");
   if (!dropdown) return;
   const isOpen = dropdown.style.display === "block";
-  dropdown.style.display = isOpen ? "none" : "block";
+  if (isOpen) {
+    closeUploadCategoryDropdown();
+    return;
+  }
+  if (dropdown.parentElement !== document.body) {
+    document.body.appendChild(dropdown);
+  }
+  positionUploadCategoryDropdown(dropdown, trigger);
+  dropdown.style.display = "block";
 }
 
 function closeUploadCategoryDropdown() {
   const dropdown = document.getElementById("uploadWorkCategoryDropdown");
-  if (dropdown) dropdown.style.display = "none";
+  if (dropdown) {
+    dropdown.style.display = "none";
+    clearUploadCategoryDropdownPosition(dropdown);
+  }
+}
+
+function clearUploadCategoryDropdownPosition(dropdown) {
+  if (!dropdown) return;
+  dropdown.style.position = "";
+  dropdown.style.top = "";
+  dropdown.style.left = "";
+  dropdown.style.right = "";
+  dropdown.style.width = "";
+  dropdown.style.maxHeight = "";
+  dropdown.style.zIndex = "";
+}
+
+function positionUploadCategoryDropdown(dropdown, trigger) {
+  if (!dropdown || !trigger) return;
+  try {
+    const rect = trigger.getBoundingClientRect();
+    const margin = 12;
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    const width = Math.max(180, Math.min(rect.width, vw - margin * 2));
+    let left = rect.left;
+    if (left + width > vw - margin) left = vw - margin - width;
+    if (left < margin) left = margin;
+
+    const below = Math.max(120, vh - rect.bottom - margin);
+    const above = Math.max(120, rect.top - margin);
+    const openAbove = below < 180 && above > below;
+    const maxHeight = Math.min(260, openAbove ? above : below);
+
+    dropdown.style.position = "fixed";
+    dropdown.style.left = `${Math.round(left)}px`;
+    dropdown.style.right = "auto";
+    dropdown.style.width = `${Math.round(width)}px`;
+    dropdown.style.maxHeight = `${Math.round(maxHeight)}px`;
+    dropdown.style.zIndex = "100500";
+    if (openAbove) {
+      dropdown.style.top = `${Math.round(Math.max(margin, rect.top - maxHeight - 4))}px`;
+    } else {
+      dropdown.style.top = `${Math.round(rect.bottom + 4)}px`;
+    }
+  } catch (_) {
+    clearUploadCategoryDropdownPosition(dropdown);
+  }
 }
 
 function populateWorksDropdown() {
@@ -1230,7 +1294,15 @@ async function doUpload() {
     }
   } catch (e) {
     console.error("[Media] Upload failed", e);
-    showUploadMessage(formatMediaUploadError(e), true);
+    const msg = formatMediaUploadError(e);
+    showUploadMessage(msg, true);
+    if (/storage|owner|upgrade|נפח/i.test(msg)) {
+      if (typeof window.ffStyledAlert === "function") {
+        window.ffStyledAlert(msg, "Storage");
+      } else {
+        alert(msg);
+      }
+    }
   } finally {
     if (submitBtn) {
       submitBtn.disabled = false;
@@ -2622,7 +2694,7 @@ function setupMediaWorkListSubscriptions() {
           void updateContentWork(w.id, { previewMediaUrl: url }).catch(() => {});
         }
       }
-      userWorks = [...enriched, ...ownWorks.slice(20)];
+      userWorks = [...enriched, ...ownWorks.slice(toEnrich.length)];
       populateWorksDropdown();
       renderMediaList();
     });
@@ -2648,7 +2720,7 @@ function setupMediaWorkListSubscriptions() {
           void updateContentWork(w.id, { previewMediaUrl: url }).catch(() => {});
         }
       }
-      allWorks = [...enriched, ...arr.slice(20)];
+      allWorks = [...enriched, ...arr.slice(toEnrich.length)];
       renderMediaFilters();
       renderMediaList();
     });

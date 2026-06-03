@@ -6018,9 +6018,6 @@ dialog footer button, .code-dialog footer button {
     <input id="signup-business-name" type="text" placeholder="Business name"
            style="width:100%;margin-bottom:10px;padding:10px 14px;border-radius:8px;border:1px solid #ddd;font-size:14px;" />
 
-    <input id="signup-owner-name" type="text" placeholder="Your name"
-           style="width:100%;margin-bottom:10px;padding:10px 14px;border-radius:8px;border:1px solid #ddd;font-size:14px;" />
-
     <input id="signup-email" type="email" placeholder="Email"
            style="width:100%;margin-bottom:10px;padding:10px 14px;border-radius:8px;border:1px solid #ddd;font-size:14px;" />
 
@@ -6057,9 +6054,6 @@ dialog footer button, .code-dialog footer button {
 
     <input id="complete-setup-business-name" type="text" placeholder="Business name"
            style="width:100%;margin-bottom:10px;padding:10px 14px;border-radius:8px;border:1px solid #ddd;font-size:14px;" />
-
-    <input id="complete-setup-owner-name" type="text" placeholder="Your name"
-           style="width:100%;margin-bottom:16px;padding:10px 14px;border-radius:8px;border:1px solid #ddd;font-size:14px;" />
 
     <button id="complete-setup-button"
             style="width:100%;padding:12px 16px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:16px;font-weight:600;cursor:pointer;">
@@ -8624,12 +8618,14 @@ async function initFirebaseAuth() {
         // We check Firestore synchronously-ish (await) before painting anything.
         (async function ffHandleSignedInUser() {
           let hasProfile = true; // safe default: if we can't check, proceed with normal paint
+          let profileData = null;
           try {
             const firestoreDb = window.db || window.ffDb;
             if (firestoreDb && typeof getTrainingFirestoreApi === 'function') {
               const { doc, getDoc } = await getTrainingFirestoreApi();
               const snap = await getDoc(doc(firestoreDb, 'users', user.uid));
               hasProfile = snap.exists();
+              profileData = hasProfile ? (snap.data() || {}) : null;
             }
           } catch (e) {
             console.warn('[AUTH] Pre-paint profile check failed (treating as has-profile):', e?.code, e?.message);
@@ -8646,6 +8642,37 @@ async function initFirebaseAuth() {
             // app.js will call showCompleteSetupScreen(user) which flips on complete-setup-section.
             ffRemoveAuthSplash();
             return;
+          }
+
+          // Billing must gate before the shell paints. app.js also enforces this
+          // before showMainAppForRole(), but this older pre-paint listener can
+          // otherwise reveal the app first.
+          try {
+            const firestoreDb = window.db || window.ffDb;
+            const salonId = profileData && profileData.salonId ? String(profileData.salonId).trim() : '';
+            if (firestoreDb && salonId && typeof getTrainingFirestoreApi === 'function') {
+              const { doc, getDoc } = await getTrainingFirestoreApi();
+              const salonSnap = await getDoc(doc(firestoreDb, 'salons', salonId));
+              const salonData = salonSnap.exists() ? (salonSnap.data() || {}) : {};
+              const billingStatus = String(salonData.accountStatus || '').toLowerCase();
+              const billingReason = String(salonData.accountStatusReason || '').toLowerCase();
+              if (billingStatus === 'locked' && billingReason === 'billing_required') {
+                console.warn('[AUTH] Billing required - blocking pre-paint app shell', { salonId });
+                try {
+                  document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
+                } catch (_) {}
+                if (mainContent) mainContent.style.display = 'none';
+                if (authBanner) authBanner.style.display = 'none';
+                if (loginSection) loginSection.style.display = 'none';
+                if (signupSection) signupSection.style.display = 'none';
+                if (resetPasswordSection) resetPasswordSection.style.display = 'none';
+                // Keep the splash in place until app.js renders the blocking
+                // Complete Billing Setup gate.
+                return;
+              }
+            }
+          } catch (billingPrePaintErr) {
+            console.warn('[AUTH] Pre-paint billing check failed (app.js gate will retry):', billingPrePaintErr?.code, billingPrePaintErr?.message);
           }
 
           // Normal signed-in flow: the user has a profile, paint the main app.
@@ -23324,9 +23351,13 @@ async function saveSettings(e){
 
   // Queue Auto Reset settings - save into ff_queues_v1 (synced to cloud) under
   // the ACTIVE BRANCH key so the configuration never leaks across branches.
-  const autoResetEnabled = document.getElementById('queueAutoResetEnabled')?.checked === true || false;
-  const autoResetTime = document.getElementById('queueAutoResetTime')?.value || '02:00';
-  const autoResetForce = document.getElementById('queueAutoResetForce')?.checked === true || false;
+  const existingAutoReset = getQueueAutoResetSettings();
+  const autoResetEnabledEl = document.getElementById('manageQueueAutoResetEnabled') || document.getElementById('queueAutoResetEnabled');
+  const autoResetTimeEl = document.getElementById('manageQueueAutoResetTime') || document.getElementById('queueAutoResetTime');
+  const autoResetForceEl = document.getElementById('manageQueueAutoResetForce') || document.getElementById('queueAutoResetForce');
+  const autoResetEnabled = autoResetEnabledEl ? autoResetEnabledEl.checked === true : existingAutoReset.enabled === true;
+  const autoResetTime = autoResetTimeEl ? autoResetTimeEl.value || '04:00' : existingAutoReset.time || '04:00';
+  const autoResetForce = autoResetForceEl ? autoResetForceEl.checked === true : existingAutoReset.resetWhileInService === true;
   const lastAutoResetDate = (getQueueRuntime() || {}).lastAutoResetDate || null;
   const queuesData = getQueuesData();
   const _saveLocKey = _ffQueueLocKey();
@@ -39286,6 +39317,9 @@ function initializeAppsPanel() {
         if (enabledEl) enabledEl.checked = autoReset.enabled === true;
         if (timeEl) timeEl.value = autoReset.time || '04:00';
         if (forceEl) forceEl.checked = autoReset.resetWhileInService === true;
+        if (typeof renderManageQueueAutoResetSettings === 'function') {
+          renderManageQueueAutoResetSettings();
+        }
       }
       if (typeof renderManageQueueGeoFenceSettings === 'function') {
         renderManageQueueGeoFenceSettings();
@@ -57328,11 +57362,11 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260510_firestore_lp"></script>
+  <script type="module" src="/app.js?v=20260602_storage_5gb_restore_final"></script>
   <script>
     (function () {
       var scripts = [
-        { src: "/billing-guard.js?v=20260519_initial", type: "module", delay: 600 }, // global account-state enforcement (banner / lock overlay)
+        { src: "/billing-guard.js?v=20260602_billing_required_checkout", type: "module", delay: 600 }, // global account-state enforcement (banner / lock overlay)
         { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module", delay: 700 },
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260501_points", delay: 1050 },
@@ -57349,7 +57383,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/dashboard.js?v=20260516_dashboard_class_first_recompute", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260530_reorder_delete", type: "module", delay: 2700 },
-        { src: "/media-upload.js?v=20260517_media_tech_fast_url_actions", type: "module", delay: 2780 },
+        { src: "/media-upload.js?v=20260602_storage_5gb_restore_final", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260522_chat_unread_push", type: "module", delay: 2900 },
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
@@ -57359,7 +57393,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },
         { src: "/inventory.js?v=20260530_inv_readonly_tabs", type: "module", delay: 4900 },
-        { src: "/locations-manage.js?v=20260501_points", type: "module", delay: 5400 },
+        { src: "/locations-manage.js?v=20260602_location_billing_fresh_count", type: "module", delay: 5400 },
         { src: "/queue-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 5700 },
         { src: "/tickets-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 6000 },
         { src: "/time-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 6300 },

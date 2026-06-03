@@ -17,12 +17,20 @@ import {
   collection,
   doc,
   addDoc,
+  getDocs,
   updateDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db, auth } from "/app.js?v=20260510_firestore_lp";
+import {
+  getFunctions,
+  httpsCallable,
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
+import { db, auth } from "/app.js?v=20260602_initial_billing_gate";
 
 const CARD_ID = "userProfileCardLocations";
+const FUNCTIONS_REGION = "us-central1";
+const PAID_LOCATION_CONFIRM_MESSAGE =
+  "Your first location is included in your base plan. Each additional location costs $79/month. If you continue, your subscription will be updated automatically.";
 
 let _editingId = null; // null → add-new; string → editing that location
 
@@ -47,6 +55,24 @@ function getAllLocations() {
   }
   const list = window.ffLocationsState?.locations;
   return Array.isArray(list) ? list : [];
+}
+
+function countActiveLocations() {
+  return getAllLocations().filter((loc) => loc && loc.isActive !== false).length;
+}
+
+async function countActiveLocationsFresh(salonId) {
+  if (!salonId) return countActiveLocations();
+  try {
+    const snap = await getDocs(collection(db, `salons/${salonId}/locations`));
+    return snap.docs.filter((d) => {
+      const data = d.data() || {};
+      return data.isActive !== false;
+    }).length;
+  } catch (e) {
+    console.warn("[LocationsManage] fresh active location count failed; using cached count", e?.code, e?.message);
+    return countActiveLocations();
+  }
 }
 
 function isCardVisible() {
@@ -162,6 +188,58 @@ function showFormError(msg) {
   err.style.display = "block";
 }
 
+function showPaidLocationConfirm() {
+  return new Promise((resolve) => {
+    document.getElementById("ffPaidLocationConfirm")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "ffPaidLocationConfirm";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483500;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;";
+    overlay.innerHTML = `
+      <div role="dialog" aria-modal="true" aria-labelledby="ffPaidLocationConfirmTitle" style="width:min(460px,100%);background:#fff;border-radius:18px;padding:24px;box-shadow:0 24px 70px rgba(15,23,42,.28);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+        <div id="ffPaidLocationConfirmTitle" style="font-size:18px;font-weight:800;margin-bottom:10px;">Add paid location?</div>
+        <div style="font-size:14px;line-height:1.55;color:#4b5563;margin-bottom:22px;">${escapeHtml(PAID_LOCATION_CONFIRM_MESSAGE)}</div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+          <button type="button" data-ff-paid-location-cancel style="padding:10px 16px;border-radius:999px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-size:13px;font-weight:800;cursor:pointer;">Cancel</button>
+          <button type="button" data-ff-paid-location-confirm style="padding:10px 16px;border-radius:999px;border:0;background:#7c3aed;color:#fff;font-size:13px;font-weight:800;cursor:pointer;">Confirm &amp; Add Location</button>
+        </div>
+      </div>
+    `;
+
+    const finish = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) finish(false);
+    });
+    overlay.querySelector("[data-ff-paid-location-cancel]")?.addEventListener("click", () => finish(false));
+    overlay.querySelector("[data-ff-paid-location-confirm]")?.addEventListener("click", () => finish(true));
+    document.body.appendChild(overlay);
+    setTimeout(() => {
+      try { overlay.querySelector("[data-ff-paid-location-confirm]")?.focus(); } catch (_) {}
+    }, 0);
+  });
+}
+
+async function syncPaidLocationQuantityOrThrow(desiredActiveLocationCount) {
+  const salonId = currentSalonId();
+  if (!salonId) throw new Error("Salon not ready. Please try again in a moment.");
+  const fn = httpsCallable(
+    getFunctions(undefined, FUNCTIONS_REGION),
+    "syncStripeLocationQuantity"
+  );
+  await fn({ salonId, desiredActiveLocationCount });
+}
+
+async function confirmAndSyncPaidLocationIfNeeded(desiredActiveLocationCount) {
+  if (desiredActiveLocationCount <= 1) return true;
+  const confirmed = await showPaidLocationConfirm();
+  if (!confirmed) return false;
+  await syncPaidLocationQuantityOrThrow(desiredActiveLocationCount);
+  return true;
+}
+
 async function saveForm() {
   const salonId = currentSalonId();
   if (!salonId) { showFormError("Salon not ready. Please try again in a moment."); return; }
@@ -171,12 +249,17 @@ async function saveForm() {
 
   if (!name) { showFormError("Please enter a location name."); return; }
 
-  setFormBusy(true);
   try {
     if (_editingId) {
+      setFormBusy(true);
       const ref = doc(db, `salons/${salonId}/locations`, _editingId);
       await updateDoc(ref, { name, address, updatedAt: serverTimestamp() });
     } else {
+      const desiredActiveLocationCount = (await countActiveLocationsFresh(salonId)) + 1;
+      const canContinue = await confirmAndSyncPaidLocationIfNeeded(desiredActiveLocationCount);
+      if (!canContinue) return;
+
+      setFormBusy(true);
       const ref = collection(db, `salons/${salonId}/locations`);
       await addDoc(ref, {
         name,
@@ -205,12 +288,23 @@ async function toggleActive(id, makeActive) {
   const salonId = currentSalonId();
   if (!salonId || !id) return;
   try {
+    if (makeActive) {
+      const loc = getAllLocations().find((item) => item && item.id === id);
+      const isCurrentlyActive = loc && loc.isActive !== false;
+      if (!isCurrentlyActive) {
+        const desiredActiveLocationCount = (await countActiveLocationsFresh(salonId)) + 1;
+        const canContinue = await confirmAndSyncPaidLocationIfNeeded(desiredActiveLocationCount);
+        if (!canContinue) return;
+      }
+    }
     const ref = doc(db, `salons/${salonId}/locations`, id);
     await updateDoc(ref, { isActive: !!makeActive, updatedAt: serverTimestamp() });
     renderList();
   } catch (e) {
     console.error("[LocationsManage] toggleActive failed:", e);
-    alert(e?.message || "Could not update the location. Please try again.");
+    const msg = e?.message || "Could not update the location. Please try again.";
+    if (typeof window.ffStyledAlert === "function") window.ffStyledAlert(msg, "Location billing");
+    else alert(msg);
   }
 }
 

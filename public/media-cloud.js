@@ -23,10 +23,19 @@ import {
   where,
   orderBy,
   onSnapshot,
+  increment,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import {
+  getFunctions,
+  httpsCallable,
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
-import { db, auth, storage } from "/app.js?v=20260510_firestore_lp";
+import { db, auth, storage } from "/app.js?v=20260602_storage_5gb_restore";
+
+const FUNCTIONS_REGION = "us-central1";
+const INCLUDED_STORAGE_BYTES = 5 * 1024 * 1024 * 1024;
+const STORAGE_BLOCK_BYTES = 10 * 1024 * 1024 * 1024;
 
 // =====================
 // Paths
@@ -107,6 +116,147 @@ function sanitize(obj) {
     if (v !== undefined) out[k] = v;
   }
   return out;
+}
+
+function storageBlockQuantityForBytes(bytes) {
+  const n = Number(bytes || 0) - INCLUDED_STORAGE_BYTES;
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.ceil(n / STORAGE_BLOCK_BYTES);
+}
+
+function formatStorageGb(bytes) {
+  const gb = Number(bytes || 0) / (1024 * 1024 * 1024);
+  if (!Number.isFinite(gb) || gb <= 0) return "0GB";
+  return `${gb >= 10 ? Math.ceil(gb) : Math.ceil(gb * 10) / 10}GB`;
+}
+
+function formatStorageSize(bytes) {
+  const n = Number(bytes || 0);
+  if (!Number.isFinite(n) || n <= 0) return "0MB";
+  if (n < 1024 * 1024 * 1024) return `${Math.ceil(n / (1024 * 1024))}MB`;
+  return formatStorageGb(n);
+}
+
+async function getStorageBillingState(salonId) {
+  const [usageSnap, billingSnap] = await Promise.all([
+    getDoc(doc(db, `salons/${salonId}/usage/storage`)).catch((e) => {
+      console.warn("[MediaCloud] storage usage read failed; assuming 0 bytes", e?.code, e?.message);
+      return null;
+    }),
+    getDoc(doc(db, `salons/${salonId}/billing/stripe`)),
+  ]);
+  const usageData = usageSnap?.exists?.() ? usageSnap.data() || {} : {};
+  const billingData = billingSnap.exists() ? billingSnap.data() || {} : {};
+  const paidBlockQuantity = Number(billingData.items?.storage?.quantity || 0);
+  const bytesUsed = Math.max(0, Number(usageData.bytesUsed || 0));
+  return {
+    bytesUsed: Number.isFinite(bytesUsed) ? bytesUsed : 0,
+    paidBlockQuantity: Number.isFinite(paidBlockQuantity) ? paidBlockQuantity : 0,
+  };
+}
+
+function showPaidStorageConfirm({ currentBlocks, requiredBlocks, projectedBytes, includedBytes }) {
+  return new Promise((resolve) => {
+    document.getElementById("ffPaidStorageConfirm")?.remove();
+
+    const additionalBlocks = Math.max(requiredBlocks - currentBlocks, 0);
+    const overlay = document.createElement("div");
+    overlay.id = "ffPaidStorageConfirm";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483500;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;";
+    overlay.innerHTML = `
+      <div role="dialog" aria-modal="true" aria-labelledby="ffPaidStorageConfirmTitle" style="width:min(480px,100%);background:#fff;border-radius:18px;padding:24px;box-shadow:0 24px 70px rgba(15,23,42,.28);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+        <div id="ffPaidStorageConfirmTitle" style="font-size:18px;font-weight:800;margin-bottom:10px;">Add paid storage?</div>
+        <div style="font-size:14px;line-height:1.55;color:#4b5563;margin-bottom:22px;">
+          Your base plan includes ${formatStorageSize(includedBytes)} of storage. Additional storage is billed in 10GB blocks. Each 10GB costs $10/month.
+          This upload will bring your salon storage to about ${formatStorageGb(projectedBytes)}.
+          If you continue, ${additionalBlocks} additional storage ${additionalBlocks === 1 ? "block" : "blocks"} will be added to your subscription automatically.
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+          <button type="button" data-ff-paid-storage-cancel style="padding:10px 16px;border-radius:999px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-size:13px;font-weight:800;cursor:pointer;">Cancel</button>
+          <button type="button" data-ff-paid-storage-confirm style="padding:10px 16px;border-radius:999px;border:0;background:#7c3aed;color:#fff;font-size:13px;font-weight:800;cursor:pointer;">Confirm &amp; Add Storage</button>
+        </div>
+      </div>
+    `;
+
+    const finish = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) finish(false);
+    });
+    overlay.querySelector("[data-ff-paid-storage-cancel]")?.addEventListener("click", () => finish(false));
+    overlay.querySelector("[data-ff-paid-storage-confirm]")?.addEventListener("click", () => finish(true));
+    document.body.appendChild(overlay);
+    setTimeout(() => {
+      try { overlay.querySelector("[data-ff-paid-storage-confirm]")?.focus(); } catch (_) {}
+    }, 0);
+  });
+}
+
+async function syncPaidStorageQuantityOrThrow(salonId, desiredStorageBlockQuantity) {
+  const fn = httpsCallable(
+    getFunctions(undefined, FUNCTIONS_REGION),
+    "syncStripeStorageQuantity"
+  );
+  await fn({ salonId, desiredStorageBlockQuantity });
+}
+
+async function checkStorageUploadAllowance(salonId, uploadBytes) {
+  const fn = httpsCallable(
+    getFunctions(undefined, FUNCTIONS_REGION),
+    "checkStorageUploadAllowance"
+  );
+  const res = await fn({ salonId, uploadBytes });
+  return res?.data || {};
+}
+
+async function ensureStorageCapacityForUpload(salonId, file) {
+  const uploadBytesCount = Number(file?.size || 0);
+  if (!Number.isFinite(uploadBytesCount) || uploadBytesCount <= 0) return;
+  const allowance = await checkStorageUploadAllowance(salonId, uploadBytesCount);
+  if (allowance.allowed) return;
+  if (!allowance.isOwner) {
+    throw new Error("This upload needs more storage. Please ask the salon owner to approve the storage upgrade.");
+  }
+
+  const confirmed = await showPaidStorageConfirm({
+    currentBlocks: Number(allowance.paidBlockQuantity || 0),
+    requiredBlocks: Number(allowance.requiredStorageBlockQuantity || 0),
+    projectedBytes: Number(allowance.projectedBytes || uploadBytesCount),
+    includedBytes: Number(allowance.includedBytes || INCLUDED_STORAGE_BYTES),
+  });
+  if (!confirmed) {
+    throw new Error("Storage upgrade was canceled.");
+  }
+  await syncPaidStorageQuantityOrThrow(
+    salonId,
+    Number(allowance.requiredStorageBlockQuantity || 0)
+  );
+}
+
+async function ensureStorageCapacityForFiles(salonId, files) {
+  const fileList = (Array.isArray(files) ? files : [files]).filter(Boolean);
+  const totalBytes = fileList.reduce((sum, file) => {
+    const n = Number(file?.size || 0);
+    return sum + (Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
+  if (totalBytes <= 0) return;
+  await ensureStorageCapacityForUpload(salonId, { size: totalBytes });
+}
+
+async function recordStorageUsageDelta(salonId, deltaBytes) {
+  const n = Number(deltaBytes || 0);
+  if (!Number.isFinite(n) || n === 0) return;
+  await setDoc(
+    doc(db, `salons/${salonId}/usage/storage`),
+    {
+      bytesUsed: increment(n),
+      updatedAt: serverTimestamp(),
+      source: "media",
+    },
+    { merge: true }
+  );
 }
 
 // =====================
@@ -345,6 +495,7 @@ export async function addMediaItem(workId, data) {
     mediaType: data.mediaType,
     mediaUrl: data.mediaUrl,
     storagePath: data.storagePath,
+    sizeBytes: Number(data.sizeBytes || 0),
     sortOrder: data.sortOrder ?? 0,
     createdAt: serverTimestamp(),
   });
@@ -378,6 +529,7 @@ async function uploadAndCreateMediaItem(workId, file, mediaType, sortOrder) {
   const mediaId = genMediaId();
   const path = mediaStoragePath(salonId, workId, mediaId, file.name);
   const fileRef = storageRef(storage, path);
+  await ensureStorageCapacityForUpload(salonId, file);
   await uploadBytes(fileRef, file);
   const mediaUrl = await getDownloadURL(fileRef);
 
@@ -386,7 +538,11 @@ async function uploadAndCreateMediaItem(workId, file, mediaType, sortOrder) {
     mediaType,
     mediaUrl,
     storagePath: path,
+    sizeBytes: Number(file?.size || 0),
     sortOrder,
+  });
+  await recordStorageUsageDelta(salonId, Number(file?.size || 0)).catch((e) => {
+    console.warn("[MediaCloud] storage usage increment failed", e?.code, e?.message);
   });
 
   if (isFirst) {
@@ -420,6 +576,7 @@ export async function addMediaToExistingWork(workId, files, mediaType) {
     : 0;
 
   const fileList = Array.isArray(files) ? files : [files];
+  await ensureStorageCapacityForFiles(salonId, fileList);
   const createdIds = [];
 
   if (mediaType === "before_after") {
@@ -452,9 +609,19 @@ export async function addMediaToExistingWork(workId, files, mediaType) {
  * @returns {Promise<{workId: string, mediaIds: string[]}>}
  */
 export async function createWorkWithMedia(workData, files, mediaType) {
+  const salonId = await getSalonId();
+  if (!salonId) throw new Error("No salonId");
+  await ensureStorageCapacityForFiles(salonId, files);
   const workId = await createContentWork(workData);
-  const mediaIds = await addMediaToExistingWork(workId, files, mediaType);
-  return { workId, mediaIds };
+  try {
+    const mediaIds = await addMediaToExistingWork(workId, files, mediaType);
+    return { workId, mediaIds };
+  } catch (err) {
+    await deleteContentWork(workId).catch((cleanupErr) => {
+      console.warn("[MediaCloud] cleanup empty work after upload failure failed", workId, cleanupErr);
+    });
+    throw err;
+  }
 }
 
 /**
@@ -475,15 +642,22 @@ export async function deleteMediaItem(workId, mediaId) {
   if (!salonId) throw new Error("No salonId");
   const items = await getMediaItems(workId);
   const item = items.find((m) => m.id === mediaId);
+  let storageDeleted = false;
   if (item?.storagePath) {
     try {
       const fileRef = storageRef(storage, item.storagePath);
       await deleteObject(fileRef);
+      storageDeleted = true;
     } catch (e) {
       console.warn("[MediaCloud] Storage delete failed, continuing with Firestore", e);
     }
   }
   await deleteDoc(mediaItemsRef(salonId, workId, mediaId));
+  if (storageDeleted && Number(item?.sizeBytes || 0) > 0) {
+    await recordStorageUsageDelta(salonId, -Number(item.sizeBytes || 0)).catch((e) => {
+      console.warn("[MediaCloud] storage usage decrement failed", e);
+    });
+  }
 }
 
 /**
@@ -494,15 +668,22 @@ export async function deleteAllMediaFromWork(workId) {
   if (!salonId) throw new Error("No salonId");
   const items = await getMediaItems(workId);
   for (const item of items) {
+    let storageDeleted = false;
     if (item.storagePath) {
       try {
         const fileRef = storageRef(storage, item.storagePath);
         await deleteObject(fileRef);
+        storageDeleted = true;
       } catch (e) {
         console.warn("[MediaCloud] Storage delete failed for", item.id, e);
       }
     }
     await deleteDoc(mediaItemsRef(salonId, workId, item.id));
+    if (storageDeleted && Number(item?.sizeBytes || 0) > 0) {
+      await recordStorageUsageDelta(salonId, -Number(item.sizeBytes || 0)).catch((e) => {
+        console.warn("[MediaCloud] storage usage decrement failed for", item.id, e);
+      });
+    }
   }
   await updateContentWork(workId, {
     previewMediaUrl: null,

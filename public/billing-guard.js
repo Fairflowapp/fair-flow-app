@@ -1,7 +1,7 @@
 /**
  * Billing Guard — global account-state enforcement based on Stripe.
  *
- * Reads:    salons/{salonId}.{accountStatus, gracePeriodEndsAt}
+ * Reads:    salons/{salonId}.{accountStatus, accountStatusReason, gracePeriodEndsAt}
  *           (mirrored from billing/stripe by functions/stripe.js so non-owner
  *            members can read it without firestore.rules changes)
  *
@@ -107,6 +107,10 @@ function getSalonId() {
     }
   } catch (_) {}
   return null;
+}
+
+function isBillingRequiredReason(reason) {
+  return String(reason || "").toLowerCase() === "billing_required";
 }
 
 function tsToMillis(ts) {
@@ -301,6 +305,7 @@ function unmountBanner() {
 function mountOverlay() {
   injectStylesOnce();
   if (_overlayEl) return; // already mounted
+  const billingRequired = isBillingRequiredReason(_lastSnap?.accountStatusReason);
 
   _overlayEl = document.createElement("div");
   _overlayEl.className = "ffbg-overlay";
@@ -321,15 +326,19 @@ function mountOverlay() {
   const title = document.createElement("h2");
   title.id = "ffbg-overlay-title";
   title.className = "ffbg-overlay-title";
-  title.textContent = "Subscription inactive";
+  title.textContent = billingRequired ? "Complete Billing Setup" : "Subscription inactive";
   card.appendChild(title);
 
   const owner = isOwner();
   const msg = document.createElement("p");
   msg.className = "ffbg-overlay-msg";
-  msg.textContent = owner
-    ? "Please update your billing to continue using Fair Flow."
-    : "Please contact your salon owner to renew the subscription.";
+  msg.textContent = billingRequired
+    ? (owner
+      ? "Add a payment method to start your 14-day trial and continue using Fair Flow."
+      : "Please contact your salon owner to complete billing setup.")
+    : (owner
+      ? "Please update your billing to continue using Fair Flow."
+      : "Please contact your salon owner to renew the subscription.");
   card.appendChild(msg);
 
   const btnRow = document.createElement("div");
@@ -339,8 +348,8 @@ function mountOverlay() {
     const manageBtn = document.createElement("button");
     manageBtn.className = "ffbg-btn-primary";
     manageBtn.type = "button";
-    manageBtn.textContent = "Manage Billing";
-    manageBtn.addEventListener("click", onManageBillingClick);
+    manageBtn.textContent = billingRequired ? "Complete Billing Setup" : "Manage Billing";
+    manageBtn.addEventListener("click", billingRequired ? onCompleteBillingSetupClick : onManageBillingClick);
     btnRow.appendChild(manageBtn);
   }
 
@@ -419,6 +428,43 @@ async function onManageBillingClick(event) {
   }
 }
 
+async function onCompleteBillingSetupClick(event) {
+  const btn = event && event.currentTarget;
+  let originalText = "";
+  if (btn) {
+    originalText = btn.textContent || "";
+    btn.disabled = true;
+    btn.textContent = "Opening checkout…";
+  }
+  try {
+    const salonId = getSalonId();
+    if (!salonId) throw new Error("No salon selected");
+    const fn = httpsCallable(
+      getFunctions(undefined, FUNCTIONS_REGION),
+      "createStripeCheckoutSession"
+    );
+    const origin = window.location.origin;
+    const { data } = await fn({
+      salonId,
+      items: [{ sku: "base", quantity: 1 }],
+      successUrl: `${origin}/?billing=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${origin}/?billing=cancel`,
+    });
+    if (data && data.url) {
+      window.location.href = data.url;
+    } else {
+      throw new Error("No checkout URL returned by server");
+    }
+  } catch (err) {
+    console.warn("[BillingGuard] checkout failed", err);
+    if (btn) {
+      btn.disabled = false;
+      if (originalText) btn.textContent = originalText;
+    }
+    showInlineError(`Could not start checkout: ${err?.message || err}`);
+  }
+}
+
 async function onLogoutClick(event) {
   const btn = event && event.currentTarget;
   if (btn) {
@@ -459,7 +505,7 @@ function scheduleGraceExpiry(deadlineMs) {
     _gracePeriodTimerId = setTimeout(() => {
       _gracePeriodTimerId = null;
       if (_lastSnap) {
-        applyState(_lastSnap.accountStatus, _lastSnap.gracePeriodEndsAt);
+        applyState(_lastSnap.accountStatus, _lastSnap.gracePeriodEndsAt, _lastSnap.accountStatusReason);
       }
     }, 0);
     return;
@@ -472,15 +518,15 @@ function scheduleGraceExpiry(deadlineMs) {
   _gracePeriodTimerId = setTimeout(() => {
     _gracePeriodTimerId = null;
     if (_lastSnap) {
-      applyState(_lastSnap.accountStatus, _lastSnap.gracePeriodEndsAt);
+      applyState(_lastSnap.accountStatus, _lastSnap.gracePeriodEndsAt, _lastSnap.accountStatusReason);
     }
   }, safeDelta);
 }
 
 // ─── State application (the heart of the guard) ────────────────────────────
 
-function applyState(accountStatus, gracePeriodEndsAt) {
-  _lastSnap = { accountStatus, gracePeriodEndsAt };
+function applyState(accountStatus, gracePeriodEndsAt, accountStatusReason) {
+  _lastSnap = { accountStatus, gracePeriodEndsAt, accountStatusReason };
   const next = deriveState(accountStatus, gracePeriodEndsAt);
   if (next === _currentState && _bannerEl == null && _overlayEl == null) {
     // No-op when state didn't change AND DOM isn't already mounted incorrectly.
@@ -531,7 +577,7 @@ function startListening(salonId) {
       ref,
       (snap) => {
         const data = snap.exists() ? snap.data() : {};
-        applyState(data.accountStatus, data.gracePeriodEndsAt);
+        applyState(data.accountStatus, data.gracePeriodEndsAt, data.accountStatusReason);
       },
       (err) => {
         // Fail-open on permission/network errors so we don't lock users out
@@ -651,7 +697,7 @@ window.ffBillingGuard = Object.freeze({
    */
   refresh() {
     if (_lastSnap) {
-      applyState(_lastSnap.accountStatus, _lastSnap.gracePeriodEndsAt);
+      applyState(_lastSnap.accountStatus, _lastSnap.gracePeriodEndsAt, _lastSnap.accountStatusReason);
     }
   },
   /**

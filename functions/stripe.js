@@ -38,6 +38,8 @@ const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
 
 const REGION = "us-central1";
+const INCLUDED_STORAGE_BYTES = 5 * 1024 * 1024 * 1024;
+const STORAGE_BLOCK_BYTES = 10 * 1024 * 1024 * 1024;
 
 // Pinned Stripe API version — keeps payload shapes deterministic across
 // account-default upgrades. Bump intentionally when you've tested a newer one.
@@ -137,6 +139,70 @@ async function assertOwnerOfSalon(uid, salonId) {
     );
   }
   return salonData;
+}
+
+async function assertSalonAccess(uid, salonId) {
+  if (!uid || !salonId) {
+    throw new HttpsError("invalid-argument", "Missing uid/salonId");
+  }
+  if (/[\/\.\#\$\[\]]/.test(String(salonId))) {
+    throw new HttpsError("invalid-argument", "Invalid salonId");
+  }
+
+  const fs = admin.firestore();
+  const [salonSnap, mainSnap, userSnap, memberSnap, membershipSnap] = await Promise.all([
+    fs.doc(`salons/${salonId}`).get(),
+    fs.doc(`salons/${salonId}/settings/main`).get(),
+    fs.doc(`users/${uid}`).get(),
+    fs.doc(`salons/${salonId}/members/${uid}`).get(),
+    fs.doc(`users/${uid}/memberships/${salonId}`).get(),
+  ]);
+  if (!salonSnap.exists) {
+    throw new HttpsError("not-found", "Salon not found");
+  }
+
+  const salonData = salonSnap.data() || {};
+  const mainData = mainSnap.exists ? mainSnap.data() || {} : {};
+  const userData = userSnap.exists ? userSnap.data() || {} : {};
+  const membershipData = membershipSnap.exists ? membershipSnap.data() || {} : {};
+  const ownerUid = String(mainData.ownerUid || salonData.ownerUid || "").trim();
+  const isOwner = ownerUid && ownerUid === String(uid);
+  const hasPrimarySalon = String(userData.salonId || "") === String(salonId);
+  const hasMemberDoc = memberSnap.exists;
+  const hasActiveMembership =
+    membershipSnap.exists &&
+    String(membershipData.status || "").toLowerCase() === "active";
+
+  if (!isOwner && !hasPrimarySalon && !hasMemberDoc && !hasActiveMembership) {
+    throw new HttpsError(
+      "permission-denied",
+      "You do not have access to this salon"
+    );
+  }
+  return { salonData, isOwner };
+}
+
+function storageBlockQuantityForBytes(bytes, includedBytes = INCLUDED_STORAGE_BYTES) {
+  const billableBytes = Number(bytes || 0) - Number(includedBytes || 0);
+  if (!Number.isFinite(billableBytes) || billableBytes <= 0) return 0;
+  return Math.ceil(billableBytes / STORAGE_BLOCK_BYTES);
+}
+
+async function computeSalonMediaTrainingStorageBytes(salonId) {
+  const bucket = admin.storage().bucket();
+  const prefixes = [
+    `salons/${salonId}/media/`,
+    `salons/${salonId}/training/`,
+  ];
+  let total = 0;
+  for (const prefix of prefixes) {
+    const [files] = await bucket.getFiles({ prefix });
+    for (const file of files || []) {
+      const size = Number(file?.metadata?.size || 0);
+      if (Number.isFinite(size) && size > 0) total += size;
+    }
+  }
+  return total;
 }
 
 /**
@@ -379,11 +445,13 @@ exports.createStripeCheckoutSession = onCall(
         mode: "subscription",
         customer: customerId,
         line_items: lineItems.map(({ price, quantity }) => ({ price, quantity })),
+        payment_method_collection: "always",
         success_url: successUrl,
         cancel_url: cancelUrl,
         client_reference_id: salonId,
         metadata: { salonId, ownerUid: auth.uid },
         subscription_data: {
+          trial_period_days: 14,
           metadata: { salonId, ownerUid: auth.uid },
         },
         allow_promotion_codes: true,
@@ -502,6 +570,381 @@ exports.createStripePortalSession = onCall(
           ? `Stripe ${stripeType}: ${msg}`
           : `Portal failed: ${msg}`
       );
+    }
+  }
+);
+
+// ============================================================================
+// syncStripeLocationQuantity — callable
+// ============================================================================
+// Updates only the paid Additional Location subscription item.
+// The first active location is included in the base plan; quantity here is
+// max(desiredActiveLocationCount - 1, 0).
+//
+// data: { salonId: string, desiredActiveLocationCount: number }
+// returns: { synced: true, activeLocationCount, locationQuantity, subscriptionId }
+exports.syncStripeLocationQuantity = onCall(
+  { region: REGION, secrets: [STRIPE_SECRET_KEY], invoker: "public" },
+  async (req) => {
+    const auth = req.auth;
+    if (!auth) {
+      throw new HttpsError("unauthenticated", "Sign in first");
+    }
+
+    const salonId = String(req.data?.salonId || "").trim();
+    const desiredActiveLocationCount = parseInt(
+      req.data?.desiredActiveLocationCount,
+      10
+    );
+    if (!salonId) throw new HttpsError("invalid-argument", "salonId required");
+    if (
+      !Number.isFinite(desiredActiveLocationCount) ||
+      desiredActiveLocationCount < 1
+    ) {
+      throw new HttpsError(
+        "invalid-argument",
+        "desiredActiveLocationCount must be at least 1"
+      );
+    }
+
+    try {
+      const salonData = await assertOwnerOfSalon(auth.uid, salonId);
+      const status = String(salonData.accountStatus || "").toLowerCase();
+      const reason = String(salonData.accountStatusReason || "").toLowerCase();
+      if (status === "locked" && reason === "billing_required") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Complete billing setup before adding paid locations."
+        );
+      }
+
+      const fs = admin.firestore();
+      const [billingSnap, locSnap] = await Promise.all([
+        fs.doc(`salons/${salonId}/billing/stripe`).get(),
+        fs.collection(`salons/${salonId}/locations`).get(),
+      ]);
+      const billingData = billingSnap.exists ? billingSnap.data() || {} : {};
+      const subscriptionId = String(billingData.subscriptionId || "").trim();
+      const billingStatus = String(billingData.status || "").toLowerCase();
+      if (!subscriptionId || !["active", "trialing"].includes(billingStatus)) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Complete billing setup before adding paid locations."
+        );
+      }
+
+      const currentActiveCount = locSnap.docs.filter((d) => {
+        const data = d.data() || {};
+        return data.isActive !== false;
+      }).length;
+      if (desiredActiveLocationCount > currentActiveCount + 1) {
+        throw new HttpsError(
+          "invalid-argument",
+          "Desired location count does not match the pending location change."
+        );
+      }
+
+      const locationQuantity = Math.max(desiredActiveLocationCount - 1, 0);
+      const locationPriceId = priceIdForSku("location");
+      const stripe = getStripe();
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      const remoteStatus = String(subscription.status || "").toLowerCase();
+      if (!["active", "trialing"].includes(remoteStatus)) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Complete billing setup before adding paid locations."
+        );
+      }
+
+      const existingLocationItem = (subscription.items?.data || []).find(
+        (item) => item?.price?.id === locationPriceId
+      );
+      const items = existingLocationItem
+        ? [{ id: existingLocationItem.id, quantity: locationQuantity }]
+        : [{ price: locationPriceId, quantity: locationQuantity }];
+
+      const updated = await stripe.subscriptions.update(subscriptionId, {
+        items,
+        proration_behavior: "create_prorations",
+        metadata: {
+          ...(subscription.metadata || {}),
+          salonId,
+          ownerUid: auth.uid,
+        },
+      });
+
+      await persistSubscriptionState(salonId, updated);
+      await recomputeAccountStatus(salonId);
+
+      logger.info("[stripe location quantity] synced", {
+        salonId,
+        subscriptionId,
+        currentActiveCount,
+        desiredActiveLocationCount,
+        locationQuantity,
+      });
+
+      return {
+        synced: true,
+        activeLocationCount: desiredActiveLocationCount,
+        locationQuantity,
+        subscriptionId,
+      };
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      const msg = err?.message || String(err);
+      const stripeType = err?.type || null;
+      logger.error("[stripe location quantity] unexpected error", {
+        uid: auth.uid,
+        salonId,
+        desiredActiveLocationCount,
+        message: msg,
+        stripeType,
+        stripeCode: err?.code || null,
+        stack: err?.stack,
+      });
+      throw new HttpsError(
+        "internal",
+        stripeType
+          ? `Stripe ${stripeType}: ${msg}`
+          : `Location billing update failed: ${msg}`
+      );
+    }
+  }
+);
+
+// ============================================================================
+// syncStripeStorageQuantity — callable
+// ============================================================================
+// Updates only the paid Storage subscription item. Quantity is the number of
+// 10GB storage blocks. This callable is intentionally increase-only; automatic
+// downgrades/refunds need a separate product decision.
+//
+// data: { salonId: string, desiredStorageBlockQuantity: number }
+// returns: { synced: true, storageQuantity, previousStorageQuantity, subscriptionId }
+exports.syncStripeStorageQuantity = onCall(
+  { region: REGION, secrets: [STRIPE_SECRET_KEY], invoker: "public" },
+  async (req) => {
+    const auth = req.auth;
+    if (!auth) {
+      throw new HttpsError("unauthenticated", "Sign in first");
+    }
+
+    const salonId = String(req.data?.salonId || "").trim();
+    const desiredStorageBlockQuantity = parseInt(
+      req.data?.desiredStorageBlockQuantity,
+      10
+    );
+    if (!salonId) throw new HttpsError("invalid-argument", "salonId required");
+    if (
+      !Number.isFinite(desiredStorageBlockQuantity) ||
+      desiredStorageBlockQuantity < 0
+    ) {
+      throw new HttpsError(
+        "invalid-argument",
+        "desiredStorageBlockQuantity must be zero or greater"
+      );
+    }
+
+    try {
+      const salonData = await assertOwnerOfSalon(auth.uid, salonId);
+      const status = String(salonData.accountStatus || "").toLowerCase();
+      const reason = String(salonData.accountStatusReason || "").toLowerCase();
+      if (status === "locked" && reason === "billing_required") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Complete billing setup before adding paid storage."
+        );
+      }
+
+      const fs = admin.firestore();
+      const billingSnap = await fs.doc(`salons/${salonId}/billing/stripe`).get();
+      const billingData = billingSnap.exists ? billingSnap.data() || {} : {};
+      const subscriptionId = String(billingData.subscriptionId || "").trim();
+      const billingStatus = String(billingData.status || "").toLowerCase();
+      if (!subscriptionId || !["active", "trialing"].includes(billingStatus)) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Complete billing setup before adding paid storage."
+        );
+      }
+
+      const storagePriceId = priceIdForSku("storage");
+      const stripe = getStripe();
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      const remoteStatus = String(subscription.status || "").toLowerCase();
+      if (!["active", "trialing"].includes(remoteStatus)) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Complete billing setup before adding paid storage."
+        );
+      }
+
+      const existingStorageItem = (subscription.items?.data || []).find(
+        (item) => item?.price?.id === storagePriceId
+      );
+      const previousStorageQuantity = existingStorageItem?.quantity || 0;
+
+      if (desiredStorageBlockQuantity < previousStorageQuantity) {
+        throw new HttpsError(
+          "invalid-argument",
+          "Storage quantity can only be increased from the upload flow."
+        );
+      }
+
+      if (desiredStorageBlockQuantity === previousStorageQuantity) {
+        return {
+          synced: true,
+          storageQuantity: desiredStorageBlockQuantity,
+          previousStorageQuantity,
+          subscriptionId,
+        };
+      }
+
+      const items = existingStorageItem
+        ? [{ id: existingStorageItem.id, quantity: desiredStorageBlockQuantity }]
+        : [{ price: storagePriceId, quantity: desiredStorageBlockQuantity }];
+
+      const updated = await stripe.subscriptions.update(subscriptionId, {
+        items,
+        proration_behavior: "create_prorations",
+        metadata: {
+          ...(subscription.metadata || {}),
+          salonId,
+          ownerUid: auth.uid,
+        },
+      });
+
+      await persistSubscriptionState(salonId, updated);
+      await recomputeAccountStatus(salonId);
+
+      logger.info("[stripe storage quantity] synced", {
+        salonId,
+        subscriptionId,
+        previousStorageQuantity,
+        desiredStorageBlockQuantity,
+      });
+
+      return {
+        synced: true,
+        storageQuantity: desiredStorageBlockQuantity,
+        previousStorageQuantity,
+        subscriptionId,
+      };
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      const msg = err?.message || String(err);
+      const stripeType = err?.type || null;
+      logger.error("[stripe storage quantity] unexpected error", {
+        uid: auth.uid,
+        salonId,
+        desiredStorageBlockQuantity,
+        message: msg,
+        stripeType,
+        stripeCode: err?.code || null,
+        stack: err?.stack,
+      });
+      throw new HttpsError(
+        "internal",
+        stripeType
+          ? `Stripe ${stripeType}: ${msg}`
+          : `Storage billing update failed: ${msg}`
+      );
+    }
+  }
+);
+
+// ============================================================================
+// checkStorageUploadAllowance — callable
+// ============================================================================
+// Read-only check for Media/Training uploads. Any salon member may ask whether
+// a file fits inside the salon's current allowance, but only the owner can use
+// syncStripeStorageQuantity to buy more storage.
+//
+// data: { salonId: string, uploadBytes: number }
+// returns: { allowed, isOwner, bytesUsed, projectedBytes, paidBlockQuantity,
+//            requiredStorageBlockQuantity, allowedBytes }
+exports.checkStorageUploadAllowance = onCall(
+  { region: REGION, invoker: "public" },
+  async (req) => {
+    const auth = req.auth;
+    if (!auth) {
+      throw new HttpsError("unauthenticated", "Sign in first");
+    }
+
+    const salonId = String(req.data?.salonId || "").trim();
+    const uploadBytes = Number(req.data?.uploadBytes || 0);
+    if (!salonId) throw new HttpsError("invalid-argument", "salonId required");
+    if (!Number.isFinite(uploadBytes) || uploadBytes < 0) {
+      throw new HttpsError("invalid-argument", "uploadBytes must be zero or greater");
+    }
+
+    try {
+      const { isOwner } = await assertSalonAccess(auth.uid, salonId);
+      const fs = admin.firestore();
+      const [actualBytesUsed, billingSnap] = await Promise.all([
+        computeSalonMediaTrainingStorageBytes(salonId),
+        fs.doc(`salons/${salonId}/billing/stripe`).get(),
+      ]);
+      const billingData = billingSnap.exists ? billingSnap.data() || {} : {};
+      const bytesUsed = Math.max(0, Number(actualBytesUsed || 0));
+      const paidBlockQuantity = Math.max(
+        0,
+        Number(billingData.items?.storage?.quantity || 0)
+      );
+      const includedBytes = INCLUDED_STORAGE_BYTES;
+      const allowedBytes =
+        includedBytes + paidBlockQuantity * STORAGE_BLOCK_BYTES;
+      const projectedBytes = bytesUsed + uploadBytes;
+      const requiredStorageBlockQuantity =
+        storageBlockQuantityForBytes(projectedBytes, includedBytes);
+      const allowed = projectedBytes <= allowedBytes;
+
+      await fs.doc(`salons/${salonId}/usage/storage`).set(
+        {
+          bytesUsed,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          source: "server_reconcile",
+        },
+        { merge: true }
+      );
+
+      logger.info("[storage allowance] checked", {
+        salonId,
+        uid: auth.uid,
+        isOwner: !!isOwner,
+        bytesUsed,
+        uploadBytes,
+        projectedBytes,
+        paidBlockQuantity,
+        requiredStorageBlockQuantity,
+        allowedBytes,
+        includedBytes,
+        allowed,
+      });
+
+      return {
+        allowed,
+        isOwner: !!isOwner,
+        bytesUsed,
+        projectedBytes,
+        paidBlockQuantity,
+        requiredStorageBlockQuantity,
+        allowedBytes,
+        includedBytes,
+        blockBytes: STORAGE_BLOCK_BYTES,
+      };
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      const msg = err?.message || String(err);
+      logger.error("[storage allowance] unexpected error", {
+        uid: auth.uid,
+        salonId,
+        uploadBytes,
+        message: msg,
+        stack: err?.stack,
+      });
+      throw new HttpsError("internal", `Storage allowance check failed: ${msg}`);
     }
   }
 );
@@ -836,9 +1279,10 @@ async function recomputeAccountStatus(salonId) {
   const fs = admin.firestore();
   const F = admin.firestore.FieldValue;
 
-  const [overrideSnap, billingSnap] = await Promise.all([
+  const [overrideSnap, billingSnap, salonSnap] = await Promise.all([
     fs.doc(`salons/${salonId}/billing/override`).get(),
     fs.doc(`salons/${salonId}/billing/stripe`).get(),
+    fs.doc(`salons/${salonId}`).get(),
   ]);
 
   // ── Override evaluation ────────────────────────────────────────────────
@@ -853,15 +1297,27 @@ async function recomputeAccountStatus(salonId) {
   const overrideActive = overrideEnabled && !overrideExpired;
 
   // ── Status derivation ──────────────────────────────────────────────────
+  const salonData = salonSnap.exists ? salonSnap.data() || {} : {};
+  const existingReason = String(salonData.accountStatusReason || "").toLowerCase();
+  const existingBillingRequired = existingReason === "billing_required";
   let accountStatus;
+  let accountStatusReason = null;
   let gracePeriodEndsAt = null;
   if (overrideActive) {
     // Override wins. Don't carry over a stale grace period from Stripe state.
     accountStatus = "active";
   } else if (billingSnap.exists) {
     const data = billingSnap.data() || {};
-    accountStatus = classifyAccountStatus(data.status);
-    gracePeriodEndsAt = data.gracePeriodEndsAt || null;
+    if (existingBillingRequired && !data.status) {
+      accountStatus = "locked";
+      accountStatusReason = "billing_required";
+    } else {
+      accountStatus = classifyAccountStatus(data.status);
+      gracePeriodEndsAt = data.gracePeriodEndsAt || null;
+    }
+  } else if (existingBillingRequired) {
+    accountStatus = "locked";
+    accountStatusReason = "billing_required";
   } else {
     // No override, no billing doc — fail-open. Matches the explicit product
     // decision documented earlier: a salon with no billing record is treated
@@ -875,6 +1331,7 @@ async function recomputeAccountStatus(salonId) {
   const update = {
     accountStatus,
     accountStatusUpdatedAt: F.serverTimestamp(),
+    accountStatusReason: accountStatusReason || F.delete(),
     gracePeriodEndsAt: gracePeriodEndsAt || F.delete(),
     billingOverrideActive: overrideActive ? true : F.delete(),
     billingOverrideEndsAt:

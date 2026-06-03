@@ -656,6 +656,19 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Salon storage usage counters. Billing details stay owner-only under
+    // billing/stripe; this doc stores only aggregate media bytes for quota math.
+    match /salons/{salonId}/usage/{docId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update: if docId == 'storage'
+        && belongsToSalon(salonId)
+        && request.resource.data.keys().hasOnly(['bytesUsed', 'updatedAt', 'source'])
+        && request.resource.data.bytesUsed is number
+        && request.resource.data.bytesUsed >= 0
+        && request.resource.data.source in ['media', 'media_training'];
+      allow delete: if false;
+    }
+
     // Stripe webhook idempotency markers — fully server-side.
     match /stripeWebhookEvents/{eventId} {
       allow read, write: if false;
