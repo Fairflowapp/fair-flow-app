@@ -279,6 +279,12 @@ function subscribe(salonId, locationId) {
   const logTag = locationId ? `loc=${locationId}` : "default";
   _unsubscribe = onSnapshot(ref, async (snap) => {
     if (!_applyState) return;
+    if (
+      typeof window !== "undefined" &&
+      Number(window.__ffTasksReturnLocalWriteUntil || 0) > Date.now()
+    ) {
+      return;
+    }
 
     // NOTE: We deliberately do NOT push local state → cloud when the salon is empty.
     // For a brand-new owner account the cloud is legitimately empty, and copying up

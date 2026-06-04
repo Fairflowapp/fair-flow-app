@@ -396,6 +396,13 @@
       var active = getAllActiveLocations();
       allowedIdsForActive = active.map(function (loc) { return loc && loc.id; }).filter(Boolean);
       primaryIdForActive = allowedIdsForActive.length ? allowedIdsForActive[0] : null;
+      var ownerStaff = ffResolveCurrentStaff();
+      if (ownerStaff) {
+        var ownerFields = ffEnsureStaffLocationFields(ownerStaff);
+        if (ownerFields && ownerFields.primaryLocationId && allowedIdsForActive.indexOf(ownerFields.primaryLocationId) !== -1) {
+          primaryIdForActive = ownerFields.primaryLocationId;
+        }
+      }
       if (!allowedIdsForActive.length) {
         var staffForOwnerFallback = ffResolveCurrentStaff();
         if (staffForOwnerFallback) {
@@ -431,7 +438,19 @@
     }
 
     var nextId = pickActiveId(allowedIdsForActive, primaryIdForActive);
+    if (isOwnerBypass() && primaryIdForActive && reason !== "manual") {
+      nextId = primaryIdForActive;
+    }
     setActive(nextId, { reason: reason || "recompute" });
+
+    // Some modules may load after the location event already fired during boot.
+    // Reconnect them here so a stale stored location cannot leave the app
+    // subscribed to an empty queue/tasks document.
+    setTimeout(function () {
+      try { if (typeof window.queueCloudReconnect === "function") window.queueCloudReconnect(); } catch (e) {}
+      try { if (typeof window.tasksCloudReconnect === "function") window.tasksCloudReconnect(); } catch (e) {}
+      try { if (typeof window.settingsCloudReconnect === "function") window.settingsCloudReconnect(); } catch (e) {}
+    }, 0);
   }
 
   // ───────────────────────────────────────────────────────────────────────────

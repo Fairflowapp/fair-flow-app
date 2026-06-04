@@ -91,6 +91,24 @@ function queueStateHasData(state) {
     ((state.queue?.length || 0) + (state.service?.length || 0) + (state.log?.length || 0)) > 0;
 }
 
+function stateCounts(state) {
+  return {
+    queue: Array.isArray(state?.queue) ? state.queue.length : 0,
+    service: Array.isArray(state?.service) ? state.service.length : 0,
+    log: Array.isArray(state?.log) ? state.log.length : 0,
+  };
+}
+
+function hasExplicitEmptyOverwriteIntent() {
+  if (typeof window === "undefined") return false;
+  return Number(window.__ff_allow_empty_queue_cloud_write_until || 0) > Date.now();
+}
+
+function queueCloudWriteReason() {
+  if (typeof window === "undefined") return "unknown";
+  return String(window.__ff_queue_cloud_write_reason || "").trim() || "app-save";
+}
+
 function subscribe(salonId, locationId, opts = {}) {
   if (_unsubscribe) {
     _unsubscribe();
@@ -204,19 +222,56 @@ function writeState() {
   const state = _getState();
   if (!state) return Promise.resolve();
   const ref = queueStateRef(_salonId, _locationId);
+  const localCounts = stateCounts(state);
+  const localEmpty = localCounts.queue + localCounts.service + localCounts.log === 0;
+  const reason = queueCloudWriteReason();
   const payload = {
     queue: state.queue || [],
     service: state.service || [],
     log: state.log || [],
-    updatedAt: serverTimestamp()
+    updatedAt: serverTimestamp(),
+    lastUpdateReason: reason,
+    lastUpdatedByUid: auth.currentUser?.uid || null,
   };
   // Also sync ff_queues_v1 (auto-reset settings + runtime)
   try {
     const raw = localStorage.getItem('ff_queues_v1');
     if (raw) payload.queueSettings = JSON.parse(raw);
   } catch (_) {}
-  return setDoc(ref, payload).catch((e) => {
+  const commit = () => setDoc(ref, payload).catch((e) => {
     console.warn("[QueueCloud] write failed", e);
+  });
+
+  if (!localEmpty || hasExplicitEmptyOverwriteIntent()) return commit();
+
+  // Guard against stale tabs/kiosks overwriting a live queue with an all-empty
+  // local cache. Legitimate reset flows set __ff_allow_empty_queue_cloud_write_until.
+  return getDocFromServer(ref).then((snap) => {
+    if (!snap.exists()) return commit();
+    const cloudCounts = stateCounts(snap.data() || {});
+    const cloudHasData =
+      cloudCounts.queue + cloudCounts.service + cloudCounts.log > 0;
+    if (!cloudHasData) return commit();
+
+    console.warn("[QueueCloud] blocked empty overwrite of non-empty cloud state", {
+      salonId: _salonId,
+      locationId: _locationId || QUEUE_STATE_DEFAULT,
+      reason,
+      localCounts,
+      cloudCounts,
+    });
+    if (typeof _applyState === "function") {
+      const data = snap.data() || {};
+      _applyState(
+        Array.isArray(data.queue) ? data.queue : [],
+        Array.isArray(data.service) ? data.service : [],
+        Array.isArray(data.log) ? data.log : []
+      );
+      if (typeof _onLogChange === "function") _onLogChange();
+    }
+    return Promise.resolve();
+  }).catch((e) => {
+    console.warn("[QueueCloud] empty write guard failed; skipping risky write", e);
   });
 }
 
@@ -338,10 +393,8 @@ if (typeof window !== "undefined") {
   setInterval(() => {
     if (document.visibilityState !== "visible") return;
     if (typeof window.queueCloudReconnect === "function") window.queueCloudReconnect();
-    if (typeof window.tasksCloudReconnect === "function") window.tasksCloudReconnect();
     setTimeout(() => {
       if (typeof window.queueCloudRefresh === "function") window.queueCloudRefresh();
-      if (typeof window.tasksCloudRefresh === "function") window.tasksCloudRefresh();
     }, 100);
   }, 2000);
 }

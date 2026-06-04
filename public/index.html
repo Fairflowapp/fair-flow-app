@@ -5504,6 +5504,195 @@ dialog footer button, .code-dialog footer button {
   }
 }
 
+/* Queue on tablet portrait (for kiosk-style Samsung tablets): use the mobile
+   queue row behavior so row actions do not crowd or overlap the customer name. */
+@media (min-width: 641px) and (max-width: 1160px) and (orientation: portrait) {
+  body.ff-queue-route-active .wrap {
+    max-width: none;
+    width: 100%;
+    padding: 10px 18px 18px;
+    box-sizing: border-box;
+    min-height: calc(100dvh - 150px);
+    display: flex;
+    flex-direction: column;
+  }
+
+  body.ff-queue-route-active .wrap > .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 14px;
+    flex: 1 1 auto;
+    min-height: clamp(420px, calc(100dvh - 220px), 820px);
+    align-items: stretch;
+  }
+
+  body.ff-queue-route-active .wrap > .grid > .col {
+    display: flex;
+    flex-direction: column;
+    min-height: clamp(420px, calc(100dvh - 220px), 820px);
+    max-height: calc(100dvh - 190px);
+    box-sizing: border-box;
+  }
+
+  body.ff-queue-route-active .wrap > .grid > .col > .list {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none !important;
+    overflow-y: auto;
+  }
+
+  body.ff-queue-route-active .available-list,
+  body.ff-queue-route-active .inservice-list {
+    overflow: visible;
+  }
+
+  body.ff-queue-route-active .available-list .item,
+  body.ff-queue-route-active .inservice-list .item {
+    grid-template-columns: 42px minmax(0, 1fr) auto !important;
+    gap: 10px;
+    align-items: center;
+  }
+
+  body.ff-queue-route-active .available-list .item .badge + div,
+  body.ff-queue-route-active .inservice-list .item .badge + div {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  body.ff-queue-route-active .available-list .item .name-pill,
+  body.ff-queue-route-active .inservice-list .item .name-pill {
+    max-width: min(360px, 48vw) !important;
+    min-width: 0 !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1 !important;
+  }
+
+  body.ff-queue-route-active .available-list .item .controls.ff-queue-avail-ctrls,
+  body.ff-queue-route-active .inservice-list .item .controls.ff-inservice-ctrls {
+    grid-column: auto;
+    justify-self: end;
+    align-self: center;
+    justify-content: flex-end;
+    position: relative;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  body.ff-queue-route-active .available-list .item .ff-queue-start-split,
+  body.ff-queue-route-active .inservice-list .item .ff-inservice-finish-split {
+    display: inline-flex !important;
+    flex-direction: row;
+    align-items: stretch;
+    order: 1;
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid #d1d5db;
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    max-width: 100%;
+    align-self: center;
+  }
+
+  body.ff-queue-route-active .available-list .item .ff-queue-start-split .start-btn,
+  body.ff-queue-route-active .inservice-list .item .ff-inservice-finish-split .finish-btn {
+    border-radius: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    flex: 0 1 auto;
+    min-width: 0;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    font-size: 15px !important;
+    font-weight: 900 !important;
+    letter-spacing: 0.02em !important;
+    padding: 6px 12px !important;
+    line-height: 1.2 !important;
+    background: #e5e7eb !important;
+    color: #111827 !important;
+  }
+
+  body.ff-queue-route-active .available-list .item .ff-queue-start-split-toggle,
+  body.ff-queue-route-active .inservice-list .item .ff-inservice-finish-split-toggle {
+    flex: 0 0 auto;
+    width: 34px;
+    min-width: 34px;
+    border: none;
+    border-left: 1px solid rgba(0, 0, 0, 0.1);
+    background: #e5e7eb;
+    color: #374151;
+    cursor: pointer;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 11px;
+    line-height: 1;
+    box-sizing: border-box;
+  }
+
+  body.ff-queue-route-active .available-list .item.ff-queue-row-more-open,
+  body.ff-queue-route-active .inservice-list .item.ff-inservice-row-more-open {
+    overflow: visible;
+    z-index: 1;
+    position: relative;
+  }
+
+  body.ff-queue-route-active.ff-queue-avail-more-open .list.available-list,
+  body.ff-queue-route-active.ff-queue-avail-more-open .list.inservice-list,
+  body.ff-queue-route-active.ff-inservice-more-open .list.available-list,
+  body.ff-queue-route-active.ff-inservice-more-open .list.inservice-list {
+    overflow: visible !important;
+  }
+
+  body.ff-queue-route-active .available-list .item .ff-queue-more-panel,
+  body.ff-queue-route-active .inservice-list .item .ff-inservice-more-panel {
+    display: none !important;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    width: max-content;
+    min-width: 168px;
+    max-width: min(92vw, 280px);
+    flex-direction: column;
+    align-items: stretch;
+    align-content: stretch;
+    gap: 8px;
+    padding: 8px;
+    margin: 0;
+    order: 2;
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+    z-index: 45;
+  }
+
+  body.ff-queue-route-active .available-list .item .ff-queue-more-panel > *,
+  body.ff-queue-route-active .inservice-list .item .ff-inservice-more-panel > * {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  body.ff-queue-route-active .available-list .item.ff-queue-row-more-open .ff-queue-more-panel,
+  body.ff-queue-route-active .inservice-list .item.ff-inservice-row-more-open .ff-inservice-more-panel {
+    display: flex !important;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 820px) and (orientation: portrait) {
+  body.ff-queue-route-active .wrap > .grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.ff-queue-route-active .wrap > .grid > .col {
+    min-height: clamp(360px, 42dvh, 560px);
+    max-height: none;
+  }
+}
+
 </style>
 
 
@@ -13320,11 +13509,22 @@ function ffServiceMaybeSplitInServiceControls(ctrls) {
 
   window.ffQueueCloseAllMobileQueueDropdowns = ffQueueCloseAllMobileQueueDropdowns;
 
+  function ffQueueUsesCompactRowMenus() {
+    try {
+      if (!window.matchMedia) return false;
+      return (
+        window.matchMedia('(max-width: 640px)').matches ||
+        window.matchMedia('(min-width: 641px) and (max-width: 1160px) and (orientation: portrait)').matches
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
   document.addEventListener(
     'click',
     function (e) {
-      var mq = window.matchMedia('(max-width: 640px)');
-      if (!mq.matches) return;
+      if (!ffQueueUsesCompactRowMenus()) return;
       var toggleIn = e.target.closest && e.target.closest('.ff-inservice-finish-split-toggle');
       if (toggleIn) {
         e.preventDefault();
@@ -13418,7 +13618,7 @@ function ffServiceMaybeSplitInServiceControls(ctrls) {
 
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
-    if (!window.matchMedia('(max-width: 640px)').matches) return;
+    if (!ffQueueUsesCompactRowMenus()) return;
     ffQueueCloseAllMobileQueueDropdowns();
   });
 })();
@@ -14703,7 +14903,14 @@ function resetQueueState({ force = false, source = 'manual' }) {
     // No separate hold list to clear
     
     // History is NOT cleared - log and history arrays remain untouched
+    window.__ff_allow_empty_queue_cloud_write_until = Date.now() + 8000;
+    window.__ff_queue_cloud_write_reason = source === 'auto' ? 'auto-reset' : 'manual-reset';
     save();
+    setTimeout(() => {
+      if (window.__ff_queue_cloud_write_reason === 'auto-reset' || window.__ff_queue_cloud_write_reason === 'manual-reset') {
+        window.__ff_queue_cloud_write_reason = '';
+      }
+    }, 0);
     renderQueue();
     renderService();
     
@@ -14833,6 +15040,8 @@ function showResetConfirmation() {
     
     // Show modal
     overlay.style.display = 'flex';
+    overlay.style.zIndex = '2147483647';
+    overlay.style.opacity = '1';
     overlay.style.pointerEvents = 'auto';
     overlay.style.visibility = 'visible';
     
@@ -15117,6 +15326,8 @@ function showReturnConfirmation() {
 
     // Show modal
     overlay.style.display = 'flex';
+    overlay.style.zIndex = '2147483647';
+    overlay.style.opacity = '1';
     overlay.style.pointerEvents = 'auto';
     overlay.style.visibility = 'visible';
 
@@ -15181,6 +15392,8 @@ function returnPendingTaskToMyList(tab, taskId) {
   }
 
   const pendingTask = pendingList[pendingIndex];
+  window.__ffTasksLastLocalWrite = Date.now();
+  window.__ffTasksReturnLocalWriteUntil = Date.now() + 8000;
   pendingList.splice(pendingIndex, 1);
   saveTabTasks(tab, 'pending', pendingList);
 
@@ -15216,6 +15429,9 @@ function returnPendingTaskToMyList(tab, taskId) {
   }
 
   saveTabTasks(tab, 'active', activeList);
+  if (typeof window.tasksCloudWrite === 'function') {
+    window.tasksCloudWrite();
+  }
   renderTasksList(tab);
   return true;
 }
@@ -29275,6 +29491,13 @@ function renderTasksList(tab, opts) {
     
     // If force option is set, bypass any caches and rebuild fresh
     const force = opts?.force === true;
+    const restoreScroll = (el, y) => {
+      if (!el || typeof y !== 'number') return;
+      requestAnimationFrame(() => {
+        el.scrollTop = y;
+        requestAnimationFrame(() => { el.scrollTop = y; });
+      });
+    };
     
     // Before any reads, run one-time migration for this tab to ensure v1 active is the source of truth
     if (typeof migrateLegacyActiveToV1 === 'function') {
@@ -29316,6 +29539,7 @@ function renderTasksList(tab, opts) {
     // Render main screen MY LIST (active tasks) - only if main screen is visible and Settings modal is NOT open
     const mainListContainer = document.querySelector('#tasksContentContainer .tasks-col:first-child .tasks-list');
     if (mainListContainer && !isTasksSettingsOpen) {
+      const mainScrollTopBeforeRender = mainListContainer.scrollTop;
       const tasksUseOk = typeof ffCurrentUserHasTasksUsePermission === 'function' && ffCurrentUserHasTasksUsePermission();
       // Ensure admin filter visibility when rendering (handles timing when admin status resolves late)
       const tasksStaffFilterWrap = document.getElementById('tasksStaffTypeFilterWrap');
@@ -29870,11 +30094,13 @@ function renderTasksList(tab, opts) {
           }
         });
       }
+      restoreScroll(mainListContainer, mainScrollTopBeforeRender);
     }
     
     // Render PENDING column (pending tasks) - only if main screen is visible and Settings modal is NOT open
     const pendingListContainer = document.querySelector('#tasksContentContainer .tasks-col:last-child .tasks-list');
     if (pendingListContainer && !isTasksSettingsOpen) {
+      const pendingScrollTopBeforeRender = pendingListContainer.scrollTop;
       const tasksUseOk = typeof ffCurrentUserHasTasksUsePermission === 'function' && ffCurrentUserHasTasksUsePermission();
       // Get current tab for main Tasks screen
       const mainTab = currentTasksTab || 'opening';
@@ -29961,7 +30187,7 @@ function renderTasksList(tab, opts) {
           btn.style.padding = '0';
           btn.style.cursor = 'pointer';
           btn.addEventListener('mouseenter', () => {
-            btn.style.color = '#374151';
+            btn.style.color = '#7c3aed';
           });
           btn.addEventListener('mouseleave', () => {
             btn.style.color = '#6b7280';
@@ -29972,7 +30198,7 @@ function renderTasksList(tab, opts) {
             if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
               return;
             }
-            btn.style.color = 'red';
+            btn.style.color = '#7c3aed';
             const taskId = btn.getAttribute("data-task-id");
             const code = await showReturnPinPrompt();
             if (!code) return;
@@ -30034,6 +30260,7 @@ function renderTasksList(tab, opts) {
           });
         });
       }
+      restoreScroll(pendingListContainer, pendingScrollTopBeforeRender);
     }
   } catch (e) {
     console.error('[Tasks] Error rendering tasks list:', e);
@@ -53551,6 +53778,8 @@ function hookSettingsGuard_DISABLED(){
     input.type = "password";
 
     ov.style.display = "flex";
+    ov.style.zIndex = "2147483647";
+    ov.style.opacity = "1";
     ov.style.pointerEvents = "auto";
     ov.style.visibility = "visible";
     ov.style.pointerEvents = "auto";
@@ -57369,11 +57598,11 @@ function hookSettingsGuard_DISABLED(){
         { src: "/billing-guard.js?v=20260602_billing_required_checkout", type: "module", delay: 600 }, // global account-state enforcement (banner / lock overlay)
         { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module", delay: 700 },
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
-        { src: "/location-helpers.js?v=20260501_points", delay: 1050 },
+        { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
-        { src: "/queue-cloud.js?v=20260522_reset_stale_mobile_fix", type: "module", delay: 1350 },
+        { src: "/queue-cloud.js?v=20260603_tasks_scroll_guard", type: "module", delay: 1350 },
         { src: "/tickets.js?v=20260530_perms", type: "module", delay: 1400 },
-        { src: "/tasks-cloud.js?v=20260505_unified_app", type: "module", delay: 1500 },
+        { src: "/tasks-cloud.js?v=20260603_return_task_cloud_guard", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
         { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
         { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 1900 },
