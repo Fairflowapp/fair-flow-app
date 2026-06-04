@@ -1070,6 +1070,45 @@ async function saveProductStaffOverride(productId, staffId, override) {
   }
 }
 
+async function ffStaffProductsLoadForStaffMember() {
+  await loadProductsCatalog();
+  return {
+    products: products.slice(),
+    categories: productCategories.slice(),
+  };
+}
+
+async function ffStaffProductsSaveOverrideForStaffMember(productId, staffId, override) {
+  await loadProductsCatalog();
+  const product = products.find((p) => String(p.id) === String(productId));
+  if (!product) throw new Error("Product not found");
+  await saveProductStaffOverride(productId, staffId, override || {});
+  return product;
+}
+
+function ffStaffProductsGetOverrideForStaffMember(product, staffId) {
+  const overrides = getProductStaffOverrides(product);
+  return overrides && overrides[staffId] && typeof overrides[staffId] === "object"
+    ? overrides[staffId]
+    : {};
+}
+
+function ffStaffProductsDefaultsForStaffMember(staff, product) {
+  return {
+    price: Number(product?.retailPrice) || 0,
+    commission: getStaffDefaultProductCommission(staff),
+  };
+}
+
+if (typeof window !== "undefined") {
+  window.ffStaffProductsLoadForStaffMember = ffStaffProductsLoadForStaffMember;
+  window.ffStaffProductsSaveOverrideForStaffMember = ffStaffProductsSaveOverrideForStaffMember;
+  window.ffStaffProductsGetOverrideForStaffMember = ffStaffProductsGetOverrideForStaffMember;
+  window.ffStaffProductsDefaultsForStaffMember = ffStaffProductsDefaultsForStaffMember;
+  window.ffStaffProductsMoney = formatMoney;
+  window.ffStaffProductsEscapeHtml = escapeHtml;
+}
+
 // ===== Inventory tab (save/load only — no automatic reordering or stock math) =====
 function getProductInventory(product) {
   return product && product.inventory && typeof product.inventory === "object" ? product.inventory : {};

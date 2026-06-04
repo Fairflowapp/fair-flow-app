@@ -5575,6 +5575,47 @@ async function saveServiceStaffOverride(service, staffId, patch) {
   if (live) live.staffOverrides = nextOverrides;
 }
 
+async function ffStaffServicesLoadForStaffMember() {
+  await loadServices();
+  _applyCatalogFilter();
+  return {
+    services: salonServices.slice(),
+    categories: serviceCategories.slice()
+  };
+}
+
+async function ffStaffServicesSaveOverrideForStaffMember(serviceId, staffId, patch) {
+  await loadServices();
+  const service = salonServices.find((s) => String(s.id) === String(serviceId));
+  if (!service) throw new Error('Service not found');
+  await saveServiceStaffOverride(service, staffId, patch);
+  return service;
+}
+
+function ffStaffServicesGetOverrideForStaffMember(service, staffId) {
+  const overrides = getServiceStaffOverrides(service);
+  return overrides && overrides[staffId] && typeof overrides[staffId] === 'object'
+    ? overrides[staffId]
+    : {};
+}
+
+function ffStaffServicesDefaultsForStaffMember(staff, service) {
+  return {
+    price: Number(service?.sharedDefaultPrice ?? service?.defaultPrice) || 0,
+    commission: getStaffDefaultServiceCommission(staff, getServiceStaffId(staff)),
+    supplyDeduction: getStaffDefaultSupplyDeduction(staff)
+  };
+}
+
+if (typeof window !== 'undefined') {
+  window.ffStaffServicesLoadForStaffMember = ffStaffServicesLoadForStaffMember;
+  window.ffStaffServicesSaveOverrideForStaffMember = ffStaffServicesSaveOverrideForStaffMember;
+  window.ffStaffServicesGetOverrideForStaffMember = ffStaffServicesGetOverrideForStaffMember;
+  window.ffStaffServicesDefaultsForStaffMember = ffStaffServicesDefaultsForStaffMember;
+  window.ffStaffServicesMoney = ffTicketMoney;
+  window.ffStaffServicesEscapeHtml = escapeHtml;
+}
+
 function wireServicesStaffTab(root, service) {
   if (!root || !service || !service.id) return;
   const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;

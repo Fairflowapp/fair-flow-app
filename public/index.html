@@ -3480,6 +3480,8 @@ dialog footer button, .code-dialog footer button {
   #staffMembersModal.ff-staff-mobile-detail #staffLocationsTabContent,
   #staffMembersModal.ff-staff-mobile-detail #staffPermissionsTabContent,
   #staffMembersModal.ff-staff-mobile-detail #staffEarningsTabContent,
+  #staffMembersModal.ff-staff-mobile-detail #staffServicesTabContent,
+  #staffMembersModal.ff-staff-mobile-detail #staffProductsTabContent,
   #staffMembersModal.ff-staff-mobile-detail #staffDocumentsTabContent {
     display: none !important;
   }
@@ -3542,6 +3544,8 @@ dialog footer button, .code-dialog footer button {
   #staffMembersModal.ff-staff-mobile-tab #staffLocationsTabContent,
   #staffMembersModal.ff-staff-mobile-tab #staffPermissionsTabContent,
   #staffMembersModal.ff-staff-mobile-tab #staffEarningsTabContent,
+  #staffMembersModal.ff-staff-mobile-tab #staffServicesTabContent,
+  #staffMembersModal.ff-staff-mobile-tab #staffProductsTabContent,
   #staffMembersModal.ff-staff-mobile-tab #staffDocumentsTabContent {
     width: 100% !important;
     max-width: none !important;
@@ -3553,6 +3557,8 @@ dialog footer button, .code-dialog footer button {
   #staffMembersModal.ff-staff-mobile-tab #staffLocationsTabContent > div,
   #staffMembersModal.ff-staff-mobile-tab #staffPermissionsTabContent > div,
   #staffMembersModal.ff-staff-mobile-tab #staffEarningsTabContent > div,
+  #staffMembersModal.ff-staff-mobile-tab #staffServicesTabContent > div,
+  #staffMembersModal.ff-staff-mobile-tab #staffProductsTabContent > div,
   #staffMembersModal.ff-staff-mobile-tab #staffDocumentsTabContent > div {
     width: 100% !important;
     max-width: none !important;
@@ -3623,6 +3629,19 @@ dialog footer button, .code-dialog footer button {
 .staff-modal-overlay [onclick],
 .staff-modal-overlay [role="button"] {
   pointer-events: auto;
+}
+
+#staffMembersModal .staff-modal-content {
+  height: 100%;
+  min-height: 0;
+}
+
+#staffMembersModal .staff-sidebar {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Archive Confirmation Modal Button Hover Styles */
@@ -5034,10 +5053,12 @@ dialog footer button, .code-dialog footer button {
   /* Allow name pill to shrink so START stays on same row (inline flexShrink:0 from JS) */
   .available-list .item .name-pill {
     max-width: min(180px, 46vw) !important;
-    font-size: 12px !important;
-    padding: 6px 10px !important;
+    font-size: clamp(10px, 2.8vw, 12px) !important;
+    padding: 5px 8px !important;
     flex-shrink: 1 !important;
     min-width: 0 !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
   }
 
   .controls {
@@ -5560,11 +5581,15 @@ dialog footer button, .code-dialog footer button {
 
   body.ff-queue-route-active .available-list .item .name-pill,
   body.ff-queue-route-active .inservice-list .item .name-pill {
-    max-width: min(360px, 48vw) !important;
+    max-width: min(320px, 44vw) !important;
     min-width: 0 !important;
     overflow: hidden;
     text-overflow: ellipsis;
     flex-shrink: 1 !important;
+    font-size: clamp(10px, 2.8vw, 12px) !important;
+    padding: 5px 8px !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
   }
 
   body.ff-queue-route-active .available-list .item .controls.ff-queue-avail-ctrls,
@@ -5577,6 +5602,24 @@ dialog footer button, .code-dialog footer button {
     flex-wrap: wrap;
     gap: 6px;
     min-width: 0;
+  }
+
+  body.ff-queue-route-active .inservice-list .item {
+    column-gap: 12px !important;
+    grid-template-columns: 42px minmax(0, 1fr) max-content !important;
+  }
+
+  body.ff-queue-route-active .inservice-list .item .name-pill {
+    flex: 0 1 min(108px, 24vw) !important;
+    max-width: min(108px, 24vw) !important;
+    font-size: clamp(8px, 2.2vw, 9px) !important;
+    padding: 4px 6px !important;
+    margin-right: 10px !important;
+  }
+
+  body.ff-queue-route-active .inservice-list .item .controls.ff-inservice-ctrls {
+    min-width: max-content !important;
+    margin-left: 10px !important;
   }
 
   body.ff-queue-route-active .available-list .item .ff-queue-start-split,
@@ -5612,6 +5655,12 @@ dialog footer button, .code-dialog footer button {
     color: #111827 !important;
   }
 
+  body.ff-queue-route-active .inservice-list .item .ff-inservice-finish-split .finish-btn {
+    font-size: 10px !important;
+    padding: 4px 7px !important;
+    letter-spacing: 0.01em !important;
+  }
+
   body.ff-queue-route-active .available-list .item .ff-queue-start-split-toggle,
   body.ff-queue-route-active .inservice-list .item .ff-inservice-finish-split-toggle {
     flex: 0 0 auto;
@@ -5629,6 +5678,11 @@ dialog footer button, .code-dialog footer button {
     font-size: 11px;
     line-height: 1;
     box-sizing: border-box;
+  }
+
+  body.ff-queue-route-active .inservice-list .item .ff-inservice-finish-split-toggle {
+    width: 28px !important;
+    min-width: 28px !important;
   }
 
   body.ff-queue-route-active .available-list .item.ff-queue-row-more-open,
@@ -14094,11 +14148,12 @@ function renderService(){
     }
 
     const pill=namePill(s); pill.textContent=s.name;
-    pill.style.fontSize = "15px";
-    pill.style.padding = "6px 12px";
-    pill.style.flexShrink = "0";
-    pill.style.minWidth = "max-content";
-    pill.style.maxWidth = "min(320px, 46vw)";
+    pill.style.fontSize = "9px";
+    pill.style.padding = "4px 6px";
+    pill.style.flexShrink = "1";
+    pill.style.minWidth = "0";
+    pill.style.maxWidth = "min(108px, 24vw)";
+    pill.style.marginRight = "10px";
     pill.style.overflow = "hidden";
     pill.style.textOverflow = "ellipsis";
     nm.appendChild(pill);
@@ -33988,13 +34043,21 @@ function initializeAppsPanel() {
 
   function closeProductsScreenForAppsNavigation() {
     try {
+      var productsScreen = document.getElementById('productsScreen');
+      var productsScreenOpen = productsScreen && window.getComputedStyle(productsScreen).display !== 'none';
       if (typeof window.ffCloseProductsScreen === 'function') {
-        window.ffCloseProductsScreen();
+        if (productsScreenOpen) {
+          window.ffCloseProductsScreen();
+          return;
+        }
+        if (productsScreen) {
+          productsScreen.style.display = 'none';
+          productsScreen.style.pointerEvents = 'none';
+        }
         return;
       }
       var productsModal = document.getElementById('productsEditorModal');
       if (productsModal) productsModal.remove();
-      var productsScreen = document.getElementById('productsScreen');
       if (productsScreen) {
         productsScreen.style.display = 'none';
         productsScreen.style.pointerEvents = 'none';
@@ -34107,6 +34170,13 @@ function initializeAppsPanel() {
           }
           return;
         }
+
+        if (typeof closeStaffMembersModal === 'function') {
+          closeStaffMembersModal();
+        } else {
+          const staffMembersModal = document.getElementById('staffMembersModal');
+          if (staffMembersModal) staffMembersModal.style.display = 'none';
+        }
         
         // Route to existing navigation handlers
         switch(appType) {
@@ -34159,7 +34229,7 @@ function initializeAppsPanel() {
                 console.error('[Apps Panel] Failed to open Products', err);
               });
             } else {
-              import('/products.js?v=20260601_loc_align')
+              import('/products.js?v=20260603_staff_products_tab')
                 .then(function (m) {
                   if (m && typeof m.goToProducts === 'function') {
                     window.goToProducts = m.goToProducts;
@@ -36030,8 +36100,8 @@ function initializeAppsPanel() {
         ? window.ffCurrentUserCanSeeEarningsRules()
         : true;
       if (navEl) {
-        const baseTabs = ['details', 'schedule', 'locations', 'permissions'];
-        const baseLabels = ['Details', 'Schedule', 'Locations', 'Permissions'];
+        const baseTabs = ['details', 'schedule', 'locations', 'permissions', 'services', 'products'];
+        const baseLabels = ['Details', 'Schedule', 'Locations', 'Permissions', 'Services', 'Products'];
         if (canSeeEarningsTab) {
           baseTabs.push('earnings');
           baseLabels.push('Earnings Rules');
@@ -36052,7 +36122,7 @@ function initializeAppsPanel() {
         });
       }
       
-      const validTabs = ['details', 'schedule', 'locations', 'permissions', 'documents'];
+      const validTabs = ['details', 'schedule', 'locations', 'permissions', 'services', 'products', 'documents'];
       if (canSeeEarningsTab) validTabs.push('earnings');
       if (!validTabs.includes(currentTab)) currentTab = 'details';
       switchTab(currentTab);
@@ -36099,12 +36169,16 @@ function initializeAppsPanel() {
     const scheduleContent = panel('staffScheduleTabContent');
     const locationsContent = panel('staffLocationsTabContent');
     const permissionsContent = panel('staffPermissionsTabContent');
+    const servicesContent = panel('staffServicesTabContent');
+    const productsContent = panel('staffProductsTabContent');
     const earningsContent = panel('staffEarningsTabContent');
     const documentsContent = panel('staffDocumentsTabContent');
 
     if (detailsContent) detailsContent.style.display = tab === 'details' ? 'block' : 'none';
     if (scheduleContent) scheduleContent.style.display = tab === 'schedule' ? 'block' : 'none';
     if (locationsContent) locationsContent.style.display = tab === 'locations' ? 'block' : 'none';
+    if (servicesContent) servicesContent.style.display = tab === 'services' ? 'block' : 'none';
+    if (productsContent) productsContent.style.display = tab === 'products' ? 'block' : 'none';
     if (earningsContent) {
       const canSeeEarningsNow = (typeof window.ffCurrentUserCanSeeEarningsRules === 'function')
         ? window.ffCurrentUserCanSeeEarningsRules()
@@ -36152,6 +36226,20 @@ function initializeAppsPanel() {
         }
       }
     }
+    if (servicesContent && tab === 'services' && selectedStaffId) {
+      const staffData = ffGetStaffStore();
+      const staff = staffData.staff.find(s => s.id === selectedStaffId);
+      if (staff && typeof renderStaffServicesTab === 'function') {
+        renderStaffServicesTab(staff);
+      }
+    }
+    if (productsContent && tab === 'products' && selectedStaffId) {
+      const staffData = ffGetStaffStore();
+      const staff = staffData.staff.find(s => s.id === selectedStaffId);
+      if (staff && typeof renderStaffProductsTab === 'function') {
+        renderStaffProductsTab(staff);
+      }
+    }
     if (documentsContent) {
       documentsContent.style.display = tab === 'documents' ? 'block' : 'none';
       if (tab === 'documents' && selectedStaffId && typeof window.ffMountStaffDocuments === 'function') {
@@ -36169,6 +36257,537 @@ function initializeAppsPanel() {
   
   // Edit mode state
   let isEditingStaffDetails = false;
+
+  function ffStaffServicesHtmlEscape(value) {
+    if (typeof window.ffStaffServicesEscapeHtml === 'function') return window.ffStaffServicesEscapeHtml(value);
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function ffStaffServicesMoney(value) {
+    if (typeof window.ffStaffServicesMoney === 'function') return window.ffStaffServicesMoney(value);
+    const n = Number(value);
+    return '$' + (Number.isFinite(n) ? n.toFixed(2) : '0.00');
+  }
+
+  function ffStaffServicesStaffId(staff) {
+    return String(staff?.id || staff?.staffId || staff?.uid || '').trim();
+  }
+
+  function ffStaffServicesDefaultCommissionLabel(rule) {
+    if (!rule || !Number.isFinite(Number(rule.value))) return 'Default';
+    return rule.type === 'fixed'
+      ? `Default ${ffStaffServicesMoney(rule.value)}`
+      : `Default ${Number(rule.value)}%`;
+  }
+
+  function ffStaffServicesSupplyLabel(rule) {
+    if (!rule || !Number.isFinite(Number(rule.value))) return 'Default OFF';
+    return rule.type === 'percentage'
+      ? `Default ${Number(rule.value)}%`
+      : `Default ${ffStaffServicesMoney(rule.value)}`;
+  }
+
+  function ffStaffCatalogCategoryGroups(items, categories, fallbackLabel) {
+    const categoryOrder = [];
+    const categoryLabels = {};
+    (Array.isArray(categories) ? categories : []).forEach(function(cat) {
+      const id = String(cat && cat.id ? cat.id : '').trim();
+      if (!id) return;
+      categoryOrder.push(id);
+      categoryLabels[id] = cat.name || fallbackLabel || 'Other';
+    });
+    const groupsByKey = {};
+    (Array.isArray(items) ? items : []).forEach(function(item) {
+      const rawCategoryId = String(item && item.categoryId ? item.categoryId : '').trim();
+      const key = rawCategoryId || '__uncategorized__';
+      if (!groupsByKey[key]) {
+        groupsByKey[key] = {
+          key: key,
+          label: categoryLabels[key] || (key === '__uncategorized__' ? (fallbackLabel || 'Uncategorized') : (fallbackLabel || 'Other')),
+          items: []
+        };
+      }
+      groupsByKey[key].items.push(item);
+    });
+    const ordered = [];
+    categoryOrder.forEach(function(key) {
+      if (groupsByKey[key] && groupsByKey[key].items.length) ordered.push(groupsByKey[key]);
+    });
+    Object.keys(groupsByKey).forEach(function(key) {
+      if (categoryOrder.indexOf(key) === -1) ordered.push(groupsByKey[key]);
+    });
+    return ordered;
+  }
+
+  function ffStaffCategoryToggleHtml(kind, groupKey, label, count, allEnabled) {
+    const safeKind = ffStaffServicesHtmlEscape(kind);
+    return `
+      <div class="ff-staff-category-header" data-kind="${safeKind}" data-category-key="${ffStaffServicesHtmlEscape(groupKey)}" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;margin-top:4px;">
+        <div style="min-width:0;">
+          <div style="font-size:13px;font-weight:800;color:#111827;line-height:1.25;">${ffStaffServicesHtmlEscape(label)}</div>
+          <div style="margin-top:2px;font-size:11px;color:#6b7280;">${count} ${count === 1 ? 'item' : 'items'} for this staff member</div>
+        </div>
+        <label class="staff-permission-toggle" style="flex:0 0 auto;" title="${allEnabled ? 'Disable category' : 'Enable category'}">
+          <input type="checkbox" class="ff-staff-category-toggle" ${allEnabled ? 'checked' : ''}>
+          <span class="staff-permission-toggle-slider"></span>
+        </label>
+      </div>
+    `;
+  }
+
+  function ffWireStaffCategoryToggles(container, cardSelector, enabledSelector) {
+    if (!container) return;
+    const syncSectionToggle = function(section) {
+      if (!section) return;
+      const toggle = section.querySelector('.ff-staff-category-toggle');
+      if (!toggle) return;
+      if (section.__ffStaffCategoryBulkActive) {
+        toggle.checked = !!section.__ffStaffCategoryBulkState;
+        toggle.title = toggle.checked ? 'Disable category' : 'Enable category';
+        return;
+      }
+      const boxes = Array.from(section.querySelectorAll(cardSelector + ' ' + enabledSelector));
+      const allEnabled = boxes.length > 0 && boxes.every(function(box) { return !!box.checked; });
+      toggle.checked = allEnabled;
+      toggle.title = allEnabled ? 'Disable category' : 'Enable category';
+    };
+    container.querySelectorAll('.ff-staff-category-section').forEach(function(section) {
+      syncSectionToggle(section);
+      const toggle = section.querySelector('.ff-staff-category-toggle');
+      if (toggle && !toggle.__ffStaffCategoryWired) {
+        toggle.__ffStaffCategoryWired = true;
+        toggle.addEventListener('change', function() {
+          const nextEnabled = !!toggle.checked;
+          section.__ffStaffCategoryBulkActive = true;
+          section.__ffStaffCategoryBulkState = nextEnabled;
+          toggle.checked = nextEnabled;
+          toggle.title = nextEnabled ? 'Disable category' : 'Enable category';
+          section.querySelectorAll(cardSelector).forEach(function(card) {
+            const input = card.querySelector(enabledSelector);
+            if (!input) return;
+            if (input.checked !== nextEnabled) {
+              input.checked = nextEnabled;
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          });
+          setTimeout(function() {
+            section.__ffStaffCategoryBulkActive = false;
+            syncSectionToggle(section);
+          }, 1200);
+        });
+      }
+      section.querySelectorAll(cardSelector + ' ' + enabledSelector).forEach(function(input) {
+        if (input.__ffStaffCategorySyncWired) return;
+        input.__ffStaffCategorySyncWired = true;
+        input.addEventListener('change', function() {
+          setTimeout(function() { syncSectionToggle(section); }, 0);
+        });
+      });
+    });
+  }
+
+  function renderStaffServicesTab(staff) {
+    const container = document.getElementById('staffServicesTabContent');
+    if (!container) return;
+    const staffId = ffStaffServicesStaffId(staff);
+    if (!staffId) {
+      container.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#b91c1c;">Missing staff id.</p></div>';
+      return;
+    }
+    if (typeof window.ffStaffServicesLoadForStaffMember !== 'function') {
+      container.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#6b7280;">Services are still loading. Please reopen this tab in a moment.</p></div>';
+      return;
+    }
+    container.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#6b7280;">Loading services...</p></div>';
+    window.ffStaffServicesLoadForStaffMember().then(function(data) {
+      if (selectedStaffId !== staff.id) return;
+      const services = Array.isArray(data?.services) ? data.services : [];
+      const categories = Array.isArray(data?.categories) ? data.categories : [];
+      const categoryNames = {};
+      categories.forEach(function(cat) {
+        if (cat && cat.id) categoryNames[String(cat.id)] = cat.name || 'Other';
+      });
+      if (!services.length) {
+        container.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#6b7280;">No services found yet.</p></div>';
+        return;
+      }
+      const serviceCardHtml = function(service) {
+        const serviceId = String(service.id || '');
+        const override = typeof window.ffStaffServicesGetOverrideForStaffMember === 'function'
+          ? window.ffStaffServicesGetOverrideForStaffMember(service, staffId)
+          : ((service.staffOverrides && service.staffOverrides[staffId]) || {});
+        const defaults = typeof window.ffStaffServicesDefaultsForStaffMember === 'function'
+          ? window.ffStaffServicesDefaultsForStaffMember(staff, service)
+          : { price: Number(service.defaultPrice) || 0, commission: null, supplyDeduction: null };
+        const basePrice = Number(defaults.price) || 0;
+        const enabled = override.enabled !== false;
+        const price = Number.isFinite(Number(override.price)) ? Number(override.price) : basePrice;
+        const commission = override.commission && typeof override.commission === 'object' ? override.commission : {};
+        const hasCommission = Number.isFinite(Number(commission.value));
+        const commissionType = hasCommission
+          ? (commission.type === 'fixed' ? 'fixed' : 'percentage')
+          : (defaults.commission?.type === 'fixed' ? 'fixed' : 'percentage');
+        const commissionValue = hasCommission ? String(Number(commission.value)) : '';
+        const supply = override.supplyDeduction && typeof override.supplyDeduction === 'object' ? override.supplyDeduction : {};
+        const hasSupplyOverride = Object.prototype.hasOwnProperty.call(override, 'supplyDeduction');
+        const hasSupplyValue = supply.enabled === true && Number.isFinite(Number(supply.value));
+        const supplyEnabled = hasSupplyOverride ? hasSupplyValue : false;
+        const defaultSupply = defaults.supplyDeduction && typeof defaults.supplyDeduction === 'object' ? defaults.supplyDeduction : null;
+        const supplyType = hasSupplyValue
+          ? (supply.type === 'percentage' ? 'percentage' : 'fixed')
+          : (defaultSupply?.type === 'percentage' ? 'percentage' : 'fixed');
+        const supplyValue = hasSupplyValue ? String(Number(supply.value)) : '';
+        const categoryLabel = categoryNames[String(service.categoryId || '')] || 'Other';
+        return `
+          <div class="ff-staff-services-card" data-service-id="${ffStaffServicesHtmlEscape(serviceId)}" style="padding:12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px;">
+              <div>
+                <div style="font-size:13px;font-weight:800;color:#111827;">${ffStaffServicesHtmlEscape(service.name || 'Untitled service')}</div>
+                <div style="margin-top:3px;font-size:11px;color:#6b7280;">${ffStaffServicesHtmlEscape(categoryLabel)} - ${enabled ? 'Available for this staff member' : 'Not available for this staff member'}</div>
+              </div>
+              <label class="staff-permission-toggle" style="flex:0 0 auto;">
+                <input type="checkbox" class="ff-staff-services-enabled" ${enabled ? 'checked' : ''}>
+                <span class="staff-permission-toggle-slider"></span>
+              </label>
+            </div>
+            <div style="display:grid;grid-template-columns:110px minmax(120px,180px) auto;gap:8px;align-items:center;margin-bottom:9px;">
+              <div style="font-size:12px;color:#6b7280;">Price</div>
+              <input type="number" min="0" step="0.01" class="ff-staff-services-price" value="${ffStaffServicesHtmlEscape(String(price))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+              <span style="font-size:11px;color:#9ca3af;">Default ${ffStaffServicesMoney(basePrice)}</span>
+            </div>
+            <div style="margin-bottom:9px;padding:9px 0;border-top:1px solid #f3f4f6;border-bottom:1px solid #f3f4f6;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
+                <div>
+                  <div style="font-size:12px;font-weight:700;color:#374151;">Supply Deduct</div>
+                  <div style="font-size:11px;color:#9ca3af;margin-top:2px;">Deduct supplies before commission.</div>
+                </div>
+                <label class="staff-permission-toggle" style="flex:0 0 auto;">
+                  <input type="checkbox" class="ff-staff-services-supply-enabled" ${supplyEnabled ? 'checked' : ''}>
+                  <span class="staff-permission-toggle-slider"></span>
+                </label>
+              </div>
+              <div class="ff-staff-services-supply-fields" style="display:${supplyEnabled ? 'grid' : 'none'};grid-template-columns:110px minmax(120px,180px) minmax(120px,180px) auto;gap:8px;align-items:center;">
+                <div style="font-size:12px;color:#6b7280;">Deduction</div>
+                <select class="ff-staff-services-supply-type" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
+                  <option value="fixed" ${supplyType === 'fixed' ? 'selected' : ''}>Fixed Amount ($)</option>
+                  <option value="percentage" ${supplyType === 'percentage' ? 'selected' : ''}>Percentage (%)</option>
+                </select>
+                <input type="number" min="0" step="0.01" class="ff-staff-services-supply-value" value="${ffStaffServicesHtmlEscape(supplyValue)}" placeholder="${ffStaffServicesHtmlEscape(ffStaffServicesSupplyLabel(defaults.supplyDeduction))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+                <span style="font-size:11px;color:${hasSupplyOverride ? '#7c3aed' : '#9ca3af'};">${hasSupplyOverride ? (hasSupplyValue ? 'Override' : 'Override OFF') : ffStaffServicesHtmlEscape(ffStaffServicesSupplyLabel(defaults.supplyDeduction))}</span>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:110px minmax(120px,180px) minmax(70px,100px) auto;gap:8px;align-items:center;">
+              <div style="font-size:12px;color:#6b7280;">Commission</div>
+              <input type="number" min="0" step="0.01" class="ff-staff-services-commission-value" value="${ffStaffServicesHtmlEscape(commissionValue)}" placeholder="${ffStaffServicesHtmlEscape(ffStaffServicesDefaultCommissionLabel(defaults.commission))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+              <select class="ff-staff-services-commission-type" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
+                <option value="percentage" ${commissionType === 'percentage' ? 'selected' : ''}>%</option>
+                <option value="fixed" ${commissionType === 'fixed' ? 'selected' : ''}>$</option>
+              </select>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <button type="button" class="ff-staff-services-save" style="width:auto;min-width:0;justify-self:start;padding:5px 10px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:999px;cursor:pointer;font-size:11px;font-weight:700;line-height:1.2;">Save</button>
+                <span class="ff-staff-services-status" style="font-size:11px;color:${hasCommission ? '#7c3aed' : '#9ca3af'};">${hasCommission ? 'Override' : ffStaffServicesHtmlEscape(ffStaffServicesDefaultCommissionLabel(defaults.commission))}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      };
+      const groupedSections = ffStaffCatalogCategoryGroups(services, categories, 'Other').map(function(group) {
+        const allEnabled = group.items.every(function(service) {
+          const itemStaffId = ffStaffServicesStaffId(staff);
+          const override = typeof window.ffStaffServicesGetOverrideForStaffMember === 'function'
+            ? window.ffStaffServicesGetOverrideForStaffMember(service, itemStaffId)
+            : ((service.staffOverrides && service.staffOverrides[itemStaffId]) || {});
+          return override.enabled !== false;
+        });
+        return `
+          <section class="ff-staff-category-section ff-staff-services-category" data-kind="services" data-category-key="${ffStaffServicesHtmlEscape(group.key)}" style="display:flex;flex-direction:column;gap:8px;">
+            ${ffStaffCategoryToggleHtml('services', group.key, group.label, group.items.length, allEnabled)}
+            ${group.items.map(serviceCardHtml).join('')}
+          </section>
+        `;
+      }).join('');
+      container.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="padding:12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+            <div style="font-size:14px;font-weight:800;color:#111827;margin-bottom:3px;">Services</div>
+            <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.45;">Manage availability, staff-specific price, supply deduct, and commission for ${ffStaffServicesHtmlEscape(staff.name || 'this staff member')}.</p>
+          </div>
+          ${groupedSections}
+        </div>
+      `;
+      wireStaffServicesTab(container, staff);
+    }).catch(function(err) {
+      console.warn('[StaffServices] load failed', err);
+      container.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#b91c1c;">Could not load services.</p></div>';
+    });
+  }
+
+  function wireStaffServicesTab(container, staff) {
+    const staffId = ffStaffServicesStaffId(staff);
+    container.querySelectorAll('.ff-staff-services-card').forEach(function(card) {
+      const serviceId = card.getAttribute('data-service-id');
+      const enabledInput = card.querySelector('.ff-staff-services-enabled');
+      const priceInput = card.querySelector('.ff-staff-services-price');
+      const supplyEnabledInput = card.querySelector('.ff-staff-services-supply-enabled');
+      const supplyFields = card.querySelector('.ff-staff-services-supply-fields');
+      const supplyTypeInput = card.querySelector('.ff-staff-services-supply-type');
+      const supplyValueInput = card.querySelector('.ff-staff-services-supply-value');
+      const commissionValueInput = card.querySelector('.ff-staff-services-commission-value');
+      const commissionTypeInput = card.querySelector('.ff-staff-services-commission-type');
+      const saveBtn = card.querySelector('.ff-staff-services-save');
+      const status = card.querySelector('.ff-staff-services-status');
+      const save = async function() {
+        if (!serviceId || !staffId || typeof window.ffStaffServicesSaveOverrideForStaffMember !== 'function') return;
+        const rawPrice = parseFloat(priceInput?.value);
+        const commissionValue = parseFloat(commissionValueInput?.value);
+        const supplyEnabled = !!(supplyEnabledInput && supplyEnabledInput.checked);
+        const supplyValue = parseFloat(supplyValueInput?.value);
+        const patch = {
+          enabled: enabledInput ? !!enabledInput.checked : true,
+          price: Number.isFinite(rawPrice) ? rawPrice : ''
+        };
+        if (Number.isFinite(commissionValue)) {
+          patch.commission = {
+            type: commissionTypeInput?.value === 'fixed' ? 'fixed' : 'percentage',
+            value: commissionValue
+          };
+        } else {
+          patch.commission = null;
+        }
+        if (supplyEnabled && Number.isFinite(supplyValue)) {
+          patch.supplyDeduction = {
+            enabled: true,
+            type: supplyTypeInput?.value === 'percentage' ? 'percentage' : 'fixed',
+            value: supplyValue
+          };
+        } else {
+          patch.supplyDeduction = supplyEnabled ? null : { enabled: false };
+        }
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.7'; }
+        try {
+          await window.ffStaffServicesSaveOverrideForStaffMember(serviceId, staffId, patch);
+          if (status) { status.textContent = 'Saved'; status.style.color = '#16a34a'; }
+        } catch (err) {
+          console.warn('[StaffServices] save failed', err);
+          if (status) { status.textContent = 'Failed'; status.style.color = '#dc2626'; }
+        } finally {
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+        }
+      };
+      if (supplyEnabledInput) {
+        supplyEnabledInput.addEventListener('change', function() {
+          if (supplyFields) supplyFields.style.display = supplyEnabledInput.checked ? 'grid' : 'none';
+        });
+      }
+      if (enabledInput) enabledInput.addEventListener('change', save);
+      if (saveBtn) {
+        saveBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          save();
+        });
+      }
+    });
+    ffWireStaffCategoryToggles(container, '.ff-staff-services-card', '.ff-staff-services-enabled');
+  }
+
+  function ffStaffProductsHtmlEscape(value) {
+    if (typeof window.ffStaffProductsEscapeHtml === 'function') return window.ffStaffProductsEscapeHtml(value);
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function ffStaffProductsMoney(value) {
+    if (typeof window.ffStaffProductsMoney === 'function') return window.ffStaffProductsMoney(value);
+    const n = Number(value);
+    return '$' + (Number.isFinite(n) ? n.toFixed(2) : '0.00');
+  }
+
+  function ffStaffProductsStaffId(staff) {
+    return String(staff?.id || staff?.staffId || staff?.uid || '').trim();
+  }
+
+  function ffStaffProductsDefaultCommissionLabel(rule) {
+    if (!rule || !Number.isFinite(Number(rule.value))) return 'Default';
+    return rule.type === 'fixed'
+      ? `Default ${ffStaffProductsMoney(rule.value)}`
+      : `Default ${Number(rule.value)}%`;
+  }
+
+  function ffEnsureStaffProductsApi() {
+    if (typeof window.ffStaffProductsLoadForStaffMember === 'function') return Promise.resolve();
+    return import('/products.js?v=20260603_staff_products_tab').then(function() {});
+  }
+
+  function renderStaffProductsTab(staff) {
+    const container = document.getElementById('staffProductsTabContent');
+    if (!container) return;
+    const staffId = ffStaffProductsStaffId(staff);
+    if (!staffId) {
+      container.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#b91c1c;">Missing staff id.</p></div>';
+      return;
+    }
+    container.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#6b7280;">Loading products...</p></div>';
+    ffEnsureStaffProductsApi().then(function() {
+      if (typeof window.ffStaffProductsLoadForStaffMember !== 'function') {
+        throw new Error('Products module is not ready');
+      }
+      return window.ffStaffProductsLoadForStaffMember();
+    }).then(function(data) {
+      if (selectedStaffId !== staff.id) return;
+      const productsList = Array.isArray(data?.products) ? data.products : [];
+      const categories = Array.isArray(data?.categories) ? data.categories : [];
+      const categoryNames = {};
+      categories.forEach(function(cat) {
+        if (cat && cat.id) categoryNames[String(cat.id)] = cat.name || 'Uncategorized';
+      });
+      if (!productsList.length) {
+        container.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#6b7280;">No products found yet.</p></div>';
+        return;
+      }
+      const productCardHtml = function(product) {
+        const productId = String(product.id || '');
+        const override = typeof window.ffStaffProductsGetOverrideForStaffMember === 'function'
+          ? window.ffStaffProductsGetOverrideForStaffMember(product, staffId)
+          : ((product.staffOverrides && product.staffOverrides[staffId]) || {});
+        const defaults = typeof window.ffStaffProductsDefaultsForStaffMember === 'function'
+          ? window.ffStaffProductsDefaultsForStaffMember(staff, product)
+          : { price: Number(product.retailPrice) || 0, commission: null };
+        const enabled = override.enabled !== false;
+        const commission = override.commission && typeof override.commission === 'object' ? override.commission : {};
+        const hasCommission = Number.isFinite(Number(commission.value));
+        const commissionType = hasCommission
+          ? (commission.type === 'fixed' ? 'fixed' : 'percentage')
+          : (defaults.commission?.type === 'fixed' ? 'fixed' : 'percentage');
+        const commissionValue = hasCommission ? String(Number(commission.value)) : '';
+        const categoryLabel = categoryNames[String(product.categoryId || '')] || 'Uncategorized';
+        const price = Number(defaults.price) || 0;
+        return `
+          <div class="ff-staff-products-card" data-product-id="${ffStaffProductsHtmlEscape(productId)}" style="padding:12px;background:${enabled ? '#fff' : '#f9fafb'};border:1px solid var(--border);border-radius:12px;">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px;">
+              <div class="ff-staff-products-title" style="min-width:0;opacity:${enabled ? '1' : '0.55'};">
+                <div style="font-size:13px;font-weight:800;color:${enabled ? '#111827' : '#9ca3af'};">${ffStaffProductsHtmlEscape(product.name || 'Untitled product')}</div>
+                <div style="margin-top:3px;font-size:11px;color:#6b7280;">${ffStaffProductsHtmlEscape(categoryLabel)} - ${enabled ? 'Available for this staff member' : 'Not available for this staff member'} - ${ffStaffProductsMoney(price)}</div>
+              </div>
+              <label class="staff-permission-toggle" style="flex:0 0 auto;">
+                <input type="checkbox" class="ff-staff-products-enabled" ${enabled ? 'checked' : ''}>
+                <span class="staff-permission-toggle-slider"></span>
+              </label>
+            </div>
+            <div class="ff-staff-products-body" style="display:grid;grid-template-columns:110px minmax(120px,180px) minmax(70px,100px) auto;gap:8px;align-items:center;opacity:${enabled ? '1' : '0.45'};pointer-events:${enabled ? 'auto' : 'none'};">
+              <div style="font-size:12px;color:#6b7280;">Commission</div>
+              <input type="number" min="0" step="0.01" class="ff-staff-products-commission-value" value="${ffStaffProductsHtmlEscape(commissionValue)}" placeholder="${ffStaffProductsHtmlEscape(ffStaffProductsDefaultCommissionLabel(defaults.commission))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+              <select class="ff-staff-products-commission-type" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
+                <option value="percentage" ${commissionType === 'percentage' ? 'selected' : ''}>%</option>
+                <option value="fixed" ${commissionType === 'fixed' ? 'selected' : ''}>$</option>
+              </select>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <button type="button" class="ff-staff-products-save" style="width:auto;min-width:0;justify-self:start;padding:5px 10px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:999px;cursor:pointer;font-size:11px;font-weight:700;line-height:1.2;">Save</button>
+                <span class="ff-staff-products-status" style="font-size:11px;color:${hasCommission ? '#7c3aed' : '#9ca3af'};">${hasCommission ? 'Override' : ffStaffProductsHtmlEscape(ffStaffProductsDefaultCommissionLabel(defaults.commission))}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      };
+      const groupedSections = ffStaffCatalogCategoryGroups(productsList, categories, 'Uncategorized').map(function(group) {
+        const allEnabled = group.items.every(function(product) {
+          const itemStaffId = ffStaffProductsStaffId(staff);
+          const override = typeof window.ffStaffProductsGetOverrideForStaffMember === 'function'
+            ? window.ffStaffProductsGetOverrideForStaffMember(product, itemStaffId)
+            : ((product.staffOverrides && product.staffOverrides[itemStaffId]) || {});
+          return override.enabled !== false;
+        });
+        return `
+          <section class="ff-staff-category-section ff-staff-products-category" data-kind="products" data-category-key="${ffStaffProductsHtmlEscape(group.key)}" style="display:flex;flex-direction:column;gap:8px;">
+            ${ffStaffCategoryToggleHtml('products', group.key, group.label, group.items.length, allEnabled)}
+            ${group.items.map(productCardHtml).join('')}
+          </section>
+        `;
+      }).join('');
+      container.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="padding:12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+            <div style="font-size:14px;font-weight:800;color:#111827;margin-bottom:3px;">Products</div>
+            <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.45;">Manage product availability and product commission for ${ffStaffProductsHtmlEscape(staff.name || 'this staff member')}.</p>
+          </div>
+          ${groupedSections}
+        </div>
+      `;
+      wireStaffProductsTab(container, staff);
+    }).catch(function(err) {
+      console.warn('[StaffProducts] load failed', err);
+      container.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#b91c1c;">Could not load products.</p></div>';
+    });
+  }
+
+  function wireStaffProductsTab(container, staff) {
+    const staffId = ffStaffProductsStaffId(staff);
+    container.querySelectorAll('.ff-staff-products-card').forEach(function(card) {
+      const productId = card.getAttribute('data-product-id');
+      const enabledInput = card.querySelector('.ff-staff-products-enabled');
+      const body = card.querySelector('.ff-staff-products-body');
+      const title = card.querySelector('.ff-staff-products-title');
+      const commissionValueInput = card.querySelector('.ff-staff-products-commission-value');
+      const commissionTypeInput = card.querySelector('.ff-staff-products-commission-type');
+      const saveBtn = card.querySelector('.ff-staff-products-save');
+      const status = card.querySelector('.ff-staff-products-status');
+      const applyEnabled = function() {
+        const enabled = enabledInput ? enabledInput.checked : true;
+        card.style.background = enabled ? '#fff' : '#f9fafb';
+        if (body) {
+          body.style.opacity = enabled ? '1' : '0.45';
+          body.style.pointerEvents = enabled ? 'auto' : 'none';
+        }
+        if (title) title.style.opacity = enabled ? '1' : '0.55';
+      };
+      const save = async function() {
+        if (!productId || !staffId || typeof window.ffStaffProductsSaveOverrideForStaffMember !== 'function') return;
+        const enabled = enabledInput ? !!enabledInput.checked : true;
+        const commissionValue = parseFloat(commissionValueInput?.value);
+        const override = {};
+        if (!enabled) override.enabled = false;
+        if (Number.isFinite(commissionValue) && commissionValue > 0) {
+          override.commission = {
+            type: commissionTypeInput?.value === 'fixed' ? 'fixed' : 'percentage',
+            value: commissionValue
+          };
+        }
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.7'; }
+        try {
+          await window.ffStaffProductsSaveOverrideForStaffMember(productId, staffId, override);
+          if (status) { status.textContent = 'Saved'; status.style.color = '#16a34a'; }
+        } catch (err) {
+          console.warn('[StaffProducts] save failed', err);
+          if (status) { status.textContent = 'Failed'; status.style.color = '#dc2626'; }
+        } finally {
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+        }
+      };
+      if (enabledInput) {
+        enabledInput.addEventListener('change', function() {
+          applyEnabled();
+          save();
+        });
+      }
+      if (saveBtn) {
+        saveBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          save();
+        });
+      }
+    });
+    ffWireStaffCategoryToggles(container, '.ff-staff-products-card', '.ff-staff-products-enabled');
+  }
 
   /**
    * Schedule board access for the signed-in staff member (Staff - Permissions).
@@ -52686,7 +53305,10 @@ function openAddTechDialog(){
       ? window.__ff_active_location_id
       : null);
 
-  staffList.forEach(w => {
+  staffList
+    .slice()
+    .sort((a, b) => String(a?.name || '').trim().localeCompare(String(b?.name || '').trim(), undefined, { sensitivity: 'base' }))
+    .forEach(w => {
     if (
       !w ||
       !w.name ||
@@ -52709,7 +53331,7 @@ function openAddTechDialog(){
     opt.textContent = w.name;
     addTechSelect.appendChild(opt);
     options.push(w.name);
-  });
+    });
 
   console.log('[AddTech] queue_join eligible options for location', activeLocForAddTech || '(none)', options);
 
@@ -57427,6 +58049,8 @@ function hookSettingsGuard_DISABLED(){
               <div id="staffPermissionsTabContent" style="display:none;padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;">
                 <p style="color:#6b7280;font-size:13px;margin:0;">Coming soon.</p>
               </div>
+              <div id="staffServicesTabContent" style="display:none;min-width:0;"></div>
+              <div id="staffProductsTabContent" style="display:none;min-width:0;"></div>
               <div id="staffEarningsTabContent" style="display:none;min-width:0;"></div>
               <div id="staffDocumentsTabContent" style="display:none;min-width:0;"></div>
             </div>
@@ -57601,7 +58225,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
         { src: "/queue-cloud.js?v=20260603_tasks_scroll_guard", type: "module", delay: 1350 },
-        { src: "/tickets.js?v=20260530_perms", type: "module", delay: 1400 },
+        { src: "/tickets.js?v=20260603_staff_services_tab", type: "module", delay: 1400 },
         { src: "/tasks-cloud.js?v=20260603_return_task_cloud_guard", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
         { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
