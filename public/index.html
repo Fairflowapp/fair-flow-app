@@ -7163,24 +7163,24 @@ dialog footer button, .code-dialog footer button {
           <div class="ff-myp-warning-card">
             <h3 class="ff-myp-title">Delete Account</h3>
             <p class="ff-myp-sub">
-              Account deletion for Fair Flow business workspaces is handled by request so our team can review the impact safely.
+              Permanently delete your personal Fair Flow login account from this device.
             </p>
             <ul class="ff-myp-warning-list">
-              <li>Deleting an Owner account may affect the entire business workspace.</li>
-              <li>This may impact staff accounts, schedules, tickets, inventory, media, locations, memberships, and associated operational data.</li>
-              <li>Some information may be retained temporarily for legal, billing, security, or operational reasons.</li>
-              <li>This action may affect connected staff users.</li>
+              <li>This deletes your Firebase Authentication user and your personal user profile.</li>
+              <li>Staff members can delete their own login account immediately.</li>
+              <li>Owners delete only their personal login account. Business data stays intact.</li>
+              <li>Business data, staff records, tickets, schedules, services, products, locations, subscriptions, and history are not deleted.</li>
             </ul>
             <p class="ff-myp-sub">
-              To request account deletion, contact
-              <a class="ff-myp-support-link" href="mailto:support@fairflowapp.com">support@fairflowapp.com</a>.
+              This action cannot be undone.
             </p>
             <div class="ff-myp-actions">
               <button
                 type="button"
+                id="myProfileDeleteAccountBtn"
                 class="ff-myp-btn"
-                onclick="window.location.href='mailto:support@fairflowapp.com?subject=Fair%20Flow%20Account%20Deletion%20Request';"
-              >Request Account Deletion</button>
+                style="background:#dc2626;border-color:#dc2626;"
+              >Delete Account</button>
             </div>
           </div>
         </div>
@@ -21050,6 +21050,381 @@ window.ffSwitchMyProfileTab = function ffSwitchMyProfileTab(tab, options) {
   }
 };
 
+function ffMyProfileAuthProviderIds(user) {
+  return (user && Array.isArray(user.providerData) ? user.providerData : [])
+    .map(function (p) { return p && p.providerId ? String(p.providerId) : ''; })
+    .filter(Boolean);
+}
+
+function ffMyProfilePrimaryAuthProviderId(user) {
+  const ids = ffMyProfileAuthProviderIds(user);
+  if (ids.indexOf('password') >= 0) return 'password';
+  if (ids.indexOf('google.com') >= 0) return 'google.com';
+  if (ids.indexOf('apple.com') >= 0) return 'apple.com';
+  return ids[0] || '';
+}
+
+function ffMyProfileNeedsRecentReauth(user) {
+  const lastSignIn = user && user.metadata && user.metadata.lastSignInTime
+    ? Date.parse(user.metadata.lastSignInTime)
+    : 0;
+  if (!lastSignIn || Number.isNaN(lastSignIn)) return true;
+  return Date.now() - lastSignIn > 4 * 60 * 1000;
+}
+
+function ffMyProfilePromptDeletePassword() {
+  return new Promise(function (resolve) {
+    const existing = document.getElementById('ffMyProfileDeletePasswordModal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ffMyProfileDeletePasswordModal';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.style.cssText = [
+      'position:fixed',
+      'inset:0',
+      'z-index:100900',
+      'background:rgba(15,23,42,0.72)',
+      'display:flex',
+      'align-items:center',
+      'justify-content:center',
+      'padding:18px',
+      'box-sizing:border-box'
+    ].join(';');
+
+    const card = document.createElement('div');
+    card.style.cssText = [
+      'width:min(440px,100%)',
+      'background:#fff',
+      'border:2px solid #dc2626',
+      'border-radius:16px',
+      'box-shadow:0 24px 80px rgba(127,29,29,0.42)',
+      'overflow:hidden',
+      'font-family:inherit'
+    ].join(';');
+
+    card.innerHTML = `
+      <div style="background:#dc2626;color:#fff;padding:14px 16px;">
+        <div style="font-size:12px;font-weight:900;letter-spacing:0.08em;text-transform:uppercase;">Security confirmation</div>
+      </div>
+      <div style="padding:16px;color:#111827;">
+        <p style="margin:0 0 10px;font-size:15px;font-weight:900;color:#7f1d1d;">
+          Enter your current password to continue deleting your account.
+        </p>
+        <p style="margin:0 0 12px;color:#6b7280;font-size:12px;line-height:1.45;">
+          This protects your account from accidental or unauthorized deletion.
+        </p>
+        <input
+          type="password"
+          data-ff-delete-password
+          autocomplete="current-password"
+          style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;"
+        >
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;padding:0 16px 16px;">
+        <button type="button" data-ff-delete-password-cancel style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:999px;padding:9px 14px;font-size:13px;font-weight:800;cursor:pointer;">Cancel</button>
+        <button type="button" data-ff-delete-password-confirm style="border:1px solid #b91c1c;background:#dc2626;color:#fff;border-radius:999px;padding:9px 14px;font-size:13px;font-weight:900;cursor:pointer;">Continue deletion</button>
+      </div>
+    `;
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const input = overlay.querySelector('[data-ff-delete-password]');
+    function close(value) {
+      overlay.remove();
+      resolve(value);
+    }
+    function submit() {
+      const value = input ? String(input.value || '') : '';
+      close(value);
+    }
+
+    const cancelBtn = overlay.querySelector('[data-ff-delete-password-cancel]');
+    const confirmBtn = overlay.querySelector('[data-ff-delete-password-confirm]');
+    if (cancelBtn) cancelBtn.onclick = function () { close(''); };
+    if (confirmBtn) confirmBtn.onclick = submit;
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) close('');
+    });
+    overlay.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') close('');
+      if (event.key === 'Enter') submit();
+    });
+    setTimeout(function () {
+      if (input) input.focus();
+    }, 0);
+  });
+}
+
+async function ffMyProfileReauthenticateForDeletion(auth, user) {
+  const providerId = ffMyProfilePrimaryAuthProviderId(user);
+  const email = user && user.email ? String(user.email) : '';
+  const authApi = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
+
+  if (providerId === 'password') {
+    const password = await ffMyProfilePromptDeletePassword();
+    if (!password) throw new Error('Account deletion was cancelled.');
+    if (!email) throw new Error('No email is linked to this account.');
+    const cred = authApi.EmailAuthProvider.credential(email, password);
+    try {
+      await authApi.reauthenticateWithCredential(user, cred);
+    } catch (err) {
+      const code = String(err && err.code || '');
+      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
+        throw new Error('The password you entered is incorrect. Please try again with your current login password.');
+      }
+      throw err;
+    }
+    return;
+  }
+
+  let provider = null;
+  if (providerId === 'google.com') {
+    provider = new authApi.GoogleAuthProvider();
+  } else if (providerId === 'apple.com') {
+    provider = new authApi.OAuthProvider('apple.com');
+    provider.addScope('email');
+    provider.addScope('name');
+  }
+
+  if (!provider) {
+    throw new Error('Please sign out, sign back in, and try deleting your account again.');
+  }
+
+  try {
+    await authApi.reauthenticateWithPopup(user, provider);
+  } catch (err) {
+    const code = String(err && err.code || '');
+    if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      throw new Error('Re-authentication was not completed. Please try again and finish the sign-in prompt.');
+    }
+    throw err;
+  }
+}
+
+function ffMyProfileConfirmDeleteAccount() {
+  return new Promise(function (resolve) {
+    const existing = document.getElementById('ffMyProfileDeleteConfirmModal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ffMyProfileDeleteConfirmModal';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.style.cssText = [
+      'position:fixed',
+      'inset:0',
+      'z-index:100800',
+      'background:rgba(15,23,42,0.72)',
+      'display:flex',
+      'align-items:center',
+      'justify-content:center',
+      'padding:18px',
+      'box-sizing:border-box'
+    ].join(';');
+
+    const card = document.createElement('div');
+    card.style.cssText = [
+      'width:min(520px,100%)',
+      'background:#fff',
+      'border:3px solid #dc2626',
+      'border-radius:18px',
+      'box-shadow:0 24px 80px rgba(127,29,29,0.45)',
+      'overflow:hidden',
+      'font-family:inherit'
+    ].join(';');
+
+    card.innerHTML = `
+      <div style="background:#dc2626;color:#fff;padding:16px 18px;">
+        <div style="font-size:12px;font-weight:900;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:4px;">Permanent account deletion</div>
+        <div style="font-size:20px;font-weight:900;line-height:1.2;">This action cannot be undone</div>
+      </div>
+      <div style="padding:18px;color:#111827;">
+        <p style="margin:0 0 12px;font-size:15px;font-weight:900;color:#7f1d1d;">
+          Are you sure you want to permanently delete your account? This action cannot be undone.
+        </p>
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:12px 14px;margin-bottom:14px;">
+          <ul style="margin:0;padding-left:18px;color:#7f1d1d;font-size:13px;line-height:1.55;font-weight:700;">
+            <li>Your personal login account will be permanently deleted.</li>
+            <li>Your personal Fair Flow user profile will be deleted.</li>
+            <li>Future payments connected to this personal account will be stopped.</li>
+            <li>Owners: business data remains intact and is not deleted.</li>
+          </ul>
+        </div>
+        <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.45;">
+          Business data, staff records, tickets, schedules, services, products, locations, subscriptions, and historical records are not deleted from the workspace.
+        </p>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;padding:0 18px 18px;">
+        <button type="button" data-ff-delete-cancel style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:800;cursor:pointer;">Cancel</button>
+        <button type="button" data-ff-delete-confirm style="border:1px solid #b91c1c;background:#dc2626;color:#fff;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:900;cursor:pointer;box-shadow:0 8px 18px rgba(220,38,38,0.28);">Yes, delete permanently</button>
+      </div>
+    `;
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    function close(value) {
+      overlay.remove();
+      resolve(value);
+    }
+
+    const cancelBtn = overlay.querySelector('[data-ff-delete-cancel]');
+    const confirmBtn = overlay.querySelector('[data-ff-delete-confirm]');
+    if (cancelBtn) cancelBtn.onclick = function () { close(false); };
+    if (confirmBtn) confirmBtn.onclick = function () { close(true); };
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) close(false);
+    });
+    overlay.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') close(false);
+    });
+    overlay.tabIndex = -1;
+    overlay.focus();
+  });
+}
+
+async function ffMyProfileCancelBillingForAccountDeletionIfNeeded() {
+  if (typeof window !== 'undefined' && window.location?.hostname === 'fair-flow-staging.web.app') {
+    return { skipped: true, reason: 'staging_billing_bypass' };
+  }
+
+  const isOwner = typeof window.ffIsOwner === 'function' && window.ffIsOwner() === true;
+  if (!isOwner) return { skipped: true, reason: 'not_owner' };
+
+  const salonId = String(window.currentSalonId || '').trim();
+  if (!salonId) {
+    throw new Error('Could not cancel billing because the current business could not be identified. Please refresh and try again.');
+  }
+
+  const { getFunctions, httpsCallable } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js');
+  const functions = getFunctions(undefined, 'us-central1');
+  const cancelBilling = httpsCallable(functions, 'syncStripeSubscription');
+  const result = await cancelBilling({ salonId: salonId, cancelForAccountDeletion: true });
+  return result && result.data ? result.data : { canceled: false };
+}
+
+function ffMyProfileFinishDeletedAccountSignOut() {
+  window.__ffMyProfileAccountDeletionNavigating = true;
+  try {
+    window.__ff_waiting_for_salon_choice = false;
+    window.currentSalonId = null;
+    window.__ff_authedStaffId = '';
+    window.__ff_user_role = '';
+  } catch (_) {}
+  try {
+    [
+      'ff_authedStaffId_v1',
+      'ff_active_salon_id',
+      'ff_last_salon_id',
+      'ff_selected_salon_id'
+    ].forEach(function (key) {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    });
+  } catch (_) {}
+  try { sessionStorage.clear(); } catch (_) {}
+  // Remove any leftover blocking overlay from earlier builds so we never get
+  // stuck on an "Account deleted..." screen that covers the login card.
+  try {
+    const staleNotice = document.getElementById('ffAccountDeletedRedirectNotice');
+    if (staleNotice && staleNotice.parentNode) staleNotice.parentNode.removeChild(staleNotice);
+  } catch (_) {}
+
+  // Close the My Profile screen so it does not sit on top of the login card.
+  try {
+    const myProfileScreenEl = document.getElementById('myProfileScreen');
+    if (myProfileScreenEl) myProfileScreenEl.style.display = 'none';
+  } catch (_) {}
+
+  // Reveal the signed-out shell directly. We do NOT navigate/reload: in the
+  // app webview a same-origin reload can leave Firebase persistence in a
+  // half-restored state and hang. The existing onAuthStateChanged "signed
+  // out" branch (triggered by the signOut above) reaches the same UI state,
+  // so showing login in-place is both immediate and reliable.
+  try {
+    document.body.classList.remove('ff-auth-resolving', 'ff-ui-ready', 'ff-queue-ui-visible', 'ff-app-loading');
+    document.body.classList.add('ff-logged-out');
+    document.body.style.overflow = '';
+    const mainContent = document.getElementById('main-app-content');
+    if (mainContent) mainContent.style.display = 'none';
+    const loginSection = document.getElementById('login-section');
+    if (loginSection) loginSection.style.display = 'block';
+    const signupSection = document.getElementById('signup-section');
+    if (signupSection) signupSection.style.display = 'none';
+  } catch (_) {}
+  try { if (typeof ffRemoveAuthSplash === 'function') ffRemoveAuthSplash(); } catch (_) {}
+  if (typeof window.showLoginScreen === 'function') {
+    try { window.showLoginScreen(); } catch (_) {}
+  }
+  if (typeof window.ffShowAppToast === 'function') {
+    try { window.ffShowAppToast('Your account has been deleted.', 'success', 5000); } catch (_) {}
+  }
+}
+
+async function ffMyProfileDeleteOwnAccount() {
+  const auth = window.auth || window.ffAuth;
+  const user = auth && auth.currentUser;
+  if (!auth || !user || !user.uid) throw new Error('You must be signed in to delete your account.');
+
+  const confirmed = await ffMyProfileConfirmDeleteAccount();
+  if (!confirmed) return false;
+
+  const btn = document.getElementById('myProfileDeleteAccountBtn');
+  const originalText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Deleting...';
+  }
+
+  try {
+    const authApi = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');
+    const db = getTrainingDb();
+    const { doc, deleteDoc } = await getTrainingFirestoreApi();
+
+    async function deleteProfileAndAuth() {
+      await deleteDoc(doc(db, 'users', user.uid));
+      await authApi.deleteUser(user);
+    }
+
+    if (ffMyProfileNeedsRecentReauth(user)) {
+      await ffMyProfileReauthenticateForDeletion(auth, user);
+    }
+
+    if (btn) btn.textContent = 'Canceling billing...';
+    await ffMyProfileCancelBillingForAccountDeletionIfNeeded();
+    if (btn) btn.textContent = 'Deleting account...';
+
+    try {
+      await deleteProfileAndAuth();
+    } catch (err) {
+      if (String(err && err.code || '') !== 'auth/requires-recent-login') throw err;
+      await ffMyProfileReauthenticateForDeletion(auth, user);
+      await deleteProfileAndAuth();
+    }
+
+    try {
+      const signOutPromise = authApi.signOut(auth);
+      if (signOutPromise && typeof signOutPromise.catch === 'function') signOutPromise.catch(function () {});
+    } catch (_) {}
+    ffMyProfileFinishDeletedAccountSignOut();
+    return true;
+  } catch (err) {
+    console.error('[MyProfile] delete account failed', err);
+    const msg = err && err.message ? err.message : 'Could not delete account. Please try again.';
+    if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast(msg, 'error', 7000);
+    else alert(msg);
+    return false;
+  } finally {
+    if (btn && !window.__ffMyProfileAccountDeletionNavigating) {
+      btn.disabled = false;
+      btn.textContent = originalText || 'Delete Account';
+    }
+  }
+}
+
 window.ffInitMyProfileScreen = async function ffInitMyProfileScreen() {
   window.ffSwitchMyProfileTab('details', { open: false });
   const staffId = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1') || '';
@@ -21308,6 +21683,12 @@ window.ffInitMyProfileHandlers = function ffInitMyProfileHandlers() {
         if (typeof window.ffShowAppToast === 'function') window.ffShowAppToast(e.message || 'Password update failed', 'error');
         else alert(e.message || 'Password update failed');
       }
+    };
+  }
+  const deleteAccountBtn = document.getElementById('myProfileDeleteAccountBtn');
+  if (deleteAccountBtn) {
+    deleteAccountBtn.onclick = async function () {
+      await ffMyProfileDeleteOwnAccount();
     };
   }
   const pinBtn = document.getElementById('myProfileChangePinBtn');
@@ -58219,7 +58600,7 @@ function hookSettingsGuard_DISABLED(){
   <script>
     (function () {
       var scripts = [
-        { src: "/billing-guard.js?v=20260602_billing_required_checkout", type: "module", delay: 600 }, // global account-state enforcement (banner / lock overlay)
+        { src: "/billing-guard.js?v=20260604_staging_billing_bypass", type: "module", delay: 600 }, // global account-state enforcement (banner / lock overlay)
         { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module", delay: 700 },
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },

@@ -575,6 +575,123 @@ exports.createStripePortalSession = onCall(
 );
 
 // ============================================================================
+// cancelStripeSubscriptionForAccountDeletion — callable
+// ============================================================================
+// Owner-only. Used by the in-app account deletion flow. Cancels the salon's
+// Stripe subscription before the owner's Firebase Auth user is deleted, while
+// leaving all business/workspace data intact.
+//
+// data: { salonId: string }
+// returns: { canceled: boolean, subscriptionId?, status?, reason? }
+exports.cancelStripeSubscriptionForAccountDeletion = onCall(
+  { region: REGION, secrets: [STRIPE_SECRET_KEY], invoker: "public" },
+  async (req) => {
+    const auth = req.auth;
+    if (!auth) {
+      throw new HttpsError("unauthenticated", "Sign in first");
+    }
+
+    const salonId = String(req.data?.salonId || "").trim();
+    if (!salonId) throw new HttpsError("invalid-argument", "salonId required");
+
+    try {
+      await assertOwnerOfSalon(auth.uid, salonId);
+
+      const fs = admin.firestore();
+      const billingRef = fs.doc(`salons/${salonId}/billing/stripe`);
+      const billingSnap = await billingRef.get();
+      const billingData = billingSnap.exists ? billingSnap.data() || {} : {};
+      let subscriptionId = String(billingData.subscriptionId || "").trim();
+      const customerId = String(billingData.customerId || "").trim();
+
+      const stripe = getStripe();
+      if (!subscriptionId && customerId) {
+        const subs = await stripe.subscriptions.list({
+          customer: customerId,
+          status: "all",
+          limit: 10,
+        });
+        const ACTIVE = new Set(["active", "trialing", "past_due", "incomplete"]);
+        const sub = (subs.data || []).find((s) => ACTIVE.has(String(s.status || ""))) || null;
+        subscriptionId = sub?.id || "";
+      }
+
+      if (!subscriptionId) {
+        await billingRef.set(
+          {
+            accountDeletionBillingCheckedAt: admin.firestore.FieldValue.serverTimestamp(),
+            accountDeletionBillingCheckedByUid: auth.uid,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        logger.info("[stripe account deletion] no subscription to cancel", {
+          salonId,
+          uid: auth.uid,
+          customerId: customerId || null,
+        });
+        return { canceled: false, reason: "no_subscription" };
+      }
+
+      const existing = await stripe.subscriptions.retrieve(subscriptionId);
+      if (String(existing.status || "").toLowerCase() === "canceled") {
+        await persistSubscriptionState(salonId, existing);
+        await recomputeAccountStatus(salonId);
+        return {
+          canceled: false,
+          reason: "already_canceled",
+          subscriptionId,
+          status: existing.status,
+        };
+      }
+
+      const canceled = await stripe.subscriptions.cancel(subscriptionId, {
+        invoice_now: false,
+        prorate: false,
+      });
+      await persistSubscriptionState(salonId, canceled);
+      await billingRef.set(
+        {
+          accountDeletionCanceledBillingAt: admin.firestore.FieldValue.serverTimestamp(),
+          accountDeletionCanceledBillingByUid: auth.uid,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      await recomputeAccountStatus(salonId);
+
+      logger.info("[stripe account deletion] subscription canceled", {
+        salonId,
+        uid: auth.uid,
+        subscriptionId,
+        status: canceled.status,
+      });
+
+      return {
+        canceled: true,
+        subscriptionId,
+        status: canceled.status,
+      };
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      const msg = err?.message || String(err);
+      logger.error("[stripe account deletion] unexpected error", {
+        uid: auth.uid,
+        salonId,
+        message: msg,
+        stripeType: err?.type || null,
+        stripeCode: err?.code || null,
+        stack: err?.stack,
+      });
+      throw new HttpsError(
+        "internal",
+        err?.type ? `Stripe ${err.type}: ${msg}` : `Billing cancellation failed: ${msg}`
+      );
+    }
+  }
+);
+
+// ============================================================================
 // syncStripeLocationQuantity — callable
 // ============================================================================
 // Updates only the paid Additional Location subscription item.
@@ -1007,6 +1124,76 @@ exports.syncStripeSubscription = onCall(
       }
 
       const stripe = getStripe();
+
+      if (req.data?.cancelForAccountDeletion === true) {
+        const billingRef = admin.firestore().doc(`salons/${salonId}/billing/stripe`);
+        const billingSnap = await billingRef.get();
+        const billingData = billingSnap.exists ? billingSnap.data() || {} : {};
+        let subscriptionId = String(billingData.subscriptionId || "").trim();
+
+        const subs = await stripe.subscriptions.list({
+          customer: customerId,
+          status: "all",
+          limit: 10,
+        });
+        const CANCELABLE = new Set(["active", "trialing", "past_due", "incomplete"]);
+        let sub = subscriptionId
+          ? (subs.data || []).find((s) => s.id === subscriptionId) || null
+          : null;
+        if (!sub || !CANCELABLE.has(String(sub.status || "").toLowerCase())) {
+          sub = (subs.data || []).find((s) => CANCELABLE.has(String(s.status || "").toLowerCase())) || null;
+        }
+
+        if (!sub) {
+          await billingRef.set(
+            {
+              accountDeletionBillingCheckedAt: admin.firestore.FieldValue.serverTimestamp(),
+              accountDeletionBillingCheckedByUid: auth.uid,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+          logger.info("[stripe account deletion via sync] no subscription to cancel", {
+            salonId,
+            uid: auth.uid,
+            customerId,
+          });
+          return { synced: true, canceled: false, reason: "no_subscription" };
+        }
+
+        const canceled = String(sub.status || "").toLowerCase() === "canceled"
+          ? sub
+          : await stripe.subscriptions.cancel(sub.id, {
+            invoice_now: false,
+            prorate: false,
+          });
+
+        await persistSubscriptionState(salonId, canceled);
+        await billingRef.set(
+          {
+            accountDeletionCanceledBillingAt: admin.firestore.FieldValue.serverTimestamp(),
+            accountDeletionCanceledBillingByUid: auth.uid,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        await recomputeAccountStatus(salonId);
+
+        logger.info("[stripe account deletion via sync] subscription canceled", {
+          salonId,
+          uid: auth.uid,
+          subscriptionId: canceled.id,
+          status: canceled.status,
+        });
+
+        return {
+          synced: true,
+          canceled: true,
+          subscriptionId: canceled.id,
+          status: canceled.status,
+        };
+      }
+
       // Pull all subscriptions for this customer and pick the most relevant.
       // Active/trialing/past_due win; otherwise the most recently created
       // subscription (canceled/incomplete) — useful when checkout is in

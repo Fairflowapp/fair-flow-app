@@ -100,6 +100,14 @@ function isOwner() {
   }
 }
 
+function isStagingBillingBypass() {
+  try {
+    return typeof window !== "undefined" && window.location?.hostname === "fair-flow-staging.web.app";
+  } catch (_) {
+    return false;
+  }
+}
+
 function getSalonId() {
   try {
     if (typeof window !== "undefined" && window.currentSalonId) {
@@ -526,6 +534,15 @@ function scheduleGraceExpiry(deadlineMs) {
 // ─── State application (the heart of the guard) ────────────────────────────
 
 function applyState(accountStatus, gracePeriodEndsAt, accountStatusReason) {
+  if (isStagingBillingBypass()) {
+    _lastSnap = { accountStatus: STATE_ACTIVE, gracePeriodEndsAt: null, accountStatusReason: null };
+    _currentState = STATE_ACTIVE;
+    window.ffBillingGuardState = STATE_ACTIVE;
+    clearGraceTimer();
+    unmountBanner();
+    unmountOverlay();
+    return;
+  }
   _lastSnap = { accountStatus, gracePeriodEndsAt, accountStatusReason };
   const next = deriveState(accountStatus, gracePeriodEndsAt);
   if (next === _currentState && _bannerEl == null && _overlayEl == null) {

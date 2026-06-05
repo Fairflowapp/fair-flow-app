@@ -1279,6 +1279,9 @@ function showResetPasswordScreen() {
 }
 
 function ffIsBillingRequiredSalonData(salonData) {
+  if (typeof window !== "undefined" && window.location?.hostname === "fair-flow-staging.web.app") {
+    return false;
+  }
   const status = String(salonData?.accountStatus || "").toLowerCase();
   const reason = String(salonData?.accountStatusReason || "").toLowerCase();
   return status === "locked" && reason === "billing_required";
