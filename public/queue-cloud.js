@@ -134,16 +134,23 @@ function subscribe(salonId, locationId, opts = {}) {
       try { _onLogChange(); } catch (_) {}
     }
   }
-  // Clear ff_queues_v1 (Queue Auto Reset + GeoFence settings) on location
-  // switch so the previous branch's settings don't leak into the new branch.
-  // The cloud snapshot below will repopulate it if the new location has its
-  // own queueSettings; otherwise defaults take effect for this location.
-  try {
-    localStorage.removeItem('ff_queues_v1');
-    if (typeof document !== 'undefined' && typeof CustomEvent === 'function') {
-      document.dispatchEvent(new CustomEvent('ff-queue-settings-changed', { detail: { reason: 'location-switch' } }));
-    }
-  } catch (_) {}
+  // Clear ff_queues_v1 (Queue Auto Reset + GeoFence settings) on a real
+  // location switch so the previous branch's settings don't leak into the new
+  // branch. We deliberately DO NOT clear on initial connect/reconnect: clearing
+  // there made the Auto Reset toggle flash OFF for a moment on every app load
+  // (until the cloud snapshot repopulated it). On a normal load the locally
+  // cached settings are for this same device/branch, and the snapshot below
+  // still reconciles (it repopulates when the cloud has queueSettings, and
+  // removes them when it doesn't), so correctness is preserved without flicker.
+  const isLocationSwitch = opts.reason !== 'connect' && opts.reason !== 'reconnect';
+  if (isLocationSwitch) {
+    try {
+      localStorage.removeItem('ff_queues_v1');
+      if (typeof document !== 'undefined' && typeof CustomEvent === 'function') {
+        document.dispatchEvent(new CustomEvent('ff-queue-settings-changed', { detail: { reason: 'location-switch' } }));
+      }
+    } catch (_) {}
+  }
   const ref = queueStateRef(salonId, locationId);
   const logTag = locationId ? `loc=${locationId}` : "default";
   _unsubscribe = onSnapshot(ref, (snap) => {
@@ -336,6 +343,31 @@ export function queueCloudWrite() {
 }
 
 /**
+ * Persist ONLY the queue settings (ff_queues_v1: Auto Reset, location
+ * restriction, runtime) to the per-location queueState doc using merge.
+ *
+ * This is decoupled from writeState() on purpose: writeState() can be blocked
+ * by the empty-queue overwrite guard (when the local queue is empty but the
+ * cloud has data), which would silently drop the settings and make the Auto
+ * Reset toggle revert to OFF on the next load. A dedicated merge write always
+ * lands, regardless of queue contents.
+ */
+export function queueCloudWriteSettings() {
+  if (!_salonId) return Promise.resolve();
+  let settings = null;
+  try {
+    const raw = localStorage.getItem('ff_queues_v1');
+    if (raw) settings = JSON.parse(raw);
+  } catch (_) {}
+  if (!settings || typeof settings !== 'object') return Promise.resolve();
+  const ref = queueStateRef(_salonId, _locationId);
+  return setDoc(ref, {
+    queueSettings: settings,
+    updatedAt: serverTimestamp()
+  }, { merge: true }).catch((e) => console.warn("[QueueCloud] settings write failed", e));
+}
+
+/**
  * Reconnect after salonId or active location might have changed.
  */
 export function queueCloudReconnect() {
@@ -373,6 +405,7 @@ export function queueCloudRefresh() {
 if (typeof window !== "undefined") {
   window.initQueueCloud = initQueueCloud;
   window.queueCloudWrite = queueCloudWrite;
+  window.queueCloudWriteSettings = queueCloudWriteSettings;
   window.queueCloudReconnect = queueCloudReconnect;
   window.queueCloudRefresh = queueCloudRefresh;
   if (typeof window.__ffQueueCloudInit === "function") {

@@ -12905,6 +12905,39 @@ function namePill(target){
 
 }
 
+// Queue display name: by default show first name only. Show the full name
+// (incl. last name) only when the staff member has opted in via the
+// "Show last name in queue" toggle (staff.showLastNameInQueue === true).
+// Underlying data (matching/presence) keeps using the full name.
+function ffQueueDisplayName(item){
+  const fullName = String(item && typeof item === 'object' ? (item.name || '') : (item || '')).trim();
+  if (!fullName) return '';
+  try {
+    let staffRow = null;
+    const staffId = item && typeof item === 'object' && item.staffId != null
+      ? String(item.staffId).trim()
+      : '';
+    let list = [];
+    try {
+      const store = (typeof window.ffGetStaffStore === 'function')
+        ? window.ffGetStaffStore()
+        : JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+      list = Array.isArray(store && store.staff) ? store.staff : [];
+    } catch (_) {}
+    if (staffId) staffRow = list.find(function(s){ return s && String(s.id) === staffId; }) || null;
+    if (!staffRow) staffRow = list.find(function(s){ return s && String(s.name || '').trim() === fullName; }) || null;
+
+    if (staffRow && staffRow.showLastNameInQueue === true) return fullName;
+
+    const first = staffRow && staffRow.firstName ? String(staffRow.firstName).trim() : '';
+    if (first) return first;
+    const token = fullName.split(/\s+/)[0];
+    return token || fullName;
+  } catch (_) {
+    return fullName;
+  }
+}
+
 function queuePresenceMeta(name, opts){
   opts = opts || {};
   const row = name && typeof name === 'object' ? name : null;
@@ -13767,6 +13800,7 @@ function renderQueue(){
     }
 
     const queuePill = namePill(q);
+    queuePill.textContent = ffQueueDisplayName(q);
     queuePill.style.fontSize = "15px";
     queuePill.style.padding = "6px 12px";
     queuePill.style.flexShrink = "0";
@@ -14147,7 +14181,7 @@ function renderService(){
       nm.appendChild(presenceRow);
     }
 
-    const pill=namePill(s); pill.textContent=s.name;
+    const pill=namePill(s); pill.textContent=ffQueueDisplayName(s);
     pill.style.fontSize = "9px";
     pill.style.padding = "4px 6px";
     pill.style.flexShrink = "1";
@@ -19900,6 +19934,10 @@ function setQueuesData(data, skipCloudWrite) {
   if (!skipCloudWrite) {
     window.__ff_lastSaveTime = Date.now();
     if (typeof window.queueCloudWrite === 'function') window.queueCloudWrite();
+    // Always persist settings via a dedicated merge write so Auto Reset /
+    // location restriction survive reloads even when the queue is empty
+    // (writeState's empty-overwrite guard can otherwise drop them).
+    if (typeof window.queueCloudWriteSettings === 'function') window.queueCloudWriteSettings();
   }
 }
 
@@ -24010,7 +24048,29 @@ async function saveSettings(e){
   const autoResetEnabled = autoResetEnabledEl ? autoResetEnabledEl.checked === true : existingAutoReset.enabled === true;
   const autoResetTime = autoResetTimeEl ? autoResetTimeEl.value || '04:00' : existingAutoReset.time || '04:00';
   const autoResetForce = autoResetForceEl ? autoResetForceEl.checked === true : existingAutoReset.resetWhileInService === true;
-  const lastAutoResetDate = (getQueueRuntime() || {}).lastAutoResetDate || null;
+  let lastAutoResetDate = (getQueueRuntime() || {}).lastAutoResetDate || null;
+  // Guard: when enabling auto-reset with a time that has ALREADY passed today,
+  // stamp it as handled today so a later page reload does not retroactively
+  // wipe the current queue. It will still run normally the next day at the
+  // configured time.
+  if (autoResetEnabled === true) {
+    try {
+      const _now = new Date();
+      const _todayKey = _now.getFullYear() + '-' +
+        String(_now.getMonth() + 1).padStart(2, '0') + '-' +
+        String(_now.getDate()).padStart(2, '0');
+      const _mins = typeof parseResetTimeToMinutes === 'function'
+        ? parseResetTimeToMinutes(autoResetTime)
+        : null;
+      if (_mins !== null && _mins !== undefined) {
+        const _target = new Date(_now);
+        _target.setHours(Math.floor(_mins / 60), _mins % 60, 0, 0);
+        if (_now >= _target && lastAutoResetDate !== _todayKey) {
+          lastAutoResetDate = _todayKey;
+        }
+      }
+    } catch (_) {}
+  }
   const queuesData = getQueuesData();
   const _saveLocKey = _ffQueueLocKey();
   if (!queuesData[_saveLocKey]) queuesData[_saveLocKey] = {};
@@ -33221,7 +33281,17 @@ function ffMaybeAutoResetQueue(now = new Date()) {
     if (now < targetToday) {
       return; // Not yet time
     }
-    
+
+    // Grace window: only auto-reset within a window after the scheduled time.
+    // This prevents a page reload hours later (e.g. enabling a 6:34 AM reset in
+    // the evening, or reopening the app long after the reset time) from
+    // retroactively wiping the current queue. While the app is open the 30s
+    // interval still triggers the reset right at the scheduled minute.
+    const AUTO_RESET_GRACE_MS = 120 * 60 * 1000; // 2 hours
+    if ((now - targetToday) > AUTO_RESET_GRACE_MS) {
+      return; // Too long past the scheduled time - skip to avoid surprise wipes
+    }
+
     // Check if force=false and there are people in service
     const autoResetForce = autoReset.resetWhileInService === true;
     if (!autoResetForce && ffQueueHasInService()) {
@@ -36775,6 +36845,20 @@ function initializeAppsPanel() {
   function renderStaffServicesTab(staff) {
     const container = document.getElementById('staffServicesTabContent');
     if (!container) return;
+    if (!document.getElementById('ffStaffSvcMobileFixStyle')) {
+      const styleEl = document.createElement('style');
+      styleEl.id = 'ffStaffSvcMobileFixStyle';
+      styleEl.textContent = '@media (max-width:640px){'
+        + '.ff-staff-services-card .ff-staff-svc-row,'
+        + '.ff-staff-services-card .ff-staff-svc-supply-row{'
+        + 'grid-template-columns:1fr !important;row-gap:6px !important;}'
+        + '.ff-staff-services-card .ff-staff-svc-save-wrap{'
+        + 'width:100% !important;justify-content:space-between !important;}'
+        + '.ff-staff-services-card .ff-staff-services-save{'
+        + 'flex:0 0 auto !important;}'
+        + '}';
+      document.head.appendChild(styleEl);
+    }
     const staffId = ffStaffServicesStaffId(staff);
     if (!staffId) {
       container.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#b91c1c;">Missing staff id.</p></div>';
@@ -36836,7 +36920,7 @@ function initializeAppsPanel() {
                 <span class="staff-permission-toggle-slider"></span>
               </label>
             </div>
-            <div style="display:grid;grid-template-columns:110px minmax(120px,180px) auto;gap:8px;align-items:center;margin-bottom:9px;">
+            <div class="ff-staff-svc-row ff-staff-svc-price-row" style="display:grid;grid-template-columns:110px minmax(120px,180px) auto;gap:8px;align-items:center;margin-bottom:9px;">
               <div style="font-size:12px;color:#6b7280;">Price</div>
               <input type="number" min="0" step="0.01" class="ff-staff-services-price" value="${ffStaffServicesHtmlEscape(String(price))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
               <span style="font-size:11px;color:#9ca3af;">Default ${ffStaffServicesMoney(basePrice)}</span>
@@ -36852,7 +36936,7 @@ function initializeAppsPanel() {
                   <span class="staff-permission-toggle-slider"></span>
                 </label>
               </div>
-              <div class="ff-staff-services-supply-fields" style="display:${supplyEnabled ? 'grid' : 'none'};grid-template-columns:110px minmax(120px,180px) minmax(120px,180px) auto;gap:8px;align-items:center;">
+              <div class="ff-staff-services-supply-fields ff-staff-svc-supply-row" style="display:${supplyEnabled ? 'grid' : 'none'};grid-template-columns:110px minmax(120px,180px) minmax(120px,180px) auto;gap:8px;align-items:center;">
                 <div style="font-size:12px;color:#6b7280;">Deduction</div>
                 <select class="ff-staff-services-supply-type" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
                   <option value="fixed" ${supplyType === 'fixed' ? 'selected' : ''}>Fixed Amount ($)</option>
@@ -36862,14 +36946,14 @@ function initializeAppsPanel() {
                 <span style="font-size:11px;color:${hasSupplyOverride ? '#7c3aed' : '#9ca3af'};">${hasSupplyOverride ? (hasSupplyValue ? 'Override' : 'Override OFF') : ffStaffServicesHtmlEscape(ffStaffServicesSupplyLabel(defaults.supplyDeduction))}</span>
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:110px minmax(120px,180px) minmax(70px,100px) auto;gap:8px;align-items:center;">
+            <div class="ff-staff-svc-row ff-staff-svc-commission-row" style="display:grid;grid-template-columns:110px minmax(120px,180px) minmax(70px,100px) auto;gap:8px;align-items:center;">
               <div style="font-size:12px;color:#6b7280;">Commission</div>
               <input type="number" min="0" step="0.01" class="ff-staff-services-commission-value" value="${ffStaffServicesHtmlEscape(commissionValue)}" placeholder="${ffStaffServicesHtmlEscape(ffStaffServicesDefaultCommissionLabel(defaults.commission))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
               <select class="ff-staff-services-commission-type" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
                 <option value="percentage" ${commissionType === 'percentage' ? 'selected' : ''}>%</option>
                 <option value="fixed" ${commissionType === 'fixed' ? 'selected' : ''}>$</option>
               </select>
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <div class="ff-staff-svc-save-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                 <button type="button" class="ff-staff-services-save" style="width:auto;min-width:0;justify-self:start;padding:5px 10px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:999px;cursor:pointer;font-size:11px;font-weight:700;line-height:1.2;">Save</button>
                 <span class="ff-staff-services-status" style="font-size:11px;color:${hasCommission ? '#7c3aed' : '#9ca3af'};">${hasCommission ? 'Override' : ffStaffServicesHtmlEscape(ffStaffServicesDefaultCommissionLabel(defaults.commission))}</span>
               </div>
@@ -37012,6 +37096,19 @@ function initializeAppsPanel() {
   function renderStaffProductsTab(staff) {
     const container = document.getElementById('staffProductsTabContent');
     if (!container) return;
+    if (!document.getElementById('ffStaffProdMobileFixStyle')) {
+      const styleEl = document.createElement('style');
+      styleEl.id = 'ffStaffProdMobileFixStyle';
+      styleEl.textContent = '@media (max-width:640px){'
+        + '.ff-staff-products-card .ff-staff-products-body{'
+        + 'grid-template-columns:1fr !important;row-gap:6px !important;}'
+        + '.ff-staff-products-card .ff-staff-prod-save-wrap{'
+        + 'width:100% !important;justify-content:space-between !important;}'
+        + '.ff-staff-products-card .ff-staff-products-save{'
+        + 'flex:0 0 auto !important;}'
+        + '}';
+      document.head.appendChild(styleEl);
+    }
     const staffId = ffStaffProductsStaffId(staff);
     if (!staffId) {
       container.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#b91c1c;">Missing staff id.</p></div>';
@@ -37071,7 +37168,7 @@ function initializeAppsPanel() {
                 <option value="percentage" ${commissionType === 'percentage' ? 'selected' : ''}>%</option>
                 <option value="fixed" ${commissionType === 'fixed' ? 'selected' : ''}>$</option>
               </select>
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <div class="ff-staff-prod-save-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                 <button type="button" class="ff-staff-products-save" style="width:auto;min-width:0;justify-self:start;padding:5px 10px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:999px;cursor:pointer;font-size:11px;font-weight:700;line-height:1.2;">Save</button>
                 <span class="ff-staff-products-status" style="font-size:11px;color:${hasCommission ? '#7c3aed' : '#9ca3af'};">${hasCommission ? 'Override' : ffStaffProductsHtmlEscape(ffStaffProductsDefaultCommissionLabel(defaults.commission))}</span>
               </div>
@@ -38923,6 +39020,16 @@ function initializeAppsPanel() {
     const salonOwnerRow =
       typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff);
 
+    // First/last name for the edit form. Fall back to splitting the full name
+    // for legacy staff that only have a combined `name`.
+    const _ffEditNameParts = String(staff.name || '').trim().split(/\s+/).filter(Boolean);
+    const ffEditFirstName = staff.firstName != null && String(staff.firstName).trim()
+      ? String(staff.firstName).trim()
+      : (_ffEditNameParts[0] || '');
+    const ffEditLastName = staff.lastName != null && String(staff.lastName).trim()
+      ? String(staff.lastName).trim()
+      : (_ffEditNameParts.length > 1 ? _ffEditNameParts.slice(1).join(' ') : '');
+
     if (editMode) {
       // Edit mode
       detailsContent.innerHTML = `
@@ -38936,8 +39043,17 @@ function initializeAppsPanel() {
           </div>
           <div style="display:flex;flex-direction:column;gap:4px;">
             <div>
-              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Name</label>
-              <input type="text" id="staffEditName" value="${escapeHtml(staff.name)}" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">First Name</label>
+              <input type="text" id="staffEditFirstName" value="${escapeHtml(ffEditFirstName)}" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Last Name</label>
+              <input type="text" id="staffEditLastName" value="${escapeHtml(ffEditLastName)}" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
+              <label style="display:flex;align-items:center;gap:6px;margin-top:5px;cursor:pointer;">
+                <input type="checkbox" id="staffEditShowLastNameInQueue" ${staff.showLastNameInQueue === true ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;flex-shrink:0;">
+                <span style="font-size:11px;color:#374151;line-height:1.3;">Show last name in queue</span>
+              </label>
+              <div style="font-size:10px;color:#9ca3af;margin-top:2px;line-height:1.3;">By default the queue shows first name only. Turn on to show this person's last name too (useful when two people share a first name).</div>
             </div>
             <div>
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Role</label>
@@ -39509,7 +39625,8 @@ function initializeAppsPanel() {
     try {
       if (!selectedStaffId) return;
       
-      const nameInput = document.getElementById('staffEditName');
+      const firstNameInput = document.getElementById('staffEditFirstName');
+      const lastNameInput = document.getElementById('staffEditLastName');
       const roleInput = document.getElementById('staffEditRole');
       const phoneInput = document.getElementById('staffEditPhone');
       const emailInput = document.getElementById('staffEditEmail');
@@ -39529,12 +39646,16 @@ function initializeAppsPanel() {
 
       const oldStaff = staffStore.staff[staffIndex];
 
-      if ((currentTab === 'details') && (!nameInput || !roleInput)) {
+      if ((currentTab === 'details') && (!firstNameInput || !roleInput)) {
         console.error('[saveStaffDetails] Edit inputs not found');
         return;
       }
       
-      const newName = nameInput ? nameInput.value.trim() : String(oldStaff.name || '').trim();
+      const newFirstName = firstNameInput ? firstNameInput.value.trim() : String(oldStaff.firstName || '').trim();
+      const newLastName = lastNameInput ? lastNameInput.value.trim() : String(oldStaff.lastName || '').trim();
+      const newName = (firstNameInput || lastNameInput)
+        ? (newFirstName + ' ' + newLastName).trim()
+        : String(oldStaff.name || '').trim();
       const newRole = roleInput ? roleInput.value : getStaffRoleValue(oldStaff);
       const newPhone = phoneInput ? (phoneInput.value.trim() || '') : (oldStaff.phone || '');
       const newEmail = emailInput ? (emailInput.value.trim() || '') : (oldStaff.email || '');
@@ -39655,6 +39776,8 @@ function initializeAppsPanel() {
       const updatedStaff = {
         ...oldStaff,
         name: newName,
+        firstName: newFirstName || undefined,
+        lastName: newLastName || undefined,
         role: roleFields.role,
         phone: newPhone ? String(newPhone) : undefined,
         email: newEmail ? String(newEmail) : undefined,
@@ -39663,6 +39786,10 @@ function initializeAppsPanel() {
         color: newButtonColor,
         fontColor: newFontColor,
         fcolor: newFontColor,
+        showLastNameInQueue: (function(){
+          const el = document.getElementById('staffEditShowLastNameInQueue');
+          return el ? el.checked === true : (oldStaff.showLastNameInQueue === true);
+        })(),
         permissions: currentPermissions, // Preserve permissions
         isAdmin: newIsAdmin,
         isManager: newIsManager,
