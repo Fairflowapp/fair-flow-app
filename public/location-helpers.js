@@ -473,6 +473,10 @@
 
   // One-shot initial pass once the current call stack finishes. Safe even if
   // staff / locations haven't loaded yet — recompute is a no-op in that case.
+  try {
+    var bootLoc = readStored();
+    if (bootLoc) window.__ff_active_location_id = bootLoc;
+  } catch (e) {}
   setTimeout(function () {
     recompute("initial");
   }, 0);

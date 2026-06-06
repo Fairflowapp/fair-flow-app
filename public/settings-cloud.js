@@ -328,6 +328,16 @@ function _applyMainSnapshot(data) {
         delete nextPreferences.defaultScreen;
       }
     }
+
+    // requireCustomerNameOnTicket — when true, staff must enter a customer
+    // name before sending a ticket to the front desk. Per-location first,
+    // fallback to legacy salon-wide preferences. Defaults to false (optional).
+    {
+      const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'requireCustomerNameOnTicket');
+      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'requireCustomerNameOnTicket');
+      const raw = hasLoc ? _locPrefs.requireCustomerNameOnTicket : (hasLegacy ? data.preferences.requireCustomerNameOnTicket : undefined);
+      nextPreferences.requireCustomerNameOnTicket = (raw === true);
+    }
     // Notifications → Birthday reminders "Days in advance" is PER-LOCATION.
     // Stored under `locationNotifications.{locationId}.birthdayReminderDaysBefore`.
     // Falls back to the legacy salon-wide `preferences.birthdayReminderDaysBefore`
@@ -682,6 +692,45 @@ function ffSavePreferencesSettings(preferences) {
     }
     console.warn("[SettingsCloud] save preferences settings failed", e);
   });
+}
+
+/**
+ * Save the "Require customer name on tickets" preference for the active
+ * location. Writes `locationPreferences.{locationId}.requireCustomerNameOnTicket`,
+ * falling back to the legacy salon-wide `preferences.*` path when there's no
+ * active location. Returns a promise resolving true on success.
+ */
+function ffSaveTicketPreferences(requireCustomerName) {
+  if (!_salonId) return Promise.resolve(false);
+  const locationId = _ffActiveLocationIdForSettings();
+  const basePath = locationId ? `locationPreferences.${locationId}` : 'preferences';
+  const payload = {
+    updatedAt: serverTimestamp(),
+    [`${basePath}.requireCustomerNameOnTicket`]: requireCustomerName === true,
+  };
+  return updateDoc(settingsMainRef(_salonId), payload)
+    .catch((e) => {
+      if (e && e.code === 'not-found') {
+        return setDoc(settingsMainRef(_salonId), payload, { merge: true });
+      }
+      console.warn("[SettingsCloud] save ticket preferences failed", e);
+      return Promise.reject(e);
+    })
+    .then(() => true);
+}
+
+/** True when staff must enter a customer name before sending a ticket. */
+function ffGetRequireCustomerNameOnTicket() {
+  try {
+    return !!(
+      typeof window !== "undefined" &&
+      window.settings &&
+      window.settings.preferences &&
+      window.settings.preferences.requireCustomerNameOnTicket === true
+    );
+  } catch (e) {
+    return false;
+  }
 }
 
 /** Resolve the current salon currency code (defaults to USD). Reads from window.settings.preferences.currency. */
@@ -1284,6 +1333,8 @@ if (typeof window !== "undefined") {
   window.ffSaveHistoryRange = ffSaveHistoryRange;
   window.ffSaveAppSettings = ffSaveAppSettings;
   window.ffSavePreferencesSettings = ffSavePreferencesSettings;
+  window.ffSaveTicketPreferences = ffSaveTicketPreferences;
+  window.ffGetRequireCustomerNameOnTicket = ffGetRequireCustomerNameOnTicket;
   window.ffSaveTaskSettings = ffSaveTaskSettings;
   window.ffSaveScheduleSettings = ffSaveScheduleSettings;
   window.ffSaveBirthdayReminderDays = ffSaveBirthdayReminderDays;

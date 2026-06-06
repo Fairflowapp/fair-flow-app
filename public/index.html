@@ -7708,6 +7708,7 @@ dialog footer button, .code-dialog footer button {
           <div class="ff-pref-tabs" role="tablist" aria-label="Preference sections">
             <button type="button" class="ff-pref-tab" data-pref-tab="salon-location">Salon Location</button>
             <button type="button" class="ff-pref-tab" data-pref-tab="business-format">Business Format</button>
+            <button type="button" class="ff-pref-tab" data-pref-tab="tickets">Tickets</button>
             <button type="button" class="ff-pref-tab" data-pref-tab="messages">Messages</button>
             <button type="button" class="ff-pref-tab" data-pref-tab="staff-setup">Staff Setup</button>
             <button type="button" class="ff-pref-tab" data-pref-tab="media-categories">Media Categories</button>
@@ -7959,6 +7960,23 @@ dialog footer button, .code-dialog footer button {
               </select>
             </div>
             </div>
+            </div>
+
+            <div class="ff-pref-pane" data-pref-pane="tickets">
+              <div style="padding:12px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+                <h4 style="margin:0 0 4px 0;font-size:13px;font-weight:600;color:#374151;">Tickets</h4>
+                <p style="margin:0 0 16px 0;font-size:11px;color:#9ca3af;line-height:1.45;">Control how staff create and send tickets to the front desk.</p>
+                <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;">
+                  <span class="staff-permission-toggle" style="margin-top:2px;flex:0 0 auto;">
+                    <input type="checkbox" id="ticketsRequireCustomerName">
+                    <span class="staff-permission-toggle-slider"></span>
+                  </span>
+                  <div>
+                    <div style="font-size:12px;font-weight:500;color:#111827;">Require customer name on tickets</div>
+                    <div style="font-size:11px;color:#6b7280;margin-top:2px;line-height:1.4;">When on, staff must enter the customer / client name before they can send a ticket to the front desk. When off, the customer name stays optional.</div>
+                  </div>
+                </label>
+              </div>
             </div>
 
             <div class="ff-pref-pane" data-pref-pane="messages">
@@ -8412,12 +8430,16 @@ dialog footer button, .code-dialog footer button {
             </label>
             <label class="history-filter-item" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
               <span>Range:</span>
-              <select id="historyRangeFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
-                <option value="today">Today</option>
-                <option value="yesterday">Yesterday</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-              </select>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <select id="historyRangeFilter" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;">
+                  <option value="today">Today</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                  <option value="pickday">Pick a day…</option>
+                </select>
+                <input type="date" id="historyDateFilter" title="Choose a day from the last 30 days" style="display:none;padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;cursor:pointer;background:#fff;">
+              </div>
             </label>
             <label class="history-filter-item" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666;">
               <span>Action:</span>
@@ -10537,7 +10559,17 @@ function getFilteredHistoryEntries(options = {}) {
     }
   } catch (_) {}
   rangeValue = rangeValue === '24h' ? 'today' : rangeValue;
-  rows = applyHistoryRangeFilter(rows, rangeValue);
+  if (rangeValue === 'pickday') {
+    rows = applyHistoryRangeFilter(rows, '30d');
+    let specificDate = '';
+    try {
+      const dateEl = document.getElementById('historyDateFilter');
+      if (dateEl && dateEl.value) specificDate = dateEl.value.trim();
+    } catch (_) {}
+    rows = specificDate ? applyHistorySpecificDateFilter(rows, specificDate) : [];
+  } else {
+    rows = applyHistoryRangeFilter(rows, rangeValue);
+  }
   if (syncActionOptions) {
     syncHistoryActionFilterOptions(rows);
   }
@@ -10738,6 +10770,9 @@ function applyHistoryRangeFilter(entries, rangeValue) {
     case '30d':
       threshold = now - 30 * 24 * 60 * 60 * 1000;
       break;
+    case 'pickday':
+      threshold = now - 30 * 24 * 60 * 60 * 1000;
+      break;
     default:
       threshold = now - 30 * 24 * 60 * 60 * 1000; // Default to 30 days
   }
@@ -10748,6 +10783,61 @@ function applyHistoryRangeFilter(entries, rangeValue) {
     if (ts === null) return true;
     if (upperBound != null) return ts >= threshold && ts < upperBound;
     return ts >= threshold;
+  });
+}
+
+function ffHistoryIsoLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+
+function ffHistoryRangeDayBounds(rangeValue) {
+  const now = new Date();
+  const max = ffHistoryIsoLocal(now);
+  const minDate = new Date(now);
+  if (rangeValue === '7d') minDate.setDate(minDate.getDate() - 6);
+  else minDate.setDate(minDate.getDate() - 29);
+  return { min: ffHistoryIsoLocal(minDate), max: max };
+}
+
+function ffSyncHistoryDateFilterUI(openPicker) {
+  const input = document.getElementById('historyDateFilter');
+  const rangeSel = document.getElementById('historyRangeFilter');
+  if (!input || !rangeSel) return;
+  const rangeValue = rangeSel.value || '30d';
+  const show = rangeValue === 'pickday';
+  input.style.display = show ? 'inline-block' : 'none';
+  if (!show) return;
+  const bounds = ffHistoryRangeDayBounds('30d');
+  input.min = bounds.min;
+  input.max = bounds.max;
+  if (!input.value) {
+    try {
+      const saved = localStorage.getItem('ff_history_pick_day_v1') || '';
+      if (saved && saved >= bounds.min && saved <= bounds.max) input.value = saved;
+    } catch (_) {}
+  }
+  if (input.value && (input.value < bounds.min || input.value > bounds.max)) {
+    input.value = '';
+  }
+  if (openPicker && typeof input.showPicker === 'function') {
+    try { input.showPicker(); } catch (_) {}
+  }
+}
+window.ffSyncHistoryDateFilterUI = ffSyncHistoryDateFilterUI;
+
+function applyHistorySpecificDateFilter(entries, isoDate) {
+  if (!isoDate) return entries;
+  const parts = isoDate.split('-').map(function (n) { return parseInt(n, 10); });
+  if (parts.length !== 3 || parts.some(function (n) { return !Number.isFinite(n); })) return entries;
+  const dayStart = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0).getTime();
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+  return entries.filter(function (entry) {
+    const ts = getEntryTs(entry);
+    if (ts === null) return false;
+    return ts >= dayStart && ts < dayEnd;
   });
 }
 
@@ -12846,6 +12936,50 @@ function ffResolveQueueStaffRecord(target) {
   return null;
 }
 
+// Persistent per-staff color cache. On boot the live staff list loads a beat
+// after the queue renders; without a cache the pill briefly shows a hash-based
+// fallback color and then snaps to the real color. We remember the last-known
+// good buttonColor/fontColor per staff (by id and by name) so the first paint
+// already uses the correct color.
+function ffStaffColorCacheRead() {
+  try {
+    return JSON.parse(localStorage.getItem('ff_staff_color_cache_v1') || '{}') || {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function ffStaffColorCacheKeys(target) {
+  const keys = [];
+  if (target && typeof target === 'object') {
+    const sid = String(target.staffId || '').trim();
+    if (sid) keys.push('id:' + sid);
+  }
+  const nm = String(target && typeof target === 'object' ? (target.name || '') : (target || '')).trim().toLowerCase();
+  if (nm) keys.push('nm:' + nm);
+  return keys;
+}
+
+function ffStaffColorCacheStore(target, buttonColor, fontColor) {
+  try {
+    const keys = ffStaffColorCacheKeys(target);
+    if (!keys.length) return;
+    const cache = ffStaffColorCacheRead();
+    keys.forEach(function (k) { cache[k] = { b: buttonColor || null, f: fontColor || null }; });
+    localStorage.setItem('ff_staff_color_cache_v1', JSON.stringify(cache));
+  } catch (_) {}
+}
+
+function ffStaffColorCacheLookup(target) {
+  const keys = ffStaffColorCacheKeys(target);
+  if (!keys.length) return null;
+  const cache = ffStaffColorCacheRead();
+  for (let i = 0; i < keys.length; i++) {
+    if (cache[keys[i]]) return cache[keys[i]];
+  }
+  return null;
+}
+
 function ffResolveStaffButtonColor(staffRecord, target) {
   const fallbackPalette = DEFAULTS.brandPalette || ['#111827'];
   const palette = settings.brandPalette || DEFAULTS.brandPalette || fallbackPalette;
@@ -12867,7 +13001,16 @@ function ffResolveStaffButtonColor(staffRecord, target) {
 
 function colorOf(target){ 
   const staffRecord = ffResolveQueueStaffRecord(target);
-  return ffResolveStaffButtonColor(staffRecord, target);
+  if (staffRecord) {
+    const buttonColor = ffResolveStaffButtonColor(staffRecord, target);
+    const fontColor = staffRecord.fontColor || staffRecord.fcolor || '#ffffff';
+    ffStaffColorCacheStore(target, buttonColor, fontColor);
+    return buttonColor;
+  }
+  // Staff list not loaded yet — use the last-known color (no wrong-color flash).
+  const cached = ffStaffColorCacheLookup(target);
+  if (cached && cached.b) return cached.b;
+  return ffResolveStaffButtonColor(null, target);
 }
 
 // Helper function to calculate luminance of a hex color
@@ -12883,6 +13026,10 @@ function getLuminance(hex) {
 function fontColorOf(target){
   const w = ffResolveQueueStaffRecord(target);
   if (w && (w.fontColor || w.fcolor)) return w.fontColor || w.fcolor;
+  if (!w) {
+    const cached = ffStaffColorCacheLookup(target);
+    if (cached && cached.f) return cached.f;
+  }
   return '#ffffff';
 }
 
@@ -25605,9 +25752,11 @@ function openHistoryModal() {
   }
   const rangeSelect = document.getElementById('historyRangeFilter');
   if (rangeSelect) {
+    const savedMode = (function () { try { return localStorage.getItem('ff_history_range_mode_v1') || ''; } catch (_) { return ''; } })();
     const currentRange = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
-    rangeSelect.value = currentRange === '24h' ? 'today' : currentRange;
+    rangeSelect.value = savedMode === 'pickday' ? 'pickday' : (currentRange === '24h' ? 'today' : currentRange);
   }
+  if (typeof ffSyncHistoryDateFilterUI === 'function') ffSyncHistoryDateFilterUI(false);
   updateHistoryActionFilterButton();
   const workerSelect = document.getElementById('historyWorkerFilter');
   if (workerSelect) {
@@ -25962,16 +26111,30 @@ if (historyOrderFilterSelect) {
 // Wire up history range filter dropdown
 const historyRangeFilterSelect = document.getElementById('historyRangeFilter');
 if (historyRangeFilterSelect) {
+  const savedMode = (function () { try { return localStorage.getItem('ff_history_range_mode_v1') || ''; } catch (_) { return ''; } })();
   const savedRangeRaw = window.__ff_historyRange || localStorage.getItem('ff_history_range_v1') || '30d';
-  const savedRange = savedRangeRaw === '24h' ? 'today' : savedRangeRaw;
+  const savedRange = savedMode === 'pickday' ? 'pickday' : (savedRangeRaw === '24h' ? 'today' : savedRangeRaw);
   historyRangeFilterSelect.value = savedRange;
+  if (typeof ffSyncHistoryDateFilterUI === 'function') ffSyncHistoryDateFilterUI(false);
   historyRangeFilterSelect.addEventListener('change', function(e) {
     const rangeValue = e.target.value || '30d';
-    if (typeof window.ffSaveHistoryRange === 'function') {
-      window.ffSaveHistoryRange(rangeValue);
-    } else {
-      localStorage.setItem('ff_history_range_v1', rangeValue);
+    try { localStorage.setItem('ff_history_range_mode_v1', rangeValue); } catch (_) {}
+    if (rangeValue !== 'pickday') {
+      if (typeof window.ffSaveHistoryRange === 'function') {
+        window.ffSaveHistoryRange(rangeValue);
+      } else {
+        localStorage.setItem('ff_history_range_v1', rangeValue);
+      }
     }
+    if (typeof ffSyncHistoryDateFilterUI === 'function') ffSyncHistoryDateFilterUI(rangeValue === 'pickday');
+    renderHistory();
+  });
+}
+
+const historyDateFilterInput = document.getElementById('historyDateFilter');
+if (historyDateFilterInput) {
+  historyDateFilterInput.addEventListener('change', function() {
+    try { localStorage.setItem('ff_history_pick_day_v1', historyDateFilterInput.value || ''); } catch (_) {}
     renderHistory();
   });
 }
@@ -48775,7 +48938,7 @@ function initializeUserProfileMenu() {
     const card = document.getElementById('userProfileCardPreferences');
     if (!card) return;
     const desired = tab || card.getAttribute('data-active-pref-tab') || 'salon-location';
-    const valid = ['salon-location', 'business-format', 'messages', 'staff-setup', 'media-categories'].indexOf(desired) >= 0
+    const valid = ['salon-location', 'business-format', 'tickets', 'messages', 'staff-setup', 'media-categories'].indexOf(desired) >= 0
       ? desired
       : 'salon-location';
     card.setAttribute('data-active-pref-tab', valid);
@@ -48932,7 +49095,40 @@ function initializeUserProfileMenu() {
     if (tab === 'media-categories') {
       ffRenderPreferenceMediaCategories();
     }
+    if (tab === 'tickets') {
+      ffRenderTicketPreferences();
+    }
   }
+
+  function ffRenderTicketPreferences() {
+    const cb = document.getElementById('ticketsRequireCustomerName');
+    if (!cb) return;
+    const cur = !!(window.settings && window.settings.preferences && window.settings.preferences.requireCustomerNameOnTicket === true);
+    cb.checked = cur;
+    if (!cb.__ffWired) {
+      cb.__ffWired = true;
+      cb.addEventListener('change', function () {
+        const val = cb.checked;
+        if (!window.settings) window.settings = {};
+        if (!window.settings.preferences) window.settings.preferences = {};
+        window.settings.preferences.requireCustomerNameOnTicket = val;
+        if (typeof window.ffSaveTicketPreferences === 'function') {
+          window.ffSaveTicketPreferences(val)
+            .then(function () {
+              if (window.ffToast && typeof window.ffToast.show === 'function') {
+                window.ffToast.show(val ? 'Customer name is now required' : 'Customer name is now optional', { variant: 'success', durationMs: 2000 });
+              }
+            })
+            .catch(function () {
+              if (window.ffToast && typeof window.ffToast.show === 'function') {
+                window.ffToast.show('Could not save setting', { variant: 'error', durationMs: 2500 });
+              }
+            });
+        }
+      });
+    }
+  }
+  window.ffRenderTicketPreferences = ffRenderTicketPreferences;
 
   // Menu item click handler
   function handleMenuClick(section, opts) {
@@ -54234,6 +54430,11 @@ function ffFilterQueueStateToCurrentStaff(q, s) {
     if (!staffCloudHydrated) return { queue: q, service: s };
     const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
     const staffList = Array.isArray(store.staff) ? store.staff : [];
+    // If the staff list isn't actually populated yet, never filter — otherwise
+    // a brief staff-sync race would wipe a non-empty queue to empty and the
+    // user sees the list flash away then come back. Treat "no staff known" as
+    // "don't touch the queue".
+    if (staffList.length === 0) return { queue: q, service: s };
     const ids = new Set();
     const names = new Set();
     staffList.forEach(function (staff) {
@@ -54249,9 +54450,17 @@ function ffFilterQueueStateToCurrentStaff(q, s) {
       const name = String(item.name || '').trim().toLowerCase();
       return (!!staffId && ids.has(staffId)) || (!!name && names.has(name));
     };
+    const filteredQueue = Array.isArray(q) ? q.filter(keep) : [];
+    const filteredService = Array.isArray(s) ? s.filter(keep) : [];
+    // Safety: if filtering would remove EVERY entry from a non-empty queue/
+    // service, that's almost certainly a staff-sync race (staff list partially
+    // loaded), not a real "none of these people work here". Keep the original
+    // so the queue never blinks empty on boot.
+    const queueWipedOut = Array.isArray(q) && q.length > 0 && filteredQueue.length === 0;
+    const serviceWipedOut = Array.isArray(s) && s.length > 0 && filteredService.length === 0;
     return {
-      queue: Array.isArray(q) ? q.filter(keep) : [],
-      service: Array.isArray(s) ? s.filter(keep) : []
+      queue: queueWipedOut ? q : filteredQueue,
+      service: serviceWipedOut ? s : filteredService
     };
   } catch (_) {
     return { queue: q, service: s };
@@ -54282,6 +54491,17 @@ window.__ffQueueCloudInit = function() {
       // After a local save, ignore Firestore updates briefly to avoid race with slow writes / snapshots
       const forceApply = meta && meta.force === true;
       if (!forceApply && Date.now() - window.__ff_lastSaveTime < 6000) return;
+      // Boot anti-flicker: before the queue-cloud has confirmed an authoritative
+      // SERVER snapshot, never clobber a non-empty in-memory queue with an empty
+      // cloud payload (e.g. an empty cached snapshot). The list would blink away
+      // then reappear once the server data lands. Explicit resets pass force.
+      const incomingEmpty = (!Array.isArray(q) || q.length === 0) &&
+                            (!Array.isArray(s) || s.length === 0);
+      const haveLocal = (Array.isArray(queue) && queue.length > 0) ||
+                        (Array.isArray(service) && service.length > 0);
+      if (!forceApply && incomingEmpty && haveLocal && !window.__ff_queueCloudServerConfirmed) {
+        return;
+      }
       const filteredQueueState = ffFilterQueueStateToCurrentStaff(q, s);
       queue = filteredQueueState.queue;
       service = filteredQueueState.service;
@@ -58760,7 +58980,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
-        { src: "/queue-cloud.js?v=20260603_tasks_scroll_guard", type: "module", delay: 1350 },
+        { src: "/queue-cloud.js?v=20260606_boot_flicker_guard2", type: "module", delay: 1350 },
         { src: "/tickets.js?v=20260603_staff_services_tab", type: "module", delay: 1400 },
         { src: "/tasks-cloud.js?v=20260603_return_task_cloud_guard", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
@@ -59867,6 +60087,7 @@ function hookSettingsGuard_DISABLED(){
       <button id="ticketSendNewBtn" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Send to Front Desk</button>
       <button id="ticketSaveBtn" style="display:none;padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;" onclick="window.saveTicket && window.saveTicket()">Save</button>
       <button id="ticketFinalizeBtn" style="display:none;padding:10px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Send to Front Desk</button>
+      <button id="ticketReviewedBtn" type="button" style="display:none;padding:10px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Mark as Reviewed</button>
       <button id="ticketCloseBtn" style="display:none;padding:10px 16px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Close Ticket</button>
       <button id="ticketArchiveBtn" style="display:none;padding:10px 16px;border:1px solid #9ca3af;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;">Archive</button>
       <button id="ticketDeleteBtn" style="display:none;padding:10px 16px;border:1px solid #ef4444;border-radius:8px;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:14px;">Delete</button>

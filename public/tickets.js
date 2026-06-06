@@ -2008,10 +2008,22 @@ async function updateTicket(ticketId, updates) {
     (hist[hist.length - 1]?.action === 'service_upgrade_marked' ||
       hist[hist.length - 1]?.action === 'service_upgrade_cleared') &&
     Object.keys(updates).every((key) => key === 'serviceUpgrade');
+  const isReviewedToggleOnly =
+    (hist[hist.length - 1]?.action === 'reviewed_marked' ||
+      hist[hist.length - 1]?.action === 'reviewed_cleared') &&
+    Object.keys(updates).every((key) => ['reviewedByFrontDesk', 'reviewedByUid', 'reviewedByName', 'reviewedAt'].includes(key));
   const statusNow = (String(data.status || '')).toUpperCase();
-  if (!isOnlyMarkingSeen && !isServiceUpgradeOnly && statusNow === 'READY_FOR_CHECKOUT') {
+  if (!isOnlyMarkingSeen && !isServiceUpgradeOnly && !isReviewedToggleOnly && statusNow === 'READY_FOR_CHECKOUT') {
     updates.editedAfterFinalize = true;
     updates.editedAt = serverTimestamp();
+    // A real edit introduces new info, so any prior front-desk "Reviewed"
+    // mark is no longer valid — clear it so the ticket needs re-reviewing.
+    if (data.reviewedByFrontDesk === true) {
+      updates.reviewedByFrontDesk = false;
+      updates.reviewedByUid = null;
+      updates.reviewedByName = null;
+      updates.reviewedAt = null;
+    }
   } else if (isServiceUpgradeOnly) {
     updates.editedAfterFinalize = false;
     updates.editedAt = null;
@@ -2023,11 +2035,14 @@ async function updateTicket(ticketId, updates) {
   });
 }
 
-async function finalizeTicket(ticketId, forUids, forNames) {
+async function finalizeTicket(ticketId, forUids, forNames, extra) {
   const updates = { status: 'READY_FOR_CHECKOUT', finalizedByUid: currentUserProfile.uid, _action: 'finalized' };
   if (Array.isArray(forUids) && forUids.length > 0) {
     updates.forUids = forUids;
     updates.forNames = Array.isArray(forNames) ? forNames : [];
+  }
+  if (extra && typeof extra.customerName === 'string' && extra.customerName.trim()) {
+    updates.customerName = extra.customerName.trim();
   }
   await updateTicket(ticketId, updates);
 }
@@ -3488,6 +3503,10 @@ function renderTicketsList() {
     const serviceUpgradeBadgeHtml = (t.serviceUpgrade === true)
       ? '<span class="ticket-customer-approved-badge" title="Service upgrade marked" style="background:#7c3aed;">Upgrade</span>'
       : '';
+    const reviewedWhenStr = ffFormatReviewedAt(t.reviewedAt);
+    const reviewedBadgeHtml = (t.reviewedByFrontDesk === true)
+      ? `<span class="ticket-customer-approved-badge" title="Reviewed by front desk${t.reviewedByName ? ' \u00b7 ' + escapeHtml(t.reviewedByName) : ''}${reviewedWhenStr ? ' \u00b7 ' + escapeHtml(reviewedWhenStr) : ''}" style="background:#2563eb;">Reviewed</span>`
+      : '';
     const technicianAvatarUrl = getTicketTechnicianAvatarUrl(t);
     const initialEsc = escapeHtml(initial);
     const avatarLoadedAttr = technicianAvatarUrl ? '0' : '1';
@@ -3526,6 +3545,7 @@ function renderTicketsList() {
           <span class="ticket-status-badge ${sk}">${statusLabel}</span>
           ${serviceUpgradeBadgeHtml}
           ${customerApprovedBadgeHtml}
+          ${reviewedBadgeHtml}
           ${editedBadgeHtml}
         </div>
       </div>
@@ -3676,6 +3696,56 @@ function openTicketModal(ticketId, appointmentData = null) {
 
 /** Admin/manager view: read-only ticket with ONLY Close Ticket button.
  *  Uses existing modal elements — does NOT replace innerHTML. */
+function ffFormatReviewedAt(v) {
+  try {
+    if (!v) return '';
+    let d = null;
+    if (v instanceof Date) d = v;
+    else if (typeof v.toDate === 'function') d = v.toDate();
+    else if (v.seconds) d = new Date(v.seconds * 1000);
+    if (!d || isNaN(d.getTime())) return '';
+    return d.toLocaleString();
+  } catch (_) { return ''; }
+}
+
+async function toggleTicketReviewed(ticketId) {
+  const t = (currentTickets || []).find(x => x.id === ticketId);
+  if (!t) return;
+  if (!canCurrentUserCloseTickets()) { showToast('Not allowed', 'error'); return; }
+  const makeReviewed = !(t.reviewedByFrontDesk === true);
+  try {
+    if (makeReviewed) {
+      await updateTicket(ticketId, {
+        reviewedByFrontDesk: true,
+        reviewedByUid: (currentUserProfile && currentUserProfile.uid) || null,
+        reviewedByName: (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || '',
+        reviewedAt: serverTimestamp(),
+        _action: 'reviewed_marked'
+      });
+      t.reviewedByFrontDesk = true;
+      t.reviewedByName = (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || '';
+      t.reviewedAt = new Date();
+    } else {
+      await updateTicket(ticketId, {
+        reviewedByFrontDesk: false,
+        reviewedByUid: null,
+        reviewedByName: null,
+        reviewedAt: null,
+        _action: 'reviewed_cleared'
+      });
+      t.reviewedByFrontDesk = false;
+      t.reviewedByName = null;
+      t.reviewedAt = null;
+    }
+    showToast(makeReviewed ? 'Marked as reviewed' : 'Review cleared', 'success');
+    const modal = document.getElementById('ticketModal');
+    if (modal && modal.dataset.adminView === '1') openAdminTicketView(t);
+    if (typeof renderTicketsList === 'function') renderTicketsList();
+  } catch (e) {
+    showToast((e && e.message) || 'Failed to update', 'error');
+  }
+}
+
 function openAdminTicketView(t) {
   const modal = document.getElementById('ticketModal');
   const title = document.getElementById('ticketModalTitle');
@@ -3774,6 +3844,36 @@ function openAdminTicketView(t) {
     closeBtn.onclick = () => doCloseTicket(t.id);
   }
 
+  // Reviewed toggle button (front desk / managers / owners only)
+  const reviewedBtn = document.getElementById('ticketReviewedBtn');
+  if (reviewedBtn) {
+    if (canCurrentUserCloseTickets()) {
+      const isReviewed = t.reviewedByFrontDesk === true;
+      reviewedBtn.style.display = 'inline-block';
+      reviewedBtn.style.width = '100%';
+      reviewedBtn.style.padding = '12px';
+      reviewedBtn.style.fontSize = '15px';
+      reviewedBtn.style.fontWeight = '700';
+      reviewedBtn.style.borderRadius = '10px';
+      reviewedBtn.style.marginBottom = '8px';
+      if (isReviewed) {
+        const whenStr = ffFormatReviewedAt(t.reviewedAt);
+        reviewedBtn.textContent = 'Reviewed \u2713' + (t.reviewedByName ? ' \u00b7 ' + t.reviewedByName : '') + (whenStr ? ' \u00b7 ' + whenStr : '');
+        reviewedBtn.style.background = '#dbeafe';
+        reviewedBtn.style.color = '#1e40af';
+        reviewedBtn.style.border = '1px solid #93c5fd';
+      } else {
+        reviewedBtn.textContent = 'Mark as Reviewed';
+        reviewedBtn.style.background = '#2563eb';
+        reviewedBtn.style.color = '#fff';
+        reviewedBtn.style.border = 'none';
+      }
+      reviewedBtn.onclick = () => toggleTicketReviewed(t.id);
+    } else {
+      reviewedBtn.style.display = 'none';
+    }
+  }
+
   // Hide as-booked block
   const asBookedBlock = document.getElementById('ticketAsBookedBlock');
   if (asBookedBlock) asBookedBlock.style.display = 'none';
@@ -3807,6 +3907,12 @@ function closeTicketModal() {
         closeBtn.style.fontSize = '';
         closeBtn.style.fontWeight = '';
         closeBtn.style.borderRadius = '';
+      }
+      // Hide reviewed button
+      const reviewedBtn = document.getElementById('ticketReviewedBtn');
+      if (reviewedBtn) {
+        reviewedBtn.style.display = 'none';
+        reviewedBtn.style.marginBottom = '';
       }
     }
   }
@@ -3906,6 +4012,46 @@ function closeTicketDetailsModal() {
   }
 }
 
+/** Salon setting: when true, staff must enter a customer name before sending. */
+function ffTicketRequiresCustomerName() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetRequireCustomerNameOnTicket === 'function') {
+      return window.ffGetRequireCustomerNameOnTicket() === true;
+    }
+    return !!(window.settings && window.settings.preferences && window.settings.preferences.requireCustomerNameOnTicket === true);
+  } catch (_) { return false; }
+}
+
+/**
+ * When the salon requires a customer name, reveal the customer field, lock the
+ * Optional toggle (so it can't be collapsed) and mark it required. Returns
+ * whether the requirement is active.
+ */
+function ffApplyTicketCustomerRequiredUI() {
+  const required = ffTicketRequiresCustomerName();
+  const wrap = document.getElementById('ticketCustomerWrap');
+  const toggle = document.getElementById('ticketCustomerToggle');
+  const input = document.getElementById('ticketCustomerName');
+  if (required) {
+    if (wrap) wrap.style.display = 'block';
+    if (toggle) {
+      toggle.textContent = 'Customer / Client (required)';
+      toggle.style.pointerEvents = 'none';
+      toggle.style.cursor = 'default';
+      toggle.style.color = '#374151';
+    }
+    if (input) input.placeholder = 'Customer / Client name (required)';
+  } else {
+    if (toggle) {
+      toggle.style.pointerEvents = '';
+      toggle.style.cursor = '';
+      toggle.style.color = '';
+    }
+    if (input) input.placeholder = 'Customer / Client name';
+  }
+  return required;
+}
+
 function resetTicketForm() {
   const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
   set('ticketCustomerName', el => { el.value = ''; });
@@ -3945,6 +4091,7 @@ function resetTicketForm() {
   }
   updateTicketDiff();
   setupTicketFormToggles();
+  ffApplyTicketCustomerRequiredUI();
 }
 
 function populateTicketForm(t) {
@@ -4013,6 +4160,8 @@ function populateTicketForm(t) {
   const deleteBtn = document.getElementById('ticketDeleteBtn');
   const sendNewBtn = document.getElementById('ticketSendNewBtn');
   const saveBtn = document.getElementById('ticketSaveBtn');
+  const reviewedBtnEdit = document.getElementById('ticketReviewedBtn');
+  if (reviewedBtnEdit) reviewedBtnEdit.style.display = 'none';
   if (finalizeBtn) finalizeBtn.style.display = (t.status === 'OPEN') ? 'inline-block' : 'none';
   if (closeBtn) closeBtn.style.display = (t.status === 'READY_FOR_CHECKOUT' && canCloseTicket) ? 'inline-block' : 'none';
   if (archiveBtn) archiveBtn.style.display = (t.status === 'CLOSED' || t.status === 'VOID') && isAdminOrOwner ? 'inline-block' : 'none';
@@ -4028,6 +4177,7 @@ function populateTicketForm(t) {
   if (deleteBtn) deleteBtn.onclick = async () => { const ok = await ticketConfirm('Permanently delete this ticket? This cannot be undone.', 'Delete ticket'); if (!ok) return; try { await deleteTicketPermanently(t.id); showToast('Ticket deleted', 'success'); closeTicketModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
   setupTicketServiceUpgradeControl(t, canCloseTicket);
   setupTicketFormToggles();
+  if (!isReadOnly) ffApplyTicketCustomerRequiredUI();
 }
 
 /** Push current price/note inputs into #ticketLinesData so Close/Save sees latest edits (e.g. before blur). */
@@ -4345,6 +4495,12 @@ async function saveTicket() {
 async function doSendNewTicket() {
   const customerNameEl = document.getElementById('ticketCustomerName');
   const customerName = customerNameEl ? customerNameEl.value.trim() : '';
+  if (ffTicketRequiresCustomerName() && !customerName) {
+    ffApplyTicketCustomerRequiredUI();
+    showToast('Customer name is required to send this ticket.', 'error');
+    if (customerNameEl) customerNameEl.focus();
+    return;
+  }
   const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
   const linesEl = document.getElementById('ticketLinesData');
   const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
@@ -4375,11 +4531,19 @@ async function doSendNewTicket() {
 }
 
 async function doFinalizeTicket(ticketId) {
+  const customerNameEl = document.getElementById('ticketCustomerName');
+  const customerName = customerNameEl ? customerNameEl.value.trim() : '';
+  if (ffTicketRequiresCustomerName() && !customerName) {
+    ffApplyTicketCustomerRequiredUI();
+    showToast('Customer name is required to send this ticket.', 'error');
+    if (customerNameEl) customerNameEl.focus();
+    return;
+  }
   const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
   const ok = await ticketConfirm('Send this ticket to Front Desk?', 'Send to Front Desk');
   if (!ok) return;
   try {
-    await finalizeTicket(ticketId, forUids, forNames);
+    await finalizeTicket(ticketId, forUids, forNames, { customerName });
     showToast('Ticket sent to Front Desk', 'success');
     closeTicketModal();
   } catch (err) {

@@ -65,7 +65,15 @@ function readActiveLocationId() {
     }
   } catch (_) {}
   const raw = typeof window.__ff_active_location_id === "string" ? window.__ff_active_location_id.trim() : "";
-  return raw || "";
+  if (raw) return raw;
+  // Mobile boot: active location may not be in memory yet but is persisted from
+  // the last session. Subscribing to the wrong queueState doc (default) and
+  // applying its empty snapshot caused a visible empty-queue flash on phone.
+  try {
+    const stored = localStorage.getItem("ff_active_location_id");
+    if (typeof stored === "string" && stored.trim()) return stored.trim();
+  } catch (_) {}
+  return "";
 }
 
 /** doc id for the queueState document — locationId per branch, otherwise "default". */
@@ -79,6 +87,22 @@ function queueStateRef(salonId, locationId) {
 }
 
 let _firstSnapshot = true;
+let _subscribedDocId = null;
+
+function storedActiveLocationIdForQueue() {
+  const fromRead = readActiveLocationId();
+  if (fromRead) return fromRead;
+  return "";
+}
+
+/** Skip applying an empty cloud snapshot while we are still subscribed to a
+ *  different branch doc than the user's persisted active location. */
+function shouldSkipEmptyCloudSnapshot(subscribedLocationId, cloudHasData, localHasAnyData) {
+  if (cloudHasData || !localHasAnyData) return false;
+  const stored = storedActiveLocationIdForQueue();
+  if (!stored) return false;
+  return queueStateDocIdFor(subscribedLocationId) !== queueStateDocIdFor(stored);
+}
 
 function hasRecentLocalQueueWrite() {
   if (typeof window === "undefined") return false;
@@ -104,36 +128,54 @@ function hasExplicitEmptyOverwriteIntent() {
   return Number(window.__ff_allow_empty_queue_cloud_write_until || 0) > Date.now();
 }
 
+function snapshotFromCache(snap) {
+  return !!(snap && snap.metadata && snap.metadata.fromCache);
+}
+
+/** During boot, never paint an empty cloud snapshot over a good local cache. */
+function shouldDeferBootSnapshot(snap, subscribedLocationId, cloudHasData, localHasAnyData) {
+  if (!_firstSnapshot || !localHasAnyData || cloudHasData) return false;
+  if (snapshotFromCache(snap)) return true;
+  return shouldSkipEmptyCloudSnapshot(subscribedLocationId, cloudHasData, localHasAnyData);
+}
+
 function queueCloudWriteReason() {
   if (typeof window === "undefined") return "unknown";
   return String(window.__ff_queue_cloud_write_reason || "").trim() || "app-save";
 }
 
 function subscribe(salonId, locationId, opts = {}) {
+  const nextDocId = queueStateDocIdFor(locationId);
+  // Already listening to this branch doc — avoid tearing down the listener and
+  // replaying cached snapshots (mobile hard refresh showed list → blank → list).
+  if (_salonId === salonId && _subscribedDocId === nextDocId && _unsubscribe) {
+    return;
+  }
   if (_unsubscribe) {
     _unsubscribe();
     _unsubscribe = null;
   }
   _firstSnapshot = true;
+  const locationDocChanged = _subscribedDocId !== null && _subscribedDocId !== nextDocId;
+  // Switching to a different branch — require a fresh server snapshot before we
+  // trust an empty queue again.
+  if (locationDocChanged && typeof window !== "undefined") {
+    window.__ff_queueCloudServerConfirmed = false;
+  }
   const preserveRecentLocalWrite =
     opts.reason !== "manual" &&
     hasRecentLocalQueueWrite() &&
     queueStateHasData(_getState ? _getState() : null);
-  // CRITICAL: clear the in-memory queue/service/log so the old location's
-  // data doesn't flash on screen while we wait for the new snapshot.
-  // Without this, switching branches shows the previous branch's queue for
-  // a fraction of a second until Firestore responds.
-  //
-  // Mobile boot can resolve the active branch a few seconds after a JOIN tap.
-  // In that case clearing immediately makes the just-added queue row disappear
-  // before the cloud write/snapshot catches up. Preserve very recent local queue
-  // writes unless this was an explicit manual branch switch.
-  if (!preserveRecentLocalWrite && typeof _applyState === "function") {
+  // Clear in-memory queue/service/log only when switching to a DIFFERENT branch
+  // doc. Re-subscribing to the same branch (staff/location recompute on boot)
+  // must not wipe the locally cached queue — that caused empty flashes on phone.
+  if (locationDocChanged && !preserveRecentLocalWrite && typeof _applyState === "function") {
     try { _applyState([], [], [], null, { force: true, reason: "queue-cloud-resubscribe" }); } catch (_) {}
     if (typeof _onLogChange === "function") {
       try { _onLogChange(); } catch (_) {}
     }
   }
+  _subscribedDocId = nextDocId;
   // Clear ff_queues_v1 (Queue Auto Reset + GeoFence settings) on a real
   // location switch so the previous branch's settings don't leak into the new
   // branch. We deliberately DO NOT clear on initial connect/reconnect: clearing
@@ -165,6 +207,10 @@ function subscribe(salonId, locationId, opts = {}) {
     const canSeedFromLocal = (isDefaultDoc || preserveRecentLocalWrite) && localHasAnyData;
 
     if (!snap.exists()) {
+      if (shouldDeferBootSnapshot(snap, locationId, false, localHasAnyData)) {
+        console.log("[QueueCloud] Defer cached missing-doc snapshot during boot", logTag);
+        return;
+      }
       if (canSeedFromLocal) {
         console.log("[QueueCloud] No cloud doc, pushing local state", logTag);
         setDoc(ref, {
@@ -174,6 +220,9 @@ function subscribe(salonId, locationId, opts = {}) {
           updatedAt: serverTimestamp()
         }).catch((e) => console.warn("[QueueCloud] Initial write failed", e));
       } else {
+        if (!snapshotFromCache(snap) && typeof window !== "undefined") {
+          window.__ff_queueCloudServerConfirmed = true;
+        }
         _applyState([], [], [], null, { force: true, reason: "queue-cloud-missing-doc" });
         if (typeof _onLogChange === "function") _onLogChange();
       }
@@ -185,6 +234,13 @@ function subscribe(salonId, locationId, opts = {}) {
     const service = Array.isArray(data.service) ? data.service : [];
     const log = Array.isArray(data.log) ? data.log : [];
     const cloudHasData = (queue.length + service.length + log.length) > 0;
+
+    if (shouldDeferBootSnapshot(snap, locationId, cloudHasData, localHasAnyData)) {
+      console.log("[QueueCloud] Defer empty boot snapshot until server data", logTag, {
+        fromCache: snapshotFromCache(snap),
+      });
+      return;
+    }
 
     // On first snapshot for an existing but empty cloud doc, do not seed from
     // localStorage unless this tab just performed a local queue write. Otherwise
@@ -202,6 +258,11 @@ function subscribe(salonId, locationId, opts = {}) {
     }
 
     _firstSnapshot = false;
+    // Mark that an authoritative (non-cache) snapshot has been seen so the app
+    // may now accept an empty cloud state as real (e.g. a genuine reset).
+    if (!snapshotFromCache(snap) && typeof window !== "undefined") {
+      window.__ff_queueCloudServerConfirmed = true;
+    }
     _applyState(queue, service, log);
     if (typeof _onLogChange === "function") _onLogChange();
     // Apply queue settings (ff_queues_v1) from cloud — each location has its
