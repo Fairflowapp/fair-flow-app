@@ -1769,39 +1769,9 @@ service cloud.firestore {
     // Reads stay open to any salon member so staff can still see status at
     // any branch they navigate to, but writes are gated by userCanWriteAtLocation
     // so a technician at branch A cannot tamper with branch B's state.
-    // queueState optimistic-lock (server-side stale-overwrite guard):
-    // A write that changes the LIVE queue (queue/service arrays) must advance the
-    // integer `rev` by exactly +1 over the rev currently stored in the cloud doc.
-    // A device holding a stale rev — e.g. a phone reopened with yesterday's cache —
-    // sends an out-of-date rev, so the SERVER rejects the overwrite regardless of
-    // what the client code does. This is the cloud-enforced backstop behind the
-    // client-side first-snapshot guard.
-    //
-    // Backward compatible (safe during rollout):
-    //   - settings-only / metadata writes (queue+service unchanged) pass without
-    //     touching rev (used by the dedicated queue-settings writer);
-    //   - a legacy cloud doc that has no rev yet accepts the first stamped rev;
-    //   - a client that does not send rev yet (un-upgraded cache) is still allowed
-    //     so we never break an old device — full enforcement engages once both the
-    //     cloud doc and the incoming write carry rev.
     match /salons/{salonId}/queueState/{docId} {
-      function queueLiveContentUnchanged() {
-        return request.resource.data.get('queue', []) == resource.data.get('queue', [])
-          && request.resource.data.get('service', []) == resource.data.get('service', []);
-      }
-      function queueRevAdvancesOrLegacy() {
-        return !('rev' in resource.data)
-          || !('rev' in request.resource.data)
-          || (request.resource.data.rev is int
-              && request.resource.data.rev == resource.data.rev + 1);
-      }
       allow read: if belongsToSalon(salonId);
-      allow create: if belongsToSalon(salonId)
-        && userCanWriteAtLocation(salonId, docId);
-      allow update: if belongsToSalon(salonId)
-        && userCanWriteAtLocation(salonId, docId)
-        && (queueLiveContentUnchanged() || queueRevAdvancesOrLegacy());
-      allow delete: if belongsToSalon(salonId)
+      allow write: if belongsToSalon(salonId)
         && userCanWriteAtLocation(salonId, docId);
     }
 

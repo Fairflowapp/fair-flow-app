@@ -79,11 +79,6 @@ function queueStateRef(salonId, locationId) {
 }
 
 let _firstSnapshot = true;
-// Optimistic-lock version of the active queueState doc. Mirrors the cloud `rev`
-// field: updated from every applied snapshot / server read, and incremented on
-// each successful write. Writes stamp rev = _cloudRev + 1 so the security rule
-// can reject any device whose rev is stale (overwrite protection at the server).
-let _cloudRev = 0;
 
 function hasRecentLocalQueueWrite() {
   if (typeof window === "undefined") return false;
@@ -120,7 +115,6 @@ function subscribe(salonId, locationId, opts = {}) {
     _unsubscribe = null;
   }
   _firstSnapshot = true;
-  _cloudRev = 0;
   const preserveRecentLocalWrite =
     opts.reason !== "manual" &&
     hasRecentLocalQueueWrite() &&
@@ -177,9 +171,8 @@ function subscribe(salonId, locationId, opts = {}) {
           queue: localState.queue || [],
           service: localState.service || [],
           log: localState.log || [],
-          rev: 1,
           updatedAt: serverTimestamp()
-        }).then(() => { _cloudRev = 1; }).catch((e) => console.warn("[QueueCloud] Initial write failed", e));
+        }).catch((e) => console.warn("[QueueCloud] Initial write failed", e));
       } else {
         _applyState([], [], [], null, { force: true, reason: "queue-cloud-missing-doc" });
         if (typeof _onLogChange === "function") _onLogChange();
@@ -198,20 +191,17 @@ function subscribe(salonId, locationId, opts = {}) {
     // an old mobile cache can resurrect an employee after the 4 AM cloud reset.
     if (_firstSnapshot && !cloudHasData && preserveRecentLocalWrite && localHasAnyData) {
       console.log("[QueueCloud] Cloud empty but local has data, pushing local", logTag);
-      const seedRev = (typeof data.rev === "number" ? data.rev : 0) + 1;
       setDoc(ref, {
         queue: localState.queue || [],
         service: localState.service || [],
         log: localState.log || [],
-        rev: seedRev,
         updatedAt: serverTimestamp()
-      }).then(() => { _cloudRev = seedRev; }).catch((e) => console.warn("[QueueCloud] Push local failed", e));
+      }).catch((e) => console.warn("[QueueCloud] Push local failed", e));
       _firstSnapshot = false;
       return;
     }
 
     _firstSnapshot = false;
-    _cloudRev = (typeof data.rev === "number") ? data.rev : 0;
     _applyState(queue, service, log);
     if (typeof _onLogChange === "function") _onLogChange();
     // Apply queue settings (ff_queues_v1) from cloud — each location has its
@@ -255,39 +245,9 @@ function writeState() {
     const raw = localStorage.getItem('ff_queues_v1');
     if (raw) payload.queueSettings = JSON.parse(raw);
   } catch (_) {}
-  // Optimistic-lock stamp: rev is computed at commit time (not earlier) so the
-  // guarded paths below can refresh _cloudRev from the server doc first. The
-  // matching security rule requires this to equal cloudRev + 1 for any write
-  // that changes the live queue, so a stale device is rejected by the server.
-  const commit = () => {
-    const nextRev = (typeof _cloudRev === "number" ? _cloudRev : 0) + 1;
-    payload.rev = nextRev;
-    return setDoc(ref, payload).then(() => {
-      _cloudRev = nextRev;
-    }).catch((e) => {
-      // A rev conflict (another device advanced the queue first) surfaces as a
-      // permission-denied under the optimistic-lock rule. Treat the cloud as the
-      // source of truth: pull current state instead of forcing the stale write.
-      const code = e && e.code ? String(e.code) : "";
-      if (code === "permission-denied" || code === "permission_denied") {
-        console.warn("[QueueCloud] write rejected (rev conflict) — pulling cloud state");
-        return getDocFromServer(ref).then((snap) => {
-          if (!snap.exists()) return;
-          const data = snap.data() || {};
-          _cloudRev = (typeof data.rev === "number") ? data.rev : 0;
-          if (typeof _applyState === "function") {
-            _applyState(
-              Array.isArray(data.queue) ? data.queue : [],
-              Array.isArray(data.service) ? data.service : [],
-              Array.isArray(data.log) ? data.log : []
-            );
-            if (typeof _onLogChange === "function") _onLogChange();
-          }
-        }).catch(() => {});
-      }
-      console.warn("[QueueCloud] write failed", e);
-    });
-  };
+  const commit = () => setDoc(ref, payload).catch((e) => {
+    console.warn("[QueueCloud] write failed", e);
+  });
 
   // Stale-device guard (pre-sync): until this device has applied the FIRST cloud
   // snapshot for the active branch, its local queue may be stale — e.g. a device
@@ -300,9 +260,7 @@ function writeState() {
   if (_firstSnapshot && !hasExplicitEmptyOverwriteIntent()) {
     return getDocFromServer(ref).then((snap) => {
       if (!snap.exists()) return commit();
-      const snapData = snap.data() || {};
-      _cloudRev = (typeof snapData.rev === "number") ? snapData.rev : 0;
-      const cloudCounts = stateCounts(snapData);
+      const cloudCounts = stateCounts(snap.data() || {});
       const cloudHasData =
         cloudCounts.queue + cloudCounts.service + cloudCounts.log > 0;
       if (!cloudHasData) return commit();
@@ -334,9 +292,7 @@ function writeState() {
   // local cache. Legitimate reset flows set __ff_allow_empty_queue_cloud_write_until.
   return getDocFromServer(ref).then((snap) => {
     if (!snap.exists()) return commit();
-    const snapData = snap.data() || {};
-    _cloudRev = (typeof snapData.rev === "number") ? snapData.rev : 0;
-    const cloudCounts = stateCounts(snapData);
+    const cloudCounts = stateCounts(snap.data() || {});
     const cloudHasData =
       cloudCounts.queue + cloudCounts.service + cloudCounts.log > 0;
     if (!cloudHasData) return commit();
@@ -473,7 +429,6 @@ export function queueCloudRefresh() {
       const queue = Array.isArray(data.queue) ? data.queue : [];
       const service = Array.isArray(data.service) ? data.service : [];
       const log = Array.isArray(data.log) ? data.log : [];
-      _cloudRev = (typeof data.rev === "number") ? data.rev : 0;
       _applyState(queue, service, log);
       if (typeof _onLogChange === "function") _onLogChange();
       // Apply queue settings from cloud
