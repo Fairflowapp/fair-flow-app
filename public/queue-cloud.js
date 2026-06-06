@@ -249,6 +249,43 @@ function writeState() {
     console.warn("[QueueCloud] write failed", e);
   });
 
+  // Stale-device guard (pre-sync): until this device has applied the FIRST cloud
+  // snapshot for the active branch, its local queue may be stale — e.g. a device
+  // that just opened is still holding an older localStorage cache. Letting it
+  // write would overwrite a live cloud queue with stale data (this is how a
+  // freshly-opened phone wiped a branch's real queue). While we have not yet
+  // reconciled with the cloud, never overwrite a non-empty cloud queue: pull the
+  // cloud state instead. Legitimate reset/seed flows set the explicit-empty
+  // intent flag and are allowed through unchanged.
+  if (_firstSnapshot && !hasExplicitEmptyOverwriteIntent()) {
+    return getDocFromServer(ref).then((snap) => {
+      if (!snap.exists()) return commit();
+      const cloudCounts = stateCounts(snap.data() || {});
+      const cloudHasData =
+        cloudCounts.queue + cloudCounts.service + cloudCounts.log > 0;
+      if (!cloudHasData) return commit();
+      console.warn("[QueueCloud] blocked pre-sync overwrite of non-empty cloud state", {
+        salonId: _salonId,
+        locationId: _locationId || QUEUE_STATE_DEFAULT,
+        reason,
+        localCounts,
+        cloudCounts,
+      });
+      if (typeof _applyState === "function") {
+        const data = snap.data() || {};
+        _applyState(
+          Array.isArray(data.queue) ? data.queue : [],
+          Array.isArray(data.service) ? data.service : [],
+          Array.isArray(data.log) ? data.log : []
+        );
+        if (typeof _onLogChange === "function") _onLogChange();
+      }
+      return Promise.resolve();
+    }).catch((e) => {
+      console.warn("[QueueCloud] pre-sync write guard failed; skipping risky write", e);
+    });
+  }
+
   if (!localEmpty || hasExplicitEmptyOverwriteIntent()) return commit();
 
   // Guard against stale tabs/kiosks overwriting a live queue with an all-empty

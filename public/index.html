@@ -14117,6 +14117,16 @@ async function selfRemoveFromQueue(i) {
 
 function renderService(){
 
+  // Web only: the In Service name pills are rendered at 9px inline (compact for
+  // mobile). On desktop that is too small to read, so override to a normal size
+  // via a scoped !important rule (>=641px). Mobile keeps the original 9px.
+  if (typeof document !== 'undefined' && !document.getElementById('ffInServiceNamePillWebStyle')) {
+    const _ffSvcNameStyle = document.createElement('style');
+    _ffSvcNameStyle.id = 'ffInServiceNamePillWebStyle';
+    _ffSvcNameStyle.textContent = '@media (min-width:641px){.ff-inservice-name-pill{font-size:14px !important;padding:5px 10px !important;max-width:min(240px,30vw) !important;}}';
+    document.head.appendChild(_ffSvcNameStyle);
+  }
+
   var _ffSvcListScroll = typeof ffQueueReadBothListScrollTops === 'function' ? ffQueueReadBothListScrollTops() : null;
   serviceList.innerHTML="";
 
@@ -14182,6 +14192,7 @@ function renderService(){
     }
 
     const pill=namePill(s); pill.textContent=ffQueueDisplayName(s);
+    pill.classList.add('ff-inservice-name-pill');
     pill.style.fontSize = "9px";
     pill.style.padding = "4px 6px";
     pill.style.flexShrink = "1";
@@ -33280,6 +33291,23 @@ function ffMaybeAutoResetQueue(now = new Date()) {
     // Check if current time >= target time
     if (now < targetToday) {
       return; // Not yet time
+    }
+
+    // CRITICAL SAFETY: never auto-reset retroactively on app load.
+    // The reset must only fire when the app is OPEN and the clock crosses the
+    // scheduled minute in real time. On the FIRST check of a session, if the
+    // scheduled time has already passed today, we "claim" today (stamp
+    // lastAutoResetDate) WITHOUT wiping the queue — otherwise opening the app
+    // after the scheduled time would erase a live, in-use queue. Subsequent
+    // checks in the same session (via the 30s interval) can still reset when
+    // the clock genuinely crosses a new day's scheduled time while open.
+    if (!window.__ffAutoResetSessionStarted) {
+      window.__ffAutoResetSessionStarted = true;
+      if (lastAutoResetDate !== todayKey) {
+        setQueueLastAutoResetDate(todayKey);
+        console.log('[AUTO_RESET][QUEUE] First load past scheduled time - claimed today without wiping queue', { todayKey, time: timeStr });
+      }
+      return;
     }
 
     // Grace window: only auto-reset within a window after the scheduled time.
