@@ -263,6 +263,17 @@ function subscribe(salonId, locationId, opts = {}) {
     if (!snapshotFromCache(snap) && typeof window !== "undefined") {
       window.__ff_queueCloudServerConfirmed = true;
     }
+    // Expose when the cloud queue was last modified so the morning auto-reset
+    // can tell "yesterday's leftover queue" (safe to clear on fresh open) from
+    // "a queue already used today" (must never be wiped).
+    if (typeof window !== "undefined") {
+      try {
+        const ms = data.updatedAt && typeof data.updatedAt.toMillis === "function"
+          ? data.updatedAt.toMillis()
+          : (typeof data.updatedAt === "number" ? data.updatedAt : 0);
+        if (ms) window.__ff_queueLastCloudUpdateMs = ms;
+      } catch (_) {}
+    }
     _applyState(queue, service, log);
     if (typeof _onLogChange === "function") _onLogChange();
     // Apply queue settings (ff_queues_v1) from cloud — each location has its
