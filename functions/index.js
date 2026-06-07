@@ -18,6 +18,11 @@ Object.assign(exports, require("./stripe"));
 // recomputeAccountStatus from ./stripe — must be required AFTER ./stripe.
 Object.assign(exports, require("./billing"));
 
+// Server-side scheduled queue auto-reset (runs even when no device is open).
+const _queueAutoReset = require("./queue-auto-reset");
+exports.scheduledQueueAutoReset = _queueAutoReset.scheduledQueueAutoReset;
+exports.debugRunQueueAutoReset = _queueAutoReset.debugRunQueueAutoReset;
+
 /**
  * Simple test callable – use to verify IAM/CORS/region work.
  * Call from console: httpsCallable(getFunctions(app,"us-central1"),"testCallable")({test:1})
