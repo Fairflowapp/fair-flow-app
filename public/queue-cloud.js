@@ -29,6 +29,107 @@ let _onLogChange = null;
 // local history is shorter than this, another device advanced the queue and we
 // must not roll it back. Reset to 0 on a real location switch.
 let _lastCloudLogLen = 0;
+// Monotonic revision of the active branch's queueState doc (Phase A: optimistic
+// concurrency / compare-and-swap). Every full-state write stamps rev = base+1,
+// and the security rules reject any update whose rev isn't exactly previous+1 —
+// so two devices writing at once are serialized by the server and the stale one
+// is rejected (no silent overwrite), with NO client transaction (so the old
+// runTransaction 400s can't recur). Tracked from authoritative snapshots and
+// bumped optimistically on our own successful writes so rapid sequential local
+// writes still increment correctly. Reset to 0 on a real location switch.
+let _lastCloudRev = 0;
+// Deep copy of the last AUTHORITATIVE server state we observed (snapshot or
+// confirmed write). Phase B uses it as the common ancestor ("base") for a
+// 3-way merge: when our optimistic write is rejected (stale rev), we diff our
+// local state against this base to recover OUR intent (who we added / removed),
+// then replay that intent on top of the fresh server state and retry — so the
+// device that "lost" the race never loses its change (no data loss, not just
+// no overwrite). Reset to empty on a real location switch.
+let _lastServerState = { queue: [], service: [], log: [] };
+
+function ffCloneArray(a) {
+  if (!Array.isArray(a)) return [];
+  try { return JSON.parse(JSON.stringify(a)); } catch (_) { return a.slice(); }
+}
+
+function setLastServerState(queue, service, log) {
+  _lastServerState = {
+    queue: ffCloneArray(queue),
+    service: ffCloneArray(service),
+    log: ffCloneArray(log),
+  };
+}
+
+// Identity of a queue/service entry: prefer staffId, fall back to name, then a
+// stable stringification. Two entries with the same identity are "the same
+// person" for merge purposes.
+function ffQueueItemKey(it) {
+  if (it == null) return "∅";
+  if (typeof it !== "object") return "v:" + String(it);
+  if (it.staffId != null && String(it.staffId).trim() !== "") return "s:" + String(it.staffId);
+  if (it.name != null && String(it.name).trim() !== "") return "n:" + String(it.name).trim().toLowerCase();
+  try { return "j:" + JSON.stringify(it); } catch (_) { return "?"; }
+}
+
+/**
+ * 3-way merge of one list (queue or service). base = common ancestor (last
+ * server state we held), local = our current list (with our pending change),
+ * server = fresh authoritative list. Returns server with OUR additions added
+ * and OUR removals removed, so concurrent changes from both devices survive.
+ */
+function ffMergeList(base, local, server) {
+  base = Array.isArray(base) ? base : [];
+  local = Array.isArray(local) ? local : [];
+  server = Array.isArray(server) ? server : [];
+  const baseKeys = new Set(base.map(ffQueueItemKey));
+  const localKeys = new Set(local.map(ffQueueItemKey));
+  // What WE added (in local, not in base) and removed (in base, not in local).
+  const localAdded = local.filter((it) => !baseKeys.has(ffQueueItemKey(it)));
+  const weRemoved = new Set(
+    base.filter((it) => !localKeys.has(ffQueueItemKey(it))).map(ffQueueItemKey)
+  );
+  // Start from server, drop the entries we intentionally removed, then append
+  // our additions that aren't already present.
+  const result = server.filter((it) => !weRemoved.has(ffQueueItemKey(it)));
+  const present = new Set(result.map(ffQueueItemKey));
+  for (const it of localAdded) {
+    const k = ffQueueItemKey(it);
+    if (!present.has(k)) { result.push(it); present.add(k); }
+  }
+  return result;
+}
+
+function ffLogEntryKey(e) {
+  if (e == null) return "∅";
+  if (typeof e !== "object") return "v:" + String(e);
+  const ts = (typeof e.ts === "number") ? e.ts : "";
+  return "t:" + ts + "|a:" + String(e.action || "") + "|w:" + String(e.worker || "") + "|p:" + String(e.performedBy || "");
+}
+
+/**
+ * Union the history log: keep the server log (authoritative order) and append
+ * any local-only entries (our new history rows) that the server hasn't seen.
+ * Never drops entries from either side.
+ */
+function ffMergeLog(server, local) {
+  server = Array.isArray(server) ? server : [];
+  local = Array.isArray(local) ? local : [];
+  const out = server.slice();
+  const seen = new Set(server.map(ffLogEntryKey));
+  for (const e of local) {
+    const k = ffLogEntryKey(e);
+    if (!seen.has(k)) { out.push(e); seen.add(k); }
+  }
+  return out;
+}
+
+function ffMerge3(base, local, server) {
+  return {
+    queue: ffMergeList(base.queue, local.queue, server.queue),
+    service: ffMergeList(base.service, local.service, server.service),
+    log: ffMergeLog(server.log, local.log),
+  };
+}
 
 async function getSalonId() {
   // Multi-salon: when the user has chosen a salon (single membership auto-
@@ -192,6 +293,8 @@ function subscribe(salonId, locationId, opts = {}) {
   const isLocationSwitch = opts.reason !== 'connect' && opts.reason !== 'reconnect';
   if (isLocationSwitch) {
     _lastCloudLogLen = 0;
+    _lastCloudRev = 0;
+    _lastServerState = { queue: [], service: [], log: [] };
     try {
       localStorage.removeItem('ff_queues_v1');
       if (typeof document !== 'undefined' && typeof CustomEvent === 'function') {
@@ -223,8 +326,10 @@ function subscribe(salonId, locationId, opts = {}) {
           queue: localState.queue || [],
           service: localState.service || [],
           log: localState.log || [],
+          rev: (_lastCloudRev || 0) + 1,
           updatedAt: serverTimestamp()
-        }).catch((e) => console.warn("[QueueCloud] Initial write failed", e));
+        }).then(() => { _lastCloudRev = (_lastCloudRev || 0) + 1; })
+          .catch((e) => console.warn("[QueueCloud] Initial write failed", e));
       } else {
         if (!snapshotFromCache(snap) && typeof window !== "undefined") {
           window.__ff_queueCloudServerConfirmed = true;
@@ -253,12 +358,17 @@ function subscribe(salonId, locationId, opts = {}) {
     // an old mobile cache can resurrect an employee after the 4 AM cloud reset.
     if (_firstSnapshot && !cloudHasData && preserveRecentLocalWrite && localHasAnyData) {
       console.log("[QueueCloud] Cloud empty but local has data, pushing local", logTag);
+      // Base the new rev on THIS snapshot's rev (the doc already exists), so the
+      // compare-and-swap rule accepts the write.
+      const baseRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : 0;
       setDoc(ref, {
         queue: localState.queue || [],
         service: localState.service || [],
         log: localState.log || [],
+        rev: baseRev + 1,
         updatedAt: serverTimestamp()
-      }).catch((e) => console.warn("[QueueCloud] Push local failed", e));
+      }).then(() => { _lastCloudRev = baseRev + 1; })
+        .catch((e) => console.warn("[QueueCloud] Push local failed", e));
       _firstSnapshot = false;
       return;
     }
@@ -271,6 +381,12 @@ function subscribe(salonId, locationId, opts = {}) {
       // guard. Only server-confirmed snapshots count, so a stale local cache
       // can't lower the bar for itself.
       _lastCloudLogLen = log.length;
+      // Track the authoritative revision for optimistic concurrency. Legacy
+      // docs without a rev field are treated as rev 0 so the first write
+      // bootstraps it to 1.
+      _lastCloudRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : 0;
+      // Remember this authoritative state as the 3-way merge base (Phase B).
+      setLastServerState(queue, service, log);
       if (typeof window !== "undefined") {
         window.__ff_queueCloudServerConfirmed = true;
       }
@@ -353,9 +469,114 @@ function writeState() {
     const raw = localStorage.getItem('ff_queues_v1');
     if (raw) payload.queueSettings = JSON.parse(raw);
   } catch (_) {}
-  const commit = () => setDoc(ref, payload).catch((e) => {
-    console.warn("[QueueCloud] write failed", e);
-  });
+  // Optimistic-concurrency commit. rev is stamped at the moment of the write
+  // from the freshest tracked revision (snapshots + guard reads keep it
+  // current), so the security rule serializes concurrent writers. On a stale-rev
+  // rejection (permission-denied) we do NOT blindly overwrite — Phase B replays
+  // OUR intent on top of the fresh server state via a 3-way merge and retries,
+  // so the device that "lost" the race keeps its change (no data loss).
+  const isPermissionDenied = (e) => {
+    const code = e && (e.code || e.name);
+    return code === "permission-denied" || code === "PERMISSION_DENIED";
+  };
+  const isExplicitIntent = hasExplicitEmptyOverwriteIntent()
+    || reason === "manual-reset"
+    || reason === "auto-reset"
+    || reason === "clear-history"
+    || reason === "retention-prune";
+
+  // Attempt the write with the given body at rev = baseRev + 1.
+  const writeAt = (body, baseRev) => setDoc(ref, Object.assign({}, body, { rev: baseRev + 1 }))
+    .then(() => {
+      if (_lastCloudRev <= baseRev) _lastCloudRev = baseRev + 1;
+      // Our write is now the authoritative state — make it the next merge base.
+      setLastServerState(body.queue || [], body.service || [], body.log || []);
+      _lastCloudLogLen = Array.isArray(body.log) ? body.log.length : _lastCloudLogLen;
+    });
+
+  const commit = (attempt) => {
+    attempt = attempt || 0;
+    const baseRev = _lastCloudRev;
+    return writeAt(payload, baseRev).catch((e) => {
+      if (!isPermissionDenied(e)) {
+        console.warn("[QueueCloud] write failed", e);
+        return;
+      }
+      // Stale rev: another device advanced the queue between our read and write.
+      if (attempt >= 5) {
+        console.warn("[QueueCloud] merge retries exhausted — pulling server state");
+        return pullServerInto();
+      }
+      return getDocFromServer(ref).then((snap) => {
+        const data = snap.exists() ? (snap.data() || {}) : {};
+        const serverRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : 0;
+        const serverState = {
+          queue: Array.isArray(data.queue) ? data.queue : [],
+          service: Array.isArray(data.service) ? data.service : [],
+          log: Array.isArray(data.log) ? data.log : [],
+        };
+        _lastCloudRev = serverRev;
+        _lastCloudLogLen = serverState.log.length;
+
+        // For explicit reset/clear/seed intent there is no "merge" — the intent
+        // is to replace, so just retry on top of the fresh rev.
+        if (isExplicitIntent) {
+          return writeAt(payload, serverRev).catch((e2) => {
+            if (isPermissionDenied(e2) && attempt < 5) return commit(attempt + 1);
+            return pullServerInto(serverState, serverRev);
+          });
+        }
+
+        // Otherwise replay OUR intent on top of the server state (no data loss).
+        const localNow = _getState ? _getState() : { queue: [], service: [], log: [] };
+        const merged = ffMerge3(_lastServerState, localNow, serverState);
+        // Reflect the merged result locally so the UI shows the union immediately.
+        if (typeof _applyState === "function") {
+          _applyState(merged.queue, merged.service, merged.log);
+          if (typeof _onLogChange === "function") _onLogChange();
+        }
+        const mergedBody = Object.assign({}, payload, {
+          queue: merged.queue,
+          service: merged.service,
+          log: merged.log,
+        });
+        return writeAt(mergedBody, serverRev).catch((e2) => {
+          if (isPermissionDenied(e2)) {
+            // Another write landed during our merge — try again with fresh state.
+            return commit(attempt + 1);
+          }
+          console.warn("[QueueCloud] merged write failed", e2);
+        });
+      }).catch((e2) => {
+        console.warn("[QueueCloud] conflict resolution read failed", e2);
+      });
+    });
+  };
+
+  // Fallback: adopt the authoritative server state locally (used when retries
+  // are exhausted). Never loses server data; our unmerged change is dropped only
+  // as a last resort after 5 failed merge attempts (extremely unlikely).
+  const pullServerInto = (serverState, serverRev) => {
+    const apply = (st, rev) => {
+      if (typeof rev === "number") _lastCloudRev = rev;
+      _lastCloudLogLen = Array.isArray(st.log) ? st.log.length : _lastCloudLogLen;
+      setLastServerState(st.queue || [], st.service || [], st.log || []);
+      if (typeof _applyState === "function") {
+        _applyState(st.queue || [], st.service || [], st.log || []);
+        if (typeof _onLogChange === "function") _onLogChange();
+      }
+    };
+    if (serverState) { apply(serverState, serverRev); return Promise.resolve(); }
+    return getDocFromServer(ref).then((snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data() || {};
+      apply({
+        queue: Array.isArray(data.queue) ? data.queue : [],
+        service: Array.isArray(data.service) ? data.service : [],
+        log: Array.isArray(data.log) ? data.log : [],
+      }, (typeof data.rev === "number" && data.rev >= 0) ? data.rev : _lastCloudRev);
+    }).catch((e2) => console.warn("[QueueCloud] post-reject pull failed", e2));
+  };
 
   // Stale-device guard (pre-sync): until this device has applied the FIRST cloud
   // snapshot for the active branch, its local queue may be stale — e.g. a device
@@ -368,7 +589,9 @@ function writeState() {
   if (_firstSnapshot && !hasExplicitEmptyOverwriteIntent()) {
     return getDocFromServer(ref).then((snap) => {
       if (!snap.exists()) return commit();
-      const cloudCounts = stateCounts(snap.data() || {});
+      const preData = snap.data() || {};
+      _lastCloudRev = (typeof preData.rev === "number" && preData.rev >= 0) ? preData.rev : _lastCloudRev;
+      const cloudCounts = stateCounts(preData);
       const cloudHasData =
         cloudCounts.queue + cloudCounts.service + cloudCounts.log > 0;
       if (!cloudHasData) return commit();
@@ -381,11 +604,11 @@ function writeState() {
       });
       if (typeof _applyState === "function") {
         const data = snap.data() || {};
-        _applyState(
-          Array.isArray(data.queue) ? data.queue : [],
-          Array.isArray(data.service) ? data.service : [],
-          Array.isArray(data.log) ? data.log : []
-        );
+        const sq = Array.isArray(data.queue) ? data.queue : [];
+        const ss = Array.isArray(data.service) ? data.service : [];
+        const sl = Array.isArray(data.log) ? data.log : [];
+        setLastServerState(sq, ss, sl);
+        _applyState(sq, ss, sl);
         if (typeof _onLogChange === "function") _onLogChange();
       }
       return Promise.resolve();
@@ -411,6 +634,7 @@ function writeState() {
       return getDocFromServer(ref).then((snap) => {
         if (!snap.exists()) return commit();
         const data = snap.data() || {};
+        _lastCloudRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : _lastCloudRev;
         const cloudLogLen = Array.isArray(data.log) ? data.log.length : 0;
         const cc = stateCounts(data);
         const cloudHasData = cc.queue + cc.service + cc.log > 0;
@@ -424,11 +648,11 @@ function writeState() {
           });
           _lastCloudLogLen = cloudLogLen;
           if (typeof _applyState === "function") {
-            _applyState(
-              Array.isArray(data.queue) ? data.queue : [],
-              Array.isArray(data.service) ? data.service : [],
-              Array.isArray(data.log) ? data.log : []
-            );
+            const sq = Array.isArray(data.queue) ? data.queue : [];
+            const ss = Array.isArray(data.service) ? data.service : [];
+            const sl = Array.isArray(data.log) ? data.log : [];
+            setLastServerState(sq, ss, sl);
+            _applyState(sq, ss, sl);
             if (typeof _onLogChange === "function") _onLogChange();
           }
           return Promise.resolve();
@@ -446,7 +670,9 @@ function writeState() {
   // local cache. Legitimate reset flows set __ff_allow_empty_queue_cloud_write_until.
   return getDocFromServer(ref).then((snap) => {
     if (!snap.exists()) return commit();
-    const cloudCounts = stateCounts(snap.data() || {});
+    const emptyData = snap.data() || {};
+    _lastCloudRev = (typeof emptyData.rev === "number" && emptyData.rev >= 0) ? emptyData.rev : _lastCloudRev;
+    const cloudCounts = stateCounts(emptyData);
     const cloudHasData =
       cloudCounts.queue + cloudCounts.service + cloudCounts.log > 0;
     if (!cloudHasData) return commit();
@@ -459,12 +685,11 @@ function writeState() {
       cloudCounts,
     });
     if (typeof _applyState === "function") {
-      const data = snap.data() || {};
-      _applyState(
-        Array.isArray(data.queue) ? data.queue : [],
-        Array.isArray(data.service) ? data.service : [],
-        Array.isArray(data.log) ? data.log : []
-      );
+      const sq = Array.isArray(emptyData.queue) ? emptyData.queue : [];
+      const ss = Array.isArray(emptyData.service) ? emptyData.service : [];
+      const sl = Array.isArray(emptyData.log) ? emptyData.log : [];
+      setLastServerState(sq, ss, sl);
+      _applyState(sq, ss, sl);
       if (typeof _onLogChange === "function") _onLogChange();
     }
     return Promise.resolve();
@@ -603,6 +828,9 @@ export function queueCloudRefresh() {
       const queue = Array.isArray(data.queue) ? data.queue : [];
       const service = Array.isArray(data.service) ? data.service : [];
       const log = Array.isArray(data.log) ? data.log : [];
+      _lastCloudRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : _lastCloudRev;
+      _lastCloudLogLen = log.length;
+      setLastServerState(queue, service, log);
       _applyState(queue, service, log);
       if (typeof _onLogChange === "function") _onLogChange();
       // Apply queue settings from cloud — but never clobber a just-made local

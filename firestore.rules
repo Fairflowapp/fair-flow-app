@@ -1803,12 +1803,49 @@ service cloud.firestore {
           );
       }
 
+      /**
+       * A settings-only merge write (queueCloudWriteSettings) touches just the
+       * queueSettings blob (Auto Reset + Location Restriction) and updatedAt. It
+       * intentionally does NOT bump rev, so it is exempt from the compare-and-swap
+       * check below.
+       */
+      function queueIsSettingsOnlyWrite() {
+        return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'queueSettings',
+          'updatedAt'
+        ]);
+      }
+
+      /**
+       * Optimistic concurrency (compare-and-swap) enforced by the server. Every
+       * full-state write must advance rev by EXACTLY one. Two devices that both
+       * read rev N and try to write rev N+1 are serialized by Firestore: the
+       * first commits (doc is now N+1), the second's rule check sees resource
+       * rev already N+1 and needs N+2, so it is REJECTED — the stale device can
+       * never silently overwrite the live queue. No client transaction is used,
+       * so the old runTransaction 400s cannot recur.
+       *
+       * Carve-outs:
+       *   - legacy docs that have no rev yet (first write bootstraps it);
+       *   - settings-only merge writes (rev intentionally unchanged).
+       */
+      function queueRevCompareAndSwap() {
+        return !('rev' in request.resource.data)   // old client (pre-rev) — still covered by the history-shrink guard during rollout
+          || !('rev' in resource.data)             // legacy doc with no rev yet (first write bootstraps it)
+          || queueIsSettingsOnlyWrite()            // settings-only merge intentionally leaves rev unchanged
+          || (
+            request.resource.data.rev is number
+            && request.resource.data.rev == resource.data.rev + 1
+          );
+      }
+
       allow read: if belongsToSalon(salonId);
       allow create: if belongsToSalon(salonId)
         && userCanWriteAtLocation(salonId, docId);
       allow update: if belongsToSalon(salonId)
         && userCanWriteAtLocation(salonId, docId)
-        && queueHistoryNotRolledBack();
+        && queueHistoryNotRolledBack()
+        && queueRevCompareAndSwap();
       allow delete: if belongsToSalon(salonId)
         && userCanWriteAtLocation(salonId, docId);
     }
