@@ -4035,6 +4035,20 @@ function enforceHistoryRetention() {
     }
 
     localStorage.setItem('ffv24_log', JSON.stringify(filtered));
+
+    // If retention actually removed entries, the next cloud write will carry a
+    // SHORTER history log. The server-side stale-overwrite guard blocks history
+    // from shrinking unless an explicit intent is declared, so flag this as a
+    // legitimate prune (cleared on the next tick once the write consumes it).
+    // Erring toward declaring intent avoids ever falsely blocking a real write.
+    if (filtered.length < raw.length && typeof window !== 'undefined') {
+      window.__ff_queue_cloud_write_reason = 'retention-prune';
+      setTimeout(function () {
+        if (window.__ff_queue_cloud_write_reason === 'retention-prune') {
+          window.__ff_queue_cloud_write_reason = '';
+        }
+      }, 0);
+    }
   } catch (err) {
     console.error('[HISTORY RETENTION] failed', err);
   }

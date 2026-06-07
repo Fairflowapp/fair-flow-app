@@ -1770,8 +1770,46 @@ service cloud.firestore {
     // any branch they navigate to, but writes are gated by userCanWriteAtLocation
     // so a technician at branch A cannot tamper with branch B's state.
     match /salons/{salonId}/queueState/{docId} {
+      /**
+       * Server-side stale-overwrite guard ("Option A" enforced authoritatively,
+       * not just on the client). The history `log` array is append-only in
+       * normal operation, so a write that SHRINKS it is the signature of a
+       * stale device (e.g. a freshly-opened phone holding an old cache) about
+       * to clobber a live queue. We block exactly that case.
+       *
+       * Allowed even when the log shrinks:
+       *   - growing or equal-length writes (every normal join/serve/finish, and
+       *     auto/manual reset which keep the log untouched);
+       *   - writes that are not the full-state shape (e.g. the settings-only
+       *     merge write keeps the existing log, so size is unchanged anyway);
+       *   - writes that declare an explicit intent to shrink history:
+       *       manual-reset / auto-reset / clear-history / retention-prune.
+       *
+       * This is enforced on UPDATE only; CREATE has no prior state to protect.
+       */
+      function queueHistoryNotRolledBack() {
+        return !(resource.data.keys().hasAny(['log']))
+          || !(resource.data.log is list)
+          || !(request.resource.data.log is list)
+          || request.resource.data.log.size() >= resource.data.log.size()
+          || (
+            request.resource.data.lastUpdateReason is string
+            && request.resource.data.lastUpdateReason in [
+              'manual-reset',
+              'auto-reset',
+              'clear-history',
+              'retention-prune'
+            ]
+          );
+      }
+
       allow read: if belongsToSalon(salonId);
-      allow write: if belongsToSalon(salonId)
+      allow create: if belongsToSalon(salonId)
+        && userCanWriteAtLocation(salonId, docId);
+      allow update: if belongsToSalon(salonId)
+        && userCanWriteAtLocation(salonId, docId)
+        && queueHistoryNotRolledBack();
+      allow delete: if belongsToSalon(salonId)
         && userCanWriteAtLocation(salonId, docId);
     }
 

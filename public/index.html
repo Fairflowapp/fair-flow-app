@@ -8285,7 +8285,7 @@ dialog footer button, .code-dialog footer button {
       <div id="queueControls" style="display:flex;gap:8px;align-items:center;">
         <button id="reorderBtn" class="queue-action-btn queue-action-btn--black" style="display:inline-flex;align-items:center;height:36px;padding:0 14px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">Reorder</button>
 
-        <button id="manageQueueBtn" style="display:none;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;" title="Manage Queue" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
+        <button id="manageQueueBtn" style="display:none;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;" title="Manage Queue" onclick="if(typeof openManageQueue==='function'){openManageQueue();}" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         </button>
 
@@ -8349,23 +8349,23 @@ dialog footer button, .code-dialog footer button {
           <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
             <label style="display:flex;align-items:center;gap:10px;cursor:pointer;min-width:210px;">
               <span class="staff-permission-toggle" style="flex:0 0 auto;">
-                <input type="checkbox" id="manageQueueAutoResetEnabled">
+                <input type="checkbox" id="manageQueueAutoResetEnabled" onchange="if(typeof ffOnAutoResetEnabledChange==='function'){ffOnAutoResetEnabledChange();}">
                 <span class="staff-permission-toggle-slider"></span>
               </span>
               <span style="font-size:12px;font-weight:400;color:#111827;">Enable queue auto reset</span>
             </label>
 
-            <div id="manageQueueAutoResetOptions" style="display:none;align-items:center;gap:14px;flex-wrap:wrap;">
+            <div id="manageQueueAutoResetOptions" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
               <!-- Reset time input -->
               <div style="display:flex;align-items:center;gap:8px;">
                 <label style="font-size:12px;font-weight:400;color:#111827;">Reset time:</label>
-                <input type="time" id="manageQueueAutoResetTime" value="04:00" style="height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
+                <input type="time" id="manageQueueAutoResetTime" value="04:00" onchange="if(typeof ffOnAutoResetTimeChange==='function'){ffOnAutoResetTimeChange();}" style="height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
               </div>
 
               <!-- Reset even if people are In Service switch -->
               <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
                 <span class="staff-permission-toggle" style="flex:0 0 auto;">
-                  <input type="checkbox" id="manageQueueAutoResetForce">
+                  <input type="checkbox" id="manageQueueAutoResetForce" onchange="if(typeof ffOnAutoResetForceChange==='function'){ffOnAutoResetForceChange();}">
                   <span class="staff-permission-toggle-slider"></span>
                 </span>
                 <span style="font-size:12px;font-weight:400;color:#111827;">Reset even if people are In Service</span>
@@ -8385,7 +8385,7 @@ dialog footer button, .code-dialog footer button {
           </div>
           <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
             <span class="staff-permission-toggle" style="flex:0 0 auto;">
-              <input type="checkbox" id="manageQueueGeoFenceEnabled">
+              <input type="checkbox" id="manageQueueGeoFenceEnabled" onchange="if(typeof ffOnQueueGeoFenceEnabledChange==='function'){ffOnQueueGeoFenceEnabledChange(this);}">
               <span class="staff-permission-toggle-slider"></span>
             </span>
             <span style="font-size:12px;font-weight:400;color:#111827;">Enable location restriction for Queue actions</span>
@@ -20220,7 +20220,105 @@ function saveQueueAutoResetSettings(autoReset) {
 
   // Clear lastAutoResetDate when settings change so next scheduled check can run
   clearQueueLastAutoResetDate();
+
+  // Persist immediately to the cloud (dedicated merge write) and protect this
+  // (see ffPersistAutoResetToCloud below)
+  ffPersistAutoResetToCloud();
 }
+
+// Cloud-persist the current queue settings (ff_queues_v1: Auto Reset + Location
+// Restriction) and open a short grace window that protects this local edit from
+// being reverted by an in-flight snapshot still carrying the previous value
+// (the "toggle flips ON then OFF a second later" bug). Shared by the Auto Reset
+// and Location Restriction inline handlers so saving never depends on the
+// fragile addEventListener wiring.
+function ffPersistQueueSettingsToCloud(label) {
+  const what = label || 'Settings';
+  try {
+    window.__ff_queueSettingsLocalEditUntil = Date.now() + 10000;
+    if (typeof window.queueCloudWriteSettings === 'function') {
+      Promise.resolve(window.queueCloudWriteSettings()).then(function (res) {
+        if (res && res.ok) {
+          if (typeof window.showToast === 'function') window.showToast(what + ' saved', 2000);
+        } else {
+          const reason = (res && res.reason) || 'unknown';
+          console.warn('[QueueSettings] cloud save did not land:', res);
+          if (typeof window.showToast === 'function') window.showToast(what + ' NOT saved to cloud (' + reason + ')', 5000);
+        }
+      });
+    } else {
+      console.warn('[QueueSettings] queueCloudWriteSettings not available yet');
+      if (typeof window.showToast === 'function') window.showToast('Cloud not ready — saved locally only', 4000);
+    }
+  } catch (_) {}
+}
+// Back-compat alias.
+function ffPersistAutoResetToCloud() { ffPersistQueueSettingsToCloud('Auto-reset settings'); }
+
+// Inline input handlers for the three Auto Reset controls. These are wired
+// directly in the HTML (onchange=...) so saving NEVER depends on the
+// addEventListener wiring in initManageQueueButtons attaching in time — that
+// attach race is exactly why the toggle appeared to do nothing / reverted.
+function ffOnAutoResetEnabledChange() {
+  const el = document.getElementById('manageQueueAutoResetEnabled');
+  if (!el) return;
+  const autoReset = getQueueAutoResetSettings();
+  autoReset.enabled = el.checked === true;
+  saveQueueAutoResetSettings(autoReset);
+  renderManageQueueAutoResetSettings();
+}
+window.ffOnAutoResetEnabledChange = ffOnAutoResetEnabledChange;
+
+function ffOnAutoResetTimeChange() {
+  const el = document.getElementById('manageQueueAutoResetTime');
+  if (!el) return;
+  const autoReset = getQueueAutoResetSettings();
+  autoReset.time = el.value || '04:00';
+  saveQueueAutoResetSettings(autoReset);
+  // If the configured time already passed today, mark today as "already reset"
+  // so we don't trigger an immediate unintended reset.
+  const now = new Date();
+  const todayKey = now.getFullYear() + '-' +
+    String(now.getMonth() + 1).padStart(2, '0') + '-' +
+    String(now.getDate()).padStart(2, '0');
+  const minutesNow = now.getHours() * 60 + now.getMinutes();
+  const parts = (autoReset.time || '04:00').split(':');
+  const minutesReset = parseInt(parts[0] || 0) * 60 + parseInt(parts[1] || 0);
+  if (minutesNow >= minutesReset) {
+    const runtime = getQueueRuntime();
+    if (runtime.lastAutoResetDate !== todayKey) {
+      runtime.lastAutoResetDate = todayKey;
+      setQueueRuntime(runtime);
+    }
+  }
+}
+window.ffOnAutoResetTimeChange = ffOnAutoResetTimeChange;
+
+function ffOnAutoResetForceChange() {
+  const el = document.getElementById('manageQueueAutoResetForce');
+  if (!el) return;
+  const autoReset = getQueueAutoResetSettings();
+  autoReset.resetWhileInService = el.checked === true;
+  saveQueueAutoResetSettings(autoReset);
+}
+window.ffOnAutoResetForceChange = ffOnAutoResetForceChange;
+
+// Inline handler for the Location Restriction toggle. Mirrors the Auto Reset
+// handlers so the save (incl. cloud persistence) never depends on the fragile
+// addEventListener wiring. saveQueueGeoFenceSettings now pushes to the cloud.
+function ffOnQueueGeoFenceEnabledChange(el) {
+  const input = el || document.getElementById('manageQueueGeoFenceEnabled');
+  if (!input) return;
+  const queueGeoFence = getQueueGeoFenceSettings();
+  queueGeoFence.enforceQueue = input.checked === true;
+  const radiusEl = document.getElementById('manageQueueGeoFenceRadius');
+  queueGeoFence.allowedRadiusMeters = sanitizeQueueGeoFenceRadius(
+    (radiusEl && radiusEl.value) || queueGeoFence.allowedRadiusMeters
+  );
+  saveQueueGeoFenceSettings(queueGeoFence);
+  if (typeof renderManageQueueGeoFenceSettings === 'function') renderManageQueueGeoFenceSettings();
+}
+window.ffOnQueueGeoFenceEnabledChange = ffOnQueueGeoFenceEnabledChange;
 
 function getDefaultQueueGeoFenceSettings() {
   return {
@@ -20308,6 +20406,12 @@ function saveQueueGeoFenceSettings(queueGeoFence) {
     updatedAt: Number.isFinite(Number(queueGeoFence?.updatedAt)) ? Number(queueGeoFence.updatedAt) : current.updatedAt
   };
   setQueuesData(queues);
+  // Persist to the cloud (same path as Auto Reset) so the Location Restriction
+  // toggle/radius survive refresh and don't get reverted by an in-flight
+  // snapshot. ff_queues_v1 carries queueGeoFence, so the shared writer covers it.
+  if (typeof ffPersistQueueSettingsToCloud === 'function') {
+    ffPersistQueueSettingsToCloud('Location settings');
+  }
 }
 
 function hasSavedQueueGeoFenceLocation(queueGeoFence) {
@@ -20389,8 +20493,15 @@ function renderManageQueueAutoResetSettings() {
   const optionsEl = document.getElementById('manageQueueAutoResetOptions');
   const timeEl = document.getElementById('manageQueueAutoResetTime');
   const forceEl = document.getElementById('manageQueueAutoResetForce');
+  // Reset time + "reset even if in service" appear ONLY while the master Auto
+  // Reset toggle is on (the original, expected behaviour). Persistence is now
+  // reliable (settings are stored in the cloud queueState doc and self-heal),
+  // so when auto-reset is enabled this block shows correctly on open.
   const enabled = enabledEl && enabledEl.checked === true;
-  if (optionsEl) optionsEl.style.display = enabled ? 'flex' : 'none';
+  if (optionsEl) {
+    optionsEl.style.display = enabled ? 'flex' : 'none';
+    optionsEl.style.opacity = '1';
+  }
   if (timeEl) timeEl.disabled = !enabled;
   if (forceEl) forceEl.disabled = !enabled;
 }
@@ -20558,76 +20669,16 @@ function initManageQueueButtons() {
     };
   }
   
-  // Auto Reset input handlers (save to new structure)
-  const enabledEl = document.getElementById('manageQueueAutoResetEnabled');
-  const timeEl = document.getElementById('manageQueueAutoResetTime');
-  const forceEl = document.getElementById('manageQueueAutoResetForce');
-  const geoFenceEnabledEl = document.getElementById('manageQueueGeoFenceEnabled');
+  // Auto Reset input handlers are wired INLINE in the HTML (onchange=
+  // ffOnAutoReset*Change) so saving never depends on this init running. Do not
+  // re-attach them here or every change would save twice (double cloud write).
   const geoFenceRadiusEl = document.getElementById('manageQueueGeoFenceRadius');
   const geoFenceSetLocationBtn = document.getElementById('manageQueueSetSalonLocationBtn');
-  
-  if (enabledEl && !enabledEl.hasAttribute('data-handler-attached')) {
-    enabledEl.setAttribute('data-handler-attached', 'true');
-    enabledEl.addEventListener('change', function() {
-      const autoReset = getQueueAutoResetSettings();
-      autoReset.enabled = enabledEl.checked === true;
-      saveQueueAutoResetSettings(autoReset);
-      renderManageQueueAutoResetSettings();
-    });
-  }
-  
-  if (timeEl && !timeEl.hasAttribute('data-handler-attached')) {
-    timeEl.setAttribute('data-handler-attached', 'true');
-    // Only save on 'change' (user finished editing), NOT on 'input' (every keystroke)
-    timeEl.addEventListener('change', function() {
-      const autoReset = getQueueAutoResetSettings();
-      autoReset.time = timeEl.value || '04:00';
-      saveQueueAutoResetSettings(autoReset);
-      // If the configured time has already passed today, mark today as "already reset"
-      // so we don't trigger an immediate unintended reset
-      const now = new Date();
-      const todayKey = now.getFullYear() + '-' +
-        String(now.getMonth() + 1).padStart(2, '0') + '-' +
-        String(now.getDate()).padStart(2, '0');
-      const minutesNow = now.getHours() * 60 + now.getMinutes();
-      const minutesReset = (function() {
-        const t = autoReset.time || '04:00';
-        const parts = t.split(':');
-        return parseInt(parts[0] || 0) * 60 + parseInt(parts[1] || 0);
-      })();
-      if (minutesNow >= minutesReset) {
-        const runtime = getQueueRuntime();
-        if (runtime.lastAutoResetDate !== todayKey) {
-          runtime.lastAutoResetDate = todayKey;
-          setQueueRuntime(runtime);
-        }
-      }
-    });
-  }
-  
-  if (forceEl && !forceEl.hasAttribute('data-handler-attached')) {
-    forceEl.setAttribute('data-handler-attached', 'true');
-    forceEl.addEventListener('change', function() {
-      const autoReset = getQueueAutoResetSettings();
-      autoReset.resetWhileInService = forceEl.checked === true;
-      saveQueueAutoResetSettings(autoReset);
-    });
-  }
 
-  if (geoFenceEnabledEl && !geoFenceEnabledEl.hasAttribute('data-handler-attached')) {
-    geoFenceEnabledEl.setAttribute('data-handler-attached', 'true');
-    geoFenceEnabledEl.addEventListener('change', function() {
-      const queueGeoFence = getQueueGeoFenceSettings();
-      // Shortcut path (Queue settings). Writes the new per-feature flag
-      // directly - the setter keeps the legacy `enabled` alias in sync.
-      queueGeoFence.enforceQueue = geoFenceEnabledEl.checked === true;
-      queueGeoFence.allowedRadiusMeters = sanitizeQueueGeoFenceRadius(
-        geoFenceRadiusEl?.value || queueGeoFence.allowedRadiusMeters
-      );
-      saveQueueGeoFenceSettings(queueGeoFence);
-      renderManageQueueGeoFenceSettings();
-    });
-  }
+  // NOTE: the Location Restriction toggle is wired via an inline onchange
+  // (ffOnQueueGeoFenceEnabledChange) for the same reason as Auto Reset - the
+  // addEventListener path could fail to attach. Cloud persistence now lives in
+  // saveQueueGeoFenceSettings, so no addEventListener is needed here.
 
   if (geoFenceRadiusEl && !geoFenceRadiusEl.hasAttribute('data-handler-attached')) {
     geoFenceRadiusEl.setAttribute('data-handler-attached', 'true');
@@ -25185,7 +25236,7 @@ $("#exportLog").addEventListener("click", e=>{
   URL.revokeObjectURL(url);
 });
 
-$("#clearLog").addEventListener("click", e=>{ e.preventDefault(); if(confirm("Clear history?")){ log=[]; save(); openLog(); } });
+$("#clearLog").addEventListener("click", e=>{ e.preventDefault(); if(confirm("Clear history?")){ log=[]; window.__ff_queue_cloud_write_reason = 'clear-history'; save(); setTimeout(()=>{ if(window.__ff_queue_cloud_write_reason === 'clear-history'){ window.__ff_queue_cloud_write_reason = ''; } }, 0); openLog(); } });
 
 
 
@@ -26039,8 +26090,22 @@ function clearHistory() {
   // Mirror the change to this location's cloud queueState doc so other
   // devices/users see the clear too. queueCloudWrite only writes to the
   // currently-active location doc - exactly what we want.
+  // Declare explicit clear-history intent so the server-side stale-overwrite
+  // guard (which blocks history from shrinking) lets this legitimate shrink
+  // through.
   if (typeof window.queueCloudWrite === 'function') {
-    try { window.queueCloudWrite(); } catch (e) { console.warn('[History] cloud sync after clear failed', e); }
+    try {
+      window.__ff_queue_cloud_write_reason = 'clear-history';
+      window.queueCloudWrite();
+    } catch (e) {
+      console.warn('[History] cloud sync after clear failed', e);
+    } finally {
+      setTimeout(() => {
+        if (window.__ff_queue_cloud_write_reason === 'clear-history') {
+          window.__ff_queue_cloud_write_reason = '';
+        }
+      }, 0);
+    }
   }
 
   renderHistory();
@@ -59017,7 +59082,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
-        { src: "/queue-cloud.js?v=20260606_morning_autoreset", type: "module", delay: 1350 },
+        { src: "/queue-cloud.js?v=20260607_location_persist", type: "module", delay: 1350 },
         { src: "/tickets.js?v=20260603_staff_services_tab", type: "module", delay: 1400 },
         { src: "/tasks-cloud.js?v=20260603_return_task_cloud_guard", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },

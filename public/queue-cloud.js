@@ -24,6 +24,11 @@ let _unsubscribe = null;
 let _applyState = null;
 let _getState = null;
 let _onLogChange = null;
+// History length of the last AUTHORITATIVE (server-confirmed) cloud snapshot for
+// the active branch. Used by the stale-overwrite guard in writeState: if our
+// local history is shorter than this, another device advanced the queue and we
+// must not roll it back. Reset to 0 on a real location switch.
+let _lastCloudLogLen = 0;
 
 async function getSalonId() {
   // Multi-salon: when the user has chosen a salon (single membership auto-
@@ -186,6 +191,7 @@ function subscribe(salonId, locationId, opts = {}) {
   // removes them when it doesn't), so correctness is preserved without flicker.
   const isLocationSwitch = opts.reason !== 'connect' && opts.reason !== 'reconnect';
   if (isLocationSwitch) {
+    _lastCloudLogLen = 0;
     try {
       localStorage.removeItem('ff_queues_v1');
       if (typeof document !== 'undefined' && typeof CustomEvent === 'function') {
@@ -260,8 +266,14 @@ function subscribe(salonId, locationId, opts = {}) {
     _firstSnapshot = false;
     // Mark that an authoritative (non-cache) snapshot has been seen so the app
     // may now accept an empty cloud state as real (e.g. a genuine reset).
-    if (!snapshotFromCache(snap) && typeof window !== "undefined") {
-      window.__ff_queueCloudServerConfirmed = true;
+    if (!snapshotFromCache(snap)) {
+      // Track the authoritative cloud history length for the stale-overwrite
+      // guard. Only server-confirmed snapshots count, so a stale local cache
+      // can't lower the bar for itself.
+      _lastCloudLogLen = log.length;
+      if (typeof window !== "undefined") {
+        window.__ff_queueCloudServerConfirmed = true;
+      }
     }
     // Expose when the cloud queue was last modified so the morning auto-reset
     // can tell "yesterday's leftover queue" (safe to clear on fresh open) from
@@ -278,15 +290,39 @@ function subscribe(salonId, locationId, opts = {}) {
     if (typeof _onLogChange === "function") _onLogChange();
     // Apply queue settings (ff_queues_v1) from cloud — each location has its
     // own queueState doc, so these settings are already per-location server-side.
-    if (data.queueSettings && typeof data.queueSettings === 'object') {
+    // BUT: if the user just edited the settings locally (e.g. toggled Auto
+    // Reset), an in-flight snapshot may still carry the PREVIOUS value. Applying
+    // it would revert the toggle back (the "toggle flips ON then OFF" bug). So
+    // during a short local-edit grace window we keep the local value and let the
+    // dedicated merge write (queueCloudWriteSettings) land; the next snapshot
+    // after the window will already reflect the new value.
+    const localSettingsEditActive = typeof window !== "undefined" &&
+      typeof window.__ff_queueSettingsLocalEditUntil === "number" &&
+      Date.now() < window.__ff_queueSettingsLocalEditUntil;
+    if (localSettingsEditActive) {
+      console.log("[QueueCloud] Skipped queueSettings from cloud (recent local edit)", logTag);
+    } else if (data.queueSettings && typeof data.queueSettings === 'object') {
       try {
         localStorage.setItem('ff_queues_v1', JSON.stringify(data.queueSettings));
         console.log("[QueueCloud] Applied queueSettings from cloud", logTag);
       } catch (_) {}
     } else {
-      // Cloud doc has no queueSettings for this location — make sure we don't
-      // keep the previous location's settings in localStorage.
-      try { localStorage.removeItem('ff_queues_v1'); } catch (_) {}
+      // Cloud doc has no queueSettings for THIS branch. Do NOT delete the local
+      // settings here. A real location switch already clears ff_queues_v1 before
+      // subscribing (see above), so any local settings present now belong to
+      // THIS branch and simply haven't been persisted to the cloud yet (e.g. the
+      // dedicated settings write raced or hasn't run). Deleting them here is
+      // exactly what made the Auto Reset toggle revert to OFF on every refresh.
+      // Instead, self-heal by pushing the local settings up to the cloud.
+      let localSettings = null;
+      try {
+        const raw = localStorage.getItem('ff_queues_v1');
+        if (raw) localSettings = JSON.parse(raw);
+      } catch (_) {}
+      if (localSettings && typeof localSettings === 'object') {
+        console.log("[QueueCloud] Cloud missing queueSettings — healing from local cache", logTag);
+        try { queueCloudWriteSettings(); } catch (_) {}
+      }
     }
     if (typeof document !== 'undefined' && typeof CustomEvent === 'function') {
       try {
@@ -358,7 +394,53 @@ function writeState() {
     });
   }
 
-  if (!localEmpty || hasExplicitEmptyOverwriteIntent()) return commit();
+  if (hasExplicitEmptyOverwriteIntent()) return commit();
+
+  // ── Stale-overwrite guard (Option A, non-transactional) ───────────────────
+  // For a NON-empty local queue: if the last authoritative cloud snapshot we
+  // saw had MORE history than we currently hold, another device has already
+  // advanced this branch and our write would roll it back (an old/backgrounded
+  // phone clobbering the live queue). Confirm against the server and, if the
+  // cloud is genuinely ahead, pull it instead of overwriting. The common case
+  // (we are current or ahead) takes the fast path with NO extra read, so normal
+  // queue flow keeps full speed. No transaction is used, so there is no risk of
+  // the commit-400 failures the earlier transactional attempt caused.
+  if (!localEmpty) {
+    const localLogLen = Array.isArray(state.log) ? state.log.length : 0;
+    if (_lastCloudLogLen > localLogLen) {
+      return getDocFromServer(ref).then((snap) => {
+        if (!snap.exists()) return commit();
+        const data = snap.data() || {};
+        const cloudLogLen = Array.isArray(data.log) ? data.log.length : 0;
+        const cc = stateCounts(data);
+        const cloudHasData = cc.queue + cc.service + cc.log > 0;
+        if (cloudHasData && cloudLogLen > localLogLen) {
+          console.warn("[QueueCloud] blocked stale overwrite (cloud history ahead)", {
+            salonId: _salonId,
+            locationId: _locationId || QUEUE_STATE_DEFAULT,
+            reason,
+            localLogLen,
+            cloudLogLen,
+          });
+          _lastCloudLogLen = cloudLogLen;
+          if (typeof _applyState === "function") {
+            _applyState(
+              Array.isArray(data.queue) ? data.queue : [],
+              Array.isArray(data.service) ? data.service : [],
+              Array.isArray(data.log) ? data.log : []
+            );
+            if (typeof _onLogChange === "function") _onLogChange();
+          }
+          return Promise.resolve();
+        }
+        return commit();
+      }).catch((e) => {
+        console.warn("[QueueCloud] stale guard read failed; committing local", e);
+        return commit();
+      });
+    }
+    return commit();
+  }
 
   // Guard against stale tabs/kiosks overwriting a live queue with an all-empty
   // local cache. Legitimate reset flows set __ff_allow_empty_queue_cloud_write_until.
@@ -461,19 +543,39 @@ export function queueCloudWrite() {
  * Reset toggle revert to OFF on the next load. A dedicated merge write always
  * lands, regardless of queue contents.
  */
-export function queueCloudWriteSettings() {
-  if (!_salonId) return Promise.resolve();
+export async function queueCloudWriteSettings() {
+  // Resolve the salon id even if the live subscription hasn't cached it yet,
+  // so toggling Auto Reset right after open still persists to the cloud.
+  let sid = _salonId;
+  if (!sid) {
+    try { sid = await getSalonId(); } catch (_) {}
+  }
+  if (!sid) {
+    console.warn("[QueueCloud] settings write skipped: no salonId");
+    return { ok: false, reason: "no-salon" };
+  }
   let settings = null;
   try {
     const raw = localStorage.getItem('ff_queues_v1');
     if (raw) settings = JSON.parse(raw);
   } catch (_) {}
-  if (!settings || typeof settings !== 'object') return Promise.resolve();
-  const ref = queueStateRef(_salonId, _locationId);
-  return setDoc(ref, {
-    queueSettings: settings,
-    updatedAt: serverTimestamp()
-  }, { merge: true }).catch((e) => console.warn("[QueueCloud] settings write failed", e));
+  if (!settings || typeof settings !== 'object') {
+    console.warn("[QueueCloud] settings write skipped: no local ff_queues_v1");
+    return { ok: false, reason: "no-settings" };
+  }
+  const loc = _locationId || readActiveLocationId();
+  const ref = queueStateRef(sid, loc);
+  try {
+    await setDoc(ref, {
+      queueSettings: settings,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    console.log("[QueueCloud] settings written to cloud", sid, loc || "(default)");
+    return { ok: true };
+  } catch (e) {
+    console.warn("[QueueCloud] settings write failed", e);
+    return { ok: false, reason: "write-error", error: String((e && e.message) || e) };
+  }
 }
 
 /**
@@ -503,8 +605,12 @@ export function queueCloudRefresh() {
       const log = Array.isArray(data.log) ? data.log : [];
       _applyState(queue, service, log);
       if (typeof _onLogChange === "function") _onLogChange();
-      // Apply queue settings from cloud
-      if (data.queueSettings && typeof data.queueSettings === 'object') {
+      // Apply queue settings from cloud — but never clobber a just-made local
+      // edit (Auto Reset toggle) that hasn't round-tripped yet.
+      const localSettingsEditActive = typeof window !== "undefined" &&
+        typeof window.__ff_queueSettingsLocalEditUntil === "number" &&
+        Date.now() < window.__ff_queueSettingsLocalEditUntil;
+      if (!localSettingsEditActive && data.queueSettings && typeof data.queueSettings === 'object') {
         try { localStorage.setItem('ff_queues_v1', JSON.stringify(data.queueSettings)); } catch (_) {}
       }
     }
