@@ -527,29 +527,30 @@ function writeState() {
           });
         }
 
-        // Normal write that lost the race. We re-assert THIS device's full
-        // queue/service exactly as the operator sees it (preserving order — a
-        // queue is order-sensitive), and UNION the history log so no device's
-        // history rows are ever rolled back (and so we pass the no-rollback
-        // rule). We deliberately do NOT cross-merge the queue/service lists:
-        // list merges reorder the queue and can duplicate a person who exists
-        // under two identities (e.g. a walk-in added by name on one device and
-        // the same staff member by id on another). Newest-writer-wins on the
-        // ordered list, serialized by the rev rule, keeps the displayed queue
-        // stable and correct. We do NOT push this onto the local UI — the device
-        // keeps showing its own state, and the next snapshot reconciles it.
+        // Normal write that lost the race. Replay OUR intent on top of the
+        // fresh server state via a 3-way merge keyed by staffId: keep every
+        // person both devices have, honor the removals WE made since our last
+        // server sync, and append people WE added at the back of the queue
+        // (correct queue semantics). This means a concurrent "add me" from
+        // another device is never dropped (the lost-add bug), and because the
+        // identity key is the stable staffId there are no duplicates. The log
+        // is unioned so no history is rolled back. We do NOT push the merged
+        // result onto the local UI here — the authoritative snapshot that
+        // follows our write drives the display, which avoids the mid-merge
+        // flashing/“wrong order” churn under heavy concurrency.
         const localNow = _getState
           ? _getState()
           : { queue: payload.queue, service: payload.service, log: payload.log };
-        const retryBody = Object.assign({}, payload, {
-          queue: Array.isArray(localNow.queue) ? localNow.queue : payload.queue,
-          service: Array.isArray(localNow.service) ? localNow.service : payload.service,
-          log: ffMergeLog(serverState.log, Array.isArray(localNow.log) ? localNow.log : payload.log),
+        const merged = ffMerge3(_lastServerState, localNow, serverState);
+        const mergedBody = Object.assign({}, payload, {
+          queue: merged.queue,
+          service: merged.service,
+          log: merged.log,
         });
-        return writeAt(retryBody, serverRev).catch((e2) => {
+        return writeAt(mergedBody, serverRev).catch((e2) => {
           if (isPermissionDenied(e2) && attempt < 5) return commit(attempt + 1);
           if (isPermissionDenied(e2)) return pullServerInto(serverState, serverRev);
-          console.warn("[QueueCloud] retry write failed", e2);
+          console.warn("[QueueCloud] merged write failed", e2);
         });
       }).catch((e2) => {
         console.warn("[QueueCloud] conflict resolution read failed", e2);
