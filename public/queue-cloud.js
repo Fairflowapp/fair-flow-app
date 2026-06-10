@@ -52,6 +52,28 @@ function ffCloneArray(a) {
   try { return JSON.parse(JSON.stringify(a)); } catch (_) { return a.slice(); }
 }
 
+// `runtime.*` (e.g. runtime.lastAutoResetDate) inside queueSettings is SERVER-
+// OWNED: the scheduled auto-reset stamps it so it only fires once per local day.
+// The client must NEVER write it — a stale local copy of ff_queues_v1 would
+// clobber that stamp, and the 15-min sweep would then re-fire within its window
+// and wipe names added right after the morning reset (the recurring morning
+// queue-wipe bug). We strip every `runtime` key before sending; because client
+// writes use { merge: true }, the server's runtime is preserved untouched.
+function ffStripServerOwnedRuntime(qs) {
+  if (!qs || typeof qs !== "object") return qs;
+  try {
+    const clone = JSON.parse(JSON.stringify(qs));
+    if (clone.runtime) delete clone.runtime;
+    for (const k of Object.keys(clone)) {
+      const v = clone[k];
+      if (v && typeof v === "object" && v.runtime) delete v.runtime;
+    }
+    return clone;
+  } catch (_) {
+    return qs;
+  }
+}
+
 function setLastServerState(queue, service, log) {
   _lastServerState = {
     queue: ffCloneArray(queue),
@@ -129,6 +151,38 @@ function ffMerge3(base, local, server) {
     service: ffMergeList(base.service, local.service, server.service),
     log: ffMergeLog(server.log, local.log),
   };
+}
+
+// Detect a "resurrection" write: a freshly-opened device whose stale localStorage
+// still holds yesterday's queue tries to push people back AFTER the server already
+// removed them (e.g. the 04:00 server auto-reset cleared the queue but PRESERVED
+// the history log). Every legitimate add/move logs a history row, so a real change
+// always grows the log past the last authoritative server log. A stale cache push
+// re-adds people present in NEITHER the server queue nor service, WITHOUT any new
+// log row to justify them — that is the exact morning-resurrection bug. We compare
+// against the last authoritative server state (set only from server-confirmed
+// snapshots), so a cache snapshot can never lower the bar for itself.
+function ffWriteResurrectsRemoved(localState) {
+  if (!localState) return false;
+  const base = _lastServerState || { queue: [], service: [], log: [] };
+  const serverKeys = new Set(
+    []
+      .concat(Array.isArray(base.queue) ? base.queue : [])
+      .concat(Array.isArray(base.service) ? base.service : [])
+      .map(ffQueueItemKey)
+  );
+  const localItems = []
+    .concat(Array.isArray(localState.queue) ? localState.queue : [])
+    .concat(Array.isArray(localState.service) ? localState.service : []);
+  const hasUnbackedNewPerson = localItems.some(
+    (it) => !serverKeys.has(ffQueueItemKey(it))
+  );
+  if (!hasUnbackedNewPerson) return false;
+  const localLogLen = Array.isArray(localState.log) ? localState.log.length : 0;
+  const baseLogLen = Array.isArray(base.log) ? base.log.length : 0;
+  // A genuine add/move grows the log; if ours did not, the "new" person is an
+  // unlogged stale-cache resurrection, not a real action.
+  return localLogLen <= baseLogLen;
 }
 
 async function getSalonId() {
@@ -376,21 +430,17 @@ function subscribe(salonId, locationId, opts = {}) {
     _firstSnapshot = false;
     // Mark that an authoritative (non-cache) snapshot has been seen so the app
     // may now accept an empty cloud state as real (e.g. a genuine reset).
-    if (!snapshotFromCache(snap)) {
-      // Track the authoritative cloud history length for the stale-overwrite
-      // guard. Only server-confirmed snapshots count, so a stale local cache
-      // can't lower the bar for itself.
-      _lastCloudLogLen = log.length;
-      // Track the authoritative revision for optimistic concurrency. Legacy
-      // docs without a rev field are treated as rev 0 so the first write
-      // bootstraps it to 1.
-      _lastCloudRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : 0;
-      // Remember this authoritative state as the 3-way merge base (Phase B).
-      setLastServerState(queue, service, log);
-      if (typeof window !== "undefined") {
-        window.__ff_queueCloudServerConfirmed = true;
-      }
+    const isAuthoritative = !snapshotFromCache(snap);
+    const snapRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : 0;
+    if (isAuthoritative && typeof window !== "undefined") {
+      window.__ff_queueCloudServerConfirmed = true;
     }
+    // A GENUINE remote change carries a HIGHER rev than the last state we
+    // reconciled with. Such updates must be applied even inside the app's
+    // post-save grace window — otherwise two active devices ignore each other
+    // for several seconds after every save and the queue "flaps" forever
+    // (names jump/disappear) without ever converging.
+    const isGenuineRemote = isAuthoritative && snapRev > _lastCloudRev;
     // Expose when the cloud queue was last modified so the morning auto-reset
     // can tell "yesterday's leftover queue" (safe to clear on fresh open) from
     // "a queue already used today" (must never be wiped).
@@ -402,7 +452,25 @@ function subscribe(salonId, locationId, opts = {}) {
         if (ms) window.__ff_queueLastCloudUpdateMs = ms;
       } catch (_) {}
     }
-    _applyState(queue, service, log);
+    // applyState returns false when the app DEFERS this snapshot (e.g. the echo
+    // of our own very recent write). When it defers we have NOT reconciled the
+    // local/on-screen state with the server, so we must NOT advance the merge
+    // base / rev / log markers below. Advancing them while the screen still
+    // shows the OLD list is exactly what made the next write re-add
+    // ("resurrect") a list the server had already cleared.
+    const applied = _applyState(queue, service, log, null, { remote: isGenuineRemote });
+    if (isAuthoritative && applied !== false) {
+      // Track the authoritative cloud history length for the stale-overwrite
+      // guard. Only reconciled server snapshots count, so a stale local cache
+      // can't lower the bar for itself.
+      _lastCloudLogLen = log.length;
+      // Track the authoritative revision for optimistic concurrency. Legacy
+      // docs without a rev field are treated as rev 0 so the first write
+      // bootstraps it to 1.
+      _lastCloudRev = snapRev;
+      // Remember this authoritative state as the 3-way merge base (Phase B).
+      setLastServerState(queue, service, log);
+    }
     if (typeof _onLogChange === "function") _onLogChange();
     // Apply queue settings (ff_queues_v1) from cloud — each location has its
     // own queueState doc, so these settings are already per-location server-side.
@@ -464,10 +532,11 @@ function writeState() {
     lastUpdateReason: reason,
     lastUpdatedByUid: auth.currentUser?.uid || null,
   };
-  // Also sync ff_queues_v1 (auto-reset settings + runtime)
+  // Also sync ff_queues_v1 (auto-reset settings). runtime.* is server-owned and
+  // is stripped so this write can never clobber the auto-reset once-per-day stamp.
   try {
     const raw = localStorage.getItem('ff_queues_v1');
-    if (raw) payload.queueSettings = JSON.parse(raw);
+    if (raw) payload.queueSettings = ffStripServerOwnedRuntime(JSON.parse(raw));
   } catch (_) {}
   // Optimistic-concurrency commit. rev is stamped at the moment of the write
   // from the freshest tracked revision (snapshots + guard reads keep it
@@ -486,7 +555,11 @@ function writeState() {
     || reason === "retention-prune";
 
   // Attempt the write with the given body at rev = baseRev + 1.
-  const writeAt = (body, baseRev) => setDoc(ref, Object.assign({}, body, { rev: baseRev + 1 }))
+  // merge:true so server-owned fields we intentionally do NOT send (queueSettings
+  // .runtime.lastAutoResetDate stamped by the scheduled reset) survive the write.
+  // queue/service/log are arrays and are replaced wholesale by merge (Firestore
+  // does not element-merge arrays), so add/remove/reset semantics are unchanged.
+  const writeAt = (body, baseRev) => setDoc(ref, Object.assign({}, body, { rev: baseRev + 1 }), { merge: true })
     .then(() => {
       if (_lastCloudRev <= baseRev) _lastCloudRev = baseRev + 1;
       // Our write is now the authoritative state — make it the next merge base.
@@ -567,7 +640,7 @@ function writeState() {
       _lastCloudLogLen = Array.isArray(st.log) ? st.log.length : _lastCloudLogLen;
       setLastServerState(st.queue || [], st.service || [], st.log || []);
       if (typeof _applyState === "function") {
-        _applyState(st.queue || [], st.service || [], st.log || []);
+        _applyState(st.queue || [], st.service || [], st.log || [], null, { force: true });
         if (typeof _onLogChange === "function") _onLogChange();
       }
     };
@@ -613,7 +686,7 @@ function writeState() {
         const ss = Array.isArray(data.service) ? data.service : [];
         const sl = Array.isArray(data.log) ? data.log : [];
         setLastServerState(sq, ss, sl);
-        _applyState(sq, ss, sl);
+        _applyState(sq, ss, sl, null, { force: true });
         if (typeof _onLogChange === "function") _onLogChange();
       }
       return Promise.resolve();
@@ -623,6 +696,53 @@ function writeState() {
   }
 
   if (hasExplicitEmptyOverwriteIntent()) return commit();
+
+  // ── Resurrection guard (server reset wins over stale cache) ───────────────
+  // After a server-side auto-reset the queue is empty but the history log is
+  // preserved, so the log-length guard below cannot see that the queue was
+  // wiped. A device opened in the morning with yesterday's queue still in
+  // localStorage would otherwise re-push those people (the recurring "wrong
+  // people every morning" bug). If our write re-adds people the server no
+  // longer has WITHOUT a new history row to justify them, treat it as a stale
+  // resurrection: confirm against the server and adopt its state instead of
+  // overwriting. Only enforced once we have a server-confirmed snapshot, so a
+  // freshly-opened device with no cloud knowledge is unaffected.
+  const serverConfirmed = typeof window !== "undefined" && window.__ff_queueCloudServerConfirmed === true;
+  if (!localEmpty && serverConfirmed && ffWriteResurrectsRemoved(state)) {
+    return getDocFromServer(ref).then((snap) => {
+      if (!snap.exists()) return commit();
+      const data = snap.data() || {};
+      _lastCloudRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : _lastCloudRev;
+      const sq = Array.isArray(data.queue) ? data.queue : [];
+      const ss = Array.isArray(data.service) ? data.service : [];
+      const sl = Array.isArray(data.log) ? data.log : [];
+      // Re-check against the FRESH server state (not just our cached baseline)
+      // so a concurrent legitimate change elsewhere is respected.
+      const freshKeys = new Set(sq.concat(ss).map(ffQueueItemKey));
+      const localItems = []
+        .concat(Array.isArray(state.queue) ? state.queue : [])
+        .concat(Array.isArray(state.service) ? state.service : []);
+      const stillResurrecting = localItems.some((it) => !freshKeys.has(ffQueueItemKey(it)))
+        && (Array.isArray(state.log) ? state.log.length : 0) <= sl.length;
+      if (!stillResurrecting) return commit();
+      console.warn("[QueueCloud] blocked stale-cache resurrection after server reset", {
+        salonId: _salonId,
+        locationId: _locationId || QUEUE_STATE_DEFAULT,
+        reason,
+        localQueueLen: Array.isArray(state.queue) ? state.queue.length : 0,
+        serverQueueLen: sq.length,
+      });
+      _lastCloudLogLen = sl.length;
+      setLastServerState(sq, ss, sl);
+      if (typeof _applyState === "function") {
+        _applyState(sq, ss, sl, null, { force: true });
+        if (typeof _onLogChange === "function") _onLogChange();
+      }
+      return Promise.resolve();
+    }).catch((e) => {
+      console.warn("[QueueCloud] resurrection guard read failed; skipping risky write", e);
+    });
+  }
 
   // ── Stale-overwrite guard (Option A, non-transactional) ───────────────────
   // For a NON-empty local queue: if the last authoritative cloud snapshot we
@@ -657,7 +777,7 @@ function writeState() {
             const ss = Array.isArray(data.service) ? data.service : [];
             const sl = Array.isArray(data.log) ? data.log : [];
             setLastServerState(sq, ss, sl);
-            _applyState(sq, ss, sl);
+            _applyState(sq, ss, sl, null, { force: true });
             if (typeof _onLogChange === "function") _onLogChange();
           }
           return Promise.resolve();
@@ -694,7 +814,7 @@ function writeState() {
       const ss = Array.isArray(emptyData.service) ? emptyData.service : [];
       const sl = Array.isArray(emptyData.log) ? emptyData.log : [];
       setLastServerState(sq, ss, sl);
-      _applyState(sq, ss, sl);
+      _applyState(sq, ss, sl, null, { force: true });
       if (typeof _onLogChange === "function") _onLogChange();
     }
     return Promise.resolve();
@@ -797,7 +917,7 @@ export async function queueCloudWriteSettings() {
   const ref = queueStateRef(sid, loc);
   try {
     await setDoc(ref, {
-      queueSettings: settings,
+      queueSettings: ffStripServerOwnedRuntime(settings),
       updatedAt: serverTimestamp()
     }, { merge: true });
     console.log("[QueueCloud] settings written to cloud", sid, loc || "(default)");
@@ -836,7 +956,7 @@ export function queueCloudRefresh() {
       _lastCloudRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : _lastCloudRev;
       _lastCloudLogLen = log.length;
       setLastServerState(queue, service, log);
-      _applyState(queue, service, log);
+      _applyState(queue, service, log, null, { force: true });
       if (typeof _onLogChange === "function") _onLogChange();
       // Apply queue settings from cloud — but never clobber a just-made local
       // edit (Auto Reset toggle) that hasn't round-tripped yet.

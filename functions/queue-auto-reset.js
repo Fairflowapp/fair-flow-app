@@ -131,16 +131,44 @@ async function runQueueAutoResetSweep(now, opts = {}) {
         if (resetMin === null) { summary.skipped += 1; continue; }
 
         // Not yet the scheduled time today, or too long past it (avoid surprise wipes).
-        if (lp.minutes < resetMin || lp.minutes > resetMin + RESET_WINDOW_MIN) { summary.skipped += 1; continue; }
+        if (lp.minutes < resetMin || lp.minutes > resetMin + RESET_WINDOW_MIN) {
+          // Diagnostic: a doc that is enabled but currently OUTSIDE its window.
+          // Helps explain "why didn't it reset" without guessing (time/tz/AM-PM).
+          console.log("[queueAutoReset] skip out-of-window", JSON.stringify({
+            salonId, docId, tz, nowLocalMin: lp.minutes, resetMin, rawTime: autoReset.time || null, dateKey: lp.dateKey,
+          }));
+          summary.skipped += 1;
+          continue;
+        }
 
         const lastDate = (bucket.runtime && bucket.runtime.lastAutoResetDate) || null;
-        if (lastDate === lp.dateKey) { summary.skipped += 1; continue; } // already reset today (local)
+        if (lastDate === lp.dateKey) {
+          console.log("[queueAutoReset] skip already-reset-today", JSON.stringify({
+            salonId, docId, lastDate, dateKey: lp.dateKey, resetMin, nowLocalMin: lp.minutes,
+          }));
+          summary.skipped += 1;
+          continue;
+        } // already reset today (local)
 
+        // NOTE (2026-06): the previous "skip a queue a client modified today
+        // at/after the reset time" guard was removed. Repeat-reset protection now
+        // relies on the once-per-day stamp (lastAutoResetDate), which is reliable
+        // again: the scheduled reset stamps it and clients strip queueSettings
+        // .runtime on every write so they can no longer clobber it. That broad
+        // guard also blocked the FIRST, legitimate reset of any queue that was
+        // touched earlier the same day (and made near-future testing impossible),
+        // which is the opposite of what the auto-reset is supposed to do.
         const force = autoReset.resetWhileInService === true;
         const serviceLen = arrLen(data.service);
 
         // Force off + someone in service → don't wipe; retry on a later run (mirrors client).
-        if (!force && serviceLen > 0) { summary.skipped += 1; continue; }
+        if (!force && serviceLen > 0) {
+          console.log("[queueAutoReset] skip in-service (force off)", JSON.stringify({
+            salonId, docId, serviceLen, resetMin, nowLocalMin: lp.minutes, dateKey: lp.dateKey,
+          }));
+          summary.skipped += 1;
+          continue;
+        }
 
         const action = {
           salonId, docId, tz, localTime: lp.minutes, resetMin, dateKey: lp.dateKey,

@@ -10,7 +10,7 @@
 import {
   collection, query, where, orderBy, limit, startAfter,
   addDoc, updateDoc, setDoc, doc, getDoc, getDocFromServer, getDocs, deleteDoc, deleteField, onSnapshot,
-  serverTimestamp, Timestamp
+  serverTimestamp, Timestamp, writeBatch
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "/app.js?v=20260510_firestore_lp";
@@ -1818,6 +1818,36 @@ function _rebuildCurrentTicketsMerged() {
   notifyTicketsAnalyticsDataChanged();
 }
 
+/**
+ * Patch a ticket in the local pagination caches after a successful server write.
+ * The live snapshot only covers the newest TICKETS_PAGE_SIZE tickets; older rows
+ * loaded via "Load more" (_ticketsExtraTickets) are a static copy and never
+ * refresh, so without this an archived old ticket keeps its stale CLOSED status
+ * locally and "comes back" until a full reload.
+ */
+function ffTicketsPatchLocalTicket(ticketId, patch) {
+  if (!ticketId || !patch) return false;
+  // Skip FieldValue sentinels (e.g. serverTimestamp()) — they are not renderable values.
+  const safe = {};
+  Object.keys(patch).forEach((k) => {
+    const v = patch[k];
+    if (v && typeof v === 'object' && typeof v._methodName === 'string') return;
+    safe[k] = v;
+  });
+  let touched = false;
+  const apply = (arr) => {
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] && arr[i].id === ticketId) {
+        arr[i] = { ...arr[i], ...safe };
+        touched = true;
+      }
+    }
+  };
+  apply(_ticketsExtraTickets);
+  apply(_ticketsFirstPageTickets);
+  return touched;
+}
+
 function updateTicketsLoadMoreUi() {
   const wrap = document.getElementById('ticketsLoadMoreWrap');
   const btn = document.getElementById('ticketsLoadMoreBtn');
@@ -2033,6 +2063,12 @@ async function updateTicket(ticketId, updates) {
     history: hist,
     updatedAt: serverTimestamp()
   });
+  // Sync the local pagination cache: tickets loaded via "Load more" are not in
+  // the live snapshot window, so without this their stale copy keeps rendering.
+  if (ffTicketsPatchLocalTicket(ticketId, { ...updates, history: hist })) {
+    _rebuildCurrentTicketsMerged();
+    renderTicketsList();
+  }
 }
 
 async function finalizeTicket(ticketId, forUids, forNames, extra) {
@@ -3352,6 +3388,264 @@ function getInitial(name) {
   return (parts[0][0] || '?').toUpperCase();
 }
 
+// =====================
+// Bulk select — archive (Closed tab) / permanent delete (Archived tab)
+// =====================
+let ticketsSelectionMode = false;
+let ticketsSelectionTab = null; // tab the selection was started on ('closed' | 'archived')
+const ticketsSelected = new Set();
+let ticketsClosedShownIds = [];
+
+/** Bulk archive/delete is restricted to owner/admin — same gate as the single-ticket actions. */
+function ffTicketsCanBulkArchive() {
+  return !!(currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase()));
+}
+
+/** Tabs where bulk selection is available: Closed (archive) and Archived (permanent delete). */
+function ffTicketsBulkTabHere() {
+  if (!ffTicketsCanBulkArchive()) return false;
+  return currentTicketsTab === 'closed' || currentTicketsTab === 'archived';
+}
+
+function ffTicketsExitSelectionMode() {
+  ticketsSelectionMode = false;
+  ticketsSelectionTab = null;
+  ticketsSelected.clear();
+}
+
+function ffTicketsToggleSelect(id, cardEl) {
+  if (ticketsSelected.has(id)) ticketsSelected.delete(id);
+  else ticketsSelected.add(id);
+  if (cardEl) {
+    const on = ticketsSelected.has(id);
+    cardEl.classList.toggle('ticket-selected', on);
+    const cb = cardEl.querySelector('.ticket-select-cb');
+    if (cb) cb.textContent = on ? '\u2713' : '';
+  }
+  ffTicketsUpdateBulkBar();
+}
+
+function ffTicketsUpdateBulkBar() {
+  const bar = document.getElementById('ticketsBulkBar');
+  if (!bar) return;
+  const onBulkTab = ffTicketsBulkTabHere();
+  bar.style.display = onBulkTab ? 'flex' : 'none';
+  // Mobile CSS pins the bar to the bottom of the screen while selecting.
+  const screenEl = document.getElementById('ticketsScreen');
+  if (screenEl) screenEl.classList.toggle('ff-tickets-selecting', onBulkTab && ticketsSelectionMode);
+  if (!onBulkTab) return;
+  const onArchived = currentTicketsTab === 'archived';
+  const toggleBtn = document.getElementById('ticketsSelectToggleBtn');
+  const selectAllBtn = document.getElementById('ticketsSelectAllBtn');
+  const info = document.getElementById('ticketsBulkInfo');
+  const archiveBtn = document.getElementById('ticketsBulkArchiveBtn');
+  const cancelBtn = document.getElementById('ticketsBulkCancelBtn');
+  const n = ticketsSelected.size;
+  const total = ticketsClosedShownIds.length;
+  if (toggleBtn) toggleBtn.style.display = ticketsSelectionMode ? 'none' : '';
+  if (selectAllBtn) {
+    selectAllBtn.style.display = ticketsSelectionMode ? '' : 'none';
+    const allSelected = total > 0 && n >= total;
+    selectAllBtn.textContent = allSelected ? 'Clear all' : 'Select all';
+  }
+  if (info) {
+    info.style.display = ticketsSelectionMode ? '' : 'none';
+    info.textContent = n > 0 ? `${n} selected` : 'Tap tickets to select';
+  }
+  if (archiveBtn) {
+    archiveBtn.style.display = ticketsSelectionMode ? '' : 'none';
+    archiveBtn.disabled = n === 0;
+    archiveBtn.style.opacity = n === 0 ? '0.5' : '1';
+    archiveBtn.style.background = onArchived ? '#ef4444' : '#7c3aed';
+    archiveBtn.textContent = onArchived
+      ? (n > 0 ? `Delete selected (${n})` : 'Delete selected')
+      : (n > 0 ? `Archive selected (${n})` : 'Archive selected');
+  }
+  if (cancelBtn) cancelBtn.style.display = ticketsSelectionMode ? '' : 'none';
+}
+
+function ffTicketsBulkInit() {
+  const toggleBtn = document.getElementById('ticketsSelectToggleBtn');
+  const selectAllBtn = document.getElementById('ticketsSelectAllBtn');
+  const archiveBtn = document.getElementById('ticketsBulkArchiveBtn');
+  const cancelBtn = document.getElementById('ticketsBulkCancelBtn');
+  if (toggleBtn && !toggleBtn._ffWired) {
+    toggleBtn._ffWired = true;
+    toggleBtn.onclick = () => {
+      ticketsSelectionMode = true;
+      ticketsSelectionTab = currentTicketsTab;
+      ticketsSelected.clear();
+      renderTicketsList();
+    };
+  }
+  if (selectAllBtn && !selectAllBtn._ffWired) {
+    selectAllBtn._ffWired = true;
+    selectAllBtn.onclick = () => {
+      const allSelected = ticketsClosedShownIds.length > 0 && ticketsSelected.size >= ticketsClosedShownIds.length;
+      ticketsSelected.clear();
+      if (!allSelected) ticketsClosedShownIds.forEach((id) => ticketsSelected.add(id));
+      renderTicketsList();
+    };
+  }
+  if (cancelBtn && !cancelBtn._ffWired) {
+    cancelBtn._ffWired = true;
+    cancelBtn.onclick = () => { ffTicketsExitSelectionMode(); renderTicketsList(); };
+  }
+  if (archiveBtn && !archiveBtn._ffWired) {
+    archiveBtn._ffWired = true;
+    archiveBtn.onclick = () => {
+      if (currentTicketsTab === 'archived') void ffTicketsDeleteSelected();
+      else void ffTicketsArchiveSelected();
+    };
+  }
+}
+
+/** Archive every selected CLOSED/VOID ticket in chunked Firestore batches (handles hundreds at once). */
+async function ffTicketsArchiveSelected() {
+  if (!ffTicketsCanBulkArchive()) { showToast('Not allowed', 'error'); return; }
+  const ids = Array.from(ticketsSelected);
+  if (ids.length === 0) return;
+  const ok = await ticketConfirm(`Move ${ids.length} ticket${ids.length > 1 ? 's' : ''} to Archived?`, 'Archive tickets');
+  if (!ok) return;
+  const salonId = getActiveTicketsSalonId();
+  if (!salonId) { showToast('No salon selected', 'error'); return; }
+  const archiveBtn = document.getElementById('ticketsBulkArchiveBtn');
+  if (archiveBtn) { archiveBtn.disabled = true; archiveBtn.textContent = 'Archiving\u2026'; }
+  try {
+    let done = 0;
+    const CHUNK = 400; // Firestore batch limit is 500; stay safely below.
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK);
+      const batch = writeBatch(db);
+      const batchPatches = [];
+      slice.forEach((id) => {
+        const t = currentTickets.find((x) => x.id === id);
+        // Defensive: only ever archive CLOSED/VOID tickets.
+        if (!t || !(t.status === 'CLOSED' || t.status === 'VOID')) return;
+        const ref = doc(db, `salons/${salonId}/tickets`, id);
+        const existingHist = Array.isArray(t.history) ? t.history : [];
+        const hist = [...existingHist, {
+          at: Timestamp.now(),
+          by: currentUserProfile.uid,
+          byName: currentUserProfile.name || '',
+          action: 'archived',
+          details: 'bulk'
+        }];
+        const fields = {
+          status: 'ARCHIVED',
+          archivedByUid: currentUserProfile.uid,
+          history: hist
+        };
+        batch.update(ref, { ...fields, updatedAt: serverTimestamp() });
+        batchPatches.push({ id, fields });
+      });
+      if (batchPatches.length > 0) {
+        await batch.commit();
+        done += batchPatches.length;
+        // Keep the local pagination cache in sync — tickets loaded via "Load more"
+        // are not covered by the live snapshot and would otherwise reappear as CLOSED.
+        batchPatches.forEach((p) => ffTicketsPatchLocalTicket(p.id, p.fields));
+      }
+    }
+    _rebuildCurrentTicketsMerged();
+    ffTicketsExitSelectionMode();
+    showToast(`${done} ticket${done !== 1 ? 's' : ''} archived`, 'success');
+    renderTicketsList();
+  } catch (e) {
+    console.warn('[Tickets] bulk archive failed', e);
+    showToast(e?.message || 'Failed to archive', 'error');
+    // Earlier batches may have committed — reflect them locally.
+    _rebuildCurrentTicketsMerged();
+    renderTicketsList();
+    if (archiveBtn) archiveBtn.disabled = false;
+    ffTicketsUpdateBulkBar();
+  }
+}
+
+/**
+ * Permanently delete every selected ARCHIVED ticket in chunked Firestore batches
+ * (handles hundreds at once). Mirrors deleteTicketPermanently: matching
+ * ticketSummaries rows are marked source-deleted before the tickets are removed.
+ */
+async function ffTicketsDeleteSelected() {
+  if (!ffTicketsCanBulkArchive()) { showToast('Not allowed', 'error'); return; }
+  const ids = Array.from(ticketsSelected);
+  if (ids.length === 0) return;
+  const ok = await ticketConfirm(
+    `Permanently delete ${ids.length} ticket${ids.length > 1 ? 's' : ''}? This cannot be undone.`,
+    'Delete tickets'
+  );
+  if (!ok) return;
+  const salonId = getActiveTicketsSalonId();
+  if (!salonId) { showToast('No salon selected', 'error'); return; }
+  const actionBtn = document.getElementById('ticketsBulkArchiveBtn');
+  if (actionBtn) { actionBtn.disabled = true; actionBtn.textContent = 'Deleting\u2026'; }
+  // Defensive: only ever bulk-delete ARCHIVED tickets.
+  const delIds = ids.filter((id) => {
+    const t = currentTickets.find((x) => x.id === id);
+    return !!t && t.status === 'ARCHIVED';
+  });
+  try {
+    // 1) Mark matching Summary rows as source-deleted (same as single permanent delete).
+    //    Failure here must not block the delete itself — same tolerance as the single flow.
+    try {
+      const uid = currentUserProfile?.uid ?? null;
+      const byName = currentUserProfile?.name || currentUserProfile?.email || null;
+      const IN_CHUNK = 10; // conservative 'in' filter size
+      for (let i = 0; i < delIds.length; i += IN_CHUNK) {
+        const slice = delIds.slice(i, i + IN_CHUNK);
+        const snap = await getDocs(query(
+          collection(db, `salons/${salonId}/ticketSummaries`),
+          where('ticketId', 'in', slice)
+        ));
+        for (let j = 0; j < snap.docs.length; j += 400) {
+          const markBatch = writeBatch(db);
+          snap.docs.slice(j, j + 400).forEach((d) => {
+            markBatch.update(d.ref, {
+              sourceTicketDeleted: true,
+              sourceTicketDeletedAt: serverTimestamp(),
+              sourceTicketDeletedByUid: uid,
+              sourceTicketDeletedByName: byName
+            });
+          });
+          await markBatch.commit();
+        }
+      }
+    } catch (e) {
+      console.warn('[Tickets] bulk delete: ticketSummaries markers failed', e);
+    }
+
+    // 2) Delete the tickets themselves in chunked batches.
+    let done = 0;
+    const CHUNK = 400; // Firestore batch limit is 500; stay safely below.
+    for (let i = 0; i < delIds.length; i += CHUNK) {
+      const slice = delIds.slice(i, i + CHUNK);
+      const batch = writeBatch(db);
+      slice.forEach((id) => batch.delete(doc(db, `salons/${salonId}/tickets`, id)));
+      await batch.commit();
+      done += slice.length;
+      // Remove from the local pagination caches — "Load more" rows are not in the
+      // live snapshot and would otherwise keep rendering until a full reload.
+      const gone = new Set(slice);
+      _ticketsExtraTickets = _ticketsExtraTickets.filter((t) => !gone.has(t.id));
+      _ticketsFirstPageTickets = _ticketsFirstPageTickets.filter((t) => !gone.has(t.id));
+      if (actionBtn) actionBtn.textContent = `Deleting\u2026 (${done}/${delIds.length})`;
+    }
+    _rebuildCurrentTicketsMerged();
+    ffTicketsExitSelectionMode();
+    showToast(`${done} ticket${done !== 1 ? 's' : ''} deleted`, 'success');
+    renderTicketsList();
+  } catch (e) {
+    console.warn('[Tickets] bulk delete failed', e);
+    showToast(e?.message || 'Failed to delete', 'error');
+    // Earlier batches may have committed — reflect them locally.
+    _rebuildCurrentTicketsMerged();
+    renderTicketsList();
+    if (actionBtn) actionBtn.disabled = false;
+    ffTicketsUpdateBulkBar();
+  }
+}
+
 function renderTicketsList() {
   const listEl = document.getElementById('ticketsList');
   const loadingEl = document.getElementById('ticketsLoading');
@@ -3371,6 +3665,9 @@ function renderTicketsList() {
     const rb = document.querySelector('.tickets-tab[data-tab="ready"]');
     if (rb) rb.classList.add('active');
   }
+
+  if (ticketsSelectionMode && currentTicketsTab !== ticketsSelectionTab) ffTicketsExitSelectionMode();
+  ffTicketsUpdateBulkBar();
 
   if (currentTicketsTab === 'summary') {
     if (loadingEl) loadingEl.style.display = 'none';
@@ -3456,6 +3753,19 @@ function renderTicketsList() {
   listEl.classList.toggle('tickets-list--closed', currentTicketsTab === 'closed');
   listEl.classList.toggle('tickets-list--archived', currentTicketsTab === 'archived');
 
+  // Track which tickets are currently shown (for "Select all"), and drop
+  // any selected ids that are no longer visible (e.g. archived/deleted elsewhere).
+  if (ffTicketsBulkTabHere()) {
+    ticketsClosedShownIds = toShow.map((t) => t.id);
+    if (ticketsSelected.size) {
+      const shown = new Set(ticketsClosedShownIds);
+      Array.from(ticketsSelected).forEach((id) => { if (!shown.has(id)) ticketsSelected.delete(id); });
+    }
+  } else {
+    ticketsClosedShownIds = [];
+  }
+  const inBulkSelect = ticketsSelectionMode && ffTicketsBulkTabHere();
+
   // Helper: status css key
   const statusKey = (s) => {
     if (s === 'READY_FOR_CHECKOUT') return 'ready';
@@ -3477,7 +3787,7 @@ function renderTicketsList() {
     const sk = statusKey(t.status);
     const statusLabel = { ready:'READY', closed:'CLOSED', open:'OPEN', void:'VOID', archived:'ARCHIVED' }[sk] || sk.toUpperCase();
     const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
-    const showDeleteBtn = currentTicketsTab === 'archived' && isAdminOrOwner;
+    const showDeleteBtn = currentTicketsTab === 'archived' && isAdminOrOwner && !inBulkSelect;
     const isCreator = currentUserProfile && (
       t.createdByUid === currentUserProfile.uid ||
       t.technicianStaffId === currentUserProfile.staffId ||
@@ -3529,10 +3839,15 @@ function renderTicketsList() {
       ? `<div style="font-size:11px;color:#059669;margin-top:2px;">✓ Closed by ${escapeHtml(t.closedByName)}</div>`
       : '';
 
+    const isSel = inBulkSelect && ticketsSelected.has(t.id);
+    const selCbHtml = inBulkSelect ? `<div class="ticket-select-cb">${isSel ? '\u2713' : ''}</div>` : '';
+    const cardClass = `ticket-card${inBulkSelect ? ' ticket-selectable' : ''}${isSel ? ' ticket-selected' : ''}`;
+
     return `
-    <div class="ticket-card" data-ticket-id="${t.id}">
+    <div class="${cardClass}" data-ticket-id="${t.id}">
       <!-- Header row: fixed min-height + center alignment avoids row jump when avatar/text resolves -->
       <div class="ticket-card-header-row" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;min-height:44px;">
+        ${selCbHtml}
         ${editBtnHtml}
         ${avatarHtml}
         <div style="flex:1;min-width:0;">
@@ -3571,6 +3886,11 @@ function renderTicketsList() {
     const ticketId = card.getAttribute('data-ticket-id');
     card.onclick = (e) => {
       if (e.target.closest('.ticket-delete-btn')) return;
+      if (ticketsSelectionMode && ffTicketsBulkTabHere()) {
+        e.preventDefault();
+        ffTicketsToggleSelect(ticketId, card);
+        return;
+      }
       openTicketModal(ticketId);
     };
   });
@@ -3590,6 +3910,7 @@ function renderTicketsList() {
   });
 
   updateTicketsLoadMoreUi();
+  ffTicketsUpdateBulkBar();
 }
 
 function statusBg(s) {
@@ -3776,6 +4097,7 @@ function openAdminTicketView(t) {
 
   const picker = document.getElementById('ticketServicePickerContainer');
   if (picker) picker.style.display = 'none';
+  ffTicketServiceSearchSetVisible(false);
 
   // Customer name (read-only)
   const custToggle = document.getElementById('ticketCustomerToggle');
@@ -4089,6 +4411,10 @@ function resetTicketForm() {
     picker.querySelectorAll('.ticket-category-body').forEach((body) => { body.style.display = 'none'; });
     picker.querySelectorAll('.ticket-cat-arrow').forEach((arrow) => { arrow.textContent = '▶'; });
   }
+  // Search field always mirrors the picker: cleared on every open, visible
+  // exactly when the picker is visible.
+  ffTicketServiceSearchClear();
+  ffTicketServiceSearchSetVisible(!(picker && picker.style.display === 'none'));
   updateTicketDiff();
   setupTicketFormToggles();
   ffApplyTicketCustomerRequiredUI();
@@ -4136,6 +4462,8 @@ function populateTicketForm(t) {
   const customerToggle = document.getElementById('ticketCustomerToggle');
   const customerInput = document.getElementById('ticketCustomerName');
   if (servicePickerContainer) servicePickerContainer.style.display = isReadOnly ? 'none' : 'block';
+  ffTicketServiceSearchSetVisible(!isReadOnly);
+  if (!isReadOnly) ffTicketServiceSearchClear();
   if (customerToggle) customerToggle.style.display = isReadOnly ? 'none' : '';
   if (customerInput) customerInput.readOnly = isReadOnly;
   updateTicketTotal(lines);
@@ -5716,21 +6044,28 @@ async function saveServiceStaffOverride(service, staffId, patch) {
   if (Object.keys(next).length) nextOverrides[staffId] = next;
   else delete nextOverrides[staffId];
 
+  // IMPORTANT: updateDoc (not setDoc+merge). "Enabled" is represented by the
+  // ABSENCE of `enabled:false` in the per-staff map, and setDoc with
+  // { merge:true } merges nested maps recursively — it never deletes the stale
+  // `enabled:false` key on the server. Result: disabling stuck, re-enabling
+  // silently didn't persist (toggle reverted on reload, and the staff member's
+  // ticket picker stayed empty). updateDoc REPLACES the whole staffOverrides
+  // field with exactly what we computed.
   if (service.isSharedService || _ffCatalogModalMode === 'shared') {
     const accountId = getTicketsAccountId();
     if (!accountId) throw new Error('No account');
-    await setDoc(doc(sharedServiceCatalogItemsRef(accountId), service.id), {
+    await updateDoc(doc(sharedServiceCatalogItemsRef(accountId), service.id), {
       staffOverrides: nextOverrides,
       updatedAt: serverTimestamp()
-    }, { merge: true });
+    });
     const raw = _rawSharedServices.find((s) => String(s.id) === String(service.id));
     if (raw) raw.staffOverrides = nextOverrides;
   } else {
     if (!currentUserProfile?.salonId) throw new Error('No salon');
-    await setDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, service.id), {
+    await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, service.id), {
       staffOverrides: nextOverrides,
       updatedAt: serverTimestamp()
-    }, { merge: true });
+    });
     const raw = _rawServices.find((s) => String(s.id) === String(service.id));
     if (raw) raw.staffOverrides = nextOverrides;
   }
@@ -6712,6 +7047,82 @@ function doServiceSelect(svc) {
   if (svc) addServiceToTicket(svc);
 }
 
+// =====================
+// Ticket service search (UI-only filter over the already-loaded catalog)
+// =====================
+// Filters the SAME salonServices / serviceCategories arrays the picker renders
+// from — no separate list, no duplication. Selecting a result goes through the
+// exact same doServiceSelect(svc) path as the normal category list, so pricing,
+// location overrides, taxes, fees and supply deductions are untouched.
+
+function ffTicketServiceSearchClear() {
+  const input = document.getElementById('ticketServiceSearchInput');
+  if (input) input.value = '';
+  ffRenderTicketServiceSearch();
+}
+
+function ffTicketServiceSearchSetVisible(show) {
+  const wrap = document.getElementById('ticketServiceSearchWrap');
+  if (wrap) wrap.style.display = show ? 'block' : 'none';
+}
+
+function ffRenderTicketServiceSearch() {
+  const catalog = document.getElementById('ticketServiceCatalogList');
+  const results = document.getElementById('ticketServiceSearchResults');
+  if (!catalog || !results) return;
+
+  const input = document.getElementById('ticketServiceSearchInput');
+  const query = input ? String(input.value || '').trim() : '';
+
+  // Empty query → restore the normal categories view exactly as-is.
+  if (!query) {
+    results.style.display = 'none';
+    results.innerHTML = '';
+    catalog.style.display = '';
+    return;
+  }
+
+  // Multi-word partial match, case-insensitive, against service name + category
+  // name ("gel mani" matches "Gel Manicure").
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const catNameById = new Map(serviceCategories.map((c) => [c.id, c.name]));
+  const matches = salonServices
+    .filter(isTicketPickerServiceAvailableForActiveLocation)
+    .filter((s) => {
+      const catLabel = catNameById.get(s.categoryId) || s.category || 'Other';
+      const hay = `${String(s.name || '')} ${String(catLabel)}`.toLowerCase();
+      return tokens.every((t) => hay.includes(t));
+    });
+
+  catalog.style.display = 'none';
+  results.style.display = 'block';
+
+  if (!matches.length) {
+    results.innerHTML = '<div style="padding:10px 8px;color:#6b7280;font-size:12px;">No services found</div>';
+    return;
+  }
+
+  results.innerHTML = matches.map((s) => {
+    const catLabel = catNameById.get(s.categoryId) || s.category || 'Other';
+    return `<button type="button" class="ticket-service-btn" data-id="${s.id}" style="display:block;width:100%;text-align:left;padding:5px 8px;margin-bottom:3px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;transition:background 0.15s;">${escapeHtml(s.name)} <span style="color:#6b7280;font-size:11px;">${ffTicketMoney(s.defaultPrice || 0)}</span><span style="display:block;font-size:10px;color:#9ca3af;">${escapeHtml(catLabel)}</span></button>`;
+  }).join('');
+
+  results.querySelectorAll('.ticket-service-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const id = btn.getAttribute('data-id');
+      const svc = salonServices.find((x) => x.id === id);
+      doServiceSelect(svc);
+    };
+  });
+}
+
+function ffTicketServiceSearchWire() {
+  const input = document.getElementById('ticketServiceSearchInput');
+  if (!input || input._ffSearchWired) return;
+  input._ffSearchWired = true;
+  input.addEventListener('input', ffRenderTicketServiceSearch);
+}
+
 function updateNewTicketButtonVisibility() {
   const newTicketBtn = document.getElementById('ticketsNewBtn');
   if (!newTicketBtn) return;
@@ -6749,8 +7160,12 @@ async function setupTicketsUI() {
   let html = '';
   if (!hasServices && !hasProducts) {
     container.innerHTML = '<div style="padding:10px 8px;color:#6b7280;font-size:12px;">No services or products available for this location.</div>';
+    ffTicketServiceSearchSetVisible(false);
     return;
   }
+  // Mirror the picker: if a catalog snapshot rebuilds the list while the modal
+  // shows a read-only ticket (picker hidden), keep the search hidden too.
+  ffTicketServiceSearchSetVisible(container.style.display !== 'none');
   Object.entries(grouped).forEach(([key, data], idx) => {
     const label = escapeHtml(data.label || 'Other');
     html += `<div class="ticket-category-section" data-cat-idx="${idx}" style="border-bottom:1px solid #e5e7eb;">`;
@@ -6774,7 +7189,12 @@ async function setupTicketsUI() {
       html += '</div></div>';
     });
   }
-  container.innerHTML = html;
+  // Wrap the normal categories view so the search can toggle it without
+  // touching its content; results render into a sibling div inside the same
+  // scrollable container.
+  container.innerHTML = `<div id="ticketServiceCatalogList">${html}</div><div id="ticketServiceSearchResults" style="display:none;padding:4px 8px;background:#fff;"></div>`;
+  ffTicketServiceSearchWire();
+  ffRenderTicketServiceSearch();
   container.querySelectorAll('.ticket-service-btn').forEach((btn) => {
     btn.onclick = () => {
       const id = btn.getAttribute('data-id');
@@ -6819,6 +7239,7 @@ export function initTickets() {
   document.querySelectorAll('.tickets-tab').forEach(btn => {
     btn.onclick = () => setTicketsTab(btn.getAttribute('data-tab'));
   });
+  ffTicketsBulkInit();
   const newBtn = document.getElementById('ticketsNewBtn');
   if (newBtn) newBtn.onclick = () => openTicketModal();
   window.goToTickets = goToTickets;

@@ -1202,7 +1202,7 @@ exports.syncStripeSubscription = onCall(
         customer: customerId,
         status: "all",
         limit: 5,
-        expand: ["data.latest_invoice"],
+        expand: ["data.latest_invoice", "data.default_payment_method"],
       });
       const ACTIVE = new Set(["active", "trialing", "past_due"]);
       const sub =
@@ -1301,23 +1301,34 @@ async function persistSubscriptionState(salonId, sub) {
     sub.items?.data?.[0]?.current_period_end ??
     null;
 
+  const payload = {
+    salonId,
+    customerId,
+    subscriptionId: sub.id,
+    status: sub.status,
+    currentPeriodEnd: tsFromUnix(cpe),
+    cancelAtPeriodEnd: !!sub.cancel_at_period_end,
+    canceledAt: tsFromUnix(sub.canceled_at),
+    items: pickItemsFromSubscription(sub),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  // Read-only card display (used by the mobile app's read-only Billing view).
+  // Only captured when default_payment_method was expanded into a card object
+  // (e.g. from the syncStripeSubscription callable). The webhook path usually
+  // passes an unexpanded id, in which case we leave the existing value intact.
+  const dpm = sub.default_payment_method;
+  if (dpm && typeof dpm === "object" && dpm.card) {
+    payload.paymentMethod = {
+      brand: dpm.card.brand || null,
+      last4: dpm.card.last4 || null,
+    };
+  }
+
   await admin
     .firestore()
     .doc(`salons/${salonId}/billing/stripe`)
-    .set(
-      {
-        salonId,
-        customerId,
-        subscriptionId: sub.id,
-        status: sub.status,
-        currentPeriodEnd: tsFromUnix(cpe),
-        cancelAtPeriodEnd: !!sub.cancel_at_period_end,
-        canceledAt: tsFromUnix(sub.canceled_at),
-        items: pickItemsFromSubscription(sub),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
+    .set(payload, { merge: true });
 }
 
 async function persistInvoiceState(salonId, invoice) {

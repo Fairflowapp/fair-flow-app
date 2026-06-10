@@ -232,8 +232,39 @@ async function syncPaidLocationQuantityOrThrow(desiredActiveLocationCount) {
   await fn({ salonId, desiredActiveLocationCount });
 }
 
+function ffLocNativeApp() {
+  try {
+    return typeof window !== "undefined" && typeof window.ffIsNativeApp === "function" && window.ffIsNativeApp() === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function showNativePaidLocationBlocked() {
+  document.getElementById("ffPaidLocationConfirm")?.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "ffPaidLocationConfirm";
+  overlay.style.cssText = "position:fixed;inset:0;z-index:2147483500;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;";
+  overlay.innerHTML = `
+    <div role="dialog" aria-modal="true" style="width:min(460px,100%);background:#fff;border-radius:18px;padding:24px;box-shadow:0 24px 70px rgba(15,23,42,.28);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+      <div style="font-size:18px;font-weight:800;margin-bottom:10px;">Manage locations on the web</div>
+      <div style="font-size:14px;line-height:1.55;color:#4b5563;margin-bottom:22px;">Adding another location changes your subscription. Please manage additional locations in the FairFlow web app.</div>
+      <div style="display:flex;justify-content:flex-end;">
+        <button type="button" data-ff-paid-location-ok style="padding:10px 16px;border-radius:999px;border:0;background:#7c3aed;color:#fff;font-size:13px;font-weight:800;cursor:pointer;">OK</button>
+      </div>
+    </div>`;
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.remove(); });
+  overlay.querySelector("[data-ff-paid-location-ok]")?.addEventListener("click", () => overlay.remove());
+  document.body.appendChild(overlay);
+}
+
 async function confirmAndSyncPaidLocationIfNeeded(desiredActiveLocationCount) {
   if (desiredActiveLocationCount <= 1) return true;
+  // Mobile app is login-only with no payment UI: paid locations are web-only.
+  if (ffLocNativeApp()) {
+    showNativePaidLocationBlocked();
+    return false;
+  }
   const confirmed = await showPaidLocationConfirm();
   if (!confirmed) return false;
   await syncPaidLocationQuantityOrThrow(desiredActiveLocationCount);

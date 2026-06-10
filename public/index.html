@@ -124,9 +124,81 @@
       if (/iPhone|iPad|iPod/i.test(ua) || touchMac) {
         document.documentElement.classList.add('ff-ios-capacitor-safe');
       }
+      // Android native WebView ("; wv)" UA token) can mis-render the page wide and
+      // zoom it out (tiny text) when maximum-scale is present. Re-assert a clean
+      // device-width viewport for Android WebView ONLY (iOS/desktop untouched).
+      if (/Android/i.test(ua) && /;\s*wv[)\];]/i.test(ua)) {
+        document.documentElement.classList.add('ff-android-native');
+        var vp = document.querySelector('meta[name="viewport"]');
+        if (vp) {
+          vp.setAttribute('content', 'width=device-width, initial-scale=1, viewport-fit=cover');
+        }
+      }
     } catch(e) {}
   })();
+
+  // ===== Capacitor native app (iOS/Android) — "login-only" gate =====
+  // The native shell (App Store / Play Store build) loads the SAME hosted files
+  // as the web browser, so UA sniffing is NOT enough: html.ff-ios-capacitor-safe
+  // also matches mobile Safari. The ONLY reliable signal that we are inside the
+  // real installed app is the injected Capacitor bridge. When detected we add
+  // html.ff-native-app and expose window.ffIsNativeApp() so the app can hide all
+  // signup, business creation, onboarding, pricing and billing on mobile while
+  // the web keeps every one of them. Web browsers never get the class.
+  (function(){
+    function detect(){
+      try {
+        var C = window.Capacitor;
+        if (!C) return false;
+        if (typeof C.isNativePlatform === 'function') return !!C.isNativePlatform();
+        return C.isNativePlatform === true;
+      } catch(e){ return false; }
+    }
+    window.ffIsNativeApp = function(){
+      var n = detect();
+      if (n) {
+        window.__ff_isNativeApp = true;
+        try { document.documentElement.classList.add('ff-native-app'); } catch(_){}
+      }
+      return n;
+    };
+    // Evaluate now (the bridge is normally injected before page scripts run) and
+    // again at DOMContentLoaded in case it attaches a moment later.
+    window.ffIsNativeApp();
+    try {
+      document.addEventListener('DOMContentLoaded', function(){ window.ffIsNativeApp(); }, { once:true });
+    } catch(_){}
+  })();
 </script>
+
+<style id="ff-native-login-only-v1">
+  /* Mobile app = login only. These are hidden ONLY inside the Capacitor native
+     shell (html.ff-native-app); the web app is completely unaffected. */
+  html.ff-native-app #signup-section,
+  html.ff-native-app #login-to-signup-toggle,
+  html.ff-native-app #show-signup-button,
+  html.ff-native-app #complete-setup-section,
+  html.ff-native-app #ff-onboarding-wizard,
+  html.ff-native-app #ff-initial-billing-gate,
+  html.ff-native-app [data-ff-billing-guard] {
+    display: none !important;
+  }
+
+  /* Billing stays VISIBLE on mobile but READ-ONLY: plan summary, payment method
+     last-4 and past invoices are shown; every payment-changing action (subscribe,
+     upgrade, manage, portal, checkout, add-ons / pricing form) is removed. The
+     web app keeps all of them. */
+  html.ff-native-app #billingSubscribeBtn,
+  html.ff-native-app #billingManageBtn,
+  html.ff-native-app #ffBillingSubscribeForm,
+  html.ff-native-app #ffBillingPortalBtn,
+  html.ff-native-app #ffBillingCheckoutBtn {
+    display: none !important;
+  }
+  html.ff-native-app #billingNativeReadOnlyNotice {
+    display: block !important;
+  }
+</style>
 
 <style>
 
@@ -1806,7 +1878,10 @@ ul{list-style:none;padding:0;margin:0}
 
 /* SELECT button in MY LIST - uses shared btn-neutral class */
 
-.hold-btn{padding:6px 12px;border-radius:8px;border:1px solid #e8d27a;background:var(--held);font-weight:800;cursor:pointer}
+.hold-btn{padding:6px 12px;border-radius:8px;border:1px solid #e8d27a;background:var(--held);font-weight:800;cursor:pointer;color:#111827}
+/* iOS/iPadOS render <select> and <button> text in the system blue tint unless an
+   explicit color is set. Force the Join service-provider dropdown text to black. */
+#nameSelect{color:#111827;-webkit-text-fill-color:#111827;}
 
 /* Red status dot for selectable tasks in MY LIST */
 .task-status-dot {
@@ -6114,6 +6189,64 @@ dialog footer button, .code-dialog footer button {
         window.sendPasswordResetEmail(authInstance, email)
     };
   </script>
+  <style id="ff-ipad-layout-v1">
+  /* ───────────────────────────────────────────────────────────────────────
+     iPad / tablet LAYOUT-ONLY adjustments. No logic, navigation, permissions,
+     colors, structure or feature positions are changed here.
+
+     Safety model:
+     - Scoped to min-width:641px, so phones (<=640px) are completely untouched.
+     - env(safe-area-inset-*) resolves to 0 on desktop monitors and non-notch
+       devices, so every rule below is a NO-OP on desktop and only takes effect
+       on devices that actually report a safe area (iPad/iPhone webview).
+     - Placed last in <head> source order so equal-specificity rules win
+       predictably without needing !important.
+     - No full-screen layers; nothing here can intercept taps.
+     ─────────────────────────────────────────────────────────────────────── */
+
+  /* Phase 1 — respect the iPad top safe area in the desktop/tablet header.
+     The desktop header is position:sticky;top:0 and did not account for the
+     device top inset, so its content sat under the iPad status bar. Push the
+     header CONTENT down by the inset (the purple header background already
+     fills to top:0, so the status-bar strip stays purple — native look).
+     Header height is remeasured by JS into --header-h, so the screens below
+     reflow automatically. On desktop the inset is 0 → identical to today. */
+  @media (min-width: 641px) {
+    .header-inner {
+      padding-top: calc(3px + env(safe-area-inset-top, 0px));
+      padding-left: max(0px, env(safe-area-inset-left, 0px));
+      padding-right: calc(25px + env(safe-area-inset-right, 0px));
+    }
+  }
+
+  /* Phase 2 — modest breathing room for the top nav on iPad-class widths so
+     the tabs do not feel cramped. Conservative: spacing only. No changes to
+     item sizes, order, visibility, or the existing progressive-hide rules
+     (1160/1260/1380/1500px). */
+  @media (min-width: 641px) and (max-width: 1366px) {
+    .header .toolbar.toolbar-nav-main {
+      gap: 8px;
+    }
+  }
+
+  /* Phase 3 — iPad PORTRAIT name legibility. The shared tablet-portrait block
+     (min-width:641 / max-width:1160 / portrait) was tuned for Samsung kiosk
+     tablets and shrinks queue names to ~9–12px, which is too small on iPad.
+     Restore a comfortable size for iOS devices ONLY (html.ff-ios-capacitor-safe
+     is added solely on iPhone/iPad). Phones are <=640px so they never match this
+     query; Samsung/Android kiosks and landscape iPads are completely unaffected.
+     Higher specificity + later source order so it wins over the kiosk rule. */
+  @media (min-width: 641px) and (max-width: 1160px) and (orientation: portrait) {
+    html.ff-ios-capacitor-safe body.ff-queue-route-active .available-list .item .name-pill {
+      font-size: clamp(13px, 2.6vw, 16px) !important;
+    }
+    html.ff-ios-capacitor-safe body.ff-queue-route-active .inservice-list .item .name-pill {
+      font-size: clamp(13px, 2.6vw, 16px) !important;
+      max-width: min(160px, 32vw) !important;
+      flex: 0 1 min(160px, 32vw) !important;
+    }
+  }
+  </style>
 </head>
 
 <body class="ff-app-loading ff-auth-splash-visible">
@@ -8164,6 +8297,8 @@ dialog footer button, .code-dialog footer button {
               <span id="billingStatus" style="font-size:12px;font-weight:400;color:#111827;text-align:right;">Not connected</span>
               <span style="font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Next Billing Date</span>
               <span id="billingNextDate" style="font-size:12px;font-weight:400;color:#111827;text-align:right;">-</span>
+              <span style="font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Payment Method</span>
+              <span id="billingPaymentMethod" style="font-size:12px;font-weight:400;color:#111827;text-align:right;">-</span>
             </div>
           </div>
           
@@ -8172,6 +8307,8 @@ dialog footer button, .code-dialog footer button {
             <button id="billingSubscribeBtn" class="btn-primary" style="font-size:12px;padding:6px 14px;background:#7c3aed;background-image:none;border-color:#7c3aed;color:#fff;">Subscribe / Upgrade</button>
             <button id="billingManageBtn" class="btn-ghost" style="font-size:12px;padding:6px 14px;border:1px solid #7c3aed;color:#7c3aed;background:#fff;">Manage Billing</button>
           </div>
+          <!-- Read-only notice (mobile app only; shown via html.ff-native-app CSS) -->
+          <div id="billingNativeReadOnlyNotice" style="display:none;margin-bottom:24px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#f9fafb;font-size:12px;line-height:1.5;color:#6b7280;">Billing changes are available in the FairFlow web app.</div>
           
           <!-- Invoices / Receipts -->
           <div>
@@ -8921,7 +9058,11 @@ async function initFirebaseAuth() {
               const salonData = salonSnap.exists() ? (salonSnap.data() || {}) : {};
               const billingStatus = String(salonData.accountStatus || '').toLowerCase();
               const billingReason = String(salonData.accountStatusReason || '').toLowerCase();
-              if (billingStatus === 'locked' && billingReason === 'billing_required') {
+              const ffNativeAppNow = (typeof window.ffIsNativeApp === 'function' && window.ffIsNativeApp() === true);
+              // Login-only mobile app shows no payment UI, so never block the shell
+              // for billing there — existing businesses keep working; they fix
+              // billing on the web.
+              if (billingStatus === 'locked' && billingReason === 'billing_required' && !ffNativeAppNow) {
                 console.warn('[AUTH] Billing required - blocking pre-paint app shell', { salonId });
                 try {
                   document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
@@ -13968,8 +14109,8 @@ function renderQueue(){
 
     hold.onclick=() =>{ window.__ff_holdTargetName = q.name; window.__ff_holdWasHeld = !!q.held; guardHold(()=>toggleHold(qi)); };
 
-    // Show call icon when we have staffId and row not held (match In Service behavior).
-    const canCall = !q.held && !!presenceMeta.staffId;
+    // Show call icon whenever we have a staffId (incl. held rows) so reception can always call staff.
+    const canCall = !!presenceMeta.staffId;
     const callStatusLabel = queueCallStatusLabel(presenceMeta.presence, presenceMeta.status);
     const diagEligibility = {
       rowName: q.name,
@@ -14006,7 +14147,12 @@ function renderQueue(){
         "cursor:pointer",
         "font-size:17px",
         "line-height:1",
-        "opacity:1"
+        "opacity:1",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "padding:0",
+        "box-sizing:border-box"
       ].join(";");
       callBtn.disabled = false;
 
@@ -14083,7 +14229,12 @@ function renderQueue(){
         "cursor:pointer",
         "font-size:15px",
         "line-height:1",
-        "flex-shrink:0"
+        "flex-shrink:0",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "padding:0",
+        "box-sizing:border-box"
       ].join(";");
       selfLeaveBtn.onclick = () => selfRemoveFromQueue(qi);
       ctrls.prepend(selfLeaveBtn);
@@ -14123,7 +14274,12 @@ function renderQueue(){
         "cursor:pointer",
         "font-size:15px",
         "line-height:1",
-        "flex-shrink:0"
+        "flex-shrink:0",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "padding:0",
+        "box-sizing:border-box"
       ].join(";");
       quickRemove.onclick = () => guardHold(() => removeFromQueue(qi));
       ctrls.append(quickRemove);
@@ -14372,7 +14528,12 @@ function renderService(){
         "cursor:pointer",
         "font-size:17px",
         "line-height:1",
-        "opacity:1"
+        "opacity:1",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "padding:0",
+        "box-sizing:border-box"
       ].join(";");
       callBtn.disabled = false;
 
@@ -32844,6 +33005,24 @@ function reloadTasksForTab(tab) {
   localStorage.setItem(`ffv24_tasks_${tab}_active`, JSON.stringify(fresh));
 }
 
+/**
+ * Per-tab reset stamps. A reset writes Date.now() for the tab; the stamp syncs
+ * through the cloud doc. Devices whose local state is OLDER than the cloud
+ * stamp must not merge/push their stale done-lists back (that is what used to
+ * resurrect every completed task right after a reset).
+ */
+function ffTasksMarkTabReset(tab) {
+  if (!tab) return;
+  try {
+    var stamps = JSON.parse(localStorage.getItem('ff_tasks_reset_stamps_v1') || '{}');
+    stamps[tab] = Date.now();
+    localStorage.setItem('ff_tasks_reset_stamps_v1', JSON.stringify(stamps));
+  } catch (e) {
+    console.warn('[Tasks] ffTasksMarkTabReset failed', e);
+  }
+}
+window.ffTasksMarkTabReset = ffTasksMarkTabReset;
+
 function resetTasksForCurrentTab() {
     if (typeof ffCurrentUserHasTasksResetPermission === 'function' && !ffCurrentUserHasTasksResetPermission()) {
       return;
@@ -32875,23 +33054,31 @@ function resetTasksForCurrentTab() {
     writeTasksList(tab, 'active', catalog);
     writeTasksList(tab, 'pending', []);
     writeTasksList(tab, 'done', []);
+    ffTasksMarkTabReset(tab);
 
     console.log("[RESET] Storage cleared and reinitialized");
 
-    // Re-render UI for this tab
-    console.log("[RESET] Re-rendering tasks list for tab:", window.currentTasksTab);
-    renderTasksList(window.currentTasksTab);
-    
-    // Log to Tasks history - call addHistoryEntry directly
-    if (typeof addHistoryEntry === 'function') {
-      const currentTab = window.currentTasksTab || 'unknown';
-      const actor = getHistoryActor ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
-      addHistoryEntry(`Tasks Reset: ${currentTab}`, actor.role, actor.name, actor.name || '-', 'tasks');
+    // Re-render UI for this tab — never let a render/history error block the cloud write below
+    try {
+      console.log("[RESET] Re-rendering tasks list for tab:", window.currentTasksTab);
+      renderTasksList(window.currentTasksTab);
+
+      // Log to Tasks history - call addHistoryEntry directly
+      if (typeof addHistoryEntry === 'function') {
+        const currentTab = window.currentTasksTab || 'unknown';
+        const actor = getHistoryActor ? getHistoryActor() : { role: 'Admin', name: 'Admin' };
+        addHistoryEntry(`Tasks Reset: ${currentTab}`, actor.role, actor.name, actor.name || '-', 'tasks');
+      }
+    } catch (e) {
+      console.error('[RESET] render/history step failed (continuing to cloud write)', e);
     }
 
     // Explicit cloud write so the reset syncs immediately to other devices
     if (typeof window.tasksCloudWrite === 'function') {
-      window.tasksCloudWrite();
+      window.tasksCloudWrite('manual-reset');
+    } else {
+      console.error('[RESET] tasksCloudWrite missing — reset NOT saved to cloud');
+      if (typeof window.showToast === 'function') window.showToast('Reset NOT saved: cloud sync module not loaded', 'error');
     }
 
     // Update badges after reset
@@ -32958,6 +33145,7 @@ function resetTasksForTabInternal(tab) {
     localStorage.setItem(keyPending, JSON.stringify([]));
     localStorage.setItem(keyDone, JSON.stringify([]));
   }
+  ffTasksMarkTabReset(tab);
   
   console.log("[RESET] Storage cleared and reinitialized");
   
@@ -54377,7 +54565,8 @@ window.__ffTasksCloudInit = function() {
       var alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
       var enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
       var autoResetState = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
-      var state = { catalog: catalog, tombstone: tombstone, alertWindows: alertWindows, enforceSelectSettings: enforceSelectSettings, autoResetState: autoResetState };
+      var resetStamps = JSON.parse(localStorage.getItem('ff_tasks_reset_stamps_v1') || '{}');
+      var state = { catalog: catalog, tombstone: tombstone, alertWindows: alertWindows, enforceSelectSettings: enforceSelectSettings, autoResetState: autoResetState, resetStamps: resetStamps };
       TABS.forEach(function(tab) {
         var active = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_active_v1')  || '[]');
         var done = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_done_v1')    || '[]');
@@ -54403,7 +54592,54 @@ window.__ffTasksCloudInit = function() {
       return state;
     },
     applyState: function(data) {
-      if (window.__ffTasksLastLocalWrite && (Date.now() - window.__ffTasksLastLocalWrite) < 8000) return;
+      var TABS_FOR_STAMPS = ['opening','closing','weekly','monthly','yearly'];
+      // Reset stamps: tabs whose cloud reset is NEWER than anything this device
+      // has seen. For those tabs the remote lists win outright — local done rows
+      // predate the reset and must NOT be merged back (that bug resurrected
+      // every completed task right after a reset).
+      var localStamps = {};
+      try { localStamps = JSON.parse(localStorage.getItem('ff_tasks_reset_stamps_v1') || '{}'); } catch (e) {}
+      var remoteStamps = (data && data.resetStamps && typeof data.resetStamps === 'object') ? data.resetStamps : {};
+      var freshResetTabs = {};
+      TABS_FOR_STAMPS.forEach(function(tab) {
+        if (Number(remoteStamps[tab] || 0) > Number(localStamps[tab] || 0)) freshResetTabs[tab] = true;
+      });
+      function persistMergedStamps() {
+        try {
+          var merged = {};
+          TABS_FOR_STAMPS.forEach(function(tab) {
+            var v = Math.max(Number(localStamps[tab] || 0), Number(remoteStamps[tab] || 0));
+            if (v > 0) merged[tab] = v;
+          });
+          var _was = window.__ffTasksApplyingRemote;
+          window.__ffTasksApplyingRemote = true;
+          try {
+            localStorage.setItem('ff_tasks_reset_stamps_v1', JSON.stringify(merged));
+          } finally {
+            window.__ffTasksApplyingRemote = _was;
+          }
+        } catch (e) {}
+      }
+      var hasFreshReset = Object.keys(freshResetTabs).length > 0;
+      if (window.__ffTasksLastLocalWrite && (Date.now() - window.__ffTasksLastLocalWrite) < 8000) {
+        // Within the local-write cooldown a remote reset still has priority:
+        // apply ONLY the freshly reset tabs, leave everything else local.
+        if (!hasFreshReset) return;
+        try {
+          Object.keys(freshResetTabs).forEach(function(tab) {
+            var tabData = data[tab];
+            if (!tabData) return;
+            ['active','pending','done'].forEach(function(kind) {
+              if (Array.isArray(tabData[kind])) {
+                localStorage.setItem('ff_tasks_' + tab + '_' + kind + '_v1', JSON.stringify(tabData[kind]));
+              }
+            });
+          });
+          persistMergedStamps();
+          console.log('[TasksCloud] Applied remote reset during cooldown for tabs:', Object.keys(freshResetTabs).join(','));
+        } catch (e) { console.warn('[TasksCloud] reset-during-cooldown apply error', e); }
+        return;
+      }
       try {
         var TABS = ['opening','closing','weekly','monthly','yearly'];
         if (data.catalog && typeof data.catalog === 'object') {
@@ -54471,7 +54707,9 @@ window.__ffTasksCloudInit = function() {
           ['active','pending','done'].forEach(function(kind) {
             if (Array.isArray(tabData[kind])) {
               var rows = tabData[kind];
-              if (kind === 'done') {
+              // Skip the done-union for freshly reset tabs — the remote (clean)
+              // lists win, otherwise local pre-reset done rows come back.
+              if (kind === 'done' && !freshResetTabs[tab]) {
                 var localDone = [];
                 try {
                   localDone = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_done_v1') || '[]') || [];
@@ -54482,6 +54720,7 @@ window.__ffTasksCloudInit = function() {
             }
           });
         });
+        persistMergedStamps();
         try {
           if (typeof cleanupOrphanTasks === 'function') cleanupOrphanTasks();
           if (typeof cleanupBlockedTasks === 'function') cleanupBlockedTasks();
@@ -54590,9 +54829,17 @@ window.__ffQueueCloudInit = function() {
   if (typeof window.initQueueCloud !== 'function') return;
   window.initQueueCloud({
     applyState: function(q, s, l, qd, meta) {
-      // After a local save, ignore Firestore updates briefly to avoid race with slow writes / snapshots
+      // After a local save, ignore Firestore updates briefly to avoid a race
+      // with our own slow write / its echo snapshot. BUT a genuine remote
+      // change (meta.remote === true: a higher rev written by ANOTHER device)
+      // must always be applied so two active devices converge instead of
+      // ignoring each other for seconds (the "names flap every second" bug).
+      // Returning false signals queue-cloud that we did NOT reconcile with the
+      // server, so it must not advance the merge base — otherwise the next
+      // write would resurrect the list we never actually cleared.
       const forceApply = meta && meta.force === true;
-      if (!forceApply && Date.now() - window.__ff_lastSaveTime < 6000) return;
+      const isRemote = meta && meta.remote === true;
+      if (!forceApply && !isRemote && Date.now() - window.__ff_lastSaveTime < 6000) return false;
       // Boot anti-flicker: before the queue-cloud has confirmed an authoritative
       // SERVER snapshot, never clobber a non-empty in-memory queue with an empty
       // cloud payload (e.g. an empty cached snapshot). The list would blink away
@@ -54602,7 +54849,7 @@ window.__ffQueueCloudInit = function() {
       const haveLocal = (Array.isArray(queue) && queue.length > 0) ||
                         (Array.isArray(service) && service.length > 0);
       if (!forceApply && incomingEmpty && haveLocal && !window.__ff_queueCloudServerConfirmed) {
-        return;
+        return false;
       }
       const filteredQueueState = ffFilterQueueStateToCurrentStaff(q, s);
       queue = filteredQueueState.queue;
@@ -54619,6 +54866,7 @@ window.__ffQueueCloudInit = function() {
       if (typeof ffRenderQueueFilterChips === 'function') ffRenderQueueFilterChips();
       renderQueue();
       renderService();
+      return true;
     },
     getState: function() {
       return { queue: queue, service: service, log: log, queuesData: getQueuesData() };
@@ -59082,9 +59330,9 @@ function hookSettingsGuard_DISABLED(){
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
-        { src: "/queue-cloud.js?v=20260607_merge_byid_nopush", type: "module", delay: 1350 },
-        { src: "/tickets.js?v=20260603_staff_services_tab", type: "module", delay: 1400 },
-        { src: "/tasks-cloud.js?v=20260603_return_task_cloud_guard", type: "module", delay: 1500 },
+        { src: "/queue-cloud.js?v=20260609_merge_base_consistency", type: "module", delay: 1350 },
+        { src: "/tickets.js?v=20260609_bulk_delete", type: "module", delay: 1400 },
+        { src: "/tasks-cloud.js?v=20260609_write_diag2", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
         { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
         { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 1900 },
@@ -59100,11 +59348,11 @@ function hookSettingsGuard_DISABLED(){
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/push-notifications.js?v=20260524_ios_fcm_bridge_retry", type: "module", delay: 3500 },
         { src: "/settings-cloud.js?v=20260530_tax_split", type: "module", delay: 3600 },
-        { src: "/billing-cloud.js?v=20260519_internaloverride", type: "module", delay: 3650 }, // bumped: internal billing override (comped/free accounts) — adds parallel billing/override listener + override-aware render path
+        { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module", delay: 3650 }, // bumped: native (mobile) read-only billing — payment-method last-4 + blocked payment actions
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },
         { src: "/inventory.js?v=20260530_inv_readonly_tabs", type: "module", delay: 4900 },
-        { src: "/locations-manage.js?v=20260602_location_billing_fresh_count", type: "module", delay: 5400 },
+        { src: "/locations-manage.js?v=20260609_native_web_app_wording", type: "module", delay: 5400 },
         { src: "/queue-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 5700 },
         { src: "/tickets-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 6000 },
         { src: "/time-analytics.js?v=20260516_analytics_class_first_recompute", type: "module", delay: 6300 },
@@ -59798,6 +60046,14 @@ function hookSettingsGuard_DISABLED(){
       transform: translateX(6px);
     }
     #ticketsScreen .tickets-tab.active { color:#7c3aed; border-bottom-color:#7c3aed; font-weight:500; font-size:13px; z-index:1; }
+    #ticketsScreen .ticket-card.ticket-selectable { cursor:pointer; }
+    #ticketsScreen .ticket-card.ticket-selected { outline:2px solid #7c3aed; outline-offset:-2px; background:#faf5ff; }
+    #ticketsScreen .ticket-select-cb {
+      width:22px; height:22px; flex-shrink:0; border:2px solid #c4b5fd; border-radius:6px;
+      display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px;
+      line-height:1; background:#fff; margin-right:2px;
+    }
+    #ticketsScreen .ticket-card.ticket-selected .ticket-select-cb { background:#7c3aed; border-color:#7c3aed; }
     #ticketsScreen #ticketsNewBtn {
       flex-shrink: 0;
     }
@@ -59889,6 +60145,33 @@ function hookSettingsGuard_DISABLED(){
       display:flex; flex-direction:column; align-items:center;
     }
     #ticketsScreen #ticketsList { width:100%; max-width:500px; }
+
+    /* Mobile: while selecting, pin the bulk bar to the bottom of the tickets screen
+       (above the fixed bottom nav) so "Archive selected" is always visible.
+       The sticky top bar version is hidden behind the fixed header on phones. */
+    @media (max-width: 640px) {
+      #ticketsScreen.ff-tickets-selecting #ticketsBulkBar {
+        position: absolute !important;
+        left: 0; right: 0; bottom: 0; top: auto !important;
+        z-index: 60;
+        background: #fff !important;
+        border-top: 1px solid #e5e7eb;
+        border-bottom: none !important;
+        box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.14);
+        padding: 10px 12px 12px;
+      }
+      #ticketsScreen.ff-tickets-selecting #ticketsBulkBar #ticketsBulkArchiveBtn {
+        flex: 1 1 auto;
+        min-height: 44px;
+      }
+      #ticketsScreen.ff-tickets-selecting #ticketsBulkBar #ticketsBulkCancelBtn {
+        min-height: 44px;
+      }
+      /* Room so the last ticket cards are not hidden behind the pinned bar */
+      #ticketsScreen.ff-tickets-selecting .tickets-body {
+        padding-bottom: 150px;
+      }
+    }
 
     /* -- Ticket Card - grid layout --------------------------- */
     #ticketsScreen .tickets-body {
@@ -60131,6 +60414,14 @@ function hookSettingsGuard_DISABLED(){
         </table>
       </div>
     </div>
+    <div id="ticketsBulkBar" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #eee;background:#faf5ff;position:sticky;top:0;z-index:5;">
+      <button type="button" id="ticketsSelectToggleBtn" style="padding:7px 14px;border:1px solid #d1d5db;border-radius:999px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;min-height:36px;">Select</button>
+      <button type="button" id="ticketsSelectAllBtn" style="display:none;padding:7px 14px;border:1px solid #d1d5db;border-radius:999px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;min-height:36px;">Select all</button>
+      <span id="ticketsBulkInfo" style="display:none;font-size:13px;color:#6b7280;font-weight:500;"></span>
+      <span style="flex:1;"></span>
+      <button type="button" id="ticketsBulkArchiveBtn" style="display:none;padding:7px 16px;border:none;border-radius:999px;background:#7c3aed;color:#fff;font-size:13px;font-weight:600;cursor:pointer;min-height:36px;" disabled>Archive selected</button>
+      <button type="button" id="ticketsBulkCancelBtn" style="display:none;padding:7px 14px;border:1px solid #d1d5db;border-radius:999px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;min-height:36px;">Cancel</button>
+    </div>
     <div id="ticketsList"></div>
     <div id="ticketsLoadMoreWrap" style="display:none;text-align:center;padding:12px 16px 20px;">
       <button type="button" id="ticketsLoadMoreBtn" style="padding:10px 22px;background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;min-height:40px;box-sizing:border-box;">Load more</button>
@@ -60159,6 +60450,9 @@ function hookSettingsGuard_DISABLED(){
     <div id="ticketAsBookedNone" style="display:block;"></div>
     <!-- Service picker -->
     <div style="margin-bottom:8px;font-size:13px;font-weight:600;color:#374151;">Add Services Performed</div>
+    <div id="ticketServiceSearchWrap" style="margin-bottom:8px;">
+      <input type="text" id="ticketServiceSearchInput" placeholder="Search services..." autocomplete="off" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#111827;background:#fff;outline:none;">
+    </div>
     <div id="ticketServicePickerContainer" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;max-height:220px;overflow-y:auto;"></div>
     <!-- Performed lines -->
     <div id="ticketPerformedList" style="margin-bottom:8px;"></div>

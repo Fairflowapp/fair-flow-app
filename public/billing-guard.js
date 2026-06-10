@@ -102,7 +102,11 @@ function isOwner() {
 
 function isStagingBillingBypass() {
   try {
-    return typeof window !== "undefined" && window.location?.hostname === "fair-flow-staging.web.app";
+    if (typeof window === "undefined") return false;
+    // Mobile app (Capacitor) is login-only and exposes no payment UI, so the
+    // billing guard (banner + lock overlay + Stripe links) must never mount.
+    if (typeof window.ffIsNativeApp === "function" && window.ffIsNativeApp() === true) return true;
+    return window.location?.hostname === "fair-flow-staging.web.app";
   } catch (_) {
     return false;
   }

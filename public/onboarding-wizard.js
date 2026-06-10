@@ -134,7 +134,17 @@ function showStep(step) {
   setError("");
 }
 
+function ffOnbNativeApp() {
+  try {
+    return typeof window !== "undefined" && typeof window.ffIsNativeApp === "function" && window.ffIsNativeApp() === true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function openWizard() {
+  // New-business onboarding is web-only; never open it in the mobile app.
+  if (ffOnbNativeApp()) return;
   const host = $(WIZARD_ID);
   if (!host) return;
   host.style.display = "flex";
@@ -550,6 +560,8 @@ function wire() {
 async function maybeStart(user) {
   if (_running || _starting) return;
   if (!user) return;
+  // Onboarding is web-only. The mobile app is login-only for existing businesses.
+  if (ffOnbNativeApp()) return;
   _starting = true;
 
   try {
@@ -585,6 +597,7 @@ onAuthStateChanged(auth, (user) => {
 
 // Manual trigger for debugging / re-opening.
 window.ffOpenOnboarding = async function () {
+  if (ffOnbNativeApp()) { console.warn("[Onboarding] disabled in mobile app"); return; }
   const user = auth.currentUser;
   if (!user) { console.warn("[Onboarding] not signed in"); return; }
   _currentUser = user;

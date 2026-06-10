@@ -68,10 +68,24 @@ const NEW_UI = Object.freeze({
   monthlyPrice: "billingMonthlyPrice",
   status: "billingStatus",
   nextDate: "billingNextDate",
+  paymentMethod: "billingPaymentMethod",
   subscribeBtn: "billingSubscribeBtn",
   manageBtn: "billingManageBtn",
   invoicesBody: "billingInvoicesBody",
 });
+
+// True only inside the Capacitor native app (iOS/Android). On native, billing is
+// READ-ONLY: plan/payment-method/invoices show, but every payment-changing action
+// (subscribe, manage, portal, checkout, add-ons) is blocked.
+function ffNativeApp() {
+  try {
+    return typeof window !== "undefined" && typeof window.ffIsNativeApp === "function" && window.ffIsNativeApp() === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+const FF_NATIVE_BILLING_MSG = "Billing changes are available in the FairFlow web app.";
 
 function $(id) {
   return document.getElementById(id);
@@ -199,6 +213,10 @@ function clearCardError() {
  * present, its label is restored on failure.
  */
 async function triggerCheckout(btn, items) {
+  if (ffNativeApp()) {
+    showCardError(FF_NATIVE_BILLING_MSG);
+    return;
+  }
   const salonId = getSalonId();
   if (!salonId) {
     showCardError("No salon selected.");
@@ -243,6 +261,10 @@ async function triggerCheckout(btn, items) {
  * Core portal invocation, shared by both UIs.
  */
 async function triggerPortal(btn) {
+  if (ffNativeApp()) {
+    showCardError(FF_NATIVE_BILLING_MSG);
+    return;
+  }
   const salonId = getSalonId();
   if (!salonId) {
     showCardError("No salon selected.");
@@ -530,7 +552,8 @@ function renderNewOverrideCard(override) {
   if (subscribeBtn) subscribeBtn.style.display = "none";
   if (manageBtn) manageBtn.style.display = "none";
 
-  // No Stripe invoices for an override; clear the table.
+  // No Stripe payment method / invoices for a comped account.
+  renderPaymentMethodRow(null);
   renderInvoicesRow(null);
 
   hideSyncingIndicator();
@@ -638,6 +661,20 @@ function buildPlanLabel(items) {
   return extras.length ? `${head} + ${extras.join(" + ")}` : head;
 }
 
+/** Renders the "Payment Method" row (Visa •••• 4242) from the cached card. */
+function renderPaymentMethodRow(data) {
+  const pmEl = $(NEW_UI.paymentMethod);
+  if (!pmEl) return;
+  const pm = data && data.paymentMethod ? data.paymentMethod : null;
+  if (pm && pm.last4) {
+    const raw = String(pm.brand || "").trim();
+    const brand = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "Card";
+    pmEl.textContent = `${brand} •••• ${pm.last4}`;
+  } else {
+    pmEl.textContent = "—";
+  }
+}
+
 /** Updates the new mobile-style billing card if it's present in DOM. */
 function renderNewBillingCard(data) {
   const statusEl = $(NEW_UI.status);
@@ -647,6 +684,9 @@ function renderNewBillingCard(data) {
   const nextDateEl = $(NEW_UI.nextDate);
   const subscribeBtn = $(NEW_UI.subscribeBtn);
   const manageBtn = $(NEW_UI.manageBtn);
+
+  renderPaymentMethodRow(data);
+  ffNativeMaybeSyncForPaymentMethod(data);
 
   if (!data) {
     if (planEl) planEl.textContent = "—";
@@ -878,6 +918,17 @@ function wireNewCardDom() {
  * safe to call repeatedly. Handles owner-gating + listener lifecycle on every
  * open so a salon switch picks up the new salon's billing doc.
  */
+// On native, fetch the latest Stripe state once so the read-only card can show
+// the payment-method last-4 (which only lands in Firestore after a sync).
+function ffNativeMaybeSyncForPaymentMethod(data) {
+  if (!ffNativeApp()) return;
+  try {
+    if (data && data.customerId && !(data.paymentMethod && data.paymentMethod.last4)) {
+      triggerSync().catch(() => {});
+    }
+  } catch (_) {}
+}
+
 function ffInitBillingSection() {
   const section = $("billingSettingsSection");
   if (!section) return;

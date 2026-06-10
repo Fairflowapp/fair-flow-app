@@ -1278,8 +1278,24 @@ function showResetPasswordScreen() {
   if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
 }
 
+// True only inside the Capacitor native app (iOS/Android). Defined in the head
+// of index.html; we wrap it defensively in case app.js loads first.
+function ffNativeApp() {
+  try {
+    return typeof window !== "undefined" && typeof window.ffIsNativeApp === "function" && window.ffIsNativeApp() === true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function ffIsBillingRequiredSalonData(salonData) {
   if (typeof window !== "undefined" && window.location?.hostname === "fair-flow-staging.web.app") {
+    return false;
+  }
+  // Mobile app is login-only and shows no payment UI. Existing pilot businesses
+  // must keep working on the phone even if billing is unresolved — they fix
+  // billing on the web. So never raise the billing gate inside the native app.
+  if (ffNativeApp()) {
     return false;
   }
   const status = String(salonData?.accountStatus || "").toLowerCase();
@@ -1468,6 +1484,9 @@ function switchToLogin() {
 }
 
 function switchToSignup() {
+  // Sign-up does not exist in the mobile app (login-only). Defensive no-op in
+  // case any hidden control is still reachable on native.
+  if (ffNativeApp()) return;
   const loginSection = document.getElementById("login-section");
   const signupSection = document.getElementById("signup-section");
   if (loginSection) loginSection.style.display = "none";
@@ -1505,7 +1524,82 @@ function ffDeriveOwnerName(user, emailFallback) {
   return ffFormatNameFromEmail(email) || "Owner";
 }
 
+// Login-only mobile app: a signed-in account with no FairFlow business/profile
+// must NOT be offered business creation. Show an informational dead-end instead
+// (text only — no website link or payment action, per App Store / Play rules).
+function ffShowNativeNoBusinessScreen(user) {
+  try {
+    if (typeof hideAuthScreens === "function") hideAuthScreens();
+  } catch (_) {}
+
+  const loginSection = document.getElementById("login-section");
+  const signupSection = document.getElementById("signup-section");
+  const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
+  const mainApp = document.getElementById("main-app-content");
+  if (loginSection) loginSection.style.display = "none";
+  if (signupSection) signupSection.style.display = "none";
+  if (resetSection) resetSection.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "none";
+  if (mainApp) mainApp.style.display = "none";
+
+  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.add("ff-logged-out");
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
+
+  const existing = document.getElementById("ff-native-no-business");
+  if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+
+  const overlay = document.createElement("div");
+  overlay.id = "ff-native-no-business";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.style.cssText = "position:fixed;inset:0;z-index:2147483600;background:rgba(15,23,42,.95);display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;";
+
+  const card = document.createElement("div");
+  card.style.cssText = "width:min(440px,100%);background:#fff;border-radius:22px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.35);text-align:center;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;";
+
+  const title = document.createElement("h2");
+  title.textContent = "No business found";
+  title.style.cssText = "margin:0 0 10px;font-size:22px;line-height:1.2;font-weight:800;";
+  card.appendChild(title);
+
+  const msg = document.createElement("p");
+  msg.textContent = "This app is for existing FairFlow businesses and invited staff only. Please create your business account in the FairFlow web app.";
+  msg.style.cssText = "margin:0 0 22px;color:#4b5563;font-size:15px;line-height:1.55;";
+  card.appendChild(msg);
+
+  const signOutBtn = document.createElement("button");
+  signOutBtn.type = "button";
+  signOutBtn.textContent = "Use a different account";
+  signOutBtn.style.cssText = "width:100%;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:15px;font-weight:700;padding:12px 18px;cursor:pointer;";
+  signOutBtn.addEventListener("click", async () => {
+    signOutBtn.disabled = true;
+    signOutBtn.textContent = "Signing out...";
+    try {
+      window.__ff_completeSetupUser = null;
+      await signOut(auth);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      if (typeof showLoginScreen === "function") showLoginScreen();
+    } catch (e) {
+      console.warn("[NativeNoBusiness] signOut failed", e);
+      signOutBtn.disabled = false;
+      signOutBtn.textContent = "Use a different account";
+    }
+  });
+  card.appendChild(signOutBtn);
+
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+}
+
 function showCompleteSetupScreen(user) {
+  // Mobile app is login-only: there is no business creation / "Complete setup".
+  // A signed-in user with no profile gets the informational dead-end instead.
+  if (ffNativeApp()) {
+    ffShowNativeNoBusinessScreen(user);
+    return;
+  }
   const loginSection = document.getElementById("login-section");
   const signupSection = document.getElementById("signup-section");
   const resetSection = document.getElementById("reset-password-section");
@@ -1535,6 +1629,11 @@ function showCompleteSetupScreen(user) {
 }
 
 async function handleCompleteSetup() {
+  // Business creation is web-only. Never run it from the mobile app.
+  if (ffNativeApp()) {
+    ffShowNativeNoBusinessScreen(window.__ff_completeSetupUser || auth.currentUser);
+    return;
+  }
   showCompleteSetupError("");
 
   const user = window.__ff_completeSetupUser || auth.currentUser;
@@ -1905,6 +2004,8 @@ async function ensureOwnerStaffAndMemberDocs({ user, salonId, ownerName }) {
 // Owner signup flow
 // =====================
 async function handleOwnerSignup() {
+  // Owner signup + new business creation is web-only. Never run it on mobile.
+  if (ffNativeApp()) return;
   showSignupError("");
 
   const businessNameEl = document.getElementById("signup-business-name");
@@ -5687,6 +5788,28 @@ window.doResetCurrentTab = function doResetCurrentTab() {
         performedBy: actor.name || '-',
         extra: currentTab ? { tab: currentTab, reset: true } : { reset: true }
     });
+
+    // 6) Stamp the reset + push to cloud EXPLICITLY.
+    // This was the root cause of "reset comes back": this function only cleaned
+    // localStorage and never wrote to Firestore, so the unchanged cloud state
+    // was re-applied a few seconds later and every task returned as completed.
+    try {
+        if (typeof window.ffTasksMarkTabReset === 'function') {
+            window.ffTasksMarkTabReset(tab);
+        } else {
+            const stamps = JSON.parse(localStorage.getItem('ff_tasks_reset_stamps_v1') || '{}');
+            stamps[tab] = Date.now();
+            localStorage.setItem('ff_tasks_reset_stamps_v1', JSON.stringify(stamps));
+        }
+    } catch (e) {
+        console.warn('RESET: stamping failed', e);
+    }
+    if (typeof window.tasksCloudWrite === 'function') {
+        window.tasksCloudWrite('manual-reset');
+    } else {
+        console.error('RESET: tasksCloudWrite missing — reset NOT saved to cloud');
+        if (typeof window.showToast === 'function') window.showToast('Reset NOT saved: cloud sync module not loaded', 'error');
+    }
 
     console.log("RESET: STATE-ONLY reset complete for tab:", tab);
 };

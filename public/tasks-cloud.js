@@ -16,7 +16,7 @@
  *     tombstone, alertWindows, enforceSelectSettings, autoResetState, updatedAt }
  */
 
-import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc, deleteDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc, deleteDoc, onSnapshot, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "/app.js?v=20260510_firestore_lp";
 
@@ -32,7 +32,8 @@ const LS_KEYS_STATIC = [
   "ff_tasks_active_deleted_v1",
   "ff_tasks_alert_windows_v1",
   "ff_tasks_enforce_select_v1",
-  "ff_tasks_auto_reset_state_v1"
+  "ff_tasks_auto_reset_state_v1",
+  "ff_tasks_reset_stamps_v1"
 ];
 
 let _salonId = null;
@@ -42,6 +43,13 @@ let _applyState = null;
 let _getState = null;
 let _onRefresh = null;
 let _writeTimeout = null;
+
+// Monotonic revision of the active branch's tasksState doc — same optimistic
+// concurrency model as the Queue. Every full-state write stamps rev = base + 1
+// inside a transaction, and the security rules reject any update whose rev is
+// not exactly previous + 1. Snapshots whose rev we have already seen (echoes of
+// our own writes, or stale reads) are skipped instead of re-applied.
+let _lastCloudRev = 0;
 
 const SALON_ID_CACHE_KEY = "ff_salonId_v1";
 
@@ -237,7 +245,8 @@ function emptyCloudState() {
     tombstone: {},
     alertWindows: {},
     enforceSelectSettings: {},
-    autoResetState: {}
+    autoResetState: {},
+    resetStamps: {}
   };
 }
 
@@ -250,6 +259,7 @@ function subscribe(salonId, locationId) {
     _unsubscribe = null;
   }
   _firstSnapshot = true;
+  _lastCloudRev = 0;
 
   // CRITICAL: when switching between locations (not on the very first
   // subscribe after app startup), wipe in-memory / local state before the
@@ -308,6 +318,13 @@ function subscribe(salonId, locationId) {
     const data = snap.data();
     _firstSnapshot = false;
 
+    // Revision gate: a snapshot whose rev we have already seen is either the
+    // echo of our own transaction or a stale read — never re-apply it (this is
+    // what allows "the newest write is authoritative" without flapping).
+    const snapRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : 0;
+    if (snapRev > 0 && snapRev <= _lastCloudRev) return;
+    if (snapRev > _lastCloudRev) _lastCloudRev = snapRev;
+
     if (typeof window !== "undefined") window.__ffTasksApplyingRemote = true;
     try {
       _applyState(await mergeSharedTaskTemplatesIntoState(data, salonId));
@@ -325,6 +342,7 @@ function buildFirestoreState(state) {
     alertWindows: state.alertWindows || {},
     enforceSelectSettings: state.enforceSelectSettings || {},
     autoResetState: state.autoResetState || {},
+    resetStamps: state.resetStamps || {},
     updatedAt: serverTimestamp()
   };
   TABS.forEach((tab) => {
@@ -337,12 +355,117 @@ function buildFirestoreState(state) {
   return out;
 }
 
-function writeState() {
-  if (!_salonId || !_getState) return Promise.resolve();
-  const state = _getState();
+function taskRowTime(row) {
+  const v = row && (row.completedAt || row.updatedAt || row.createdAt);
+  if (!v) return 0;
+  if (typeof v === "number") return v;
+  if (v && typeof v.toMillis === "function") return v.toMillis();
+  if (v && typeof v.seconds === "number") return v.seconds * 1000;
+  const p = Date.parse(v);
+  return Number.isFinite(p) ? p : 0;
+}
+
+/** Union of done rows by task id — the row with the newest timestamp wins. */
+function unionDoneNewestWins(localRows, serverRows) {
+  const byId = new Map();
+  const put = (row) => {
+    const id = String((row && (row.taskId || row.id)) || "").trim();
+    if (!id) return;
+    const normalized = { ...row, id, taskId: id, status: "done" };
+    const existing = byId.get(id);
+    if (!existing || taskRowTime(normalized) >= taskRowTime(existing)) byId.set(id, normalized);
+  };
+  (Array.isArray(serverRows) ? serverRows : []).forEach(put);
+  (Array.isArray(localRows) ? localRows : []).forEach(put);
+  return Array.from(byId.values());
+}
+
+/**
+ * Push local state → cloud inside a TRANSACTION (queue-style protection):
+ *
+ *   1. rev compare-and-swap — the write lands at rev = server rev + 1 and the
+ *      security rules reject anything else, so concurrent writers from any
+ *      device are serialized by the server. The transaction retries on
+ *      contention automatically; nobody blind-overwrites the document.
+ *   2. Reset stamps — a tab whose server resetStamp is NEWER than this
+ *      device's is stale here: the server's clean lists are kept (a stale
+ *      device can never resurrect pre-reset tasks). A tab whose LOCAL stamp
+ *      is newer means WE just reset it — local lists win wholesale.
+ *   3. Newest-wins done merge — when stamps are equal (normal work), done
+ *      rows are unioned per task id with the newest timestamp winning, so
+ *      two staff marking tasks at the same moment never erase each other.
+ */
+function writeState(reason) {
+  const isManualReset = reason === "manual-reset";
+  const toast = (msg, kind) => {
+    if (typeof window !== "undefined" && typeof window.showToast === "function") {
+      try { window.showToast(msg, kind || "error"); } catch (_) {}
+    }
+  };
+  if (!_salonId || !_getState) {
+    console.warn("[TasksCloud] writeState skipped — no salonId or getState", { salonId: _salonId });
+    if (isManualReset) toast("Reset NOT saved: no cloud connection (salon not linked)", "error");
+    return Promise.resolve();
+  }
+  let state = null;
+  try {
+    state = _getState();
+  } catch (e) {
+    console.error("[TasksCloud] getState threw — local tasks data unreadable", e);
+    if (typeof window !== "undefined" && typeof window.showToast === "function") {
+      window.showToast("Tasks save failed: local data unreadable", "error");
+    }
+    return Promise.resolve();
+  }
   if (!state) return Promise.resolve();
-  return setDoc(tasksStateRef(_salonId, _locationId), buildFirestoreState(state)).catch((e) => {
-    console.warn("[TasksCloud] write failed", e);
+  const ref = tasksStateRef(_salonId, _locationId);
+  console.log("[TasksCloud] write attempt", { loc: _locationId || "default", reason: reason || "task-update" });
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const out = buildFirestoreState(state);
+    let baseRev = 0;
+    if (snap.exists()) {
+      const server = snap.data() || {};
+      baseRev = (typeof server.rev === "number" && server.rev >= 0) ? server.rev : 0;
+      const serverStamps = (server.resetStamps && typeof server.resetStamps === "object") ? server.resetStamps : {};
+      const localStamps = (state.resetStamps && typeof state.resetStamps === "object") ? state.resetStamps : {};
+      const mergedStamps = { ...localStamps };
+      TABS.forEach((tab) => {
+        const sv = Number(serverStamps[tab] || 0);
+        const lv = Number(localStamps[tab] || 0);
+        if (sv > lv) {
+          // Server tab was reset after our local copy — server lists win.
+          out[tab] = {
+            active: Array.isArray(server[tab]?.active) ? server[tab].active : [],
+            pending: Array.isArray(server[tab]?.pending) ? server[tab].pending : [],
+            done: Array.isArray(server[tab]?.done) ? server[tab].done : []
+          };
+          mergedStamps[tab] = sv;
+        } else if (sv === lv) {
+          // Same reset generation — merge done rows so concurrent marks from
+          // other devices are never dropped by our full-state write.
+          out[tab] = {
+            active: out[tab].active,
+            pending: out[tab].pending,
+            done: unionDoneNewestWins(out[tab].done, server[tab]?.done)
+          };
+        }
+        // lv > sv: we just reset this tab — our clean lists win wholesale.
+      });
+      out.resetStamps = mergedStamps;
+    }
+    out.rev = baseRev + 1;
+    out.lastUpdateReason = typeof reason === "string" && reason ? reason : "task-update";
+    out.lastUpdatedByUid = (auth.currentUser && auth.currentUser.uid) || null;
+    tx.set(ref, out);
+    return out.rev;
+  }).then((rev) => {
+    if (typeof rev === "number" && rev > _lastCloudRev) _lastCloudRev = rev;
+    console.log("[TasksCloud] write OK at rev", rev);
+    if (isManualReset) toast("Reset saved to cloud (rev " + rev + ")", "success");
+  }).catch((e) => {
+    console.error("[TasksCloud] write FAILED", e && (e.code || e.name), e && e.message, e);
+    toast("Tasks save FAILED: " + ((e && (e.code || e.message)) || "unknown error"), "error");
   });
 }
 
@@ -426,8 +549,8 @@ export function initTasksCloud(opts) {
   }
 }
 
-export function tasksCloudWrite() {
-  return writeState();
+export function tasksCloudWrite(reason) {
+  return writeState(reason);
 }
 
 export function tasksCloudReconnect() {
@@ -450,9 +573,12 @@ export function tasksCloudRefresh() {
   return getDocFromServer(ref).then(async (snap) => {
     if (snap.exists()) {
       if (typeof window !== "undefined" && window.__ffTasksLastLocalWrite != null && (Date.now() - window.__ffTasksLastLocalWrite) < 12000) return;
+      const data = snap.data();
+      const r = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : 0;
+      if (r > _lastCloudRev) _lastCloudRev = r;
       window.__ffTasksApplyingRemote = true;
       try {
-        _applyState(await mergeSharedTaskTemplatesIntoState(snap.data(), _salonId));
+        _applyState(await mergeSharedTaskTemplatesIntoState(data, _salonId));
         if (typeof _onRefresh === "function") _onRefresh();
       } finally {
         window.__ffTasksApplyingRemote = false;
