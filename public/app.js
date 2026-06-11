@@ -170,9 +170,23 @@ const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 window.__ffAuth = auth;
 window.__ffGetUid = () => (auth.currentUser && auth.currentUser.uid) || null;
-/** Android WebView / some mobile networks break default gRPC/WebChannel — long polling is more reliable. */
+/**
+ * Mobile WebViews break the default gRPC/WebChannel transport — long polling is
+ * more reliable. On iOS/iPadOS and inside the Capacitor native app the
+ * WKWebView channel can silently STALL: auto-detect probes the connection,
+ * wrongly decides WebChannel works, and then onSnapshot stops delivering
+ * updates while getDocFromServer hangs forever. That froze every technician's
+ * rev at a stale value so their task writes were rejected with
+ * permission-denied. Forcing long polling on those clients keeps the live
+ * listener and writes working; desktop browsers keep the lighter auto-detect.
+ */
 let db;
 try {
+  // Auto-detect long polling: reliable for login + reads across the Capacitor
+  // app and mobile Safari. NOTE: forcing long polling (experimentalForceLongPolling)
+  // was tried to fix technician write-sync, but it STALLED the connection inside
+  // the native app and froze the PIN/login flow — so we keep auto-detect here and
+  // solve the sync problem in the write path instead (see tasks-cloud writeState).
   db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
 } catch (_) {
   db = getFirestore(app);
@@ -4284,9 +4298,13 @@ function moveTaskToPending(taskId, workerName) {
             });
             
             // Update task in ACTIVE: set status='pending' and assignedTo
+            const ffSelectTime = Date.now();
             task.status = 'pending';
             task.assignedTo = workerName;
             task.assignedStaffId = String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || task.assignedStaffId || "").trim() || null;
+            // Stamp the action time so cross-device merge keeps the newest action
+            // (the device that just took the task) instead of being overwritten.
+            task.updatedAt = ffSelectTime;
             
             console.log(`[MOVE TO PENDING] Updated task in ACTIVE:`, {
                 tab,
@@ -4321,7 +4339,9 @@ function moveTaskToPending(taskId, workerName) {
                     assignedTo: workerName,
                     assignedStaffId: String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || task.assignedStaffId || "").trim() || null,
                     assignTo: task.assignTo !== undefined ? task.assignTo : 'all',
-                    technicianTypes: task.technicianTypes
+                    technicianTypes: task.technicianTypes,
+                    updatedAt: ffSelectTime,
+                    selectedAt: ffSelectTime
                 };
                 pendingTasks.push(pendingCopy);
                 localStorage.setItem(pendingKey, JSON.stringify(pendingTasks));
@@ -4409,13 +4429,16 @@ function moveTaskToPending(taskId, workerName) {
                     // Task is in initial state - move it to pending
                     // Create a runtime copy based only on catalog template fields.
                     // IMPORTANT: Do NOT mutate or persist runtime fields into catalog.
+                    const ffSelectTimeCatalog = Date.now();
                     const taskCopy = {
                         id: task.id,
                         title: task.title,
                         instructions: task.instructions || task.info || task.details || "",
                         status: "pending",
                         assignedTo: workerName,
-                        assignedStaffId: String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || task.assignedStaffId || "").trim() || null
+                        assignedStaffId: String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || task.assignedStaffId || "").trim() || null,
+                        updatedAt: ffSelectTimeCatalog,
+                        selectedAt: ffSelectTimeCatalog
                     };
                     
                     // Add to pending list (runtime state only)

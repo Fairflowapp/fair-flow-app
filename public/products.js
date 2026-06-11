@@ -8,7 +8,7 @@ import {
   deleteDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db } from "/app.js?v=20260510_firestore_lp";
+import { db } from "/app.js?v=20260610_force_lp_ios";
 
 let productCategories = [];
 let products = [];

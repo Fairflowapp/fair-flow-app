@@ -31,7 +31,7 @@
 import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "/app.js?v=20260510_firestore_lp";
+import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 
 const FUNCTIONS_REGION = "us-central1";
 

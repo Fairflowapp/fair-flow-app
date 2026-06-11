@@ -31,7 +31,7 @@ import {
   httpsCallable,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
-import { db, auth, storage } from "/app.js?v=20260602_storage_5gb_restore";
+import { db, auth, storage } from "/app.js?v=20260610_force_lp_ios";
 
 const FUNCTIONS_REGION = "us-central1";
 const INCLUDED_STORAGE_BYTES = 5 * 1024 * 1024 * 1024;

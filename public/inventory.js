@@ -2,7 +2,7 @@
  * Inventory — categories/subcategories from Firestore (salon inventoryCategories).
  * Table rows/groups persist on the selected subcategory Firestore document.
  */
-import { db, auth, storage } from "/app.js?v=20260510_firestore_lp";
+import { db, auth, storage } from "/app.js?v=20260610_force_lp_ios";
 import {
   doc,
   getDoc,

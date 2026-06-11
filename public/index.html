@@ -1974,6 +1974,20 @@ dialog footer button, .code-dialog footer button {
 
 .name-pill{white-space:nowrap;font-size:18px;min-width:120px;display:inline-flex;justify-content:center}
 
+@media (min-width: 641px) {
+  body.ff-queue-route-active .available-list .item .name-pill,
+  body.ff-queue-route-active .inservice-list .item .name-pill {
+    width: 108px !important;
+    min-width: 108px !important;
+    max-width: 108px !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    justify-content: center !important;
+    text-align: center !important;
+  }
+}
+
 
 
 /* Ensure all prompts/modals inherit the app font */
@@ -5685,10 +5699,10 @@ dialog footer button, .code-dialog footer button {
   }
 
   body.ff-queue-route-active .inservice-list .item .name-pill {
-    flex: 0 1 min(108px, 24vw) !important;
-    max-width: min(108px, 24vw) !important;
-    font-size: clamp(8px, 2.2vw, 9px) !important;
-    padding: 4px 6px !important;
+    flex: 0 1 min(160px, 32vw) !important;
+    max-width: min(160px, 32vw) !important;
+    font-size: clamp(13px, 2.6vw, 16px) !important;
+    padding: 5px 8px !important;
     margin-right: 10px !important;
   }
 
@@ -5728,12 +5742,6 @@ dialog footer button, .code-dialog footer button {
     line-height: 1.2 !important;
     background: #e5e7eb !important;
     color: #111827 !important;
-  }
-
-  body.ff-queue-route-active .inservice-list .item .ff-inservice-finish-split .finish-btn {
-    font-size: 10px !important;
-    padding: 4px 7px !important;
-    letter-spacing: 0.01em !important;
   }
 
   body.ff-queue-route-active .available-list .item .ff-queue-start-split-toggle,
@@ -6244,6 +6252,67 @@ dialog footer button, .code-dialog footer button {
       font-size: clamp(13px, 2.6vw, 16px) !important;
       max-width: min(160px, 32vw) !important;
       flex: 0 1 min(160px, 32vw) !important;
+    }
+  }
+
+  /* Queue name pills: keep the colored label column visually consistent in
+     Available and In service on tablet/desktop, while phones keep the compact
+     flexible layout. */
+  @media (min-width: 641px) {
+    html body.ff-queue-route-active .available-list .item .name-pill,
+    html body.ff-queue-route-active .inservice-list .item .name-pill {
+      flex: 0 0 108px !important;
+      width: 108px !important;
+      min-width: 108px !important;
+      max-width: 108px !important;
+      box-sizing: border-box !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      justify-content: center !important;
+      text-align: center !important;
+    }
+  }
+
+  /* Queue phone polish: compact rows, readable colored name pills, and no empty
+     right-side space when the current user cannot see row action buttons. */
+  @media (max-width: 640px) {
+    html body.ff-queue-route-active .available-list .item,
+    html body.ff-queue-route-active .inservice-list .item {
+      min-height: 50px !important;
+      padding: 8px 10px !important;
+      gap: 8px !important;
+      align-items: center !important;
+    }
+
+    html body.ff-queue-route-active .available-list .item .name-pill,
+    html body.ff-queue-route-active .inservice-list .item .name-pill {
+      flex: 0 1 min(96px, 34vw) !important;
+      max-width: min(96px, 34vw) !important;
+      min-width: 0 !important;
+      font-size: clamp(11px, 3.2vw, 13px) !important;
+      padding: 5px 8px !important;
+      box-sizing: border-box !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      justify-content: center !important;
+      text-align: center !important;
+      margin-right: 0 !important;
+    }
+
+    html body.ff-queue-route-active .available-list .item .controls:empty,
+    html body.ff-queue-route-active .inservice-list .item .controls:empty {
+      display: none !important;
+    }
+
+    html body.ff-queue-route-active .available-list .item:has(.controls:empty),
+    html body.ff-queue-route-active .inservice-list .item:has(.controls:empty) {
+      grid-template-columns: 42px minmax(0, 1fr) !important;
+    }
+
+    html body.ff-queue-route-active .available-list .item .ff-queue-start-split .start-btn,
+    html body.ff-queue-route-active .inservice-list .item .ff-inservice-finish-split .finish-btn {
+      font-size: 13px !important;
+      padding: 6px 10px !important;
     }
   }
   </style>
@@ -15812,12 +15881,17 @@ function returnPendingTaskToMyList(tab, taskId) {
     return id != null && String(id) === taskIdStr;
   });
 
+  const ffReturnTime = Date.now();
   if (activeIndex >= 0) {
     const updated = { ...activeList[activeIndex] };
     updated.assignedTo = null;
     if ('assignedToId' in updated) updated.assignedToId = null;
     if ('assignedToName' in updated) updated.assignedToName = null;
-    if ('status' in updated) updated.status = null;
+    updated.status = null;
+    // Stamp the return so cross-device merge treats this as the newest action
+    // (otherwise a stale device still holding the task in pending would win).
+    updated.updatedAt = ffReturnTime;
+    updated.completedAt = null;
     activeList[activeIndex] = updated;
   } else {
     const baseId = (pendingTask && (pendingTask.taskId || pendingTask.id)) ? (pendingTask.taskId || pendingTask.id) : taskId;
@@ -15832,7 +15906,8 @@ function returnPendingTaskToMyList(tab, taskId) {
       status: null,
       assignedTo: null,
       completedBy: null,
-      completedAt: null
+      completedAt: null,
+      updatedAt: ffReturnTime
     });
   }
 
@@ -30394,6 +30469,26 @@ function renderTasksList(tab, opts) {
         requestAnimationFrame(() => { el.scrollTop = y; });
       });
     };
+    // On mobile the whole PAGE scrolls (not the inner .tasks-list), so re-rendering
+    // the list — e.g. after selecting a task or when a remote update arrives — was
+    // jumping the page back to the top. Capture the page scroll now and restore it
+    // after the DOM is rebuilt so the user stays exactly where they were.
+    const ffPageScroller = document.scrollingElement || document.documentElement;
+    const ffPageScrollTop = ffPageScroller ? ffPageScroller.scrollTop : (window.pageYOffset || 0);
+    const ffRestorePageScroll = () => {
+      requestAnimationFrame(() => {
+        try {
+          if (ffPageScroller) ffPageScroller.scrollTop = ffPageScrollTop;
+          if (typeof window.scrollTo === 'function') window.scrollTo(0, ffPageScrollTop);
+        } catch (_) {}
+        requestAnimationFrame(() => {
+          try {
+            if (ffPageScroller) ffPageScroller.scrollTop = ffPageScrollTop;
+            if (typeof window.scrollTo === 'function') window.scrollTo(0, ffPageScrollTop);
+          } catch (_) {}
+        });
+      });
+    };
     
     // Before any reads, run one-time migration for this tab to ensure v1 active is the source of truth
     if (typeof migrateLegacyActiveToV1 === 'function') {
@@ -31158,6 +31253,7 @@ function renderTasksList(tab, opts) {
       }
       restoreScroll(pendingListContainer, pendingScrollTopBeforeRender);
     }
+    ffRestorePageScroll();
   } catch (e) {
     console.error('[Tasks] Error rendering tasks list:', e);
   }
@@ -54704,19 +54800,39 @@ window.__ffTasksCloudInit = function() {
         TABS.forEach(function(tab) {
           var tabData = data[tab];
           if (!tabData) return;
-          ['active','pending','done'].forEach(function(kind) {
-            if (Array.isArray(tabData[kind])) {
-              var rows = tabData[kind];
-              // Skip the done-union for freshly reset tabs — the remote (clean)
-              // lists win, otherwise local pre-reset done rows come back.
-              if (kind === 'done' && !freshResetTabs[tab]) {
-                var localDone = [];
-                try {
-                  localDone = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_done_v1') || '[]') || [];
-                } catch (e) {}
-                rows = mergeDoneRows(localDone, rows);
+          // Freshly reset tab: the remote (clean) lists win wholesale, otherwise
+          // local pre-reset rows resurrect. Write remote rows directly.
+          if (freshResetTabs[tab]) {
+            ['active','pending','done'].forEach(function(kind) {
+              if (Array.isArray(tabData[kind])) {
+                localStorage.setItem('ff_tasks_' + tab + '_' + kind + '_v1', JSON.stringify(tabData[kind]));
               }
-              localStorage.setItem('ff_tasks_' + tab + '_' + kind + '_v1', JSON.stringify(rows));
+            });
+            return;
+          }
+          // Same reset generation: three-list merge of remote ⇄ local so this
+          // device never loses its own just-made selection AND always picks up
+          // other devices' selections/completions/returns ("newest action wins").
+          var localTab = {};
+          ['active','pending','done'].forEach(function(kind) {
+            try { localTab[kind] = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_' + kind + '_v1') || '[]') || []; }
+            catch (e) { localTab[kind] = []; }
+          });
+          var merged;
+          if (typeof window.__ffTasksMergeTab === 'function') {
+            merged = window.__ffTasksMergeTab(localTab, tabData);
+          } else {
+            // Fallback (helper not loaded): preserve previous behavior — remote
+            // active/pending win, done is unioned.
+            merged = {
+              active: Array.isArray(tabData.active) ? tabData.active : localTab.active,
+              pending: Array.isArray(tabData.pending) ? tabData.pending : localTab.pending,
+              done: mergeDoneRows(localTab.done, tabData.done)
+            };
+          }
+          ['active','pending','done'].forEach(function(kind) {
+            if (Array.isArray(merged[kind])) {
+              localStorage.setItem('ff_tasks_' + tab + '_' + kind + '_v1', JSON.stringify(merged[kind]));
             }
           });
         });
@@ -59321,7 +59437,7 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260602_storage_5gb_restore_final"></script>
+  <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
   <script>
     (function () {
       var scripts = [
@@ -59332,7 +59448,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
         { src: "/queue-cloud.js?v=20260609_merge_base_consistency", type: "module", delay: 1350 },
         { src: "/tickets.js?v=20260609_bulk_delete", type: "module", delay: 1400 },
-        { src: "/tasks-cloud.js?v=20260609_write_diag2", type: "module", delay: 1500 },
+        { src: "/tasks-cloud.js?v=20260610_tasks_rules_direct_sync", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
         { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
         { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 1900 },

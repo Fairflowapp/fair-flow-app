@@ -13,7 +13,7 @@ import {
   serverTimestamp, Timestamp, writeBatch
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "/app.js?v=20260510_firestore_lp";
+import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 
 // =====================
 // State

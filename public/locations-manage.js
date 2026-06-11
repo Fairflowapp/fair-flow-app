@@ -25,7 +25,7 @@ import {
   getFunctions,
   httpsCallable,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
-import { db, auth } from "/app.js?v=20260602_initial_billing_gate";
+import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 
 const CARD_ID = "userProfileCardLocations";
 const FUNCTIONS_REGION = "us-central1";

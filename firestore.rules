@@ -1868,33 +1868,11 @@ service cloud.firestore {
           && request.resource.data.get('resetStamps', {}).get('yearly', 0) >= resource.data.get('resetStamps', {}).get('yearly', 0);
       }
 
-      /**
-       * Optimistic concurrency (compare-and-swap) — same model as queueState.
-       * Every new-client write lands at rev = previous + 1 (computed inside a
-       * transaction), so concurrent writers are serialized by the server and a
-       * stale device can never blind-overwrite the doc. Old clients that omit
-       * rev are still allowed during rollout (the reset-stamp guard above
-       * keeps them from rolling back a reset); once the doc carries a rev,
-       * any rev-bearing write must advance it by exactly 1.
-       */
-      function tasksRevCompareAndSwap() {
-        return !('rev' in request.resource.data)   // old client (pre-rev) — still covered by the reset-stamp guard during rollout
-          || !('rev' in resource.data)             // legacy doc with no rev yet (first write bootstraps it)
-          || (
-            request.resource.data.rev is number
-            && request.resource.data.rev == resource.data.rev + 1
-          );
-      }
-
       allow read: if belongsToSalon(salonId);
-      allow create: if belongsToSalon(salonId)
-        && userCanWriteAtLocation(salonId, docId);
+      allow create: if belongsToSalon(salonId);
       allow update: if belongsToSalon(salonId)
-        && userCanWriteAtLocation(salonId, docId)
-        && tasksResetStampsNotRolledBack()
-        && tasksRevCompareAndSwap();
-      allow delete: if belongsToSalon(salonId)
-        && userCanWriteAtLocation(salonId, docId);
+        && tasksResetStampsNotRolledBack();
+      allow delete: if belongsToSalon(salonId);
     }
 
     // ===== TRAINING (root collections; each doc has salonId) =====

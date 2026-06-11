@@ -12,7 +12,7 @@ import {
   deleteField,
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { auth, db } from "/app.js?v=20260510_firestore_lp";
+import { auth, db } from "/app.js?v=20260610_force_lp_ios";
 import { generateWeeklySchedule } from "./schedule-generator.js?v=20260420_cross_loc_busy";
 import { validateScheduleDraft } from "./schedule-validator.js?v=20260409_coverage_total_staff_skip";
 import {

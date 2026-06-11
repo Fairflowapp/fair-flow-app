@@ -16,9 +16,9 @@
  *     tombstone, alertWindows, enforceSelectSettings, autoResetState, updatedAt }
  */
 
-import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc, deleteDoc, onSnapshot, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { collection, doc, getDoc, getDocFromServer, getDocs, setDoc, deleteDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "/app.js?v=20260510_firestore_lp";
+import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 
 const TASKS_STATE_DEFAULT = "default";
 const TABS = ["opening", "closing", "weekly", "monthly", "yearly"];
@@ -44,12 +44,17 @@ let _getState = null;
 let _onRefresh = null;
 let _writeTimeout = null;
 
-// Monotonic revision of the active branch's tasksState doc — same optimistic
-// concurrency model as the Queue. Every full-state write stamps rev = base + 1
-// inside a transaction, and the security rules reject any update whose rev is
-// not exactly previous + 1. Snapshots whose rev we have already seen (echoes of
-// our own writes, or stale reads) are skipped instead of re-applied.
+// Last revision we observed from the active branch's tasksState doc. Tasks no
+// longer uses a server-side rev compare-and-swap because stale iOS WebView
+// listeners can freeze rev and cause legitimate technician selections to be
+// rejected as permission-denied. Conflict handling is based on reset stamps and
+// per-row action timestamps ("newest action wins").
 let _lastCloudRev = 0;
+
+// The most recent server doc delivered by the onSnapshot listener. Used as the
+// merge base for writes so we never have to do a blocking getDoc/getDocFromServer
+// (those can hang inside the iOS WKWebView).
+let _lastServerData = null;
 
 const SALON_ID_CACHE_KEY = "ff_salonId_v1";
 
@@ -125,6 +130,102 @@ function tasksStateDocIdFor(locationId) {
 
 function tasksStateRef(salonId, locationId) {
   return doc(db, `salons/${salonId}/tasksState`, tasksStateDocIdFor(locationId));
+}
+
+function firestoreProjectId() {
+  try {
+    return (db && db.app && db.app.options && db.app.options.projectId) || "fairflowapp-db841";
+  } catch (_) {
+    return "fairflowapp-db841";
+  }
+}
+
+function tasksStateRestUrl(salonId, locationId) {
+  const projectId = firestoreProjectId();
+  const docId = tasksStateDocIdFor(locationId);
+  const path = ["salons", salonId, "tasksState", docId].map(encodeURIComponent).join("/");
+  return `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/${path}`;
+}
+
+function firestoreValueToJs(value) {
+  if (!value || typeof value !== "object") return undefined;
+  if ("nullValue" in value) return null;
+  if ("booleanValue" in value) return !!value.booleanValue;
+  if ("integerValue" in value) return Number(value.integerValue);
+  if ("doubleValue" in value) return Number(value.doubleValue);
+  if ("timestampValue" in value) return value.timestampValue;
+  if ("stringValue" in value) return String(value.stringValue || "");
+  if ("arrayValue" in value) return ((value.arrayValue && value.arrayValue.values) || []).map(firestoreValueToJs);
+  if ("mapValue" in value) {
+    const out = {};
+    const fields = (value.mapValue && value.mapValue.fields) || {};
+    Object.keys(fields).forEach((key) => { out[key] = firestoreValueToJs(fields[key]); });
+    return out;
+  }
+  return undefined;
+}
+
+function firestoreDocToJs(docJson) {
+  const out = {};
+  const fields = (docJson && docJson.fields) || {};
+  Object.keys(fields).forEach((key) => { out[key] = firestoreValueToJs(fields[key]); });
+  return out;
+}
+
+function jsToFirestoreValue(value) {
+  if (value === null || typeof value === "undefined") return { nullValue: null };
+  if (typeof value === "boolean") return { booleanValue: value };
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+  }
+  if (typeof value === "string") return { stringValue: value };
+  if (Array.isArray(value)) return { arrayValue: { values: value.map(jsToFirestoreValue) } };
+  if (value && typeof value === "object") {
+    if (typeof value.toISOString === "function") return { timestampValue: value.toISOString() };
+    if (typeof value.seconds === "number") {
+      return { timestampValue: new Date(value.seconds * 1000).toISOString() };
+    }
+    const fields = {};
+    Object.keys(value).forEach((key) => {
+      const v = value[key];
+      if (typeof v !== "undefined" && typeof v !== "function") fields[key] = jsToFirestoreValue(v);
+    });
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(value) };
+}
+
+async function readTasksStateViaRest(salonId, locationId) {
+  const user = auth.currentUser;
+  if (!user || typeof user.getIdToken !== "function") throw new Error("No auth token for Tasks REST read");
+  const token = await user.getIdToken();
+  const res = await fetch(tasksStateRestUrl(salonId, locationId), {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Tasks REST read failed: ${res.status}`);
+  return firestoreDocToJs(await res.json());
+}
+
+async function writeTasksStateViaRest(salonId, locationId, payload) {
+  const user = auth.currentUser;
+  if (!user || typeof user.getIdToken !== "function") throw new Error("No auth token for Tasks REST write");
+  const token = await user.getIdToken();
+  const cleanPayload = { ...payload, updatedAt: new Date().toISOString() };
+  const fieldsValue = jsToFirestoreValue(cleanPayload);
+  const res = await fetch(tasksStateRestUrl(salonId, locationId), {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ fields: fieldsValue.mapValue.fields || {} })
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Tasks REST write failed: ${res.status} ${text.slice(0, 180)}`);
+  }
 }
 
 function sharedTaskTemplatesRef(accountId) {
@@ -260,6 +361,7 @@ function subscribe(salonId, locationId) {
   }
   _firstSnapshot = true;
   _lastCloudRev = 0;
+  _lastServerData = null;
 
   // CRITICAL: when switching between locations (not on the very first
   // subscribe after app startup), wipe in-memory / local state before the
@@ -306,6 +408,7 @@ function subscribe(salonId, locationId) {
     // does not exist yet, we must NOT migrate the default/other-location data.
     // Each branch is "its own business" and starts fresh.
     if (!snap.exists()) {
+      _lastServerData = null;
       try {
         _applyState(await mergeSharedTaskTemplatesIntoState(emptyCloudState(), salonId));
         if (typeof _onRefresh === "function") _onRefresh();
@@ -317,6 +420,11 @@ function subscribe(salonId, locationId) {
     }
     const data = snap.data();
     _firstSnapshot = false;
+
+    // Always keep the freshest server doc as the write merge base + rev source,
+    // even for snapshots we don't re-apply to the UI (echoes / equal rev). This
+    // is what lets writes use a correct rev WITHOUT a blocking server read.
+    _lastServerData = data;
 
     // Revision gate: a snapshot whose rev we have already seen is either the
     // echo of our own transaction or a stale read — never re-apply it (this is
@@ -355,8 +463,7 @@ function buildFirestoreState(state) {
   return out;
 }
 
-function taskRowTime(row) {
-  const v = row && (row.completedAt || row.updatedAt || row.createdAt);
+function rowTimeValue(v) {
   if (!v) return 0;
   if (typeof v === "number") return v;
   if (v && typeof v.toMillis === "function") return v.toMillis();
@@ -365,11 +472,24 @@ function taskRowTime(row) {
   return Number.isFinite(p) ? p : 0;
 }
 
+function taskRowTime(row) {
+  return rowTimeValue(row && (row.completedAt || row.updatedAt || row.createdAt));
+}
+
+/** Time of the last action on a row (take / done / return), used for merge. */
+function rowActionTime(row) {
+  return rowTimeValue(row && (row.completedAt || row.updatedAt || row.selectedAt || row.createdAt));
+}
+
+function rowId(row) {
+  return String((row && (row.taskId || row.id)) || "").trim();
+}
+
 /** Union of done rows by task id — the row with the newest timestamp wins. */
 function unionDoneNewestWins(localRows, serverRows) {
   const byId = new Map();
   const put = (row) => {
-    const id = String((row && (row.taskId || row.id)) || "").trim();
+    const id = rowId(row);
     if (!id) return;
     const normalized = { ...row, id, taskId: id, status: "done" };
     const existing = byId.get(id);
@@ -380,13 +500,128 @@ function unionDoneNewestWins(localRows, serverRows) {
   return Array.from(byId.values());
 }
 
+/** Newest-wins merge of the active roster by task id. Take / mark-done / return
+ *  all update the active row with a fresh timestamp, so the row carrying the
+ *  latest action wins — no device can blind-overwrite another's selection. */
+function mergeActiveNewestWins(localRows, serverRows) {
+  const byId = new Map();
+  const put = (row) => {
+    const id = rowId(row);
+    if (!id) return;
+    const existing = byId.get(id);
+    if (!existing || rowActionTime(row) >= rowActionTime(existing)) byId.set(id, row);
+  };
+  (Array.isArray(serverRows) ? serverRows : []).forEach(put);
+  (Array.isArray(localRows) ? localRows : []).forEach(put);
+  return Array.from(byId.values());
+}
+
+function newestPendingRowById(localRows, serverRows) {
+  const byId = new Map();
+  const put = (row) => {
+    const id = rowId(row);
+    if (!id) return;
+    const existing = byId.get(id);
+    if (!existing || rowActionTime(row) >= rowActionTime(existing)) byId.set(id, row);
+  };
+  (Array.isArray(serverRows) ? serverRows : []).forEach(put);
+  (Array.isArray(localRows) ? localRows : []).forEach(put);
+  return byId;
+}
+
 /**
- * Push local state → cloud inside a TRANSACTION (queue-style protection):
+ * Three-list merge for one tab, used by BOTH the cloud write (so a writer never
+ * clobbers another device's pending/active) and applyState (so a reader never
+ * loses its own just-made selection). Only called when both sides share the
+ * same reset generation — a fresh reset is handled separately by resetStamps.
+ *
+ * Rules (all driven by per-row action timestamps):
+ *   - active : newest action per id wins (the roster row reflects take/done/return).
+ *   - done   : union, newest per id wins.
+ *   - pending: a pending row stays only if no NEWER active row moved the task
+ *              away from "pending" (i.e. it was marked done or returned). This
+ *              makes removals (return / done) win over a stale pending copy
+ *              without resurrecting it.
+ */
+function mergeTabAllLists(localTab, serverTab) {
+  const L = localTab || {};
+  const S = serverTab || {};
+  const mergedActive = mergeActiveNewestWins(L.active, S.active);
+  const mergedDone = unionDoneNewestWins(L.done, S.done);
+
+  // Index merged active rows by id for the pending cross-check.
+  const activeById = new Map();
+  mergedActive.forEach((row) => {
+    const id = rowId(row);
+    if (id) activeById.set(id, row);
+  });
+
+  const pendingById = newestPendingRowById(L.pending, S.pending);
+  const mergedPending = [];
+  pendingById.forEach((pRow, id) => {
+    const aRow = activeById.get(id);
+    if (aRow) {
+      const status = String((aRow.status || "")).toLowerCase();
+      const movedAway = status !== "pending";
+      // A strictly newer active row that is no longer "pending" means the task
+      // was completed or returned after it was taken → drop the stale pending.
+      if (movedAway && rowActionTime(aRow) > rowActionTime(pRow)) return;
+    }
+    mergedPending.push(pRow);
+  });
+
+  return { active: mergedActive, pending: mergedPending, done: mergedDone };
+}
+
+function serverRev(server) {
+  return (server && typeof server.rev === "number" && server.rev >= 0) ? server.rev : 0;
+}
+
+function buildMergedWritePayload(state, server, reason, baseRevOverride) {
+  const out = buildFirestoreState(state);
+  const baseRev = typeof baseRevOverride === "number" && baseRevOverride >= 0
+    ? baseRevOverride
+    : serverRev(server);
+
+  if (server && typeof server === "object") {
+    const serverStamps = (server.resetStamps && typeof server.resetStamps === "object") ? server.resetStamps : {};
+    const localStamps = (state.resetStamps && typeof state.resetStamps === "object") ? state.resetStamps : {};
+    const mergedStamps = { ...localStamps };
+    TABS.forEach((tab) => {
+      const sv = Number(serverStamps[tab] || 0);
+      const lv = Number(localStamps[tab] || 0);
+      if (sv > lv) {
+        // Server tab was reset after our local copy — server lists win.
+        out[tab] = {
+          active: Array.isArray(server[tab]?.active) ? server[tab].active : [],
+          pending: Array.isArray(server[tab]?.pending) ? server[tab].pending : [],
+          done: Array.isArray(server[tab]?.done) ? server[tab].done : []
+        };
+        mergedStamps[tab] = sv;
+      } else if (sv === lv) {
+        // Same reset generation — three-list merge so concurrent selections,
+        // completions and returns from other devices are never dropped by our
+        // full-state write.
+        out[tab] = mergeTabAllLists(out[tab], server[tab]);
+      }
+      // lv > sv: this device just reset this tab — local clean lists win.
+    });
+    out.resetStamps = mergedStamps;
+  }
+
+  out.rev = baseRev + 1;
+  out.lastUpdateReason = typeof reason === "string" && reason ? reason : "task-update";
+  out.lastUpdatedByUid = (auth.currentUser && auth.currentUser.uid) || null;
+  return { payload: out, rev: out.rev, baseRev };
+}
+
+/**
+ * Push local state → cloud with queue-style optimistic concurrency:
  *
  *   1. rev compare-and-swap — the write lands at rev = server rev + 1 and the
  *      security rules reject anything else, so concurrent writers from any
- *      device are serialized by the server. The transaction retries on
- *      contention automatically; nobody blind-overwrites the document.
+ *      device are serialized by the server. If our tracked rev is stale, we
+ *      pull the fresh server doc, merge, and retry rather than blind-overwrite.
  *   2. Reset stamps — a tab whose server resetStamp is NEWER than this
  *      device's is stale here: the server's clean lists are kept (a stale
  *      device can never resurrect pre-reset tasks). A tab whose LOCAL stamp
@@ -420,46 +655,67 @@ function writeState(reason) {
   if (!state) return Promise.resolve();
   const ref = tasksStateRef(_salonId, _locationId);
   console.log("[TasksCloud] write attempt", { loc: _locationId || "default", reason: reason || "task-update" });
-  return runTransaction(db, async (tx) => {
-    const snap = await tx.get(ref);
-    const out = buildFirestoreState(state);
-    let baseRev = 0;
-    if (snap.exists()) {
-      const server = snap.data() || {};
-      baseRev = (typeof server.rev === "number" && server.rev >= 0) ? server.rev : 0;
-      const serverStamps = (server.resetStamps && typeof server.resetStamps === "object") ? server.resetStamps : {};
-      const localStamps = (state.resetStamps && typeof state.resetStamps === "object") ? state.resetStamps : {};
-      const mergedStamps = { ...localStamps };
-      TABS.forEach((tab) => {
-        const sv = Number(serverStamps[tab] || 0);
-        const lv = Number(localStamps[tab] || 0);
-        if (sv > lv) {
-          // Server tab was reset after our local copy — server lists win.
-          out[tab] = {
-            active: Array.isArray(server[tab]?.active) ? server[tab].active : [],
-            pending: Array.isArray(server[tab]?.pending) ? server[tab].pending : [],
-            done: Array.isArray(server[tab]?.done) ? server[tab].done : []
-          };
-          mergedStamps[tab] = sv;
-        } else if (sv === lv) {
-          // Same reset generation — merge done rows so concurrent marks from
-          // other devices are never dropped by our full-state write.
-          out[tab] = {
-            active: out[tab].active,
-            pending: out[tab].pending,
-            done: unionDoneNewestWins(out[tab].done, server[tab]?.done)
-          };
-        }
-        // lv > sv: we just reset this tab — our clean lists win wholesale.
+
+  const isPermissionDenied = (e) => {
+    const code = e && (e.code || e.name);
+    return code === "permission-denied" || code === "PERMISSION_DENIED";
+  };
+  const writePayload = ({ payload, rev }) => setDoc(ref, payload, { merge: true }).then(() => rev);
+  const commitViaRest = () => {
+    return readTasksStateViaRest(_salonId, _locationId).then((server) => {
+      const sRev = serverRev(server);
+      if (sRev > _lastCloudRev) _lastCloudRev = sRev;
+      const freshLocal = _getState ? (_getState() || state) : state;
+      const next = buildMergedWritePayload(freshLocal, server, reason, sRev);
+      const adopt = () => {
+        _lastServerData = next.payload;
+        if (typeof next.rev === "number" && next.rev > _lastCloudRev) _lastCloudRev = next.rev;
+        return next.rev;
+      };
+      return writeTasksStateViaRest(_salonId, _locationId, next.payload).then(() => {
+        console.log("[TasksCloud] REST fallback write OK at rev", next.rev);
+        return adopt();
+      }).catch((restErr) => {
+        console.warn("[TasksCloud] REST fallback failed", restErr);
+        throw restErr;
       });
-      out.resetStamps = mergedStamps;
-    }
-    out.rev = baseRev + 1;
-    out.lastUpdateReason = typeof reason === "string" && reason ? reason : "task-update";
-    out.lastUpdatedByUid = (auth.currentUser && auth.currentUser.uid) || null;
-    tx.set(ref, out);
-    return out.rev;
-  }).then((rev) => {
+    });
+  };
+
+  // Merge our local state into the latest server doc BEFORE writing, so we never
+  // clobber another device's pending/active selection ("newest action wins").
+  //
+  // CRITICAL: we do NOT read the doc here (no getDoc / getDocFromServer). Both
+  // forms of one-shot read HANG inside the iOS WKWebView (Firestore long-polling
+  // channel quirk) which left every technician write stuck "in progress", and
+  // the cache-first read returned a STALE rev which the security rules rejected
+  // with permission-denied. Instead we use the doc + rev that the live
+  // onSnapshot listener last delivered (that channel works where one-shot reads
+  // do not). rev = base + 1; if the base is stale or the staff/location rule
+  // rejects the write, we immediately fall back to REST/member-intent sync.
+  const commit = () => {
+    const server = _lastServerData || null;
+    const sRev = Math.max(_lastCloudRev || 0, serverRev(server));
+    const freshLocal = _getState ? (_getState() || state) : state;
+    const next = buildMergedWritePayload(freshLocal, server, reason, sRev);
+    return writePayload(next).then((rev) => {
+      // Adopt our own write as the freshest base so the next write merges on top
+      // of it without waiting for the echo snapshot.
+      _lastServerData = next.payload;
+      if (typeof rev === "number" && rev > _lastCloudRev) _lastCloudRev = rev;
+      return rev;
+    }).catch((e) => {
+      if (isPermissionDenied(e)) {
+        // iOS WKWebView can keep the Firestore SDK listener/cache stale. A plain
+        // REST read/write uses the current server rev and satisfies the existing
+        // Firestore rules without relying on the SDK's stuck channel.
+        return commitViaRest();
+      }
+      throw e;
+    });
+  };
+
+  return commit().then((rev) => {
     if (typeof rev === "number" && rev > _lastCloudRev) _lastCloudRev = rev;
     console.log("[TasksCloud] write OK at rev", rev);
     if (isManualReset) toast("Reset saved to cloud (rev " + rev + ")", "success");
@@ -633,6 +889,9 @@ if (typeof window !== "undefined") {
   window.tasksCloudReconnect = tasksCloudReconnect;
   window.tasksCloudRefresh = tasksCloudRefresh;
   window.ffClearAllTasksFromCloud = ffClearAllTasksFromCloud;
+  // Shared three-list merge so applyState (index.html) merges remote ⇄ local
+  // with exactly the same "newest action wins" rules as the cloud write.
+  window.__ffTasksMergeTab = mergeTabAllLists;
   if (typeof window.__ffTasksCloudInit === "function") {
     window.__ffTasksCloudInit();
   }
