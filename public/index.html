@@ -808,6 +808,201 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   border: 1.5px solid #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
+
+.ff-live-desk-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 100320;
+  width: 62px;
+  height: 62px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #7c3aed, #a855f7);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 14px 34px rgba(124, 58, 237, 0.34);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  touch-action: none;
+  user-select: none;
+}
+.ff-live-desk-fab::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  border: 2px solid rgba(124, 58, 237, 0.22);
+  animation: ffLiveDeskPulse 1.9s ease-out infinite;
+}
+.ff-live-desk-fab-core {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.82);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+.ff-live-desk-fab-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  border: 2px solid #fff;
+}
+.ff-live-desk-panel {
+  position: fixed;
+  right: 22px;
+  bottom: 100px;
+  z-index: 100321;
+  width: min(430px, calc(100vw - 28px));
+  max-height: min(720px, calc(100vh - 132px));
+  overflow: hidden;
+  display: none;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid #ede9fe;
+  border-radius: 24px;
+  box-shadow: 0 24px 70px rgba(31, 41, 55, 0.22);
+}
+.ff-live-desk-panel.is-open {
+  display: flex;
+}
+.ff-live-desk-head {
+  padding: 18px 18px 14px;
+  background: linear-gradient(135deg, #7c3aed, #a855f7);
+  color: #fff;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ff-live-desk-title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 900;
+}
+.ff-live-desk-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+  opacity: 0.86;
+}
+.ff-live-desk-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255,255,255,0.34);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.14);
+  color: #fff;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+.ff-live-desk-body {
+  overflow: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ff-live-desk-card {
+  border: 1px solid #f1eef8;
+  border-radius: 18px;
+  background: #fff;
+  padding: 13px;
+}
+.ff-live-desk-card-title {
+  margin: 0 0 9px;
+  font-size: 13px;
+  font-weight: 900;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ff-live-desk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.ff-live-desk-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 13px;
+  background: #faf9ff;
+  color: #374151;
+  font-size: 13px;
+}
+.ff-live-desk-muted {
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.ff-live-desk-badge {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #ede9fe;
+  color: #6d28d9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 900;
+}
+.ff-live-desk-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.ff-live-desk-action {
+  border: 1px solid #e9d5ff;
+  border-radius: 14px;
+  background: #faf5ff;
+  color: #6d28d9;
+  cursor: pointer;
+  padding: 10px 11px;
+  font-size: 12px;
+  font-weight: 900;
+}
+@keyframes ffLiveDeskPulse {
+  0% { transform: scale(0.92); opacity: 0.72; }
+  70% { transform: scale(1.18); opacity: 0; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+@media (max-width: 640px) {
+  .ff-live-desk-fab {
+    right: 18px;
+    bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+    width: 58px;
+    height: 58px;
+  }
+  .ff-live-desk-panel {
+    left: 10px;
+    right: 10px;
+    bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    max-height: calc(100vh - 118px - env(safe-area-inset-bottom, 0px));
+    border-radius: 22px;
+  }
+}
 #mediaBtn.active {
   color:#7c3aed !important;
   border-color:#a78bfa !important;
@@ -59434,6 +59629,279 @@ function hookSettingsGuard_DISABLED(){
     <button id="logout-button-staff">Log out</button>
     <button id="test-ping-btn" type="button" style="display:none;">Test Ping</button>
   </div>
+  <button class="ff-live-desk-fab" type="button" aria-label="Live Desk" title="Live Desk">
+    <span class="ff-live-desk-fab-core" aria-hidden="true">
+      LIVE
+      <span class="ff-live-desk-fab-dot"></span>
+    </span>
+  </button>
+  <section class="ff-live-desk-panel" id="ffLiveDeskPanel" aria-label="Live Desk" aria-hidden="true">
+    <div class="ff-live-desk-head">
+      <div>
+        <h2 class="ff-live-desk-title">Live Desk</h2>
+        <p class="ff-live-desk-sub">A quick live view for reception.</p>
+      </div>
+      <button class="ff-live-desk-close" id="ffLiveDeskClose" type="button" aria-label="Close Live Desk">×</button>
+    </div>
+    <div class="ff-live-desk-body">
+      <div class="ff-live-desk-card">
+        <h3 class="ff-live-desk-card-title">Next in Queue <span class="ff-live-desk-badge" id="ffLiveDeskQueueCount">0</span></h3>
+        <div class="ff-live-desk-list" id="ffLiveDeskQueueList">
+          <div class="ff-live-desk-muted">Queue will appear here.</div>
+        </div>
+      </div>
+      <div class="ff-live-desk-card">
+        <h3 class="ff-live-desk-card-title">Tickets to Charge <span class="ff-live-desk-badge" id="ffLiveDeskTicketsCount">0</span></h3>
+        <div class="ff-live-desk-list" id="ffLiveDeskTicketsList">
+          <div class="ff-live-desk-muted">Ticket shortcuts will appear here.</div>
+        </div>
+      </div>
+      <div class="ff-live-desk-card">
+        <h3 class="ff-live-desk-card-title">Messages</h3>
+        <div class="ff-live-desk-list" id="ffLiveDeskMessagesList">
+          <div class="ff-live-desk-row"><span>Chat</span><span class="ff-live-desk-badge" id="ffLiveDeskChatCount">0</span></div>
+          <div class="ff-live-desk-row"><span>Inbox</span><span class="ff-live-desk-badge" id="ffLiveDeskInboxCount">0</span></div>
+        </div>
+      </div>
+      <div class="ff-live-desk-actions">
+        <button class="ff-live-desk-action" type="button" data-live-desk-go="queue">Open Queue</button>
+        <button class="ff-live-desk-action" type="button" data-live-desk-go="tickets">Open Tickets</button>
+        <button class="ff-live-desk-action" type="button" data-live-desk-go="chat">Open Chat</button>
+        <button class="ff-live-desk-action" type="button" data-live-desk-go="inbox">Open Inbox</button>
+      </div>
+    </div>
+  </section>
+  <script>
+    (function () {
+      var STORAGE_KEY = "ff_live_desk_fab_pos_v1";
+      var btn = document.querySelector(".ff-live-desk-fab");
+      var panel = document.getElementById("ffLiveDeskPanel");
+      var closeBtn = document.getElementById("ffLiveDeskClose");
+      if (!btn || btn.dataset.dragReady === "1") return;
+      btn.dataset.dragReady = "1";
+
+      function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      function bottomReservedSpace() {
+        return window.matchMedia && window.matchMedia("(max-width: 640px)").matches ? 92 : 12;
+      }
+
+      function boundsForButton() {
+        var rect = btn.getBoundingClientRect();
+        var margin = 12;
+        var viewport = window.visualViewport || null;
+        var viewportWidth = viewport ? viewport.width : window.innerWidth;
+        var viewportHeight = viewport ? viewport.height : window.innerHeight;
+        return {
+          minX: margin,
+          minY: margin,
+          maxX: Math.max(margin, viewportWidth - rect.width - margin),
+          maxY: Math.max(margin, viewportHeight - rect.height - bottomReservedSpace())
+        };
+      }
+
+      function setPosition(x, y, save) {
+        var b = boundsForButton();
+        var nextX = clamp(x, b.minX, b.maxX);
+        var nextY = clamp(y, b.minY, b.maxY);
+        btn.style.left = nextX + "px";
+        btn.style.top = nextY + "px";
+        btn.style.right = "auto";
+        btn.style.bottom = "auto";
+        if (save) {
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ x: nextX, y: nextY })); } catch (_) {}
+        }
+      }
+
+      function restorePosition() {
+        try {
+          var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+          if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+            setPosition(saved.x, saved.y, false);
+          }
+        } catch (_) {}
+      }
+
+      function readJsonArray(key) {
+        try {
+          var data = JSON.parse(localStorage.getItem(key) || "[]");
+          return Array.isArray(data) ? data : [];
+        } catch (_) {
+          return [];
+        }
+      }
+
+      function setText(id, value) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = String(value == null ? "" : value);
+      }
+
+      function badgeNumber(selector) {
+        var el = document.querySelector(selector);
+        var text = el ? String(el.textContent || "").trim() : "";
+        var n = parseInt(text, 10);
+        return Number.isFinite(n) ? n : 0;
+      }
+
+      function renderQueuePreview() {
+        var list = document.getElementById("ffLiveDeskQueueList");
+        if (!list) return;
+        var rows = readJsonArray("ffv24_queue").slice(0, 5);
+        setText("ffLiveDeskQueueCount", rows.length);
+        list.innerHTML = "";
+        if (!rows.length) {
+          list.innerHTML = '<div class="ff-live-desk-muted">No one is waiting in Queue.</div>';
+          return;
+        }
+        rows.forEach(function (row, index) {
+          var item = document.createElement("div");
+          item.className = "ff-live-desk-row";
+          var name = String(row && row.name ? row.name : "Staff member").trim();
+          var label = document.createElement("span");
+          label.textContent = (index + 1) + ". " + name;
+          var badge = document.createElement("span");
+          badge.className = "ff-live-desk-badge";
+          badge.textContent = row && row.held ? "HOLD" : "NEXT";
+          item.append(label, badge);
+          list.appendChild(item);
+        });
+      }
+
+      function ticketDisplayName(ticket) {
+        return String(
+          ticket?.clientName ||
+          ticket?.customerName ||
+          ticket?.guestName ||
+          ticket?.name ||
+          ticket?.ticketNumber ||
+          "Ticket"
+        ).trim();
+      }
+
+      function renderTicketsPreview() {
+        var list = document.getElementById("ffLiveDeskTicketsList");
+        if (!list) return;
+        var tickets = [];
+        try {
+          if (typeof window.ffGetCurrentTickets === "function") {
+            tickets = window.ffGetCurrentTickets() || [];
+          }
+        } catch (_) {}
+        tickets = (Array.isArray(tickets) ? tickets : []).filter(function (ticket) {
+          var status = String(ticket?.status || "").toLowerCase();
+          return status !== "archived" && status !== "deleted" && status !== "void";
+        }).slice(0, 5);
+        setText("ffLiveDeskTicketsCount", tickets.length || badgeNumber("#ticketsNavBadge"));
+        list.innerHTML = "";
+        if (!tickets.length) {
+          list.innerHTML = '<div class="ff-live-desk-muted">Open Tickets to view tickets ready for charge.</div>';
+          return;
+        }
+        tickets.forEach(function (ticket) {
+          var item = document.createElement("div");
+          item.className = "ff-live-desk-row";
+          var amount = ticket?.total || ticket?.grandTotal || ticket?.amountDue || "";
+          var label = document.createElement("span");
+          label.textContent = ticketDisplayName(ticket);
+          var badge = document.createElement("span");
+          badge.className = "ff-live-desk-badge";
+          badge.textContent = amount ? "$" + amount : "OPEN";
+          item.append(label, badge);
+          list.appendChild(item);
+        });
+      }
+
+      function renderLiveDesk() {
+        renderQueuePreview();
+        renderTicketsPreview();
+        setText("ffLiveDeskChatCount", badgeNumber("#chatNavBadge"));
+        setText("ffLiveDeskInboxCount", badgeNumber(".ff-inbox-badge") || badgeNumber("#inboxOpenBadge"));
+      }
+
+      function openLiveDesk() {
+        if (!panel) return;
+        renderLiveDesk();
+        panel.classList.add("is-open");
+        panel.setAttribute("aria-hidden", "false");
+      }
+
+      function closeLiveDesk() {
+        if (!panel) return;
+        panel.classList.remove("is-open");
+        panel.setAttribute("aria-hidden", "true");
+      }
+
+      function goLiveDesk(target) {
+        closeLiveDesk();
+        if (target === "queue" && typeof window.goToQueue === "function") window.goToQueue();
+        else if (target === "tickets" && typeof window.goToTickets === "function") window.goToTickets();
+        else if (target === "chat" && typeof window.goToChat === "function") window.goToChat();
+        else if (target === "inbox") {
+          var inboxBtn = document.getElementById("inboxBtn");
+          if (inboxBtn) inboxBtn.click();
+        }
+      }
+
+      var drag = null;
+      var suppressNextClick = false;
+      btn.addEventListener("pointerdown", function (event) {
+        if (event.button != null && event.button !== 0) return;
+        var rect = btn.getBoundingClientRect();
+        drag = {
+          pointerId: event.pointerId,
+          offsetX: event.clientX - rect.left,
+          offsetY: event.clientY - rect.top,
+          moved: false
+        };
+        btn.setPointerCapture(event.pointerId);
+      });
+      btn.addEventListener("pointermove", function (event) {
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        event.preventDefault();
+        drag.moved = true;
+        setPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY, false);
+      });
+      btn.addEventListener("pointerup", function (event) {
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        var rect = btn.getBoundingClientRect();
+        setPosition(rect.left, rect.top, true);
+        suppressNextClick = !!drag.moved;
+        drag = null;
+      });
+      btn.addEventListener("pointercancel", function () {
+        drag = null;
+      });
+      btn.addEventListener("click", function (event) {
+        if (suppressNextClick) {
+          suppressNextClick = false;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        openLiveDesk();
+      }, true);
+      if (closeBtn) closeBtn.addEventListener("click", closeLiveDesk);
+      if (panel) {
+        panel.addEventListener("click", function (event) {
+          var action = event.target && event.target.closest ? event.target.closest("[data-live-desk-go]") : null;
+          if (action) goLiveDesk(action.getAttribute("data-live-desk-go"));
+        });
+      }
+      window.addEventListener("resize", function () {
+        var rect = btn.getBoundingClientRect();
+        setPosition(rect.left, rect.top, true);
+      });
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", function () {
+          var rect = btn.getBoundingClientRect();
+          setPosition(rect.left, rect.top, true);
+        });
+      }
+      restorePosition();
+    })();
+  </script>
 
   </div> <!-- End main-app-content -->
 
