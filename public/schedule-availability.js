@@ -2,9 +2,6 @@ import {
   normalizeStaffSchedulingData,
   getDayNameFromDateKey,
   normalizeBusinessHours,
-  getEffectiveShiftSegmentsForDay,
-  clipTimeWindowToBestShiftSegment,
-  clipTimeWindowToUnionOfShiftSegments,
 } from "./schedule-helpers.js?v=20260420_per_loc_no_default";
 
 function normalizeDateKey(value) {
@@ -410,12 +407,8 @@ function clipDailyAvailabilityToShiftSegments(applied, dateKey, options) {
   if (!bh) return applied;
   const dayName = getDayNameFromDateKey(dateKey);
   if (!dayName) return applied;
-  const segs = getEffectiveShiftSegmentsForDay(dayName, bh, options.dayShiftSegments);
-  const clipped =
-    Array.isArray(segs) && segs.length > 1
-      ? clipTimeWindowToUnionOfShiftSegments(applied.startTime, applied.endTime, segs)
-      : clipTimeWindowToBestShiftSegment(applied.startTime, applied.endTime, segs);
-  if (!clipped) {
+  const businessDay = bh[dayName];
+  if (businessDay && businessDay.isOpen === false) {
     return {
       ...applied,
       isAvailable: false,
@@ -424,14 +417,7 @@ function clipDailyAvailabilityToShiftSegments(applied, dateKey, options) {
       overrideApplied: true,
     };
   }
-  const startChanged = String(clipped.startTime) !== String(applied.startTime || "").trim();
-  const endChanged = String(clipped.endTime) !== String(applied.endTime || "").trim();
-  return {
-    ...applied,
-    startTime: clipped.startTime,
-    endTime: clipped.endTime,
-    overrideApplied: applied.overrideApplied === true || startChanged || endChanged,
-  };
+  return applied;
 }
 
 function getEffectiveAvailabilityForDate(staff, requests, dateKey, options = {}) {

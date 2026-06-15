@@ -13,14 +13,15 @@ import {
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { auth, db } from "/app.js?v=20260610_force_lp_ios";
-import { generateWeeklySchedule } from "./schedule-generator.js?v=20260420_cross_loc_busy";
+import { generateWeeklySchedule } from "./schedule-generator.js?v=20260615_default_schedule_source";
 import { validateScheduleDraft } from "./schedule-validator.js?v=20260409_coverage_total_staff_skip";
 import {
   getEffectiveAvailabilityForDate,
   getInboxApprovalDisplayForDate,
   isApprovedRequest,
-} from "./schedule-availability.js?v=20260409_coverage_plain_cards";
-import { parseScheduleTimeToMinutes, clipTimeWindowToBestShiftSegment } from "./schedule-helpers.js?v=20260420_per_loc_no_default";
+} from "./schedule-availability.js?v=20260615_default_schedule_source";
+import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260420_per_loc_no_default";
+import "./format-utils.js";
 
 // Default to next week — managers usually plan/publish the upcoming week, not the one already in progress.
 let schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 7);
@@ -937,6 +938,26 @@ function openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffNam
   };
   const startEl = document.getElementById("scheduleShiftEditStart");
   const endEl = document.getElementById("scheduleShiftEditEnd");
+  const prefers24h =
+    typeof window !== "undefined" &&
+    typeof window.ffGetDisplayTimeFormat === "function" &&
+    window.ffGetDisplayTimeFormat() === "24h";
+  [startEl, endEl].forEach((el) => {
+    if (!el) return;
+    if (prefers24h) {
+      el.type = "text";
+      el.inputMode = "numeric";
+      el.maxLength = 5;
+      el.pattern = "\\d{1,2}:\\d{2}";
+      el.placeholder = "HH:mm";
+    } else {
+      el.type = "time";
+      el.removeAttribute("inputmode");
+      el.removeAttribute("maxlength");
+      el.removeAttribute("pattern");
+      el.removeAttribute("placeholder");
+    }
+  });
   if (startEl) {
     startEl.value = toInput(
       isNewShift ? startTime || defStart : startTime || defStart,
@@ -957,6 +978,22 @@ function openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffNam
   const lunchCb = document.getElementById("scheduleShiftEditLunchEnabled");
   const lunchSt = document.getElementById("scheduleShiftEditLunchStart");
   const lunchEn = document.getElementById("scheduleShiftEditLunchEnd");
+  [lunchSt, lunchEn].forEach((el) => {
+    if (!el) return;
+    if (prefers24h) {
+      el.type = "text";
+      el.inputMode = "numeric";
+      el.maxLength = 5;
+      el.pattern = "\\d{1,2}:\\d{2}";
+      el.placeholder = "HH:mm";
+    } else {
+      el.type = "time";
+      el.removeAttribute("inputmode");
+      el.removeAttribute("maxlength");
+      el.removeAttribute("pattern");
+      el.removeAttribute("placeholder");
+    }
+  });
   if (lunchCb) {
     lunchCb.checked = Boolean(existingAssign?.lunchBreakEnabled);
     lunchCb.disabled = !canManual;
@@ -981,7 +1018,13 @@ function closeScheduleShiftEdit() {
 
 function hhmmFromTimeInput(v) {
   const s = String(v || "").trim();
-  return /^\d{2}:\d{2}$/.test(s) ? s : null;
+  const match = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function scheduleUserCanManualEditLegacy() {
@@ -2356,7 +2399,7 @@ async function runDiscardSavedScheduleWeekDraftAndReload() {
       );
     }
   }
-  await refreshSchedulePreview();
+  await refreshSchedulePreview({ ignoreSavedDrafts: true, persistFreshLocalDraft: true });
   ffScheduleAppToast("Schedule rebuilt from rules for this week.", 4000);
 }
 
@@ -2568,8 +2611,11 @@ function formatWeeklyHoursShort(totalMinutes) {
   return `${rounded.toFixed(1)}h`;
 }
 
-/** "HH:mm" -> compact label e.g. "11 AM", "2:30 PM" */
+/** "HH:mm" -> display label according to Preferences > Time Format. */
 function formatScheduleTimeShortAmPm(hhmm) {
+  if (typeof window !== "undefined" && typeof window.ffFormatDisplayTime === "function") {
+    return window.ffFormatDisplayTime(hhmm, { compact: true });
+  }
   const m = parseScheduleTimeToMinutes(String(hhmm || "").trim());
   if (m == null) return String(hhmm || "").trim() || "";
   const h24 = Math.floor(m / 60) % 24;
@@ -2579,6 +2625,37 @@ function formatScheduleTimeShortAmPm(hhmm) {
   if (h12 === 0) h12 = 12;
   const minPart = min === 0 ? "" : `:${String(min).padStart(2, "0")}`;
   return `${h12}${minPart} ${isAm ? "AM" : "PM"}`;
+}
+
+function formatScheduleTimeDisplay(hhmm, options = {}) {
+  const raw = String(hhmm || "").trim();
+  if (!raw) return options.fallback || "";
+  if (typeof window !== "undefined" && typeof window.ffFormatDisplayTime === "function") {
+    return window.ffFormatDisplayTime(raw, { compact: options.compact === true, fallback: raw });
+  }
+  return raw;
+}
+
+function formatScheduleTimeRangeDisplay(start, end, options = {}) {
+  const rawStart = String(start || "").trim();
+  const rawEnd = String(end || "").trim();
+  if (!rawStart && !rawEnd) return options.fallback || "";
+  if (typeof window !== "undefined" && typeof window.ffFormatDisplayTimeRange === "function") {
+    return window.ffFormatDisplayTimeRange(rawStart, rawEnd, {
+      compact: options.compact === true,
+      separator: options.separator || " - ",
+    });
+  }
+  if (!rawStart) return rawEnd;
+  if (!rawEnd) return rawStart;
+  return `${rawStart}${options.separator || " - "}${rawEnd}`;
+}
+
+function formatScheduleRawRangeDisplay(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})$/);
+  if (!match) return raw;
+  return formatScheduleTimeRangeDisplay(match[1], match[2], { separator: raw.includes("–") ? "–" : "-" });
 }
 
 function laterScheduleHHMM(a, b) {
@@ -2767,6 +2844,30 @@ function handleShiftDragEnd(event) {
   scheduleDragState = null;
 }
 
+function handleScheduleShiftClick(event) {
+  if (!scheduleUserCanManualEdit() || schedulePreviewMode !== "build") return;
+  const shiftEl = event.currentTarget;
+  const staffKey = String(shiftEl?.getAttribute("data-staff-id") || "").trim();
+  const dateKey = String(shiftEl?.getAttribute("data-date") || "").trim();
+  if (!staffKey || !dateKey) return;
+  const day = findDraftDay(schedulePreviewState.draft, dateKey);
+  const assignment = Array.isArray(day?.assignments)
+    ? day.assignments.find((a) => String(a.staffId || a.uid || "").trim() === staffKey)
+    : null;
+  if (!assignment) return;
+  const staff = getStaffByScheduleKey(schedulePreviewState.staffList, staffKey);
+  event.preventDefault();
+  event.stopPropagation();
+  openScheduleShiftEdit({
+    staffKey,
+    dateKey,
+    startTime: assignment.startTime,
+    endTime: assignment.endTime,
+    staffName: String(staff?.name || assignment.name || "").trim(),
+    isNew: false,
+  });
+}
+
 function handleDropZoneDragOver(event) {
   if (!scheduleUserCanManualEdit() || schedulePreviewMode !== "build") return;
   event.preventDefault();
@@ -2888,6 +2989,7 @@ function bindScheduleBoardDnD() {
     el.__ffDnDBound = true;
     el.addEventListener("dragstart", handleShiftDragStart);
     el.addEventListener("dragend", handleShiftDragEnd);
+    el.addEventListener("click", handleScheduleShiftClick);
   });
 
   document.querySelectorAll('[data-drop-zone="true"]').forEach((zone) => {
@@ -2958,22 +3060,6 @@ function getDayNameFromDateKey(dateKey) {
 function normalizeTimeValue(value) {
   const candidate = String(value || "").trim();
   return /^\d{2}:\d{2}$/.test(candidate) ? candidate : null;
-}
-
-function maxTimeValue(a, b) {
-  const left = normalizeTimeValue(a);
-  const right = normalizeTimeValue(b);
-  if (!left) return right;
-  if (!right) return left;
-  return left.localeCompare(right) >= 0 ? left : right;
-}
-
-function minTimeValue(a, b) {
-  const left = normalizeTimeValue(a);
-  const right = normalizeTimeValue(b);
-  if (!left) return right;
-  if (!right) return left;
-  return left.localeCompare(right) <= 0 ? left : right;
 }
 
 function getBusinessStatusForDate(dateKey) {
@@ -3065,43 +3151,6 @@ function applyBusinessSettingsToDraft(draft) {
 
       if (!businessStatus.isOpen) {
         assignments = [];
-      } else {
-        const segs = Array.isArray(businessStatus.shiftSegments) ? businessStatus.shiftSegments : [];
-        assignments = assignments
-          .map((assignment) => {
-            if (segs.length === 1) {
-              const clipped = clipTimeWindowToBestShiftSegment(
-                assignment.startTime,
-                assignment.endTime,
-                segs,
-              );
-              if (!clipped) return null;
-              return {
-                ...assignment,
-                startTime: clipped.startTime,
-                endTime: clipped.endTime,
-              };
-            }
-            if (segs.length > 1) {
-              const startTime = maxTimeValue(assignment.startTime, businessStatus.openTime);
-              const endTime = minTimeValue(assignment.endTime, businessStatus.closeTime);
-              if (!startTime || !endTime || startTime >= endTime) return null;
-              return {
-                ...assignment,
-                startTime,
-                endTime,
-              };
-            }
-            const startTime = maxTimeValue(assignment.startTime, businessStatus.openTime);
-            const endTime = minTimeValue(assignment.endTime, businessStatus.closeTime);
-            if (!startTime || !endTime || startTime >= endTime) return null;
-            return {
-              ...assignment,
-              startTime,
-              endTime,
-            };
-          })
-          .filter(Boolean);
       }
 
       return {
@@ -3311,10 +3360,11 @@ function renderScheduleCrossLocationConflictBanner() {
       if (!conflicts.length) return;
       const name = String(staff.name || staff.fullName || "Staff");
       conflicts.forEach((c) => {
+        const overlap = formatScheduleRawRangeDisplay(c.overlap);
         rows.push(`<li style="margin:3px 0;">
           <strong>${name}</strong> — ${dayLabels[c.dayKey] || c.dayKey} overlap
           between <em>${labelLoc(c.locationAId)}</em> and <em>${labelLoc(c.locationBId)}</em>
-          (${c.overlap})
+          (${overlap || c.overlap})
         </li>`);
       });
     });
@@ -3529,7 +3579,7 @@ function buildMyShiftsIcsForCurrentWeek() {
     if (locationName) params.set("location", locationName);
     calendarLinks.push({
       url: `https://calendar.google.com/calendar/render?${params.toString()}`,
-      label: `${dateKey} ${String(startTime || "").trim()}-${String(endTime || "").trim()}`,
+      label: `${dateKey} ${formatScheduleTimeRangeDisplay(startTime, endTime, { separator: "-" })}`,
     });
   };
 
@@ -4277,7 +4327,7 @@ function buildCoverageMinimalGapLinesHtml(gaps, assignments, helpers) {
 
   const parts = [];
   for (const m of merged) {
-    const range = `${fmt(m.lo)}–${fmt(m.hi)}`;
+    const range = formatScheduleTimeRangeDisplay(fmt(m.lo), fmt(m.hi), { separator: "–" });
     parts.push(`<div style="margin:0 0 10px;font-size:14px;line-height:1.45;color:#334155;">
       <span style="font-weight:700;color:#c2410c;">${escapeScheduleHtml(range)}</span>
       <span> — ${escapeScheduleHtml(m.line)}</span>
@@ -4623,7 +4673,7 @@ function renderScheduleBoard(draft, validation, staffList) {
                 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeScheduleHtml(activeName)}</span>
               </div>
               <div ${allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : `style="user-select:none;"`}>
-                <div>${assignment.startTime || "--:--"} - ${assignment.endTime || "--:--"}</div>
+                <div>${escapeScheduleHtml(formatScheduleTimeRangeDisplay(assignment.startTime, assignment.endTime, { fallback: "--:-- - --:--" }))}</div>
                 ${lunchSubline}
                 ${approvedMismatchBlock}
               </div>
@@ -4646,7 +4696,7 @@ function renderScheduleBoard(draft, validation, staffList) {
                 <span style="width:5px;height:5px;border-radius:50%;background:#2563eb;flex-shrink:0;"></span>
                 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeScheduleHtml(labelName)}</span>
               </div>
-              <div>${escapeScheduleHtml(s.startTime || "--:--")} - ${escapeScheduleHtml(s.endTime || "--:--")}</div>
+              <div>${escapeScheduleHtml(formatScheduleTimeRangeDisplay(s.startTime, s.endTime, { fallback: "--:-- - --:--" }))}</div>
               ${lunchOther}
             </div>
           `;
@@ -4666,7 +4716,7 @@ function renderScheduleBoard(draft, validation, staffList) {
           <div ${assignment && allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : assignment ? `style="user-select:none;"` : emptyCellWrap}>
             <div>${
               assignment
-                ? `${assignment.startTime || "--:--"} - ${assignment.endTime || "--:--"}`
+                ? escapeScheduleHtml(formatScheduleTimeRangeDisplay(assignment.startTime, assignment.endTime, { fallback: "--:-- - --:--" }))
                 : hasPartialApproval
                   ? `<span style="font-weight:600;color:#475569;">Not scheduled</span>`
                   : "Off"
@@ -4761,7 +4811,7 @@ function renderScheduleBoard(draft, validation, staffList) {
       const statusHtml = dayIsClosed
         ? `<span style="color:#9ca3af;font-size:13px;font-weight:700;">Closed</span>`
         : assignment
-          ? `<span ${canManual ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : `style="user-select:none;"`}>${escapeScheduleHtml(assignment.startTime || "--:--")} - ${escapeScheduleHtml(assignment.endTime || "--:--")}</span>`
+          ? `<span ${canManual ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : `style="user-select:none;"`}>${escapeScheduleHtml(formatScheduleTimeRangeDisplay(assignment.startTime, assignment.endTime, { fallback: "--:-- - --:--" }))}</span>`
           : manualOff
             ? `<span style="color:#64748b;font-weight:800;">Marked OFF</span>`
             : inboxApprovedOff
@@ -4897,7 +4947,9 @@ function setScheduleLoadingState({ loading = false, error = "" } = {}) {
   }
 }
 
-async function refreshSchedulePreview() {
+async function refreshSchedulePreview(options = {}) {
+  const ignoreSavedDrafts = options?.ignoreSavedDrafts === true;
+  const persistFreshLocalDraft = options?.persistFreshLocalDraft === true;
   const weekRange = getWeekRange(schedulePreviewWeekStart);
   const weekLabel = document.getElementById("scheduleWeekLabel");
   if (weekLabel) weekLabel.textContent = formatWeekLabel(weekRange);
@@ -4956,8 +5008,8 @@ async function refreshSchedulePreview() {
       dirtyKey &&
       localStorage.getItem(dirtyKey) === "1";
     const canEdit = scheduleUserCanManualEdit();
-    const hasLocal = Array.isArray(localDraftDays) && localDraftDays.length > 0;
-    const hasCloud = Array.isArray(cloudDraftDays) && cloudDraftDays.length > 0;
+    const hasLocal = !ignoreSavedDrafts && Array.isArray(localDraftDays) && localDraftDays.length > 0;
+    const hasCloud = !ignoreSavedDrafts && Array.isArray(cloudDraftDays) && cloudDraftDays.length > 0;
 
     let standByByDate = {};
 
@@ -4987,7 +5039,9 @@ async function refreshSchedulePreview() {
       standByByDate = normalizeStandByBlock(cloudBlock, draftWithBusinessRules.days);
     } else {
       const manualOffOverrides = loadScheduleManualOffOverrides(weekRange);
-      draftWithBusinessRules = mergeManualOffOverridesIntoDraft(draftWithBusinessRules, manualOffOverrides, staffList);
+      if (!ignoreSavedDrafts) {
+        draftWithBusinessRules = mergeManualOffOverridesIntoDraft(draftWithBusinessRules, manualOffOverrides, staffList);
+      }
       const fromLocal = normalizeStandByBlock(
         {
           standByByDate: localPayload?.standByByDate,
@@ -4996,11 +5050,11 @@ async function refreshSchedulePreview() {
         draftWithBusinessRules.days,
       );
       const fromCloud = normalizeStandByBlock(cloudBlock, draftWithBusinessRules.days);
-      standByByDate = Object.keys(fromLocal).length > 0 ? fromLocal : fromCloud;
+      standByByDate = ignoreSavedDrafts ? {} : (Object.keys(fromLocal).length > 0 ? fromLocal : fromCloud);
     }
 
     /* Published week: merge stand-by from Firestore; local wins per date when set; per-view fallback from cloud. */
-    if (weekPublished) {
+    if (weekPublished && !ignoreSavedDrafts) {
       const cloudSb = normalizeStandByBlock(cloudBlock, draftWithBusinessRules.days);
       standByByDate = mergeStandByByDatePreferLocal(cloudSb, standByByDate, draftWithBusinessRules.days);
     }
@@ -5041,6 +5095,9 @@ async function refreshSchedulePreview() {
     };
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
+    }
+    if (persistFreshLocalDraft && canEdit) {
+      persistScheduleDraftOverrideFromState();
     }
     if (!canViewScheduleBoardForCurrentWeek()) {
       teardownScheduleAckListener();
@@ -5371,6 +5428,15 @@ function bindScheduleUi() {
     };
     document.addEventListener("ff-active-location-changed", handler);
     window.addEventListener("ff-active-location-changed", handler);
+    const settingsUpdatedHandler = () => {
+      const screen = document.getElementById("scheduleScreen");
+      if (screen && screen.style.display !== "none") {
+        renderScheduleCrossLocationConflictBanner();
+        renderScheduleBoard(schedulePreviewState.draft, schedulePreviewState.validation, schedulePreviewState.staffList);
+      }
+    };
+    document.addEventListener("ff-schedule-settings-changed", settingsUpdatedHandler);
+    window.addEventListener("ff-schedule-settings-changed", settingsUpdatedHandler);
     // When the owner edits a staff member's Locations tab we also need to
     // re-evaluate who belongs in the current branch's grid.
     const staffUpdatedHandler = () => {

@@ -1,7 +1,7 @@
 import {
   enumerateDateRange,
   getEffectiveAvailability,
-} from "./schedule-availability.js?v=20260409_coverage_plain_cards";
+} from "./schedule-availability.js?v=20260615_default_schedule_source";
 import {
   normalizeManagerType,
   normalizeScheduleRules,
@@ -527,33 +527,7 @@ function narrowTechniciansToBestSegment({
 
 function buildDayDraft({ date, staffList, availabilityDirectory, rules, coverageRules, businessHours, dayShiftSegments, crossLocationBusy } = {}) {
   const all = buildAssignmentsForDate(staffList, availabilityDirectory, date, { crossLocationBusy });
-  let assignments = filterAssignmentsByCoverageTargets(all, date, rules, coverageRules, { businessHours, dayShiftSegments });
-  assignments = applyStaggeredFullManagerSegmentWindows({
-    date,
-    assignments,
-    staffList,
-    availabilityDirectory,
-    businessHours,
-    dayShiftSegments,
-    coverageRules,
-  });
-  assignments = narrowAssistantManagersToFirstSegment({
-    date,
-    assignments,
-    staffList,
-    availabilityDirectory,
-    businessHours,
-    dayShiftSegments,
-    coverageRules,
-  });
-  assignments = narrowTechniciansToBestSegment({
-    date,
-    assignments,
-    staffList,
-    availabilityDirectory,
-    businessHours,
-    dayShiftSegments,
-  });
+  const assignments = filterAssignmentsByCoverageTargets(all, date, rules, coverageRules, { businessHours, dayShiftSegments });
   return {
     date,
     assignments,
@@ -889,8 +863,6 @@ function generateWeeklySchedule({ staffList = [], requests = [], rules = {}, dat
 
   let draft = applyWeeklyHoursCapToDraft(draftBeforeCap, normalizedStaffList);
   draft = applyWeeklyRemainingHoursFill(draft, normalizedStaffList, normalizedCrossBusy);
-  draft = applyWeeklyHoursCapToDraft(draft, normalizedStaffList);
-  draft = applyEqualSplitAmongManagement(draft, normalizedStaffList, businessHours, dayShiftSegments);
   draft = applyWeeklyHoursCapToDraft(draft, normalizedStaffList);
   return draft;
 }
