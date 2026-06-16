@@ -57,11 +57,18 @@
     var cb=document.getElementById('chatBtn');if(cb)cb.classList.add('active');
     var g=document.getElementById('chatSettingsGearBtn');if(g){var cm=typeof ffCurrentUserHasChatManagePermission==='function'?ffCurrentUserHasChatManagePermission():typeof ffHasAdminAccess==='function'&&ffHasAdminAccess();g.style.display=cm?'flex':'none';}
   };
-  window.openChatTemplatesSettings = window.openChatTemplatesSettings || function() {
+  window.openChatTemplatesSettings = window.openChatTemplatesSettings || async function() {
     if(typeof ffCurrentUserHasChatManagePermission==='function'&&!ffCurrentUserHasChatManagePermission())return;
     if(typeof ffCurrentUserHasChatManagePermission!=='function'&&typeof ffHasAdminAccess==='function'&&!ffHasAdminAccess())return;
+    try {
+      await import('/chat.js?v=20260615_chat_flow_load_resilient');
+      if (window.openChatTemplatesSettings && !window.openChatTemplatesSettings.__ffFallback) {
+        return window.openChatTemplatesSettings();
+      }
+    } catch(e) {}
     var m=document.getElementById('chatTemplatesModal');if(m)m.style.display='flex';
   };
+  window.openChatTemplatesSettings.__ffFallback = true;
   window.closeChatTemplatesModal = window.closeChatTemplatesModal || function() {
     var m=document.getElementById('chatTemplatesModal');if(m)m.style.display='none';
   };
@@ -810,6 +817,7 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
 }
 
 .ff-live-desk-fab {
+  display: none !important;
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -868,7 +876,7 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   width: min(430px, calc(100vw - 28px));
   max-height: min(720px, calc(100vh - 132px));
   overflow: hidden;
-  display: none;
+  display: none !important;
   flex-direction: column;
   background: #ffffff;
   border: 1px solid #ede9fe;
@@ -1268,6 +1276,7 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   flex: 1;
   overflow-y: auto;
   padding: 18px 20px;
+  min-height: 0;
 }
 .chat-modal-footer {
   padding: 14px 20px;
@@ -1287,6 +1296,35 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   margin-top: 16px;
 }
 .chat-section-label:first-child { margin-top: 0; }
+#chatSendModal .chat-modal-box {
+  height: min(78dvh, 620px);
+  max-height: 78dvh;
+}
+#chatSendModal #chatSendMessageList {
+  max-height: none !important;
+  overflow-y: visible !important;
+}
+@media (max-width: 640px) {
+  #chatSendModal {
+    align-items: flex-start;
+    padding-top: max(54px, env(safe-area-inset-top, 0px) + 42px);
+    box-sizing: border-box;
+  }
+  #chatSendModal .chat-modal-box {
+    width: calc(100vw - 24px);
+    height: min(74dvh, 590px);
+    max-height: calc(100dvh - max(92px, env(safe-area-inset-top, 0px) + 76px));
+  }
+  #chatSendModal .chat-modal-header {
+    padding: 14px 16px;
+  }
+  #chatSendModal .chat-modal-body {
+    padding: 14px 16px;
+  }
+  #chatSendModal .chat-modal-footer {
+    padding: 12px 16px;
+  }
+}
 
 /* ===== CHAT TEMPLATES - COMPACT FORM + BANK ===== */
 .chat-tmpl-form-compact {
@@ -1500,6 +1538,27 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   background: #f9fafb;
   border: 1px dashed #e5e7eb;
   border-radius: 10px;
+}
+.chat-category-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chat-category-section + .chat-category-section {
+  margin-top: 10px;
+}
+.chat-category-section-title {
+  font-size: 11px;
+  font-weight: 800;
+  color: #7c3aed;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 2px 0;
+}
+.chat-category-section-items {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 .chat-tmpl-card {
   display: flex;
@@ -2059,6 +2118,12 @@ ul{list-style:none;padding:0;margin:0}
 .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;min-width:0}
 
 .ff-queue-call-near-name{flex:0 0 auto}
+.ff-queue-call-btn-green {
+  border-color: #16a34a !important;
+  background: #16a34a !important;
+  color: #fff !important;
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.28) !important;
+}
 
 /* Buttons in rows */
 
@@ -8675,7 +8740,7 @@ dialog footer button, .code-dialog footer button {
       </div>
 
       <div class="ff-join-split">
-      <button id="joinBtn" class="btn-primary" style="background:#7c3aed;background-image:none;border-color:#7c3aed;color:#fff;">Join</button>
+      <button type="button" id="joinBtn" class="btn-primary" style="background:#7c3aed;background-image:none;border-color:#7c3aed;color:#fff;">Join</button>
 
       <button type="button" id="ffJoinMoreToggle" class="ff-join-more-toggle" aria-expanded="false" aria-haspopup="true" aria-controls="queueControls" aria-label="More queue actions" title="More queue actions"><span aria-hidden="true">▼</span></button>
       </div>
@@ -10264,7 +10329,7 @@ function ffGetUsers() {
   }
 }
 
-function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue') {
+function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue', options = {}) {
   console.log('[BUILD MARKER] addHistoryEntry is THIS version', addHistoryEntry.toString().slice(0,120));
   console.log('[ADD_HISTORY_ENTRY CALLED]', { args: Array.from(arguments) });
   try {
@@ -10317,7 +10382,7 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
     // Update in-memory log variable
     log = logArr;
     
-    if ((entry.source === 'queue' || entry.source === 'tasks') && typeof window.queueCloudWrite === 'function') {
+    if ((entry.source === 'queue' || entry.source === 'tasks') && typeof window.queueCloudWrite === 'function' && !(options && options.skipCloudWrite)) {
       setTimeout(() => {
         try {
           window.queueCloudWrite();
@@ -13579,6 +13644,133 @@ function queueCallStatusLabel(presence, status){
   return '';
 }
 
+function ffTwilioVoiceStatusText(data){
+  if (!data) return 'Calling';
+  if (data.acknowledged === true) return 'Accepted';
+  const status = String(data.status || '').trim();
+  if (!status || status === 'creating' || status === 'queued') return 'Calling';
+  if (status === 'ringing') return 'Ringing';
+  if (status === 'in-progress') return 'Answered';
+  if (status === 'completed') return 'Completed';
+  if (status === 'no-answer') return 'No answer';
+  if (status === 'busy') return 'Busy';
+  if (status === 'failed') return 'Failed';
+  if (status === 'canceled') return 'Canceled';
+  return status.replace(/_/g, ' ');
+}
+
+window.__ffTwilioVoiceLogUnsubs = window.__ffTwilioVoiceLogUnsubs || {};
+window.__ffTwilioVoiceRecentCalls = window.__ffTwilioVoiceRecentCalls || {};
+
+function ffTwilioVoiceCallKey(staffId, queueEntryId, callType){
+  return [
+    String(staffId || '').trim(),
+    String(queueEntryId || '').trim(),
+    String(callType || '').trim()
+  ].join('|');
+}
+
+function ffTwilioVoiceRememberCall({ staffId, queueEntryId, callType, callLogId, status }){
+  const key = ffTwilioVoiceCallKey(staffId, queueEntryId, callType);
+  if (!key || key === '||' || !callLogId) return;
+  window.__ffTwilioVoiceRecentCalls[key] = {
+    staffId: String(staffId || '').trim(),
+    queueEntryId: String(queueEntryId || '').trim(),
+    callType: String(callType || '').trim(),
+    callLogId: String(callLogId || '').trim(),
+    status: status || 'Calling',
+    updatedAtMs: Date.now()
+  };
+}
+
+function ffTwilioVoiceRecentStatus(staffId, queueEntryId, callType){
+  const key = ffTwilioVoiceCallKey(staffId, queueEntryId, callType);
+  const rec = window.__ffTwilioVoiceRecentCalls[key];
+  if (!rec || !rec.status) return '';
+  if (Date.now() - Number(rec.updatedAtMs || 0) > 30 * 60 * 1000) {
+    delete window.__ffTwilioVoiceRecentCalls[key];
+    return '';
+  }
+  return rec.status;
+}
+
+async function ffSubscribeTwilioVoiceCallLog(callLogId, statusEl, meta = {}){
+  if (!callLogId || !statusEl || !window.currentSalonId) return;
+  try {
+    const key = String(callLogId);
+    if (window.__ffTwilioVoiceLogUnsubs[key]) window.__ffTwilioVoiceLogUnsubs[key]();
+    const [{ getFirestore, doc, onSnapshot }] = await Promise.all([
+      import('https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js')
+    ]);
+    const db = getFirestore();
+    const ref = doc(db, `salons/${window.currentSalonId}/staffCallLogs/${key}`);
+    window.__ffTwilioVoiceLogUnsubs[key] = onSnapshot(ref, (snap) => {
+      const data = snap.exists() ? (snap.data() || {}) : null;
+      const status = ffTwilioVoiceStatusText(data);
+      statusEl.textContent = status;
+      statusEl.style.display = 'inline';
+      ffTwilioVoiceRememberCall({ ...meta, callLogId: key, status });
+    }, (err) => {
+      console.warn('[TwilioVoicePOC] call log listen failed', err);
+    });
+  } catch (err) {
+    console.warn('[TwilioVoicePOC] subscribe failed', err);
+  }
+}
+
+async function ffSendTwilioVoiceStaffCall({ staffId, queueEntryId, callType, statusEl, buttonEl }){
+  const businessId = String(window.currentSalonId || '').trim();
+  const cleanStaffId = String(staffId || '').trim();
+  let locationId = 'default';
+  try {
+    if (typeof window.ffGetActiveLocationId === 'function') {
+      locationId = String(window.ffGetActiveLocationId() || '').trim() || 'default';
+    }
+  } catch (_) {}
+  if (!businessId || !cleanStaffId) return { ok: false, reason: 'missing-context' };
+  if (statusEl) {
+    statusEl.textContent = 'Calling';
+    statusEl.style.display = 'inline';
+  }
+  if (buttonEl) buttonEl.disabled = true;
+  try {
+    const { getFunctions, httpsCallable } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js');
+    const fn = httpsCallable(getFunctions(undefined, 'us-central1'), 'callStaff');
+    const result = await fn({
+      businessId,
+      locationId,
+      staffId: cleanStaffId,
+      queueEntryId: String(queueEntryId || '').trim(),
+      callType: callType === 'front_desk' ? 'front_desk' : 'client_waiting'
+    });
+    const data = result && result.data ? result.data : {};
+    if (data.callLogId) {
+      ffTwilioVoiceRememberCall({
+        staffId: cleanStaffId,
+        queueEntryId: String(queueEntryId || '').trim(),
+        callType: callType === 'front_desk' ? 'front_desk' : 'client_waiting',
+        callLogId: data.callLogId,
+        status: 'Calling'
+      });
+      await ffSubscribeTwilioVoiceCallLog(data.callLogId, statusEl, {
+        staffId: cleanStaffId,
+        queueEntryId: String(queueEntryId || '').trim(),
+        callType: callType === 'front_desk' ? 'front_desk' : 'client_waiting'
+      });
+    }
+    return { ok: true, ...data };
+  } catch (err) {
+    console.error('[TwilioVoicePOC] callStaff failed', err);
+    if (statusEl) {
+      statusEl.textContent = err?.message || 'Failed';
+      statusEl.style.display = 'inline';
+    }
+    return { ok: false, error: err };
+  } finally {
+    if (buttonEl) buttonEl.disabled = false;
+  }
+}
+
 function getCurrentQueueActorRole() {
   let role = String(
     window.__ff_user_role ||
@@ -14375,7 +14567,10 @@ function renderQueue(){
 
     // Show call icon whenever we have a staffId (incl. held rows) so reception can always call staff.
     const canCall = !!presenceMeta.staffId;
-    const callStatusLabel = queueCallStatusLabel(presenceMeta.presence, presenceMeta.status);
+    const queueEntryIdForCall = q.id || q.queueEntryId || q.entryId || '';
+    const callStatusLabel =
+      ffTwilioVoiceRecentStatus(presenceMeta.staffId, queueEntryIdForCall, 'client_waiting') ||
+      queueCallStatusLabel(presenceMeta.presence, presenceMeta.status);
     const diagEligibility = {
       rowName: q.name,
       rowIndex: i,
@@ -14401,10 +14596,12 @@ function renderQueue(){
       const callBtn = document.createElement("button");
       callBtn.type = "button";
       callBtn.textContent = "📞";
+      callBtn.className = "ff-queue-call-btn-green";
       callBtn.title = ffStaffCallButtonTitle(presenceMeta.status, 'queue');
       callBtn.style.cssText = [
-        "border:1px solid var(--border)",
-        "background:#fff",
+        "border:1px solid #16a34a",
+        "background:#16a34a",
+        "color:#fff",
         "border-radius:999px",
         "width:34px",
         "height:34px",
@@ -14422,34 +14619,26 @@ function renderQueue(){
 
       callBtn.onclick = async () => {
         try {
-          if (typeof window.ffSendStaffCall !== 'function') {
+          if (typeof ffSendTwilioVoiceStaffCall !== 'function') {
             alert('Call feature is still loading. Wait a few seconds and try again.');
             return;
           }
-          const callTemplate = getStaffCallTemplate('available');
-          const result = await window.ffSendStaffCall(presenceMeta.staffId, {
-            message: callTemplate.message,
-            detail: callTemplate.detail,
-            allowOfflineDelivery: true,
-            presenceStatusHint: presenceMeta.status
+          const result = await ffSendTwilioVoiceStaffCall({
+            staffId: presenceMeta.staffId,
+            queueEntryId: queueEntryIdForCall,
+            callType: 'client_waiting',
+            statusEl: callStatus,
+            buttonEl: callBtn
           });
           if (!result || result.ok !== true) {
-            if (result?.reason === 'offline') {
-              alert('Request was queued. They may see it when they open the app.');
-            } else if (result?.reason === 'recipient_not_logged_in') {
-              alert('This staff member must log in to the app at least once before they can receive a call request.');
-            } else if (result?.reason === 'no_permission') {
-              alert('Your account cannot send staff calls. Ask an owner or manager.');
-            } else if (result?.reason === 'no_auth') {
-              alert('Please sign in again, then try the call button.');
-            } else if (result?.reason === 'not-eligible') {
-              alert('Staff must be on shift in the right queue for a call alert. Check that they joined the queue on their device.');
+            if (result?.reason === 'missing-context') {
+              alert('Call could not be sent because the staff or business context is missing.');
             } else {
               alert('Call could not be sent.');
             }
           }
         } catch (e) {
-          console.error('[Queue] Failed to send staff call', e);
+          console.error('[Queue] Failed to start staff voice call', e);
           alert('Call could not be sent.');
         }
       };
@@ -14776,16 +14965,19 @@ function renderService(){
     ctrls.style.gap = "10px";
 
     if (canManageCalls && presenceMeta.staffId && !queueLockedSvc) {
+      const serviceEntryIdForCall = s.id || s.queueEntryId || s.entryId || '';
       const callWrap = document.createElement("div");
       callWrap.style.cssText = "display:flex;align-items:center;gap:4px;white-space:nowrap;";
 
       const callBtn = document.createElement("button");
       callBtn.type = "button";
       callBtn.textContent = "📞";
+      callBtn.className = "ff-queue-call-btn-green";
       callBtn.title = ffStaffCallButtonTitle(presenceMeta.status, 'service');
       callBtn.style.cssText = [
-        "border:1px solid var(--border)",
-        "background:#fff",
+        "border:1px solid #16a34a",
+        "background:#16a34a",
+        "color:#fff",
         "border-radius:999px",
         "width:34px",
         "height:34px",
@@ -14803,41 +14995,35 @@ function renderService(){
 
       callBtn.onclick = async () => {
         try {
-          if (typeof window.ffSendStaffCall !== 'function') {
+          if (typeof ffSendTwilioVoiceStaffCall !== 'function') {
             alert('Call feature is still loading. Wait a few seconds and try again.');
             return;
           }
-          const callTemplate = getStaffCallTemplate('inService');
-          const result = await window.ffSendStaffCall(presenceMeta.staffId, {
-            allowedQueueStatuses: ["in_service"],
-            message: callTemplate.message,
-            detail: callTemplate.detail,
-            allowOfflineDelivery: true,
-            presenceStatusHint: presenceMeta.status
+          const result = await ffSendTwilioVoiceStaffCall({
+            staffId: presenceMeta.staffId,
+            queueEntryId: serviceEntryIdForCall,
+            callType: 'front_desk',
+            statusEl: callStatus,
+            buttonEl: callBtn
           });
           if (!result || result.ok !== true) {
-            if (result?.reason === 'offline') {
-              alert('Request was queued. They may see it when they open the app.');
-            } else if (result?.reason === 'recipient_not_logged_in') {
-              alert('This staff member must log in to the app at least once before they can receive a call request.');
-            } else if (result?.reason === 'no_permission') {
-              alert('Your account cannot send staff calls. Ask an owner or manager.');
-            } else if (result?.reason === 'no_auth') {
-              alert('Please sign in again, then try the call button.');
-            } else if (result?.reason === 'not-eligible') {
-              alert('Staff must be In service for this alert. Check their queue status.');
+            if (result?.reason === 'missing-context') {
+              alert('Call could not be sent because the staff or business context is missing.');
             } else {
               alert('Call could not be sent.');
             }
           }
         } catch (e) {
-          console.error('[Service] Failed to send reception call', e);
+          console.error('[Service] Failed to start staff voice call', e);
           alert('Call could not be sent.');
         }
       };
 
       const callStatus = document.createElement("span");
-      const serviceCallStatusLabel = queueCallStatusLabel(presenceMeta.presence, presenceMeta.status) || "";
+      const serviceCallStatusLabel =
+        ffTwilioVoiceRecentStatus(presenceMeta.staffId, serviceEntryIdForCall, 'front_desk') ||
+        queueCallStatusLabel(presenceMeta.presence, presenceMeta.status) ||
+        "";
       callStatus.textContent = serviceCallStatusLabel;
       callStatus.style.cssText = "font-size:10px;color:#6b7280;white-space:nowrap;";
       if (!serviceCallStatusLabel) callStatus.style.display = "none";
@@ -15303,7 +15489,21 @@ async function handleJoin(){
   if (typeof window.ffMarkStaffJoinedShift === 'function') {
     window.ffMarkStaffJoinedShift(currentStaffId, selectedTechnicianName);
   }
-  save();
+  // Add Join history before save so queue + history persist in one cloud write.
+  const techActor = getActorForAction({ workerName: selectedTechnicianName });
+  addHistoryEntry('Join', techActor.role, techActor.name, selectedTechnicianName, 'queue', { skipCloudWrite: true });
+  const queueWriteResult = await save();
+  const queueWriteFailed = !!(queueWriteResult && queueWriteResult.ok === false);
+  if (queueWriteResult && queueWriteResult.ok === false) {
+    const msg = 'Queue could not sync. Please try again.';
+    console.warn('[handleJoin] queue cloud write failed', queueWriteResult);
+    if (joinErrorEl) {
+      joinErrorEl.textContent = msg;
+      joinErrorEl.style.display = 'block';
+    } else {
+      alert(msg);
+    }
+  }
   renderQueue();
   
   // Set technician identity for Tasks (so MY LIST shows correct filtered tasks)
@@ -15330,21 +15530,18 @@ async function handleJoin(){
   
   // Clear PIN field and error message on success
   pinInputEl.value = '';
-  if (joinErrorEl) {
+  if (joinErrorEl && !queueWriteFailed) {
     joinErrorEl.textContent = '';
     joinErrorEl.style.display = 'none';
   }
   
-  console.log('[handleJoin] Successfully added', selectedTechnicianName, 'to queue');
+  console.log('[handleJoin] Added locally', selectedTechnicianName, 'to queue', { cloudSynced: !queueWriteFailed });
 
   ffAwardQueueJoinPoints({
     staffId,
     staffName: selectedTechnicianName
   });
 
-  // Join is done directly by worker (Tech action)
-  const techActor = getActorForAction({ workerName: selectedTechnicianName });
-  addHistoryEntry('Join', techActor.role, techActor.name, selectedTechnicianName, 'queue');
   } catch (e) {
     console.error('[handleJoin] Error in handleJoin:', e);
     const joinErrorEl = document.getElementById('joinError');
@@ -15558,6 +15755,32 @@ function resetQueueState({ force = false, source = 'manual' }) {
     // Exit reorder mode when resetting queue (ensures clean state)
     if (typeof exitReorderMode === 'function' && reorderMode) {
       exitReorderMode();
+    }
+    const removedQueueCount = Array.isArray(queue) ? queue.length : 0;
+    const removedServiceCount = (force || source === 'manual') && Array.isArray(service) ? service.length : 0;
+    const workersRemoved = removedQueueCount + removedServiceCount;
+    if (typeof addHistoryEntry === 'function') {
+      if (source === 'auto') {
+        addHistoryEntry(
+          'Automatic Queue Reset' + (workersRemoved ? ` (${workersRemoved} workers removed)` : ''),
+          'System',
+          'System',
+          '',
+          'queue',
+          { skipCloudWrite: true }
+        );
+      } else {
+        const actorRole = window.__ff_actorRole || getCurrentActorRole?.() || 'Unknown';
+        const actorName = window.__ff_actorName || getCurrentActorName?.() || 'System';
+        addHistoryEntry(
+          'Queue Reset' + (workersRemoved ? ` (${workersRemoved} workers removed)` : ''),
+          actorRole,
+          actorName,
+          '',
+          'queue',
+          { skipCloudWrite: true }
+        );
+      }
     }
     
     // Clear Available queue
@@ -18418,7 +18641,7 @@ async function sendTrainingReminderFromReport(trainingId, staffLookupKey) {
   try {
     if (typeof window.ffSendTrainingReminderChat !== 'function') {
       try {
-        await import('/chat.js?v=20260512_training_reminder_v8');
+        await import('/chat.js?v=20260615_chat_flow_load_resilient');
       } catch (eImp) {
         console.warn('[Training] Could not load chat module for reminder', eImp);
       }
@@ -22909,6 +23132,71 @@ const SCHEDULE_SETTINGS_DAY_OPTIONS = [
   { value: 'sunday', label: 'Sun' }
 ];
 
+function ffScheduleSettingsPrefers24HourInputs() {
+  try {
+    const tf = window.settings && window.settings.preferences && window.settings.preferences.timeFormat;
+    return tf === '24h' || tf === '24hour' || tf === 24;
+  } catch (_) {
+    return false;
+  }
+}
+
+function ffScheduleSettingsNormalizeHHMM(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return '';
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return '';
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function ffScheduleSettingsTimeInputAttrs(value) {
+  const normalized = ffScheduleSettingsNormalizeHHMM(value);
+  const safeValue = escapeHtmlAttr(normalized || String(value || '').trim());
+  if (!ffScheduleSettingsPrefers24HourInputs()) {
+    return `type="time" value="${safeValue}"`;
+  }
+  return `type="text" value="${safeValue}" inputmode="numeric" maxlength="5" pattern="[0-9]{2}:[0-9]{2}" placeholder="HH:mm" data-ff-schedule-hhmm="true" data-ff-schedule-last-valid="${safeValue}"`;
+}
+
+function ffScheduleSettingsReadTimeInputValue(input) {
+  if (!input) return null;
+  const raw = String(input.value || '').trim();
+  if (!raw) return null;
+  const normalized = ffScheduleSettingsNormalizeHHMM(raw);
+  if (normalized) {
+    input.value = normalized;
+    if (input.dataset) input.dataset.ffScheduleLastValid = normalized;
+    return normalized;
+  }
+  return null;
+}
+
+function ffBindScheduleSettingsTimeTextInputs(scope) {
+  const root = scope || document;
+  root.querySelectorAll('input[data-ff-schedule-hhmm="true"]').forEach((input) => {
+    if (!input.dataset.ffScheduleLastValid) {
+      input.dataset.ffScheduleLastValid = ffScheduleSettingsNormalizeHHMM(input.value) || '';
+    }
+    if (input.__ffScheduleHhmmBound) return;
+    input.__ffScheduleHhmmBound = true;
+    input.addEventListener('input', () => {
+      const normalized = ffScheduleSettingsNormalizeHHMM(input.value);
+      if (normalized && input.dataset) input.dataset.ffScheduleLastValid = normalized;
+    });
+    input.addEventListener('blur', () => {
+      const normalized = ffScheduleSettingsNormalizeHHMM(input.value);
+      if (normalized) {
+        input.value = normalized;
+        if (input.dataset) input.dataset.ffScheduleLastValid = normalized;
+        return;
+      }
+      input.value = input.dataset.ffScheduleLastValid || '';
+    });
+  });
+}
+
 function ffCreateShiftSegmentRowEl(day, start, end, cov) {
   cov = cov || {};
   var m = cov.minManagers != null && cov.minManagers !== '' ? String(cov.minManagers) : '';
@@ -22918,8 +23206,8 @@ function ffCreateShiftSegmentRowEl(day, start, end, cov) {
   div.className = 'ff-shift-row';
   div.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin-bottom:6px;width:100%;box-sizing:border-box;';
   div.innerHTML =
-    '<input type="time" class="ff-shift-start" value="' + String(start || '') + '" style="flex:1 1 108px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
-    '<input type="time" class="ff-shift-end" value="' + String(end || '') + '" style="flex:1 1 108px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
+    '<input ' + ffScheduleSettingsTimeInputAttrs(start) + ' class="ff-shift-start" style="flex:1 1 108px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
+    '<input ' + ffScheduleSettingsTimeInputAttrs(end) + ' class="ff-shift-end" style="flex:1 1 108px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
     '<input type="number" min="0" step="1" class="ff-shift-cov-mgr" value="' + m + '" placeholder="0" title="Managers" style="flex:0 0 52px;width:52px;height:30px;padding:0 4px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
     '<input type="number" min="0" step="1" class="ff-shift-cov-fd" value="' + f + '" placeholder="0" title="Assistant Manager (Manager + Assistant Manager type)" style="flex:0 0 52px;width:52px;height:30px;padding:0 4px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
     '<input type="number" min="0" step="1" class="ff-shift-cov-sp" value="' + t + '" placeholder="0" title="Service providers" style="flex:0 0 64px;width:64px;height:30px;padding:0 4px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
@@ -22961,7 +23249,10 @@ function ffInitDayShiftSegmentPanelsInBox(box, dayShiftSeg, attrPrefix, coverage
       if (addBtn) {
         var d = addBtn.getAttribute('data-' + attrPrefix + '-shift-add');
         var c = box.querySelector('[data-' + attrPrefix + '-shift-container="' + d + '"]');
-        if (c) c.appendChild(ffCreateShiftSegmentRowEl(d, '', '', {}));
+        if (c) {
+          c.appendChild(ffCreateShiftSegmentRowEl(d, '', '', {}));
+          ffBindScheduleSettingsTimeTextInputs(c);
+        }
         return;
       }
       if (ev.target.closest('.ff-shift-remove')) {
@@ -22991,6 +23282,7 @@ function ffInitDayShiftSegmentPanelsInBox(box, dayShiftSeg, attrPrefix, coverage
       }
     });
   }
+  ffBindScheduleSettingsTimeTextInputs(box);
 }
 
 function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverageRulesValue, dayShiftSegmentsValue, attrPrefix) {
@@ -23025,8 +23317,8 @@ function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverag
             <input type="checkbox" data-${attrPrefix}-business-open="${day.value}" ${hoursEntry.isOpen ? 'checked' : ''} style="width:14px;height:14px;accent-color:#7c3aed;cursor:pointer;">
             <span>Open</span>
           </label>
-          <input type="time" data-${attrPrefix}-business-open-time="${day.value}" value="${hoursEntry.openTime || ''}" style="width:100%;min-width:0;max-width:100%;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
-          <input type="time" data-${attrPrefix}-business-close-time="${day.value}" value="${hoursEntry.closeTime || ''}" style="width:100%;min-width:0;max-width:100%;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
+          <input ${ffScheduleSettingsTimeInputAttrs(hoursEntry.openTime)} data-${attrPrefix}-business-open-time="${day.value}" style="width:100%;min-width:0;max-width:100%;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
+          <input ${ffScheduleSettingsTimeInputAttrs(hoursEntry.closeTime)} data-${attrPrefix}-business-close-time="${day.value}" style="width:100%;min-width:0;max-width:100%;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
         </div>
         <button type="button" data-${attrPrefix}-shift-toggle="${day.value}" aria-expanded="false" style="width:100%;text-align:left;padding:8px 12px;border:none;border-top:1px solid #f3f4f6;background:#fafafa;font-size:11px;font-weight:600;color:#5b21b6;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;">
           <span>Shift segments &amp; coverage</span>
@@ -23050,6 +23342,7 @@ function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverag
   }).join('');
 
   box.innerHTML = header + rows;
+  ffBindScheduleSettingsTimeTextInputs(box);
   ffInitDayShiftSegmentPanelsInBox(box, dayShiftSeg, attrPrefix, coverageRules);
 }
 
@@ -23058,8 +23351,8 @@ function collectBusinessHoursFromUiPrefix(attrPrefix) {
   SCHEDULE_SETTINGS_DAY_OPTIONS.forEach((day) => {
     result[day.value] = {
       isOpen: document.querySelector(`[data-${attrPrefix}-business-open="${day.value}"]`)?.checked === true,
-      openTime: document.querySelector(`[data-${attrPrefix}-business-open-time="${day.value}"]`)?.value || null,
-      closeTime: document.querySelector(`[data-${attrPrefix}-business-close-time="${day.value}"]`)?.value || null
+      openTime: ffScheduleSettingsReadTimeInputValue(document.querySelector(`[data-${attrPrefix}-business-open-time="${day.value}"]`)),
+      closeTime: ffScheduleSettingsReadTimeInputValue(document.querySelector(`[data-${attrPrefix}-business-close-time="${day.value}"]`))
     };
   });
   return window.ffScheduleHelpers?.normalizeBusinessHours
@@ -23110,8 +23403,8 @@ function collectDayShiftSegmentsFromUiPrefix(attrPrefix) {
     let maxUntimedF = 0;
     let maxUntimedT = 0;
     rows.forEach((row) => {
-      const start = row.querySelector('.ff-shift-start')?.value;
-      const end = row.querySelector('.ff-shift-end')?.value;
+      const start = ffScheduleSettingsReadTimeInputValue(row.querySelector('.ff-shift-start'));
+      const end = ffScheduleSettingsReadTimeInputValue(row.querySelector('.ff-shift-end'));
       const mgr = Math.max(0, Math.round(Number(row.querySelector('.ff-shift-cov-mgr')?.value ?? 0)) || 0);
       const fd = Math.max(0, Math.round(Number(row.querySelector('.ff-shift-cov-fd')?.value ?? 0)) || 0);
       const sp = Math.max(0, Math.round(Number(row.querySelector('.ff-shift-cov-sp')?.value ?? 0)) || 0);
@@ -23125,8 +23418,8 @@ function collectDayShiftSegmentsFromUiPrefix(attrPrefix) {
     });
     if (!list.length && (maxUntimedM > 0 || maxUntimedF > 0 || maxUntimedT > 0)) {
       const isOpen = root?.querySelector(`[data-${attrPrefix}-business-open="${day.value}"]`)?.checked === true;
-      const openT = root?.querySelector(`[data-${attrPrefix}-business-open-time="${day.value}"]`)?.value || '';
-      const closeT = root?.querySelector(`[data-${attrPrefix}-business-close-time="${day.value}"]`)?.value || '';
+      const openT = ffScheduleSettingsReadTimeInputValue(root?.querySelector(`[data-${attrPrefix}-business-open-time="${day.value}"]`)) || '';
+      const closeT = ffScheduleSettingsReadTimeInputValue(root?.querySelector(`[data-${attrPrefix}-business-close-time="${day.value}"]`)) || '';
       if (isOpen && openT && closeT) {
         list.push({
           startTime: openT,
@@ -23219,8 +23512,8 @@ function renderSpecialBusinessDaysInto(containerId, specialBusinessDaysValue, at
         <input type="checkbox" data-${attrPrefix}-special-closed="${dateKey}" ${entry.isClosed ? 'checked' : ''} style="width:14px;height:14px;accent-color:#7c3aed;cursor:pointer;">
         <span>Closed</span>
       </label>
-      <input type="time" data-${attrPrefix}-special-open="${dateKey}" value="${entry.openTime || ''}" ${entry.isClosed ? 'disabled' : ''} style="width:100%;min-width:0;height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
-      <input type="time" data-${attrPrefix}-special-close="${dateKey}" value="${entry.closeTime || ''}" ${entry.isClosed ? 'disabled' : ''} style="width:100%;min-width:0;height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
+      <input ${ffScheduleSettingsTimeInputAttrs(entry.openTime)} data-${attrPrefix}-special-open="${dateKey}" ${entry.isClosed ? 'disabled' : ''} style="width:100%;min-width:0;height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
+      <input ${ffScheduleSettingsTimeInputAttrs(entry.closeTime)} data-${attrPrefix}-special-close="${dateKey}" ${entry.isClosed ? 'disabled' : ''} style="width:100%;min-width:0;height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
       <input type="hidden" data-${attrPrefix}-special-note="${dateKey}" value="${escapeHtmlAttr(noteVal)}">
       <button type="button" data-${attrPrefix}-special-note-btn="${dateKey}" class="ff-special-day-note-btn" style="width:36px;height:32px;border:1px solid ${hasNote ? '#7c3aed' : '#e5e7eb'};border-radius:8px;background:${hasNote ? '#f5f3ff' : '#fff'};color:${hasNote ? '#5b21b6' : '#9ca3af'};font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;" title="${hasNote ? 'Edit schedule note' : 'Add schedule note (shown on Schedule board)'}">*</button>
       <button type="button" title="Remove special day" aria-label="Remove special day" data-${attrPrefix}-special-remove="${dateKey}" style="width:36px;height:32px;border:1px solid #fecaca;border-radius:8px;background:#fff;color:#b91c1c;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">
@@ -23235,6 +23528,7 @@ function renderSpecialBusinessDaysInto(containerId, specialBusinessDaysValue, at
     </div>
   `;
   }).join('');
+  ffBindScheduleSettingsTimeTextInputs(box);
 
   box.querySelectorAll(`[data-${attrPrefix}-special-closed]`).forEach((checkbox) => {
     checkbox.addEventListener('change', () => {
@@ -23277,8 +23571,8 @@ function collectSpecialBusinessDaysFromUiPrefix(attrPrefix) {
     const isClosed = row.querySelector(`[data-${attrPrefix}-special-closed="${originalDate}"]`)?.checked === true;
     result[dateKey] = {
       isClosed,
-      openTime: isClosed ? null : (row.querySelector(`[data-${attrPrefix}-special-open="${originalDate}"]`)?.value || null),
-      closeTime: isClosed ? null : (row.querySelector(`[data-${attrPrefix}-special-close="${originalDate}"]`)?.value || null),
+      openTime: isClosed ? null : ffScheduleSettingsReadTimeInputValue(row.querySelector(`[data-${attrPrefix}-special-open="${originalDate}"]`)),
+      closeTime: isClosed ? null : ffScheduleSettingsReadTimeInputValue(row.querySelector(`[data-${attrPrefix}-special-close="${originalDate}"]`)),
       note: row.querySelector(`[data-${attrPrefix}-special-note="${originalDate}"]`)?.value?.trim() || ""
     };
   });
@@ -25686,19 +25980,39 @@ function initializeJoinButton() {
         const freshJoinBtn = document.getElementById("joinBtn");
         
         if (freshJoinBtn) {
-          let lastMobileJoinAt = 0;
+          let lastJoinTriggerAt = 0;
           const triggerJoin = (e, source) => {
             if (e) {
               e.preventDefault();
               e.stopPropagation();
             }
             const now = Date.now();
-            if (source !== 'click') {
-              if (now - lastMobileJoinAt < 180) return;
-              lastMobileJoinAt = now;
-            } else if (now - lastMobileJoinAt < 450) {
+            if (now - lastJoinTriggerAt < 650) {
               return;
             }
+            lastJoinTriggerAt = now;
+            try {
+              const sel = document.getElementById('nameSelect');
+              const btn = document.getElementById('joinBtn');
+              const rect = btn ? btn.getBoundingClientRect() : null;
+              const hit = rect
+                ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+                : null;
+              console.log('[JoinDiag] trigger', {
+                source,
+                width: window.innerWidth,
+                activeLocationId: typeof window.ffGetActiveLocationId === 'function' ? window.ffGetActiveLocationId() : window.__ff_active_location_id,
+                selectedStaffId: sel ? sel.value : '',
+                selectedText: sel && sel.selectedOptions && sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : '',
+                disabled: btn ? btn.disabled === true : null,
+                hitElement: hit ? {
+                  tag: hit.tagName,
+                  id: hit.id || '',
+                  className: String(hit.className || '').slice(0, 120),
+                } : null,
+                hitIsJoinButton: !!(btn && hit && (hit === btn || btn.contains(hit))),
+              });
+            } catch (_) {}
             try {
               const joinBar = document.getElementById('joinBar');
               const moreToggle = document.getElementById('ffJoinMoreToggle');
@@ -25707,11 +26021,10 @@ function initializeJoinButton() {
             } catch (_) {}
             handleJoin();
           };
-          freshJoinBtn.onclick = (e) => {
+          freshJoinBtn.addEventListener('click', (e) => {
             triggerJoin(e, 'click');
-          };
+          });
           freshJoinBtn.addEventListener('pointerup', (e) => {
-            if (typeof window.matchMedia === 'function' && !window.matchMedia('(max-width: 640px)').matches) return;
             triggerJoin(e, 'pointerup');
           });
           freshJoinBtn.addEventListener('touchend', (e) => {
@@ -26508,12 +26821,33 @@ function clearHistory() {
   // Load, filter out this location's rows, save back.
   let logArr = [];
   try { logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]'); } catch (_) { logArr = []; }
+  const removedCount = logArr.filter((raw) => {
+    const entry = normalizeHistoryEntry(raw);
+    const entryLoc = (entry && typeof entry.locationId === 'string' && entry.locationId.trim())
+      ? entry.locationId.trim()
+      : 'default';
+    return entryLoc === activeLocKey;
+  }).length;
+  let auditEntry = null;
+  if (typeof addHistoryEntry === 'function') {
+    const actorRole = window.__ff_actorRole || getCurrentActorRole?.() || 'Unknown';
+    const actorName = window.__ff_actorName || getCurrentActorName?.() || 'System';
+    auditEntry = addHistoryEntry(
+      'Clear History' + (removedCount ? ` (${removedCount} entries removed)` : ''),
+      actorRole,
+      actorName,
+      '',
+      'queue',
+      { skipCloudWrite: true }
+    );
+    try { logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]'); } catch (_) {}
+  }
   const kept = logArr.filter((raw) => {
     const entry = normalizeHistoryEntry(raw);
     const entryLoc = (entry && typeof entry.locationId === 'string' && entry.locationId.trim())
       ? entry.locationId.trim()
       : 'default';
-    return entryLoc !== activeLocKey;
+    return entryLoc !== activeLocKey || (auditEntry && raw && typeof raw === 'object' && raw.ts === auditEntry.ts && raw.action === auditEntry.action);
   });
   localStorage.setItem('ffv24_log', JSON.stringify(kept));
   log = kept;
@@ -28802,6 +29136,85 @@ let isTasksSettingsOpen = false;
 let tasksSettingsModalContainer = null; // Reference to modal container element
 window.ff_is_admin_cached = null; // Cached admin status for Tasks Settings access
 
+const FF_TASKS_SETTINGS_TIME_INPUT_IDS = [
+  'tasksAlertTimeInput',
+  'tasksOpeningAutoResetTime',
+  'tasksClosingAutoResetTime',
+  'tasksAlertWeekdayTimeInput',
+  'tasksWeeklyAutoResetTime',
+  'tasksAlertDayTimeInput',
+  'tasksMonthlyAutoResetTime',
+  'tasksAlertYearlyTimeInput',
+  'tasksYearlyAutoResetTime'
+];
+
+function ffTasksSettingsNormalizeHHMM(value) {
+  if (typeof ffScheduleSettingsNormalizeHHMM === 'function') {
+    return ffScheduleSettingsNormalizeHHMM(value);
+  }
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return '';
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return '';
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function ffTasksSettingsPrefers24HourInputs() {
+  try {
+    const tf = window.settings && window.settings.preferences && window.settings.preferences.timeFormat;
+    return tf === '24h' || tf === '24hour' || tf === 24;
+  } catch (_) {
+    return false;
+  }
+}
+
+function ffApplyTasksSettingsTimeInputs() {
+  const prefers24h = ffTasksSettingsPrefers24HourInputs();
+  FF_TASKS_SETTINGS_TIME_INPUT_IDS.forEach((id) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    const normalized = ffTasksSettingsNormalizeHHMM(input.value);
+    if (normalized) {
+      input.value = normalized;
+      input.dataset.ffTasksLastValidTime = normalized;
+    } else if (!input.dataset.ffTasksLastValidTime) {
+      input.dataset.ffTasksLastValidTime = '';
+    }
+    if (prefers24h) {
+      input.type = 'text';
+      input.inputMode = 'numeric';
+      input.maxLength = 5;
+      input.pattern = '[0-9]{2}:[0-9]{2}';
+      input.placeholder = 'HH:mm';
+      input.classList.add('ff-tasks-settings-time-input-24h');
+    } else {
+      input.type = 'time';
+      input.removeAttribute('inputmode');
+      input.removeAttribute('maxlength');
+      input.removeAttribute('pattern');
+      input.removeAttribute('placeholder');
+      input.classList.remove('ff-tasks-settings-time-input-24h');
+    }
+    if (input.__ffTasksHhmmBound) return;
+    input.__ffTasksHhmmBound = true;
+    input.addEventListener('input', () => {
+      const next = ffTasksSettingsNormalizeHHMM(input.value);
+      if (next) input.dataset.ffTasksLastValidTime = next;
+    });
+    input.addEventListener('blur', () => {
+      const next = ffTasksSettingsNormalizeHHMM(input.value);
+      if (next) {
+        input.value = next;
+        input.dataset.ffTasksLastValidTime = next;
+        return;
+      }
+      input.value = input.dataset.ffTasksLastValidTime || '';
+    });
+  });
+}
+
 // Debug: run in console to get full task filter state (unfolded)
 window.ffDebugTaskFilterFull = function() {
   const sid = window.__ff_authedStaffId || localStorage.getItem('ff_authedStaffId_v1');
@@ -29888,6 +30301,7 @@ function setSettingsModalTab(tabName, options) {
       updateAddFormScheduleFields();
       resetAddFormScheduleFields();
     }
+    ffApplyTasksSettingsTimeInputs();
     
     console.log('[Tasks] Settings modal tab switched to:', tabName);
   } catch (e) {
@@ -34896,7 +35310,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260512_training_reminder_v8');
+            const m = await import('/chat.js?v=20260615_chat_flow_load_resilient');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -47570,8 +47984,35 @@ function initializeUserProfileMenu() {
       const d = (ts && typeof ts.toDate === 'function') ? ts.toDate()
               : (ts instanceof Date ? ts : null);
       if (!d) return '-';
+      if (typeof window.ffFormatDisplayTime === 'function') {
+        return window.ffFormatDisplayTime(d, { hour: 'numeric', minute: '2-digit', fallback: '-' });
+      }
       return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     } catch (_) { return '-'; }
+  }
+
+  function _ffTCPrefers24HourInputs() {
+    try {
+      const tf = window.settings && window.settings.preferences && window.settings.preferences.timeFormat;
+      return tf === '24h' || tf === '24hour' || tf === 24;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function _ffTCHHMMFromDate(d) {
+    if (!(d instanceof Date) || !isFinite(d.getTime())) return '';
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  function _ffTCNormalizeHHMM(value) {
+    const raw = String(value || '').trim();
+    const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return '';
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return '';
+    return String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
   }
 
   function _ffTCFormatDay(ts) {
@@ -49265,9 +49706,13 @@ function initializeUserProfileMenu() {
     const outH12 = outDate ? (((outDate.getHours() + 11) % 12) + 1) : '';
     const outMins = outDate ? String(outDate.getMinutes()).padStart(2, '0') : '';
     const outAmPm = outDate ? (outDate.getHours() >= 12 ? 'PM' : 'AM') : '';
+    const prefers24h = _ffTCPrefers24HourInputs();
+    const inHHMM = _ffTCHHMMFromDate(inDate);
+    const outHHMM = outDate ? _ffTCHHMMFromDate(outDate) : '';
 
     const fieldStyle = 'padding:6px 9px;border:1px solid #e5e7eb;border-radius:7px;background:#f9fafb;font-size:11px;color:#111827;font-weight:500;outline:none;box-sizing:border-box;width:100%;';
     const labelStyle = 'display:flex;flex-direction:column;gap:2px;font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;';
+    const tcTimeTextStyle = 'width:100%;height:28px;padding:4px 8px;border:1px solid #e5e7eb;border-radius:7px;background:#f9fafb;font-size:12px;color:#111827;font-weight:500;outline:none;box-sizing:border-box;';
 
     const title = isEdit ? 'Time Card' : 'New Time Card';
     const submitLabel = isEdit ? 'SAVE CHANGES' : 'Add Time Card';
@@ -49297,28 +49742,36 @@ function initializeUserProfileMenu() {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end;">
           <div style="display:flex;flex-direction:column;">
             <div style="${labelStyle};height:14px;line-height:14px;white-space:nowrap;overflow:hidden;margin-bottom:3px;">Clock-in</div>
-            <div style="display:flex;align-items:center;gap:2px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:7px;background:#f9fafb;height:28px;box-sizing:border-box;">
-              <input id="tcAddInH" type="number" min="0" max="23" value="${inH12}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
-              <span style="color:#9ca3af;font-weight:500;font-size:12px;">:</span>
-              <input id="tcAddInM" type="number" min="0" max="59" value="${inMins}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
-              <select id="tcAddInAM" style="border:none;font-size:10px;color:#6b7280;background:transparent;outline:none;font-weight:500;margin-left:auto;padding:0;">
-                <option value="AM"${inAmPm === 'AM' ? ' selected' : ''}>AM</option>
-                <option value="PM"${inAmPm === 'PM' ? ' selected' : ''}>PM</option>
-              </select>
-            </div>
+            ${prefers24h ? `
+              <input id="tcAddInTime" type="text" inputmode="numeric" maxlength="5" pattern="[0-9]{2}:[0-9]{2}" placeholder="HH:mm" value="${_ffTCEscape(inHHMM)}" style="${tcTimeTextStyle}"/>
+            ` : `
+              <div style="display:flex;align-items:center;gap:2px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:7px;background:#f9fafb;height:28px;box-sizing:border-box;">
+                <input id="tcAddInH" type="number" min="0" max="23" value="${inH12}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
+                <span style="color:#9ca3af;font-weight:500;font-size:12px;">:</span>
+                <input id="tcAddInM" type="number" min="0" max="59" value="${inMins}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
+                <select id="tcAddInAM" style="border:none;font-size:10px;color:#6b7280;background:transparent;outline:none;font-weight:500;margin-left:auto;padding:0;">
+                  <option value="AM"${inAmPm === 'AM' ? ' selected' : ''}>AM</option>
+                  <option value="PM"${inAmPm === 'PM' ? ' selected' : ''}>PM</option>
+                </select>
+              </div>
+            `}
           </div>
           <div style="display:flex;flex-direction:column;">
             <div style="${labelStyle};height:14px;line-height:14px;white-space:nowrap;overflow:hidden;margin-bottom:3px;">Clock-out</div>
-            <div style="display:flex;align-items:center;gap:2px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:7px;background:#f9fafb;height:28px;box-sizing:border-box;">
-              <input id="tcAddOutH" type="number" min="0" max="23" placeholder="--" value="${outH12}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
-              <span style="color:#9ca3af;font-weight:500;font-size:12px;">:</span>
-              <input id="tcAddOutM" type="number" min="0" max="59" placeholder="--" value="${outMins}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
-              <select id="tcAddOutAM" style="border:none;font-size:10px;color:#6b7280;background:transparent;outline:none;font-weight:500;margin-left:auto;padding:0;">
-                <option value=""${!outAmPm ? ' selected' : ''}>--</option>
-                <option value="AM"${outAmPm === 'AM' ? ' selected' : ''}>AM</option>
-                <option value="PM"${outAmPm === 'PM' ? ' selected' : ''}>PM</option>
-              </select>
-            </div>
+            ${prefers24h ? `
+              <input id="tcAddOutTime" type="text" inputmode="numeric" maxlength="5" pattern="[0-9]{2}:[0-9]{2}" placeholder="HH:mm" value="${_ffTCEscape(outHHMM)}" style="${tcTimeTextStyle}"/>
+            ` : `
+              <div style="display:flex;align-items:center;gap:2px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:7px;background:#f9fafb;height:28px;box-sizing:border-box;">
+                <input id="tcAddOutH" type="number" min="0" max="23" placeholder="--" value="${outH12}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
+                <span style="color:#9ca3af;font-weight:500;font-size:12px;">:</span>
+                <input id="tcAddOutM" type="number" min="0" max="59" placeholder="--" value="${outMins}" style="width:22px;border:none;font-size:12px;text-align:center;color:#111827;outline:none;background:transparent;font-weight:500;padding:0;"/>
+                <select id="tcAddOutAM" style="border:none;font-size:10px;color:#6b7280;background:transparent;outline:none;font-weight:500;margin-left:auto;padding:0;">
+                  <option value=""${!outAmPm ? ' selected' : ''}>--</option>
+                  <option value="AM"${outAmPm === 'AM' ? ' selected' : ''}>AM</option>
+                  <option value="PM"${outAmPm === 'PM' ? ' selected' : ''}>PM</option>
+                </select>
+              </div>
+            `}
           </div>
         </div>
         <label style="${labelStyle}">Notes
@@ -49382,6 +49835,16 @@ function initializeUserProfileMenu() {
     return isFinite(dt.getTime()) ? dt : null;
   }
 
+  function _ffTCBuildDateFromHHMM(dayISO, hhmm) {
+    const normalized = _ffTCNormalizeHHMM(hhmm);
+    if (!dayISO || !normalized) return null;
+    const [y, m, d] = String(dayISO).split('-').map((x) => parseInt(x, 10));
+    const [h, mi] = normalized.split(':').map((x) => parseInt(x, 10));
+    if (!y || !m || !d || !Number.isFinite(h) || !Number.isFinite(mi)) return null;
+    const dt = new Date(y, m - 1, d, h, mi, 0, 0);
+    return isFinite(dt.getTime()) ? dt : null;
+  }
+
   async function _ffTCSubmitAddTimeCard(drawer) {
     const err = drawer.querySelector('#tcAddErr');
     const save = drawer.querySelector('#tcAddSave');
@@ -49390,23 +49853,30 @@ function initializeUserProfileMenu() {
     const locId = drawer.querySelector('#tcAddLoc').value.trim();
     const staffId = drawer.querySelector('#tcAddStaff').value.trim();
     const dayISO = drawer.querySelector('#tcAddDay').value.trim();
-    const inH = drawer.querySelector('#tcAddInH').value;
-    const inM = drawer.querySelector('#tcAddInM').value;
-    const inAM = drawer.querySelector('#tcAddInAM').value;
-    const outH = drawer.querySelector('#tcAddOutH').value;
-    const outM = drawer.querySelector('#tcAddOutM').value;
-    const outAM = drawer.querySelector('#tcAddOutAM').value;
+    const inTimeInput = drawer.querySelector('#tcAddInTime');
+    const outTimeInput = drawer.querySelector('#tcAddOutTime');
+    const inH = drawer.querySelector('#tcAddInH') ? drawer.querySelector('#tcAddInH').value : '';
+    const inM = drawer.querySelector('#tcAddInM') ? drawer.querySelector('#tcAddInM').value : '';
+    const inAM = drawer.querySelector('#tcAddInAM') ? drawer.querySelector('#tcAddInAM').value : '';
+    const outH = drawer.querySelector('#tcAddOutH') ? drawer.querySelector('#tcAddOutH').value : '';
+    const outM = drawer.querySelector('#tcAddOutM') ? drawer.querySelector('#tcAddOutM').value : '';
+    const outAM = drawer.querySelector('#tcAddOutAM') ? drawer.querySelector('#tcAddOutAM').value : '';
     const notes = drawer.querySelector('#tcAddNotes').value.trim();
 
     if (!locId) { if (err) err.textContent = 'Please choose a location.'; return; }
     if (!staffId) { if (err) err.textContent = 'Please choose a staff member.'; return; }
     if (!dayISO) { if (err) err.textContent = 'Please choose a day.'; return; }
-    const inAt = _ffTCBuildDateFromParts(dayISO, inH, inM, inAM);
+    const inAt = inTimeInput
+      ? _ffTCBuildDateFromHHMM(dayISO, inTimeInput.value)
+      : _ffTCBuildDateFromParts(dayISO, inH, inM, inAM);
     if (!inAt) { if (err) err.textContent = 'Invalid clock-in time.'; return; }
 
     let outAt = null;
-    if (outH !== '' || outM !== '' || outAM) {
-      outAt = _ffTCBuildDateFromParts(dayISO, outH, outM, outAM);
+    const outTimeValue = outTimeInput ? String(outTimeInput.value || '').trim() : '';
+    if (outTimeInput ? outTimeValue !== '' : (outH !== '' || outM !== '' || outAM)) {
+      outAt = outTimeInput
+        ? _ffTCBuildDateFromHHMM(dayISO, outTimeValue)
+        : _ffTCBuildDateFromParts(dayISO, outH, outM, outAM);
       if (!outAt) { if (err) err.textContent = 'Invalid clock-out time.'; return; }
       if (outAt.getTime() < inAt.getTime()) {
         // Treat clock-out on next day if earlier than clock-in (overnight shift).
@@ -49447,24 +49917,31 @@ function initializeUserProfileMenu() {
 
     const locId = drawer.querySelector('#tcAddLoc').value.trim();
     const dayISO = drawer.querySelector('#tcAddDay').value.trim();
-    const inH = drawer.querySelector('#tcAddInH').value;
-    const inM = drawer.querySelector('#tcAddInM').value;
-    const inAM = drawer.querySelector('#tcAddInAM').value;
-    const outH = drawer.querySelector('#tcAddOutH').value;
-    const outM = drawer.querySelector('#tcAddOutM').value;
-    const outAM = drawer.querySelector('#tcAddOutAM').value;
+    const inTimeInput = drawer.querySelector('#tcAddInTime');
+    const outTimeInput = drawer.querySelector('#tcAddOutTime');
+    const inH = drawer.querySelector('#tcAddInH') ? drawer.querySelector('#tcAddInH').value : '';
+    const inM = drawer.querySelector('#tcAddInM') ? drawer.querySelector('#tcAddInM').value : '';
+    const inAM = drawer.querySelector('#tcAddInAM') ? drawer.querySelector('#tcAddInAM').value : '';
+    const outH = drawer.querySelector('#tcAddOutH') ? drawer.querySelector('#tcAddOutH').value : '';
+    const outM = drawer.querySelector('#tcAddOutM') ? drawer.querySelector('#tcAddOutM').value : '';
+    const outAM = drawer.querySelector('#tcAddOutAM') ? drawer.querySelector('#tcAddOutAM').value : '';
     const notes = drawer.querySelector('#tcAddNotes').value;
 
     if (!locId) { if (err) err.textContent = 'Please choose a location.'; return; }
     if (!dayISO) { if (err) err.textContent = 'Please choose a day.'; return; }
-    const inAt = _ffTCBuildDateFromParts(dayISO, inH, inM, inAM);
+    const inAt = inTimeInput
+      ? _ffTCBuildDateFromHHMM(dayISO, inTimeInput.value)
+      : _ffTCBuildDateFromParts(dayISO, inH, inM, inAM);
     if (!inAt) { if (err) err.textContent = 'Invalid clock-in time.'; return; }
 
     let outAt = null;
     let hasOut = false;
-    if (outH !== '' || outM !== '' || outAM) {
+    const outTimeValue = outTimeInput ? String(outTimeInput.value || '').trim() : '';
+    if (outTimeInput ? outTimeValue !== '' : (outH !== '' || outM !== '' || outAM)) {
       hasOut = true;
-      outAt = _ffTCBuildDateFromParts(dayISO, outH, outM, outAM);
+      outAt = outTimeInput
+        ? _ffTCBuildDateFromHHMM(dayISO, outTimeValue)
+        : _ffTCBuildDateFromParts(dayISO, outH, outM, outAM);
       if (!outAt) { if (err) err.textContent = 'Invalid clock-out time.'; return; }
       if (outAt.getTime() < inAt.getTime()) {
         outAt = new Date(outAt.getTime() + 24 * 60 * 60 * 1000);
@@ -50188,8 +50665,14 @@ function initializeUserProfileMenu() {
     const salonWeekStartsOn = (window.settings && window.settings.preferences && window.settings.preferences.weekStartsOn === 'sunday')
       ? 'sunday'
       : 'monday';
+    const settingsTimeFormat = (window.settings && window.settings.preferences && window.settings.preferences.timeFormat === '24h')
+      ? '24h'
+      : (window.settings && window.settings.preferences && window.settings.preferences.timeFormat === '12h')
+        ? '12h'
+        : '';
+    const timeFormat = settingsTimeFormat || prefs.preferences.timeFormat;
     if (timeFormat12h && timeFormat24h) {
-      if (prefs.preferences.timeFormat === '24h') {
+      if (timeFormat === '24h') {
         timeFormat24h.checked = true;
       } else {
         timeFormat12h.checked = true;
@@ -50278,7 +50761,8 @@ function initializeUserProfileMenu() {
       const currentSettings = JSON.parse(localStorage.getItem('ffv24_settings') || '{}');
       currentSettings.preferences = {
         ...(currentSettings.preferences && typeof currentSettings.preferences === 'object' ? currentSettings.preferences : {}),
-        weekStartsOn: nextWeekStartsOn
+        weekStartsOn: nextWeekStartsOn,
+        timeFormat: prefs.preferences.timeFormat
       };
       if (salonTz) {
         currentSettings.preferences.salonTimeZone = salonTz;
@@ -50302,7 +50786,8 @@ function initializeUserProfileMenu() {
       localStorage.setItem('ffv24_settings', JSON.stringify(currentSettings));
       settings.preferences = {
         ...(settings.preferences && typeof settings.preferences === 'object' ? settings.preferences : {}),
-        weekStartsOn: nextWeekStartsOn
+        weekStartsOn: nextWeekStartsOn,
+        timeFormat: prefs.preferences.timeFormat
       };
       if (salonTz) {
         settings.preferences.salonTimeZone = salonTz;
@@ -50351,6 +50836,7 @@ function initializeUserProfileMenu() {
     if (typeof window.ffSavePreferencesSettings === 'function') {
       window.ffSavePreferencesSettings({
         weekStartsOn: nextWeekStartsOn,
+        timeFormat: prefs.preferences.timeFormat,
         salonTimeZone: salonTz,
         currency: salonCur,
         taxRate: Number.isFinite(salonTaxRate) ? salonTaxRate : 0,
@@ -54837,11 +55323,19 @@ eye.addEventListener("mouseup",hide); eye.addEventListener("mouseleave",hide); e
 
 window.__ff_lastSaveTime = 0;
 
-function save(){
+async function save(){
   window.__ff_lastSaveTime = Date.now();
   ls("ffv24_settings",settings); ls("ffv24_queue",queue); ls("ffv24_service",service); ls("ffv24_log",log); syncWorkersToUsers();
   if(typeof window.ffSyncPresenceFromQueueState==='function') window.ffSyncPresenceFromQueueState(queue, service);
-  if(typeof window.queueCloudWrite==='function') window.queueCloudWrite();
+  if(typeof window.queueCloudWrite==='function') {
+    try {
+      return await window.queueCloudWrite();
+    } catch (err) {
+      console.warn('[Queue] queueCloudWrite failed from save()', err);
+      return { ok: false, reason: 'queue-cloud-write-threw', error: err?.message || String(err) };
+    }
+  }
+  return { ok: true, reason: 'queue-cloud-unavailable' };
 }
 
 // Tasks Cloud init callback - called automatically by tasks-cloud.js when it loads
@@ -55125,10 +55619,12 @@ function ffApplyCurrentStaffFilterToRenderedQueue() {
     const queueChanged = JSON.stringify(filteredQueueState.queue || []) !== JSON.stringify(queue || []);
     const serviceChanged = JSON.stringify(filteredQueueState.service || []) !== JSON.stringify(service || []);
     if (!queueChanged && !serviceChanged) return;
-    queue = filteredQueueState.queue;
-    service = filteredQueueState.service;
-    ls("ffv24_queue", queue);
-    ls("ffv24_service", service);
+    console.warn('[Queue] skipped staff-store filter for canonical queue state', {
+      queueLen: Array.isArray(queue) ? queue.length : 0,
+      filteredQueueLen: Array.isArray(filteredQueueState.queue) ? filteredQueueState.queue.length : 0,
+      serviceLen: Array.isArray(service) ? service.length : 0,
+      filteredServiceLen: Array.isArray(filteredQueueState.service) ? filteredQueueState.service.length : 0
+    });
     if (typeof renderQueue === 'function') renderQueue();
     if (typeof renderService === 'function') renderService();
   } catch (e) {
@@ -55162,9 +55658,8 @@ window.__ffQueueCloudInit = function() {
       if (!forceApply && incomingEmpty && haveLocal && !window.__ff_queueCloudServerConfirmed) {
         return false;
       }
-      const filteredQueueState = ffFilterQueueStateToCurrentStaff(q, s);
-      queue = filteredQueueState.queue;
-      service = filteredQueueState.service;
+      queue = Array.isArray(q) ? q : [];
+      service = Array.isArray(s) ? s : [];
       log = l;
       // Keep localStorage in sync as cache
       ls("ffv24_queue", queue);
@@ -58704,6 +59199,17 @@ function hookSettingsGuard_DISABLED(){
       flex-wrap: wrap;
     }
 
+    /* Tasks settings 24h text inputs: keep compact size on desktop browsers */
+    #tasksScreen #tasksSettingsModal input.ff-tasks-settings-time-input-24h {
+      width: 72px;
+      height: 22px;
+      min-height: 22px;
+      max-height: 22px;
+      padding: 1px 6px;
+      line-height: 1;
+      box-sizing: border-box;
+    }
+
     /* Add Task form: desktop = name/info + assign side-by-side; mobile = stacked full width + assign filter */
     #tasksScreen #tasksSettingsModal .tasks-add-form-grid {
       display: flex;
@@ -59927,7 +60433,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260530_reorder_delete", type: "module", delay: 2700 },
         { src: "/media-upload.js?v=20260602_storage_5gb_restore_final", type: "module", delay: 2780 },
-        { src: "/chat.js?v=20260522_chat_unread_push", type: "module", delay: 2900 },
+        { src: "/chat.js?v=20260615_chat_flow_load_resilient", type: "module", delay: 2900 },
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/push-notifications.js?v=20260524_ios_fcm_bridge_retry", type: "module", delay: 3500 },
@@ -61459,6 +61965,10 @@ function hookSettingsGuard_DISABLED(){
         <div class="chat-tmpl-field-row">
           <input id="chatTmplTitle" type="text" placeholder="Template title (e.g. Need 15 more minutes)" maxlength="80" class="chat-tmpl-input">
         </div>
+        <div class="chat-tmpl-field-row">
+          <input id="chatTmplCategory" type="text" list="chatCategorySuggestions" placeholder="Category (optional, e.g. Timing, Client, Drinks)" maxlength="40" class="chat-tmpl-input">
+          <datalist id="chatCategorySuggestions"></datalist>
+        </div>
         <div class="chat-tmpl-row chat-tmpl-row-actions">
           <button type="button" id="chatTmplDetailsToggle" class="chat-tmpl-details-toggle" aria-expanded="false">
             <span>Options</span>
@@ -61517,6 +62027,9 @@ function hookSettingsGuard_DISABLED(){
           <div class="chat-tmpl-form-label" id="chatFlowFormLabel">New Flow</div>
           <div class="chat-tmpl-field-row">
             <input id="chatFlowTitle" type="text" placeholder="Flow title (e.g. Coffee Order)" maxlength="80" class="chat-tmpl-input">
+          </div>
+          <div class="chat-tmpl-field-row">
+            <input id="chatFlowCategory" type="text" list="chatCategorySuggestions" placeholder="Category (optional, e.g. Timing, Client, Drinks)" maxlength="40" class="chat-tmpl-input">
           </div>
           <div class="chat-tmpl-row chat-tmpl-row-actions">
             <button type="button" id="chatFlowDetailsToggle" class="chat-tmpl-details-toggle" aria-expanded="false">

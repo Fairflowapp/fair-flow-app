@@ -17,6 +17,7 @@ Object.assign(exports, require("./stripe"));
 // Internal billing override (owner-only comped/free access). Imports
 // recomputeAccountStatus from ./stripe — must be required AFTER ./stripe.
 Object.assign(exports, require("./billing"));
+Object.assign(exports, require("./twilio-voice"));
 
 // Server-side scheduled queue auto-reset (runs even when no device is open).
 const _queueAutoReset = require("./queue-auto-reset");
@@ -1113,6 +1114,75 @@ async function _sendPushToUid({ salonId, uid, title, body, data, channelId, logT
   });
 }
 
+async function _sendPushToUidExcludingUidTokens({ salonId, uid, excludeUid, title, body, data, channelId, logTag }) {
+  const targetUid = String(uid || "").trim();
+  const excludedUid = String(excludeUid || "").trim();
+  if (!salonId || !targetUid || targetUid === excludedUid) return null;
+
+  const [targetTokensSnap, allEnabledTokensSnap] = await Promise.all([
+    admin.firestore()
+      .collection(`salons/${salonId}/staffDeviceTokens`)
+      .where("uid", "==", targetUid)
+      .where("enabled", "==", true)
+      .get(),
+    admin.firestore()
+      .collection(`salons/${salonId}/staffDeviceTokens`)
+      .where("enabled", "==", true)
+      .get(),
+  ]);
+
+  const latestTokenDocByToken = new Map();
+  const latestTokenDocByDevice = new Map();
+  allEnabledTokensSnap.docs.forEach((docSnap) => {
+    const tokenData = docSnap.data() || {};
+    const updatedMs = _timestampMillis(tokenData.updatedAt);
+    const token = String(tokenData.token || "").trim();
+    const deviceId = String(tokenData.deviceId || "").trim();
+    const uidValue = String(tokenData.uid || "").trim();
+    const currentByToken = token ? latestTokenDocByToken.get(token) : null;
+    if (token && (!currentByToken || updatedMs >= currentByToken.updatedMs)) {
+      latestTokenDocByToken.set(token, { docId: docSnap.id, uid: uidValue, updatedMs });
+    }
+    const currentByDevice = deviceId ? latestTokenDocByDevice.get(deviceId) : null;
+    if (deviceId && (!currentByDevice || updatedMs >= currentByDevice.updatedMs)) {
+      latestTokenDocByDevice.set(deviceId, { docId: docSnap.id, uid: uidValue, updatedMs });
+    }
+  });
+
+  const tokenDocs = targetTokensSnap.docs.filter((docSnap) => {
+    const tokenData = docSnap.data() || {};
+    const token = String(tokenData.token || "").trim();
+    const tokenUid = String(tokenData.uid || "").trim();
+    const deviceId = String(tokenData.deviceId || "").trim();
+    const latestForToken = token ? latestTokenDocByToken.get(token) : null;
+    const latestForDevice = deviceId ? latestTokenDocByDevice.get(deviceId) : null;
+    const tokenOwnerMatches = !latestForToken || latestForToken.uid === targetUid;
+    const deviceOwnerMatches = !latestForDevice || latestForDevice.uid === targetUid;
+    return token && tokenUid === targetUid && tokenOwnerMatches && deviceOwnerMatches;
+  });
+
+  const skippedTokenCount = targetTokensSnap.size - tokenDocs.length;
+  if (skippedTokenCount > 0) {
+    console.log(`[${logTag}] Skipped stale or non-current recipient tokens`, {
+      salonId,
+      uid: targetUid,
+      excludeUid: excludedUid,
+      skippedTokenCount,
+      targetTokenDocs: targetTokensSnap.size,
+      allEnabledTokenDocs: allEnabledTokensSnap.size,
+    });
+  }
+
+  return _sendPushToTokenQuery({
+    tokensSnap: { forEach: (cb) => tokenDocs.forEach(cb) },
+    title,
+    body,
+    data: { ...data, salonId, uid: targetUid, excludeUid: excludedUid },
+    channelId,
+    logTag,
+  });
+}
+
 function _roleCanHandleInbox(role) {
   const r = String(role || "").toLowerCase().trim().replace(/\s+/g, "_");
   return ["manager", "admin", "owner", "front_desk", "assistant_manager"].includes(r);
@@ -1346,11 +1416,47 @@ async function _sendPushToMediaHandlers({ salonId, excludeUid, title, body, data
 
   const staffCache = new Map();
   const handlerTokenDocs = [];
+  const latestTokenDocByToken = new Map();
+  const latestTokenDocByDevice = new Map();
+  tokensSnap.docs.forEach((docSnap) => {
+    const tokenData = docSnap.data() || {};
+    const updatedMs = _timestampMillis(tokenData.updatedAt);
+    const token = String(tokenData.token || "").trim();
+    const deviceId = String(tokenData.deviceId || "").trim();
+    const uid = String(tokenData.uid || "").trim();
+    const currentByToken = token ? latestTokenDocByToken.get(token) : null;
+    if (token && (!currentByToken || updatedMs >= currentByToken.updatedMs)) {
+      latestTokenDocByToken.set(token, { docId: docSnap.id, uid, updatedMs });
+    }
+    const currentByDevice = deviceId ? latestTokenDocByDevice.get(deviceId) : null;
+    if (deviceId && (!currentByDevice || updatedMs >= currentByDevice.updatedMs)) {
+      latestTokenDocByDevice.set(deviceId, { docId: docSnap.id, uid, updatedMs });
+    }
+  });
+
+  let staleFilteredCount = 0;
+  let uploaderFilteredCount = 0;
   for (const tokenDoc of tokensSnap.docs) {
     const tokenData = tokenDoc.data() || {};
     const uid = String(tokenData.uid || "").trim();
     const staffId = String(tokenData.staffId || "").trim();
-    if (!uid || uid === excluded || !staffId) continue;
+    const token = String(tokenData.token || "").trim();
+    if (!uid || !staffId || !token) continue;
+    const deviceId = String(tokenData.deviceId || "").trim();
+    const latestForToken = token ? latestTokenDocByToken.get(token) : null;
+    const latestForDevice = deviceId ? latestTokenDocByDevice.get(deviceId) : null;
+    const isStale =
+      (latestForToken && latestForToken.docId !== tokenDoc.id) ||
+      (latestForDevice && latestForDevice.docId !== tokenDoc.id);
+    if (isStale) {
+      staleFilteredCount += 1;
+      continue;
+    }
+    const latestOwnerUid = (latestForToken && latestForToken.uid) || (latestForDevice && latestForDevice.uid) || uid;
+    if (uid === excluded || latestOwnerUid === excluded) {
+      uploaderFilteredCount += 1;
+      continue;
+    }
 
     let staffData = staffCache.get(staffId);
     if (staffData === undefined) {
@@ -1360,6 +1466,16 @@ async function _sendPushToMediaHandlers({ salonId, excludeUid, title, body, data
     }
     if (_staffCanHandleMedia(staffData)) handlerTokenDocs.push(tokenDoc);
   }
+
+  console.log(`[${logTag}] Media handler tokens resolved`, {
+    salonId,
+    excludeUid: excluded,
+    candidateTokenDocs: tokensSnap.size,
+    matchingTokenDocs: handlerTokenDocs.length,
+    staleFilteredTokenDocs: staleFilteredCount,
+    uploaderFilteredTokenDocs: uploaderFilteredCount,
+    ...data,
+  });
 
   return _sendPushToTokenQuery({
     tokensSnap: { forEach: (cb) => handlerTokenDocs.forEach(cb) },
@@ -1657,9 +1773,10 @@ exports.onChatMessageCreated = functions
       "You have a new chat message."
     );
 
-    return _sendPushToUid({
+    return _sendPushToUidExcludingUidTokens({
       salonId,
       uid: recipientUid,
+      excludeUid: senderUid,
       title,
       body,
       channelId: "staff_calls",
