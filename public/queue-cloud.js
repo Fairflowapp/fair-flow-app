@@ -46,6 +46,33 @@ let _lastCloudRev = 0;
 // device that "lost" the race never loses its change (no data loss, not just
 // no overwrite). Reset to empty on a real location switch.
 let _lastServerState = { queue: [], service: [], log: [] };
+let _writeChain = Promise.resolve();
+
+function queueWriteResult(ok, reason, extra = {}) {
+  return Object.assign({
+    ok: ok === true,
+    reason: reason || (ok === true ? "ok" : "write-failed"),
+    salonId: _salonId || null,
+    activeLocationId: _locationId || readActiveLocationId() || null,
+    queueStateDocId: queueStateDocIdFor(_locationId),
+  }, extra);
+}
+
+function queueErrorMessage(err) {
+  if (!err) return "";
+  return String(err.message || err.code || err.name || err);
+}
+
+function logQueueWrite(label, extra = {}) {
+  try {
+    console.log("[QueueCloud]", label, Object.assign({
+      salonId: _salonId || null,
+      activeLocationId: _locationId || readActiveLocationId() || null,
+      queueStateDocId: queueStateDocIdFor(_locationId),
+      rev: _lastCloudRev,
+    }, extra));
+  } catch (_) {}
+}
 
 function ffCloneArray(a) {
   if (!Array.isArray(a)) return [];
@@ -358,6 +385,13 @@ function subscribe(salonId, locationId, opts = {}) {
   }
   const ref = queueStateRef(salonId, locationId);
   const logTag = locationId ? `loc=${locationId}` : "default";
+  console.log("[QueueCloud] subscribe", {
+    salonId,
+    activeLocationId: locationId || null,
+    queueStateDocId: queueStateDocIdFor(locationId),
+    reason: opts.reason || "unknown",
+    rev: _lastCloudRev,
+  });
   _unsubscribe = onSnapshot(ref, (snap) => {
     if (!_applyState) return;
     const localState = _getState ? _getState() : null;
@@ -459,6 +493,19 @@ function subscribe(salonId, locationId, opts = {}) {
     // shows the OLD list is exactly what made the next write re-add
     // ("resurrect") a list the server had already cleared.
     const applied = _applyState(queue, service, log, null, { remote: isGenuineRemote });
+    if (applied !== false) {
+      console.log("[QueueCloud] snapshot applied", {
+        salonId,
+        activeLocationId: locationId || null,
+        queueStateDocId: queueStateDocIdFor(locationId),
+        rev: snapRev,
+        queueLen: queue.length,
+        serviceLen: service.length,
+        logLen: log.length,
+        fromCache: snapshotFromCache(snap),
+        remote: isGenuineRemote,
+      });
+    }
     if (isAuthoritative && applied !== false) {
       // Track the authoritative cloud history length for the stale-overwrite
       // guard. Only reconciled server snapshots count, so a stale local cache
@@ -565,20 +612,24 @@ function writeState() {
       // Our write is now the authoritative state — make it the next merge base.
       setLastServerState(body.queue || [], body.service || [], body.log || []);
       _lastCloudLogLen = Array.isArray(body.log) ? body.log.length : _lastCloudLogLen;
+      const result = queueWriteResult(true, "ok", { rev: baseRev + 1, reason: body.lastUpdateReason || reason });
+      logQueueWrite("write ok", result);
+      return result;
     });
 
   const commit = (attempt) => {
     attempt = attempt || 0;
     const baseRev = _lastCloudRev;
+    logQueueWrite("write start", { reason, baseRev, attempt, localCounts });
     return writeAt(payload, baseRev).catch((e) => {
       if (!isPermissionDenied(e)) {
         console.warn("[QueueCloud] write failed", e);
-        return;
+        return queueWriteResult(false, "write-failed", { error: queueErrorMessage(e), rev: baseRev + 1 });
       }
       // Stale rev: another device advanced the queue between our read and write.
       if (attempt >= 5) {
         console.warn("[QueueCloud] merge retries exhausted — pulling server state");
-        return pullServerInto();
+        return pullServerInto().then(() => queueWriteResult(false, "merge-retries-exhausted", { rev: baseRev }));
       }
       return getDocFromServer(ref).then((snap) => {
         const data = snap.exists() ? (snap.data() || {}) : {};
@@ -596,7 +647,7 @@ function writeState() {
         if (isExplicitIntent) {
           return writeAt(payload, serverRev).catch((e2) => {
             if (isPermissionDenied(e2) && attempt < 5) return commit(attempt + 1);
-            return pullServerInto(serverState, serverRev);
+            return pullServerInto(serverState, serverRev).then(() => queueWriteResult(false, "explicit-intent-write-rejected", { error: queueErrorMessage(e2), rev: serverRev }));
           });
         }
 
@@ -622,11 +673,13 @@ function writeState() {
         });
         return writeAt(mergedBody, serverRev).catch((e2) => {
           if (isPermissionDenied(e2) && attempt < 5) return commit(attempt + 1);
-          if (isPermissionDenied(e2)) return pullServerInto(serverState, serverRev);
+          if (isPermissionDenied(e2)) return pullServerInto(serverState, serverRev).then(() => queueWriteResult(false, "merged-write-rejected", { error: queueErrorMessage(e2), rev: serverRev }));
           console.warn("[QueueCloud] merged write failed", e2);
+          return queueWriteResult(false, "merged-write-failed", { error: queueErrorMessage(e2), rev: serverRev + 1 });
         });
       }).catch((e2) => {
         console.warn("[QueueCloud] conflict resolution read failed", e2);
+        return queueWriteResult(false, "conflict-resolution-read-failed", { error: queueErrorMessage(e2) });
       });
     });
   };
@@ -689,9 +742,10 @@ function writeState() {
         _applyState(sq, ss, sl, null, { force: true });
         if (typeof _onLogChange === "function") _onLogChange();
       }
-      return Promise.resolve();
+      return queueWriteResult(false, "pre-sync-overwrite-blocked", { cloudCounts });
     }).catch((e) => {
       console.warn("[QueueCloud] pre-sync write guard failed; skipping risky write", e);
+      return queueWriteResult(false, "pre-sync-guard-read-failed", { error: queueErrorMessage(e) });
     });
   }
 
@@ -738,9 +792,13 @@ function writeState() {
         _applyState(sq, ss, sl, null, { force: true });
         if (typeof _onLogChange === "function") _onLogChange();
       }
-      return Promise.resolve();
+      return queueWriteResult(false, "stale-cache-resurrection-blocked", {
+        localQueueLen: Array.isArray(state.queue) ? state.queue.length : 0,
+        serverQueueLen: sq.length,
+      });
     }).catch((e) => {
       console.warn("[QueueCloud] resurrection guard read failed; skipping risky write", e);
+      return queueWriteResult(false, "resurrection-guard-read-failed", { error: queueErrorMessage(e) });
     });
   }
 
@@ -780,7 +838,7 @@ function writeState() {
             _applyState(sq, ss, sl, null, { force: true });
             if (typeof _onLogChange === "function") _onLogChange();
           }
-          return Promise.resolve();
+          return queueWriteResult(false, "stale-overwrite-blocked", { localLogLen, cloudLogLen });
         }
         return commit();
       }).catch((e) => {
@@ -817,9 +875,10 @@ function writeState() {
       _applyState(sq, ss, sl, null, { force: true });
       if (typeof _onLogChange === "function") _onLogChange();
     }
-    return Promise.resolve();
+    return queueWriteResult(false, "empty-overwrite-blocked", { localCounts, cloudCounts });
   }).catch((e) => {
     console.warn("[QueueCloud] empty write guard failed; skipping risky write", e);
+    return queueWriteResult(false, "empty-guard-read-failed", { error: queueErrorMessage(e) });
   });
 }
 
@@ -880,7 +939,13 @@ export function initQueueCloud(opts) {
  * Write current queue state to Firestore. Call from save() in index.html.
  */
 export function queueCloudWrite() {
-  return writeState();
+  _writeChain = _writeChain
+    .catch(() => {})
+    .then(() => writeState())
+    .then((result) => result && typeof result === "object" && "ok" in result
+      ? result
+      : queueWriteResult(true, "ok"));
+  return _writeChain;
 }
 
 /**

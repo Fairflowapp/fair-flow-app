@@ -1081,6 +1081,12 @@ service cloud.firestore {
         && isManager(salonId);
     }
 
+    // Staging Twilio Voice POC call logs. Client reads status only; writes are Admin SDK only.
+    match /salons/{salonId}/staffCallLogs/{callLogId} {
+      allow read: if belongsToSalon(salonId) && isManager(salonId);
+      allow create, update, delete: if false;
+    }
+
     // Native push notification device tokens for Queue staff calls.
     // Staff can register/update/delete only their own device token docs.
     // Managers can read tokens for diagnostics; actual push sending is Admin SDK only.
@@ -1151,6 +1157,51 @@ service cloud.firestore {
           allow create, update, delete: if isAdminOrOwner(salonId);
         }
       }
+    }
+
+    // Floor Settings — Admin/Owner can manage; all salon members can read for New Floor Request
+    match /salons/{salonId}/floorCategories/{categoryId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isAdminOrOwner(salonId);
+    }
+
+    match /salons/{salonId}/floorRegularRequests/{requestId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isAdminOrOwner(salonId);
+    }
+
+    match /salons/{salonId}/floorFlows/{flowId} {
+      allow read: if belongsToSalon(salonId);
+      allow create, update, delete: if isAdminOrOwner(salonId);
+      match /steps/{stepId} {
+        allow read: if belongsToSalon(salonId);
+        allow create, update, delete: if isAdminOrOwner(salonId);
+        match /options/{optionId} {
+          allow read: if belongsToSalon(salonId);
+          allow create, update, delete: if isAdminOrOwner(salonId);
+        }
+      }
+    }
+
+    match /salons/{salonId}/floorOrders/{orderId} {
+      allow read: if belongsToSalon(salonId);
+      allow create: if belongsToSalon(salonId);
+      allow update: if isManager(salonId)
+        || (
+          belongsToSalon(salonId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'handledByUid',
+            'handledByName',
+            'handledAt',
+            'closedByUid',
+            'closedByName',
+            'closedAt',
+            'deleteAt'
+          ])
+          && request.resource.data.status in ['open', 'in_progress', 'closed']
+        );
+      allow delete: if isManager(salonId);
     }
 
     // Conversations (PRIVATE) — only participants can read

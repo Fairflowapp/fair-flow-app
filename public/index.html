@@ -425,8 +425,9 @@ body.ff-logged-out #complete-setup-section {
 
 .header-inner{display:flex;align-items:center;width:100%;max-width:none;box-sizing:border-box;padding:3px 25px 3px 0}
 .header-toolbar-rest{display:flex;align-items:center;flex:1;min-width:0}
-.toolbar.toolbar-nav-main{display:flex;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:22px;min-width:0;flex:1;padding-left:6px}
-.toolbar.toolbar-nav-right{display:flex;align-items:center;flex-wrap:wrap;gap:10px;flex-shrink:0;margin-left:auto;padding-left:14px;border-left:1px solid rgba(255,255,255,0.35)}
+.toolbar.toolbar-nav-main{display:flex;align-items:center;justify-content:flex-start;flex-wrap:nowrap;gap:22px;min-width:0;flex:1;padding-left:6px;overflow:hidden}
+.toolbar.toolbar-nav-main .nav-item{flex:0 0 auto}
+.toolbar.toolbar-nav-right{display:flex;align-items:center;flex-wrap:nowrap;gap:10px;flex-shrink:0;margin-left:auto;padding-left:14px;border-left:1px solid rgba(255,255,255,0.35)}
 #headerCustomerSupportBtn{flex-shrink:0}
 
 .brandbox{display:flex;align-items:center;gap:8px;margin-left:25px}
@@ -2119,10 +2120,10 @@ ul{list-style:none;padding:0;margin:0}
 
 .ff-queue-call-near-name{flex:0 0 auto}
 .ff-queue-call-btn-green {
-  border-color: #16a34a !important;
-  background: #16a34a !important;
-  color: #fff !important;
-  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.28) !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  color: #16a34a !important;
+  box-shadow: none !important;
 }
 
 /* Buttons in rows */
@@ -4294,7 +4295,7 @@ dialog footer button, .code-dialog footer button {
   display: inline-flex !important;
 }
 
-@media (max-width: 1500px) {
+@media (max-width: 1660px) {
   .hide-1 { display: none !important; }
 }
 
@@ -4379,6 +4380,7 @@ dialog footer button, .code-dialog footer button {
   /* Full-screen modules outside #main-app-content use bottom:0; leave space for fixed bottom nav */
   #ticketsScreen,
   #tasksScreen,
+  #floorScreen,
   #inventoryScreen,
   #pointsAppScreen,
   #mediaScreen,
@@ -5013,6 +5015,7 @@ dialog footer button, .code-dialog footer button {
   }
 
   .header .toolbar.toolbar-nav-main #inboxBtn,
+  .header .toolbar.toolbar-nav-main #chatBtn,
   .toolbar.toolbar-nav-main #inventoryNavBtn,
   .toolbar.toolbar-nav-main #scheduleBtn,
   .toolbar.toolbar-nav-main #trainingBtn,
@@ -5021,9 +5024,9 @@ dialog footer button, .code-dialog footer button {
   }
 
   .header .toolbar.toolbar-nav-main #queueBtn,
-  .header .toolbar.toolbar-nav-main #ticketsBtn,
   .header .toolbar.toolbar-nav-main #tasksBtn,
-  .header .toolbar.toolbar-nav-main #chatBtn,
+  .header .toolbar.toolbar-nav-main #ticketsBtn,
+  .header .toolbar.toolbar-nav-main #floorBtn,
   .header .toolbar.toolbar-nav-main #mediaBtn:not(.ff-nav-tab-hidden) {
     display: flex !important;
     min-height: 54px !important;
@@ -5043,10 +5046,16 @@ dialog footer button, .code-dialog footer button {
     white-space: nowrap;
   }
 
+  .header .toolbar.toolbar-nav-main #queueBtn { order: 1; }
+  .header .toolbar.toolbar-nav-main #tasksBtn { order: 2; }
+  .header .toolbar.toolbar-nav-main #ticketsBtn { order: 3; }
+  .header .toolbar.toolbar-nav-main #floorBtn { order: 4; }
+  .header .toolbar.toolbar-nav-main #mediaBtn { order: 5; }
+
   .header .toolbar.toolbar-nav-main #queueBtn.active,
-  .header .toolbar.toolbar-nav-main #ticketsBtn.active,
   .header .toolbar.toolbar-nav-main #tasksBtn.active,
-  .header .toolbar.toolbar-nav-main #chatBtn.active,
+  .header .toolbar.toolbar-nav-main #ticketsBtn.active,
+  .header .toolbar.toolbar-nav-main #floorBtn.active,
   .header .toolbar.toolbar-nav-main #mediaBtn:not(.ff-nav-tab-hidden).active {
     color: #7c3aed !important;
     background: #f5f3ff !important;
@@ -5054,17 +5063,17 @@ dialog footer button, .code-dialog footer button {
   }
 
   .header .toolbar.toolbar-nav-main #queueBtn.active .nav-icon,
-  .header .toolbar.toolbar-nav-main #ticketsBtn.active .nav-icon,
   .header .toolbar.toolbar-nav-main #tasksBtn.active .nav-icon,
-  .header .toolbar.toolbar-nav-main #chatBtn.active .nav-icon,
+  .header .toolbar.toolbar-nav-main #ticketsBtn.active .nav-icon,
+  .header .toolbar.toolbar-nav-main #floorBtn.active .nav-icon,
   .header .toolbar.toolbar-nav-main #mediaBtn:not(.ff-nav-tab-hidden).active .nav-icon {
     opacity: 1 !important;
   }
 
   .header .toolbar.toolbar-nav-main #queueBtn.active .nav-icon svg,
-  .header .toolbar.toolbar-nav-main #ticketsBtn.active .nav-icon svg,
   .header .toolbar.toolbar-nav-main #tasksBtn.active .nav-icon svg,
-  .header .toolbar.toolbar-nav-main #chatBtn.active .nav-icon svg,
+  .header .toolbar.toolbar-nav-main #ticketsBtn.active .nav-icon svg,
+  .header .toolbar.toolbar-nav-main #floorBtn.active .nav-icon svg,
   .header .toolbar.toolbar-nav-main #mediaBtn:not(.ff-nav-tab-hidden).active .nav-icon svg {
     stroke: #7c3aed !important;
     opacity: 1 !important;
@@ -6988,6 +6997,8 @@ dialog footer button, .code-dialog footer button {
 
         <button id="tasksBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="ff-home-tasks-badge ff-nav-icon-badge"></span></span>Tasks</button>
 
+        <button id="floorBtn" class="btn-pill nav-item core-nav" onclick="window.goToFloor && window.goToFloor()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18"></path><path d="M9 4v16"></path><path d="M15 10v10"></path></svg></span>Floor</button>
+
         <button id="chatBtn" class="btn-pill nav-item core-nav" onclick="window.goToChat && window.goToChat()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span id="chatNavBadge" class="ff-home-tasks-badge ff-nav-icon-badge"></span></span>Chat</button>
 
         <button id="inboxBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg><span class="ff-inbox-badge ff-home-tasks-badge ff-nav-icon-badge"></span></span>Inbox</button>
@@ -7074,6 +7085,7 @@ dialog footer button, .code-dialog footer button {
       { button: 'queueBtn', screen: 'owner-view', title: 'Queue' },
       { button: 'ticketsBtn', screen: 'ticketsScreen', title: 'Tickets' },
       { button: 'tasksBtn', screen: 'tasksScreen', title: 'Tasks' },
+      { button: 'floorBtn', screen: 'floorScreen', title: 'Floor' },
       { button: 'chatBtn', screen: 'chatScreen', title: 'Chat' },
       { button: 'mediaBtn', screen: 'mediaScreen', title: 'Media' },
       { button: 'settingsBtn', screen: 'userProfileScreen', title: 'Settings' },
@@ -7192,7 +7204,7 @@ dialog footer button, .code-dialog footer button {
       if(h) new ResizeObserver(setHeaderH).observe(h);
     }
     if(typeof MutationObserver!=='undefined'){
-      var targets = ['queueBtn','ticketsBtn','tasksBtn','chatBtn','mediaBtn','inventoryNavBtn','inboxBtn','trainingBtn','scheduleBtn','timeClockBtn','settingsBtn','dashboardBtn','appsPanel','staffMembersModal','owner-view','ticketsScreen','servicesScreen','productsScreen','tasksScreen','chatScreen','mediaScreen','inventoryScreen','inboxScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen','queueAnalyticsScreen','ticketsAnalyticsScreen','timeAnalyticsScreen','tasksAnalyticsScreen','historyScreen'];
+      var targets = ['queueBtn','ticketsBtn','tasksBtn','floorBtn','chatBtn','mediaBtn','inventoryNavBtn','inboxBtn','trainingBtn','scheduleBtn','timeClockBtn','settingsBtn','dashboardBtn','appsPanel','staffMembersModal','owner-view','ticketsScreen','servicesScreen','productsScreen','tasksScreen','floorScreen','chatScreen','mediaScreen','inventoryScreen','inboxScreen','trainingScreen','scheduleScreen','timeClockScreen','pointsAppScreen','userProfileScreen','myProfileScreen','dashboardScreen','queueAnalyticsScreen','ticketsAnalyticsScreen','timeAnalyticsScreen','tasksAnalyticsScreen','historyScreen'];
       var observer = new MutationObserver(function () {
         setMobileHeaderTitle();
         setHeaderH();
@@ -7366,6 +7378,16 @@ dialog footer button, .code-dialog footer button {
                 </div>
                 <div>
                   <div>Tickets</div>
+                </div>
+              </div>
+            </div>
+            <div class="apps-panel-item" data-app="floor" style="cursor:pointer;">
+              <div class="apps-panel-item__content">
+                <div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18"></path><path d="M9 4v16"></path><path d="M15 10v10"></path></svg>
+                </div>
+                <div>
+                  <div>Floor</div>
                 </div>
               </div>
             </div>
@@ -12280,6 +12302,25 @@ function ffCurrentUserHasTasksResetPermission() {
 }
 window.ffCurrentUserHasTasksResetPermission = ffCurrentUserHasTasksResetPermission;
 
+/** Floor: send/receive/manage gates for UI-only visibility in the Floor module. */
+function ffStaffHasFloorPermission(staff, key) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p[key]));
+}
+function ffCurrentUserCanSendFloorOrders() {
+  return ffStaffHasFloorPermission(ffResolveCurrentStaffRowFromFfStaffV1(), 'floor_send');
+}
+function ffCurrentUserCanReceiveFloorOrders() {
+  return ffStaffHasFloorPermission(ffResolveCurrentStaffRowFromFfStaffV1(), 'floor_receive');
+}
+function ffCurrentUserCanManageFloorSettings() {
+  return ffStaffHasFloorPermission(ffResolveCurrentStaffRowFromFfStaffV1(), 'floor_manage');
+}
+window.ffCurrentUserCanSendFloorOrders = ffCurrentUserCanSendFloorOrders;
+window.ffCurrentUserCanReceiveFloorOrders = ffCurrentUserCanReceiveFloorOrders;
+window.ffCurrentUserCanManageFloorSettings = ffCurrentUserCanManageFloorSettings;
+
 function ffRefreshTasksPermissionControls() {
   try {
     const settingsBtn = document.getElementById('btnTasksSettings');
@@ -12668,6 +12709,7 @@ function ffUpdateAppsPanelPermissionVisibility() {
   setAppsTileVisible('.apps-panel-item[data-app="queue"]', (typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="tasks"]', (typeof ffCurrentUserHasTasksViewPermission === 'function' && ffCurrentUserHasTasksViewPermission()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="tickets"]', (typeof ffCurrentUserHasTicketsViewPermission === 'function' && ffCurrentUserHasTicketsViewPermission()) || trustLoadingApps);
+  setAppsTileVisible('.apps-panel-item[data-app="floor"]', true);
   setAppsTileVisible('.apps-panel-item[data-app="services"]', (typeof ffCurrentUserHasServicesViewPermission === 'function' && ffCurrentUserHasServicesViewPermission()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="products"]', (typeof ffCurrentUserHasProductsViewPermission === 'function' && ffCurrentUserHasProductsViewPermission()) || trustLoadingApps);
   setAppsTileVisible('.apps-panel-item[data-app="inbox"]', (typeof ffCurrentUserHasInboxViewPermission === 'function' && ffCurrentUserHasInboxViewPermission()) || trustLoadingApps);
@@ -12737,6 +12779,7 @@ function ffIsFullscreenModuleCoveringQueue() {
     'scheduleScreen',
     'timeClockScreen',
     'inventoryScreen',
+    'floorScreen',
     'pointsAppScreen',
     'userProfileScreen',
     'myProfileScreen',
@@ -14595,18 +14638,17 @@ function renderQueue(){
 
       const callBtn = document.createElement("button");
       callBtn.type = "button";
-      callBtn.textContent = "📞";
+      callBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.89.7 2.78a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.3-1.27a2 2 0 0 1 2.11-.45c.89.34 1.82.57 2.78.7A2 2 0 0 1 22 16.92z"></path></svg>';
       callBtn.className = "ff-queue-call-btn-green";
       callBtn.title = ffStaffCallButtonTitle(presenceMeta.status, 'queue');
       callBtn.style.cssText = [
-        "border:1px solid #16a34a",
-        "background:#16a34a",
-        "color:#fff",
-        "border-radius:999px",
-        "width:34px",
-        "height:34px",
+        "border:0",
+        "background:transparent",
+        "color:#16a34a",
+        "width:24px",
+        "height:24px",
         "cursor:pointer",
-        "font-size:17px",
+        "font-size:19px",
         "line-height:1",
         "opacity:1",
         "display:flex",
@@ -14691,51 +14733,6 @@ function renderQueue(){
       ].join(";");
       selfLeaveBtn.onclick = () => selfRemoveFromQueue(qi);
       ctrls.prepend(selfLeaveBtn);
-    }
-
-    // Always-visible red - for Owner/Admin/Manager so they can remove a row
-    // from the Available list without entering Reorder mode. Placed BEFORE
-    // HOLD/START so the order reads: -? - - - HOLD - START. Skipped when
-    // Reorder is active (the Reorder block below already appends a -) OR
-    // when this row is the current user's own row - in that case the
-    // selfLeaveBtn above already rendered a PIN-based -, so we avoid
-    // showing two buttons.
-    const isMyOwnRow = canTechnicianSelfCheckoutQueueRow(q);
-    if (
-      !queueLocked &&
-      !reorderMode &&
-      !isMyOwnRow &&
-      canViewQueueRowActionControls(q) &&
-      (function () {
-        const r = getCurrentQueueActorRole();
-        return r === 'owner' || r === 'admin' || r === 'manager';
-      })() &&
-      typeof ffCurrentUserHasQueueReorderPermission === 'function' &&
-      ffCurrentUserHasQueueReorderPermission()
-    ) {
-      const quickRemove = document.createElement("button");
-      quickRemove.type = "button";
-      quickRemove.textContent = "✖";
-      quickRemove.title = "Remove from queue";
-      quickRemove.style.cssText = [
-        "border:1px solid #fecaca",
-        "background:#fff",
-        "color:#dc2626",
-        "border-radius:999px",
-        "width:34px",
-        "height:34px",
-        "cursor:pointer",
-        "font-size:15px",
-        "line-height:1",
-        "flex-shrink:0",
-        "display:flex",
-        "align-items:center",
-        "justify-content:center",
-        "padding:0",
-        "box-sizing:border-box"
-      ].join(";");
-      quickRemove.onclick = () => guardHold(() => removeFromQueue(qi));
-      ctrls.append(quickRemove);
     }
 
     if (!reorderMode && canViewQueueRowActionControls(q)) {
@@ -14971,18 +14968,17 @@ function renderService(){
 
       const callBtn = document.createElement("button");
       callBtn.type = "button";
-      callBtn.textContent = "📞";
+      callBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.89.7 2.78a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.3-1.27a2 2 0 0 1 2.11-.45c.89.34 1.82.57 2.78.7A2 2 0 0 1 22 16.92z"></path></svg>';
       callBtn.className = "ff-queue-call-btn-green";
       callBtn.title = ffStaffCallButtonTitle(presenceMeta.status, 'service');
       callBtn.style.cssText = [
-        "border:1px solid #16a34a",
-        "background:#16a34a",
-        "color:#fff",
-        "border-radius:999px",
-        "width:34px",
-        "height:34px",
+        "border:0",
+        "background:transparent",
+        "color:#16a34a",
+        "width:24px",
+        "height:24px",
         "cursor:pointer",
-        "font-size:17px",
+        "font-size:19px",
         "line-height:1",
         "opacity:1",
         "display:flex",
@@ -16640,6 +16636,11 @@ function goToQueue() {
     inventoryScreenQueue.style.display = 'none';
   }
 
+  const floorScreenQueue = document.getElementById('floorScreen');
+  if (floorScreenQueue) {
+    floorScreenQueue.style.display = 'none';
+  }
+
   const pointsAppScreenQueue = document.getElementById('pointsAppScreen');
   if (pointsAppScreenQueue) {
     pointsAppScreenQueue.style.display = 'none';
@@ -16796,6 +16797,682 @@ function goToQueue() {
     }
   } catch (e) {}
 }
+
+function goToFloor() {
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try { window.ffCloseGlobalBlockingOverlays(); } catch (e) {}
+  }
+  if (typeof window.closeStaffMembersModal === 'function') window.closeStaffMembersModal();
+
+  try {
+    document.body.classList.remove('ff-queue-route-active', 'ff-queue-ui-visible', 'ff-staff-members-open', 'ff-dashboard-open', 'ff-dashboard-analytics-open');
+    document.body.classList.add('ff-ui-ready');
+  } catch (e) {}
+
+  const screenIdsToHide = [
+    'owner-view',
+    'tasksScreen',
+    'chatScreen',
+    'inboxScreen',
+    'mediaScreen',
+    'ticketsScreen',
+    'servicesScreen',
+    'productsScreen',
+    'trainingScreen',
+    'scheduleScreen',
+    'timeClockScreen',
+    'inventoryScreen',
+    'pointsAppScreen',
+    'userProfileScreen',
+    'myProfileScreen',
+    'manageQueueScreen',
+    'historyScreen',
+    'dashboardScreen',
+    'queueAnalyticsScreen',
+    'ticketsAnalyticsScreen',
+    'timeAnalyticsScreen',
+    'tasksAnalyticsScreen'
+  ];
+  screenIdsToHide.forEach(function (id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = 'none';
+    if (el.style.pointerEvents) el.style.pointerEvents = 'none';
+  });
+
+  ['joinBar', 'joinError', 'queueControls'].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  const wrap = document.querySelector('.wrap');
+  if (wrap) wrap.style.display = 'none';
+
+  const floorScreen = document.getElementById('floorScreen');
+  if (floorScreen) {
+    floorScreen.style.display = 'flex';
+    floorScreen.style.pointerEvents = 'auto';
+  }
+
+  try {
+    const appsBackdrop = document.getElementById('appsOverlayBackdrop');
+    const appsPanel = document.getElementById('appsPanel');
+    if (appsBackdrop) appsBackdrop.style.display = 'none';
+    if (appsPanel) appsPanel.style.display = 'none';
+  } catch (e) {}
+
+  document.querySelectorAll('.btn-pill').forEach(function (b) { b.classList.remove('active'); });
+  const floorNavBtn = document.getElementById('floorBtn');
+  if (floorNavBtn) floorNavBtn.classList.add('active');
+  document.querySelectorAll('.apps-panel-item').forEach(function (item) {
+    item.classList.toggle('is-active', item.getAttribute('data-app') === 'floor');
+  });
+  if (typeof window.ffApplyFloorPermissionUi === 'function') window.ffApplyFloorPermissionUi();
+  if (typeof window.ffSetFloorTab === 'function') window.ffSetFloorTab('open', { silent: true });
+  if (typeof window.ffUpdateMobileHeaderTitle === 'function') window.ffUpdateMobileHeaderTitle();
+}
+window.goToFloor = goToFloor;
+
+function ffHideFloorScreenForNavigation() {
+  const floorOrderModal = document.getElementById('floorOrderModal');
+  if (floorOrderModal) floorOrderModal.style.display = 'none';
+  const floorScreen = document.getElementById('floorScreen');
+  if (floorScreen) {
+    floorScreen.style.display = 'none';
+    floorScreen.style.pointerEvents = 'none';
+  }
+  const floorNavBtn = document.getElementById('floorBtn');
+  if (floorNavBtn) floorNavBtn.classList.remove('active');
+  document.querySelectorAll('.apps-panel-item[data-app="floor"]').forEach(function (item) {
+    item.classList.remove('is-active');
+  });
+}
+window.ffHideFloorScreenForNavigation = ffHideFloorScreenForNavigation;
+
+function ffBindFloorNavigationExitGuards() {
+  [
+    'queueBtn',
+    'ticketsBtn',
+    'tasksBtn',
+    'chatBtn',
+    'inboxBtn',
+    'mediaBtn',
+    'inventoryNavBtn',
+    'scheduleBtn',
+    'trainingBtn'
+  ].forEach(function (id) {
+    const btn = document.getElementById(id);
+    if (!btn || btn.__ffFloorNavigationExitGuardBound) return;
+    btn.__ffFloorNavigationExitGuardBound = true;
+    btn.addEventListener('click', function () {
+      if (id !== 'floorBtn') ffHideFloorScreenForNavigation();
+    }, true);
+  });
+}
+ffBindFloorNavigationExitGuards();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', ffBindFloorNavigationExitGuards, { once: true });
+}
+
+function ffSetFloorTab(tab, options) {
+  const canReceive = typeof window.ffCurrentUserCanReceiveFloorOrders === 'function'
+    ? window.ffCurrentUserCanReceiveFloorOrders()
+    : true;
+  const activeTab = tab === 'closed' && canReceive ? 'closed' : 'open';
+  document.querySelectorAll('[data-floor-tab]').forEach(function (btn) {
+    const isActive = btn.getAttribute('data-floor-tab') === activeTab;
+    btn.classList.toggle('active', isActive);
+  });
+  const emptyTitle = document.getElementById('floorEmptyTitle');
+  const emptyDesc = document.getElementById('floorEmptyDesc');
+  const demoGrid = document.getElementById('floorDemoGrid');
+  const emptyState = document.getElementById('floorEmptyState');
+  if (demoGrid) demoGrid.style.display = 'grid';
+  if (emptyState) emptyState.style.display = activeTab === 'closed' ? 'flex' : 'none';
+  if (emptyTitle) emptyTitle.textContent = activeTab === 'closed' ? 'No closed floor orders yet' : 'No open floor orders yet';
+  if (emptyDesc) emptyDesc.textContent = activeTab === 'closed'
+    ? 'Closed floor orders will appear here later.'
+    : 'New floor orders will appear here in a later phase.';
+  if (!(options && options.silent)) {
+    try { window.__ffFloorActiveTab = activeTab; } catch (e) {}
+  }
+  if (typeof window.ffRenderFloorOrders === 'function') window.ffRenderFloorOrders();
+}
+window.ffSetFloorTab = ffSetFloorTab;
+
+function ffApplyFloorPermissionUi() {
+  const canSend = typeof window.ffCurrentUserCanSendFloorOrders === 'function'
+    ? window.ffCurrentUserCanSendFloorOrders()
+    : true;
+  const canReceive = typeof window.ffCurrentUserCanReceiveFloorOrders === 'function'
+    ? window.ffCurrentUserCanReceiveFloorOrders()
+    : true;
+  const canManage = typeof window.ffCurrentUserCanManageFloorSettings === 'function'
+    ? window.ffCurrentUserCanManageFloorSettings()
+    : true;
+  const newBtn = document.getElementById('floorNewBtn');
+  if (newBtn) newBtn.style.display = canSend ? 'flex' : 'none';
+  const settingsBtn = document.getElementById('floorSettingsGearBtn');
+  if (settingsBtn) settingsBtn.style.display = canManage ? 'flex' : 'none';
+  const closedTab = document.querySelector('[data-floor-tab="closed"]');
+  if (closedTab) closedTab.style.display = canReceive ? '' : 'none';
+  const openTab = document.querySelector('[data-floor-tab="open"]');
+  if (openTab && !canReceive && canSend) openTab.classList.add('active');
+  const ordersList = document.getElementById('floorOrdersList');
+  if (ordersList) ordersList.style.display = (canReceive || canSend) ? '' : 'none';
+  if (!canReceive && window.__ffFloorActiveTab === 'closed') {
+    try { window.__ffFloorActiveTab = 'open'; } catch (e) {}
+  }
+}
+window.ffApplyFloorPermissionUi = ffApplyFloorPermissionUi;
+document.addEventListener('ff-staff-cloud-updated', function () {
+  if (typeof window.ffApplyFloorPermissionUi === 'function') window.ffApplyFloorPermissionUi();
+  if (typeof window.ffRenderFloorOrders === 'function') window.ffRenderFloorOrders();
+});
+
+function ffOpenFloorOrderModal() {
+  if (typeof window.ffCurrentUserCanSendFloorOrders === 'function' && !window.ffCurrentUserCanSendFloorOrders()) return;
+  const modal = document.getElementById('floorOrderModal');
+  if (!modal) return;
+  window.__ffFloorSelectedOrderRequest = null;
+  const clientInput = document.getElementById('floorOrderClientNameInput');
+  if (clientInput) clientInput.value = '';
+  if (typeof window.ffRenderFloorOrderPicker === 'function') window.ffRenderFloorOrderPicker();
+  modal.style.display = 'flex';
+  if (clientInput) {
+    try { clientInput.focus(); } catch (e) {}
+  } else {
+    const firstToggle = modal.querySelector('[data-floor-order-category-toggle]');
+    if (firstToggle) {
+      try { firstToggle.focus(); } catch (e) {}
+    }
+  }
+}
+window.ffOpenFloorOrderModal = ffOpenFloorOrderModal;
+
+function ffCloseFloorOrderModal() {
+  const modal = document.getElementById('floorOrderModal');
+  if (modal) modal.style.display = 'none';
+  const clientInput = document.getElementById('floorOrderClientNameInput');
+  if (clientInput) clientInput.value = '';
+}
+window.ffCloseFloorOrderModal = ffCloseFloorOrderModal;
+
+function ffOpenFloorSettingsModal() {
+  if (typeof window.ffCurrentUserCanManageFloorSettings === 'function' && !window.ffCurrentUserCanManageFloorSettings()) return;
+  const modal = document.getElementById('floorSettingsModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  if (typeof window.ffFloorRefreshCategoryOptions === 'function') window.ffFloorRefreshCategoryOptions();
+  if (typeof window.ffFloorSettingsTab === 'function') window.ffFloorSettingsTab('regular');
+}
+window.ffOpenFloorSettingsModal = ffOpenFloorSettingsModal;
+
+function ffCloseFloorSettingsModal() {
+  const modal = document.getElementById('floorSettingsModal');
+  if (modal) modal.style.display = 'none';
+}
+window.ffCloseFloorSettingsModal = ffCloseFloorSettingsModal;
+
+function ffFloorSettingsTab(tab) {
+  const activeTab = tab === 'flow' ? 'flow' : (tab === 'categories' ? 'categories' : 'regular');
+  document.querySelectorAll('.floor-settings-tab').forEach(function (btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-floor-settings-tab') === activeTab);
+  });
+  const regularPane = document.getElementById('floorSettingsRegularPane');
+  const flowPane = document.getElementById('floorSettingsFlowPane');
+  const categoriesPane = document.getElementById('floorSettingsCategoriesPane');
+  if (regularPane) regularPane.style.display = activeTab === 'regular' ? 'flex' : 'none';
+  if (flowPane) flowPane.style.display = activeTab === 'flow' ? 'flex' : 'none';
+  if (categoriesPane) categoriesPane.style.display = activeTab === 'categories' ? 'flex' : 'none';
+  if (typeof window.ffFloorRefreshCategoryOptions === 'function') window.ffFloorRefreshCategoryOptions();
+  if (activeTab === 'flow') {
+    if (typeof window.ffFloorFlowEnsureBuilder === 'function') {
+      window.ffFloorFlowEnsureBuilder();
+    } else {
+      import('/floor-flows.js?v=20260616_floor_flow_save_state_fix').then(function () {
+        if (typeof window.ffFloorFlowEnsureBuilder === 'function') window.ffFloorFlowEnsureBuilder();
+      }).catch(function (err) {
+        console.warn('[Floor] Could not load Floor Flow builder UI', err);
+      });
+    }
+  }
+}
+window.ffFloorSettingsTab = ffFloorSettingsTab;
+
+function ffFloorEscapeHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, function (ch) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+  });
+}
+
+function ffFloorGetCategories() {
+  if (!Array.isArray(window.__ffFloorCategories)) {
+    window.__ffFloorCategories = [];
+  }
+  return window.__ffFloorCategories;
+}
+window.ffFloorGetCategories = ffFloorGetCategories;
+
+function ffFloorIconButton(kind, onClick, label) {
+  const isDelete = kind === 'delete';
+  const color = isDelete ? '#dc2626' : '#7c3aed';
+  const svg = isDelete
+    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="' + color + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>'
+    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="' + color + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
+  return '<button type="button" onclick="' + onClick + '" title="' + label + '" aria-label="' + label + '" style="border:0;background:transparent;color:' + color + ';display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;cursor:pointer;padding:0;">' + svg + '</button>';
+}
+
+function ffFloorGetRegularRequests() {
+  if (!Array.isArray(window.__ffFloorRegularRequests)) {
+    window.__ffFloorRegularRequests = [];
+  }
+  return window.__ffFloorRegularRequests;
+}
+window.ffFloorGetRegularRequests = ffFloorGetRegularRequests;
+
+function ffFloorRefreshRegularRequests() {
+  const list = document.getElementById('floorRegularRequestsList');
+  if (!list) return;
+  const requests = ffFloorGetRegularRequests();
+  if (!requests.length) {
+    list.innerHTML = '<div style="padding:14px;color:#9ca3af;font-size:13px;">No regular requests yet.</div>';
+    return;
+  }
+  list.innerHTML = requests.map(function (item, idx) {
+    return '<div style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(130px,1fr) 72px;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#111827;">'
+      + '<div style="font-weight:600;">' + ffFloorEscapeHtml(item.name) + '</div>'
+      + '<div style="color:#6b7280;">' + ffFloorEscapeHtml(item.category) + '</div>'
+      + '<div style="display:flex;gap:6px;justify-content:flex-end;">'
+      + ffFloorIconButton('edit', 'window.ffEditFloorRegularRequestUiOnly && window.ffEditFloorRegularRequestUiOnly(' + idx + ')', 'Edit request')
+      + ffFloorIconButton('delete', 'window.ffDeleteFloorRegularRequestUiOnly && window.ffDeleteFloorRegularRequestUiOnly(' + idx + ')', 'Delete request')
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+window.ffFloorRefreshRegularRequests = ffFloorRefreshRegularRequests;
+
+function ffAddFloorRegularRequestUiOnly() {
+  const nameInput = document.getElementById('floorRegularRequestNameInput');
+  const categoryInput = document.getElementById('floorRegularCategoryInput');
+  const name = (nameInput && nameInput.value ? nameInput.value : '').trim();
+  const category = (categoryInput && categoryInput.value ? categoryInput.value : '').trim();
+  if (!name) return;
+  ffFloorGetRegularRequests().push({ name: name, category: category || '' });
+  if (nameInput) nameInput.value = '';
+  if (categoryInput) categoryInput.value = '';
+  ffFloorRefreshRegularRequests();
+}
+window.ffAddFloorRegularRequestUiOnly = ffAddFloorRegularRequestUiOnly;
+
+function ffEditFloorRegularRequestUiOnly(idx) {
+  const requests = ffFloorGetRegularRequests();
+  const current = requests[idx];
+  if (!current) return;
+  const name = prompt('Edit request name', current.name);
+  if (name === null || !name.trim()) return;
+  const category = prompt('Edit category', current.category || '');
+  if (category === null) return;
+  requests[idx] = { name: name.trim(), category: category.trim() || '' };
+  ffFloorRefreshRegularRequests();
+}
+window.ffEditFloorRegularRequestUiOnly = ffEditFloorRegularRequestUiOnly;
+
+function ffDeleteFloorRegularRequestUiOnly(idx) {
+  const requests = ffFloorGetRegularRequests();
+  if (!requests[idx]) return;
+  requests.splice(idx, 1);
+  ffFloorRefreshRegularRequests();
+}
+window.ffDeleteFloorRegularRequestUiOnly = ffDeleteFloorRegularRequestUiOnly;
+
+function ffFloorOrderGroups() {
+  const categories = ffFloorGetCategories();
+  const regularRequests = ffFloorGetRegularRequests().map(function (item) {
+    return { id: item.id, name: item.name, category: item.category, kind: 'regular' };
+  });
+  const flowRequests = (Array.isArray(window.__ffFloorFlowDocs) ? window.__ffFloorFlowDocs : []).map(function (item) {
+    return { id: item.id, name: item.title || 'Untitled flow', category: item.category || '', kind: 'flow', steps: Array.isArray(item.steps) ? item.steps : [] };
+  });
+  const requests = regularRequests.concat(flowRequests);
+  const categoryNames = categories.slice();
+  requests.forEach(function (item) {
+    const category = String(item.category || '').trim();
+    if (category && !categoryNames.some(function (existing) { return existing === category; })) {
+      categoryNames.push(category);
+    }
+  });
+  return categoryNames.map(function (category) {
+    return {
+      category: category,
+      requests: requests.filter(function (item) {
+        return String(item.category || '') === String(category || '');
+      })
+    };
+  });
+}
+
+function ffFloorOrderFlowRunnerHtml(item) {
+  const state = window.__ffFloorOrderFlowState || {};
+  if (!item || item.kind !== 'flow') return '';
+  if (state.loading && state.flowId === item.id) {
+    return '<div style="margin-top:8px;padding:12px;border:1px dashed #ddd6fe;border-radius:10px;color:#7c3aed;font-size:12px;background:#faf5ff;">Loading flow questions...</div>';
+  }
+  if (state.error && state.flowId === item.id) {
+    return '<div style="margin-top:8px;padding:12px;border:1px solid #fecaca;border-radius:10px;color:#b91c1c;font-size:12px;background:#fef2f2;">Could not load this flow. Try again.</div>';
+  }
+  const draft = state.flowId === item.id && state.draft
+    ? state.draft
+    : (Array.isArray(item.steps) && item.steps.length ? { steps: item.steps } : null);
+  if (!draft || !Array.isArray(draft.steps) || !draft.steps.length) {
+    return '<div style="margin-top:8px;padding:12px;border:1px dashed #d1d5db;border-radius:10px;color:#9ca3af;font-size:12px;background:#fff;">This flow has no questions configured yet. Edit it in Floor Settings - Flow Requests.</div>';
+  }
+  const answers = Array.isArray(state.answers) ? state.answers : [];
+  const answersSummary = answers.length
+    ? '<div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;">'
+      + answers.map(function (answer) {
+        return '<div style="display:flex;align-items:flex-start;gap:6px;font-size:11px;color:#6b7280;background:#fff;border:1px solid #ede9fe;border-radius:8px;padding:6px 8px;">'
+          + '<span style="color:#7c3aed;font-weight:800;">✓</span>'
+          + '<span><strong style="color:#374151;">' + ffFloorEscapeHtml(answer.question || 'Question') + ':</strong> ' + ffFloorEscapeHtml(answer.answer || '') + '</span>'
+          + '</div>';
+      }).join('')
+      + '</div>'
+    : '';
+  if (state.completed) {
+    return '<div style="margin-top:8px;padding:12px;border:1px solid #bbf7d0;border-radius:10px;background:#ecfdf5;">'
+      + answersSummary
+      + '<div style="color:#047857;font-size:12px;font-weight:700;">Flow complete. You can send this floor order.</div>'
+      + '</div>';
+  }
+  const currentStep = draft.steps.find(function (step) {
+    return String(step.id) === String(state.currentStepId);
+  }) || draft.steps[0];
+  const options = Array.isArray(currentStep.options) ? currentStep.options : [];
+  const answersHtml = options.length
+    ? options.map(function (option, idx) {
+      const isChosen = String(state.lastSelectedStepId || '') === String(currentStep.id) && state.lastSelectedOptionIdx === idx;
+      return '<button type="button" onclick="event.stopPropagation(); window.ffFloorOrderSelectFlowAnswer && window.ffFloorOrderSelectFlowAnswer(' + idx + ')" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid ' + (isChosen ? '#7c3aed' : '#e5e7eb') + ';background:' + (isChosen ? '#f5f3ff' : '#fff') + ';color:#111827;border-radius:9px;padding:9px 10px;font-size:12px;font-weight:600;cursor:pointer;text-align:left;">'
+        + '<span>'
+        + ffFloorEscapeHtml(option.label || 'Answer')
+        + '</span>'
+        + (isChosen ? '<span style="font-size:10px;color:#7c3aed;font-weight:800;">Selected</span>' : '')
+        + '</button>';
+    }).join('')
+    : '<div style="color:#9ca3af;font-size:12px;">No answers in this question.</div>';
+  return '<div style="margin-top:8px;padding:12px;border:1px solid #ddd6fe;border-radius:12px;background:#faf5ff;">'
+    + answersSummary
+    + '<div style="font-size:11px;font-weight:800;color:#7c3aed;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Flow Question</div>'
+    + '<div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:10px;">' + ffFloorEscapeHtml(currentStep.prompt || 'Question') + '</div>'
+    + '<div style="display:flex;flex-direction:column;gap:7px;">' + answersHtml + '</div>'
+    + '</div>';
+}
+window.ffFloorOrderFlowRunnerHtml = ffFloorOrderFlowRunnerHtml;
+
+function ffRenderFloorOrderPicker() {
+  const list = document.getElementById('floorOrderCategoryList');
+  const sendBtn = document.getElementById('floorSendOrderBtn');
+  if (!list) return;
+  const groups = ffFloorOrderGroups();
+  const selected = window.__ffFloorSelectedOrderRequest || null;
+  const hasContent = groups.some(function (group) { return group.requests.length > 0; });
+  if (!groups.length || !hasContent) {
+    list.innerHTML = '<div style="padding:18px;border:1px dashed #d1d5db;border-radius:14px;color:#9ca3af;font-size:13px;text-align:center;">No floor requests yet. Add Categories and Regular Requests in Floor Settings first.</div>';
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.style.opacity = '0.5';
+      sendBtn.style.cursor = 'not-allowed';
+    }
+    return;
+  }
+  if (typeof window.__ffFloorOpenOrderCategoryIdx !== 'number' && groups[0]) {
+    window.__ffFloorOpenOrderCategoryIdx = 0;
+  }
+  list.innerHTML = groups.map(function (group, groupIdx) {
+    const isOpen = window.__ffFloorOpenOrderCategoryIdx === groupIdx;
+    const safeCategory = ffFloorEscapeHtml(group.category);
+    const requestsHtml = group.requests.length
+      ? group.requests.map(function (item, idx) {
+        const requestKey = group.category + '::' + item.kind + '::' + item.name + '::' + idx;
+        const isSelected = selected && selected.key === requestKey;
+        return '<div>'
+          + '<button type="button" aria-pressed="' + (isSelected ? 'true' : 'false') + '" onclick="window.ffSelectFloorOrderRequestByIdx && window.ffSelectFloorOrderRequestByIdx(' + groupIdx + ',' + idx + ')" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid ' + (isSelected ? '#7c3aed' : '#e5e7eb') + ';background:' + (isSelected ? '#f5f3ff' : '#fff') + ';color:#111827;border-radius:10px;padding:10px 12px;font-size:13px;font-weight:600;cursor:pointer;text-align:left;">'
+          + '<span style="display:flex;align-items:center;gap:8px;"><span>' + ffFloorEscapeHtml(item.name) + '</span><span style="font-size:10px;color:' + (item.kind === 'flow' ? '#7c3aed' : '#6b7280') + ';background:' + (item.kind === 'flow' ? '#f5f3ff' : '#f9fafb') + ';border:1px solid ' + (item.kind === 'flow' ? '#ddd6fe' : '#e5e7eb') + ';border-radius:999px;padding:2px 6px;font-weight:700;">' + (item.kind === 'flow' ? 'Flow' : 'Regular') + '</span></span>'
+          + (isSelected ? '<span style="font-size:11px;color:#7c3aed;font-weight:700;">Selected</span>' : '')
+          + '</button>'
+          + (isSelected && item.kind === 'flow' ? ffFloorOrderFlowRunnerHtml(item) : '')
+          + '</div>';
+      }).join('')
+      : '<div style="padding:10px 12px;color:#9ca3af;font-size:12px;">No requests in this category yet.</div>';
+    return '<div style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;overflow:hidden;">'
+      + '<button type="button" data-floor-order-category-toggle="' + groupIdx + '" aria-expanded="' + (isOpen ? 'true' : 'false') + '" onclick="window.ffToggleFloorOrderCategory && window.ffToggleFloorOrderCategory(' + groupIdx + ')" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;border:0;background:#f9fafb;color:#111827;padding:12px 14px;font-size:13px;font-weight:700;cursor:pointer;text-align:left;">'
+      + '<span>' + safeCategory + '</span>'
+      + '<span aria-hidden="true" style="color:#7c3aed;font-size:14px;">' + (isOpen ? '^' : 'v') + '</span>'
+      + '</button>'
+      + '<div style="display:' + (isOpen ? 'flex' : 'none') + ';flex-direction:column;gap:8px;padding:10px;background:#fff;">' + requestsHtml + '</div>'
+      + '</div>';
+  }).join('');
+  if (sendBtn) {
+    const flowState = window.__ffFloorOrderFlowState || {};
+    const flowReady = selected && selected.kind === 'flow'
+      ? flowState.flowId === selected.id && flowState.completed === true
+      : true;
+    const canSend = !!selected && flowReady;
+    sendBtn.disabled = !canSend;
+    sendBtn.style.opacity = canSend ? '1' : '0.5';
+    sendBtn.style.cursor = canSend ? 'pointer' : 'not-allowed';
+  }
+}
+window.ffRenderFloorOrderPicker = ffRenderFloorOrderPicker;
+
+function ffToggleFloorOrderCategory(idx) {
+  window.__ffFloorOpenOrderCategoryIdx = window.__ffFloorOpenOrderCategoryIdx === idx ? -1 : idx;
+  ffRenderFloorOrderPicker();
+}
+window.ffToggleFloorOrderCategory = ffToggleFloorOrderCategory;
+
+async function ffSelectFloorOrderRequestByIdx(groupIdx, requestIdx) {
+  const groups = ffFloorOrderGroups();
+  const group = groups[groupIdx];
+  const item = group && group.requests && group.requests[requestIdx];
+  if (!group || !item) return;
+  window.__ffFloorSelectedOrderRequest = {
+    key: group.category + '::' + item.kind + '::' + item.name + '::' + requestIdx,
+    id: item.id || '',
+    name: item.name,
+    category: group.category,
+    kind: item.kind
+  };
+  ffRenderFloorOrderPicker();
+  if (item.kind === 'flow') {
+    if (Array.isArray(item.steps) && item.steps.length) {
+      window.__ffFloorOrderFlowState = {
+        flowId: item.id,
+        loading: false,
+        completed: false,
+        draft: { steps: item.steps },
+        currentStepId: item.steps[0].id,
+        answers: []
+      };
+      ffRenderFloorOrderPicker();
+      return;
+    }
+    window.__ffFloorOrderFlowState = { flowId: item.id, loading: true, completed: false, draft: null, currentStepId: null };
+    ffRenderFloorOrderPicker();
+    try {
+      const draft = typeof window.ffFloorLoadFlowTreeForOrder === 'function'
+        ? await window.ffFloorLoadFlowTreeForOrder(item.id)
+        : null;
+      const firstStep = draft && Array.isArray(draft.steps) ? draft.steps[0] : null;
+      window.__ffFloorOrderFlowState = {
+        flowId: item.id,
+        loading: false,
+        completed: false,
+        draft: draft,
+        currentStepId: firstStep ? firstStep.id : null,
+        answers: []
+      };
+    } catch (err) {
+      console.warn('[Floor] load order flow failed', err);
+      window.__ffFloorOrderFlowState = { flowId: item.id, loading: false, error: true, completed: false };
+    }
+    ffRenderFloorOrderPicker();
+  } else {
+    window.__ffFloorOrderFlowState = null;
+  }
+}
+window.ffSelectFloorOrderRequestByIdx = ffSelectFloorOrderRequestByIdx;
+
+function ffFloorOrderSelectFlowAnswer(optionIdx) {
+  const state = window.__ffFloorOrderFlowState || {};
+  const draft = state.draft;
+  if (!draft || !Array.isArray(draft.steps)) return;
+  const currentStep = draft.steps.find(function (step) {
+    return String(step.id) === String(state.currentStepId);
+  }) || draft.steps[0];
+  const option = currentStep && currentStep.options && currentStep.options[optionIdx];
+  if (!option) return;
+  const nextStepId = option.nextStepId || option.nextQuestionId || option.nextId || option.nextStep || null;
+  state.answers = Array.isArray(state.answers) ? state.answers : [];
+  const existingCurrentIdx = state.answers.findIndex(function (answer) {
+    return answer.questionId === currentStep.id;
+  });
+  if (existingCurrentIdx >= 0) {
+    state.answers = state.answers.slice(0, existingCurrentIdx);
+  }
+  state.answers.push({
+    questionId: currentStep.id,
+    question: currentStep.prompt || '',
+    optionId: option.id || '',
+    answer: option.label || '',
+    nextStepId: nextStepId || null
+  });
+  state.lastSelectedStepId = currentStep.id;
+  state.lastSelectedOptionIdx = optionIdx;
+  window.__ffFloorOrderDraft = {
+    selectedRequest: window.__ffFloorSelectedOrderRequest || null,
+    answers: state.answers.slice(),
+    completed: !nextStepId
+  };
+  if (nextStepId) {
+    state.currentStepId = nextStepId;
+    state.lastSelectedStepId = null;
+    state.lastSelectedOptionIdx = null;
+    state.completed = false;
+  } else {
+    state.completed = true;
+  }
+  window.__ffFloorOrderFlowState = state;
+  ffRenderFloorOrderPicker();
+}
+window.ffFloorOrderSelectFlowAnswer = ffFloorOrderSelectFlowAnswer;
+
+function ffFloorRefreshCategoryOptions() {
+  const categories = ffFloorGetCategories();
+  const selectOptions = '<option value="">Choose from Categories</option>' + categories.map(function (name) {
+    return '<option value="' + ffFloorEscapeHtml(name) + '">' + ffFloorEscapeHtml(name) + '</option>';
+  }).join('');
+  const datalist = document.getElementById('floorCategorySuggestions');
+  if (datalist) {
+    datalist.innerHTML = categories.map(function (name) {
+      return '<option value="' + ffFloorEscapeHtml(name) + '"></option>';
+    }).join('');
+  }
+  ['floorRegularCategoryInput', 'floorFlowCategory'].forEach(function (id) {
+    const select = document.getElementById(id);
+    if (!select || String(select.tagName || '').toLowerCase() !== 'select') return;
+    const current = select.value;
+    select.innerHTML = selectOptions;
+    if (current && categories.some(function (name) { return name === current; })) {
+      select.value = current;
+    }
+  });
+  const list = document.getElementById('floorCategoriesList');
+  if (list) {
+    if (!categories.length) {
+      list.innerHTML = '<div style="padding:14px;color:#9ca3af;font-size:13px;">No categories yet.</div>';
+    } else {
+    list.innerHTML = categories.map(function (name, idx) {
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#111827;">'
+        + '<span style="font-weight:600;">' + ffFloorEscapeHtml(name) + '</span>'
+        + '<span style="display:flex;gap:6px;align-items:center;">'
+        + ffFloorIconButton('edit', 'window.ffEditFloorCategoryUiOnly && window.ffEditFloorCategoryUiOnly(' + idx + ')', 'Edit category')
+        + ffFloorIconButton('delete', 'window.ffDeleteFloorCategoryUiOnly && window.ffDeleteFloorCategoryUiOnly(' + idx + ')', 'Delete category')
+        + '</span>'
+        + '</div>';
+    }).join('');
+    }
+  }
+  ffFloorRefreshRegularRequests();
+}
+window.ffFloorRefreshCategoryOptions = ffFloorRefreshCategoryOptions;
+
+function ffEditFloorCategoryUiOnly(idx) {
+  const categories = ffFloorGetCategories();
+  const current = categories[idx];
+  if (!current) return;
+  const next = prompt('Edit category name', current);
+  if (next === null) return;
+  const name = next.trim();
+  if (!name) return;
+  categories[idx] = name;
+  ffFloorRefreshCategoryOptions();
+}
+window.ffEditFloorCategoryUiOnly = ffEditFloorCategoryUiOnly;
+
+function ffDeleteFloorCategoryUiOnly(idx) {
+  const categories = ffFloorGetCategories();
+  if (!categories[idx]) return;
+  categories.splice(idx, 1);
+  ffFloorRefreshCategoryOptions();
+}
+window.ffDeleteFloorCategoryUiOnly = ffDeleteFloorCategoryUiOnly;
+
+function ffAddFloorCategoryUiOnly() {
+  const input = document.getElementById('floorNewCategoryName');
+  const name = (input && input.value ? input.value : '').trim();
+  if (!name) return;
+  const categories = ffFloorGetCategories();
+  const exists = categories.some(function (category) {
+    return category.toLowerCase() === name.toLowerCase();
+  });
+  if (!exists) categories.push(name);
+  if (input) input.value = '';
+  ffFloorRefreshCategoryOptions();
+  if (typeof window.ffToast === 'object' && window.ffToast && typeof window.ffToast.show === 'function') {
+    window.ffToast.show('Category added locally for this UI preview only.', { variant: 'info', durationMs: 2200 });
+  }
+}
+window.ffAddFloorCategoryUiOnly = ffAddFloorCategoryUiOnly;
+
+function ffCreateFloorOrderPlaceholder() {
+  const selected = window.__ffFloorSelectedOrderRequest || null;
+  if (!selected) {
+    if (typeof window.ffToast === 'object' && window.ffToast && typeof window.ffToast.show === 'function') {
+      window.ffToast.show('Choose a floor request first.', { variant: 'info', durationMs: 2000 });
+    }
+    return;
+  }
+  if (selected.kind === 'flow') {
+    const flowState = window.__ffFloorOrderFlowState || {};
+    if (flowState.flowId !== selected.id || flowState.completed !== true) {
+      if (typeof window.ffToast === 'object' && window.ffToast && typeof window.ffToast.show === 'function') {
+        window.ffToast.show('Complete the flow questions first.', { variant: 'info', durationMs: 2200 });
+      }
+      return;
+    }
+  }
+  if (typeof window.ffSendFloorOrder === 'function') {
+    const clientNameInput = document.getElementById('floorOrderClientNameInput');
+    const clientName = clientNameInput ? String(clientNameInput.value || '').trim() : '';
+    Promise.resolve(window.ffSendFloorOrder(selected, window.__ffFloorOrderFlowState || {}, { clientName: clientName })).then(function (sent) {
+      if (sent) ffCloseFloorOrderModal();
+    });
+    return;
+  }
+  if (typeof window.ffToast === 'object' && window.ffToast && typeof window.ffToast.show === 'function') {
+    window.ffToast.show('Floor order sender is still loading. Try again in a moment.', { variant: 'info', durationMs: 2200 });
+  }
+}
+window.ffCreateFloorOrderPlaceholder = ffCreateFloorOrderPlaceholder;
 
 /**
  * Time Clock - full-screen route (peer to Schedule / Tasks). Not part of Settings.
@@ -35777,6 +36454,9 @@ function initializeAppsPanel() {
         if (appType !== 'products') {
           closeProductsScreenForAppsNavigation();
         }
+        if (appType !== 'floor' && typeof window.ffHideFloorScreenForNavigation === 'function') {
+          window.ffHideFloorScreenForNavigation();
+        }
 
         // When leaving Dashboard from the Apps Panel, close its injected
         // full-screen screens explicitly. The bottom nav has capture handlers
@@ -35889,6 +36569,11 @@ function initializeAppsPanel() {
           case 'inventory':
             if (typeof window.goToInventory === 'function') {
               window.goToInventory();
+            }
+            break;
+          case 'floor':
+            if (typeof window.goToFloor === 'function') {
+              window.goToFloor();
             }
             break;
           case 'schedule':
@@ -38925,6 +39610,26 @@ function initializeAppsPanel() {
         ]
       },
       {
+        title: 'Floor',
+        permissions: [
+          {
+            key: 'floor_send',
+            label: 'Can Send Floor Orders',
+            desc: 'Can open + New Floor Order and submit floor support requests.'
+          },
+          {
+            key: 'floor_receive',
+            label: 'Can Receive Floor Orders',
+            desc: 'Can view Floor Orders and handle/take orders.'
+          },
+          {
+            key: 'floor_manage',
+            label: 'Can Manage Floor Settings',
+            desc: 'Can manage Floor Categories, Regular Requests, and Flow Requests.'
+          }
+        ]
+      },
+      {
         title: 'Chat',
         permissions: [
           {
@@ -39196,10 +39901,15 @@ function initializeAppsPanel() {
         // "require location check". They're opposites, so !value.
         var displayValue = perm.inverted === true ? !value : value;
         if (perm.inverted === true) rowOpts.inverted = true;
-        // Owner keeps full access automatically. Join Queue is intentionally
-        // separate because it controls provider visibility.
+        // Owner keeps full access automatically in legacy modules. Queue Join
+        // and Floor permissions are intentionally editable per owner/staff row.
         var isQueueJoinProviderSetting = group.title === 'Queue' && perm.key === 'queue_join';
-        if (ownerRowLocked && !isQueueJoinProviderSetting) {
+        var isFloorPermissionSetting = group.title === 'Floor' && (
+          perm.key === 'floor_send' ||
+          perm.key === 'floor_receive' ||
+          perm.key === 'floor_manage'
+        );
+        if (ownerRowLocked && !isQueueJoinProviderSetting && !isFloorPermissionSetting) {
           displayValue = true;
           rowOpts.disabled = true;
         }
@@ -39213,7 +39923,7 @@ function initializeAppsPanel() {
     });
 
     var ownerBanner = ownerRowLocked
-      ? '<div style="margin-bottom:12px;padding:10px 12px;border-radius:10px;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;font-size:12px;line-height:1.45;">This person is the <strong>salon owner</strong>. Their access is full; only Queue participation can be changed here.</div>'
+      ? '<div style="margin-bottom:12px;padding:10px 12px;border-radius:10px;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;font-size:12px;line-height:1.45;">This person is the <strong>salon owner</strong>. Legacy module access is full; Queue participation and Floor permissions can be changed here.</div>'
       : '';
 
     // Render all cards
@@ -39234,7 +39944,10 @@ function initializeAppsPanel() {
         if (
           typeof window.ffStaffRowIsSalonOwner === 'function' &&
           window.ffStaffRowIsSalonOwner(staff) &&
-          permissionKey !== 'queue_join'
+          permissionKey !== 'queue_join' &&
+          permissionKey !== 'floor_send' &&
+          permissionKey !== 'floor_receive' &&
+          permissionKey !== 'floor_manage'
         ) {
           checkbox.checked = !uiChecked;
           return;
@@ -39334,6 +40047,8 @@ function initializeAppsPanel() {
           if (typeof window.ffRefreshTicketsTabVisibility === 'function') window.ffRefreshTicketsTabVisibility();
           if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
           if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
+          if (typeof window.ffApplyFloorPermissionUi === 'function') window.ffApplyFloorPermissionUi();
+          if (typeof window.ffRenderFloorOrders === 'function') window.ffRenderFloorOrders();
           if (typeof window.ffApplyHistoryActionButtonsVisibility === 'function') window.ffApplyHistoryActionButtonsVisibility();
           if (typeof renderSelect === 'function') renderSelect();
           if (typeof window.renderServicesCatalogV2 === 'function') window.renderServicesCatalogV2();
@@ -59356,6 +60071,8 @@ function hookSettingsGuard_DISABLED(){
       gap: 18px;
       max-width: 1140px;
       margin: 0 auto;
+      height: 100%;
+      min-height: 0;
     }
     
     #tasksScreen .tasks-col {
@@ -59364,6 +60081,9 @@ function hookSettingsGuard_DISABLED(){
       border-radius: 14px;
       padding: 14px;
       min-height: 240px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
     
     /* Match Queue column headers (.wrap .grid .col h2 - Available / In service) */
@@ -59377,8 +60097,12 @@ function hookSettingsGuard_DISABLED(){
     }
     
     #tasksScreen .tasks-list {
-      max-height: 58vh;
-      overflow: auto;
+      flex: 1 1 auto;
+      min-height: 0;
+      max-height: none;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
     }
     
     /* Mobile: stack columns vertically */
@@ -60434,6 +61158,8 @@ function hookSettingsGuard_DISABLED(){
         { src: "/inbox.js?v=20260530_reorder_delete", type: "module", delay: 2700 },
         { src: "/media-upload.js?v=20260602_storage_5gb_restore_final", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260615_chat_flow_load_resilient", type: "module", delay: 2900 },
+        { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module", delay: 3050 },
+        { src: "/floor-cloud.js?v=20260618_floor_order_picker_fast", type: "module", delay: 3120 },
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/push-notifications.js?v=20260524_ios_fcm_bridge_retry", type: "module", delay: 3500 },
@@ -62295,6 +63021,463 @@ function hookSettingsGuard_DISABLED(){
 </style>
 <!-- Inventory mock screen (sidebar + table; content from /inventory.js) -->
 <div id="inventoryScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f8fafc;z-index:300;flex-direction:column;overflow:hidden;"></div>
+
+<!-- Floor Module UI placeholder: no Firestore or saved data yet. -->
+<style>
+  #floorScreen .floor-tabs {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    background: #fff;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 2;
+    padding: 0;
+    gap: 0;
+    border-bottom: 1px solid #e5e7eb;
+    box-sizing: border-box;
+  }
+  #floorScreen .floor-tabs__top {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 12px;
+    padding: 2px 20px 0;
+    box-sizing: border-box;
+    width: 100%;
+  }
+  #floorScreen #floorTabsNav {
+    display: flex;
+    align-items: stretch;
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 14px;
+    align-self: stretch;
+    min-height: 36px;
+  }
+  #floorScreen #floorToolbarRight {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    flex-grow: 0;
+    margin-left: auto;
+    align-self: flex-end;
+  }
+  #floorScreen #floorSettingsGearBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: 1px solid #e5e7eb;
+    border-radius: 50%;
+    background: #fff;
+    cursor: pointer;
+    padding: 0;
+    box-sizing: border-box;
+    flex-shrink: 0;
+  }
+  #floorScreen #floorSettingsGearBtn:hover {
+    background: #f3f4f6;
+  }
+  #floorScreen #floorNewBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 36px;
+    height: 36px;
+    padding: 8px 14px;
+    background: #7c3aed;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    box-sizing: border-box;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  #floorScreen #floorNewBtn svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+  }
+  .floor-settings-tab.active {
+    color: #7c3aed !important;
+    border-bottom-color: #7c3aed !important;
+  }
+  #floorScreen .floor-tab {
+    padding: 8px 14px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: #374151;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    box-sizing: border-box;
+    position: relative;
+    z-index: 0;
+    white-space: nowrap;
+  }
+  #floorScreen .floor-tab.active {
+    color: #7c3aed;
+    border-bottom-color: #7c3aed;
+    font-weight: 500;
+    font-size: 13px;
+    z-index: 1;
+  }
+  #floorScreen #floorNewBtn .floor-new-btn__sm {
+    display: none;
+  }
+  #floorScreen #floorOrdersList {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 28px 28px;
+    box-sizing: border-box;
+    background: #f5f5f5;
+  }
+  #floorScreen .floor-empty-state {
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: #6b7280;
+    font-size: 13px;
+  }
+  #floorScreen .floor-demo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 300px);
+    gap: 16px;
+    align-items: flex-start;
+    justify-content: flex-start;
+    width: calc(100% - min(25vw, 280px));
+    margin-left: min(25vw, 280px);
+  }
+  #floorScreen .floor-demo-card {
+    width: 300px;
+    min-height: 118px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+    padding: 12px;
+    box-sizing: border-box;
+  }
+  #floorScreen .floor-demo-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  #floorScreen .floor-demo-person {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+  #floorScreen .floor-demo-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #fce7f3;
+    color: #be185d;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 36px;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    overflow: hidden;
+  }
+  #floorScreen .floor-demo-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  #floorScreen .floor-demo-employee {
+    font-size: 13px;
+    font-weight: 800;
+    color: #111827;
+    line-height: 1.2;
+  }
+  #floorScreen .floor-demo-client {
+    font-size: 11px;
+    color: #6b7280;
+    margin-top: 1px;
+    line-height: 1.2;
+  }
+  #floorScreen .floor-demo-time {
+    font-size: 10px;
+    color: #6b7280;
+    margin-top: 3px;
+    line-height: 1.2;
+  }
+  #floorScreen .floor-demo-badge {
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: #ecfdf5;
+    color: #059669;
+    border: 1px solid #a7f3d0;
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    white-space: nowrap;
+  }
+  #floorScreen .floor-demo-status {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  #floorScreen .floor-demo-status-by {
+    max-width: 92px;
+    color: #6b7280;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #floorScreen .floor-demo-badge--in-progress {
+    background: #fffbeb;
+    color: #b45309;
+    border-color: #fcd34d;
+  }
+  #floorScreen .floor-demo-badge--closed {
+    background: #f3f4f6;
+    color: #6b7280;
+    border-color: #d1d5db;
+  }
+  #floorScreen .floor-demo-line {
+    font-size: 12px;
+    color: #374151;
+    line-height: 1.35;
+    padding: 2px 0;
+  }
+  #floorScreen .floor-demo-line strong {
+    color: #111827;
+    font-weight: 800;
+  }
+  @media (max-width: 767px) {
+    #floorScreen .floor-tabs__top {
+      padding: 6px 10px 0;
+      gap: 8px;
+    }
+    #floorScreen #floorTabsNav {
+      gap: 10px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    #floorScreen #floorTabsNav::-webkit-scrollbar {
+      display: none;
+    }
+    #floorScreen .floor-tab {
+      flex: 0 0 auto;
+      flex-shrink: 0 !important;
+      flex-grow: 0;
+      white-space: nowrap;
+      font-size: 12px;
+      padding: 7px 8px 6px;
+      letter-spacing: -0.015em;
+      margin-bottom: -1px;
+      align-self: flex-end;
+    }
+    #floorScreen #floorNewBtn {
+      padding: 8px 14px !important;
+      font-size: 12px !important;
+      min-height: 34px !important;
+    }
+    #floorScreen #floorNewBtn .floor-new-btn__lg {
+      display: inline;
+    }
+    #floorScreen #floorNewBtn .floor-new-btn__sm {
+      display: none;
+    }
+    #floorScreen #floorOrdersList {
+      padding: 14px 12px 22px;
+    }
+    #floorScreen .floor-demo-grid {
+      grid-template-columns: minmax(0, 1fr);
+      width: 100%;
+      margin-left: 0;
+    }
+    #floorScreen .floor-demo-card {
+      width: 100%;
+    }
+  }
+</style>
+<div id="floorScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f8fafc;z-index:9860;flex-direction:column;overflow:hidden;pointer-events:auto;">
+  <div class="floor-tabs">
+    <div class="floor-tabs__top">
+      <div id="floorTabsNav">
+        <button type="button" class="floor-tab active" data-floor-tab="open" onclick="window.ffSetFloorTab && window.ffSetFloorTab('open')">Open</button>
+        <button type="button" class="floor-tab" data-floor-tab="closed" onclick="window.ffSetFloorTab && window.ffSetFloorTab('closed')">Closed</button>
+      </div>
+      <div id="floorToolbarRight">
+        <button id="floorSettingsGearBtn" type="button" onclick="window.ffOpenFloorSettingsModal && window.ffOpenFloorSettingsModal()" title="Manage Floor requests">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        </button>
+        <!-- Future: show New Floor Order based on a dedicated Floor permission. -->
+        <button type="button" id="floorNewBtn" onclick="window.ffOpenFloorOrderModal && window.ffOpenFloorOrderModal()">
+          <span class="floor-new-btn__lg">+ New Floor Order</span><span class="floor-new-btn__sm">+ NEW</span>
+        </button>
+      </div>
+    </div>
+  </div>
+  <div id="floorOrdersList">
+    <div id="floorDemoGrid" class="floor-demo-grid">
+    </div>
+    <div id="floorEmptyState" class="floor-empty-state" style="display:none;">
+      <div>
+        <div id="floorEmptyTitle" style="font-size:14px;font-weight:700;color:#111827;margin-bottom:5px;">No open floor orders yet</div>
+        <div id="floorEmptyDesc">New floor orders will appear here in a later phase.</div>
+      </div>
+    </div>
+    <div style="display:none;">
+      Future floor orders render here as small ticket-style cards, not table rows.
+    </div>
+  </div>
+  <div id="floorOrderModal" style="display:none;position:fixed;inset:0;z-index:9875;background:rgba(15,23,42,0.55);align-items:center;justify-content:center;padding:18px;">
+    <div role="dialog" aria-modal="true" aria-labelledby="floorOrderModalTitle" style="width:min(520px,100%);max-height:min(720px,92vh);background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(15,23,42,0.24);overflow:hidden;display:flex;flex-direction:column;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid #e5e7eb;">
+        <div>
+          <div id="floorOrderModalTitle" style="font-size:16px;font-weight:800;color:#111827;">New Floor Request</div>
+          <div style="font-size:12px;color:#6b7280;margin-top:4px;">Choose a category, then choose the request to send.</div>
+        </div>
+        <button type="button" onclick="window.ffCloseFloorOrderModal && window.ffCloseFloorOrderModal()" title="Close" aria-label="Close" style="border:none;background:none;color:#6b7280;font-size:24px;line-height:1;cursor:pointer;">x</button>
+      </div>
+      <div style="padding:14px 18px 0;">
+        <label for="floorOrderClientNameInput" style="display:block;font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">Client Name <span style="font-weight:500;color:#9ca3af;">(optional)</span></label>
+        <input id="floorOrderClientNameInput" type="text" autocomplete="off" placeholder="Client Name (optional)" style="width:100%;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;font-size:13px;color:#111827;outline:none;background:#fff;">
+      </div>
+      <div id="floorOrderCategoryList" style="padding:18px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;min-height:180px;"></div>
+      <div style="padding:14px 18px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:10px;background:#f9fafb;">
+        <button type="button" id="floorSendOrderBtn" onclick="window.ffCreateFloorOrderPlaceholder && window.ffCreateFloorOrderPlaceholder()" style="border:0;background:#7c3aed;color:#fff;border-radius:999px;padding:9px 14px;font-size:13px;font-weight:800;cursor:not-allowed;opacity:.5;">Send Floor Order</button>
+      </div>
+    </div>
+  </div>
+  <div id="floorSettingsModal" style="display:none;position:fixed;inset:0;z-index:9876;background:rgba(15,23,42,0.55);align-items:center;justify-content:center;padding:18px;">
+    <div role="dialog" aria-modal="true" aria-labelledby="floorSettingsModalTitle" style="width:min(760px,100%);max-height:min(720px,92vh);background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(15,23,42,0.24);overflow:hidden;display:flex;flex-direction:column;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid #e5e7eb;">
+        <div>
+          <div id="floorSettingsModalTitle" style="font-size:16px;font-weight:800;color:#111827;">Floor Settings</div>
+          <div style="font-size:12px;color:#6b7280;margin-top:4px;">Manage Floor requests, flows, and shared categories for this salon.</div>
+        </div>
+        <button type="button" onclick="window.ffCloseFloorSettingsModal && window.ffCloseFloorSettingsModal()" style="border:none;background:none;color:#6b7280;font-size:24px;line-height:1;cursor:pointer;">x</button>
+      </div>
+      <div style="display:flex;gap:0;border-bottom:1px solid #e5e7eb;padding:0 20px;background:#f9fafb;">
+        <button type="button" class="floor-settings-tab active" data-floor-settings-tab="regular" onclick="window.ffFloorSettingsTab && window.ffFloorSettingsTab('regular')" style="padding:12px 20px;font-size:13px;font-weight:600;color:#6b7280;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;margin-bottom:-1px;">Regular Requests</button>
+        <button type="button" class="floor-settings-tab" data-floor-settings-tab="flow" onclick="window.ffFloorSettingsTab && window.ffFloorSettingsTab('flow')" style="padding:12px 20px;font-size:13px;font-weight:600;color:#6b7280;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;margin-bottom:-1px;">Flow Requests</button>
+        <button type="button" class="floor-settings-tab" data-floor-settings-tab="categories" onclick="window.ffFloorSettingsTab && window.ffFloorSettingsTab('categories')" style="padding:12px 20px;font-size:13px;font-weight:600;color:#6b7280;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;margin-bottom:-1px;">Categories</button>
+      </div>
+      <div style="padding:22px;min-height:260px;overflow-y:auto;">
+        <datalist id="floorCategorySuggestions">
+        </datalist>
+        <div id="floorSettingsRegularPane" style="display:flex;flex-direction:column;gap:16px;min-height:220px;">
+          <div style="border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb;padding:14px;">
+            <div style="display:grid;grid-template-columns:minmax(160px,1.2fr) minmax(140px,1fr) auto;gap:10px;align-items:end;">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">
+                Request Name
+                <input id="floorRegularRequestNameInput" type="text" placeholder="Coffee" style="border:1px solid #d1d5db;border-radius:10px;padding:9px 11px;font-size:13px;color:#111827;outline:none;background:#fff;text-transform:none;letter-spacing:0;font-weight:500;">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">
+                Category
+                <select id="floorRegularCategoryInput" style="border:1px solid #d1d5db;border-radius:10px;padding:9px 11px;font-size:13px;color:#111827;outline:none;background:#fff;text-transform:none;letter-spacing:0;font-weight:500;">
+                  <option value="">Choose from Categories</option>
+                </select>
+              </label>
+              <button type="button" onclick="window.ffAddFloorRegularRequestUiOnly && window.ffAddFloorRegularRequestUiOnly()" style="border:0;background:#7c3aed;color:#fff;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;">Add</button>
+            </div>
+          </div>
+          <div style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;overflow:hidden;">
+            <div style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(130px,1fr) 72px;gap:10px;padding:10px 14px;background:#f9fafb;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">
+              <div>Request Name</div>
+              <div>Category</div>
+              <div></div>
+            </div>
+            <div id="floorRegularRequestsList" style="display:flex;flex-direction:column;"></div>
+          </div>
+        </div>
+        <div id="floorSettingsFlowPane" style="display:none;flex-direction:column;gap:12px;min-height:220px;text-align:left;color:#111827;">
+          <div class="chat-tmpl-form-compact">
+            <div class="chat-tmpl-form-label">New Flow Request</div>
+            <div class="chat-tmpl-field-row">
+              <input id="floorFlowTitle" type="text" placeholder="Flow title (e.g. Coffee Order)" maxlength="80" class="chat-tmpl-input">
+            </div>
+            <div class="chat-tmpl-field-row">
+              <select id="floorFlowCategory" class="chat-tmpl-input" style="appearance:auto;background:#fff;">
+                <option value="">Choose from Categories</option>
+              </select>
+            </div>
+            <div class="chat-tmpl-details" style="display:block;">
+              <div class="chat-tmpl-details-block">
+                <label class="chat-tmpl-details-label">Who Can Use</label>
+                <div class="chat-tmpl-senders-pills">
+                  <label class="chat-tmpl-sender-pill"><input type="checkbox" id="floorFlowSenderTech"><span>Service Provider</span></label>
+                  <label class="chat-tmpl-sender-pill"><input type="checkbox" id="floorFlowSenderMgr"><span>Manager</span></label>
+                  <label class="chat-tmpl-sender-pill"><input type="checkbox" id="floorFlowSenderAdmin"><span>Admin</span></label>
+                </div>
+                <div class="chat-tmpl-hint">Leave all unchecked - everyone can use.</div>
+              </div>
+            </div>
+            <div class="chat-flow-tree-header">
+              <span class="chat-tmpl-details-label">Decision Tree</span>
+              <span class="chat-tmpl-hint" style="margin:0;">Question - Answer - Add next question. No continuation = end.</span>
+            </div>
+            <div id="floorFlowStepsList" class="chat-flow-tree"></div>
+            <button type="button" id="floorFlowAddStepBtn" onclick="window._floorFlowAddStep && window._floorFlowAddStep()"
+              style="margin-top:6px;padding:6px 12px;border:1px dashed #a78bfa;border-radius:6px;background:#f5f3ff;cursor:pointer;font-size:12px;color:#7c3aed;">+ Add first question</button>
+            <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
+              <button type="button" id="floorFlowSaveBtn" onclick="window.ffFloorFlowUiOnlySave && window.ffFloorFlowUiOnlySave()" style="padding:7px 14px;border:0;border-radius:7px;background:#7c3aed;color:#fff;cursor:pointer;font-size:12px;font-weight:800;">Save Flow</button>
+              <button type="button" id="floorFlowCancelEditBtn" onclick="window.ffCancelFloorFlowEdit && window.ffCancelFloorFlowEdit()" style="display:none;padding:7px 14px;border:1px solid #d1d5db;border-radius:7px;background:#fff;color:#6b7280;cursor:pointer;font-size:12px;font-weight:700;">Cancel Edit</button>
+              <span style="font-size:11px;color:#9ca3af;font-weight:700;">Saved to Floor Flow Requests on Staging.</span>
+            </div>
+          </div>
+          <div style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;overflow:hidden;">
+            <div style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(130px,1fr);gap:10px;padding:10px 14px;background:#f9fafb;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">
+              <div>Flow Request</div>
+              <div>Category</div>
+            </div>
+            <div id="floorFlowsList" style="display:flex;flex-direction:column;"></div>
+          </div>
+        </div>
+        <div id="floorSettingsCategoriesPane" style="display:none;flex-direction:column;gap:16px;min-height:220px;text-align:left;color:#111827;">
+          <div style="border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb;padding:14px;">
+            <div style="display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:10px;align-items:end;">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">
+                Category Name
+                <input id="floorNewCategoryName" type="text" placeholder="Supplies" style="border:1px solid #d1d5db;border-radius:10px;padding:9px 11px;font-size:13px;color:#111827;outline:none;background:#fff;text-transform:none;letter-spacing:0;font-weight:500;">
+              </label>
+              <button type="button" onclick="window.ffAddFloorCategoryUiOnly && window.ffAddFloorCategoryUiOnly()" style="border:0;background:#7c3aed;color:#fff;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;">Add Category</button>
+            </div>
+          </div>
+          <div style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;overflow:hidden;">
+            <div id="floorCategoriesList" style="display:flex;flex-direction:column;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Fair Flow Points dashboard -->
 <div id="pointsAppScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f8fafc;z-index:300;flex-direction:column;overflow:hidden;">

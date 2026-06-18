@@ -21,6 +21,20 @@ import {
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 import "./format-utils.js";
+import {
+  addFlowOptionAt,
+  addFlowOptionByStepId,
+  addFlowStep,
+  addFlowStepAndLinkAt,
+  addFlowStepAndLinkByStepId,
+  collectFlowStepsFromDom,
+  ensureFlowDraft,
+  removeFlowOptionAt,
+  removeFlowOptionByStepId,
+  removeFlowStepAt,
+  removeFlowStepById,
+  unlinkFlowOption
+} from "./flow-builder.js";
 
 // Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
 // window level in capture phase to beat any other handler that might
@@ -2494,64 +2508,49 @@ window._chatSettingsTab = function(tab) {
 window._chatFlowAddStep = function() {
   if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  if (!chatFlowDraft) chatFlowDraft = { title: '', category: '', allowedSenders: [], steps: [] };
-  if (!chatFlowDraft.steps) chatFlowDraft.steps = [];
-  const id = 's' + Date.now();
-  chatFlowDraft.steps.push({ id, prompt: '', order: 0, options: [{ id: 'o' + Date.now(), label: '', finish: true }] });
+  chatFlowDraft = addFlowStep(chatFlowDraft, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowRemoveStep = function(idx) {
   if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  if (chatFlowDraft?.steps?.[idx] === undefined) return;
-  chatFlowDraft.steps.splice(idx, 1);
+  chatFlowDraft = removeFlowStepAt(chatFlowDraft, idx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowRemoveStepById = function(stepId) {
   if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  const idx = chatFlowDraft?.steps?.findIndex(s => s.id === stepId);
-  if (idx === undefined || idx < 0) return;
-  chatFlowDraft.steps.splice(idx, 1);
+  chatFlowDraft = removeFlowStepById(chatFlowDraft, stepId, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowAddOption = function(stepIdx) {
   if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  if (!chatFlowDraft?.steps?.[stepIdx]) return;
-  const step = chatFlowDraft.steps[stepIdx];
-  if (!step.options) step.options = [];
-  step.options.push({ id: 'o' + Date.now(), label: '', finish: true });
+  chatFlowDraft = addFlowOptionAt(chatFlowDraft, stepIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowAddOptionById = function(stepId) {
   if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
-  if (!step) return;
-  if (!step.options) step.options = [];
-  step.options.push({ id: 'o' + Date.now(), label: '', finish: true });
+  chatFlowDraft = addFlowOptionByStepId(chatFlowDraft, stepId, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowRemoveOption = function(stepIdx, optIdx) {
   if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  if (!chatFlowDraft?.steps?.[stepIdx]?.options) return;
-  chatFlowDraft.steps[stepIdx].options.splice(optIdx, 1);
+  chatFlowDraft = removeFlowOptionAt(chatFlowDraft, stepIdx, optIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowRemoveOptionByIdx = function(stepId, optIdx) {
   if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
-  if (!step?.options) return;
-  step.options.splice(optIdx, 1);
+  chatFlowDraft = removeFlowOptionByStepId(chatFlowDraft, stepId, optIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
@@ -2559,89 +2558,40 @@ window._chatFlowRemoveOptionByIdx = function(stepId, optIdx) {
 window._chatFlowAddStepAndLink = function(stepIdx, optIdx) {
   if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  if (!chatFlowDraft.steps) chatFlowDraft.steps = [];
-  const newId = 's' + Date.now();
-  const newStep = { id: newId, prompt: '', order: chatFlowDraft.steps.length, options: [{ id: 'o' + Date.now(), label: '', finish: true }] };
-  chatFlowDraft.steps.push(newStep);
-  const opt = chatFlowDraft.steps[stepIdx]?.options?.[optIdx];
-  if (opt) {
-    opt.nextStepId = newId;
-    opt.finish = false;
-  }
+  chatFlowDraft = addFlowStepAndLinkAt(chatFlowDraft, stepIdx, optIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowAddStepAndLinkById = function(stepId, optIdx) {
   _syncFlowDraftFromUI();
-  if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  if (!chatFlowDraft.steps) chatFlowDraft.steps = [];
-  const newId = 's' + Date.now();
-  const newStep = { id: newId, prompt: '', order: chatFlowDraft.steps.length, options: [{ id: 'o' + Date.now(), label: '', finish: true }] };
-  chatFlowDraft.steps.push(newStep);
-  const step = chatFlowDraft.steps.find(s => s.id === stepId);
-  const opt = step?.options?.[optIdx];
-  if (opt) {
-    opt.nextStepId = newId;
-    opt.finish = false;
-  }
+  chatFlowDraft = addFlowStepAndLinkByStepId(chatFlowDraft, stepId, optIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowUnlinkStep = function(stepId, optIdx) {
   if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
-  const opt = step?.options?.[optIdx];
-  if (!opt) return;
-  opt.nextStepId = null;
-  opt.finish = true;
+  chatFlowDraft = unlinkFlowOption(chatFlowDraft, stepId, optIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
-function _chatDirectChildrenByClass(node, className) {
-  return Array.from(node?.children || []).filter(child =>
-    child.classList && child.classList.contains(className)
-  );
-}
-
-function _chatDirectChildByClass(node, className) {
-  return _chatDirectChildrenByClass(node, className)[0] || null;
-}
-
 // Collect steps from the flat builder DOM, preserving the visible question order.
 function _collectStepsFromTreeDOM() {
-  const steps = [];
-  document.querySelectorAll?.('#chatFlowStepsList > .chat-flow-node').forEach(node => {
-    const stepId = node.getAttribute?.('data-step-id');
-    if (!stepId) return;
-    const promptEl = node.querySelector?.('.chat-flow-step-prompt');
-    const prompt = (promptEl?.value ?? '').trim();
-    const options = [];
-    const optsContainer = _chatDirectChildByClass(node, 'chat-flow-options');
-    const existingStep = chatFlowDraft?.steps?.find(s => s.id === stepId);
-    _chatDirectChildrenByClass(optsContainer, 'chat-flow-answer-block').forEach((block, oidx) => {
-      const labelEl = block.querySelector?.('.chat-flow-opt-label');
-      const nextEl = block.querySelector?.('.chat-flow-next-select');
-      const label = (labelEl?.value ?? '').trim();
-      const nextStepId = (nextEl?.value ?? '').trim();
-      const existingOpt = existingStep?.options?.[oidx];
-      options.push({
-        id: existingOpt?.id || 'o' + Date.now() + '_' + oidx,
-        label,
-        order: oidx,
-        nextStepId: nextStepId || null,
-        finish: !nextStepId
-      });
-    });
-    steps.push({ id: stepId, prompt, order: steps.length, options });
+  return collectFlowStepsFromDom({
+    nodeSelector: '#chatFlowStepsList > .chat-flow-node',
+    stepIdAttr: 'data-step-id',
+    promptSelector: '.chat-flow-step-prompt',
+    optionsContainerClass: 'chat-flow-options',
+    optionBlockClass: 'chat-flow-answer-block',
+    optionLabelSelector: '.chat-flow-opt-label',
+    optionNextSelector: '.chat-flow-next-select',
+    draft: chatFlowDraft
   });
-  return steps;
 }
 
 // Sync current form values from DOM into chatFlowDraft.
 function _syncFlowDraftFromUI() {
-  if (!chatFlowDraft) chatFlowDraft = { title: '', category: '', allowedSenders: [], steps: [] };
+  chatFlowDraft = ensureFlowDraft(chatFlowDraft, { title: '', category: '', allowedSenders: [] });
   chatFlowDraft.title = document.getElementById('chatFlowTitle')?.value ?? '';
   chatFlowDraft.category = _chatCategoryValue(document.getElementById('chatFlowCategory')?.value);
   chatFlowDraft.allowedSenders = ['technician','manager','admin'].filter((_, i) =>

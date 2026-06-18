@@ -14,6 +14,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
+import "./format-utils.js";
 
 // =====================
 // State
@@ -2358,10 +2359,24 @@ async function markTicketSeenByFrontDesk(ticketId) {
 // =====================
 // Helpers
 // =====================
+function ticketDateFromValue(value) {
+  if (!value) return null;
+  const d = value?.toDate ? value.toDate() : (value instanceof Date ? value : new Date(value));
+  return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+}
+
+function formatTicketDisplayDateTime(value) {
+  const d = ticketDateFromValue(value);
+  if (!d) return '';
+  const datePart = d.toLocaleDateString();
+  const timePart = typeof window !== 'undefined' && typeof window.ffFormatDisplayTime === 'function'
+    ? window.ffFormatDisplayTime(d, { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `${datePart} ${timePart}`;
+}
+
 function formatDate(ts) {
-  if (!ts) return '';
-  const d = ts?.toDate ? ts.toDate() : new Date(ts);
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return formatTicketDisplayDateTime(ts);
 }
 
 /** Submitted time for list + date filter (uses createdAt). */
@@ -4025,7 +4040,7 @@ function ffFormatReviewedAt(v) {
     else if (typeof v.toDate === 'function') d = v.toDate();
     else if (v.seconds) d = new Date(v.seconds * 1000);
     if (!d || isNaN(d.getTime())) return '';
-    return d.toLocaleString();
+    return formatTicketDisplayDateTime(d);
   } catch (_) { return ''; }
 }
 
@@ -4294,7 +4309,7 @@ function openTicketDetailsModal(t) {
   contentEl.innerHTML = `
     <div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:16px;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
-        <div><div style="color:#6b7280;margin-bottom:4px;">Submitted time</div><div style="font-weight:500;">${createdDate.toLocaleDateString()} ${createdDate.toLocaleTimeString()}</div></div>
+        <div><div style="color:#6b7280;margin-bottom:4px;">Submitted time</div><div style="font-weight:500;">${formatTicketDisplayDateTime(createdDate)}</div></div>
         <div><div style="color:#6b7280;margin-bottom:4px;">Submitted by</div><div style="font-weight:500;">${escapeHtml(t.technicianName || '—')}</div></div>
         <div><div style="color:#6b7280;margin-bottom:4px;">Status</div><div style="font-weight:500;">${escapeHtml(statusLabel)}</div></div>
         <div><div style="color:#6b7280;margin-bottom:4px;">Customer</div><div style="font-weight:500;">${escapeHtml(t.customerName || '—')}</div></div>
