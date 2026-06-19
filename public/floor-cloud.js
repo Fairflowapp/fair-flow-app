@@ -27,6 +27,13 @@ let floorFlows = [];
 let floorOrders = [];
 let floorEditingFlowId = null;
 
+// Live Desk reads current floor orders (who sent what) for its overview.
+if (typeof window !== 'undefined') {
+  window.ffGetFloorOrders = function () {
+    return Array.isArray(floorOrders) ? floorOrders.slice() : [];
+  };
+}
+
 function toast(message) {
   if (typeof window.ffToast === 'object' && window.ffToast && typeof window.ffToast.show === 'function') {
     window.ffToast.show(message, { variant: 'info', durationMs: 2200 });
@@ -263,7 +270,63 @@ function floorOrderBadgeClass(status) {
   return `floor-demo-badge floor-demo-badge--${normalized.replace('_', '-')}`;
 }
 
+function updateFloorNavBadge() {
+  const badge = document.getElementById('floorNavBadge');
+  if (!badge) return;
+  const canReceive = typeof window.ffCurrentUserCanReceiveFloorOrders === 'function'
+    ? window.ffCurrentUserCanReceiveFloorOrders()
+    : true;
+  if (!floorUser || !canReceive) {
+    badge.textContent = '';
+    badge.style.display = 'none';
+    return;
+  }
+  const openOrders = (floorOrders || []).filter((order) => normalizeFloorOrderStatus(order.status) === 'open');
+  badge.textContent = openOrders.length > 0 ? String(openOrders.length) : '';
+  badge.style.display = openOrders.length > 0 ? '' : 'none';
+}
+window.ffUpdateFloorNavBadge = updateFloorNavBadge;
+
+// Build a single floor-order card with the EXACT same look as the Floor module.
+// Shared by the Floor grid and the Live Desk so both look identical.
+function ffBuildFloorOrderCardHTML(order) {
+  const name = resolveFloorOrderCreatorName(order);
+  const status = normalizeFloorOrderStatus(order.status);
+  const details = floorOrderDetailsSummary(order)
+    ? '<div class="floor-demo-line"><strong>Details:</strong> ' + escapeHtml(floorOrderDetailsSummary(order)) + '</div>'
+    : '';
+  const client = cleanFloorText(order.clientName)
+    ? '<div class="floor-demo-client">\uD83D\uDC64 ' + escapeHtml(order.clientName) + '</div>'
+    : '';
+  const handledStatus = status === 'in_progress'
+    ? '<div class="floor-demo-status-by">' + (cleanFloorText(order.handledByName) ? 'by ' + escapeHtml(order.handledByName) : 'In progress') + '</div>'
+    : '';
+  return '<div class="floor-demo-card">'
+    + '<div class="floor-demo-card-header">'
+    + '<div class="floor-demo-person">'
+    + '<div class="floor-demo-avatar" aria-hidden="true">' + escapeHtml(initialsForName(name)) + '</div>'
+    + '<div>'
+    + '<div class="floor-demo-employee">' + escapeHtml(name) + '</div>'
+    + client
+    + '<div class="floor-demo-time">' + escapeHtml(formatOrderTime(order)) + '</div>'
+    + '</div>'
+    + '</div>'
+    + '<div class="floor-demo-status"><div class="' + floorOrderBadgeClass(status) + '">' + floorOrderStatusLabel(status) + '</div>' + handledStatus + '</div>'
+    + '</div>'
+    + '<div class="floor-demo-line"><strong>Request:</strong> ' + escapeHtml(order.requestName || 'Floor request') + '</div>'
+    + '<div class="floor-demo-line"><strong>Category:</strong> ' + escapeHtml(order.category || '') + '</div>'
+    + details
+    + '</div>';
+}
+window.ffRenderFloorOrderCardHTML = function (order) {
+  try { return order ? ffBuildFloorOrderCardHTML(order) : ''; } catch (_) { return ''; }
+};
+
 function renderFloorOrders() {
+  // Keep the Live Desk floor card in sync in real time (it reads from ffGetFloorOrders).
+  if (typeof window.ffLiveRefreshFloorCard === 'function') {
+    try { window.ffLiveRefreshFloorCard(); } catch (_eLive) {}
+  }
   const canReceive = typeof window.ffCurrentUserCanReceiveFloorOrders === 'function'
     ? window.ffCurrentUserCanReceiveFloorOrders()
     : true;
@@ -273,6 +336,7 @@ function renderFloorOrders() {
   if (!canReceive && !canSend) {
     const ordersList = document.getElementById('floorOrdersList');
     if (ordersList) ordersList.style.display = 'none';
+    updateFloorNavBadge();
     return;
   }
   const ordersList = document.getElementById('floorOrdersList');
@@ -281,7 +345,10 @@ function renderFloorOrders() {
   const emptyState = document.getElementById('floorEmptyState');
   const emptyTitle = document.getElementById('floorEmptyTitle');
   const emptyDesc = document.getElementById('floorEmptyDesc');
-  if (!grid) return;
+  if (!grid) {
+    updateFloorNavBadge();
+    return;
+  }
   const activeTab = window.__ffFloorActiveTab === 'closed' ? 'closed' : 'open';
   const visibleOrders = floorOrders.filter((order) => {
     const status = normalizeFloorOrderStatus(order.status);
@@ -297,39 +364,12 @@ function renderFloorOrders() {
     if (emptyDesc) emptyDesc.textContent = activeTab === 'closed' && canReceive
       ? 'Closed floor orders will appear here.'
       : (!canReceive && canSend ? 'Your sent floor orders will appear here until they are closed.' : 'New floor orders will appear here.');
+    updateFloorNavBadge();
     return;
   }
   grid.style.display = 'grid';
   if (emptyState) emptyState.style.display = 'none';
-  grid.innerHTML = visibleOrders.map((order) => {
-    const name = resolveFloorOrderCreatorName(order);
-    const status = normalizeFloorOrderStatus(order.status);
-    const details = floorOrderDetailsSummary(order)
-      ? '<div class="floor-demo-line"><strong>Details:</strong> ' + escapeHtml(floorOrderDetailsSummary(order)) + '</div>'
-      : '';
-    const client = cleanFloorText(order.clientName)
-      ? '<div class="floor-demo-client">👤 ' + escapeHtml(order.clientName) + '</div>'
-      : '';
-    const handledStatus = status === 'in_progress'
-      ? '<div class="floor-demo-status-by">' + (cleanFloorText(order.handledByName) ? 'by ' + escapeHtml(order.handledByName) : 'In progress') + '</div>'
-      : '';
-    return '<div class="floor-demo-card">'
-      + '<div class="floor-demo-card-header">'
-      + '<div class="floor-demo-person">'
-      + '<div class="floor-demo-avatar" aria-hidden="true">' + escapeHtml(initialsForName(name)) + '</div>'
-      + '<div>'
-      + '<div class="floor-demo-employee">' + escapeHtml(name) + '</div>'
-      + client
-      + '<div class="floor-demo-time">' + escapeHtml(formatOrderTime(order)) + '</div>'
-      + '</div>'
-      + '</div>'
-      + '<div class="floor-demo-status"><div class="' + floorOrderBadgeClass(status) + '">' + floorOrderStatusLabel(status) + '</div>' + handledStatus + '</div>'
-      + '</div>'
-      + '<div class="floor-demo-line"><strong>Request:</strong> ' + escapeHtml(order.requestName || 'Floor request') + '</div>'
-      + '<div class="floor-demo-line"><strong>Category:</strong> ' + escapeHtml(order.category || '') + '</div>'
-      + details
-      + '</div>';
-  }).join('');
+  grid.innerHTML = visibleOrders.map((order) => ffBuildFloorOrderCardHTML(order)).join('');
   grid.querySelectorAll('.floor-demo-card').forEach((card, idx) => {
     const order = visibleOrders[idx];
     card.tabIndex = 0;
@@ -343,6 +383,7 @@ function renderFloorOrders() {
       }
     });
   });
+  updateFloorNavBadge();
 }
 window.ffRenderFloorOrders = renderFloorOrders;
 
@@ -377,7 +418,7 @@ function ensureFloorOrderDetailsModal() {
     + '<div><h3 style="margin:0;color:#111827;font-size:15px;font-weight:800;">Request Information</h3></div>'
     + '<button type="button" id="floorOrderDetailsCloseBtn" aria-label="Close" style="border:none;background:none;color:#6b7280;font-size:24px;line-height:1;cursor:pointer;">x</button>'
     + '</div>'
-    + '<div id="floorOrderDetailsBody" style="padding:18px 20px 20px;overflow-y:auto;"></div>'
+    + '<div id="floorOrderDetailsBody" style="padding:18px 20px 20px;overflow-y:auto;flex:1 1 auto;min-height:0;"></div>'
     + '<div id="floorOrderDetailsFooter" style="padding:14px 20px;border-top:1px solid #e5e7eb;background:#f9fafb;display:flex;justify-content:flex-end;gap:10px;"></div>'
     + '</div>';
   document.body.appendChild(modal);
@@ -395,7 +436,7 @@ function ensureFloorOrderDeleteConfirmModal() {
   modal = document.createElement('div');
   modal.id = 'floorOrderDeleteConfirmModal';
   modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:9895;background:rgba(15,23,42,0.55);align-items:center;justify-content:center;padding:18px;';
-  modal.innerHTML = '<div style="width:min(380px,94vw);background:#fff;border-radius:16px;box-shadow:0 18px 60px rgba(15,23,42,0.28);overflow:hidden;">'
+  modal.innerHTML = '<div style="width:min(380px,94vw);max-height:92vh;background:#fff;border-radius:16px;box-shadow:0 18px 60px rgba(15,23,42,0.28);overflow-y:auto;">'
     + '<div style="padding:18px 20px 10px;">'
     + '<h3 style="margin:0;color:#111827;font-size:16px;font-weight:800;">Delete Order?</h3>'
     + '<p style="margin:8px 0 0;color:#6b7280;font-size:13px;line-height:1.45;">This action cannot be undone.</p>'

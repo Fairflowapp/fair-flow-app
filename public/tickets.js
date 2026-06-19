@@ -71,6 +71,16 @@ window.ffGetCurrentTickets = function() {
   return Array.isArray(currentTickets) ? currentTickets.slice() : [];
 };
 
+// Live Desk (and other surfaces) open a ticket's details by id.
+window.ffOpenTicketModal = function(ticketId, appointmentData = null) {
+  return openTicketModal(ticketId, appointmentData);
+};
+
+// Currency formatter exposed so the Live Desk shows the same money format as tickets.
+window.ffTicketMoney = function(n, decimals) {
+  return ffTicketMoney(n, decimals);
+};
+
 window.ffLoadTicketsForAnalytics = async function() {
   const salonId = getActiveTicketsSalonId();
   if (!currentUserProfile) {
@@ -1183,6 +1193,7 @@ function serviceMatchesProviderTypeIds(service, typeIds) {
 function controlledStaffCanProvideService(staff, service) {
   if (!staffUsesQueueJoinAsProviderTypes(staff)) return true;
   const permissions = staff?.permissions && typeof staff.permissions === 'object' ? staff.permissions : {};
+  if (ffServiceStaffPermissionTrue(permissions.tickets_create)) return true;
   const joinOn = typeof window !== 'undefined' && typeof window.ffStaffHasQueueJoinPermission === 'function'
     ? window.ffStaffHasQueueJoinPermission(staff)
     : ffServiceStaffPermissionTrue(permissions.queue_join);
@@ -3661,7 +3672,90 @@ async function ffTicketsDeleteSelected() {
   }
 }
 
+// Build a single ticket card with the EXACT same look as the Tickets list cards.
+// Used by the Tickets list and by the Live Desk so both look identical.
+function ffBuildTicketCardHTML(t) {
+  const statusKey = (s) => {
+    s = String(s || '').toUpperCase();
+    if (s === 'READY_FOR_CHECKOUT') return 'ready';
+    if (s === 'CLOSED') return 'closed';
+    if (s === 'VOID') return 'void';
+    if (s === 'ARCHIVED') return 'archived';
+    return 'open';
+  };
+  const submittedAt = formatDate(t.createdAt);
+  const allLines = t.performedLines || [];
+  const lines = allLines.slice(0, 4);
+  const more = allLines.length > 4 ? allLines.length - 4 : 0;
+  const techName = escapeHtml(t.technicianName || '\u2014');
+  const customerName = (t.customerName || '').trim();
+  const initial = getInitial(t.technicianName);
+  const sk = statusKey(t.status);
+  const statusLabel = { ready: 'READY', closed: 'CLOSED', open: 'OPEN', void: 'VOID', archived: 'ARCHIVED' }[sk] || sk.toUpperCase();
+  const isAdminOrManager = currentUserProfile && ['owner', 'admin', 'manager'].includes((currentUserProfile.role || '').toLowerCase());
+  const isReady = sk === 'ready';
+  const showEdited = isAdminOrManager && isReady && t.serviceUpgrade !== true && ticketHasRealPostSendEdit(t);
+  const editedBadgeHtml = showEdited ? '<span class="ticket-edited-badge">Edited</span>' : '';
+  const customerApprovedBadgeHtml = (t.customerApprovedPrice === true)
+    ? '<span class="ticket-customer-approved-badge" title="Customer approved the price">Approved</span>'
+    : '';
+  const serviceUpgradeBadgeHtml = (t.serviceUpgrade === true)
+    ? '<span class="ticket-customer-approved-badge" title="Service upgrade marked" style="background:#7c3aed;">Upgrade</span>'
+    : '';
+  const reviewedWhenStr = ffFormatReviewedAt(t.reviewedAt);
+  const reviewedBadgeHtml = (t.reviewedByFrontDesk === true)
+    ? `<span class="ticket-customer-approved-badge" title="Reviewed by front desk${t.reviewedByName ? ' \u00b7 ' + escapeHtml(t.reviewedByName) : ''}${reviewedWhenStr ? ' \u00b7 ' + escapeHtml(reviewedWhenStr) : ''}" style="background:#2563eb;">Reviewed</span>`
+    : '';
+  const technicianAvatarUrl = getTicketTechnicianAvatarUrl(t);
+  const initialEsc = escapeHtml(initial);
+  const avatarLoadedAttr = technicianAvatarUrl ? '0' : '1';
+  const imgTag = technicianAvatarUrl
+    ? `<img class="ticket-card-avatar-img" src="${String(technicianAvatarUrl).replace(/"/g, '&quot;')}" alt="" loading="lazy" decoding="async" onload="var w=this.closest('.ticket-card-avatar-wrap');if(w)w.setAttribute('data-avatar-loaded','1');" onerror="var w=this.closest('.ticket-card-avatar-wrap');if(w)w.setAttribute('data-avatar-loaded','error');" />`
+    : '';
+  const avatarHtml = `<div class="ticket-card-avatar-wrap" data-avatar-loaded="${avatarLoadedAttr}"><span class="ticket-card-avatar-fallback">${initialEsc}</span>${imgTag}</div>`;
+  const linesHtml = lines.map(l => `<div style="font-size:13px;color:#374151;padding:2px 0;">${formatLineForList(l)}</div>`).join('');
+  const moreHtml = more > 0 ? `<div style="font-size:11px;color:#9ca3af;margin-top:2px;">+ ${more} more\u2026</div>` : '';
+  const asIsHtml = t.asIs && t.asIsMessage
+    ? `<div style="font-size:12px;color:#059669;background:#d1fae5;padding:6px 8px;border-radius:6px;margin-top:6px;"><strong>AS IS:</strong> ${escapeHtml(t.asIsMessage)}</div>`
+    : '';
+  const closedByHtml = (sk === 'closed' && t.closedByName)
+    ? `<div style="font-size:11px;color:#059669;margin-top:2px;">\u2713 Closed by ${escapeHtml(t.closedByName)}</div>`
+    : '';
+  return `
+    <div class="ticket-card" data-ticket-id="${t.id}">
+      <div class="ticket-card-header-row" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;min-height:44px;">
+        ${avatarHtml}
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;font-size:14px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${techName}</div>
+          ${customerName ? `<div style="font-size:11px;color:#6b7280;margin-top:1px;">\uD83D\uDC64 ${escapeHtml(customerName)}</div>` : ''}
+          <div style="font-size:11px;color:#9ca3af;margin-top:1px;">${submittedAt}</div>
+          ${closedByHtml}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+          <span class="ticket-status-badge ${sk}">${statusLabel}</span>
+          ${serviceUpgradeBadgeHtml}
+          ${customerApprovedBadgeHtml}
+          ${reviewedBadgeHtml}
+          ${editedBadgeHtml}
+        </div>
+      </div>
+      <div style="border-top:1px dashed #e5e7eb;padding-top:10px;">
+        ${linesHtml || '<div style="font-size:12px;color:#9ca3af;">No services</div>'}
+        ${moreHtml}
+      </div>
+      ${asIsHtml}
+    </div>
+  `;
+}
+window.ffRenderTicketCardHTML = function (t) {
+  try { return t ? ffBuildTicketCardHTML(t) : ''; } catch (_) { return ''; }
+};
+
 function renderTicketsList() {
+  // Keep the Live Desk tickets card in sync in real time (it reads from ffGetCurrentTickets).
+  if (typeof window.ffLiveRefreshTicketsCard === 'function') {
+    try { window.ffLiveRefreshTicketsCard(); } catch (_eLive) {}
+  }
   const listEl = document.getElementById('ticketsList');
   const loadingEl = document.getElementById('ticketsLoading');
   const emptyEl = document.getElementById('ticketsEmpty');
@@ -3998,6 +4092,14 @@ function openTicketModal(ticketId, appointmentData = null) {
         updateTicketsNavBadge();
         markTicketSeenByFrontDesk(t.id).catch(() => {});
       }
+      openAdminTicketView(t);
+      return;
+    }
+
+    // Admin/manager/owner viewing an OPEN ticket → manager (read-only) view, NOT the
+    // technician edit form. They can review / upgrade / close, but not edit prices
+    // like a technician. Technicians (cannot close) still get the edit form below.
+    if (canCurrentUserCloseTickets() && s === 'OPEN') {
       openAdminTicketView(t);
       return;
     }
@@ -5857,6 +5959,32 @@ function isServiceProviderStaffForServices(staff, service) {
   return hasProviderRole || hasProviderTypes || hasTicketsPermission;
 }
 
+function canStaffSendNewTicket(staff) {
+  if (!staff || typeof staff !== 'object' || staff.isArchived === true || staff.archived === true) return false;
+  const permissions = staff.permissions && typeof staff.permissions === 'object' ? staff.permissions : {};
+  // The "Can send new ticket" toggle is authoritative in BOTH directions once an
+  // owner has set it explicitly: ON always shows the + New button, OFF always
+  // hides it (even for service providers). This matches what owners expect when
+  // they flip the switch on a staff member.
+  if (Object.prototype.hasOwnProperty.call(permissions, 'tickets_create')) {
+    return ffServiceStaffPermissionTrue(permissions.tickets_create);
+  }
+  // Legacy staff whose toggle was never set: service providers keep the button
+  // by role / provider types so existing technicians are unaffected.
+  const role = String(staff.role || staff.type || '').toLowerCase().trim();
+  if (['owner', 'admin', 'manager', 'front_desk', 'front desk', 'assistant_manager'].includes(role)) return false;
+  const hasProviderRole = [
+    'technician',
+    'tech',
+    'service_provider',
+    'service provider',
+    'provider',
+    'staff'
+  ].indexOf(role) !== -1;
+  const hasProviderTypes = Array.isArray(staff.technicianTypes) && staff.technicianTypes.length > 0;
+  return hasProviderRole || hasProviderTypes;
+}
+
 function getServicesEligibleStaffRows(service) {
   try {
     const store = typeof window !== 'undefined' && typeof window.ffGetStaffStore === 'function'
@@ -7145,10 +7273,14 @@ function updateNewTicketButtonVisibility() {
     newTicketBtn.style.display = 'none';
     return;
   }
-  // The logged-in Firebase profile controls who can create service-provider tickets.
+  const staff = _ticketsCurrentStaffRow();
+  if (staff) {
+    newTicketBtn.style.display = canStaffSendNewTicket(staff) ? 'inline-flex' : 'none';
+    return;
+  }
+  // Fallback only when the salon staff row is not hydrated yet.
   const profileRole = (currentUserProfile?.role || '').toLowerCase();
-  const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
-  newTicketBtn.style.display = isFirebaseAdmin ? 'none' : 'inline-flex';
+  newTicketBtn.style.display = ['owner', 'admin', 'manager'].includes(profileRole) ? 'none' : 'inline-flex';
 }
 
 function ensureTicketsBackgroundSubscription(attempt = 0) {
@@ -7325,6 +7457,19 @@ export function initTickets() {
         };
         refreshCatalogForLocation().catch((e) => console.warn('[SharedServices] location refresh failed', e));
       } catch (_) {}
+    });
+  }
+
+  // Staff permissions hydrate asynchronously: the staff store can finish loading
+  // (or change) AFTER the Tickets screen is already visible. Without this, the
+  // + New button stays stuck on the role-only fallback and ignores the
+  // "Can send new ticket" toggle. Re-evaluate it (and tab visibility) on every
+  // staff-store update so the permission-driven state is always correct.
+  if (typeof document !== 'undefined' && !window.__ffTicketsStaffListenerBound) {
+    window.__ffTicketsStaffListenerBound = true;
+    document.addEventListener('ff-staff-cloud-updated', function () {
+      try { updateNewTicketButtonVisibility(); } catch (_) {}
+      try { updateTicketsTabsVisibility(); } catch (_) {}
     });
   }
 

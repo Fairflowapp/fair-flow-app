@@ -8,7 +8,9 @@ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/fi
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 import {
   createWorkWithMedia,
+  createWorkWithMediaBestEffort,
   addMediaToExistingWork,
+  addMediaToExistingWorkBestEffort,
   subscribeContentWorks,
   getContentWork,
   getMediaItems,
@@ -27,7 +29,7 @@ import {
   createMediaCategory,
   updateMediaCategory,
   deleteMediaCategory,
-} from "./media-cloud.js?v=20260602_storage_5gb_restore_final";
+} from "./media-cloud.js?v=20260618_multi_image_upload_internal_fallback";
 
 let currentUserProfile = null;
 let userWorks = [];
@@ -43,6 +45,7 @@ let currentMediaCategoryFilter = "all"; // categoryId or "all"; filter by catego
 let mediaCategories = [];
 let unsubMediaCategories = null;
 const MEDIA_UPLOAD_POINTS_DAILY_CAP = 10;
+const MEDIA_MAX_IMAGES_PER_UPLOAD = 15;
 /** First Firestore snapshot received (avoid empty-state flash while queries run). */
 let mediaMyWorksHydrated = false;
 let mediaAllWorksHydrated = false;
@@ -846,6 +849,28 @@ function hideUploadMessage() {
   if (el) el.style.display = "none";
 }
 
+function getUploadSelectedFiles(mediaType = getMediaType()) {
+  if (mediaType === "before_after") {
+    return [
+      document.getElementById("uploadWorkFileBefore")?.files?.[0],
+      document.getElementById("uploadWorkFileAfter")?.files?.[0],
+    ].filter(Boolean);
+  }
+  const input = document.getElementById("uploadWorkFileInput");
+  const files = Array.from(input?.files || []).filter(Boolean);
+  return mediaType === "photo" ? files : files.slice(0, 1);
+}
+
+function buildMediaUploadSummary(successCount, failureCount) {
+  if (failureCount > 0 && successCount > 0) {
+    return `Upload complete: ${successCount} succeeded, ${failureCount} failed.`;
+  }
+  if (failureCount > 0) {
+    return `Upload failed: 0 succeeded, ${failureCount} failed.`;
+  }
+  return `Success! ${successCount} media item(s) added.`;
+}
+
 function getMediaPointsAccountId() {
   const candidates = [
     typeof window !== "undefined" ? window.currentSalonId : "",
@@ -1013,15 +1038,22 @@ function toggleFileInputs() {
   const single = document.getElementById("uploadWorkFileSingle");
   const beforeAfter = document.getElementById("uploadWorkFileBeforeAfter");
   const fileInput = document.getElementById("uploadWorkFileInput");
+  const hint = document.getElementById("uploadWorkFileHint");
   if (!single || !beforeAfter || !fileInput) return;
   if (mediaType === "before_after") {
     single.style.display = "none";
     beforeAfter.style.display = "block";
     fileInput.accept = "";
+    fileInput.multiple = false;
+    if (hint) hint.textContent = "Choose one Before image and one After image.";
   } else {
     single.style.display = "block";
     beforeAfter.style.display = "none";
     fileInput.accept = mediaType === "photo" ? "image/*" : "video/*";
+    fileInput.multiple = mediaType === "photo";
+    if (hint) hint.textContent = mediaType === "photo"
+      ? `You can choose up to ${MEDIA_MAX_IMAGES_PER_UPLOAD} images at once.`
+      : "Choose one video.";
   }
 }
 
@@ -1166,9 +1198,13 @@ function validateUpload() {
     return false;
   }
   if (mediaType === "photo" || mediaType === "video") {
-    const file = document.getElementById("uploadWorkFileInput")?.files?.[0];
-    if (!file) {
+    const files = getUploadSelectedFiles(mediaType);
+    if (!files.length) {
       showUploadMessage(mediaType === "photo" ? "Please choose an image." : "Please choose a video.", true);
+      return false;
+    }
+    if (mediaType === "photo" && files.length > MEDIA_MAX_IMAGES_PER_UPLOAD) {
+      showUploadMessage(`Please choose up to ${MEDIA_MAX_IMAGES_PER_UPLOAD} images per upload. You selected ${files.length}.`, true);
       return false;
     }
   }
@@ -1234,63 +1270,72 @@ async function doUpload() {
       const categoryIds = [...checked].map((el) => el.value?.trim()).filter(Boolean);
       const categoryNames = [...checked].map((el) => el.dataset?.name || el.value || "").filter(Boolean);
       const caption = document.getElementById("uploadWorkCaption")?.value?.trim() || "";
-      let files;
-      if (mediaType === "before_after") {
-        files = [
-          document.getElementById("uploadWorkFileBefore")?.files?.[0],
-          document.getElementById("uploadWorkFileAfter")?.files?.[0],
-        ].filter(Boolean);
-      } else {
-        files = document.getElementById("uploadWorkFileInput")?.files?.[0];
+      const files = getUploadSelectedFiles(mediaType);
+      const workPayload = {
+        staffId: currentUserProfile.staffId,
+        staffName: currentUserProfile.staffName,
+        createdByRole: currentUserProfile.createdByRole,
+        categoryIds,
+        categoryNames,
+        serviceType: categoryNames[0] || "", // backward compat
+        caption,
+      };
+      showUploadMessage(`Uploading 0/${files.length}...`, false);
+      const uploadResult = mediaType === "photo"
+        ? await createWorkWithMediaBestEffort(workPayload, files, mediaType, ({ done, total }) => {
+          showUploadMessage(`Uploading ${done}/${total}...`, false);
+        })
+        : {
+          ...(await createWorkWithMedia(workPayload, mediaType === "before_after" ? files : files[0], mediaType)),
+          failures: [],
+          successfulFiles: files,
+        };
+      const { workId, mediaIds, successfulFiles = [], failures = [] } = uploadResult;
+      if (!mediaIds.length) {
+        showUploadMessage(buildMediaUploadSummary(0, failures.length || files.length), true);
+        return;
       }
-      const fileHashes = await hashMediaPointFiles(files, mediaType);
-      const { workId, mediaIds } = await createWorkWithMedia(
-        {
-          staffId: currentUserProfile.staffId,
-          staffName: currentUserProfile.staffName,
-          createdByRole: currentUserProfile.createdByRole,
-          categoryIds,
-          categoryNames,
-          serviceType: categoryNames[0] || "", // backward compat
-          caption,
-        },
-        files,
-        mediaType
-      );
+      const fileHashes = await hashMediaPointFiles(successfulFiles.length ? successfulFiles : files, mediaType);
       void awardMediaUploadPoints({
         mediaIds,
         mediaType,
         fileHashes,
         work: { locationId: typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function" ? window.ffGetActiveLocationId() : "" },
       });
-      showUploadMessage(`Success! Work created. ${mediaIds.length} media item(s) added.`, false);
+      showUploadMessage(`Work created. ${buildMediaUploadSummary(mediaIds.length, failures.length)}`, failures.length > 0);
       userWorks.unshift({ id: workId, categoryIds, categoryNames, categoryId: categoryIds[0], categoryName: categoryNames[0], serviceType: categoryNames[0], caption, status: "active" });
       populateWorksDropdown();
       document.getElementById("uploadWorkFileInput").value = "";
       document.getElementById("uploadWorkFileBefore").value = "";
       document.getElementById("uploadWorkFileAfter").value = "";
-      setTimeout(() => closeUploadModal(), 1500);
+      if (!failures.length) setTimeout(() => closeUploadModal(), 1500);
     } else {
       const workId = document.getElementById("uploadWorkExistingSelect")?.value?.trim();
-      let files;
-      if (mediaType === "before_after") {
-        files = [
-          document.getElementById("uploadWorkFileBefore")?.files?.[0],
-          document.getElementById("uploadWorkFileAfter")?.files?.[0],
-        ].filter(Boolean);
-      } else {
-        files = document.getElementById("uploadWorkFileInput")?.files?.[0];
+      const files = getUploadSelectedFiles(mediaType);
+      showUploadMessage(`Uploading 0/${files.length}...`, false);
+      const uploadResult = mediaType === "photo"
+        ? await addMediaToExistingWorkBestEffort(workId, files, mediaType, ({ done, total }) => {
+          showUploadMessage(`Uploading ${done}/${total}...`, false);
+        })
+        : {
+          mediaIds: await addMediaToExistingWork(workId, mediaType === "before_after" ? files : files[0], mediaType),
+          failures: [],
+          successfulFiles: files,
+        };
+      const { mediaIds, successfulFiles = [], failures = [] } = uploadResult;
+      if (!mediaIds.length) {
+        showUploadMessage(buildMediaUploadSummary(0, failures.length || files.length), true);
+        return;
       }
-      const fileHashes = await hashMediaPointFiles(files, mediaType);
-      const mediaIds = await addMediaToExistingWork(workId, files, mediaType);
+      const fileHashes = await hashMediaPointFiles(successfulFiles.length ? successfulFiles : files, mediaType);
       getContentWork(workId)
         .then((work) => awardMediaUploadPoints({ mediaIds, mediaType, work, fileHashes }))
         .catch(() => awardMediaUploadPoints({ mediaIds, mediaType, work: null, fileHashes }));
-      showUploadMessage(`Success! ${mediaIds.length} media item(s) added.`, false);
+      showUploadMessage(buildMediaUploadSummary(mediaIds.length, failures.length), failures.length > 0);
       document.getElementById("uploadWorkFileInput").value = "";
       document.getElementById("uploadWorkFileBefore").value = "";
       document.getElementById("uploadWorkFileAfter").value = "";
-      setTimeout(() => closeUploadModal(), 1500);
+      if (!failures.length) setTimeout(() => closeUploadModal(), 1500);
     }
   } catch (e) {
     console.error("[Media] Upload failed", e);

@@ -61,7 +61,7 @@
     if(typeof ffCurrentUserHasChatManagePermission==='function'&&!ffCurrentUserHasChatManagePermission())return;
     if(typeof ffCurrentUserHasChatManagePermission!=='function'&&typeof ffHasAdminAccess==='function'&&!ffHasAdminAccess())return;
     try {
-      await import('/chat.js?v=20260615_chat_flow_load_resilient');
+      await import('/chat.js?v=20260619_live_chat_card_shared');
       if (window.openChatTemplatesSettings && !window.openChatTemplatesSettings.__ffFallback) {
         return window.openChatTemplatesSettings();
       }
@@ -818,7 +818,6 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
 }
 
 .ff-live-desk-fab {
-  display: none !important;
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -868,6 +867,10 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   border-radius: 50%;
   background: #ef4444;
   border: 2px solid #fff;
+  transition: background 0.2s ease;
+}
+.ff-live-desk-fab.is-live-open .ff-live-desk-fab-dot {
+  background: #22c55e;
 }
 .ff-live-desk-panel {
   position: fixed;
@@ -877,7 +880,7 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
   width: min(430px, calc(100vw - 28px));
   max-height: min(720px, calc(100vh - 132px));
   overflow: hidden;
-  display: none !important;
+  display: none;
   flex-direction: column;
   background: #ffffff;
   border: 1px solid #ede9fe;
@@ -1010,6 +1013,14 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
     width: auto;
     max-height: calc(100vh - 118px - env(safe-area-inset-bottom, 0px));
     border-radius: 22px;
+  }
+}
+/* Live Desk is a control/reception screen for large screens only — hide on phones. */
+@media (max-width: 768px) {
+  .ff-live-desk-fab,
+  .ff-live-desk-panel,
+  #liveScreen {
+    display: none !important;
   }
 }
 #mediaBtn.active {
@@ -4337,6 +4348,54 @@ dialog footer button, .code-dialog footer button {
   display: none !important;
 }
 
+/* ===== Mobile Accessibility — Horizontal Overflow Guard (zoom / large font) =====
+   At large Font/Display sizes the effective CSS width can fall in the 641–767px range,
+   where the <=640px guards don't apply, producing page-level horizontal scroll. Clip the
+   document and the full-screen fixed shells to the viewport (fixed elements are NOT clipped
+   by body overflow), and keep any horizontal scroll contained inside tab strips / table
+   wrappers only. CSS-only — no logic / Firestore / Rules / Permissions changes. */
+@media (max-width: 767px) {
+  html,
+  body {
+    overflow-x: hidden !important;
+    max-width: 100vw;
+  }
+  #main-app-content,
+  #owner-view,
+  .wrap {
+    max-width: 100vw;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+  #ticketsScreen,
+  #tasksScreen,
+  #floorScreen,
+  #inventoryScreen,
+  #pointsAppScreen,
+  #mediaScreen,
+  #scheduleScreen,
+  #timeClockScreen,
+  .inbox-screen {
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+  }
+  .toolbar.toolbar-nav-main {
+    max-width: 100vw !important;
+    overflow: hidden !important;
+  }
+  .toolbar.toolbar-nav-main .nav-item {
+    min-width: 0 !important;
+  }
+  #ticketsScreen #ticketsTabsNav {
+    max-width: 100%;
+  }
+  #ticketsScreen .tickets-summary-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 @media (max-width: 640px) {
   /*
    * Do not set z-index on #main-app-content here. A numeric z-index creates a stacking context so
@@ -4381,6 +4440,7 @@ dialog footer button, .code-dialog footer button {
   #ticketsScreen,
   #tasksScreen,
   #floorScreen,
+  #liveScreen,
   #inventoryScreen,
   #pointsAppScreen,
   #mediaScreen,
@@ -5086,6 +5146,13 @@ dialog footer button, .code-dialog footer button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    overflow: visible;
+    position: relative;
+  }
+
+  .header .toolbar.toolbar-nav-main .nav-icon .ff-nav-icon-badge:not(:empty) {
+    top: -6px;
+    right: -9px;
   }
 
   .header .toolbar.toolbar-nav-main .nav-icon svg {
@@ -6997,7 +7064,7 @@ dialog footer button, .code-dialog footer button {
 
         <button id="tasksBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="ff-home-tasks-badge ff-nav-icon-badge"></span></span>Tasks</button>
 
-        <button id="floorBtn" class="btn-pill nav-item core-nav" onclick="window.goToFloor && window.goToFloor()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18"></path><path d="M9 4v16"></path><path d="M15 10v10"></path></svg></span>Floor</button>
+        <button id="floorBtn" class="btn-pill nav-item core-nav" onclick="window.goToFloor && window.goToFloor()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18"></path><path d="M9 4v16"></path><path d="M15 10v10"></path></svg><span id="floorNavBadge" class="ff-home-tasks-badge ff-nav-icon-badge" style="display:none;"></span></span>Floor</button>
 
         <button id="chatBtn" class="btn-pill nav-item core-nav" onclick="window.goToChat && window.goToChat()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span id="chatNavBadge" class="ff-home-tasks-badge ff-nav-icon-badge"></span></span>Chat</button>
 
@@ -12321,6 +12388,18 @@ window.ffCurrentUserCanSendFloorOrders = ffCurrentUserCanSendFloorOrders;
 window.ffCurrentUserCanReceiveFloorOrders = ffCurrentUserCanReceiveFloorOrders;
 window.ffCurrentUserCanManageFloorSettings = ffCurrentUserCanManageFloorSettings;
 
+/** Live Desk: staff.permissions.live_view === true. Strict per-staff toggle (no owner bypass) so visibility is fully controlled in the Permissions tab. */
+function ffStaffHasLiveDeskPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.live_view));
+}
+function ffCurrentUserCanUseLiveDesk() {
+  return ffStaffHasLiveDeskPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffStaffHasLiveDeskPermission = ffStaffHasLiveDeskPermission;
+window.ffCurrentUserCanUseLiveDesk = ffCurrentUserCanUseLiveDesk;
+
 function ffRefreshTasksPermissionControls() {
   try {
     const settingsBtn = document.getElementById('btnTasksSettings');
@@ -14529,6 +14608,9 @@ function renderQueue(){
     } catch (eEarly) {}
     if (typeof ffQueueSyncAvailMoreBodyClass === 'function') ffQueueSyncAvailMoreBodyClass();
     if (typeof ffQueueApplyBothListScrollTops === 'function') ffQueueApplyBothListScrollTops(_ffQListScroll);
+    if (typeof window.ffLiveRefreshQueueCard === 'function') {
+      try { window.ffLiveRefreshQueueCard(); } catch (_eLive) {}
+    }
     return;
   }
 
@@ -14544,6 +14626,9 @@ function renderQueue(){
     if (typeof ffQueueSyncAvailMoreBodyClass === 'function') ffQueueSyncAvailMoreBodyClass();
     if (typeof ffApplyQueueReadOnlyMode === 'function') ffApplyQueueReadOnlyMode();
     if (typeof ffQueueApplyBothListScrollTops === 'function') ffQueueApplyBothListScrollTops(_ffQListScroll);
+    if (typeof window.ffLiveRefreshQueueCard === 'function') {
+      try { window.ffLiveRefreshQueueCard(); } catch (_eLive) {}
+    }
     return;
   }
   const queueLocked =
@@ -14787,9 +14872,80 @@ function renderQueue(){
 
   if (typeof ffQueueApplyBothListScrollTops === 'function') ffQueueApplyBothListScrollTops(_ffQListScroll);
 
+  // Keep the Live Desk Queue card in sync with the main queue (real-time).
+  if (typeof window.ffLiveRefreshQueueCard === 'function') {
+    try { window.ffLiveRefreshQueueCard(); } catch (_eLive) {}
+  }
+
 }
 
-
+// ---- Live Desk bridge: expose the Available queue + reuse existing actions ----
+// Read-only view of the Available column for the Live Desk. Does not change the
+// main Queue logic; actions below delegate to the existing queue functions.
+function ffLiveFindQueueIndexByKey(key) {
+  if (!Array.isArray(queue)) return -1;
+  return queue.findIndex(function (q) { return ffQueueAvailableRowStableKey(q) === key; });
+}
+window.ffGetLiveQueueRows = function () {
+  if (!Array.isArray(queue)) return [];
+  var canCallAccess = (typeof ffHasQueueCallAccess === 'function') ? ffHasQueueCallAccess() : false;
+  return queue.filter(function (q) { return q && !q.removed; }).map(function (q) {
+    var meta = {};
+    try { meta = queuePresenceMeta(q, { queueMember: true }) || {}; } catch (_e) {}
+    var staffId = meta.staffId || q.staffId || '';
+    // Resolve the same per-staff name color used in the Queue module so Live matches it.
+    var colorTarget = { name: q.name || '', staffId: staffId };
+    var nameBg = '';
+    var nameFg = '';
+    try { if (typeof colorOf === 'function') nameBg = colorOf(colorTarget) || ''; } catch (_eC) {}
+    try { if (typeof fontColorOf === 'function') nameFg = fontColorOf(colorTarget) || ''; } catch (_eF) {}
+    return {
+      key: ffQueueAvailableRowStableKey(q),
+      name: (typeof ffQueueDisplayName === 'function') ? ffQueueDisplayName(q) : (q.name || ''),
+      held: !!q.held,
+      canCall: !!(canCallAccess && staffId),
+      nameBg: nameBg,
+      nameFg: nameFg
+    };
+  });
+};
+window.ffLiveQueueStart = function (key) {
+  var idx = ffLiveFindQueueIndexByKey(key);
+  if (idx < 0) return;
+  var q = queue[idx];
+  if (typeof guardStart === 'function') guardStart(q.name, idx, function () { startSpecific(idx); });
+};
+window.ffLiveQueueHold = function (key) {
+  var idx = ffLiveFindQueueIndexByKey(key);
+  if (idx < 0) return;
+  var q = queue[idx];
+  window.__ff_holdTargetName = q.name;
+  window.__ff_holdWasHeld = !!q.held;
+  if (typeof guardHold === 'function') guardHold(function () { toggleHold(idx); });
+};
+window.ffLiveQueueCall = async function (key) {
+  var idx = ffLiveFindQueueIndexByKey(key);
+  if (idx < 0) return;
+  var q = queue[idx];
+  if (typeof ffSendTwilioVoiceStaffCall !== 'function') {
+    alert('Call feature is still loading. Wait a few seconds and try again.');
+    return;
+  }
+  var meta = {};
+  try { meta = queuePresenceMeta(q, { queueMember: true }) || {}; } catch (_e) {}
+  var queueEntryIdForCall = q.id || q.queueEntryId || q.entryId || '';
+  try {
+    var result = await ffSendTwilioVoiceStaffCall({
+      staffId: meta.staffId,
+      queueEntryId: queueEntryIdForCall,
+      callType: 'client_waiting'
+    });
+    if (!result || result.ok !== true) alert('Call could not be sent.');
+  } catch (e) {
+    console.error('[Live] queue call failed', e);
+    alert('Call could not be sent.');
+  }
+};
 
 function removeFromQueue(i){
   if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
@@ -19318,7 +19474,7 @@ async function sendTrainingReminderFromReport(trainingId, staffLookupKey) {
   try {
     if (typeof window.ffSendTrainingReminderChat !== 'function') {
       try {
-        await import('/chat.js?v=20260615_chat_flow_load_resilient');
+        await import('/chat.js?v=20260619_live_chat_card_shared');
       } catch (eImp) {
         console.warn('[Training] Could not load chat module for reminder', eImp);
       }
@@ -32698,6 +32854,15 @@ function handleTaskInfoEsc(e) {
  */
 window.ffCloseGlobalBlockingOverlays = function () {
   try {
+    // If the Live Desk is open, navigating to any other module should close it
+    // automatically (no need to close Live first).
+    var liveScreenEl = document.getElementById('liveScreen');
+    if (liveScreenEl && liveScreenEl.style.display === 'flex') {
+      if (typeof window.ffCloseLiveScreen === 'function') window.ffCloseLiveScreen();
+      else liveScreenEl.style.display = 'none';
+    }
+  } catch (e) {}
+  try {
     document.body.classList.remove('ff-queue-route-active');
     if (typeof window.ffResetMobileBottomNavViewportLock === 'function') window.ffResetMobileBottomNavViewportLock();
   } catch (e) {}
@@ -35987,7 +36152,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260615_chat_flow_load_resilient');
+            const m = await import('/chat.js?v=20260619_live_chat_card_shared');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -39390,7 +39555,7 @@ function initializeAppsPanel() {
         groupTitle: 'Tickets',
         parentKey: 'tickets_view',
         parentMode: 'strictTrue',
-        childKeys: ['tickets_summary', 'tickets_archived']
+        childKeys: ['tickets_create', 'tickets_summary', 'tickets_archived']
       },
       {
         groupTitle: 'Services',
@@ -39585,6 +39750,11 @@ function initializeAppsPanel() {
             desc: 'Controls the Tickets tab in the top bar and access to the Tickets screen. When off, Tickets is hidden in navigation and internal ticket permissions are unavailable.'
           },
           {
+            key: 'tickets_create',
+            label: 'Can send new ticket',
+            desc: 'Shows the + New Ticket button for staff who are not automatically treated as service providers. Service providers can create tickets by role; managers/admins need this toggle only when they also perform services.'
+          },
+          {
             key: 'tickets_summary',
             label: 'Show Summary tab',
             desc: 'Allow the Tickets Summary tab (aggregates). Owner and Admin always see it. Managers and other staff need this on (per staff profile).'
@@ -39626,6 +39796,16 @@ function initializeAppsPanel() {
             key: 'floor_manage',
             label: 'Can Manage Floor Settings',
             desc: 'Can manage Floor Categories, Regular Requests, and Flow Requests.'
+          }
+        ]
+      },
+      {
+        title: 'Live',
+        permissions: [
+          {
+            key: 'live_view',
+            label: 'Can use Live Desk',
+            desc: 'Shows the floating Live Desk button \u2014 a quick live view for reception (queue, tickets to charge, and messages). Off by default; turn on per staff member to decide who sees it.'
           }
         ]
       },
@@ -39909,7 +40089,9 @@ function initializeAppsPanel() {
           perm.key === 'floor_receive' ||
           perm.key === 'floor_manage'
         );
-        if (ownerRowLocked && !isQueueJoinProviderSetting && !isFloorPermissionSetting) {
+        var isTicketCreatePermissionSetting = group.title === 'Tickets' && perm.key === 'tickets_create';
+        var isLivePermissionSetting = group.title === 'Live' && perm.key === 'live_view';
+        if (ownerRowLocked && !isQueueJoinProviderSetting && !isFloorPermissionSetting && !isTicketCreatePermissionSetting && !isLivePermissionSetting) {
           displayValue = true;
           rowOpts.disabled = true;
         }
@@ -39945,9 +40127,11 @@ function initializeAppsPanel() {
           typeof window.ffStaffRowIsSalonOwner === 'function' &&
           window.ffStaffRowIsSalonOwner(staff) &&
           permissionKey !== 'queue_join' &&
+          permissionKey !== 'tickets_create' &&
           permissionKey !== 'floor_send' &&
           permissionKey !== 'floor_receive' &&
-          permissionKey !== 'floor_manage'
+          permissionKey !== 'floor_manage' &&
+          permissionKey !== 'live_view'
         ) {
           checkbox.checked = !uiChecked;
           return;
@@ -41860,6 +42044,7 @@ function initializeAppsPanel() {
       time_clock_bypass_location: tc.bypassLocation === true,
       time_clock_manage: tc.manage === true,
       tickets_view: d.tickets.view,
+      tickets_create: true,
       tickets_summary: d.tickets.summary,
       tickets_archived: false,
       services_view: true,
@@ -41999,6 +42184,7 @@ function initializeAppsPanel() {
       time_clock_bypass_location: tc.bypassLocation === true,
       time_clock_manage: tc.manage === true,
       tickets_view: d.tickets.view,
+      tickets_create: false,
       tickets_summary: d.tickets.summary,
       tickets_archived: false,
       services_view: true,
@@ -42178,6 +42364,7 @@ function initializeAppsPanel() {
       time_clock_bypass_location: tc.bypassLocation === true,
       time_clock_manage: tc.manage === true,
       tickets_view: d.tickets.view,
+      tickets_create: false,
       tickets_summary: d.tickets.summary,
       tickets_archived: d.tickets.archived === true,
       services_view: true,
@@ -56933,7 +57120,7 @@ function hookSettingsGuard_DISABLED(){
 
 <!-- Lightweight password prompt (no layout changes elsewhere) -->
 
-<div id="codePromptOverlay" class="code-dialog" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:1100;align-items:center;justify-content:center;">
+<div id="codePromptOverlay" class="code-dialog" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2147483600;align-items:center;justify-content:center;">
 
   <div style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:20px;min-width:280px;max-width:90%;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
 
@@ -56964,7 +57151,7 @@ function hookSettingsGuard_DISABLED(){
 </div>
 
 <!-- HOLD Code Modal -->
-<div id="holdCodeOverlay" class="code-dialog" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:1100;align-items:center;justify-content:center;">
+<div id="holdCodeOverlay" class="code-dialog" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2147483600;align-items:center;justify-content:center;">
   <div id="holdCodeModal" style="background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:20px;min-width:280px;max-width:90%;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
     <div id="holdCodeMsg" style="font-weight:600;margin-bottom:10px">Enter admin or manager code</div>
     <div style="display:flex;gap:8px;align-items:center">
@@ -57056,6 +57243,17 @@ function hookSettingsGuard_DISABLED(){
   };
 
   eye.onmouseup = eye.onmouseleave = ()=>{ input.type="password"; };
+
+  // Allow typing inside the code prompt even when a full-screen overlay (e.g. the
+  // Live Desk) sits above the page: block global capture handlers from stealing the
+  // pointer event, but allow default so the input can focus.
+  if (!window.__ff_codePromptCaptureInstalled) {
+    window.__ff_codePromptCaptureInstalled = true;
+    document.addEventListener('pointerdown', function(e){
+      if (!ov || ov.style.display === 'none') return;
+      if (ov.contains(e.target)) e.stopImmediatePropagation();
+    }, true);
+  }
 
   // Helper function to show toast messages
   function showToast(message, duration = 3000) {
@@ -60901,6 +61099,508 @@ function hookSettingsGuard_DISABLED(){
       </div>
     </div>
   </section>
+  <style>
+    #liveScreen { box-sizing: border-box; }
+    #liveScreen * { box-sizing: border-box; }
+    #liveScreen .live-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 7px 16px; background: #ffffff; border-bottom: 1px solid #e9e7f3; flex-shrink: 0;
+    }
+    #liveScreen .live-head-brand {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 12.5px; font-weight: 800; letter-spacing: .08em; color: #6d28d9; text-transform: uppercase;
+    }
+    #liveScreen .live-head-dot {
+      width: 9px; height: 9px; border-radius: 50%; background: #22c55e;
+      box-shadow: 0 0 0 0 rgba(34,197,94,0.45);
+      animation: ffLiveHeadPulse 2.4s ease-out infinite;
+    }
+    @keyframes ffLiveHeadPulse {
+      0%   { box-shadow: 0 0 0 0 rgba(34,197,94,0.45); }
+      70%  { box-shadow: 0 0 0 7px rgba(34,197,94,0); }
+      100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+    }
+    #liveScreen .live-close {
+      border: 0; background: transparent; color: #9ca3af; width: 28px; height: 28px;
+      border-radius: 8px; font-size: 20px; line-height: 1; cursor: pointer; flex-shrink: 0;
+    }
+    #liveScreen .live-close:hover { background: #f3f4f6; color: #6b7280; }
+    #liveScreen .live-body {
+      flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px;
+      display: grid; gap: 16px; grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-auto-rows: minmax(0, 1fr); align-content: stretch;
+    }
+    #liveScreen .live-card {
+      background: #fff; border: 1px solid #e9e7f3; border-radius: 16px; overflow: hidden;
+      box-shadow: 0 6px 20px rgba(31,41,55,0.06); display: flex; flex-direction: column; min-width: 0; min-height: 0;
+    }
+    #liveScreen .live-card-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 13px 16px; border-bottom: 1px solid #f1f0f7;
+    }
+    #liveScreen .live-card-title { font-size: 13px; font-weight: 800; color: #111827; text-transform: uppercase; letter-spacing: .04em; }
+    #liveScreen .live-card-count {
+      min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; background: #f5f3ff; color: #6d28d9;
+      font-size: 12px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center;
+    }
+    #liveScreen .live-list { display: flex; flex-direction: column; padding: 8px; gap: 6px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+    #liveScreen .live-item {
+      display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
+      background: #fafafe; border: 1px solid #f0eefb;
+    }
+    #liveScreen .live-item.is-clickable { cursor: pointer; }
+    #liveScreen .live-item.is-clickable:hover { background: #f3f0ff; border-color: #ddd6fe; }
+    #liveScreen .live-item-main { min-width: 0; flex: 1; }
+    #liveScreen .live-item-title { font-size: 13.5px; font-weight: 700; color: #111827; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #liveScreen .live-item-sub { font-size: 11.5px; color: #6b7280; line-height: 1.3; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #liveScreen .live-item-right { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+    #liveScreen .live-pill { font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+    #liveScreen .live-pill--num { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+    #liveScreen .live-pill--idx { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+    #liveScreen .live-pill--hold { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; }
+    #liveScreen .live-pill--time { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; font-weight: 700; }
+    #liveScreen .live-pill--next { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+    #liveScreen .live-empty { padding: 18px 14px; text-align: center; color: #9ca3af; font-size: 12.5px; }
+    #liveScreen .live-q-item .live-item-sub { display: flex; align-items: center; gap: 5px; }
+    #liveScreen .live-q-name-pill {
+      display: inline-block; padding: 3px 10px; border-radius: 999px;
+      background: #eef2ff; color: #4338ca; font-weight: 800; font-size: 13px; line-height: 1.3;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
+    }
+    #liveScreen .live-q-actions { flex-shrink: 0; display: flex; align-items: center; gap: 6px; }
+    /* Match the Queue module button colors (gray Start, yellow Hold, green Call), kept small. */
+    #liveScreen .live-q-btn {
+      border: 1px solid #e5e7eb; background: #e5e7eb; color: #111827; border-radius: 8px;
+      padding: 5px 11px; font-size: 12px; font-weight: 800; cursor: pointer; line-height: 1; white-space: nowrap;
+    }
+    #liveScreen .live-q-btn:hover { background: #d1d5db; }
+    #liveScreen .live-q-start { background: #e5e7eb; border-color: #e5e7eb; color: #111827; }
+    #liveScreen .live-q-start:hover { background: #d1d5db; }
+    #liveScreen .live-q-hold { background: var(--held); border-color: #e8d27a; color: #111827; }
+    #liveScreen .live-q-hold:hover { background: #f0d570; }
+    #liveScreen .live-q-call {
+      width: 30px; height: 30px; padding: 0; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+      background: #fff; color: #16a34a; border-color: #bbf7d0;
+    }
+    #liveScreen .live-q-call:hover { background: #f0fdf4; }
+    /* Live ticket cards reuse the exact Tickets-list card markup; mirror its styles here. */
+    #liveScreen .live-tk-wrap { cursor: pointer; }
+    #liveScreen .ticket-card {
+      background:#fff; border-radius:12px;
+      box-shadow:0 2px 8px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+      padding:11px; cursor:pointer; transition:box-shadow 0.15s, transform 0.12s;
+    }
+    #liveScreen .ticket-card:hover {
+      box-shadow:0 6px 18px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06); transform:translateY(-2px);
+    }
+    #liveScreen .ticket-card-avatar-wrap {
+      position:relative; width:40px; height:40px; min-width:40px; min-height:40px; flex-shrink:0;
+      border-radius:50%; overflow:hidden; aspect-ratio:1; background:#f3f4f6; contain:layout style;
+    }
+    #liveScreen .ticket-card-avatar-fallback {
+      position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      background:linear-gradient(135deg,#9d68b9,#ff9580); color:#fff; font-size:14px; font-weight:700;
+      z-index:0; pointer-events:none; line-height:1;
+    }
+    #liveScreen .ticket-card-avatar-wrap img.ticket-card-avatar-img {
+      position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block;
+      z-index:1; opacity:0; transition:opacity 0.08s ease;
+    }
+    #liveScreen .ticket-card-avatar-wrap[data-avatar-loaded="1"] img.ticket-card-avatar-img { opacity:1; }
+    #liveScreen .ticket-card-avatar-wrap[data-avatar-loaded="error"] img.ticket-card-avatar-img { opacity:0; visibility:hidden; }
+    #liveScreen .ticket-status-badge {
+      display:inline-block; padding:3px 10px; border-radius:20px; font-size:10px; font-weight:700;
+      letter-spacing:0.4px; text-transform:uppercase; flex-shrink:0; white-space:nowrap;
+    }
+    #liveScreen .ticket-status-badge.ready    { background:#ede9fe; color:#7c3aed; }
+    #liveScreen .ticket-status-badge.closed   { background:#d1fae5; color:#065f46; }
+    #liveScreen .ticket-status-badge.open     { background:#fef3c7; color:#92400e; }
+    #liveScreen .ticket-status-badge.void,
+    #liveScreen .ticket-status-badge.archived { background:#e5e7eb; color:#4b5563; }
+    #liveScreen .ticket-edited-badge {
+      display:inline-block; padding:2px 9px; border-radius:20px; font-size:10px; font-weight:700;
+      background:#d97706; color:#fff; letter-spacing:0.3px; text-transform:uppercase;
+    }
+    #liveScreen .ticket-customer-approved-badge {
+      display:inline-block; padding:2px 9px; border-radius:20px; font-size:10px; font-weight:700;
+      background:#059669; color:#fff; letter-spacing:0.3px; text-transform:uppercase;
+    }
+    /* Chat thread cards in Live reuse the global .chat-thread-card / .ctc-* styles. */
+    #liveScreen .live-chat-wrap { cursor: pointer; }
+    /* Floor cards in Live: identical look to the Floor module (floor-cloud.js). */
+    #liveScreen .live-floor-wrap { cursor: pointer; }
+    #liveScreen .floor-demo-card {
+      width: auto;
+      min-height: 118px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+      padding: 12px;
+      box-sizing: border-box;
+      transition: box-shadow 0.15s, transform 0.12s;
+    }
+    #liveScreen .floor-demo-card:hover {
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
+      transform: translateY(-2px);
+    }
+    #liveScreen .floor-demo-card-header {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px;
+    }
+    #liveScreen .floor-demo-person { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    #liveScreen .floor-demo-avatar {
+      width: 36px; height: 36px; border-radius: 50%; background: #fce7f3; color: #be185d;
+      display: flex; align-items: center; justify-content: center; flex: 0 0 36px;
+      font-size: 12px; font-weight: 900; letter-spacing: -0.02em; overflow: hidden;
+    }
+    #liveScreen .floor-demo-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    #liveScreen .floor-demo-employee { font-size: 13px; font-weight: 800; color: #111827; line-height: 1.2; }
+    #liveScreen .floor-demo-client { font-size: 11px; color: #6b7280; margin-top: 1px; line-height: 1.2; }
+    #liveScreen .floor-demo-time { font-size: 10px; color: #6b7280; margin-top: 3px; line-height: 1.2; }
+    #liveScreen .floor-demo-badge {
+      padding: 3px 7px; border-radius: 999px; background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0;
+      font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap;
+    }
+    #liveScreen .floor-demo-status { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+    #liveScreen .floor-demo-status-by {
+      max-width: 92px; color: #6b7280; font-size: 10px; font-weight: 600; line-height: 1.2; text-align: right;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #liveScreen .floor-demo-badge--in-progress { background: #fffbeb; color: #b45309; border-color: #fcd34d; }
+    #liveScreen .floor-demo-badge--closed { background: #f3f4f6; color: #6b7280; border-color: #d1d5db; }
+    #liveScreen .floor-demo-line { font-size: 12px; color: #374151; line-height: 1.35; padding: 2px 0; }
+    #liveScreen .floor-demo-line strong { color: #111827; font-weight: 800; }
+    @media (max-width: 767px) {
+      #liveScreen .live-body { grid-template-columns: 1fr; grid-auto-rows: auto; align-content: start; padding: 12px; gap: 12px; }
+      #liveScreen .live-list { flex: 0 1 auto; max-height: 60vh; }
+    }
+    @media (min-width: 768px) and (max-width: 1099px) {
+      #liveScreen .live-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+  <div id="liveScreen" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f5f7fb;z-index:9870;flex-direction:column;overflow:hidden;pointer-events:auto;">
+    <div class="live-head">
+      <span class="live-head-brand"><span class="live-head-dot"></span>Live</span>
+      <button type="button" class="live-close" id="liveScreenClose" aria-label="Close Live">&times;</button>
+    </div>
+    <div class="live-body">
+      <div class="live-card">
+        <div class="live-card-head"><span class="live-card-title">Queue</span><span class="live-card-count" id="liveQueueCount">0</span></div>
+        <div class="live-list" id="liveQueueList"></div>
+      </div>
+      <div class="live-card">
+        <div class="live-card-head"><span class="live-card-title">Tickets</span><span class="live-card-count" id="liveTicketsCount">0</span></div>
+        <div class="live-list" id="liveTicketsList"></div>
+      </div>
+      <div class="live-card">
+        <div class="live-card-head"><span class="live-card-title">Floor Requests</span><span class="live-card-count" id="liveFloorCount">0</span></div>
+        <div class="live-list" id="liveFloorList"></div>
+      </div>
+      <div class="live-card">
+        <div class="live-card-head"><span class="live-card-title">Chat</span><span class="live-card-count" id="liveChatCount">0</span></div>
+        <div class="live-list" id="liveChatList"></div>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      function readJsonArrayLS(key) {
+        try { var d = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(d) ? d : []; }
+        catch (_) { return []; }
+      }
+      function liveEsc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+          return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+        });
+      }
+      function liveTimeAgo(input) {
+        var d = null;
+        if (!input) return "";
+        if (typeof input === "number") d = new Date(input);
+        else if (input.toDate) { try { d = input.toDate(); } catch (_) {} }
+        else if (input.toMillis) { try { d = new Date(input.toMillis()); } catch (_) {} }
+        else if (input instanceof Date) d = input;
+        if (!d || isNaN(d.getTime())) return "";
+        var diff = Math.max(0, Date.now() - d.getTime());
+        var m = Math.floor(diff / 60000);
+        if (m < 1) return "now";
+        if (m < 60) return m + "m";
+        var h = Math.floor(m / 60);
+        if (h < 24) return h + "h";
+        return Math.floor(h / 24) + "d";
+      }
+      function setCount(id, n) { var el = document.getElementById(id); if (el) el.textContent = String(n); }
+      function emptyHtml(msg) { return '<div class="live-empty">' + liveEsc(msg) + "</div>"; }
+
+      function renderQueue() {
+        var list = document.getElementById("liveQueueList");
+        if (!list) return;
+        var rows = [];
+        try { if (typeof window.ffGetLiveQueueRows === "function") rows = window.ffGetLiveQueueRows() || []; } catch (_) {}
+        rows = Array.isArray(rows) ? rows : [];
+        setCount("liveQueueCount", rows.length);
+        if (!rows.length) { list.innerHTML = emptyHtml("No one is waiting in the queue."); return; }
+        list.innerHTML = rows.map(function (row, i) {
+          var name = liveEsc(row.name || "Staff member");
+          var nameStyle = "";
+          if (row.nameBg) nameStyle += "background:" + liveEsc(row.nameBg) + ";";
+          if (row.nameFg) nameStyle += "color:" + liveEsc(row.nameFg) + ";";
+          var namePill = '<span class="live-q-name-pill"' + (nameStyle ? ' style="' + nameStyle + '"' : "") + '>' + name + '</span>';
+          var statePill = row.held ? ' <span class="live-pill live-pill--hold">HOLD</span>' : "";
+          var key = liveEsc(row.key || "");
+          var callBtn = row.canCall
+            ? '<button type="button" class="live-q-btn live-q-call" data-live-q-call="' + key + '" title="Call">' +
+              '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.89.7 2.78a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.3-1.27a2 2 0 0 1 2.11-.45c.89.34 1.82.57 2.78.7A2 2 0 0 1 22 16.92z"></path></svg></button>'
+            : "";
+          var holdLabel = row.held ? "Release" : "Hold";
+          return '<div class="live-item live-q-item">' +
+              '<div class="live-item-main">' +
+                '<div class="live-item-title">' + (i + 1) + ". " + namePill + statePill + '</div>' +
+              '</div>' +
+              '<div class="live-q-actions">' +
+                callBtn +
+                '<button type="button" class="live-q-btn live-q-hold" data-live-q-hold="' + key + '">' + holdLabel + '</button>' +
+                '<button type="button" class="live-q-btn live-q-start" data-live-q-start="' + key + '">Start</button>' +
+              '</div>' +
+            '</div>';
+        }).join("");
+      }
+      window.ffLiveRefreshQueueCard = function () {
+        var screen = document.getElementById("liveScreen");
+        if (screen && screen.style.display === "flex") renderQueue();
+      };
+
+      function ticketEmployee(t) {
+        return String(t && (t.employeeName || t.staffName || t.technicianName || t.providerName) || "").trim();
+      }
+      function ticketClient(t) {
+        return String(t && (t.clientName || t.customerName || t.guestName || t.name) || "").trim();
+      }
+      function liveMoney(v) {
+        if (typeof window.ffTicketMoney === "function") { try { return window.ffTicketMoney(v); } catch (_) {} }
+        var n = Number(v);
+        return "$" + (Number.isFinite(n) ? n : 0).toFixed(2);
+      }
+      function ticketStatusLabel(t) {
+        return String((t && t.status) || "").replace(/_/g, " ").trim().toUpperCase();
+      }
+      function ticketLines(t) {
+        return (t && Array.isArray(t.performedLines)) ? t.performedLines : [];
+      }
+      function ticketTotalAmount(t) {
+        var lines = ticketLines(t);
+        if (lines.length) return lines.reduce(function (s, l) { return s + (Number(l.ticketPrice) || 0); }, 0);
+        var st = Number(t && t.total);
+        return Number.isFinite(st) ? st : 0;
+      }
+      function renderTickets() {
+        var list = document.getElementById("liveTicketsList");
+        if (!list) return;
+        var tickets = [];
+        try { if (typeof window.ffGetCurrentTickets === "function") tickets = window.ffGetCurrentTickets() || []; } catch (_) {}
+        tickets = (Array.isArray(tickets) ? tickets : []).filter(function (t) {
+          // Live (reception view) shows ACTIVE tickets: OPEN (in progress) and
+          // READY_FOR_CHECKOUT (sent to front desk). Excludes closed/void/archived.
+          var s = String((t && t.status) || "").toLowerCase();
+          return s === "open" || s === "ready_for_checkout";
+        });
+        setCount("liveTicketsCount", tickets.length);
+        if (!tickets.length) { list.innerHTML = emptyHtml("No active tickets."); return; }
+        if (typeof window.ffRenderTicketCardHTML === "function") {
+          // Use the exact same ticket card as the Tickets list so the look matches 1:1.
+          list.innerHTML = tickets.map(function (t) {
+            return '<div class="live-tk-wrap" data-live-ticket="' + liveEsc(t.id || "") + '">' +
+              window.ffRenderTicketCardHTML(t) + '</div>';
+          }).join("");
+          return;
+        }
+        // Fallback: compact rows if the shared renderer isn't ready yet.
+        list.innerHTML = tickets.map(function (t) {
+          var emp = ticketEmployee(t) || "Unassigned";
+          var client = ticketClient(t) || "No client name";
+          var total = liveMoney(ticketTotalAmount(t));
+          return '<div class="live-item is-clickable" data-live-ticket="' + liveEsc(t.id || "") + '">' +
+            '<div class="live-item-main"><div class="live-item-title">' + liveEsc(emp) + '</div>' +
+            '<div class="live-item-sub">\uD83D\uDC64 ' + liveEsc(client) + '</div></div>' +
+            '<div class="live-item-right"><span class="live-pill live-pill--num">' + total + '</span></div></div>';
+        }).join("");
+      }
+
+      function renderFloor() {
+        var list = document.getElementById("liveFloorList");
+        if (!list) return;
+        var orders = [];
+        try { if (typeof window.ffGetFloorOrders === "function") orders = window.ffGetFloorOrders() || []; } catch (_) {}
+        orders = (Array.isArray(orders) ? orders : []).filter(function (o) {
+          return String((o && o.status) || "open").toLowerCase() !== "closed";
+        });
+        setCount("liveFloorCount", orders.length);
+        if (!orders.length) { list.innerHTML = emptyHtml("No open floor requests."); return; }
+        if (typeof window.ffRenderFloorOrderCardHTML === "function") {
+          // Use the exact same floor card as the Floor module so the look matches 1:1.
+          list.innerHTML = orders.map(function (o) {
+            return '<div class="live-floor-wrap" data-live-floor="' + liveEsc(o.id || "") + '">' +
+              window.ffRenderFloorOrderCardHTML(o) + '</div>';
+          }).join("");
+          return;
+        }
+        // Fallback: compact rows if the shared renderer isn't ready yet.
+        list.innerHTML = orders.map(function (o) {
+          var who = liveEsc((o && o.createdByName) || "Someone");
+          var req = liveEsc((o && o.requestName) || "Floor request");
+          var client = String((o && o.clientName) || "").trim();
+          var sub = req + (client ? (" \u00B7 \uD83D\uDC64 " + liveEsc(client)) : "");
+          return '<div class="live-item"><div class="live-item-main"><div class="live-item-title">' + who +
+            '</div><div class="live-item-sub">' + sub + '</div></div></div>';
+        }).join("");
+      }
+      window.ffLiveRefreshFloorCard = function () {
+        var screen = document.getElementById("liveScreen");
+        if (screen && screen.style.display === "flex") renderFloor();
+      };
+      window.ffLiveRefreshTicketsCard = function () {
+        var screen = document.getElementById("liveScreen");
+        if (screen && screen.style.display === "flex") renderTickets();
+      };
+
+      function renderChat() {
+        var list = document.getElementById("liveChatList");
+        if (!list) return;
+        var convos = [];
+        try { if (typeof window.ffGetRecentConversations === "function") convos = window.ffGetRecentConversations(20) || []; } catch (_) {}
+        convos = Array.isArray(convos) ? convos : [];
+        setCount("liveChatCount", convos.length);
+        if (!convos.length) { list.innerHTML = emptyHtml("No recent messages."); return; }
+        if (typeof window.ffRenderChatThreadCardHTML === "function") {
+          // Use the exact same chat thread card as the Chat module so the look matches 1:1.
+          list.innerHTML = convos.map(function (c) {
+            return '<div class="live-chat-wrap" data-live-chat="' + liveEsc((c && c.id) || "") + '">' +
+              window.ffRenderChatThreadCardHTML(c) + '</div>';
+          }).join("");
+          return;
+        }
+        // Fallback: compact rows if the shared renderer isn't ready yet.
+        list.innerHTML = convos.map(function (c) {
+          var title = liveEsc((c && (c.title || c.lastTitle || c.name)) || "Conversation");
+          var msg = liveEsc((c && (c.lastMessage || c.lastTitle || c.preview)) || "");
+          var when = liveTimeAgo(c && (c.lastMessageAt || c.lastMessageAtMs));
+          var right = when ? '<span class="live-pill live-pill--time">' + when + "</span>" : "";
+          return '<div class="live-item is-clickable" data-live-chat="' + liveEsc((c && c.id) || "") + '"><div class="live-item-main"><div class="live-item-title">' + title +
+            '</div><div class="live-item-sub">' + (msg || "&nbsp;") + '</div></div><div class="live-item-right">' + right + "</div></div>";
+        }).join("");
+      }
+      window.ffLiveRefreshChatCard = function () {
+        var screen = document.getElementById("liveScreen");
+        if (screen && screen.style.display === "flex") renderChat();
+      };
+
+      function renderLiveScreen() {
+        renderQueue();
+        renderTickets();
+        renderFloor();
+        renderChat();
+      }
+      function ffSetLiveFabState(isOpen) {
+        var fab = document.querySelector(".ff-live-desk-fab");
+        if (fab) fab.classList.toggle("is-live-open", !!isOpen);
+      }
+      function openLiveScreen() {
+        var screen = document.getElementById("liveScreen");
+        if (!screen) return;
+        renderLiveScreen();
+        screen.style.display = "flex";
+        ffSetLiveFabState(true);
+      }
+      function closeLiveScreen() {
+        var screen = document.getElementById("liveScreen");
+        if (screen) screen.style.display = "none";
+        ffSetLiveFabState(false);
+      }
+      window.ffRenderLiveScreen = renderLiveScreen;
+      window.ffOpenLiveScreen = openLiveScreen;
+      window.ffCloseLiveScreen = closeLiveScreen;
+
+      document.addEventListener("DOMContentLoaded", function () {
+        var closeBtn = document.getElementById("liveScreenClose");
+        if (closeBtn) closeBtn.addEventListener("click", closeLiveScreen);
+        var ticketsList = document.getElementById("liveTicketsList");
+        if (ticketsList) {
+          ticketsList.addEventListener("click", function (ev) {
+            var row = ev.target && ev.target.closest ? ev.target.closest("[data-live-ticket]") : null;
+            if (!row) return;
+            var id = row.getAttribute("data-live-ticket");
+            if (!id) return;
+            // Stay in Live: open the ticket modal on top of the Live screen (modal z-index > Live).
+            if (typeof window.ffOpenTicketModal === "function") {
+              window.ffOpenTicketModal(id);
+            } else if (typeof window.goToTickets === "function") {
+              closeLiveScreen();
+              window.goToTickets();
+            }
+          });
+        }
+        var floorList = document.getElementById("liveFloorList");
+        if (floorList) {
+          floorList.addEventListener("click", function (ev) {
+            var row = ev.target && ev.target.closest ? ev.target.closest("[data-live-floor]") : null;
+            if (!row) return;
+            var id = row.getAttribute("data-live-floor");
+            if (!id) return;
+            // Stay in Live: open the floor details modal on top of the Live screen (modal z-index > Live).
+            if (typeof window.ffOpenFloorOrderDetails === "function") window.ffOpenFloorOrderDetails(id);
+          });
+        }
+        var chatList = document.getElementById("liveChatList");
+        if (chatList) {
+          chatList.addEventListener("click", function (ev) {
+            var row = ev.target && ev.target.closest ? ev.target.closest("[data-live-chat]") : null;
+            if (!row) return;
+            var id = row.getAttribute("data-live-chat");
+            if (!id) return;
+            // Chat is a full screen (no modal): switch to Chat and open the conversation.
+            closeLiveScreen();
+            if (typeof window.ffOpenChatConversation === "function") window.ffOpenChatConversation(id);
+            else if (typeof window.goToChat === "function") window.goToChat();
+          });
+        }
+        var queueList = document.getElementById("liveQueueList");
+        if (queueList) {
+          queueList.addEventListener("click", function (ev) {
+            var t = ev.target && ev.target.closest ? ev.target.closest("[data-live-q-start],[data-live-q-hold],[data-live-q-call]") : null;
+            if (!t) return;
+            ev.preventDefault();
+            var startKey = t.getAttribute("data-live-q-start");
+            var holdKey = t.getAttribute("data-live-q-hold");
+            var callKey = t.getAttribute("data-live-q-call");
+            if (startKey != null && typeof window.ffLiveQueueStart === "function") window.ffLiveQueueStart(startKey);
+            else if (holdKey != null && typeof window.ffLiveQueueHold === "function") window.ffLiveQueueHold(holdKey);
+            else if (callKey != null && typeof window.ffLiveQueueCall === "function") window.ffLiveQueueCall(callKey);
+          });
+        }
+        // Safety net: when Live is open, clicking any nav item / apps tile (top nav,
+        // mobile bottom nav, or Apps panel) closes Live so the target module shows
+        // immediately — no need to close Live first. Navigation itself still runs.
+        document.addEventListener("click", function (ev) {
+          var screen = document.getElementById("liveScreen");
+          if (!screen || screen.style.display !== "flex") return;
+          var tgt = ev.target;
+          if (!tgt || typeof tgt.closest !== "function") return;
+          if (tgt.closest("#liveScreen") || tgt.closest(".ff-live-desk-fab")) return;
+          if (tgt.closest(".nav-item, .apps-panel-item, [data-app]")) {
+            closeLiveScreen();
+          }
+        }, true);
+      });
+      document.addEventListener("ff-tickets-data-changed", function () {
+        var screen = document.getElementById("liveScreen");
+        if (screen && screen.style.display !== "none") renderTickets();
+      });
+      document.addEventListener("ff-staff-cloud-updated", function () {
+        var screen = document.getElementById("liveScreen");
+        if (screen && screen.style.display !== "none") renderLiveScreen();
+      });
+    })();
+  </script>
   <script>
     (function () {
       var STORAGE_KEY = "ff_live_desk_fab_pos_v1";
@@ -60908,7 +61608,56 @@ function hookSettingsGuard_DISABLED(){
       var panel = document.getElementById("ffLiveDeskPanel");
       var closeBtn = document.getElementById("ffLiveDeskClose");
       if (!btn || btn.dataset.dragReady === "1") return;
+      // Live Desk is available on all hosts (staging + production). WHO sees it is
+      // controlled per-staff by the `live_view` permission (Permissions tab), and it
+      // is hidden on phones via CSS (desktop/large-screen reception tool only).
+      var ffLiveDeskHostAllowed = true;
       btn.dataset.dragReady = "1";
+      // Visibility is also gated per-staff by the `live_view` permission (Permissions tab).
+      // Start hidden to avoid a flash before the staff row / permission is known.
+      btn.style.setProperty("display", "none", "important");
+      // The floating LIVE button sits in the bottom-right corner. The Chat screen
+      // keeps its message composer (Send / Reply) in that exact spot, so the FAB
+      // would cover those controls and clicks would "do nothing". Hide the FAB
+      // while the Chat screen is open (Live itself can still be opened from any
+      // other screen). Live is already open as a full screen overlay, so don't
+      // hide the FAB when Live is showing.
+      function ffChatScreenIsOpen() {
+        var chat = document.getElementById("chatScreen");
+        if (!chat) return false;
+        var live = document.getElementById("liveScreen");
+        if (live && live.style.display === "flex") return false;
+        var disp = chat.style.display;
+        if (disp === "none") return false;
+        // Visible if explicitly shown, or computed style is not none.
+        if (disp === "flex" || disp === "block") return true;
+        try { return window.getComputedStyle(chat).display !== "none"; } catch (_) { return false; }
+      }
+      function ffRefreshLiveDeskVisibility() {
+        var allowed = typeof window.ffCurrentUserCanUseLiveDesk === "function"
+          ? window.ffCurrentUserCanUseLiveDesk()
+          : false;
+        if (allowed && !ffChatScreenIsOpen()) {
+          btn.style.setProperty("display", "inline-flex", "important");
+        } else {
+          btn.style.setProperty("display", "none", "important");
+          if (panel) {
+            panel.classList.remove("is-open");
+            panel.setAttribute("aria-hidden", "true");
+          }
+        }
+      }
+      window.ffRefreshLiveDeskVisibility = ffRefreshLiveDeskVisibility;
+      document.addEventListener("ff-staff-cloud-updated", ffRefreshLiveDeskVisibility);
+      setTimeout(ffRefreshLiveDeskVisibility, 0);
+      // Re-evaluate FAB visibility whenever the Chat screen is shown/hidden.
+      try {
+        var ffChatScreenEl = document.getElementById("chatScreen");
+        if (ffChatScreenEl && typeof MutationObserver === "function") {
+          new MutationObserver(function () { ffRefreshLiveDeskVisibility(); })
+            .observe(ffChatScreenEl, { attributes: true, attributeFilter: ["style", "class"] });
+        }
+      } catch (_) {}
 
       function clamp(value, min, max) {
         return Math.max(min, Math.min(max, value));
@@ -61051,6 +61800,17 @@ function hookSettingsGuard_DISABLED(){
       }
 
       function openLiveDesk() {
+        // Toggle the full Live screen (panel kept for legacy / fallback only).
+        if (typeof window.ffOpenLiveScreen === "function") {
+          var screen = document.getElementById("liveScreen");
+          var isOpen = screen && screen.style.display === "flex";
+          if (isOpen) {
+            if (typeof window.ffCloseLiveScreen === "function") window.ffCloseLiveScreen();
+          } else {
+            window.ffOpenLiveScreen();
+          }
+          return;
+        }
         if (!panel) return;
         renderLiveDesk();
         panel.classList.add("is-open");
@@ -61076,27 +61836,39 @@ function hookSettingsGuard_DISABLED(){
 
       var drag = null;
       var suppressNextClick = false;
+      var FF_DRAG_THRESHOLD = 6; // px — below this a pointer move counts as a click, not a drag
       btn.addEventListener("pointerdown", function (event) {
         if (event.button != null && event.button !== 0) return;
         var rect = btn.getBoundingClientRect();
         drag = {
           pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
           offsetX: event.clientX - rect.left,
           offsetY: event.clientY - rect.top,
           moved: false
         };
-        btn.setPointerCapture(event.pointerId);
+        try { btn.setPointerCapture(event.pointerId); } catch (_) {}
       });
       btn.addEventListener("pointermove", function (event) {
         if (!drag || drag.pointerId !== event.pointerId) return;
+        // Only treat as a drag once the pointer has moved past a small threshold,
+        // so tiny movements during a normal click don't suppress the click.
+        if (!drag.moved) {
+          var dx = event.clientX - drag.startX;
+          var dy = event.clientY - drag.startY;
+          if ((dx * dx + dy * dy) < (FF_DRAG_THRESHOLD * FF_DRAG_THRESHOLD)) return;
+          drag.moved = true;
+        }
         event.preventDefault();
-        drag.moved = true;
         setPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY, false);
       });
       btn.addEventListener("pointerup", function (event) {
         if (!drag || drag.pointerId !== event.pointerId) return;
-        var rect = btn.getBoundingClientRect();
-        setPosition(rect.left, rect.top, true);
+        if (drag.moved) {
+          var rect = btn.getBoundingClientRect();
+          setPosition(rect.left, rect.top, true);
+        }
         suppressNextClick = !!drag.moved;
         drag = null;
       });
@@ -61145,7 +61917,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
         { src: "/queue-cloud.js?v=20260609_merge_base_consistency", type: "module", delay: 1350 },
-        { src: "/tickets.js?v=20260609_bulk_delete", type: "module", delay: 1400 },
+        { src: "/tickets.js?v=20260619_manager_view_open_tickets", type: "module", delay: 1400 },
         { src: "/tasks-cloud.js?v=20260610_tasks_rules_direct_sync", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
         { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
@@ -61156,14 +61928,14 @@ function hookSettingsGuard_DISABLED(){
         { src: "/dashboard.js?v=20260516_dashboard_class_first_recompute", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260530_reorder_delete", type: "module", delay: 2700 },
-        { src: "/media-upload.js?v=20260602_storage_5gb_restore_final", type: "module", delay: 2780 },
-        { src: "/chat.js?v=20260615_chat_flow_load_resilient", type: "module", delay: 2900 },
+        { src: "/media-upload.js?v=20260618_multi_image_upload_internal_fallback", type: "module", delay: 2780 },
+        { src: "/chat.js?v=20260619_live_chat_card_shared", type: "module", delay: 2900 },
         { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module", delay: 3050 },
-        { src: "/floor-cloud.js?v=20260618_floor_order_picker_fast", type: "module", delay: 3120 },
+        { src: "/floor-cloud.js?v=20260618_live_floor_realtime_refresh", type: "module", delay: 3120 },
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/push-notifications.js?v=20260524_ios_fcm_bridge_retry", type: "module", delay: 3500 },
-        { src: "/settings-cloud.js?v=20260530_tax_split", type: "module", delay: 3600 },
+        { src: "/settings-cloud.js?v=20260618_ticket_customer_required_fix", type: "module", delay: 3600 },
         { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module", delay: 3650 }, // bumped: native (mobile) read-only billing — payment-method last-4 + blocked payment actions
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },
@@ -61882,9 +62654,15 @@ function hookSettingsGuard_DISABLED(){
         gap: 8px;
       }
       #ticketsScreen #ticketsTabsNav {
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: 100%;
+        white-space: nowrap;
         overflow-x: auto;
         overflow-y: hidden;
         -webkit-overflow-scrolling: touch;
+        touch-action: pan-x;
+        overscroll-behavior-x: contain;
         scrollbar-width: none;
         gap: 16px;
         padding: 4px 0 0;
@@ -63281,11 +64059,20 @@ function hookSettingsGuard_DISABLED(){
     #floorScreen .floor-tabs__top {
       padding: 6px 10px 0;
       gap: 8px;
+      flex-wrap: wrap;
+      row-gap: 8px;
     }
     #floorScreen #floorTabsNav {
       gap: 10px;
       overflow-x: auto;
       scrollbar-width: none;
+      flex: 0 1 auto;
+    }
+    #floorScreen #floorToolbarRight {
+      flex-shrink: 1;
+      min-width: 0;
+      max-width: 100%;
+      margin-left: auto;
     }
     #floorScreen #floorTabsNav::-webkit-scrollbar {
       display: none;
@@ -63305,6 +64092,12 @@ function hookSettingsGuard_DISABLED(){
       padding: 8px 14px !important;
       font-size: 12px !important;
       min-height: 34px !important;
+      height: auto !important;
+      max-width: 100%;
+      min-width: 0;
+      white-space: normal;
+      line-height: 1.15;
+      text-align: center;
     }
     #floorScreen #floorNewBtn .floor-new-btn__lg {
       display: inline;
@@ -63369,7 +64162,7 @@ function hookSettingsGuard_DISABLED(){
         <label for="floorOrderClientNameInput" style="display:block;font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">Client Name <span style="font-weight:500;color:#9ca3af;">(optional)</span></label>
         <input id="floorOrderClientNameInput" type="text" autocomplete="off" placeholder="Client Name (optional)" style="width:100%;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;font-size:13px;color:#111827;outline:none;background:#fff;">
       </div>
-      <div id="floorOrderCategoryList" style="padding:18px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;min-height:180px;"></div>
+      <div id="floorOrderCategoryList" style="padding:18px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;flex:1 1 auto;min-height:0;"></div>
       <div style="padding:14px 18px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:10px;background:#f9fafb;">
         <button type="button" id="floorSendOrderBtn" onclick="window.ffCreateFloorOrderPlaceholder && window.ffCreateFloorOrderPlaceholder()" style="border:0;background:#7c3aed;color:#fff;border-radius:999px;padding:9px 14px;font-size:13px;font-weight:800;cursor:not-allowed;opacity:.5;">Send Floor Order</button>
       </div>
@@ -63389,7 +64182,7 @@ function hookSettingsGuard_DISABLED(){
         <button type="button" class="floor-settings-tab" data-floor-settings-tab="flow" onclick="window.ffFloorSettingsTab && window.ffFloorSettingsTab('flow')" style="padding:12px 20px;font-size:13px;font-weight:600;color:#6b7280;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;margin-bottom:-1px;">Flow Requests</button>
         <button type="button" class="floor-settings-tab" data-floor-settings-tab="categories" onclick="window.ffFloorSettingsTab && window.ffFloorSettingsTab('categories')" style="padding:12px 20px;font-size:13px;font-weight:600;color:#6b7280;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;margin-bottom:-1px;">Categories</button>
       </div>
-      <div style="padding:22px;min-height:260px;overflow-y:auto;">
+      <div style="padding:22px;min-height:0;overflow-y:auto;flex:1 1 auto;">
         <datalist id="floorCategorySuggestions">
         </datalist>
         <div id="floorSettingsRegularPane" style="display:flex;flex-direction:column;gap:16px;min-height:220px;">
@@ -63813,7 +64606,8 @@ function hookSettingsGuard_DISABLED(){
       </div>
       <div id="uploadWorkFileSingle" style="margin-bottom:20px;">
         <label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:8px;">Choose file</label>
-        <input type="file" id="uploadWorkFileInput" accept="image/*" style="width:100%;padding:8px;border:1px dashed #d1d5db;border-radius:8px;font-size:10px;">
+        <input type="file" id="uploadWorkFileInput" accept="image/*" multiple style="width:100%;padding:8px;border:1px dashed #d1d5db;border-radius:8px;font-size:10px;">
+        <div id="uploadWorkFileHint" style="font-size:9px;color:#6b7280;margin-top:6px;line-height:1.35;">You can choose up to 15 images at once.</div>
       </div>
       <div id="uploadWorkFileBeforeAfter" style="display:none;margin-bottom:20px;">
         <div style="margin-bottom:12px;"><label style="display:block;font-size:10px;font-weight:500;color:#374151;margin-bottom:6px;">Before image</label><input type="file" id="uploadWorkFileBefore" accept="image/*" style="width:100%;padding:8px;border:1px dashed #d1d5db;border-radius:8px;font-size:10px;"></div>

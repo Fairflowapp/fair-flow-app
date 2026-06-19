@@ -207,8 +207,18 @@ async function checkStorageUploadAllowance(salonId, uploadBytes) {
     getFunctions(undefined, FUNCTIONS_REGION),
     "checkStorageUploadAllowance"
   );
-  const res = await fn({ salonId, uploadBytes });
-  return res?.data || {};
+  try {
+    const res = await fn({ salonId, uploadBytes });
+    return res?.data || {};
+  } catch (err) {
+    const code = String(err?.code || "").toLowerCase();
+    const message = String(err?.message || err || "").toLowerCase();
+    if (code.includes("internal") || message.includes("functions/internal") || message.includes("internal")) {
+      console.warn("[MediaCloud] storage allowance callable failed; allowing upload to continue", err);
+      return { allowed: true, skippedReason: "allowance_internal_error" };
+    }
+    throw err;
+  }
 }
 
 async function ensureStorageCapacityForUpload(salonId, file) {
@@ -602,6 +612,58 @@ export async function addMediaToExistingWork(workId, files, mediaType) {
 }
 
 /**
+ * Add multiple regular media files without failing the full batch when one file fails.
+ * before_after stays on the strict path because it must remain an exact before/after pair.
+ *
+ * @param {string} workId
+ * @param {File[]} files
+ * @param {string} mediaType - "photo" | "video"
+ * @param {(info: { done: number, total: number, file: File, ok: boolean }) => void} onProgress
+ * @returns {Promise<{mediaIds: string[], successfulFiles: File[], failures: Array<{fileName: string, error: string}>}>}
+ */
+export async function addMediaToExistingWorkBestEffort(workId, files, mediaType, onProgress) {
+  const salonId = await getSalonId();
+  if (!salonId) throw new Error("No salonId");
+  if (mediaType === "before_after") {
+    const mediaIds = await addMediaToExistingWork(workId, files, mediaType);
+    return { mediaIds, successfulFiles: (Array.isArray(files) ? files : [files]).filter(Boolean), failures: [] };
+  }
+
+  const fileList = (Array.isArray(files) ? files : [files]).filter(Boolean);
+  await ensureStorageCapacityForFiles(salonId, fileList);
+
+  const existing = await getMediaItems(workId);
+  let nextSortOrder = existing.length > 0
+    ? Math.max(...existing.map((m) => m.sortOrder ?? 0)) + 1
+    : 0;
+  const mediaIds = [];
+  const successfulFiles = [];
+  const failures = [];
+
+  for (let idx = 0; idx < fileList.length; idx++) {
+    const file = fileList[idx];
+    try {
+      const result = await uploadAndCreateMediaItem(workId, file, mediaType, nextSortOrder);
+      mediaIds.push(result.mediaId);
+      successfulFiles.push(file);
+      nextSortOrder++;
+      if (typeof onProgress === "function") onProgress({ done: idx + 1, total: fileList.length, file, ok: true });
+    } catch (err) {
+      failures.push({
+        fileName: file?.name || `File ${idx + 1}`,
+        error: err?.message || err?.code || String(err || "Upload failed"),
+      });
+      if (typeof onProgress === "function") onProgress({ done: idx + 1, total: fileList.length, file, ok: false });
+    }
+  }
+
+  if (mediaIds.length > 0) {
+    await updateContentWork(workId, { updatedAt: serverTimestamp() });
+  }
+  return { mediaIds, successfulFiles, failures };
+}
+
+/**
  * Create a new work with media in one call.
  * @param {object} workData - { staffId, staffName, createdByRole, serviceType, caption?, ... }
  * @param {File|File[]} files - Single file or [before, after] for before_after
@@ -619,6 +681,36 @@ export async function createWorkWithMedia(workData, files, mediaType) {
   } catch (err) {
     await deleteContentWork(workId).catch((cleanupErr) => {
       console.warn("[MediaCloud] cleanup empty work after upload failure failed", workId, cleanupErr);
+    });
+    throw err;
+  }
+}
+
+/**
+ * Create a new work and upload regular files best-effort.
+ * Cleans up the work only if every file fails.
+ */
+export async function createWorkWithMediaBestEffort(workData, files, mediaType, onProgress) {
+  const salonId = await getSalonId();
+  if (!salonId) throw new Error("No salonId");
+  if (mediaType === "before_after") {
+    const result = await createWorkWithMedia(workData, files, mediaType);
+    return { workId: result.workId, mediaIds: result.mediaIds, successfulFiles: (Array.isArray(files) ? files : [files]).filter(Boolean), failures: [] };
+  }
+
+  await ensureStorageCapacityForFiles(salonId, files);
+  const workId = await createContentWork(workData);
+  try {
+    const result = await addMediaToExistingWorkBestEffort(workId, files, mediaType, onProgress);
+    if (!result.mediaIds.length) {
+      await deleteContentWork(workId).catch((cleanupErr) => {
+        console.warn("[MediaCloud] cleanup empty best-effort work failed", workId, cleanupErr);
+      });
+    }
+    return { workId, ...result };
+  } catch (err) {
+    await deleteContentWork(workId).catch((cleanupErr) => {
+      console.warn("[MediaCloud] cleanup empty best-effort work failed", workId, cleanupErr);
     });
     throw err;
   }

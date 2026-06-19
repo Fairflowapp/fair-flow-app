@@ -402,6 +402,29 @@ service cloud.firestore {
       return permModuleManageAllowed(salonId, 'products_manage');
     }
 
+    /**
+     * Floor module per-staff permissions (server mirror of the client UI gates).
+     * NO Owner/Admin role override by design: if an owner/admin turns their own
+     * Floor toggle off, the rules respect it — matching the Floor UI behavior.
+     * Resolves the caller's staff doc via mySalonStaffDocData (same resolver the
+     * Media module uses), so it is inherently scoped to the caller's salon.
+     */
+    function floorStaffPermTrue(salonId, key) {
+      return mySalonStaffDocData(salonId) != null
+        && mySalonStaffDocData(salonId).permissions is map
+        && mySalonStaffDocData(salonId).permissions.keys().hasAny([key])
+        && mySalonStaffDocData(salonId).permissions[key] == true;
+    }
+    function permFloorSendAllowed(salonId) {
+      return floorStaffPermTrue(salonId, 'floor_send');
+    }
+    function permFloorReceiveAllowed(salonId) {
+      return floorStaffPermTrue(salonId, 'floor_receive');
+    }
+    function permFloorManageAllowed(salonId) {
+      return floorStaffPermTrue(salonId, 'floor_manage');
+    }
+
     /** Default is allow (mirrors UI `points_view_own !== false`); only explicit false denies. */
     function permPointsOwnAllowed(salonId) {
       return mySalonStaffDocData(salonId) != null && (
@@ -1159,37 +1182,43 @@ service cloud.firestore {
       }
     }
 
-    // Floor Settings — Admin/Owner can manage; all salon members can read for New Floor Request
+    // Floor Settings — staff with floor_manage can manage; all salon members can
+    // read for the New Floor Request picker. No Owner/Admin auto-override.
     match /salons/{salonId}/floorCategories/{categoryId} {
       allow read: if belongsToSalon(salonId);
-      allow create, update, delete: if isAdminOrOwner(salonId);
+      allow create, update, delete: if permFloorManageAllowed(salonId);
     }
 
     match /salons/{salonId}/floorRegularRequests/{requestId} {
       allow read: if belongsToSalon(salonId);
-      allow create, update, delete: if isAdminOrOwner(salonId);
+      allow create, update, delete: if permFloorManageAllowed(salonId);
     }
 
     match /salons/{salonId}/floorFlows/{flowId} {
       allow read: if belongsToSalon(salonId);
-      allow create, update, delete: if isAdminOrOwner(salonId);
+      allow create, update, delete: if permFloorManageAllowed(salonId);
       match /steps/{stepId} {
         allow read: if belongsToSalon(salonId);
-        allow create, update, delete: if isAdminOrOwner(salonId);
+        allow create, update, delete: if permFloorManageAllowed(salonId);
         match /options/{optionId} {
           allow read: if belongsToSalon(salonId);
-          allow create, update, delete: if isAdminOrOwner(salonId);
+          allow create, update, delete: if permFloorManageAllowed(salonId);
         }
       }
     }
 
     match /salons/{salonId}/floorOrders/{orderId} {
-      allow read: if belongsToSalon(salonId);
-      allow create: if belongsToSalon(salonId);
-      allow update: if isManager(salonId)
-        || (
-          belongsToSalon(salonId)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+      // Read: receivers see all orders; senders can read (UI filters to own).
+      allow read: if permFloorReceiveAllowed(salonId) || permFloorSendAllowed(salonId);
+      // Create: floor_send only, with basic field validation.
+      allow create: if permFloorSendAllowed(salonId)
+        && request.resource.data.status == 'open'
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.keys().hasAll(['createdAt']);
+      // Update (Take / In Progress / Close): floor_receive only (no role override),
+      // limited to status/handled/closed bookkeeping fields.
+      allow update: if permFloorReceiveAllowed(salonId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'status',
             'handledByUid',
             'handledByName',
@@ -1199,9 +1228,9 @@ service cloud.firestore {
             'closedAt',
             'deleteAt'
           ])
-          && request.resource.data.status in ['open', 'in_progress', 'closed']
-        );
-      allow delete: if isManager(salonId);
+        && request.resource.data.status in ['open', 'in_progress', 'closed'];
+      // Delete: floor_receive only.
+      allow delete: if permFloorReceiveAllowed(salonId);
     }
 
     // Conversations (PRIVATE) — only participants can read

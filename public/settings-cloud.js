@@ -722,12 +722,27 @@ function ffSaveTicketPreferences(requireCustomerName) {
 /** True when staff must enter a customer name before sending a ticket. */
 function ffGetRequireCustomerNameOnTicket() {
   try {
-    return !!(
-      typeof window !== "undefined" &&
-      window.settings &&
-      window.settings.preferences &&
-      window.settings.preferences.requireCustomerNameOnTicket === true
-    );
+    if (typeof window === "undefined") return false;
+    const data = _lastMainSnapshot && typeof _lastMainSnapshot === "object" ? _lastMainSnapshot : {};
+    const locationId = _ffActiveLocationIdForSettings();
+    const locationPreferences = data.locationPreferences && typeof data.locationPreferences === "object"
+      ? data.locationPreferences
+      : {};
+    const activePrefs = locationId && locationPreferences[locationId] && typeof locationPreferences[locationId] === "object"
+      ? locationPreferences[locationId]
+      : null;
+    if (activePrefs && Object.prototype.hasOwnProperty.call(activePrefs, "requireCustomerNameOnTicket")) {
+      return activePrefs.requireCustomerNameOnTicket === true;
+    }
+    if (data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, "requireCustomerNameOnTicket")) {
+      return data.preferences.requireCustomerNameOnTicket === true;
+    }
+    if (window.settings && window.settings.preferences && window.settings.preferences.requireCustomerNameOnTicket === true) {
+      return true;
+    }
+    return Object.values(locationPreferences).some((prefs) => (
+      prefs && typeof prefs === "object" && prefs.requireCustomerNameOnTicket === true
+    ));
   } catch (e) {
     return false;
   }

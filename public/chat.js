@@ -144,6 +144,78 @@ let chatEditingFlowId  = null;
 let chatFlowDraft      = null;   // { title, allowedSenders, steps } for builder
 let chatReplyContext   = null;   // { uid, name, conversationId }
 let allConversations   = [];     // kept in sync by onSnapshot
+// Live Desk reads the most recent conversations for its Chat card.
+// Returns the FULL conversation objects so the Live card can render the exact
+// same thread card as the Chat module (avatars, name, time, preview, unread).
+if (typeof window !== 'undefined') {
+  window.ffGetRecentConversations = function (limitN) {
+    var n = Number(limitN) > 0 ? Number(limitN) : 8;
+    var arr = Array.isArray(allConversations) ? allConversations.slice() : [];
+    arr.sort(function (a, b) {
+      var am = (a && (a.lastMessageAtMs || (a.lastMessageAt && a.lastMessageAt.toMillis && a.lastMessageAt.toMillis()))) || 0;
+      var bm = (b && (b.lastMessageAtMs || (b.lastMessageAt && b.lastMessageAt.toMillis && b.lastMessageAt.toMillis()))) || 0;
+      return bm - am;
+    });
+    return arr.slice(0, n);
+  };
+  // Build a single chat thread card with the EXACT same look as the Chat module.
+  window.ffRenderChatThreadCardHTML = function (conv) {
+    try { return conv ? ffBuildChatThreadCardHTML(conv, { forLive: true }) : ''; }
+    catch (_) { return ''; }
+  };
+  // Open a conversation from the Live Desk: switch to the Chat screen and open the thread.
+  window.ffOpenChatConversation = async function (convId) {
+    if (!convId) return;
+    try { if (typeof goToChat === 'function') await goToChat(); } catch (_) {}
+    try { if (typeof window._openThread === 'function') window._openThread(convId); } catch (_) {}
+  };
+}
+
+// Shared thread-card builder used by both the Chat module list and the Live Desk
+// so the two always look identical.
+function ffBuildChatThreadCardHTML(conv, opts) {
+  opts = opts || {};
+  const forLive = !!opts.forLive;
+  const uid = (opts.uid != null && opts.uid !== '') ? opts.uid : (chatUserProfile?.uid || '');
+  const convId = conv.id;
+  const otherUid = _otherUidFromParticipants(conv.participants, uid);
+  const otherName = _nameForUid(otherUid) || 'Unknown';
+  const unread = (conv.unreadFor && conv.unreadFor[uid]) ? Number(conv.unreadFor[uid]) : 0;
+  const myInitial = (_trimStr(chatUserProfile?.displayName) || _trimStr(chatUserProfile?.name) || '?').charAt(0).toUpperCase();
+  const otherInitial = otherName.charAt(0).toUpperCase();
+  const myAvatarUrl = _avatarUrlForUid(uid);
+  const otherAvatarUrl = _avatarUrlForUid(otherUid);
+  const myAvatarHtml = myAvatarUrl
+    ? `<span class="ctc-avatar ctc-avatar-me" style="overflow:hidden;"><img src="${String(myAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
+    : `<span class="ctc-avatar ctc-avatar-me">${escHtml(myInitial)}</span>`;
+  const otherAvatarHtml = otherAvatarUrl
+    ? `<span class="ctc-avatar ctc-avatar-other" style="overflow:hidden;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
+    : `<span class="ctc-avatar ctc-avatar-other">${escHtml(otherInitial)}</span>`;
+  const selected = (!forLive && typeof currentConvId !== 'undefined' && currentConvId === convId) ? 'is-selected' : '';
+  const onclickAttr = forLive ? '' : ` onclick="window._openThread('${escHtml(convId)}', this)"`;
+  return `
+      <div class="chat-thread-card ${selected} ${unread > 0 ? 'chat-thread-card-unread' : ''}"
+           data-conv-id="${escHtml(convId)}"
+           data-other-uid="${escHtml(otherUid)}"
+           data-other-name="${escHtml(otherName)}"${onclickAttr}>
+        <div class="ctc-avatars">
+          ${myAvatarHtml}
+          ${otherAvatarHtml}
+        </div>
+        <div class="ctc-body">
+          <div class="ctc-top">
+            <span class="ctc-name">${escHtml(otherName)}</span>
+            <span class="ctc-time">${timeAgo(conv?.lastMessageAt)}</span>
+          </div>
+          <div class="ctc-preview">
+            ${conv?.lastSenderUid === uid ? '<span class="ctc-you">You: </span>' : ''}
+            ${escHtml(conv?.lastTitle || conv?.lastMessage || '')}
+          </div>
+        </div>
+        ${unread > 0 ? `<span class="ctc-badge">${unread}</span>` : ''}
+      </div>
+    `;
+}
 let lastNonEmptyConversations = [];
 let lastRenderedConversations = [];
 let lastRenderedThreadListHtml = '';
@@ -1011,6 +1083,10 @@ function subscribeToConversationList() {
 
 // ─── Thread List ───────────────────────────────────────────────────────────────
 function renderThreadList() {
+  // Keep the Live Desk chat card in sync in real time (it reads from ffGetRecentConversations).
+  if (typeof window.ffLiveRefreshChatCard === 'function') {
+    try { window.ffLiveRefreshChatCard(); } catch (_eLive) {}
+  }
   const loading = document.getElementById('chatFeedLoading');
   const empty   = document.getElementById('chatFeedEmpty');
   const list    = document.getElementById('chatFeedList');
@@ -1051,47 +1127,7 @@ function renderThreadList() {
   lastRenderedConversations = conversationsToRender.slice();
   _cacheConversations(conversationsToRender);
 
-  const nextHtml = conversationsToRender.map(conv => {
-    const convId = conv.id;
-    const otherUid = _otherUidFromParticipants(conv.participants, uid);
-    const otherName = _nameForUid(otherUid) || 'Unknown';
-    const unread = (conv.unreadFor && conv.unreadFor[uid]) ? Number(conv.unreadFor[uid]) : 0;
-    const myInitial  = (_trimStr(chatUserProfile?.displayName) || _trimStr(chatUserProfile?.name) || '?').charAt(0).toUpperCase();
-    const otherInitial = otherName.charAt(0).toUpperCase();
-    const myAvatarUrl = _avatarUrlForUid(uid);
-    const otherAvatarUrl = _avatarUrlForUid(otherUid);
-    const myAvatarHtml = myAvatarUrl
-      ? `<span class="ctc-avatar ctc-avatar-me" style="overflow:hidden;"><img src="${String(myAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
-      : `<span class="ctc-avatar ctc-avatar-me">${escHtml(myInitial)}</span>`;
-    const otherAvatarHtml = otherAvatarUrl
-      ? `<span class="ctc-avatar ctc-avatar-other" style="overflow:hidden;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
-      : `<span class="ctc-avatar ctc-avatar-other">${escHtml(otherInitial)}</span>`;
-
-    const selected = (currentConvId === convId) ? 'is-selected' : '';
-    return `
-      <div class="chat-thread-card ${selected} ${unread > 0 ? 'chat-thread-card-unread' : ''}"
-           data-conv-id="${escHtml(convId)}"
-           data-other-uid="${escHtml(otherUid)}"
-           data-other-name="${escHtml(otherName)}"
-           onclick="window._openThread('${escHtml(convId)}', this)">
-        <div class="ctc-avatars">
-          ${myAvatarHtml}
-          ${otherAvatarHtml}
-        </div>
-        <div class="ctc-body">
-          <div class="ctc-top">
-            <span class="ctc-name">${escHtml(otherName)}</span>
-            <span class="ctc-time">${timeAgo(conv?.lastMessageAt)}</span>
-          </div>
-          <div class="ctc-preview">
-            ${conv?.lastSenderUid === uid ? '<span class="ctc-you">You: </span>' : ''}
-            ${escHtml(conv?.lastTitle || conv?.lastMessage || '')}
-          </div>
-        </div>
-        ${unread > 0 ? `<span class="ctc-badge">${unread}</span>` : ''}
-      </div>
-    `;
-  }).join('');
+  const nextHtml = conversationsToRender.map(conv => ffBuildChatThreadCardHTML(conv, { uid })).join('');
   lastRenderedThreadListHtml = nextHtml;
   list.innerHTML = nextHtml;
 }
