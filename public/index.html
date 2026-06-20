@@ -14789,7 +14789,10 @@ function renderQueue(){
       });
     }
 
+    // Self-leave (✖) button disabled per request — it is never shown in the
+    // Available list for anyone. Removal is handled via the manager Reorder flow.
     if (
+      false &&
       !queueLocked &&
       !reorderMode &&
       (canTechnicianSelfCheckoutQueueRow(q) ||
@@ -14899,13 +14902,33 @@ window.ffGetLiveQueueRows = function () {
     var nameFg = '';
     try { if (typeof colorOf === 'function') nameBg = colorOf(colorTarget) || ''; } catch (_eC) {}
     try { if (typeof fontColorOf === 'function') nameFg = fontColorOf(colorTarget) || ''; } catch (_eF) {}
+    // Mirror the Queue module call-status info so Live shows the same call state
+    // (Calling / Ringing / In call / answered ...) instead of a silent phone icon.
+    var queueEntryIdForCall = q.id || q.queueEntryId || q.entryId || '';
+    var callStatus = '';
+    try {
+      callStatus =
+        (typeof ffTwilioVoiceRecentStatus === 'function'
+          ? ffTwilioVoiceRecentStatus(staffId, queueEntryIdForCall, 'client_waiting')
+          : '') ||
+        (typeof queueCallStatusLabel === 'function'
+          ? queueCallStatusLabel(meta.presence, meta.status)
+          : '') ||
+        '';
+    } catch (_eS) {}
+    var callTitle = '';
+    try {
+      if (typeof ffStaffCallButtonTitle === 'function') callTitle = ffStaffCallButtonTitle(meta.status, 'queue') || '';
+    } catch (_eT) {}
     return {
       key: ffQueueAvailableRowStableKey(q),
       name: (typeof ffQueueDisplayName === 'function') ? ffQueueDisplayName(q) : (q.name || ''),
       held: !!q.held,
       canCall: !!(canCallAccess && staffId),
       nameBg: nameBg,
-      nameFg: nameFg
+      nameFg: nameFg,
+      callStatus: callStatus,
+      callTitle: callTitle
     };
   });
 };
@@ -14923,7 +14946,8 @@ window.ffLiveQueueHold = function (key) {
   window.__ff_holdWasHeld = !!q.held;
   if (typeof guardHold === 'function') guardHold(function () { toggleHold(idx); });
 };
-window.ffLiveQueueCall = async function (key) {
+window.ffLiveQueueCall = async function (key, opts) {
+  opts = opts || {};
   var idx = ffLiveFindQueueIndexByKey(key);
   if (idx < 0) return;
   var q = queue[idx];
@@ -14938,11 +14962,90 @@ window.ffLiveQueueCall = async function (key) {
     var result = await ffSendTwilioVoiceStaffCall({
       staffId: meta.staffId,
       queueEntryId: queueEntryIdForCall,
-      callType: 'client_waiting'
+      callType: 'client_waiting',
+      statusEl: opts.statusEl || null,
+      buttonEl: opts.buttonEl || null
     });
     if (!result || result.ok !== true) alert('Call could not be sent.');
   } catch (e) {
     console.error('[Live] queue call failed', e);
+    alert('Call could not be sent.');
+  }
+};
+
+// ---- Live Desk: In Service (service list) bridge — mirrors the Queue module ----
+function ffLiveFindServiceIndexByKey(key) {
+  if (!Array.isArray(service)) return -1;
+  return service.findIndex(function (s) { return ffServiceInServiceRowStableKey(s) === key; });
+}
+window.ffGetLiveServiceRows = function () {
+  if (!Array.isArray(service)) return [];
+  var canCallAccess = (typeof ffHasQueueCallAccess === 'function') ? ffHasQueueCallAccess() : false;
+  return service.map(function (s) {
+    var meta = {};
+    try { meta = queuePresenceMeta(s, { queueMember: true }) || {}; } catch (_e) {}
+    var staffId = meta.staffId || s.staffId || '';
+    var colorTarget = { name: s.name || '', staffId: staffId };
+    var nameBg = '';
+    var nameFg = '';
+    try { if (typeof colorOf === 'function') nameBg = colorOf(colorTarget) || ''; } catch (_eC) {}
+    try { if (typeof fontColorOf === 'function') nameFg = fontColorOf(colorTarget) || ''; } catch (_eF) {}
+    var serviceEntryIdForCall = s.id || s.queueEntryId || s.entryId || '';
+    var callStatus = '';
+    try {
+      callStatus =
+        (typeof ffTwilioVoiceRecentStatus === 'function'
+          ? ffTwilioVoiceRecentStatus(staffId, serviceEntryIdForCall, 'front_desk')
+          : '') ||
+        (typeof queueCallStatusLabel === 'function'
+          ? queueCallStatusLabel(meta.presence, meta.status)
+          : '') ||
+        '';
+    } catch (_eS) {}
+    var callTitle = '';
+    try {
+      if (typeof ffStaffCallButtonTitle === 'function') callTitle = ffStaffCallButtonTitle(meta.status, 'service') || '';
+    } catch (_eT) {}
+    return {
+      key: ffServiceInServiceRowStableKey(s),
+      name: (typeof ffQueueDisplayName === 'function') ? ffQueueDisplayName(s) : (s.name || ''),
+      nameBg: nameBg,
+      nameFg: nameFg,
+      canCall: !!(canCallAccess && staffId),
+      callStatus: callStatus,
+      callTitle: callTitle
+    };
+  });
+};
+window.ffLiveServiceFinish = function (key) {
+  var idx = ffLiveFindServiceIndexByKey(key);
+  if (idx < 0) return;
+  var s = service[idx];
+  if (typeof guardFinish === 'function') guardFinish(s.name, function () { finish(idx); });
+};
+window.ffLiveServiceCall = async function (key, opts) {
+  opts = opts || {};
+  var idx = ffLiveFindServiceIndexByKey(key);
+  if (idx < 0) return;
+  var s = service[idx];
+  if (typeof ffSendTwilioVoiceStaffCall !== 'function') {
+    alert('Call feature is still loading. Wait a few seconds and try again.');
+    return;
+  }
+  var meta = {};
+  try { meta = queuePresenceMeta(s, { queueMember: true }) || {}; } catch (_e) {}
+  var serviceEntryIdForCall = s.id || s.queueEntryId || s.entryId || '';
+  try {
+    var result = await ffSendTwilioVoiceStaffCall({
+      staffId: meta.staffId,
+      queueEntryId: serviceEntryIdForCall,
+      callType: 'front_desk',
+      statusEl: opts.statusEl || null,
+      buttonEl: opts.buttonEl || null
+    });
+    if (!result || result.ok !== true) alert('Call could not be sent.');
+  } catch (e) {
+    console.error('[Live] service call failed', e);
     alert('Call could not be sent.');
   }
 };
@@ -15034,6 +15137,10 @@ function renderService(){
     _ffSvcNameStyle.id = 'ffInServiceNamePillWebStyle';
     _ffSvcNameStyle.textContent = '@media (min-width:641px){.ff-inservice-name-pill{font-size:14px !important;padding:5px 10px !important;max-width:min(240px,30vw) !important;}}';
     document.head.appendChild(_ffSvcNameStyle);
+  }
+
+  if (typeof window.ffLiveRefreshQueueCard === 'function') {
+    try { window.ffLiveRefreshQueueCard(); } catch (_eLiveSvc) {}
   }
 
   var _ffSvcListScroll = typeof ffQueueReadBothListScrollTops === 'function' ? ffQueueReadBothListScrollTops() : null;
@@ -61162,6 +61269,18 @@ function hookSettingsGuard_DISABLED(){
     #liveScreen .live-pill--next { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
     #liveScreen .live-empty { padding: 18px 14px; text-align: center; color: #9ca3af; font-size: 12.5px; }
     #liveScreen .live-q-item .live-item-sub { display: flex; align-items: center; gap: 5px; }
+    #liveScreen .live-q-head { gap: 8px; }
+    #liveScreen .live-q-head-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    #liveScreen .live-q-seg {
+      display: inline-flex; align-items: center; background: #f1f0f9; border: 1px solid #e5e3f5;
+      border-radius: 999px; padding: 2px; gap: 2px;
+    }
+    #liveScreen .live-q-seg-opt {
+      border: 0; background: transparent; color: #6b7280; cursor: pointer;
+      font-size: 11px; font-weight: 800; line-height: 1; padding: 5px 10px; border-radius: 999px;
+      white-space: nowrap; transition: background .15s ease, color .15s ease;
+    }
+    #liveScreen .live-q-seg-opt.is-active { background: #7c3aed; color: #fff; box-shadow: 0 1px 3px rgba(124,58,237,.35); }
     #liveScreen .live-q-name-pill {
       display: inline-block; padding: 3px 10px; border-radius: 999px;
       background: #eef2ff; color: #4338ca; font-weight: 800; font-size: 13px; line-height: 1.3;
@@ -61178,11 +61297,16 @@ function hookSettingsGuard_DISABLED(){
     #liveScreen .live-q-start:hover { background: #d1d5db; }
     #liveScreen .live-q-hold { background: var(--held); border-color: #e8d27a; color: #111827; }
     #liveScreen .live-q-hold:hover { background: #f0d570; }
+    #liveScreen .live-q-call-wrap { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
     #liveScreen .live-q-call {
       width: 30px; height: 30px; padding: 0; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
       background: #fff; color: #16a34a; border-color: #bbf7d0;
     }
     #liveScreen .live-q-call:hover { background: #f0fdf4; }
+    #liveScreen .live-q-call-status {
+      font-size: 9px; line-height: 1.1; color: #6b7280; white-space: nowrap; font-weight: 700;
+      max-width: 64px; overflow: hidden; text-overflow: ellipsis; text-align: center;
+    }
     /* Live ticket cards reuse the exact Tickets-list card markup; mirror its styles here. */
     #liveScreen .live-tk-wrap { cursor: pointer; }
     #liveScreen .ticket-card {
@@ -61285,7 +61409,16 @@ function hookSettingsGuard_DISABLED(){
     </div>
     <div class="live-body">
       <div class="live-card">
-        <div class="live-card-head"><span class="live-card-title">Queue</span><span class="live-card-count" id="liveQueueCount">0</span></div>
+        <div class="live-card-head live-q-head">
+          <span class="live-card-title" id="liveQueueTitle">Queue</span>
+          <div class="live-q-head-right">
+            <div class="live-q-seg" id="liveQueueModeToggle" role="tablist" aria-label="Queue view">
+              <button type="button" class="live-q-seg-opt is-active" data-live-q-mode="available" role="tab" aria-selected="true">Available</button>
+              <button type="button" class="live-q-seg-opt" data-live-q-mode="service" role="tab" aria-selected="false">In Service</button>
+            </div>
+            <span class="live-card-count" id="liveQueueCount">0</span>
+          </div>
+        </div>
         <div class="live-list" id="liveQueueList"></div>
       </div>
       <div class="live-card">
@@ -61332,38 +61465,82 @@ function hookSettingsGuard_DISABLED(){
       function setCount(id, n) { var el = document.getElementById(id); if (el) el.textContent = String(n); }
       function emptyHtml(msg) { return '<div class="live-empty">' + liveEsc(msg) + "</div>"; }
 
-      function renderQueue() {
-        var list = document.getElementById("liveQueueList");
-        if (!list) return;
+      var ffLiveQueueMode = "available"; // "available" | "service"
+      function liveQueueNamePill(row) {
+        var name = liveEsc(row.name || "Staff member");
+        var nameStyle = "";
+        if (row.nameBg) nameStyle += "background:" + liveEsc(row.nameBg) + ";";
+        if (row.nameFg) nameStyle += "color:" + liveEsc(row.nameFg) + ";";
+        return '<span class="live-q-name-pill"' + (nameStyle ? ' style="' + nameStyle + '"' : "") + '>' + name + '</span>';
+      }
+      function liveQueueCallBtn(row, mode) {
+        if (!row.canCall) return "";
+        var key = liveEsc(row.key || "");
+        var callTitle = liveEsc(row.callTitle || "Call");
+        var callStatusInit = liveEsc(row.callStatus || "");
+        var attr = mode === "service" ? "data-live-s-call" : "data-live-q-call";
+        return '<span class="live-q-call-wrap">' +
+            '<button type="button" class="live-q-btn live-q-call" ' + attr + '="' + key + '" title="' + callTitle + '">' +
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.89.7 2.78a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.3-1.27a2 2 0 0 1 2.11-.45c.89.34 1.82.57 2.78.7A2 2 0 0 1 22 16.92z"></path></svg></button>' +
+            '<span class="live-q-call-status"' + (callStatusInit ? '' : ' style="display:none;"') + '>' + callStatusInit + '</span>' +
+          '</span>';
+      }
+      function renderQueueAvailable(list) {
         var rows = [];
         try { if (typeof window.ffGetLiveQueueRows === "function") rows = window.ffGetLiveQueueRows() || []; } catch (_) {}
         rows = Array.isArray(rows) ? rows : [];
         setCount("liveQueueCount", rows.length);
         if (!rows.length) { list.innerHTML = emptyHtml("No one is waiting in the queue."); return; }
         list.innerHTML = rows.map(function (row, i) {
-          var name = liveEsc(row.name || "Staff member");
-          var nameStyle = "";
-          if (row.nameBg) nameStyle += "background:" + liveEsc(row.nameBg) + ";";
-          if (row.nameFg) nameStyle += "color:" + liveEsc(row.nameFg) + ";";
-          var namePill = '<span class="live-q-name-pill"' + (nameStyle ? ' style="' + nameStyle + '"' : "") + '>' + name + '</span>';
-          var statePill = row.held ? ' <span class="live-pill live-pill--hold">HOLD</span>' : "";
           var key = liveEsc(row.key || "");
-          var callBtn = row.canCall
-            ? '<button type="button" class="live-q-btn live-q-call" data-live-q-call="' + key + '" title="Call">' +
-              '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.89.7 2.78a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.3-1.27a2 2 0 0 1 2.11-.45c.89.34 1.82.57 2.78.7A2 2 0 0 1 22 16.92z"></path></svg></button>'
-            : "";
+          var statePill = row.held ? ' <span class="live-pill live-pill--hold">HOLD</span>' : "";
           var holdLabel = row.held ? "Release" : "Hold";
           return '<div class="live-item live-q-item">' +
               '<div class="live-item-main">' +
-                '<div class="live-item-title">' + (i + 1) + ". " + namePill + statePill + '</div>' +
+                '<div class="live-item-title">' + (i + 1) + ". " + liveQueueNamePill(row) + statePill + '</div>' +
               '</div>' +
               '<div class="live-q-actions">' +
-                callBtn +
+                liveQueueCallBtn(row, "available") +
                 '<button type="button" class="live-q-btn live-q-hold" data-live-q-hold="' + key + '">' + holdLabel + '</button>' +
                 '<button type="button" class="live-q-btn live-q-start" data-live-q-start="' + key + '">Start</button>' +
               '</div>' +
             '</div>';
         }).join("");
+      }
+      function renderQueueService(list) {
+        var rows = [];
+        try { if (typeof window.ffGetLiveServiceRows === "function") rows = window.ffGetLiveServiceRows() || []; } catch (_) {}
+        rows = Array.isArray(rows) ? rows : [];
+        setCount("liveQueueCount", rows.length);
+        if (!rows.length) { list.innerHTML = emptyHtml("No one is in service right now."); return; }
+        list.innerHTML = rows.map(function (row) {
+          var key = liveEsc(row.key || "");
+          return '<div class="live-item live-q-item">' +
+              '<div class="live-item-main">' +
+                '<div class="live-item-title">' + liveQueueNamePill(row) + '</div>' +
+              '</div>' +
+              '<div class="live-q-actions">' +
+                liveQueueCallBtn(row, "service") +
+                '<button type="button" class="live-q-btn live-q-finish" data-live-s-finish="' + key + '">Finish</button>' +
+              '</div>' +
+            '</div>';
+        }).join("");
+      }
+      function renderQueue() {
+        var list = document.getElementById("liveQueueList");
+        if (!list) return;
+        var title = document.getElementById("liveQueueTitle");
+        if (title) title.textContent = "Queue";
+        var seg = document.getElementById("liveQueueModeToggle");
+        if (seg) {
+          seg.querySelectorAll(".live-q-seg-opt").forEach(function (b) {
+            var on = b.getAttribute("data-live-q-mode") === ffLiveQueueMode;
+            b.classList.toggle("is-active", on);
+            b.setAttribute("aria-selected", on ? "true" : "false");
+          });
+        }
+        if (ffLiveQueueMode === "service") renderQueueService(list);
+        else renderQueueAvailable(list);
       }
       window.ffLiveRefreshQueueCard = function () {
         var screen = document.getElementById("liveScreen");
@@ -61563,18 +61740,44 @@ function hookSettingsGuard_DISABLED(){
             else if (typeof window.goToChat === "function") window.goToChat();
           });
         }
+        var queueModeToggle = document.getElementById("liveQueueModeToggle");
+        if (queueModeToggle) {
+          queueModeToggle.addEventListener("click", function (ev) {
+            var opt = ev.target && ev.target.closest ? ev.target.closest("[data-live-q-mode]") : null;
+            if (!opt) return;
+            var mode = opt.getAttribute("data-live-q-mode");
+            if (mode !== "available" && mode !== "service") return;
+            if (mode === ffLiveQueueMode) return;
+            ffLiveQueueMode = mode;
+            renderQueue();
+          });
+        }
         var queueList = document.getElementById("liveQueueList");
         if (queueList) {
           queueList.addEventListener("click", function (ev) {
-            var t = ev.target && ev.target.closest ? ev.target.closest("[data-live-q-start],[data-live-q-hold],[data-live-q-call]") : null;
+            var t = ev.target && ev.target.closest
+              ? ev.target.closest("[data-live-q-start],[data-live-q-hold],[data-live-q-call],[data-live-s-finish],[data-live-s-call]")
+              : null;
             if (!t) return;
             ev.preventDefault();
             var startKey = t.getAttribute("data-live-q-start");
             var holdKey = t.getAttribute("data-live-q-hold");
             var callKey = t.getAttribute("data-live-q-call");
+            var finishKey = t.getAttribute("data-live-s-finish");
+            var svcCallKey = t.getAttribute("data-live-s-call");
             if (startKey != null && typeof window.ffLiveQueueStart === "function") window.ffLiveQueueStart(startKey);
             else if (holdKey != null && typeof window.ffLiveQueueHold === "function") window.ffLiveQueueHold(holdKey);
-            else if (callKey != null && typeof window.ffLiveQueueCall === "function") window.ffLiveQueueCall(callKey);
+            else if (callKey != null && typeof window.ffLiveQueueCall === "function") {
+              var callWrap = t.closest ? t.closest(".live-q-call-wrap") : null;
+              var statusEl = callWrap ? callWrap.querySelector(".live-q-call-status") : null;
+              window.ffLiveQueueCall(callKey, { statusEl: statusEl, buttonEl: t });
+            }
+            else if (finishKey != null && typeof window.ffLiveServiceFinish === "function") window.ffLiveServiceFinish(finishKey);
+            else if (svcCallKey != null && typeof window.ffLiveServiceCall === "function") {
+              var svcCallWrap = t.closest ? t.closest(".live-q-call-wrap") : null;
+              var svcStatusEl = svcCallWrap ? svcCallWrap.querySelector(".live-q-call-status") : null;
+              window.ffLiveServiceCall(svcCallKey, { statusEl: svcStatusEl, buttonEl: t });
+            }
           });
         }
         // Safety net: when Live is open, clicking any nav item / apps tile (top nav,
@@ -61633,14 +61836,32 @@ function hookSettingsGuard_DISABLED(){
         if (disp === "flex" || disp === "block") return true;
         try { return window.getComputedStyle(chat).display !== "none"; } catch (_) { return false; }
       }
+      // Live Desk is a large-screen reception tool. It must never appear on phones,
+      // including when JS forces the FAB visible with an inline !important style
+      // (which would otherwise beat the mobile @media display:none rule). Mirror the
+      // same 768px breakpoint used by the CSS so the two can never disagree.
+      function ffLiveDeskIsMobileViewport() {
+        try {
+          if (window.matchMedia) return window.matchMedia("(max-width: 768px)").matches;
+        } catch (_) {}
+        var w = window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 0;
+        return w > 0 && w <= 768;
+      }
       function ffRefreshLiveDeskVisibility() {
         var allowed = typeof window.ffCurrentUserCanUseLiveDesk === "function"
           ? window.ffCurrentUserCanUseLiveDesk()
           : false;
-        if (allowed && !ffChatScreenIsOpen()) {
+        if (allowed && !ffChatScreenIsOpen() && !ffLiveDeskIsMobileViewport()) {
           btn.style.setProperty("display", "inline-flex", "important");
         } else {
           btn.style.setProperty("display", "none", "important");
+          if (ffLiveDeskIsMobileViewport()) {
+            var liveScreenEl = document.getElementById("liveScreen");
+            if (liveScreenEl && liveScreenEl.style.display === "flex" &&
+                typeof window.ffCloseLiveScreen === "function") {
+              window.ffCloseLiveScreen();
+            }
+          }
           if (panel) {
             panel.classList.remove("is-open");
             panel.setAttribute("aria-hidden", "true");
@@ -61649,6 +61870,15 @@ function hookSettingsGuard_DISABLED(){
       }
       window.ffRefreshLiveDeskVisibility = ffRefreshLiveDeskVisibility;
       document.addEventListener("ff-staff-cloud-updated", ffRefreshLiveDeskVisibility);
+      window.addEventListener("resize", ffRefreshLiveDeskVisibility);
+      window.addEventListener("orientationchange", ffRefreshLiveDeskVisibility);
+      try {
+        if (window.matchMedia) {
+          var ffLiveMq = window.matchMedia("(max-width: 768px)");
+          if (ffLiveMq.addEventListener) ffLiveMq.addEventListener("change", ffRefreshLiveDeskVisibility);
+          else if (ffLiveMq.addListener) ffLiveMq.addListener(ffRefreshLiveDeskVisibility);
+        }
+      } catch (_) {}
       setTimeout(ffRefreshLiveDeskVisibility, 0);
       // Re-evaluate FAB visibility whenever the Chat screen is shown/hidden.
       try {
@@ -61917,7 +62147,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
         { src: "/queue-cloud.js?v=20260609_merge_base_consistency", type: "module", delay: 1350 },
-        { src: "/tickets.js?v=20260619_manager_view_open_tickets", type: "module", delay: 1400 },
+        { src: "/tickets.js?v=20260619_frontdesk_edit_services_showall", type: "module", delay: 1400 },
         { src: "/tasks-cloud.js?v=20260610_tasks_rules_direct_sync", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
         { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
@@ -63078,7 +63308,7 @@ function hookSettingsGuard_DISABLED(){
       <button id="ticketSaveBtn" style="display:none;padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;" onclick="window.saveTicket && window.saveTicket()">Save</button>
       <button id="ticketFinalizeBtn" style="display:none;padding:10px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Send to Front Desk</button>
       <button id="ticketReviewedBtn" type="button" style="display:none;padding:10px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Mark as Reviewed</button>
-      <button id="ticketCloseBtn" style="display:none;padding:10px 16px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Close Ticket</button>
+      <button id="ticketCloseBtn" style="display:none;padding:10px 16px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Paid Ticket</button>
       <button id="ticketArchiveBtn" style="display:none;padding:10px 16px;border:1px solid #9ca3af;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;">Archive</button>
       <button id="ticketDeleteBtn" style="display:none;padding:10px 16px;border:1px solid #ef4444;border-radius:8px;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:14px;">Delete</button>
     </div>

@@ -42,6 +42,10 @@ let ticketsUnsubscribe = null;
 let _ticketsDataReady = false; // cache flag — skip Firestore re-fetch on repeat visits
 let currentTicketsTab = 'ready';
 let editingTicketId = null;
+/** When true, the ticket service/product picker shows the FULL catalog (used when a
+ * manager / front-desk receiver edits a ticket) instead of filtering by the current
+ * staff member's allowed services. Reset to false for the technician new-ticket flow. */
+let _ticketPickerShowAllCatalog = false;
 /** When set, opening this ticket (e.g. from list) must not show Ticket Details – we just closed it. */
 let _justClosedTicketId = null;
 /** Cache for member avatars (uid/staffId -> { avatarUrl, avatarUpdatedAtMs }) for ticket list. */
@@ -1205,14 +1209,18 @@ function controlledStaffCanProvideService(staff, service) {
 function isTicketPickerServiceAvailableForActiveLocation(service) {
   if (!service || !String(service.name || '').trim()) return false;
   if (service.active === false || service.locationEnabled === false) return false;
-  const staffOverride = getServiceStaffOverrideForCurrentTicketUser(service);
-  if (staffOverride && staffOverride.enabled === false) return false;
-  try {
-    const currentStaff = typeof window !== 'undefined' && typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
-      ? window.ffResolveCurrentStaffRowFromFfStaffV1()
-      : null;
-    if (currentStaff && !controlledStaffCanProvideService(currentStaff, service)) return false;
-  } catch (_) {}
+  // A manager / front-desk receiver editing a ticket should see the FULL catalog,
+  // so skip the per-staff override + controlled-staff provider filtering.
+  if (!_ticketPickerShowAllCatalog) {
+    const staffOverride = getServiceStaffOverrideForCurrentTicketUser(service);
+    if (staffOverride && staffOverride.enabled === false) return false;
+    try {
+      const currentStaff = typeof window !== 'undefined' && typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+        ? window.ffResolveCurrentStaffRowFromFfStaffV1()
+        : null;
+      if (currentStaff && !controlledStaffCanProvideService(currentStaff, service)) return false;
+    } catch (_) {}
+  }
   const activeLoc = getActiveLocationIdForTickets();
   if (!activeLoc) return true;
   const serviceLoc = typeof service.locationId === 'string' ? service.locationId.trim() : '';
@@ -1326,8 +1334,10 @@ function isTicketPickerProductAvailableForActiveLocation(product) {
   if (product.active === false) return false;
   const locOverride = getProductLocationOverrideForActiveLocation(product);
   if (locOverride && locOverride.enabled === false) return false;
-  const staffOverride = getProductStaffOverrideForCurrentTicketUser(product);
-  if (staffOverride && staffOverride.enabled === false) return false;
+  if (!_ticketPickerShowAllCatalog) {
+    const staffOverride = getProductStaffOverrideForCurrentTicketUser(product);
+    if (staffOverride && staffOverride.enabled === false) return false;
+  }
   return true;
 }
 
@@ -2143,12 +2153,14 @@ async function appendTicketSummaryOnClose(salonId, ticketId) {
 
     const dupQ = query(
       collection(db, `salons/${salonId}/ticketSummaries`),
-      where('ticketId', '==', ticketId),
-      limit(1)
+      where('ticketId', '==', ticketId)
     );
     const dupSnap = await getDocs(dupQ);
-    if (!dupSnap.empty) {
-      console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: abort — duplicate summary exists for ticketId');
+    // A summary that was reversed by a reopen should not block a fresh entry when
+    // the ticket is paid/closed again.
+    const hasActiveSummary = dupSnap.docs.some((d) => (d.data() || {}).reopenedReversed !== true);
+    if (hasActiveSummary) {
+      console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: abort — active summary exists for ticketId');
       return;
     }
 
@@ -2227,6 +2239,47 @@ async function closeTicket(ticketId, preCloseFields = null) {
     _action: 'closed'
   });
   await appendTicketSummaryOnClose(salonId, ticketId);
+}
+
+// Undo an accidental "Paid Ticket" (close). Returns the ticket to the
+// Ready-for-checkout state and removes the revenue summary entry created at
+// close so the ticket isn't counted twice in analytics.
+async function reopenTicket(ticketId) {
+  const salonId = getActiveTicketsSalonId();
+  if (salonId) {
+    // ticketSummaries delete is disallowed by rules; mark the close entry as
+    // reversed instead (best-effort; permitted for admin/owner). The dedup in
+    // appendTicketSummaryOnClose ignores reversed rows so a later re-close
+    // writes a fresh, correct summary.
+    try {
+      const sumQ = query(
+        collection(db, `salons/${salonId}/ticketSummaries`),
+        where('ticketId', '==', ticketId)
+      );
+      const sumSnap = await getDocs(sumQ);
+      await Promise.all(
+        sumSnap.docs.map((d) =>
+          updateDoc(d.ref, {
+            reopenedReversed: true,
+            reopenedAt: serverTimestamp(),
+            reopenedByUid: currentUserProfile?.uid ?? null,
+            reopenedByName: currentUserProfile?.name || currentUserProfile?.email || null
+          }).catch(() => {})
+        )
+      );
+    } catch (e) {
+      console.warn('[Tickets] reopenTicket: summary reversal failed', e);
+    }
+  }
+  await updateTicket(ticketId, {
+    status: 'READY_FOR_CHECKOUT',
+    closedByUid: deleteField(),
+    closedByName: deleteField(),
+    reopenedByUid: currentUserProfile?.uid || null,
+    reopenedByName: currentUserProfile?.name || currentUserProfile?.email || 'Manager',
+    reopenedAt: serverTimestamp(),
+    _action: 'reopened'
+  });
 }
 
 async function voidTicket(ticketId) {
@@ -3394,6 +3447,50 @@ function computeDiff(appointmentData, performedLines) {
   return { removed, added, changed };
 }
 
+// Diff between two sets of performed lines (used to show what the front desk
+// changed on a ticket vs the technician's original submission).
+function ffNormalizeLineForCompare(l) {
+  return {
+    name: String((l && l.serviceName) || '').trim(),
+    price: Number(l && l.ticketPrice) || 0,
+    note: String((l && l.note) || '').trim()
+  };
+}
+function computeLinesDiff(originalLines, currentLines) {
+  const orig = (Array.isArray(originalLines) ? originalLines : []).map(ffNormalizeLineForCompare);
+  const curr = (Array.isArray(currentLines) ? currentLines : []).map(ffNormalizeLineForCompare);
+  const removed = orig.filter(o => !curr.some(c => c.name === o.name));
+  const added = curr.filter(c => !orig.some(o => o.name === c.name));
+  const changed = [];
+  orig.forEach(o => {
+    const c = curr.find(x => x.name === o.name);
+    if (c && (c.price !== o.price || c.note !== o.note)) {
+      changed.push({ name: o.name, from: o.price, to: c.price });
+    }
+  });
+  return { removed, added, changed };
+}
+function ffTicketLinesChanged(beforeLines, afterLines) {
+  const d = computeLinesDiff(beforeLines, afterLines);
+  return !!(d.removed.length || d.added.length || d.changed.length);
+}
+// Renders the "Edited by front desk" change summary (vs the technician's original).
+function ffRenderFrontDeskChangesHtml(t) {
+  if (!t || t.frontDeskEdited !== true || !Array.isArray(t.frontDeskOriginalLines)) return '';
+  const d = computeLinesDiff(t.frontDeskOriginalLines, t.performedLines || []);
+  if (!d.removed.length && !d.added.length && !d.changed.length) return '';
+  const who = escapeHtml(t.frontDeskEditedByName || 'Front desk');
+  const when = ffFormatReviewedAt(t.frontDeskEditedAt);
+  const parts = [];
+  d.removed.forEach(r => parts.push(`<div style="color:#dc2626;font-size:13px;">Removed: ${escapeHtml(r.name)} (${ffTicketMoney(r.price || 0)})</div>`));
+  d.added.forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} (${ffTicketMoney(a.price || 0)})</div>`));
+  d.changed.forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} — ${ffTicketMoney(c.from || 0)} → ${ffTicketMoney(c.to || 0)}</div>`));
+  return `<div style="margin-top:14px;padding:12px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;">
+    <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:6px;">Edited by front desk${who ? ' · ' + who : ''}${when ? ' · ' + when : ''} <span style="font-weight:500;color:#b45309;">(vs technician)</span></div>
+    ${parts.join('')}
+  </div>`;
+}
+
 // =====================
 // UI: List
 // =====================
@@ -4206,6 +4303,7 @@ function openAdminTicketView(t) {
         <span style="font-weight:700;color:${adjusted ? '#d97706' : '#111'};">${ffTicketMoney(price)}${adjusted ? ` <small style="color:#9ca3af;">(base ${ffTicketMoney(base)})</small>` : ''}</span>
       </div>`;
     }).join('') || '<div style="color:#9ca3af;font-size:14px;padding:8px 0;">No services</div>';
+    cont.innerHTML += ffRenderFrontDeskChangesHtml(t);
   }
 
   // Hide lines data and service picker
@@ -4281,6 +4379,49 @@ function openAdminTicketView(t) {
     closeBtn.style.background = '#7c3aed';
     closeBtn.style.color = '#fff';
     closeBtn.onclick = () => doCloseTicket(t.id);
+  }
+
+  // Edit Services button — lets whoever received the ticket modify the services
+  // (add / remove / change price). Only for staff allowed to close tickets.
+  let editBtn = document.getElementById('ticketEditServicesBtn');
+  if (!editBtn && closeBtn && closeBtn.parentNode) {
+    editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.id = 'ticketEditServicesBtn';
+    closeBtn.parentNode.insertBefore(editBtn, closeBtn);
+  }
+  if (editBtn) {
+    if (canCurrentUserCloseTickets()) {
+      editBtn.style.display = 'inline-block';
+      editBtn.style.width = '100%';
+      editBtn.style.padding = '12px';
+      editBtn.style.fontSize = '15px';
+      editBtn.style.fontWeight = '700';
+      editBtn.style.borderRadius = '10px';
+      editBtn.style.marginBottom = '8px';
+      editBtn.style.background = '#fff';
+      editBtn.style.color = '#6d28d9';
+      editBtn.style.border = '1px solid #c4b5fd';
+      editBtn.style.cursor = 'pointer';
+      editBtn.textContent = 'Edit Services';
+      editBtn.onclick = () => {
+        delete modal.dataset.adminView;
+        editingTicketId = t.id;
+        // Reset the admin-view button styling so the edit form looks normal.
+        if (closeBtn) {
+          closeBtn.style.width = '';
+          closeBtn.style.padding = '';
+          closeBtn.style.fontSize = '';
+          closeBtn.style.fontWeight = '';
+          closeBtn.style.borderRadius = '';
+        }
+        const titleEl = document.getElementById('ticketModalTitle');
+        if (titleEl) titleEl.textContent = 'Edit Ticket';
+        populateTicketForm(t);
+      };
+    } else {
+      editBtn.style.display = 'none';
+    }
   }
 
   // Reviewed toggle button (front desk / managers / owners only)
@@ -4418,12 +4559,17 @@ function openTicketDetailsModal(t) {
       </div>
     </div>
     <div style="margin-bottom:16px;"><h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#374151;">Performed services</h3>${performedHtml || '<div style="color:#9ca3af;font-size:13px;">None</div>'}${totalHtml}</div>
+    ${ffRenderFrontDeskChangesHtml(t)}
     ${diffHtml}
     ${asIsHtml}
     ${serviceUpgradeHtml}
   `;
   const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
+  const canReopenTicket = typeof canCurrentUserCloseTickets === 'function' && canCurrentUserCloseTickets();
   let actionsHtml = '';
+  if (t.status === 'CLOSED' && canReopenTicket) {
+    actionsHtml += `<button type="button" id="ticketDetailsReopenBtn" style="padding:8px 16px;border:1px solid #c4b5fd;border-radius:6px;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-size:14px;font-weight:600;">Reopen Ticket</button>`;
+  }
   if ((t.status === 'CLOSED' || t.status === 'VOID') && isAdminOrOwner) {
     actionsHtml += `<button type="button" id="ticketDetailsArchiveBtn" style="padding:8px 16px;border:1px solid #9ca3af;border-radius:6px;background:#fff;cursor:pointer;font-size:14px;">Archive</button>`;
   }
@@ -4432,9 +4578,16 @@ function openTicketDetailsModal(t) {
   }
   actionsHtml += `<button type="button" id="ticketDetailsCloseBtn" style="padding:8px 16px;border:none;border-radius:6px;background:#7c3aed;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">Close</button>`;
   actionsEl.innerHTML = actionsHtml;
+  const reopenBtn = document.getElementById('ticketDetailsReopenBtn');
   const archiveBtn = document.getElementById('ticketDetailsArchiveBtn');
   const deleteBtn = document.getElementById('ticketDetailsDeleteBtn');
   const closeBtn = document.getElementById('ticketDetailsCloseBtn');
+  if (reopenBtn) reopenBtn.onclick = async () => {
+    const ok = await ticketConfirm('Reopen this ticket? It will return to Ready for checkout (no longer marked as Paid).', 'Reopen ticket');
+    if (!ok) return;
+    try { await reopenTicket(t.id); showToast('Ticket reopened', 'success'); closeTicketDetailsModal(); }
+    catch (e) { showToast(e?.message || 'Failed', 'error'); }
+  };
   if (archiveBtn) archiveBtn.onclick = async () => { try { await archiveTicket(t.id); showToast('Ticket archived', 'success'); closeTicketDetailsModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
   if (deleteBtn) deleteBtn.onclick = async () => { const ok = await ticketConfirm('Permanently delete this ticket? This cannot be undone.', 'Delete ticket'); if (!ok) return; try { await deleteTicketPermanently(t.id); showToast('Ticket deleted', 'success'); closeTicketDetailsModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
   if (closeBtn) closeBtn.onclick = () => closeTicketDetailsModal();
@@ -4492,6 +4645,10 @@ function ffApplyTicketCustomerRequiredUI() {
 }
 
 function resetTicketForm() {
+  // New-ticket flow (technicians) keeps the staff-filtered catalog.
+  _ticketPickerShowAllCatalog = false;
+  // Rebuild the picker so it reflects the (filtered) catalog for this flow.
+  try { if (typeof setupTicketsUI === 'function') setupTicketsUI(); } catch (_) {}
   const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
   set('ticketCustomerName', el => { el.value = ''; });
   set('ticketCustomerWrap', el => { el.style.display = 'none'; });
@@ -4574,6 +4731,11 @@ function populateTicketForm(t) {
   const lines = t.performedLines || [];
   set('ticketLinesData', el => { el.value = JSON.stringify(lines); });
   const isReadOnly = ['CLOSED', 'VOID', 'ARCHIVED'].includes((t.status || '').toUpperCase());
+  // Managers / front-desk receivers editing a ticket see the FULL service + product
+  // catalog (not just their own assigned services). Technicians keep the filtered view.
+  _ticketPickerShowAllCatalog = (typeof canCurrentUserCloseTickets === 'function')
+    ? !!canCurrentUserCloseTickets()
+    : false;
   renderPerformedLines(lines, isReadOnly);
   const servicePickerContainer = document.getElementById('ticketServicePickerContainer');
   const customerToggle = document.getElementById('ticketCustomerToggle');
@@ -4581,6 +4743,23 @@ function populateTicketForm(t) {
   if (servicePickerContainer) servicePickerContainer.style.display = isReadOnly ? 'none' : 'block';
   ffTicketServiceSearchSetVisible(!isReadOnly);
   if (!isReadOnly) ffTicketServiceSearchClear();
+  // When a manager / front-desk user opens a ticket for editing they may not
+  // have visited the "new ticket" flow yet, so the service catalog (salonServices)
+  // can be empty even though products are streaming in. Ensure the catalog is
+  // loaded and re-render the picker so they see all services + products.
+  if (!isReadOnly) {
+    (async () => {
+      try {
+        if (!Array.isArray(salonServices) || salonServices.length === 0) {
+          try { await loadServiceCategories(); } catch (_) {}
+          try { await loadServices(); } catch (_) {}
+        }
+        if (typeof setupTicketsUI === 'function') await setupTicketsUI();
+      } catch (err) {
+        console.warn('[Tickets] ensure catalog for edit failed', err);
+      }
+    })();
+  }
   if (customerToggle) customerToggle.style.display = isReadOnly ? 'none' : '';
   if (customerInput) customerInput.readOnly = isReadOnly;
   updateTicketTotal(lines);
@@ -4607,6 +4786,8 @@ function populateTicketForm(t) {
   const saveBtn = document.getElementById('ticketSaveBtn');
   const reviewedBtnEdit = document.getElementById('ticketReviewedBtn');
   if (reviewedBtnEdit) reviewedBtnEdit.style.display = 'none';
+  const editServicesBtnEdit = document.getElementById('ticketEditServicesBtn');
+  if (editServicesBtnEdit) editServicesBtnEdit.style.display = 'none';
   if (finalizeBtn) finalizeBtn.style.display = (t.status === 'OPEN') ? 'inline-block' : 'none';
   if (closeBtn) closeBtn.style.display = (t.status === 'READY_FOR_CHECKOUT' && canCloseTicket) ? 'inline-block' : 'none';
   if (archiveBtn) archiveBtn.style.display = (t.status === 'CLOSED' || t.status === 'VOID') && isAdminOrOwner ? 'inline-block' : 'none';
@@ -4896,6 +5077,27 @@ async function saveTicket() {
 
   try {
     if (editingTicketId) {
+      // If someone who received the ticket (front desk / manager) changes the
+      // services, preserve the technician's original lines once and tag the edit
+      // so we can show what changed and by whom.
+      const fdUpdate = {};
+      try {
+        const existingT = (currentTickets || []).find(x => x.id === editingTicketId);
+        const isCloser = typeof canCurrentUserCloseTickets === 'function' && canCurrentUserCloseTickets();
+        if (isCloser && existingT) {
+          const beforeLines = Array.isArray(existingT.performedLines) ? existingT.performedLines : [];
+          if (ffTicketLinesChanged(beforeLines, lines)) {
+            if (!Array.isArray(existingT.frontDeskOriginalLines)) {
+              fdUpdate.frontDeskOriginalLines = beforeLines;
+            }
+            fdUpdate.frontDeskEdited = true;
+            fdUpdate.frontDeskEditedByUid = (currentUserProfile && currentUserProfile.uid) || null;
+            fdUpdate.frontDeskEditedByName =
+              (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || null;
+            fdUpdate.frontDeskEditedAt = serverTimestamp();
+          }
+        }
+      } catch (_) {}
       await updateTicket(editingTicketId, {
         customerName,
         performedLines: lines,
@@ -4906,6 +5108,7 @@ async function saveTicket() {
         total: totals.total,
         forUids,
         forNames,
+        ...fdUpdate,
         _action: 'edited_after_send'
       });
       const t = currentTickets.find(x => x.id === editingTicketId);
@@ -4997,7 +5200,7 @@ async function doFinalizeTicket(ticketId) {
 }
 
 async function doCloseTicket(ticketId) {
-  const ok = await ticketConfirm('Mark this ticket as Closed? (Checkout done)', 'Close ticket');
+  const ok = await ticketConfirm('Mark this ticket as Paid? (Checkout done)', 'Paid ticket');
   if (!ok) return;
   _justClosedTicketId = ticketId;
   try {
@@ -5008,6 +5211,24 @@ async function doCloseTicket(ticketId) {
     const linesEl = document.getElementById('ticketLinesData');
     const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
     const totals = computeTicketTotalsFromLines(lines);
+    // Capture front-desk edits made right before paying (vs technician original).
+    const fdUpdate = {};
+    try {
+      const existingT = (currentTickets || []).find(x => x.id === ticketId);
+      if (existingT) {
+        const beforeLines = Array.isArray(existingT.performedLines) ? existingT.performedLines : [];
+        if (ffTicketLinesChanged(beforeLines, lines)) {
+          if (!Array.isArray(existingT.frontDeskOriginalLines)) {
+            fdUpdate.frontDeskOriginalLines = beforeLines;
+          }
+          fdUpdate.frontDeskEdited = true;
+          fdUpdate.frontDeskEditedByUid = (currentUserProfile && currentUserProfile.uid) || null;
+          fdUpdate.frontDeskEditedByName =
+            (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || null;
+          fdUpdate.frontDeskEditedAt = serverTimestamp();
+        }
+      }
+    } catch (_) {}
     await closeTicket(ticketId, {
       customerName,
       performedLines: lines,
@@ -5017,9 +5238,10 @@ async function doCloseTicket(ticketId) {
       serviceTax: totals.serviceTax,
       total: totals.total,
       forUids,
-      forNames
+      forNames,
+      ...fdUpdate
     });
-    showToast('Ticket closed', 'success');
+    showToast('Ticket marked as paid', 'success');
     closeTicketModal();
   } catch (err) {
     showToast(err?.message || 'Failed', 'error');
