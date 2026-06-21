@@ -198,3 +198,22 @@ FF_SEED_PROJECT=fair-flow-staging FF_SEED_SALON=<salonId> \
 - No Security Rules enforcement yet (Stage 4) — `kiosks`, `roles`, and
   `pairingCodes` rules are added in their respective stages.
 - No new queue / time-clock logic — those existing functions are reused later.
+
+## Before production checklist
+
+- Confirm the frontend source of truth is complete before any hosting deploy:
+  `firebase.json` points to `public/`, so `public/index.html` and every JS asset
+  it references must be present and tracked before production.
+- Keep the environment switch intact in `public/index.html` (`FF_ENV` /
+  hostname-based staging vs production config) so staging never talks to
+  production by accident.
+- Fix and verify the `backfillKioskRoles` callable deployment/IAM issue before
+  production, because existing production salons need the default kiosk role.
+- Verify required function service-account IAM in production before deploying
+  pairing: `Service Account Token Creator` for custom-token minting and
+  `Cloud Datastore User` / equivalent Firestore access for Gen1 triggers.
+- Deploy and review Firestore Rules explicitly for the production project only
+  after final approval; rules deployment replaces the whole ruleset.
+- Run an end-to-end production rehearsal plan on staging first: create pending
+  pairing code, approve from Settings -> Devices, confirm kiosk doc creation,
+  token delivery, sign-in, and delete-after-read cleanup.
