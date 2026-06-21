@@ -43,6 +43,13 @@ service cloud.firestore {
         && userRole() in ['admin', 'owner'];
     }
 
+    // Admin/Owner of their OWN salon, without needing a salonId path arg.
+    // Used by collections that are not (yet) salon-scoped, e.g. pairingCodes.
+    function isAdminOrOwnerAny() {
+      return userExists()
+        && userRole() in ['admin', 'owner'];
+    }
+
     // Training: staffId on /users/{uid} (set when technician uses PIN / profile)
     function userStaffId() {
       return userExists() && userDocData().keys().hasAll(['staffId'])
@@ -118,6 +125,56 @@ service cloud.firestore {
         && request.time < resource.data.expiresAt;
       allow list: if false;
       allow create, update, delete: if false;
+    }
+
+    // ===== Kiosk device pairing (Stage 3a) =====
+    // Trampoline-style pairing (no callable). An UNAUTHENTICATED tablet creates a
+    // pending code at an UNGUESSABLE high-entropy doc id (pairId). The 4-digit
+    // `code` is only a lookup field for the owner. An admin/owner approves; a
+    // Cloud Function (admin SDK, which bypasses these rules) then writes the
+    // custom token back to the same doc. The tablet reads it by its secret id and
+    // deletes the doc (delete-after-read).
+    match /pairingCodes/{pairId} {
+      // GET by exact (secret) id only. This is what protects the token: the
+      // tablet listens to its own doc; nobody can enumerate the collection.
+      allow get: if true;
+
+      // LIST/QUERY is the security boundary: ONLY an authenticated admin/owner
+      // may search by code. Unauthenticated tablets can NEVER list/scan.
+      allow list: if isAdminOrOwnerAny();
+
+      // CREATE by the (unauthenticated) tablet, tightly constrained:
+      //  - high-entropy doc id, status must start as pending
+      //  - 4-digit code + a >=32-char deviceSecretHash (never the secret itself)
+      //  - short, forward-only expiry (<= 15 min)
+      //  - may NOT pre-set token / salon / kiosk fields
+      allow create: if pairId.size() >= 20
+        && request.resource.data.status == 'pending'
+        && request.resource.data.code is string
+        && request.resource.data.code.matches('^[0-9]{4}$')
+        && request.resource.data.deviceSecretHash is string
+        && request.resource.data.deviceSecretHash.size() >= 32
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt < request.time + duration.value(15, 'm')
+        && !request.resource.data.keys().hasAny(
+             ['token', 'tokenExpiresAt', 'salonId', 'kioskId', 'kioskName', 'locationId']);
+
+      // UPDATE = owner approval ONLY (pending -> approved), scoped to the
+      // approver's own salon. The token is written later by the Cloud Function
+      // (admin SDK), so the client may NOT set token/tokenExpiresAt here, and the
+      // code/deviceSecretHash identity fields are immutable.
+      allow update: if isAdminOrOwnerAny()
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'approved'
+        && request.resource.data.salonId == userDocData().salonId
+        && request.resource.data.code == resource.data.code
+        && request.resource.data.deviceSecretHash == resource.data.deviceSecretHash
+        && !request.resource.data.keys().hasAny(['token', 'tokenExpiresAt']);
+
+      // DELETE = the tablet's delete-after-read cleanup (it knows the secret id).
+      allow delete: if true;
     }
 
     // User profile doc: each signed-in user can read/write ONLY their own doc

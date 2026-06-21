@@ -85,6 +85,61 @@ kept on the doc for convenience (e.g. when minting auth claims).
 }
 ```
 
+## Device pairing — `pairingCodes/{pairId}` (Stage 3a)
+
+Pairing connects a physical tablet to a salon and issues it a kiosk auth token,
+using a **trampoline** (Firestore-only, no callable). Security rests on one
+idea: the **document id `pairId` is a high-entropy secret** known only to the
+tablet, while the human-friendly **4-digit `code` is just a lookup field** for
+the owner.
+
+```javascript
+// pairingCodes/{pairId}   (pairId = high-entropy random string, >= 20 chars)
+{
+  code: string,             // 4-digit, for the owner to type (lookup only)
+  deviceSecretHash: string, // >=32 chars; hash of a tablet-local secret (never the secret)
+  status: string,           // "pending" -> "approved" -> "tokenReady"
+  createdAt: Timestamp,     // must equal request.time on create
+  expiresAt: Timestamp,     // short, <= 15 min ahead
+
+  // added by the owner on approval:
+  salonId: string,          // approver's salon
+  kioskName: string,
+  locationId: string,
+
+  // added by the Cloud Function (admin SDK) after approval:
+  token: string,            // custom auth token (short-lived)
+  tokenExpiresAt: Timestamp
+}
+```
+
+### Flow
+1. **Tablet (unauthenticated)** generates `pairId` (high entropy) + a 4-digit
+   `code`, stores a local `deviceSecret`, and creates `pairingCodes/{pairId}`
+   with `status: "pending"`. It listens to that doc **by its secret id**.
+2. **Owner (authenticated admin/owner)** types the code in Settings → Devices.
+   The client queries `where code == … && status == "pending"`, finds the
+   `pairId`, and updates the doc to `status: "approved"` + `salonId` + kiosk name
+   / location.
+3. **Cloud Function** (Stage 3b) reacts to the approval, creates
+   `salons/{salonId}/kiosks/{kioskId}`, self-heals the role, mints a custom token
+   with claims `{ isKiosk, salonId, kioskId, roleId }`, and writes `token` +
+   `tokenExpiresAt` back to the doc with `status: "tokenReady"`.
+4. **Tablet** sees `tokenReady`, calls `signInWithCustomToken`, then **deletes
+   the doc (delete-after-read)** and persists its session.
+
+### Security Rules summary (`firestore.rules`)
+| Op       | Who                          | Notes                                              |
+| -------- | ---------------------------- | -------------------------------------------------- |
+| `get`    | anyone with the exact id     | protected by the unguessable `pairId`              |
+| `list`   | **authenticated admin/owner only** | the boundary: tablets can never scan/enumerate |
+| `create` | unauthenticated tablet       | tight constraints; cannot pre-set token/salon      |
+| `update` | authenticated admin/owner    | only `pending → approved`, own salon; cannot set token |
+| `delete` | anyone with the exact id     | tablet's delete-after-read cleanup                 |
+
+The `token` field is only ever written by the Cloud Function via the admin SDK
+(which bypasses rules); no client write path can set it.
+
 ## Capability keys (canonical)
 
 Defined once in `functions/kiosk/permissions.js` and reused everywhere
