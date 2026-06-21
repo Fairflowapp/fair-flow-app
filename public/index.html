@@ -9151,6 +9151,16 @@ dialog footer button, .code-dialog footer button {
           </button>
         </div>
 
+        <!-- Kiosk Devices (Stage 3c-1: UI shell only; Firestore wiring follows later) -->
+        <div id="kioskDevicesSettingsSection" style="margin-top:24px;">
+          <h4 style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Devices</h4>
+          <div class="row small" style="margin-bottom:12px;">Pair and manage shared kiosk tablets for this salon.</div>
+          <button id="openKioskDevicesBtn" type="button" onclick="window.ffOpenKioskDevicesModal && window.ffOpenKioskDevicesModal()"
+            style="padding:8px 16px;border:1px solid #a78bfa;border-radius:8px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:13px;font-weight:600;">
+            Manage Kiosk Devices
+          </button>
+        </div>
+
         <div id="legacySettingsTechniciansBlock" style="display:none;">
           <!-- NEW STAFF MEMBER Form Container -->
           <div class="staffNewFormContainer" style="margin-top:32px;padding:20px;background:#fff;border:1px solid var(--border);border-radius:12px;">
@@ -9181,6 +9191,50 @@ dialog footer button, .code-dialog footer button {
 
   </dialog>
 
+
+
+  <div id="kioskDevicesModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:200002;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;" onclick="window.ffCloseKioskDevicesModal && window.ffCloseKioskDevicesModal()">
+    <div role="dialog" aria-modal="true" aria-labelledby="kioskDevicesModalTitle" onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,0.25);width:min(720px,94vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 24px;border-bottom:1px solid #e5e7eb;flex-shrink:0;">
+        <div>
+          <h3 id="kioskDevicesModalTitle" style="margin:0;font-size:18px;font-weight:800;color:#111827;">Kiosk Devices</h3>
+          <p style="margin:4px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Approve a tablet pairing code and choose where this shared kiosk lives.</p>
+        </div>
+        <button type="button" id="kioskDevicesCloseBtn" onclick="window.ffCloseKioskDevicesModal && window.ffCloseKioskDevicesModal()" aria-label="Close kiosk devices" style="background:none;border:none;cursor:pointer;padding:6px;border-radius:6px;color:#6b7280;font-size:22px;line-height:1;">&times;</button>
+      </div>
+
+      <div style="padding:20px 24px;overflow:auto;display:flex;flex-direction:column;gap:18px;">
+        <section style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;background:#f9fafb;">
+          <h4 style="margin:0 0 4px;font-size:13px;font-weight:800;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Pair a Kiosk</h4>
+          <div style="font-size:12px;color:#6b7280;line-height:1.4;margin-bottom:14px;">Enter the 4-digit code shown on the tablet. Firestore approval will be wired in the next 3c step.</div>
+
+          <div style="display:grid;grid-template-columns:120px minmax(160px,1fr);gap:12px;align-items:center;">
+            <label for="kioskPairingCodeInput" style="font-size:12px;font-weight:700;color:#374151;">Pairing code</label>
+            <input id="kioskPairingCodeInput" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="one-time-code" placeholder="1234" style="height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;letter-spacing:0.18em;max-width:160px;">
+
+            <label for="kioskDeviceNameInput" style="font-size:12px;font-weight:700;color:#374151;">Device name</label>
+            <input id="kioskDeviceNameInput" type="text" maxlength="80" placeholder="Front desk tablet" style="height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;">
+
+            <label for="kioskDeviceLocationSelect" style="font-size:12px;font-weight:700;color:#374151;">Location</label>
+            <select id="kioskDeviceLocationSelect" style="height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;background:#fff;"></select>
+          </div>
+
+          <div id="kioskDevicesFormStatus" role="status" aria-live="polite" style="min-height:16px;margin-top:12px;font-size:11px;color:#6b7280;">UI shell only - no pairing writes happen yet.</div>
+          <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+            <button type="button" id="kioskApprovePairingBtn" disabled style="padding:8px 14px;border:1px solid #d1d5db;border-radius:8px;background:#f3f4f6;color:#9ca3af;font-size:12px;font-weight:700;cursor:not-allowed;">Approve Pairing (next step)</button>
+          </div>
+        </section>
+
+        <section style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;background:#fff;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+            <h4 style="margin:0;font-size:13px;font-weight:800;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Connected Devices</h4>
+            <button type="button" id="kioskDevicesRefreshBtn" onclick="window.ffRenderKioskDevicesModal && window.ffRenderKioskDevicesModal()" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#6b7280;font-size:11px;font-weight:700;cursor:pointer;">Refresh</button>
+          </div>
+          <div id="kioskDevicesList" style="border:1px dashed #d1d5db;border-radius:10px;padding:18px;text-align:center;font-size:12px;color:#6b7280;background:#f9fafb;">No kiosk devices connected yet.</div>
+        </section>
+      </div>
+    </div>
+  </div>
 
 
   <!-- Add Technician Type Modal -->
@@ -16810,6 +16864,83 @@ async function openSettingsSecure(){
 
 // Expose globally for onclick handlers
 window.openSettingsSecure = openSettingsSecure;
+
+function ffGetKioskDeviceLocationOptions() {
+  try {
+    if (typeof window.ffGetActiveLocations === 'function') {
+      const active = window.ffGetActiveLocations();
+      if (Array.isArray(active)) return active;
+    }
+  } catch (e) {}
+  try {
+    if (typeof window.ffGetLocations === 'function') {
+      const all = window.ffGetLocations();
+      if (Array.isArray(all)) return all.filter((loc) => loc && loc.isActive !== false);
+    }
+  } catch (e) {}
+  return [];
+}
+
+function ffRenderKioskDevicesModal() {
+  const select = document.getElementById('kioskDeviceLocationSelect');
+  const list = document.getElementById('kioskDevicesList');
+  const status = document.getElementById('kioskDevicesFormStatus');
+  if (select) {
+    const activeLocationId =
+      typeof window.ffGetActiveLocationId === 'function'
+        ? window.ffGetActiveLocationId()
+        : null;
+    const locations = ffGetKioskDeviceLocationOptions();
+    select.innerHTML = '';
+
+    const noneOption = document.createElement('option');
+    noneOption.value = '';
+    noneOption.textContent = locations.length ? 'No specific location' : 'No locations loaded yet';
+    select.appendChild(noneOption);
+
+    locations.forEach((loc) => {
+      if (!loc || !loc.id) return;
+      const option = document.createElement('option');
+      option.value = loc.id;
+      option.textContent = loc.name || loc.label || loc.id;
+      if (activeLocationId && loc.id === activeLocationId) option.selected = true;
+      select.appendChild(option);
+    });
+  }
+
+  if (list) {
+    list.textContent = 'No kiosk devices connected yet.';
+  }
+  if (status) {
+    status.textContent = 'UI shell only - no pairing writes happen yet.';
+  }
+}
+window.ffRenderKioskDevicesModal = ffRenderKioskDevicesModal;
+
+function ffOpenKioskDevicesModal() {
+  const modal = document.getElementById('kioskDevicesModal');
+  if (!modal) return;
+  ffRenderKioskDevicesModal();
+  modal.style.display = 'flex';
+  const codeInput = document.getElementById('kioskPairingCodeInput');
+  if (codeInput) {
+    setTimeout(() => codeInput.focus(), 0);
+  }
+}
+window.ffOpenKioskDevicesModal = ffOpenKioskDevicesModal;
+
+function ffCloseKioskDevicesModal() {
+  const modal = document.getElementById('kioskDevicesModal');
+  if (modal) modal.style.display = 'none';
+}
+window.ffCloseKioskDevicesModal = ffCloseKioskDevicesModal;
+
+document.addEventListener('ff-locations-updated', () => {
+  const modal = document.getElementById('kioskDevicesModal');
+  if (modal && modal.style.display !== 'none') {
+    ffRenderKioskDevicesModal();
+  }
+});
 
 // Navigation function to return to Queue view
 function goToQueue() {
