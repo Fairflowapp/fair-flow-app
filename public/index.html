@@ -9221,7 +9221,7 @@ dialog footer button, .code-dialog footer button {
 
           <div id="kioskDevicesFormStatus" role="status" aria-live="polite" style="min-height:16px;margin-top:12px;font-size:11px;color:#6b7280;">UI shell only - no pairing writes happen yet.</div>
           <div style="display:flex;justify-content:flex-end;margin-top:14px;">
-            <button type="button" id="kioskApprovePairingBtn" disabled style="padding:8px 14px;border:1px solid #d1d5db;border-radius:8px;background:#f3f4f6;color:#9ca3af;font-size:12px;font-weight:700;cursor:not-allowed;">Approve Pairing (next step)</button>
+            <button type="button" id="kioskApprovePairingBtn" onclick="window.ffApproveKioskPairingFromSettings && window.ffApproveKioskPairingFromSettings()" style="padding:8px 14px;border:1px solid #7c3aed;border-radius:8px;background:#7c3aed;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">Approve Pairing</button>
           </div>
         </section>
 
@@ -16916,6 +16916,126 @@ function ffRenderKioskDevicesModal() {
   }
 }
 window.ffRenderKioskDevicesModal = ffRenderKioskDevicesModal;
+
+function ffSetKioskDevicesStatus(message, variant) {
+  const status = document.getElementById('kioskDevicesFormStatus');
+  if (!status) return;
+  status.textContent = message || '';
+  const colorByVariant = {
+    error: '#b91c1c',
+    success: '#047857',
+    info: '#6b7280',
+  };
+  status.style.color = colorByVariant[variant] || colorByVariant.info;
+}
+
+async function ffGetKioskFirestoreApi() {
+  const api = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js');
+  const app = window.__firebaseApp || (typeof window.__initFirebaseModular === 'function' ? window.__initFirebaseModular() : null);
+  const db =
+    window.ffDb ||
+    window.db ||
+    (typeof window.getFirestore === 'function' ? window.getFirestore(app || undefined) : null);
+  if (!db) throw new Error('Firestore is not ready yet.');
+  return {
+    db,
+    collection: api.collection,
+    query: api.query,
+    where: api.where,
+    getDocs: api.getDocs,
+    updateDoc: api.updateDoc,
+  };
+}
+
+function ffKioskPairingDocIsExpired(data) {
+  const expiresAt = data && data.expiresAt;
+  try {
+    if (expiresAt && typeof expiresAt.toMillis === 'function') {
+      return expiresAt.toMillis() <= Date.now();
+    }
+    if (expiresAt && typeof expiresAt.seconds === 'number') {
+      return expiresAt.seconds * 1000 <= Date.now();
+    }
+  } catch (e) {}
+  return false;
+}
+
+async function ffApproveKioskPairingFromSettings() {
+  const btn = document.getElementById('kioskApprovePairingBtn');
+  const codeInput = document.getElementById('kioskPairingCodeInput');
+  const nameInput = document.getElementById('kioskDeviceNameInput');
+  const locationSelect = document.getElementById('kioskDeviceLocationSelect');
+  const code = String(codeInput && codeInput.value || '').replace(/\D/g, '').slice(0, 4);
+  if (codeInput && codeInput.value !== code) codeInput.value = code;
+
+  if (!/^[0-9]{4}$/.test(code)) {
+    ffSetKioskDevicesStatus('Enter the 4-digit code shown on the tablet.', 'error');
+    return;
+  }
+
+  const salonId = String((typeof window !== 'undefined' && window.currentSalonId) || '').trim();
+  if (!salonId) {
+    ffSetKioskDevicesStatus('Salon context is still loading. Try again in a moment.', 'error');
+    return;
+  }
+
+  const kioskName = String(nameInput && nameInput.value || '').trim() || 'Kiosk';
+  const locationId = String(locationSelect && locationSelect.value || '').trim() || null;
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Approving...';
+    btn.style.cursor = 'wait';
+    btn.style.opacity = '0.75';
+  }
+  ffSetKioskDevicesStatus('Looking for a pending pairing code...', 'info');
+
+  try {
+    const api = await ffGetKioskFirestoreApi();
+    const snap = await api.getDocs(
+      api.query(
+        api.collection(api.db, 'pairingCodes'),
+        api.where('code', '==', code),
+        api.where('status', '==', 'pending')
+      )
+    );
+    const candidates = snap.docs.filter((pairDoc) => !ffKioskPairingDocIsExpired(pairDoc.data() || {}));
+
+    if (!candidates.length) {
+      ffSetKioskDevicesStatus('No active pending pairing code found. Ask the tablet to generate a new code.', 'error');
+      return;
+    }
+    if (candidates.length > 1) {
+      ffSetKioskDevicesStatus('More than one pending code matched. Ask the tablet to refresh its code and try again.', 'error');
+      return;
+    }
+
+    await api.updateDoc(candidates[0].ref, {
+      status: 'approved',
+      salonId,
+      kioskName,
+      locationId,
+    });
+
+    ffSetKioskDevicesStatus('Pairing approved. The tablet should connect in a moment.', 'success');
+    if (codeInput) codeInput.value = '';
+  } catch (err) {
+    console.warn('[KioskDevices] approve pairing failed', err);
+    const codeName = err && err.code ? String(err.code) : '';
+    const message = codeName === 'permission-denied'
+      ? 'Permission denied. Only an owner/admin can approve kiosk pairing.'
+      : 'Could not approve pairing. Try again.';
+    ffSetKioskDevicesStatus(message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Approve Pairing';
+      btn.style.cursor = 'pointer';
+      btn.style.opacity = '1';
+    }
+  }
+}
+window.ffApproveKioskPairingFromSettings = ffApproveKioskPairingFromSettings;
 
 function ffOpenKioskDevicesModal() {
   const modal = document.getElementById('kioskDevicesModal');
