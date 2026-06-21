@@ -92,27 +92,49 @@ Defined once in `functions/kiosk/permissions.js` and reused everywhere
 Security Rules enforcement in Stage 4). Use the exported `CAPABILITIES`
 constants rather than raw strings.
 
-## Seeding (staging only)
+## Seeding the default role
 
-The default role is seeded **per salon** by an idempotent script that
-**hard-refuses** to run against production (`fairflowapp-db841`):
+All seeding paths share one non-destructive implementation in
+`functions/kiosk/seed.js` (`ensureKioskRoleForSalon`): the default is written
+**only when the role is first created**. If the role already exists it is left
+untouched, so customizations are never clobbered. Each salon owns its own
+`salons/{salonId}/roles/technician-kiosk`.
+
+### 1. Auto-seed on salon creation (preferred, prod-safe)
+`seedKioskRoleOnSalonCreate` — a Firestore trigger
+(`onDocumentCreated('salons/{salonId}')`) that seeds the role automatically for
+every newly created salon. Runs inside Google with built-in credentials; no
+gcloud or service-account key required. Safe to use in production later.
+
+### 2. Backfill existing salons (callable)
+`backfillKioskRoles` — a callable function for salons that already existed
+before the trigger was deployed:
+- **Default mode** (safe, multi-tenant): seeds only the caller's own salon.
+  Requires owner/admin of that salon.
+- **Sweep mode** `{ allSalons: true }`: seeds every salon. Gated behind a
+  platform super-admin custom claim (`token.superAdmin === true`) so a normal
+  salon admin can never write into other businesses' salons.
+
+### Deploy (STAGING ONLY)
+Deploy **only** these two functions, with an explicit project (the repo's
+`.firebaserc` default is production, so `--project` is mandatory):
 
 ```bash
-# All salons in the project:
-FF_SEED_PROJECT=fair-flow-staging node functions/seed-kiosk-roles.js
+firebase deploy \
+  --only functions:seedKioskRoleOnSalonCreate,functions:backfillKioskRoles \
+  --project fair-flow-staging
+```
 
-# A single salon:
+### 3. Standalone CLI script (optional)
+`functions/seed-kiosk-roles.js` still exists for local/manual runs and
+**hard-refuses** to run against production. It now reuses the same
+`ensureKioskRoleForSalon` logic:
+
+```bash
+FF_SEED_PROJECT=fair-flow-staging node functions/seed-kiosk-roles.js
 FF_SEED_PROJECT=fair-flow-staging FF_SEED_SALON=<salonId> \
   node functions/seed-kiosk-roles.js
 ```
-
-Each salon gets its own `salons/{salonId}/roles/technician-kiosk` document, so a
-business can later customize its copy without affecting other salons.
-
-**Re-run behavior (non-destructive):** the default permissions are written
-**only when the role is first created**. If the role already exists, the seed
-**skips it entirely** and never touches `permissions` — so re-running the script
-can never clobber a salon's customizations.
 
 ## What Stage 0 intentionally does NOT include
 

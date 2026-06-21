@@ -9,6 +9,12 @@ const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onRequest: onRequestV2 } = require("firebase-functions/v2/https");
 functions.region = functionsV1.region;
 
+// Kiosk feature — shared, non-destructive role seeding (Stage 2).
+const {
+  ensureKioskRoleForSalon,
+  backfillAllSalons,
+} = require("./kiosk/seed");
+
 /**
  * Simple test callable – use to verify IAM/CORS/region work.
  * Call from console: httpsCallable(getFunctions(app,"us-central1"),"testCallable")({test:1})
@@ -906,4 +912,100 @@ exports.mediaDownloadFile = onRequestV2(
     .pipe(res);
   }
 );
+
+// ============================================================================
+// Kiosk roles seeding (Stage 2)
+// Runs inside Google with built-in credentials — no gcloud / service-account
+// key needed. Deploy ONLY these functions, to staging:
+//   firebase deploy --only functions:seedKioskRoleOnSalonCreate,functions:backfillKioskRoles --project fair-flow-staging
+// Both paths are idempotent and never overwrite a salon's customized role.
+// ============================================================================
+
+/**
+ * Auto-seed the default technician-kiosk role whenever a new salon is created.
+ * Works in any environment (incl. production) with no manual step.
+ */
+exports.seedKioskRoleOnSalonCreate = onDocumentCreated(
+  { document: "salons/{salonId}", region: "us-central1" },
+  async (event) => {
+    const salonId = event.params.salonId;
+    try {
+      const created = await ensureKioskRoleForSalon(admin.firestore(), salonId);
+      console.log(
+        `[seedKioskRoleOnSalonCreate] salon ${salonId}: role ` +
+          `${created ? "created" : "already existed (preserved)"}`
+      );
+    } catch (err) {
+      // Don't throw: a seeding hiccup must not break salon creation. Backfill
+      // can repair it later.
+      console.error(
+        `[seedKioskRoleOnSalonCreate] failed for salon ${salonId}:`,
+        err && err.message ? err.message : err
+      );
+    }
+  }
+);
+
+/**
+ * One-time backfill of the default kiosk role into existing salons.
+ *
+ * Default (safe, multi-tenant): seeds only the caller's own salon. Requires the
+ * caller to be signed in as owner/admin of that salon.
+ *
+ * Optional sweep mode: pass { allSalons: true }. This is gated behind a custom
+ * claim (token.superAdmin === true) so a normal salon admin can never write
+ * roles into other businesses' salons.
+ */
+exports.backfillKioskRoles = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+    }
+    const uid = context.auth.uid;
+    const requestData = typeof data === "object" && data ? data : {};
+
+    // Sweep mode: every salon. Only a platform super-admin may do this.
+    if (requestData.allSalons === true) {
+      if (context.auth.token && context.auth.token.superAdmin === true) {
+        const result = await backfillAllSalons(admin.firestore());
+        console.log("[backfillKioskRoles] sweep all salons:", result);
+        return { ok: true, mode: "allSalons", ...result };
+      }
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Sweep mode requires platform super-admin."
+      );
+    }
+
+    // Default mode: caller's own salon only.
+    const userSnap = await admin.firestore().doc(`users/${uid}`).get();
+    if (!userSnap.exists) {
+      throw new functions.https.HttpsError("permission-denied", "User profile not found.");
+    }
+    const userData = userSnap.data() || {};
+    const role = String(userData.role || "").toLowerCase();
+    if (!["owner", "admin"].includes(role)) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Only owner/admin can backfill kiosk roles."
+      );
+    }
+    const salonId = userData.salonId;
+    if (!salonId) {
+      throw new functions.https.HttpsError("failed-precondition", "No salonId on user profile.");
+    }
+
+    const created = await ensureKioskRoleForSalon(admin.firestore(), salonId);
+    console.log(`[backfillKioskRoles] salon ${salonId}: created=${created}`);
+    return {
+      ok: true,
+      mode: "ownSalon",
+      salonId,
+      created,
+      message: created
+        ? "Kiosk role created."
+        : "Kiosk role already existed (preserved).",
+    };
+  });
 

@@ -25,6 +25,7 @@ const {
   TECHNICIAN_KIOSK_ROLE_ID,
   TECHNICIAN_KIOSK_ROLE,
 } = require("./kiosk/permissions");
+const { ensureKioskRoleForSalon } = require("./kiosk/seed");
 
 // Projects this script must never touch.
 const PRODUCTION_PROJECT_IDS = ["fairflowapp-db841"];
@@ -59,40 +60,19 @@ function assertSafeProject(projectId) {
   }
 }
 
-// Full default payload, written ONLY when the role is first created.
-function buildNewRolePayload() {
-  return {
-    name: TECHNICIAN_KIOSK_ROLE.name,
-    isSystem: TECHNICIAN_KIOSK_ROLE.isSystem,
-    permissions: TECHNICIAN_KIOSK_ROLE.permissions,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  };
-}
-
-// Seed the default kiosk role into one salon's roles subcollection.
-// IMPORTANT: write the default ONLY on first creation. If the role already
-// exists, do NOT touch it — a salon may have customized its permissions, and a
-// re-run must never clobber that customization.
+// Seed the default kiosk role into one salon, reusing the shared (and
+// non-destructive) seeding logic so CLI / trigger / callable never drift apart.
 async function seedSalon(db, salonId) {
-  const ref = db
-    .collection("salons")
-    .doc(salonId)
-    .collection("roles")
-    .doc(TECHNICIAN_KIOSK_ROLE_ID);
-
-  const existing = await ref.get();
-  if (existing.exists) {
+  const created = await ensureKioskRoleForSalon(db, salonId);
+  if (created) {
+    console.log(`   ✅ salons/${salonId}/roles/${TECHNICIAN_KIOSK_ROLE_ID} created`);
+  } else {
     console.log(
       `   ⏭️  salons/${salonId}/roles/${TECHNICIAN_KIOSK_ROLE_ID} ` +
         `already exists — preserving customization, not touching permissions`
     );
-    return false;
   }
-
-  await ref.set(buildNewRolePayload());
-  console.log(`   ✅ salons/${salonId}/roles/${TECHNICIAN_KIOSK_ROLE_ID} created`);
-  return true;
+  return created;
 }
 
 async function listTargetSalonIds(db) {
