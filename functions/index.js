@@ -14,6 +14,7 @@ const {
   ensureKioskRoleForSalon,
   backfillAllSalons,
 } = require("./kiosk/seed");
+const { TECHNICIAN_KIOSK_ROLE_ID } = require("./kiosk/permissions");
 
 /**
  * Simple test callable – use to verify IAM/CORS/region work.
@@ -1007,5 +1008,139 @@ exports.backfillKioskRoles = functions
         ? "Kiosk role created."
         : "Kiosk role already existed (preserved).",
     };
+  });
+
+// ============================================================================
+// Kiosk device pairing — token issuance (Stage 3b)
+//
+// Trampoline (no callable). When an owner/admin approves a pairing code
+// (pending -> approved, with their salonId set; enforced by Security Rules),
+// this trigger:
+//   1. creates salons/{salonId}/kiosks/{kioskId}
+//   2. self-heals the technician-kiosk role for that salon
+//   3. mints a custom token with claims { isKiosk, salonId, kioskId, roleId }
+//   4. writes token + tokenExpiresAt back to the doc and sets status=tokenReady
+//
+// The tablet (listening to the doc by its secret high-entropy id) then signs in
+// with the token and deletes the doc (delete-after-read).
+//
+// Deploy staging-only by name:
+//   firebase deploy --only functions:onPairingApproved --project fair-flow-staging
+// Requires the runtime SA (fair-flow-staging@appspot.gserviceaccount.com) to
+// have roles/iam.serviceAccountTokenCreator on itself (for createCustomToken).
+// ============================================================================
+
+// How long the minted token doc stays usable before the tablet should give up.
+const KIOSK_TOKEN_TTL_MS = 5 * 60 * 1000;
+
+exports.onPairingApproved = functions
+  .region("us-central1")
+  .firestore.document("pairingCodes/{pairId}")
+  .onUpdate(async (change, context) => {
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+    const pairId = context.params.pairId;
+
+    // Act ONLY on the pending -> approved transition. This also prevents a loop:
+    // our own write below sets status to "tokenReady", which re-fires onUpdate
+    // but fails this guard and exits.
+    if (before.status === "approved" || after.status !== "approved") {
+      return null;
+    }
+    // Defensive: never re-mint if a token was somehow already issued.
+    if (after.token || after.kioskId) {
+      return null;
+    }
+
+    const db = admin.firestore();
+
+    // salonId is guaranteed by Security Rules to equal the approver's own salon.
+    const salonId = typeof after.salonId === "string" ? after.salonId.trim() : "";
+    if (!salonId) {
+      await change.after.ref.set(
+        {
+          status: "error",
+          error: "Missing salonId on approval.",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      console.error(`[onPairingApproved] ${pairId}: approval missing salonId`);
+      return null;
+    }
+
+    try {
+      // 1. Create the kiosk device document.
+      const kioskRef = db
+        .collection("salons")
+        .doc(salonId)
+        .collection("kiosks")
+        .doc();
+      const kioskId = kioskRef.id;
+      const name =
+        typeof after.kioskName === "string" && after.kioskName.trim()
+          ? after.kioskName.trim()
+          : "Kiosk";
+      const locationId =
+        typeof after.locationId === "string" && after.locationId.trim()
+          ? after.locationId.trim()
+          : null;
+
+      await kioskRef.set({
+        name,
+        locationId,
+        roleId: TECHNICIAN_KIOSK_ROLE_ID,
+        businessId: salonId,
+        status: "active",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 2. Self-heal: make sure this salon has the kiosk role (covers existing
+      //    salons that pre-date the auto-seed trigger). Non-destructive.
+      await ensureKioskRoleForSalon(db, salonId);
+
+      // 3. Mint a custom token identifying the DEVICE (not a person).
+      const uid = `kiosk_${kioskId}`;
+      const claims = {
+        isKiosk: true,
+        salonId,
+        kioskId,
+        roleId: TECHNICIAN_KIOSK_ROLE_ID,
+      };
+      const token = await admin.auth().createCustomToken(uid, claims);
+
+      // 4. Hand the token back to the tablet via the (secret-id) doc.
+      const tokenExpiresAt = admin.firestore.Timestamp.fromMillis(
+        Date.now() + KIOSK_TOKEN_TTL_MS
+      );
+      await change.after.ref.set(
+        {
+          status: "tokenReady",
+          kioskId,
+          token,
+          tokenExpiresAt,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      console.log(
+        `[onPairingApproved] ${pairId}: paired kiosk ${kioskId} for salon ${salonId}`
+      );
+      return null;
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      await change.after.ref.set(
+        {
+          status: "error",
+          error: msg,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      console.error(`[onPairingApproved] ${pairId}: failed —`, msg);
+      return null;
+    }
   });
 
