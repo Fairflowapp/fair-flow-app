@@ -47,15 +47,27 @@ Per-salon role definitions. `permissions` is a **flat map** of
 
 **Default role `salons/{salonId}/roles/technician-kiosk`** — seeded into every
 salon from the shared template (source of truth:
-`functions/kiosk/permissions.js`):
+`functions/kiosk/permissions.js`). Every known capability is listed explicitly
+(sensitive denials kept as `false` rather than omitted):
 
-| Capability             | Value |
-| ---------------------- | ----- |
-| `queue.join`           | true  |
-| `queue.leave`          | true  |
-| `timeclock.use`        | true  |
-| `inventory.addItem`    | true  |
-| `inventory.editPrice`  | false |
+| Capability                | Value | Notes                              |
+| ------------------------- | ----- | ---------------------------------- |
+| `queue.join`              | true  |                                    |
+| `queue.leave`             | true  |                                    |
+| `queue.pause`             | true  | "be right back" / break from queue |
+| `service.start`           | true  |                                    |
+| `service.end`             | true  |                                    |
+| `timeclock.clockIn`       | true  |                                    |
+| `timeclock.clockOut`      | true  |                                    |
+| `timeclock.breakStart`    | true  |                                    |
+| `timeclock.breakEnd`      | true  |                                    |
+| `inventory.addItem`       | true  | add / count items                  |
+| `inventory.adjustStock`   | false | denied                             |
+| `inventory.editPrice`     | false | denied                             |
+| `inventory.createOrder`   | false | denied                             |
+| `tasks.complete`          | true  | mark assigned task done            |
+| `schedule.viewOwn`        | false | denied for now                     |
+| `requests.create`         | false | denied for now                     |
 
 ### `salons/{salonId}/kiosks/{kioskId}`
 One document per physical device. `businessId` mirrors the path `salonId` and is

@@ -19,14 +19,33 @@
  * No business logic here — definitions only.
  */
 
-// Canonical capability keys. Use these constants instead of raw strings so a
-// typo fails loudly at import time rather than silently granting/denying.
+// Canonical capability catalog. This is the full known surface of kiosk
+// capabilities. Use these constants instead of raw strings so a typo fails
+// loudly at import time rather than silently granting/denying.
 const CAPABILITIES = Object.freeze({
+  // Queue / floor
   QUEUE_JOIN: "queue.join",
   QUEUE_LEAVE: "queue.leave",
-  TIMECLOCK_USE: "timeclock.use",
+  QUEUE_PAUSE: "queue.pause", // temporary "be right back" / break from queue
+  SERVICE_START: "service.start",
+  SERVICE_END: "service.end",
+
+  // Time clock
+  TIMECLOCK_CLOCK_IN: "timeclock.clockIn",
+  TIMECLOCK_CLOCK_OUT: "timeclock.clockOut",
+  TIMECLOCK_BREAK_START: "timeclock.breakStart",
+  TIMECLOCK_BREAK_END: "timeclock.breakEnd",
+
+  // Inventory
   INVENTORY_ADD_ITEM: "inventory.addItem",
+  INVENTORY_ADJUST_STOCK: "inventory.adjustStock",
   INVENTORY_EDIT_PRICE: "inventory.editPrice",
+  INVENTORY_CREATE_ORDER: "inventory.createOrder",
+
+  // Other modules
+  TASKS_COMPLETE: "tasks.complete",
+  SCHEDULE_VIEW_OWN: "schedule.viewOwn",
+  REQUESTS_CREATE: "requests.create",
 });
 
 // Stable identifier for the built-in kiosk role document, stored per salon at:
@@ -43,12 +62,33 @@ const TECHNICIAN_KIOSK_ROLE = Object.freeze({
   // isSystem marks this as a built-in default template role (seeded into every
   // salon), as opposed to a custom role a business creates for itself later.
   isSystem: true,
+  // Every known capability is listed explicitly (true = allowed, false =
+  // denied). Listing sensitive denials explicitly — rather than omitting them —
+  // makes intent unambiguous for Stage 4 Security Rules enforcement.
   permissions: Object.freeze({
+    // Queue / floor — daily personal floor actions
     [CAPABILITIES.QUEUE_JOIN]: true,
     [CAPABILITIES.QUEUE_LEAVE]: true,
-    [CAPABILITIES.TIMECLOCK_USE]: true,
+    [CAPABILITIES.QUEUE_PAUSE]: true,
+    [CAPABILITIES.SERVICE_START]: true,
+    [CAPABILITIES.SERVICE_END]: true,
+
+    // Time clock — clock in/out + breaks
+    [CAPABILITIES.TIMECLOCK_CLOCK_IN]: true,
+    [CAPABILITIES.TIMECLOCK_CLOCK_OUT]: true,
+    [CAPABILITIES.TIMECLOCK_BREAK_START]: true,
+    [CAPABILITIES.TIMECLOCK_BREAK_END]: true,
+
+    // Inventory — may add/count items only; everything money/management is off
     [CAPABILITIES.INVENTORY_ADD_ITEM]: true,
+    [CAPABILITIES.INVENTORY_ADJUST_STOCK]: false,
     [CAPABILITIES.INVENTORY_EDIT_PRICE]: false,
+    [CAPABILITIES.INVENTORY_CREATE_ORDER]: false,
+
+    // Other modules
+    [CAPABILITIES.TASKS_COMPLETE]: true,
+    [CAPABILITIES.SCHEDULE_VIEW_OWN]: false,
+    [CAPABILITIES.REQUESTS_CREATE]: false,
   }),
 });
 
